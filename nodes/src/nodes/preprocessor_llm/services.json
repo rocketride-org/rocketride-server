@@ -1,0 +1,167 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Preprocessor - LLM",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "preprocessor_llm://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"preprocessor"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if 
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.preprocessor_llm",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "Preprocessor",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A processing component that analyzes document content to extract concise ",
+		"summaries, key points, and named entities and to divide a document for ",
+		"storage into a vector database."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "preprocessor.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/4oODcCd",
+	//
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	"tile": [
+	],
+	//
+	// Optional:
+	//		Defines the invoke connections that may/must be connected
+	// 		which are utilized by this driver
+	//
+	"invoke": {
+		"llm": {
+			"description": "LLM to use to process the document",
+			"min": 1
+		}
+	},
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"table": [
+			"documents"
+		],
+		"text": [
+			"documents"
+		]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "default",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"default": {
+				"numberOfTokens": 384
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"preprocessor_llm.numberOfTokens": {
+			"type": "number",
+			"title": "Number of tokens per document chunk. Needs to match your embedding model.",
+			"optional": true,
+			"default": 384
+		},
+		"preprocessor_llm.default": {
+			"object": "default",
+			"properties": [
+				"preprocessor_llm.numberOfTokens"
+			]
+		},
+		"preprocessor_llm.profile": {
+			"hidden": true,
+			"type": "string",
+			"default": "default",
+			"enum": [
+				[
+					"default",
+					"Default"
+				]
+			],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": [
+						"preprocessor_llm.default"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Preprocessor - LLM",
+			"properties": [
+				"preprocessor_llm.profile"
+			]
+		}
+	]
+}

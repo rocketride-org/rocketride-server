@@ -1,0 +1,1 @@
+This port of replxx was added because the vcpkg port creates libraries with unusable names on Windows, e.g. replxx-static-d.lib

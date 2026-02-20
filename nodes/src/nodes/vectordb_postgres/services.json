@@ -1,0 +1,311 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Vector Store - PostgreSQL",
+	//
+	// Required:
+	//     The protocol is the endpoint protocol
+	//
+	"protocol": "postgres://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"store"
+	],
+	//
+	// Required:
+	//     Capabilities are flags that change the behavior of the underlying
+	//     engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//     The node is the actual pyhsical node to instantiate - if
+	//     not specified, the protocol will be used
+	//
+	"node": "python", //ai
+	//
+	// Optional:
+	//     The path is the executable/script code - it is node dependent
+	//     and is optional for most node
+	//
+	"path": "nodes.vectordb_postgres",
+	//
+	// Required:
+	//     The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "PostgreSQL Vector Store",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A component that enhances PostgreSQL with vector similarity search ",
+		"capabilities through the pgvector extension. It allows for storing and querying of ",
+		"high-dimensional vectors directly within your existing PostgreSQL database. ",
+		"This component is ideal for building AI-powered applications that require semantic search, ",
+		"recommendation engines, and other similarity-based features without the need ",
+		"for a separate, specialized vector database."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "postgres.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/47Xooun",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": [
+		"Host/Port: ${parameters.postgres.${profile}.host}:${parameters.postgres.${profile}.port}",
+		"Database: ${parameters.postgres.${profile}.database}",
+		"Table: ${parameters.postgres.${profile}.collection}"
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"documents": [],
+		"questions": [
+			"documents",
+			"answers",
+			"questions"
+		]
+	},
+	//
+	// Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["local"],
+		"cases": [
+			{
+				"name": "Add document to store",
+				"documents": [
+					{
+						"page_content": "The capital of France is Paris.",
+						"metadata": {
+							"objectId": "test-doc-1",
+							"nodeId": "test-node",
+							"parent": "/test",
+							"chunkId": 0,
+							"isDeleted": false
+						},
+						"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+						"embedding_model": "test-model"
+					}
+				],
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "capital of France"
+					}
+				}
+			},
+			{
+				"name": "Search with question",
+				"questions": {
+					"type": "semantic",
+					"questions": [
+						{
+							"text": "What is the capital of France?",
+							"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+							"embedding_model": "test-model"
+						}
+					]
+				},
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "Paris",
+						"property": [
+							{"path": "[0].score", "greaterThanOrEqual": 0.5},
+							{"path": "[0].metadata.objectId", "equals": "test-doc-1"}
+						]
+					}
+				}
+			}
+		]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "local",
+		"profiles": {
+			"local": {
+				"mode": "local",
+				"title": "Your own PostgreSQL server",
+				"host": "your-postgres-host.example.com",
+				"port": 5432,
+				"user": "postgres",
+				"password": "",
+				"database": "aparavi",
+				"collection": "aparavi",
+				"score": 0.5,
+				"similarity": "cosine"
+			}
+		}
+	},
+	//
+	// Optional:
+	//     Local fields defintions - these define fields only for the
+	//     current service. You may specify them here, or directly
+	//     in the shape
+	//
+	"fields": {
+		"vector.collection": {
+			"title": "Table",
+			"description": "Name of the table to store vectors.",
+			"type": "string",
+			"default": "aparavi"
+		},
+		"vector.local.host": {
+			"title": "Host",
+			"description": "Host name or IP address of the PostgreSQL server",
+			"default": "your-postgres-host.example.com"
+		},
+		"vector.local.port": {
+			"title": "Port",
+			"description": "Port number of the PostgreSQL server",
+			"default": 5432
+		},
+		"vector.local.user": {
+			"title": "User",
+			"description": "User to connect to the PostgreSQL server",
+			"default": "postgres",
+			"type": "string"
+		},
+		"vector.local.password": {
+			"title": "Password",
+			"description": "Password to connect to the PostgreSQL server",
+			"type": "string",
+			"format": "password",
+			"secure": true
+		},
+		"vector.local.database": {
+			"title": "Database",
+			"description": "Name of the database",
+			"default": "postgres",
+			"type": "string"
+		},
+		"vector.similarity": {
+			"title": "Similarity Metric",
+			"description": "The similarity metric to use for vector search",
+			"type": "string",
+			"default": "cosine",
+			"enum": [
+				"cosine",
+				"l2",
+				"inner_product"
+			]
+		},
+		"postgres.local": {
+			"object": "local",
+			"properties": [
+				"vector.local.host",
+				"vector.local.port",
+				"vector.local.user",
+				"vector.local.password",
+				"vector.local.database",
+				"vector.collection",
+				"vector.score",
+				"vector.similarity"
+			]
+		},
+		"postgres.profile": {
+			"hidden": true,
+			"title": "Type of PostgreSQL host",
+			"description": "Connect to...",
+			"type": "string",
+			"default": "local",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "local",
+					"properties": [
+						"postgres.local"
+					]
+				}
+			]
+		},
+		"postgres.provider": {
+			"type": "string",
+			"const": "postgres",
+			"default": "postgres"
+		},
+		"postgres.postgres": {
+			"object": "postgres",
+			"properties": [
+				"postgres.profile"
+			]
+		},
+		"postgres.store": {
+			"object": "store",
+			"title": "Store",
+			"properties": [
+				"postgres.provider",
+				"postgres.postgres"
+			]
+		},
+		"postgres.target.autopipe": {
+			"object": "parameters",
+			"title": "Parameters",
+			"properties": [
+				"remote",
+				"postgres.store",
+				"all.embedding"
+			]
+		},
+		"postgres.target.parameters": {
+			"object": "parameters",
+			"title": "Parameters",
+			"properties": [
+				"postgres.target.autopipe"
+			]
+		}
+	},
+	//
+	// Required:
+	//     Defines the fields (shape) of the service. Either source or target
+	//     map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "PostgreSQL Vector Store",
+			"properties": [
+				"postgres.profile"
+			]
+		},
+		{
+			"section": "Transform",
+			"title": "PostgreSQL",
+			"properties": [
+				"type",
+				"postgres.target.parameters"
+			]
+		}
+	]
+}

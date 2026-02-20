@@ -1,0 +1,527 @@
+//
+// Common field defintions for microsoft azure - these will be merged into the 
+// service defintion as required by the service
+//
+// NOTE: APPLAT-4699: tenant/clientId/clientSecret made required.
+//       It is ok while only authentication type 'secure' is supported.
+//       Not sure it will work properly if both authentication type 'secure'/'password' are supported.
+//
+{
+	"fields": {
+		"ms.authType": {
+			"type": "string",
+			"title": "Authentication Type",
+			"default": "enterprise",
+			"readonly": true,
+			"enum": [
+				[
+					"enterprise",
+					"Enterprise"
+				],
+				[
+					"personal",
+					"Personal"
+				]
+			],
+			"conditional": [
+				{
+					"value": "enterprise",
+					"properties": [
+						"ms.tenant",
+						"ms.region",
+						"ms.clientId",
+						"ms.clientSecret"
+					]
+				},
+				{
+					"value": "personal",
+					"properties": [
+						"ms.clientId",
+						"ms.clientSecret",
+						"DTC.ms.oAuthButton",
+						"DTC.ms.refreshToken"
+					]
+				}
+			]
+		},
+		"DTC.ms.authType": {
+			"type": "string",
+			"title": "Authentication Type",
+			"default": "enterprise",
+			"readonly": true,
+			"enum": [
+				[
+					"enterprise",
+					"Enterprise"
+				],
+				[
+					"personal",
+					"Personal"
+				]
+			],
+			"conditional": [
+				{
+					"value": "enterprise",
+					"properties": [
+						"ms.tenant",
+						"ms.region",
+						"ms.clientId",
+						"ms.clientSecret"
+					]
+				},
+				{
+					"value": "personal",
+					"properties": [
+						"ms.clientId",
+						"ms.clientSecret",
+						"DTC.ms.oAuthButton",
+						"DTC.ms.accessToken",
+						"DTC.ms.refreshToken"
+					]
+				}
+			]
+		},
+		"ms.region": {
+			"default": "",
+			"title": "Region",
+			"type": "string",
+			"description": "This specifies the data center regions for the OneDrive / SharePoint account.",
+			"enum": [
+				[
+					"",
+					"Auto-detect"
+				],
+				[
+					"asia",
+					"Asia"
+				],
+				[
+					"asiapacific",
+					"Asia Pacific"
+				],
+				[
+					"australia",
+					"Australia"
+				],
+				[
+					"brazil",
+					"Brazil"
+				],
+				[
+					"canada",
+					"Canada"
+				],
+				[
+					"europe",
+					"Europe"
+				],
+				[
+					"france",
+					"France"
+				],
+				[
+					"germany",
+					"Germany"
+				],
+				[
+					"global",
+					"Global"
+				],
+				[
+					"india",
+					"India"
+				],
+				[
+					"japan",
+					"Japan"
+				],
+				[
+					"korea",
+					"Korea"
+				],
+				[
+					"norway",
+					"Norway"
+				],
+				[
+					"southafrica",
+					"South Africa"
+				],
+				[
+					"switzerland",
+					"Switzerland"
+				],
+				[
+					"uae",
+					"United Arab Emirates"
+				],
+				[
+					"uk",
+					"United Kingdom"
+				],
+				[
+					"unitedstates",
+					"United States"
+				],
+				[
+					"unitedstateseuap",
+					"United States EUAP"
+				],
+				[
+					"southafricanorth",
+					"(Africa) South Africa North"
+				],
+				[
+					"southafricawest",
+					"(Africa) South Africa West"
+				],
+				[
+					"australiacentral",
+					"(Asia Pacific) Australia Central"
+				],
+				[
+					"australiacentral2",
+					"(Asia Pacific) Australia Central 2"
+				],
+				[
+					"australiaeast",
+					"(Asia Pacific) Australia East"
+				],
+				[
+					"australiasoutheast",
+					"(Asia Pacific) Australia Southeast"
+				],
+				[
+					"centralindia",
+					"(Asia Pacific) Central India"
+				],
+				[
+					"eastasia",
+					"(Asia Pacific) East Asia"
+				],
+				[
+					"eastasiastage",
+					"(Asia Pacific) East Asia (Stage)"
+				],
+				[
+					"japaneast",
+					"(Asia Pacific) Japan East"
+				],
+				[
+					"japanwest",
+					"(Asia Pacific) Japan West"
+				],
+				[
+					"jioindiacentral",
+					"(Asia Pacific) Jio India Central"
+				],
+				[
+					"jioindiawest",
+					"(Asia Pacific) Jio India West"
+				],
+				[
+					"koreacentral",
+					"(Asia Pacific) Korea Central"
+				],
+				[
+					"koreasouth",
+					"(Asia Pacific) Korea South"
+				],
+				[
+					"southindia",
+					"(Asia Pacific) South India"
+				],
+				[
+					"southeastasia",
+					"(Asia Pacific) Southeast Asia"
+				],
+				[
+					"southeastasiastage",
+					"(Asia Pacific) Southeast Asia (Stage)"
+				],
+				[
+					"westindia",
+					"(Asia Pacific) West India"
+				],
+				[
+					"canadacentral",
+					"(Canada) Canada Central"
+				],
+				[
+					"canadaeast",
+					"(Canada) Canada East"
+				],
+				[
+					"francecentral",
+					"(Europe) France Central"
+				],
+				[
+					"francesouth",
+					"(Europe) France South"
+				],
+				[
+					"germanynorth",
+					"(Europe) Germany North"
+				],
+				[
+					"germanywestcentral",
+					"(Europe) Germany West Central"
+				],
+				[
+					"northeurope",
+					"(Europe) North Europe"
+				],
+				[
+					"norwayeast",
+					"(Europe) Norway East"
+				],
+				[
+					"norwaywest",
+					"(Europe) Norway West"
+				],
+				[
+					"swedencentral",
+					"(Europe) Sweden Central"
+				],
+				[
+					"switzerlandnorth",
+					"(Europe) Switzerland North"
+				],
+				[
+					"switzerlandwest",
+					"(Europe) Switzerland West"
+				],
+				[
+					"uksouth",
+					"(Europe) UK South"
+				],
+				[
+					"ukwest",
+					"(Europe) UK West"
+				],
+				[
+					"westeurope",
+					"(Europe) West Europe"
+				],
+				[
+					"uaecentral",
+					"(Middle East) UAE Central"
+				],
+				[
+					"uaenorth",
+					"(Middle East) UAE North"
+				],
+				[
+					"brazilsouth",
+					"(South America) Brazil South"
+				],
+				[
+					"brazilsoutheast",
+					"(South America) Brazil Southeast"
+				],
+				[
+					"centralus",
+					"(US) Central US"
+				],
+				[
+					"centralusstage",
+					"(US) Central US (Stage)"
+				],
+				[
+					"centraluseuap",
+					"(US) Central US EUAP"
+				],
+				[
+					"eastus",
+					"(US) East US"
+				],
+				[
+					"eastusstage",
+					"(US) East US (Stage)"
+				],
+				[
+					"eastus2",
+					"(US) East US 2"
+				],
+				[
+					"eastus2stage",
+					"(US) East US 2 (Stage)"
+				],
+				[
+					"eastus2euap",
+					"(US) East US 2 EUAP"
+				],
+				[
+					"northcentralus",
+					"(US) North Central US"
+				],
+				[
+					"northcentralusstage",
+					"(US) North Central US (Stage)"
+				],
+				[
+					"southcentralus",
+					"(US) South Central US"
+				],
+				[
+					"southcentralusstage",
+					"(US) South Central US (Stage)"
+				],
+				[
+					"westcentralus",
+					"(US) West Central US"
+				],
+				[
+					"westus",
+					"(US) West US"
+				],
+				[
+					"westusstage",
+					"(US) West US (Stage)"
+				],
+				[
+					"westus2",
+					"(US) West US 2"
+				],
+				[
+					"westus2stage",
+					"(US) West US 2 (Stage)"
+				],
+				[
+					"westus3",
+					"(US) West US 3"
+				]
+			]
+		},
+		"ms.tenant": {
+			"type": "string",
+			"description": "It is a unique identifier different to your organization name or domain. Tenant Id can be found in Azure Active directory property page",
+			"title": "Tenant Id",
+			"readonly": true
+		},
+		"ms.clientId": {
+			"type": "string",
+			"title": "Client Id",
+			"description": "The Client Id created for your application (configuration in Azure).",
+			"secure": true,
+			"ui:options": {
+				"hideFor": "personal"
+			}
+		},
+		"ms.clientSecret": {
+			"type": "string",
+			"title": "Client Secret",
+			"description": "The Client Secret for your application (configuration in Azure).",
+			"secure": true,
+			"ui:options": {
+				"hideFor": "personal"
+			}
+		},
+		"ms.refreshToken": {
+			"type": "string",
+			"title": "Refresh Token",
+			"description": "The refresh token for your application.",
+			"ui:widget": "password"
+		},
+		"DTC.ms.oAuthButton": {
+			"title": "Login with Microsoft",
+			"type": "string",
+			"ui:widget": "MicrosoftButtonWidget",
+			"optional": true
+		},
+		"DTC.ms.accessToken": {
+			"description": "It is a short term token that allows you to access the Microsoft Graph API.",
+			"title": "Access Token",
+			"type": "string",
+			"ui:widget": "password"
+		},
+		"DTC.ms.refreshToken": {
+			"description": "It is a long term token that allows you to get new access tokens to access the Microsoft Graph API.",
+			"title": "Refresh Token",
+			"type": "string",
+			"ui:widget": "password",
+			"ui:disabled": true
+		},
+		"ms.accountName": {
+			"type": "string",
+			"title": "Account name",
+			"description": "This defines the unique namespace in Azure for your data. This is available inside the Azure Portal.",
+			"minLength": 3,
+			"maxLength": 63,
+			"optional": true,
+			"secure": true
+		},
+		"ms.accountPassword": {
+			"type": "string",
+			"title": "Account password",
+			"optional": true,
+			"ui:widget": "password"
+		},
+		"ms.accountKey": {
+			"type": "string",
+			"title": "Key",
+			"description": "This defines the Azure account key needed to access the blob storage. This is available inside the Azure Portal.",
+			"minLength": 3,
+			"maxLength": 256,
+			"optional": true,
+			"secure": true,
+			"ui:widget": "password"
+		},
+		"ms.container": {
+			"type": "string",
+			"title": "Container name",
+			"description": "This organizes a set of blobs, similar to directory in a file system. This is available inside the Azure Portal.",
+			"minLength": 3,
+			"maxLength": 63
+		},
+		"ms.endpointSuffix": {
+			"type": "string",
+			"title": "Endpoint suffix",
+			"default": "blob.core.windows.net",
+			"minLength": 3,
+			"maxLength": 63,
+			"highlightChangedValue": true
+		},
+		"ms.auth": {
+			"type": "string",
+			"title": "Authentication type",
+			"default": "password",
+			"enum": [
+				[
+					"password",
+					"Username/Password"
+				],
+				[
+					"secure",
+					"Secure Web-Web Access"
+				]
+			],
+			"conditional": [
+				{
+					"value": "secure",
+					"properties": [
+						"ms.tenant",
+						"ms.region",
+						"ms.clientId",
+						"ms.clientSecret"
+					]
+				},
+				{
+					"value": "password",
+					"properties": [
+						"ms.tenant",
+						"ms.region",
+						"ms.clientId",
+						"ms.accountName",
+						"ms.accountPassword"
+					]
+				}
+			]
+		},
+		"fixed.ms.secure.auth": {
+			"hidden": true,
+			"type": "string",
+			"default": "secure"
+		}
+	}
+}

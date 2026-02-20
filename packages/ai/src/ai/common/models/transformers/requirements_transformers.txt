@@ -1,0 +1,4 @@
+# Requirements for Transformers loader
+# Direct imports only
+
+transformers

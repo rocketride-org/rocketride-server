@@ -1,0 +1,168 @@
+{
+	"pipeline": {
+		"source": "webhook_1",
+		"components": [
+			{
+				"id": "webhook_1",
+				"provider": "webhook",
+				"config": {
+					"mode": "Source",
+					"parameters": {
+						"endpoint": "/webHook",
+						"host": "0.0.0.0",
+						"port": 5567
+					},
+					"type": "webhook"
+				},
+				"input": []
+			},
+			{
+				"id": "parser_1",
+				"provider": "parse",
+				"config": {},
+				"input": [
+					{
+						"lane": "tags",
+						"from": "webhook_1"
+					}
+				]
+			},
+			{
+				"id": "preprocessor_1",
+				"provider": "preprocessor_langchain",
+				"config": {
+					"profile": "default",
+					"default": {
+						"mode": "strlen",
+						"splitter": "RecursiveCharacterTextSplitter",
+						"strlen": 1024
+					}
+				},
+				"input": [
+					{
+						"lane": "table",
+						"from": "parser_1"
+					},
+					{
+						"lane": "text",
+						"from": "parser_1"
+					}
+				]
+			},
+			{
+				"id": "embedding_1",
+				"provider": "embedding_transformer",
+				"config": {
+					"profile": "miniLM"
+				},
+				"input": [
+					{
+						"lane": "documents",
+						"from": "preprocessor_1"
+					}
+				]
+			},
+			{
+				"id": "embedding_2",
+				"provider": "embedding_transformer",
+				"config": {
+					"profile": "miniLM"
+				},
+				"input": [
+					{
+						"lane": "questions",
+						"from": "chat_1"
+					}
+				]
+			},
+			{
+				"id": "chat_1",
+				"provider": "chat",
+				"config": {
+					"mode": "Source",
+					"parameters": {
+						"endpoint": "/",
+						"host": "0.0.0.0",
+						"port": 5566
+					},
+					"type": "chat"
+				},
+				"input": []
+			},
+			{
+				"id": "qdrant_1",
+				"provider": "qdrant",
+				"config": {
+					"profile": "local",
+					"local": {
+						"collection": "ROCKETRIDE",
+						"host": "localhost",
+						"port": 6333
+					}
+				},
+				"input": [
+					{
+						"lane": "documents",
+						"from": "embedding_1"
+					}
+				]
+			},
+			{
+				"id": "qdrant_2",
+				"provider": "qdrant",
+				"config": {
+					"profile": "local",
+					"local": {
+						"collection": "ROCKETRIDE",
+						"host": "localhost",
+						"port": 6333
+					}
+				},
+				"input": [
+					{
+						"lane": "questions",
+						"from": "embedding_2"
+					}
+				]
+			},
+			{
+				"id": "openai_1",
+				"provider": "llm_openai",
+				"config": {
+					"profile": "openai-5",
+					"openai-5": {
+						"apikey": ""
+					}
+				},
+				"input": [
+					{
+						"lane": "questions",
+						"from": "qdrant_2"
+					}
+				]
+			},
+			{
+				"id": "response_2",
+				"provider": "response",
+				"config": {},
+				"input": [
+					{
+						"lane": "answers",
+						"from": "openai_1"
+					}
+				]
+			},
+			{
+				"id": "response_1",
+				"provider": "response",
+				"config": {},
+				"input": [
+					{
+						"lane": "documents",
+						"from": "qdrant_1"
+					}
+				]
+			}
+		]
+	}
+}

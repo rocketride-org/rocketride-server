@@ -1,0 +1,9 @@
+environs
+marshmallow
+grpcio
+milvus-lite; platform_system != "Windows"
+pandas
+protobuf
+ujson
+pymilvus
+numpy

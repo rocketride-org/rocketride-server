@@ -1,0 +1,2 @@
+# version.h is the output of a CMake configure_file command
+version.h

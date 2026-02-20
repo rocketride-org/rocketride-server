@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <defs>
+    <linearGradient id="botGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF7A00;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#E66A00;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Bot head/body -->
+  <rect x="6" y="4" width="12" height="14" rx="3" ry="3" 
+        fill="url(#botGradient)" stroke="#E66A00" stroke-width="0.5"/>
+  
+  <!-- Bot eyes -->
+  <circle cx="9" cy="8" r="1.5" fill="white"/>
+  <circle cx="15" cy="8" r="1.5" fill="white"/>
+  <circle cx="9" cy="8" r="0.8" fill="#E66A00"/>
+  <circle cx="15" cy="8" r="0.8" fill="#E66A00"/>
+  
+  <!-- Bot mouth/speaker -->
+  <rect x="10" y="12" width="4" height="2" rx="1" fill="white"/>
+  <line x1="10.5" y1="13" x2="13.5" y2="13" stroke="#E66A00" stroke-width="0.5"/>
+  
+  <!-- Bot antenna -->
+  <line x1="12" y1="4" x2="12" y2="1" stroke="#FF7A00" stroke-width="1.5" stroke-linecap="round"/>
+  <circle cx="12" cy="1" r="1" fill="#FF9433"/>
+  
+  <!-- Bot arms/connectors -->
+  <rect x="3" y="10" width="3" height="1.5" rx="0.75" fill="#FF9433"/>
+  <rect x="18" y="10" width="3" height="1.5" rx="0.75" fill="#FF9433"/>
+  
+  <!-- Bot legs/base -->
+  <rect x="8" y="18" width="2" height="4" rx="1" fill="#FF9433"/>
+  <rect x="14" y="18" width="2" height="4" rx="1" fill="#FF9433"/>
+  
+  <!-- Status indicator -->
+  <circle cx="16" cy="6" r="1" fill="#10B981" opacity="0.8"/>
+  
+  <!-- Circuit pattern -->
+  <path d="M7 15 L9 15 M11 15 L13 15 M15 15 L17 15" 
+        stroke="white" stroke-width="0.5" opacity="0.6"/>
+</svg>

@@ -1,0 +1,286 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Text - Data Extractor",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "extract_data://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"text"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if 
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.extract_data",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "extrace_data",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A component that processes unstructured or semi-structured text and extracts ",
+		"structured data in a tabular format. It identifies key fields, values, and ",
+		"patterns within the input content using configurable extraction rules or machine ",
+		"learning models. The resulting output is organized into rows and columns, making ",
+		"it suitable for further analysis, storage, or integration into downstream systems. This ",
+		"component is ideal for transforming documents, reports, or freeform text into usable ",
+		"data structures, enabling automation and insight generation across various domains."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "util-text.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/4qBFA0L",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"invoke": {
+		"llm": {
+			"description": "LLM to use for data extraction",
+			"min": 1
+		}
+	},
+	"lanes": {
+		"table": [
+			"answers",
+			"documents"
+		],
+		"text": [
+			"answers",
+			"documents"
+		]
+	},
+	"input": [
+		{
+			"description": "Extracts data from an existing table (transformation)",
+			"lane": "table",
+			"output": [
+				{
+					"lane": "answers",
+					"description": "Outputs the extracted data"
+				},
+				{
+					"lane": "documents",
+					"description": "Outputs the extracted data"
+				}
+			]
+		},
+		{
+			"description": "Extracts data from an text",
+			"lane": "text",
+			"output": [
+				{
+					"lane": "answers",
+					"description": "Outputs the extracted data"
+				},
+				{
+					"lane": "documents",
+					"description": "Outputs the extracted data"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "default",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"default": {
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"extract.column": {
+			"type": "string",
+			"title": "Column",
+			"default": "column",
+			"minLength": 2,
+			"maxLength": 32,
+			"description": "Name of column"
+		},
+		"extract.type": {
+			"type": "string",
+			"title": "Type",
+			"default": "text",
+			"enum": [
+				[
+					"text",
+					"Text"
+				],
+				[
+					"decimal",
+					"Number"
+				],
+				[
+					"int",
+					"Integer"
+				],
+				[
+					"date",
+					"Date"
+				],
+				[
+					"time",
+					"Time"
+				],
+				[
+					"datetime",
+					"DateTime"
+				],
+				[
+					"timestamp",
+					"Timestamp"
+				],
+				[
+					"binary",
+					"Binary"
+				],
+				[
+					"json",
+					"JSON"
+				],
+				[
+					"html",
+					"HTML"
+				],
+				[
+					"url",
+					"URL"
+				],
+				[
+					"email",
+					"Email"
+				],
+				[
+					"phone",
+					"Phone"
+				],
+				[
+					"ipv4",
+					"IPv4"
+				],
+				[
+					"ipv6",
+					"IPv6"
+				],
+				[
+					"uuid",
+					"UUID"
+				],
+				[
+					"guid",
+					"GUID"
+				]
+			]
+		},
+		"extract.defval": {
+			"optional": true,
+			"type": "string",
+			"title": "Default Value",
+			"default": ""
+		},
+		"extract.fields": {
+			"type": "array",
+			"minItems": 1,
+			"maxItems": 32,
+			"items": {
+				"type": "object",
+				"properties": [
+					"extract.column",
+					"extract.type",
+					"extract.defval"
+				]
+			}
+		},
+		"extract.default": {
+			"object": "default",
+			"properties": [
+				"extract.fields"
+			]
+		},
+		"extract.profile": {
+			"hidden": true,
+			"type": "string",
+			"default": "default",
+			"enum": [
+				[
+					"default",
+					"Default"
+				]
+			],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": [
+						"extract.default"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Data Extract",
+			"properties": [
+				"extract.profile"
+			]
+		}
+	]
+}

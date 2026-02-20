@@ -1,0 +1,1631 @@
+/**
+ * MIT License
+ * Copyright (c) 2026 RocketRide, Inc.
+ * See LICENSE file for details.
+ */
+
+/**
+ * RocketRide Dropper Interface Styles
+ *
+ * Consistent design system with responsive layout
+ * Optimized for file upload and document processing workflows
+ * Theme-aware CSS variables for dual-mode support (standalone + VSCode)
+ */
+
+/* =============================================================================
+   THEME VARIABLES - Applied by ThemeContext
+   These are overridden by ThemeProvider based on selected theme or VSCode theme
+   ============================================================================= */
+
+:root {
+	/* Theme-aware colors - defaults (Ocean Blue theme) */
+	--bg-primary: #0f172a;
+	--bg-secondary: #1e293b;
+	--bg-tertiary: #334155;
+	--bg-hover: #475569;
+	--text-primary: #f1f5f9;
+	--text-secondary: #94a3b8;
+	--text-muted: #64748b;
+	--border-color: #334155;
+	--border-hover: #475569;
+	--accent-primary: #0ea5e9;
+	--accent-secondary: #06b6d4;
+	--accent-hover: #38bdf8;
+	--success-color: #10b981;
+	--error-color: #ef4444;
+	--warning-color: #f59e0b;
+	--info-color: #3b82f6;
+	--code-bg: #1e293b;
+	--input-bg: #1e293b;
+	--input-border: #334155;
+	--shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+	--shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+	--shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+
+	/* Brand colors */
+	--rocketride-orange: #FF8C42;
+	--rocketride-orange-light: #FFA366;
+	--rocketride-orange-dark: #E67A2E;
+	--rocketride-orange-pale: #FFF6F0;
+	--rocketride-navy: #1A1D29;
+	--rocketride-white: #FFFFFF;
+}
+
+* {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+body {
+	font-family: styreneB, "styreneB Fallback", system-ui, "Segoe UI", Roboto;
+	font-size: 16px;
+	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	background: var(--bg-primary);
+	color: var(--text-primary);
+	margin: 0;
+	padding: 0;
+}
+
+.dropper-container {
+	display: flex;
+	flex-direction: column;
+	height: 100vh;
+	width: 100%;
+	background: var(--bg-primary);
+}
+
+/* Header Styles - Same as chat app */
+.dropper-header {
+	background: var(--bg-secondary);
+	box-shadow: var(--shadow-sm);
+	border-bottom: 1px solid var(--border-color);
+	padding: 1rem 1.5rem;
+	position: relative;
+	width: 100%;
+}
+
+.dropper-header::after {
+	content: '';
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	right: 0;
+	height: 2px;
+	background: linear-gradient(90deg, var(--rocketride-orange) 0%, var(--rocketride-orange-light) 100%);
+}
+
+.header-content {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0 50px;
+	width: 100%;
+}
+
+.header-info {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+}
+
+.dropper-avatar {
+	width: 2.5rem;
+	height: 2.5rem;
+	background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: white;
+	border: 2px solid var(--accent-secondary);
+}
+
+.header-text h1 {
+	font-size: 1.25rem;
+	font-weight: 600;
+	color: var(--text-primary);
+	margin: 0;
+}
+
+.header-text p {
+	font-size: 0.875rem;
+	color: var(--text-secondary);
+	margin: 0;
+}
+
+.header-actions {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+/* Theme Selector Styles */
+.theme-selector {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.5rem 0.75rem;
+	background-color: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 0.375rem;
+	transition: all 0.2s ease;
+}
+
+.theme-selector:hover {
+	background-color: var(--bg-hover);
+	border-color: var(--border-hover);
+}
+
+.theme-selector-icon {
+	color: var(--text-secondary);
+	flex-shrink: 0;
+}
+
+.theme-select {
+	background-color: transparent;
+	color: var(--text-primary);
+	border: none;
+	font-size: 0.875rem;
+	font-weight: 500;
+	cursor: pointer;
+	outline: none;
+	padding: 0;
+	min-width: 120px;
+}
+
+.theme-select option {
+	background-color: var(--bg-secondary);
+	color: var(--text-primary);
+	padding: 0.5rem;
+}
+
+.theme-select:focus {
+	outline: 2px solid var(--accent-primary);
+	outline-offset: 2px;
+	border-radius: 0.25rem;
+}
+
+.header-btn {
+	padding: 0.5rem;
+	color: var(--text-secondary);
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 0.5rem;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.header-btn:hover:not(:disabled) {
+	color: var(--accent-primary);
+	background: var(--bg-hover);
+	border-color: var(--border-hover);
+}
+
+.header-btn:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+.header-btn:disabled:hover {
+	color: var(--text-secondary);
+	background: var(--bg-tertiary);
+	border-color: var(--border-color);
+}
+
+.header-btn:focus-visible {
+	outline: 2px solid var(--accent-primary);
+	outline-offset: 2px;
+}
+
+/* Header Accent Line */
+.dropper-header::after {
+	content: '';
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	right: 0;
+	height: 2px;
+	background: linear-gradient(90deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+}
+
+/* =============================================================================
+   MAIN CONTENT AREA
+   ============================================================================= */
+
+.dropper-main {
+	flex: 1;
+	padding: 1.5rem 50px;
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	gap: 1.5rem;
+	overflow-y: auto;
+}
+
+/* Top Controls Section - Horizontal layout */
+.top-controls-section {
+	display: flex;
+	gap: 1.5rem;
+	align-items: flex-start;
+}
+
+/* Left Panel - File upload and management */
+.left-panel {
+	flex: 0 0 calc(33.333% - 1rem);
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+}
+
+/* Right Panel - Results display */
+.right-panel {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 1rem;
+	box-shadow: var(--shadow-sm);
+	overflow: hidden;
+	min-height: 400px;
+}
+
+.drop-zone {
+	background: var(--bg-secondary);
+	border: 2px dashed var(--border-color);
+	border-radius: 1rem;
+	padding: 1.5rem 1rem;
+	text-align: center;
+	cursor: pointer;
+	transition: all 0.3s ease;
+	position: relative;
+	min-height: 200px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	margin: 4px;
+}
+
+.drop-zone:hover:not(.disabled) {
+	border-color: var(--accent-primary);
+	background: var(--bg-tertiary);
+}
+
+/* Active drag-over state */
+.drop-zone.drag-over {
+	border-color: var(--accent-primary);
+	background: var(--bg-tertiary);
+	border-style: solid;
+	border-width: 3px;
+	box-shadow: 0 0 0 2px var(--bg-tertiary), var(--shadow-lg);
+}
+
+/* Processing state - disabled interaction */
+.drop-zone.processing {
+	border-color: var(--rocketride-orange);
+	background: var(--rocketride-orange-pale);
+	cursor: not-allowed;
+	pointer-events: none;
+}
+
+.drop-zone.disabled:hover {
+	border-color: var(--border-color);
+	background: var(--bg-secondary);
+	transform: none;
+}
+
+/* Hidden file input (triggered by clicking drop zone) */
+.file-input {
+	display: none;
+}
+
+.drop-zone-content {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.drop-zone-content h4 {
+	font-size: 1rem;
+	font-weight: 600;
+	color: var(--text-primary);
+	margin: 0;
+}
+
+.drop-zone-content p {
+	font-size: 0.75rem;
+	color: var(--text-secondary);
+	margin: 0;
+}
+
+/* Animated spinner for loading states */
+@keyframes spin {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.animate-spin {
+	animation: spin 1s linear infinite;
+}
+
+/* =============================================================================
+   FILE LIST
+   List of uploaded files with status indicators
+   ============================================================================= */
+
+.file-list {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 1rem;
+	box-shadow: var(--shadow-sm);
+	padding: 1.5rem;
+	display: flex;
+	flex-direction: column;
+}
+
+/* File List - Compact version */
+.file-list {
+	padding: 1rem;
+	border-top: 1px solid var(--border-light);
+}
+
+.file-list h4 {
+	margin: 0 0 0.75rem 0;
+	font-size: 0.875rem;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.file-items {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.file-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0.75rem;
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 0.5rem;
+	transition: all 0.2s ease;
+	cursor: pointer;
+}
+
+.file-item:hover {
+	background: var(--bg-hover);
+}
+
+.file-info {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex: 1;
+	min-width: 0;
+}
+
+.file-details {
+	flex: 1;
+	min-width: 0;
+}
+
+.file-name {
+	margin: 0;
+	font-weight: 500;
+	color: var(--text-primary);
+	font-size: 0.75rem;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.file-meta {
+	margin: 0;
+	font-size: 0.625rem;
+	color: var(--text-secondary);
+}
+
+.file-error {
+	color: var(--error-color);
+}
+
+.remove-file-btn {
+	padding: 0.125rem;
+	background: none;
+	border: none;
+	color: var(--text-secondary);
+	cursor: pointer;
+	border-radius: 0.25rem;
+	transition: all 0.2s ease;
+	flex-shrink: 0;
+}
+
+.remove-file-btn:hover {
+	background: var(--bg-hover);
+	color: var(--error-color);
+}
+
+/* =============================================================================
+   PROCESSING INDICATOR
+   Shown while files are being processed
+   ============================================================================= */
+
+.processing-indicator {
+	text-align: center;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 1rem;
+	padding: 2rem;
+}
+
+.processing-indicator h3 {
+	font-size: 1.125rem;
+	font-weight: 600;
+	color: var(--text-primary);
+	margin: 0 0 0.5rem 0;
+}
+
+.processing-progress {
+	font-size: 1rem;
+	color: var(--accent-primary);
+	font-weight: 500;
+	margin: 0;
+}
+
+/* =============================================================================
+   RESULTS SECTION
+   Tabbed interface for viewing processed results
+   ============================================================================= */
+
+/* Content item wrappers for grouped content */
+.content-item-wrapper {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.content-item-wrapper+.content-item-wrapper {
+	margin-top: 1rem;
+}
+
+/* Field label (e.g., "response_1", "text") */
+.content-field-label {
+	font-size: 0.75rem;
+	font-weight: 600;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	margin-bottom: 0.5rem;
+	padding: 0 0.25rem;
+}
+
+/* Filename header */
+.content-item-header {
+	font-size: 0.875rem;
+	font-weight: 600;
+	color: var(--text-secondary);
+	padding: 0 0.25rem;
+	margin-bottom: 1rem;
+}
+
+/* =============================================================================
+   TAB NAVIGATION
+   Results, Text, Tables, Images tabs
+   ============================================================================= */
+
+.tab-nav {
+	display: flex;
+	flex-wrap: wrap;
+	border-bottom: 1px solid var(--border-color);
+	background: var(--bg-secondary);
+	align-items: center;
+}
+
+.tab-btn {
+	flex: 0 1 auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	padding: 1rem 1.25rem;
+	background: none;
+	border: none;
+	color: var(--text-secondary);
+	cursor: pointer;
+	transition: all 0.2s ease;
+	font-weight: 500;
+	position: relative;
+	white-space: nowrap;
+}
+
+.tab-btn:hover {
+	color: var(--accent-primary);
+	background: var(--bg-tertiary);
+}
+
+.tab-btn.active {
+	color: var(--accent-primary);
+	border-bottom-color: var(--accent-primary);
+}
+
+.tab-btn span {
+	display: none;
+}
+
+@media (min-width: 640px) {
+	.tab-btn span {
+		display: inline;
+	}
+}
+
+.tab-badge {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 1.5rem;
+	min-height: 1.5rem;
+	padding: 0.375rem 0.625rem;
+	background: var(--accent-primary);
+	color: white;
+	font-size: 0.75rem;
+	font-weight: 600;
+	line-height: 1;
+	border-radius: 9999px;
+	vertical-align: middle;
+	padding-top: 0.4rem;
+	padding-bottom: 0.35rem;
+}
+
+.compare-checkbox-wrapper {
+	display: flex;
+	align-items: center;
+	padding: 1rem 1.25rem;
+	border-left: 1px solid var(--border-color);
+	margin-left: auto;
+	white-space: nowrap;
+}
+
+.compare-checkbox-label {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	cursor: pointer;
+	color: var(--text-secondary);
+	font-size: 0.875rem;
+	font-weight: 500;
+	-webkit-user-select: none;
+	user-select: none;
+}
+
+.compare-checkbox {
+	width: 1rem;
+	height: 1rem;
+	cursor: pointer;
+	accent-color: var(--accent-primary);
+}
+
+.compare-checkbox-label:hover {
+	color: var(--accent-primary);
+}
+
+/* Compare mode grid layout */
+.compare-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+	gap: 1rem;
+	margin-top: 0.5rem;
+}
+
+.compare-column {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+/* =============================================================================
+   TAB CONTENT
+   Content area for each tab
+   ============================================================================= */
+
+.tab-content-wrapper {
+	flex: 1;
+	overflow: auto;
+}
+
+.tab-content {
+	padding: 1.5rem;
+	height: 100%;
+}
+
+.tab-content-empty {
+	padding: 3rem 1.5rem;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.empty-state {
+	text-align: center;
+	color: var(--text-secondary);
+}
+
+.empty-state h3 {
+	margin: 1rem 0 0.5rem 0;
+	font-size: 1.125rem;
+	font-weight: 600;
+}
+
+.empty-state p {
+	margin: 0;
+}
+
+/* No content message */
+.no-content {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 1rem;
+	padding: 3rem 1rem;
+	text-align: center;
+}
+
+.no-content p {
+	font-size: 0.875rem;
+	color: var(--text-secondary);
+	margin: 0;
+}
+
+/* =============================================================================
+   CONTENT LIST
+   List of content items (text, tables, documents, questions, answers)
+   ============================================================================= */
+
+.content-list {
+	display: flex;
+	flex-direction: column;
+	gap: 1.5rem;
+}
+
+.content-item {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 0.75rem;
+	padding: 1.5rem;
+}
+
+/* =============================================================================
+   TEXT CONTENT STYLING
+   Plain text display with preserved whitespace
+   ============================================================================= */
+
+.text-content {
+	margin: 0;
+	padding: 0;
+	font-family: inherit;
+	font-size: inherit;
+	white-space: pre-wrap;
+	word-wrap: break-word;
+	overflow-wrap: break-word;
+	color: var(--text-primary);
+	background: transparent;
+	border: none;
+}
+
+/* =============================================================================
+   QUESTION CONTENT STYLING
+   Question objects with structured compact display
+   ============================================================================= */
+
+.question-structured {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.question-header-info {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding-bottom: 12px;
+	border-bottom: 2px solid var(--border-color);
+}
+
+.question-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 1rem;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.question-icon {
+	width: 1.25rem;
+	height: 1.25rem;
+	color: var(--info-color);
+	flex-shrink: 0;
+}
+
+.question-meta-badges {
+	display: flex;
+	gap: 8px;
+}
+
+.meta-badge {
+	padding: 4px 12px;
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 12px;
+	font-size: 0.75rem;
+	font-weight: 500;
+	color: var(--text-secondary);
+}
+
+.question-field {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.field-label {
+	font-size: 0.875rem;
+	font-weight: 600;
+	color: var(--info-color);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+.field-value {
+	color: var(--text-primary);
+	padding-left: 16px;
+}
+
+.field-items {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding-left: 16px;
+}
+
+.field-item {
+	display: flex;
+	gap: 8px;
+	align-items: flex-start;
+	padding: 8px;
+	background: var(--bg-tertiary);
+	border-radius: 4px;
+	border-left: 3px solid var(--info-color);
+}
+
+.item-number {
+	color: var(--info-color);
+	font-weight: 600;
+	flex-shrink: 0;
+	min-width: 24px;
+}
+
+.item-content {
+	flex: 1;
+	color: var(--text-primary);
+	word-break: break-word;
+}
+
+.item-subtitle {
+	font-weight: 600;
+	color: var(--text-primary);
+	margin-bottom: 4px;
+}
+
+.item-text {
+	color: var(--text-secondary);
+}
+
+.example-pair {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 4px;
+}
+
+.example-pair:last-child {
+	margin-bottom: 0;
+}
+
+.example-label {
+	font-weight: 600;
+	color: var(--text-secondary);
+	flex-shrink: 0;
+	min-width: 60px;
+}
+
+.example-text {
+	flex: 1;
+	color: var(--text-primary);
+}
+
+.history-role {
+	font-weight: 600;
+	color: var(--accent-primary);
+	margin-right: 8px;
+}
+
+.history-text {
+	color: var(--text-primary);
+}
+
+.filter-preview {
+	display: block;
+	padding: 8px;
+	background: var(--code-bg);
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	font-size: 0.75rem;
+	color: var(--text-primary);
+	overflow-x: auto;
+}
+
+.truncated-text {
+	cursor: help;
+	position: relative;
+}
+
+.truncated-text[title]:hover {
+	text-decoration: underline;
+	text-decoration-style: dotted;
+}
+
+/* =============================================================================
+   ANSWER CONTENT STYLING
+   Answers with icon display
+   ============================================================================= */
+
+/* =============================================================================
+   ANSWER CONTENT STYLING
+   Answer objects with structured compact display
+   ============================================================================= */
+
+.answer-content {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.75rem;
+}
+
+.answer-icon {
+	width: 1.25rem;
+	height: 1.25rem;
+	color: var(--success-color);
+	flex-shrink: 0;
+	margin-top: 0.25rem;
+}
+
+/* =============================================================================
+   DOCUMENT CONTENT STYLING
+   Structured document display with metadata
+   ============================================================================= */
+
+.document-block {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.document-metadata {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 16px;
+	padding: 8px 12px;
+	background: var(--bg-tertiary);
+	border-radius: 4px;
+	font-size: 0.875rem;
+}
+
+.metadata-item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.metadata-icon {
+	width: 14px;
+	height: 14px;
+	color: var(--text-muted);
+}
+
+.metadata-label {
+	color: var(--text-secondary);
+	font-weight: 500;
+}
+
+.metadata-value {
+	color: var(--text-primary);
+	font-family: monospace;
+}
+
+.document-content {
+	padding: 12px;
+	background: var(--bg-tertiary);
+	border-radius: 4px;
+	border-left: 3px solid var(--accent-primary);
+}
+
+.document-context {
+	padding: 12px;
+	background: var(--bg-secondary);
+	border-radius: 4px;
+}
+
+.context-label {
+	font-weight: 600;
+	color: var(--text-secondary);
+	margin-bottom: 8px;
+	font-size: 0.875rem;
+}
+
+.context-item {
+	padding: 6px 0;
+	color: var(--text-primary);
+	font-size: 0.875rem;
+	border-top: 1px solid var(--border-color);
+}
+
+.context-item:first-child {
+	border-top: none;
+	padding-top: 0;
+}
+
+/* =============================================================================
+   JSON DISPLAY
+   Raw JSON view in results tab
+   ============================================================================= */
+
+.json-display-wrapper {
+	position: relative;
+	background: var(--code-bg);
+	border-radius: 0.75rem;
+	padding: 10px;
+	min-height: 150px;
+}
+
+.json-download-btn {
+	position: absolute;
+	top: 1rem;
+	right: 1rem;
+	z-index: 10;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.5rem 1rem;
+	background: var(--accent-primary);
+	color: white;
+	border: none;
+	border-radius: 0.5rem;
+	font-size: 0.875rem;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.json-download-btn:hover {
+	background: var(--accent-hover);
+}
+
+/* =============================================================================
+   IMAGE DISPLAY
+   Image grid with responsive columns and carousel viewer
+   ============================================================================= */
+
+/* Responsive image grid - flexible sizing based on viewport */
+.image-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 1rem;
+}
+
+.no-content p {
+	margin: 0;
+	font-size: 0.875rem;
+}
+
+.image-wrapper {
+	display: flex;
+	justify-content: center;
+	background: var(--bg-secondary);
+	border-radius: 0.5rem;
+	padding: 1rem;
+}
+
+.processed-image {
+	width: 100%;
+	height: auto;
+	object-fit: contain;
+	display: block;
+	max-height: 128px;
+	cursor: pointer;
+	transition: opacity 0.2s;
+}
+
+.processed-image:hover {
+	opacity: 0.8;
+}
+
+/* Carousel - Full-screen image viewer */
+.carousel-overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.9);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1000;
+}
+
+.carousel-content {
+	position: relative;
+	width: 90vw;
+	height: 90vh;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.carousel-image-container {
+	max-width: 100%;
+	max-height: 90vh;
+	border-radius: 0.375rem;
+	box-shadow: var(--shadow-md);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.carousel-image {
+	max-width: 100%;
+	max-height: 90vh;
+	object-fit: contain;
+	user-select: none;
+}
+
+/* Carousel zoom controls */
+.carousel-zoom-controls {
+	position: absolute;
+	top: 1rem;
+	left: 1rem;
+	z-index: 10;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 0.5rem;
+	padding: 0.5rem;
+}
+
+.carousel-zoom-btn {
+	padding: 0.5rem;
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 0.375rem;
+	color: var(--text-primary);
+	cursor: pointer;
+	transition: all 0.2s ease;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.carousel-zoom-btn:hover:not(:disabled) {
+	background: var(--bg-hover);
+	color: var(--accent-primary);
+}
+
+.carousel-zoom-btn:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+.carousel-zoom-level {
+	font-size: 0.875rem;
+	font-weight: 600;
+	color: var(--text-primary);
+	min-width: 3rem;
+	text-align: center;
+}
+
+/* Carousel close button */
+.carousel-close {
+	position: absolute;
+	top: 1rem;
+	right: 1rem;
+	z-index: 10;
+	padding: 0.75rem;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 0.5rem;
+	color: var(--text-primary);
+	cursor: pointer;
+	transition: all 0.2s ease;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.carousel-close:hover {
+	background: var(--error-color);
+	color: white;
+	border-color: var(--error-color);
+}
+
+/* Carousel navigation buttons */
+.carousel-nav {
+	position: absolute;
+	top: 50%;
+	transform: translateY(-50%);
+	padding: 1rem;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 0.5rem;
+	color: var(--text-primary);
+	cursor: pointer;
+	transition: all 0.2s ease;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 10;
+}
+
+.carousel-nav:hover {
+	background: var(--bg-hover);
+	color: var(--accent-primary);
+	border-color: var(--accent-primary);
+}
+
+.carousel-prev {
+	left: 1rem;
+}
+
+.carousel-next {
+	right: 1rem;
+}
+
+/* Carousel counter */
+.carousel-counter {
+	position: absolute;
+	bottom: 1rem;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 10;
+	padding: 0.5rem 1rem;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 0.5rem;
+	color: var(--text-primary);
+	font-size: 0.875rem;
+	font-weight: 600;
+}
+
+/* Markdown Content - Same styles as chat app */
+.markdown-content {
+	width: 100%;
+	line-height: 1.6;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+	color: var(--text-primary);
+	margin: 0.5rem 0;
+	font-weight: 600;
+}
+
+.markdown-content h1 {
+	font-size: 1.25rem;
+}
+
+.markdown-content h2 {
+	font-size: 1.125rem;
+}
+
+.markdown-content h3 {
+	font-size: 1rem;
+}
+
+.markdown-content p {
+	margin: 0.5rem 0;
+	color: var(--text-primary);
+}
+
+.markdown-content code {
+	background: var(--code-bg);
+	padding: 0.125rem 0.25rem;
+	border-radius: 0.25rem;
+	font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+	font-size: 0.8em;
+	color: var(--accent-primary);
+}
+
+.markdown-content pre {
+	margin: 0.5rem 0;
+	border-radius: 0.5rem;
+	overflow-x: auto;
+}
+
+.markdown-content .markdown-table {
+	width: 100%;
+	border-collapse: collapse;
+	margin: 0.5rem 0;
+	font-size: 0.875rem;
+}
+
+.markdown-content .markdown-table th,
+.markdown-content .markdown-table td {
+	padding: 0.5rem;
+	text-align: left;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.markdown-content .markdown-table th {
+	background: var(--bg-secondary);
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.markdown-content .table-wrapper {
+	overflow-x: auto;
+	margin: 0.5rem 0;
+}
+
+.markdown-content .markdown-link {
+	color: var(--accent-primary);
+	text-decoration: none;
+}
+
+.markdown-content .markdown-link:hover {
+	text-decoration: underline;
+	color: var(--accent-hover);
+}
+
+.markdown-content .markdown-blockquote {
+	border-left: 4px solid var(--accent-primary);
+	padding-left: 1rem;
+	margin: 0.5rem 0;
+	color: var(--text-secondary);
+	font-style: italic;
+}
+
+.markdown-content .markdown-list {
+	margin: 0.5rem 0;
+	padding-left: 1.5rem;
+}
+
+.markdown-content .markdown-list li {
+	margin: 0.25rem 0;
+}
+
+/* =============================================================================
+   SCROLLBAR STYLING
+   Custom scrollbars for webkit browsers
+   ============================================================================= */
+
+.dropper-main::-webkit-scrollbar,
+.tab-content-wrapper::-webkit-scrollbar {
+	width: 6px;
+}
+
+.dropper-main::-webkit-scrollbar-track,
+.tab-content-wrapper::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.dropper-main::-webkit-scrollbar-thumb,
+.tab-content-wrapper::-webkit-scrollbar-thumb {
+	background: var(--accent-secondary);
+	border-radius: 3px;
+}
+
+.dropper-main::-webkit-scrollbar-thumb:hover,
+.tab-content-wrapper::-webkit-scrollbar-thumb:hover {
+	background: var(--accent-primary);
+}
+
+/* =============================================================================
+   CONNECTION STATE
+   Status indicators for connection state
+   ============================================================================= */
+
+/* Status banner for connection messages */
+.status-banner {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 0.75rem;
+	padding: 1rem 1.5rem;
+	margin: 0 0 1.5rem 0;
+	text-align: center;
+}
+
+.status-banner p {
+	color: var(--warning-color);
+	font-weight: 500;
+	margin: 0;
+	white-space: pre-line;
+}
+
+/* Connection error panel - detailed troubleshooting view */
+.connection-error-panel {
+	background: var(--bg-secondary);
+	border: 2px solid var(--warning-color);
+	border-radius: 1rem;
+	padding: 2rem 1.5rem;
+	text-align: center;
+	max-width: 600px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.connection-error-icon {
+	font-size: 3rem;
+	margin-bottom: 1rem;
+	opacity: 0.9;
+}
+
+.connection-error-title {
+	color: var(--text-primary);
+	font-size: 1.25rem;
+	font-weight: 600;
+	margin: 0 0 0.5rem 0;
+}
+
+.connection-error-message {
+	color: var(--warning-color);
+	font-size: 0.9375rem;
+	font-weight: 500;
+	margin: 0 0 1rem 0;
+	line-height: 1.4;
+}
+
+.connection-error-subtitle {
+	color: var(--text-secondary);
+	font-size: 0.875rem;
+	margin: 0 0 1.5rem 0;
+	line-height: 1.5;
+}
+
+.connection-error-checklist {
+	text-align: left;
+	background: var(--bg-tertiary);
+	border-radius: 0.75rem;
+	padding: 1rem;
+	margin-bottom: 1.5rem;
+}
+
+.connection-error-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.75rem;
+	padding: 0.5rem 0;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.connection-error-item:last-child {
+	border-bottom: none;
+}
+
+.connection-error-bullet {
+	color: var(--accent-primary);
+	font-size: 1rem;
+	font-weight: bold;
+	flex-shrink: 0;
+	opacity: 0.7;
+}
+
+.connection-error-text {
+	color: var(--text-primary);
+	font-size: 0.875rem;
+	line-height: 1.6;
+	flex: 1;
+}
+
+.connection-error-footer {
+	color: var(--text-secondary);
+	font-size: 0.75rem;
+	font-style: italic;
+	margin: 0;
+	opacity: 0.8;
+}
+
+/* =============================================================================
+   UPLOAD PROGRESS PANEL
+   Real-time upload progress display with compact single-line layout
+   ============================================================================= */
+
+.upload-progress-panel {
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 1rem;
+	padding: 1rem;
+	overflow: hidden;
+}
+
+.upload-progress-panel h3 {
+	font-size: 1rem;
+	font-weight: 600;
+	color: var(--text-primary);
+	margin: 0;
+	flex-shrink: 0;
+}
+
+.upload-progress-list {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	overflow-y: auto;
+	flex: 1;
+	min-height: 0;
+	-ms-overflow-style: none;
+}
+
+.upload-progress-list::-webkit-scrollbar {
+	display: none;
+}
+
+/* Empty state - no active uploads */
+.upload-progress-empty {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	color: var(--text-secondary);
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 1rem;
+	padding: 2rem;
+}
+
+/* Individual upload item - single horizontal line layout */
+.upload-progress-item {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex-shrink: 0;
+}
+
+/* Filename section - 25% width */
+.upload-progress-filename {
+	flex: 0 0 calc(25% - 0.34rem);
+	min-width: 0;
+	font-size: 0.875rem;
+	font-weight: 500;
+	color: var(--text-primary);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* Progress bar wrapper - 40% width */
+.upload-progress-bar-wrapper {
+	flex: 0 0 calc(40% - 0.34rem);
+	min-width: 0;
+}
+
+.dropper-main::-webkit-scrollbar-track,
+.tab-content-wrapper::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+/* Progress bar container */
+.upload-progress-bar-container {
+	width: 100%;
+	height: 8px;
+	background: var(--bg-primary);
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+/* Animated progress bar */
+.upload-progress-bar {
+	height: 100%;
+	background: linear-gradient(90deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+	transition: width 0.3s ease;
+	border-radius: 3px;
+}
+
+/* Stats section - 35% width, single line with wrapping */
+.upload-progress-stats {
+	flex: 0 0 calc(35% - 0.34rem);
+	min-width: 0;
+	font-size: 0.75rem;
+	color: var(--text-secondary);
+	text-align: right;
+	word-wrap: break-word;
+	overflow-wrap: break-word;
+}
+
+.upload-progress-size {
+	font-size: 0.75rem;
+	color: var(--text-secondary);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 100%;
+}
+
+.upload-progress-percentage {
+	font-size: 0.875rem;
+	font-weight: 600;
+	color: var(--accent-primary);
+	white-space: nowrap;
+}
+
+/* Smooth scrolling */
+.dropper-main {
+	scroll-behavior: smooth;
+}
+
+/* =============================================================================
+   RESPONSIVE DESIGN
+   Mobile-first breakpoints for smaller screens
+   ============================================================================= */
+
+/* Tablet and below - single column layout */
+@media (max-width: 1024px) {
+	.top-controls-section {
+		grid-template-columns: 1fr;
+	}
+}
+
+/* Mobile - compact spacing and hidden labels */
+@media (max-width: 768px) {
+	.dropper-main {
+		padding: 1rem;
+	}
+
+	.tab-btn {
+		padding: 0.75rem 1rem;
+		font-size: 0.75rem;
+	}
+
+	.tab-btn span {
+		display: none;
+	}
+
+	.content-item {
+		padding: 1rem;
+	}
+
+	.upload-progress-item {
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.upload-progress-filename {
+		flex: 1 1 100%;
+	}
+
+	.upload-progress-bar-wrapper {
+		flex: 1 1 60%;
+	}
+
+	.upload-progress-stats {
+		flex: 1 1 35%;
+		align-items: flex-end;
+	}
+}

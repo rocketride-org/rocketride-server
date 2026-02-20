@@ -1,0 +1,23 @@
+diff --git a/cmake_modules/DetectCPUFeatures.cmake b/cmake_modules/DetectCPUFeatures.cmake
+index 05e5e56..412f53b 100644
+--- a/cmake_modules/DetectCPUFeatures.cmake
++++ b/cmake_modules/DetectCPUFeatures.cmake
+@@ -29,10 +29,6 @@ x=_mm256_add_epi32(x,x);
+ return _mm256_movemask_epi8(x);
+ }")
+ 
+-
+-# Lowest common CPU denominator
+-#[[
+-
+ if(MSVC)
+ 	message(STATUS "TEST 2")
+ 	set(CMAKE_REQUIRED_FLAGS "/EHsc /arch:SSE2")
+@@ -53,7 +49,5 @@ else()
+ 	check_cxx_source_compiles("${AVX2PROG}" SUPPORT_AVX2)
+ endif()	
+ 
+-]]
+-
+ set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQUIRED_FLAGS})
+ 	

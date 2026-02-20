@@ -1,0 +1,2 @@
+# version.rc is the output of a CMake configure_file command
+version.rc

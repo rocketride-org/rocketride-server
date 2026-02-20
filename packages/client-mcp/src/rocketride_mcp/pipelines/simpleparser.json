@@ -1,0 +1,161 @@
+{
+  "pipeline": {
+    "source": "webhook_1",
+    "components": [
+      {
+        "id": "response_1",
+        "provider": "response",
+        "config": {
+          "lanes": []
+        },
+        "ui": {
+          "position": {
+            "x": 420,
+            "y": 260
+          },
+          "measured": {
+            "width": 140,
+            "height": 264
+          },
+          "data": {
+            "class": "infrastructure",
+            "type": "default"
+          },
+          "formDataValid": true,
+          "edges": [
+            {
+              "selectable": true,
+              "deletable": true,
+              "id": "xy-edge__parse_1source-text-0-response_1target-text-6",
+              "source": "parse_1",
+              "target": "response_1",
+              "sourceHandle": "source-text-0",
+              "targetHandle": "target-text-6"
+            },
+            {
+              "selectable": true,
+              "deletable": true,
+              "id": "xy-edge__parse_1source-video-0-response_1target-video-7",
+              "source": "parse_1",
+              "target": "response_1",
+              "sourceHandle": "source-video-0",
+              "targetHandle": "target-video-7"
+            },
+            {
+              "selectable": true,
+              "deletable": true,
+              "id": "xy-edge__parse_1source-table-0-response_1target-table-5",
+              "source": "parse_1",
+              "target": "response_1",
+              "sourceHandle": "source-table-0",
+              "targetHandle": "target-table-5"
+            },
+            {
+              "selectable": true,
+              "deletable": true,
+              "id": "xy-edge__parse_1source-image-0-response_1target-image-3",
+              "source": "parse_1",
+              "target": "response_1",
+              "sourceHandle": "source-image-0",
+              "targetHandle": "target-image-3"
+            },
+            {
+              "selectable": true,
+              "deletable": true,
+              "id": "xy-edge__parse_1source-audio-0-response_1target-audio-1",
+              "source": "parse_1",
+              "target": "response_1",
+              "sourceHandle": "source-audio-0",
+              "targetHandle": "target-audio-1"
+            }
+          ]
+        },
+        "input": [
+          {
+            "lane": "text",
+            "from": "parse_1"
+          },
+          {
+            "lane": "video",
+            "from": "parse_1"
+          },
+          {
+            "lane": "table",
+            "from": "parse_1"
+          },
+          {
+            "lane": "image",
+            "from": "parse_1"
+          },
+          {
+            "lane": "audio",
+            "from": "parse_1"
+          }
+        ]
+      },
+      {
+        "id": "webhook_1",
+        "provider": "webhook",
+        "config": {
+          "hideForm": true,
+          "mode": "Source",
+          "parameters": {},
+          "type": "webhook"
+        },
+        "ui": {
+          "position": {
+            "x": -40,
+            "y": 320
+          },
+          "measured": {
+            "width": 140,
+            "height": 123
+          },
+          "data": {
+            "class": "source",
+            "type": "default"
+          },
+          "formDataValid": true
+        }
+      },
+      {
+        "id": "parse_1",
+        "provider": "parse",
+        "config": {},
+        "ui": {
+          "position": {
+            "x": 180,
+            "y": 320
+          },
+          "measured": {
+            "width": 140,
+            "height": 123
+          },
+          "data": {
+            "class": "data",
+            "type": "default"
+          },
+          "formDataValid": true,
+          "edges": [
+            {
+              "selectable": true,
+              "deletable": true,
+              "id": "xy-edge__webhook_1source-tags-0-parse_1target-tags-0",
+              "source": "webhook_1",
+              "target": "parse_1",
+              "sourceHandle": "source-tags-0",
+              "targetHandle": "target-tags-0"
+            }
+          ]
+        },
+        "input": [
+          {
+            "lane": "tags",
+            "from": "webhook_1"
+          }
+        ]
+      }
+    ],
+    "id": "d12f82f5-daa5-4eb3-8515-0f7cb02729fc"
+  }
+}

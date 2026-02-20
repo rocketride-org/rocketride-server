@@ -1,0 +1,135 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Local File System",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "filesys://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["source"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	"capabilities": [
+		"filesystem",
+		"security"
+	],
+	//
+	// Optional:
+	//		Supported actions - if not specified, no actions are supported
+	//		engine
+	//
+	"actions":[
+		"export",
+		"delete",
+		"download"
+	],
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	"prefix": "File System",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"tags": []
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	"fields": {
+		"include": {
+			"description": "This path defines the paths included for Scan, Index, Classify and OCR. By default, its empty.\n\nFormat for Windows : C:\\foldername (for local filesystem) or \\\\file.core.net\\foldername (for shared folders)\n\nFormat for Linux : /file.core.net/foldername"
+		},
+		"exclude": {
+			"description": "This path defines the paths excluded for Scan, Index, Classify and OCR. By default, its empty.\n\nFormat for Windows : C:\\foldername (for local filesystem) or \\\\file.core.net\\foldername (for shared folders)\n\nFormat for Linux : /file.core.net/foldername"
+		},
+		"excludeExternalDrives": {
+			"title": "Exclude external drives",
+			"type": "boolean",
+			"default": true
+		},
+		"excludeEnableGlobal": {
+			"title": "Exclude typical OS files and directories",
+			"type": "boolean",
+			"default": true
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	"shape": [
+		{
+			"section": "Source",
+			"title": "File System",
+			"properties": [
+				"type",
+				"name",
+				"actions",
+				"source.mode",
+				{
+					"section": "parameters",
+					"title": "Parameters",
+					"properties": [
+						"excludeExternalDrives",
+						"excludeEnableGlobal"
+					]
+				},
+				"include",
+				"exclude",
+				"estimation"
+			]
+		},
+		{
+			"section": "Target",
+			"title": "File System",
+			"properties": [
+				"type",
+				"name",
+				"target.mode",
+				{
+					"section": "parameters",
+					"title": "Parameters",
+					"properties": [
+						"storePath"
+					]
+				},
+				"estimation"
+			]
+		},
+		{
+			"section": "Export",
+			"title": "File System",
+			"properties": [
+				"type",
+				"name",
+				"target.mode",
+				{
+					"section": "parameters",
+					"title": "Parameters",
+					"properties": [
+						"storePath"
+					],
+					"ui": {
+						"ui:options": {
+							"nonNestedDisplay": true
+						}
+					}
+				}
+			]
+		}
+	]
+}

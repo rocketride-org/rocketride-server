@@ -1,0 +1,20 @@
+# This is the baseline of the modules that need to be installed
+# to use the python backend. They are common to all python
+# modules, including nodes, ai module, etc
+
+# Make sure wheel is loaded so we can load all older dependencies
+certifi
+charset-normalizer
+idna
+requests
+urllib3
+numpy
+httpx
+fastapi
+uvicorn
+pydantic
+pywin32; platform_system=="Windows"
+safetensors
+# Needed for dependencies compilations
+Cython
+versioneer

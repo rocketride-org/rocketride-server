@@ -1,0 +1,3 @@
+# Local Text Output node Requirements
+# Basic file operations - no external dependencies needed
+# The node uses only standard Python libraries (os, etc.)

@@ -1,0 +1,4 @@
+# Requirements for Surya OCR loader
+# Direct imports only
+
+surya-ocr

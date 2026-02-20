@@ -1,0 +1,9 @@
+# NER node Requirements
+# 
+# This node uses the model server's transformers support,
+# so it doesn't need to install transformers locally - the model
+# server handles that.
+#
+# If running without model server (local mode), transformers will
+# be loaded from ai.common.models which falls back to local execution.
+

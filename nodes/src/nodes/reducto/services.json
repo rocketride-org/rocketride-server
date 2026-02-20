@@ -1,0 +1,252 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Data - Reducto",
+
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "reducto://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"data"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine. Not needed for cloud-based processing.
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if 
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.reducto",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "reducto",
+	//
+	// Optional:
+	//	Description to of this driver
+	//
+	"description": [
+		"A parsing component that uses Reducto to extract text and structured data ",
+		"from various document formats including PDFs, images, and other document types. ",
+		"It provides high-quality text extraction with support for tables, layout preservation, ",
+		"and multiple output formats."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "reducto.svg",
+
+
+	"documentation": "https://bit.ly/47vaPBW",
+	//
+	// Required:
+	//		Defines the input and output data types for the node
+	//
+	"lanes": {
+		"tags": [
+			"text",
+			"table"
+		]
+	},
+	"input": [
+		{
+			"lane": "tags",
+			"output": [
+				{
+					"lane": "text"
+				},
+				{
+					"lane": "table"
+				}
+			]
+		}
+	],
+
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Reducto",
+			"properties": [
+				"reducto.default"
+			]
+		}
+	],
+
+	//
+	// Required:
+	//		Defines the fields that are available in the UI and for config
+	//
+	"fields": {
+		"reducto.api_key": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Your Reducto API key",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"reducto.parse_mode": {
+			"type": "boolean",
+			"title": "Advanced Mode",
+			"description": "Toggle to use the advanced parse mode, and have access to the full set of options from the Reducto API.",
+			"default": false,
+			"enum": [
+				[
+					false,
+					"Simple"
+				],
+				[
+					true,
+					"Advanced"
+				]
+			],
+			"conditional": [
+				{
+					"value": false,
+					"properties": [
+						"reducto.Contains_Handwritten_Text",
+						"reducto.Contains_Non_English_Text",
+						"reducto.Summarize_Text"
+					]
+				},
+				{
+					"value": true,
+					"properties": [
+						"reducto.advanced_documentation",
+						"reducto.options",
+						"reducto.advanced_options",
+						"reducto.experimental_options"
+					]
+				}
+			]
+		},
+		"reducto.Contains_Handwritten_Text": {
+			"type": "boolean",
+			"title": "Contains Handwritten Text",
+			"description": "Enables Agentic OCR mode for better handwriting recognition and small text/table cell corrections.",
+			"default": false,
+			"enum": [
+				[
+					true,
+					"Yes"
+				],
+				[
+					false,
+					"No"
+				]
+			]
+		},
+		"reducto.Contains_Non_English_Text": {
+			"type": "boolean",
+			"title": "Contains Non-English Text",
+			"description": "Enables Multilingual OCR system which can parse non-Germanic languages and unicode symbols.",
+			"default": false,
+			"enum": [
+				[
+					true,
+					"Yes"
+				],
+				[
+					false,
+					"No"
+				]
+			]
+		},
+		"reducto.Summarize_Text": {
+			"type": "boolean",
+			"title": "AI Summarize Figures/Images",
+			"description": "Generate AI summaries for figures, diagrams, and images using vision-language models.",
+			"default": false,
+			"enum": [
+				[
+					true,
+					"Yes"
+				],
+				[
+					false,
+					"No"
+				]
+			]
+		},
+		"reducto.advanced_documentation": {
+			"type": "null",
+			"title": "Advanced Parse Mode - How to",
+			"description": "In advanced mode, you can use the full set of options from the Reducto API. For each set of options you must use and only include a python dictionary, e.g., {'key': 'value', 'flag': True}. If no information is provided for a set of options, the default values will be used. For more information on what options are available, see the Reducto API documentation at https://docs.reducto.ai/parsing/default-configurations. This page also contains examples of how to format the options fields. (In Advanced mode your configuration from Simple mode will be ignored)",
+			"default": null
+		},
+		"reducto.options": {
+			"type": "string",
+			"title": "Options",
+			"description": "Options for the Reducto API",
+			"format": "textarea"
+		},
+		"reducto.advanced_options": {
+			"type": "string",
+			"title": "Advanced Options",
+			"description": "Advanced options for the Reducto API",
+			"format": "textarea"
+		},
+		"reducto.experimental_options": {
+			"type": "string",
+			"title": "Experimental Options",
+			"description": "Experimental options for the Reducto API",
+			"format": "textarea"
+		},
+		"reducto.default": {
+			"object": "default",
+			"properties": [
+				"reducto.api_key",
+				"reducto.parse_mode"
+			]
+		}
+	},
+	//
+	// Optional:
+	//		Predefined configurations for common use cases
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"parse_mode": false
+			}
+		}
+	},
+	"required": [
+		"reducto.api_key",
+		"reducto.parse_mode"
+	]
+}
+

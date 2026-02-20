@@ -1,0 +1,120 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Remote Processing",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "remote://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"infrastructure"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"nosaas"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.remote.client",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "Remote",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A transport component that forwards data to a remote machine or ",
+		"processing node. It enables distributed pipeline architectures by ",
+		"offloading computation or specialized tasks to external systems. Configurable ",
+		"with network endpoints, authentication, and serialization settings, ",
+		"it supports scalable and modular deployment across environments."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "remote.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/4l0udeR",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {},
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "local",
+		"profiles": {
+			// Defines profiles used with the "profile": key
+			"local": {
+				"mode": "local"
+			},
+			"remote": {
+				"mode": "remote",
+				"host": "localhost",
+				"port": 5565,
+				"apikey": "xxx"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Remote",
+			"properties": [
+				"remote"
+			]
+		}
+	]
+}

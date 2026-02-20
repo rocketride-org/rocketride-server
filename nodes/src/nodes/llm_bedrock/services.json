@@ -1,0 +1,645 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "LLM - Amazon Bedrock",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "llm_bedrock://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"llm"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"invoke"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if 
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.llm_bedrock",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "llm",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A component that connects to Amazon Bedrock, providing access to a range ",
+		"of foundation models from leading AI providers through a unified AWS interface. ",
+		"It supports text generation, summarization, classification, and other natural language ",
+		"processing tasks. With flexible model selection and secure, serverless deployment, the ",
+		"component integrates seamlessly into AWS-powered pipelines, offering scalable, ",
+		"enterprise-ready AI capabilities without managing infrastructure."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "bedrock.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/4oGG8Rc",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//      on the tile box. For example:
+	//          Bedrock LLM           (from service.tile)
+	//              profile (model name)
+	//
+	"tile": [
+		"Model: ${parameters.llm_bedrock.profile}"
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": [
+			"answers"
+		]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [
+				{
+					"lane": "answers"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "meta_llama3_3-70b",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"custom": {
+				"title": "Custom",
+				"model": "",
+				"modelTotalTokens": 256000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"ai21_jamba-1_5-large": {
+				"title": "Jamba 1.5 Large",
+				"model": "ai21.jamba-1-5-large-v1:0",
+				"modelTotalTokens": 256000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"ai21_jamba-1_5-mini": {
+				"title": "Jamba 1.5 Mini",
+				"model": "ai21.jamba-1-5-mini-v1:0",
+				"modelTotalTokens": 256000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"amazon_titan-text-express": {
+				"title": "Titan Text Express",
+				"model": "amazon.titan-text-express-v1",
+				"modelTotalTokens": 8192,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"amazon_nova-2-lite": {
+				"title": "Nova 2 Lite",
+				"model": "amazon.nova-2-lite-v1:0",
+				"modelTotalTokens": 1000000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"anthropic_claude-3_7-sonnet": {
+				"title": "Claude Sonnet 3.7",
+				"model": "anthropic.claude-3-7-sonnet-20250219-v1:0",
+				"modelTotalTokens": 200000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"anthropic_claude-sonnet-4-5": {
+				"title": "Claude Sonnet 4.5",
+				"model": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+				"modelTotalTokens": 200000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"anthropic_claude-3_5-haiku": {
+				"title": "Claude Haiku 3.5",
+				"model": "anthropic.claude-3-5-haiku-20241022-v1:0",
+				"modelTotalTokens": 200000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"anthropic_claude-haiku-4-5": {
+				"title": "Claude Haiku 4.5",
+				"model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+				"modelTotalTokens": 200000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"anthropic_claude-opus-4": {
+				"title": "Claude Opus 4",
+				"model": "anthropic.claude-opus-4-20250514-v1:0",
+				"modelTotalTokens": 200000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"anthropic_claude-opus-4-5": {
+				"title": "Claude Opus 4.5",
+				"model": "anthropic.claude-opus-4-5-20251101-v1:0",
+				"modelTotalTokens": 200000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"cohere_command-r-plus": {
+				"title": "Command R+",
+				"model": "cohere.command-r-plus-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"cohere_command-r": {
+				"title": "Command R",
+				"model": "cohere.command-r-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama3_1-8b": {
+				"title": "Llama 3.1 8B Instruct",
+				"model": "meta.llama3-1-8b-instruct-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama3_1-70b": {
+				"title": "Llama 3.1 70B Instruct",
+				"model": "meta.llama3-1-70b-instruct-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama3_3-70b": {
+				"title": "Llama 3.3 70B Instruct",
+				"model": "meta.llama3-3-70b-instruct-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama3_2-1b": {
+				"title": "Llama 3.2 1B Instruct",
+				"model": "meta.llama3-2-1b-instruct-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama3_2-3b": {
+				"title": "Llama 3.2 3B Instruct",
+				"model": "meta.llama3-2-3b-instruct-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama3_2-11b": {
+				"title": "Llama 3.2 11B Vision Instruct",
+				"model": "meta.llama3-2-11b-instruct-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama3_2-90b": {
+				"title": "Llama 3.2 90B Vision Instruct",
+				"model": "meta.llama3-2-90b-instruct-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama4-scout-17b": {
+				"title": "Llama 4 Scout 17B Instruct",
+				"model": "meta.llama4-scout-17b-instruct-v1:0",
+				"modelTotalTokens": 3500000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama4-maverick-17b": {
+				"title": "Llama 4 Maverick 17B Instruct",
+				"model": "meta.llama4-maverick-17b-instruct-v1:0",
+				"modelTotalTokens": 1000000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Bedrock LLM model name or ARN for custom or provisioned models"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total Tokens"
+		},
+		"bedrock.custom": {
+			"object": "custom",
+			"properties": [
+				"model",
+				"modelTotalTokens",
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.ai21_jamba-1_5-large": {
+			"object": "ai21_jamba-1_5-large",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.ai21_jamba-1_5-mini": {
+			"object": "ai21_jamba-1_5-mini",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.amazon_titan-text-express": {
+			"object": "amazon_titan-text-express",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.amazon_nova-2-lite": {
+			"object": "amazon_nova-2-lite",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.anthropic_claude-3_7-sonnet": {
+			"object": "anthropic_claude-3_7-sonnet",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.anthropic_claude-sonnet-4-5": {
+			"object": "anthropic_claude-sonnet-4-5",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.anthropic_claude-3_5-haiku": {
+			"object": "anthropic_claude-3_5-haiku",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.anthropic_claude-haiku-4-5": {
+			"object": "anthropic_claude-haiku-4-5",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.anthropic_claude-opus-4": {
+			"object": "anthropic_claude-opus-4",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.anthropic_claude-opus-4-5": {
+			"object": "anthropic_claude-opus-4-5",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.cohere_command-r-plus": {
+			"object": "cohere_command-r-plus",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.cohere_command-r": {
+			"object": "cohere_command-r",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.meta_llama3_1-8b": {
+			"object": "meta_llama3_1-8b",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.meta_llama3_1-70b": {
+			"object": "meta_llama3_1-70b",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.meta_llama3_3-70b": {
+			"object": "meta_llama3_3-70b",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.meta_llama3_2-1b": {
+			"object": "meta_llama3_2-1b",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.meta_llama3_2-3b": {
+			"object": "meta_llama3_2-3b",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.meta_llama3_2-11b": {
+			"object": "meta_llama3_2-11b",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.meta_llama3_2-90b": {
+			"object": "meta_llama3_2-90b",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.meta_llama4-scout-17b": {
+			"object": "meta_llama4-scout-17b",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.meta_llama4-maverick-17b": {
+			"object": "meta_llama4-maverick-17b",
+			"properties": [
+				"aws.accessKey",
+				"aws.secretKey",
+				"aws.region"
+			]
+		},
+		"bedrock.profile": {
+			"title": "Model",
+			"description": "LLM model",
+			"type": "string",
+			"default": "meta_llama3_3-70b",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": [
+						"bedrock.custom"
+					]
+				},
+				{
+					"value": "ai21_jamba-1_5-large",
+					"properties": [
+						"bedrock.ai21_jamba-1_5-large"
+					]
+				},
+				{
+					"value": "ai21_jamba-1_5-mini",
+					"properties": [
+						"bedrock.ai21_jamba-1_5-mini"
+					]
+				},
+				{
+					"value": "amazon_titan-text-express",
+					"properties": [
+						"bedrock.amazon_titan-text-express"
+					]
+				},
+				{
+					"value": "amazon_nova-2-lite",
+					"properties": [
+						"bedrock.amazon_nova-2-lite"
+					]
+				},
+				{
+					"value": "anthropic_claude-3_7-sonnet",
+					"properties": [
+						"bedrock.anthropic_claude-3_7-sonnet"
+					]
+				},
+				{
+					"value": "anthropic_claude-sonnet-4-5",
+					"properties": [
+						"bedrock.anthropic_claude-sonnet-4-5"
+					]
+				},
+				{
+					"value": "anthropic_claude-3_5-haiku",
+					"properties": [
+						"bedrock.anthropic_claude-3_5-haiku"
+					]
+				},
+				{
+					"value": "anthropic_claude-haiku-4-5",
+					"properties": [
+						"bedrock.anthropic_claude-haiku-4-5"
+					]
+				},
+				{
+					"value": "anthropic_claude-opus-4",
+					"properties": [
+						"bedrock.anthropic_claude-opus-4"
+					]
+				},
+				{
+					"value": "anthropic_claude-opus-4-5",
+					"properties": [
+						"bedrock.anthropic_claude-opus-4-5"
+					]
+				},
+				{
+					"value": "cohere_command-r-plus",
+					"properties": [
+						"bedrock.cohere_command-r-plus"
+					]
+				},
+				{
+					"value": "cohere_command-r",
+					"properties": [
+						"bedrock.cohere_command-r"
+					]
+				},
+				{
+					"value": "meta_llama3_1-8b",
+					"properties": [
+						"bedrock.meta_llama3_1-8b"
+					]
+				},
+				{
+					"value": "meta_llama3_1-70b",
+					"properties": [
+						"bedrock.meta_llama3_1-70b"
+					]
+				},
+				{
+					"value": "meta_llama3_3-70b",
+					"properties": [
+						"bedrock.meta_llama3_3-70b"
+					]
+				},
+				{
+					"value": "meta_llama3_2-1b",
+					"properties": [
+						"bedrock.meta_llama3_2-1b"
+					]
+				},
+				{
+					"value": "meta_llama3_2-3b",
+					"properties": [
+						"bedrock.meta_llama3_2-3b"
+					]
+				},
+				{
+					"value": "meta_llama3_2-11b",
+					"properties": [
+						"bedrock.meta_llama3_2-11b"
+					]
+				},
+				{
+					"value": "meta_llama3_2-90b",
+					"properties": [
+						"bedrock.meta_llama3_2-90b"
+					]
+				},
+				{
+					"value": "meta_llama4-scout-17b",
+					"properties": [
+						"bedrock.meta_llama4-scout-17b"
+					]
+				},
+				{
+					"value": "meta_llama4-maverick-17b",
+					"properties": [
+						"bedrock.meta_llama4-maverick-17b"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "LLM - Amazon Bedrock",
+			"properties": [
+				"bedrock.profile"
+			]
+		}
+	]
+}

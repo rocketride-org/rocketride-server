@@ -1,0 +1,17 @@
+# Preprocessor: LangChain
+langchain
+langchain-text-splitters
+
+# LangChain deps
+langchain-core
+
+# Transformers stack
+accelerate
+transformers
+tokenizers
+huggingface-hub
+pyyaml
+filelock
+regex
+tqdm
+safetensors

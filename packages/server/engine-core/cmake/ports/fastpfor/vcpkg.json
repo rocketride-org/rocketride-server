@@ -1,0 +1,13 @@
+{
+  "name": "fastpfor",
+  "version-string": "0.3.0",
+  "description": "FastPFOR - Fast integer compression library with SIMD support.",
+  "homepage": "https://github.com/lemire/FastPFor",
+  "license": "Apache-2.0",
+  "dependencies": [
+   {
+      "name": "simde",
+      "platform": "arm | arm64"
+    }
+  ]
+}

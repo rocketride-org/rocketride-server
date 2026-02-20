@@ -1,0 +1,83 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Vectorizer",
+	//
+	// Required:
+	//     The protocol is the endpoint protocol
+	//
+	"protocol": "vectorizer://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [],
+	//
+	// Required:
+	//     Capabilities are flags that change the behavior of the underlying
+	//     engine
+	//
+	"capabilities": [
+		"internal"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//     The node is the actual pyhsical node to instantiate - if
+	//     not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//     The path is the executable/script code - it is node dependent
+	//     and is optional for most node
+	//
+	"path": "nodes.vectorizer", // Qdrant node resides in "../aparavi_ai/ai"
+	//
+	// Required:
+	//     The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "Vectorizer",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {},
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {},
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//      on the tile box. For example:
+	//          Qdrant VectorDB           (from service.tile)
+	//              localhost
+	//              aparavi
+	//
+	"tile": [],
+	//
+	// Optional:
+	//     Local fields defintions - these define fields only for the
+	//     current service. You may specify them here, or directly
+	//     in the shape
+	//
+	"fields": {},
+	//
+	// Required:
+	//     Defines the fields (shape) of the service. Either source or target
+	//     map be specified, or both, but at least one is required
+	//
+	"shape": []
+}

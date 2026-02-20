@@ -1,0 +1,17 @@
+# Plugin xAI core
+langchain-xai
+transformers
+tokenizers
+
+# Transformers deps
+accelerate
+huggingface-hub
+pyyaml
+filelock
+regex
+tqdm
+safetensors
+
+# LangChain deps
+langchain-core
+langchain

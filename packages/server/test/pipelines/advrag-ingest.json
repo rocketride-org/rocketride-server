@@ -1,0 +1,309 @@
+{
+	"pipeline": {
+		"source": "webhook_1",
+		"components": [
+			{
+				"id": "webhook_1",
+				"provider": "webhook",
+				"config": {
+					"key": "webhook://*",
+					"mode": "Source",
+					"name": "Web Hook",
+					"include": [
+						{
+							"path": "*"
+						}
+					],
+					"parameters": {
+						"endpoint": "/pipe/process",
+						"port": 5565
+					},
+					"sync": false,
+					"type": "webhook"
+				},
+				"ui": {
+					"position": {
+						"x": -193.96,
+						"y": 25.160000000000004
+					},
+					"measured": {
+						"width": 140,
+						"height": 54
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				}
+			},
+			{
+				"id": "parse_1",
+				"provider": "parse",
+				"config": {},
+				"ui": {
+					"position": {
+						"x": 2.280000000000001,
+						"y": -4.1999999999999975
+					},
+					"measured": {
+						"width": 140,
+						"height": 116
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"input": [
+					{
+						"lane": "tags",
+						"from": "webhook_1"
+					}
+				]
+			},
+			{
+				"id": "summary_1",
+				"provider": "summarization",
+				"config": {},
+				"ui": {
+					"position": {
+						"x": 212.922154753569,
+						"y": -47.1493176048045
+					},
+					"measured": {
+						"width": 140,
+						"height": 54
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"input": [
+					{
+						"lane": "text",
+						"from": "parse_1"
+					},
+					{
+						"lane": "text",
+						"from": "webhook_1"
+					}
+				]
+			},
+			{
+				"id": "openai_1",
+				"provider": "llm_openai",
+				"config": {
+					"profile": "openai-5",
+					"openai-5": {
+						"apikey": ""
+					}
+				},
+				"ui": {
+					"position": {
+						"x": 656.6927333333333,
+						"y": 328.8123523809524
+					},
+					"measured": {
+						"width": 140,
+						"height": 70
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"control": [
+					{
+						"classType": "llm",
+						"from": "summary_1"
+					}
+				]
+			},
+			{
+				"id": "embedding_1",
+				"provider": "embedding_transformer",
+				"config": {
+					"profile": "miniLM"
+				},
+				"ui": {
+					"position": {
+						"x": 610.68,
+						"y": -29.72999999999997
+					},
+					"measured": {
+						"width": 140,
+						"height": 83
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"input": [
+					{
+						"lane": "documents",
+						"from": "summary_1"
+					}
+				]
+			},
+			{
+				"id": "qdrant_1",
+				"provider": "qdrant",
+				"config": {
+					"profile": "local",
+					"local": {
+						"collection": "summary",
+						"host": "localhost",
+						"port": 6333,
+						"score": 0.7
+					}
+				},
+				"ui": {
+					"position": {
+						"x": 792.96,
+						"y": -55.19999999999999
+					},
+					"measured": {
+						"width": 140,
+						"height": 146
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"input": [
+					{
+						"lane": "documents",
+						"from": "embedding_1"
+					}
+				]
+			},
+			{
+				"id": "preprocessor_2",
+				"provider": "preprocessor_langchain",
+				"config": {
+					"profile": "default",
+					"default": {
+						"mode": "strlen",
+						"splitter": "RecursiveCharacterTextSplitter",
+						"strlen": 1024
+					}
+				},
+				"ui": {
+					"position": {
+						"x": 415.4399999999999,
+						"y": -40.079999999999984
+					},
+					"measured": {
+						"width": 140,
+						"height": 83
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"input": [
+					{
+						"lane": "text",
+						"from": "parse_1"
+					}
+				]
+			},
+			{
+				"id": "embedding_2",
+				"provider": "embedding_transformer",
+				"config": {
+					"profile": "miniLM"
+				},
+				"ui": {
+					"position": {
+						"x": 610.68,
+						"y": -29.72999999999997
+					},
+					"measured": {
+						"width": 140,
+						"height": 83
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"input": [
+					{
+						"lane": "documents",
+						"from": "preprocessor_2"
+					}
+				]
+			},
+			{
+				"id": "qdrant_2",
+				"provider": "qdrant",
+				"config": {
+					"profile": "local",
+					"local": {
+						"collection": "content",
+						"host": "localhost",
+						"port": 6333,
+						"score": 0.7
+					}
+				},
+				"ui": {
+					"position": {
+						"x": 231.44019047619048,
+						"y": 247.8964761904762
+					},
+					"measured": {
+						"width": 140,
+						"height": 146
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"input": [
+					{
+						"lane": "documents",
+						"from": "embedding_2"
+					}
+				]
+			},
+			{
+				"id": "response_1",
+				"provider": "response",
+				"config": {
+					"lanes": []
+				},
+				"ui": {
+					"position": {
+						"x": 845.094080952381,
+						"y": 287.7346666666667
+					},
+					"measured": {
+						"width": 140,
+						"height": 140
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"input": [
+					{
+						"lane": "documents",
+						"from": "summary_1"
+					},
+				
+					{
+						"lane": "text",
+						"from": "summary_1"
+					}
+				]
+			}
+		]
+	}
+}

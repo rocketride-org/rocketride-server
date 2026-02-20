@@ -1,0 +1,130 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Local Text Output",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "local-text-output://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"target"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"nosaas",
+		"filesystem",
+		"security"
+	],
+	"register": "endpoint",
+	//
+	// Optional:
+	//     The node is the actual pyhsical node to instantiate - if
+	//     not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//     The path is the executable/script code - it is node dependent
+	//     and is optional for most node
+	//
+	"path": "nodes.local_text_output",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	"prefix": "Local Text Output",
+	//
+	// Optional:
+	//		Defines the readonly/secure fields in the parameters section of
+	//		the service definition. This provides a method to obscure the
+	//		sensitive fields and ensure non-changeable fields are maintained
+	//		accross service configurations
+	//
+	//
+	"description": [
+		"A target component that writes data to the file system. It supports ",
+		"outputting structured or unstructured content to files in a variety ",
+		"of formats such as JSON, CSV, or plain text. Configurable with output ",
+		"paths and naming conventions, the component enables flexible persistence ",
+		"of processed data to networked storage."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "text-output.svg",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"text": []
+	},
+	"input": [
+		{
+			"lane": "text",
+			"output": []
+		}
+	],
+	
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "default",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"default": {}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"local_text_output.exclude": {
+			"title": "exclude",
+			"description": "Which paths to exclude from the output path, if not required put N/A. e.g Users/Downloads/ or N/A",
+			"type": "string",
+			"default": "N/A"
+		},
+		"local_text_output.target.parameters": {
+			"object": "parameters",
+			"properties": [
+				"storePath",
+				"local_text_output.exclude"
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Destination path",
+			"properties": [
+				"local_text_output.target.parameters"
+			]
+		}
+	]
+}

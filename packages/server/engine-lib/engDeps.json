@@ -1,0 +1,26 @@
+{
+  "install": [
+    "pybind11",
+    "python3",
+    "aws-sdk-cpp[s3]",
+    "aws-sdk-cpp[transfer]",
+    "azure-core-cpp",
+    "azure-identity-cpp",
+    "azure-storage-blobs-cpp",
+    "azure-storage-files-datalake-cpp",
+    "azure-storage-files-shares-cpp",
+    "boost-log",
+    "boost-thread",
+    "bzip2",
+    "expat",
+    "libffi",
+    "liblzma",
+    "libxml2",
+    "minizip-ng",
+    "openssl",
+    "zlib",
+    "zstd"
+  ],
+  "osx_install": ["libuuid"],
+  "osx_arm64_install": ["libuuid"]
+}

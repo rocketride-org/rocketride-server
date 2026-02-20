@@ -1,0 +1,10 @@
+{
+  "name": "@aparavi/ai",
+  "version": "3.1.0",
+  "description": "Aparavi AI/ML modules",
+  "private": true,
+  "license": "MIT",
+  "scripts": {}
+}
+
+

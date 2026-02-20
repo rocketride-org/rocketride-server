@@ -1,0 +1,5 @@
+# Preprocessor: LangChain (LLM-only)
+langchain
+
+# LangChain deps
+langchain-core

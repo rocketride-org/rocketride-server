@@ -1,0 +1,62 @@
+// =============================================================================
+// MIT License
+// Copyright (c) 2026 RocketRide, Inc.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+// =============================================================================
+
+#include "test.h"
+
+struct MyThing {
+    Text val1 = "frodo";
+    int val2 = 1;
+    Size val3 = 1_mb;
+    json::Value params;
+    inline static bool valid = true;
+
+    bool operator==(const MyThing& other) const noexcept {
+        return params == other.params && val1 == other.val1 &&
+               val2 == other.val2 && val3 == other.val3;
+    }
+
+    auto __jsonSchema() const noexcept {
+        return json::makeSchema(val1, "val1", val2, "val2", val3, "val3",
+                                params, "params");
+    }
+
+    Error __jsonValidate() noexcept {
+        if (!valid) return APERR(Ec::InvalidParam, "Not valid");
+        return {};
+    }
+};
+
+TEST_CASE("json::Schema") {
+    MyThing thing;
+    auto [values, names] = thing.__jsonSchema();
+
+    REQUIRE(_fj<MyThing>(_tj(thing)) == thing);
+
+    thing.val2 = 5;
+
+    REQUIRE(_fj<MyThing>(_tj(thing)) == thing);
+
+    // Test __jsonValidate callback
+    MyThing::valid = false;
+    REQUIRE_THROWS(*_fjc<MyThing>(_tj(thing)));
+}

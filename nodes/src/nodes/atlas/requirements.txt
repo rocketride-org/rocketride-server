@@ -1,0 +1,4 @@
+pymongo
+dnspython
+pydantic
+urllib3

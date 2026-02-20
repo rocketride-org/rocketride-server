@@ -1,0 +1,10 @@
+authlib
+grpcio
+grpcio-health-checking
+grpcio-tools
+httpx
+pydantic
+requests
+validators
+weaviate-client
+numpy

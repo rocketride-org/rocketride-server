@@ -1,0 +1,202 @@
+{
+	"pipeline": {
+		"source": "chat_1",
+		"components": [
+			{
+				"id": "chat_1",
+				"provider": "chat",
+				"config": {},
+				"ui": {
+					"position": {
+						"x": -195.03888571428573,
+						"y": 204.4046095238095
+					},
+					"measured": {
+						"width": 140,
+						"height": 54
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				}
+			},
+			{
+				"id": "question_1",
+				"provider": "question",
+				"config": {
+				},
+				"ui": {
+					"position": {
+						"x": 25.57929523809524,
+						"y": 265.36250476190475
+					},
+					"measured": {
+						"width": 140,
+						"height": 83
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"input": [
+					{
+						"lane": "text",
+						"from": "chat_1"
+					}
+				]
+			},
+			{
+				"id": "embedding_1",
+				"provider": "embedding_transformer",
+				"config": {
+					"profile": "miniLM"
+				},
+				"ui": {
+					"position": {
+						"x": 25.57929523809524,
+						"y": 265.36250476190475
+					},
+					"measured": {
+						"width": 140,
+						"height": 83
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"input": [
+					{
+						"lane": "questions",
+						"from": "question_1"
+					}
+				]
+			},
+			{
+				"id": "qdrant_1",
+				"provider": "qdrant",
+				"config": {
+					"profile": "local",
+					"local": {
+						"collection": "summary",
+						"host": "localhost",
+						"port": 6333,
+						"score": 0.5
+					}
+				},
+				"ui": {
+					"position": {
+						"x": 618.8221809523809,
+						"y": 121.02270476190478
+					},
+					"measured": {
+						"width": 140,
+						"height": 146
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"input": [
+					{
+						"lane": "questions",
+						"from": "embedding_1"
+					}
+				]
+			},
+			{
+				"id": "qdrant_2",
+				"provider": "qdrant",
+				"config": {
+					"profile": "local",
+					"local": {
+						"collection": "content",
+						"host": "localhost",
+						"port": 6333,
+						"score": 0.5
+					}
+				},
+				"ui": {
+					"position": {
+						"x": 231.44019047619048,
+						"y": 247.8964761904762
+					},
+					"measured": {
+						"width": 140,
+						"height": 146
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"input": [
+					{
+						"lane": "questions",
+						"from": "qdrant_1"
+					}
+				]
+			},
+			{
+				"id": "openai_1",
+				"provider": "llm_openai",
+				"config": {
+					"profile": "openai-5",
+					"openai-5": {
+						"apikey": ""
+					}
+				},
+				"ui": {
+					"position": {
+						"x": 656.6927333333333,
+						"y": 328.8123523809524
+					},
+					"measured": {
+						"width": 140,
+						"height": 70
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"input": [
+					{
+						"lane": "questions",
+						"from": "qdrant_2"
+					}
+				]
+			},
+			{
+				"id": "response_1",
+				"provider": "response",
+				"config": {
+					"lanes": []
+				},
+				"ui": {
+					"position": {
+						"x": 845.094080952381,
+						"y": 287.7346666666667
+					},
+					"measured": {
+						"width": 140,
+						"height": 140
+					},
+					"data": {
+						"class": "default",
+						"type": "default"
+					}
+				},
+				"input": [
+					{
+						"lane": "answers",
+						"from": "openai_1"
+					}
+				]
+			}
+		]
+	}
+}

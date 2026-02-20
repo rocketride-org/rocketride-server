@@ -1,0 +1,135 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Web Hook",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "webhook://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"source"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"noinclude"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "endpoint",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if 
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.webhook",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "WebHook",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A source component that listens for incoming HTTP requests and accepts ",
+		"uploaded documents or data from external systems or processes. It enables ",
+		"seamless integration for document ingestion, allowing external systems to ",
+		"trigger the component and send files for further processing. Configurable ",
+		"with endpoint and authentication settings, it ensures secure and reliable ",
+		"document transfer for pipeline processing. Ideal for receiving documents, ",
+		"images, or other files from external platforms via HTTP-based communication."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "webhook.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/3XaDTK4",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	"tile": [],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"_source": [
+			"tags",
+			"text",
+			"audio",
+			"video",
+			"image"
+		]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "default",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"default": {}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"parameters": {
+			"object": "parameters",
+			"properties": []
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Web Hook",
+			"properties": [
+				"hideForm",
+				"type",
+				"source.mode",
+				"parameters"
+			]
+		}
+	]
+}

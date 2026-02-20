@@ -1,0 +1,51 @@
+# Aparavi Engine Monorepo Workspace Configuration
+# This file defines which directories contain packages in the monorepo
+
+# Allow all dependency postinstall/preinstall scripts to run (disables the
+# default allow-list). Only enable if you trust your dependency graph.
+# See: https://pnpm.io/npmrc#dangerouslyallowallbuilds
+dangerouslyAllowAllBuilds: true
+
+# Mute deprecation warnings for known deprecated (transitive) dependencies.
+# See: https://pnpm.io/npmrc#alloweddeprecatedversions
+allowedDeprecatedVersions:
+  "@mui/styles": "*"
+  glob: "*"
+  deep-diff: "*"
+  popper.js: "*"
+  rimraf: "*"
+  stable: "*"
+  whatwg-encoding: "*"
+
+packages:
+  # Core library packages
+  - 'packages/server/engine-core'
+  - 'packages/server/engine-lib'
+  
+  # Node packages (data source integrations)
+  - 'nodes'
+  
+  # AI/ML modules
+  - 'packages/ai'
+  
+  # Shared UI components
+  - 'packages/shared-ui'
+  
+  # Client libraries
+  - 'packages/client-python'
+  - 'packages/client-typescript'
+  - 'packages/client-mcp'
+  
+  # Java/Tika integration
+  - 'packages/tika'
+  
+  # Applications
+  - 'apps/engine'
+  - 'apps/chat-ui'
+  - 'apps/dropper-ui'
+  - 'apps/rocket-ui'
+  - 'apps/vscode'
+  
+  # Examples
+  - 'examples/*'
+

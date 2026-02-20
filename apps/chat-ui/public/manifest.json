@@ -1,0 +1,24 @@
+{
+  "short_name": "RocketRide Chat",
+  "name": "RocketRide Assistant Chatbot",
+  "description": "Intelligent AI assistant for RocketRide",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "32x32",
+      "type": "image/x-icon"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#FF7A00",
+  "background_color": "#FFFFFF",
+  "orientation": "any",
+  "scope": "/",
+  "lang": "en-US",
+  "categories": [
+    "productivity",
+    "business",
+    "utilities"
+  ]
+}

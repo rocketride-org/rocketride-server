@@ -1,0 +1,27 @@
+{
+	//
+	// Handle the all. - combines services into a single selectable type
+	// 
+	"fields": {
+		"all.preprocessor": {
+			"title": "Preprocessor",
+			"default": "preprocessor_langchain",
+			"combo": "preprocessor"
+		},
+		"all.embedding": {
+			"title": "Embedding",
+			"default": "embedding_transformer",
+			"combo": "embedding"
+		},
+		"all.store": {
+			"title": "Vector Store",
+			"default": "qdrant",
+			"combo": "store"
+		},
+		"all.llm": {
+			"title": "LLM",
+			"default": "openai",
+			"combo": "llm"
+		}
+	}
+}

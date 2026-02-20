@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rocketride-client-python"
+version = "1.1.0"
+description = "RocketRide Pipeline Python Client SDK"
+readme = "README.md"
+authors = [
+    {name = "RocketRide, Inc.", email = "dev@rocketride.ai"}
+]
+maintainers = [
+    {name = "RocketRide, Inc.", email = "dev@rocketride.ai"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Networking",
+    "Topic :: Internet :: WWW/HTTP",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+]
+keywords = [
+    "rocketride",
+    "pipeline",
+    "dap", 
+    "debug-adapter-protocol",
+    "data-processing",
+    "client-sdk",
+    "async",
+    "websocket",
+]
+dependencies = [
+    "websockets>=11.0.0",
+    "aiofiles>=23.0.0",
+    "pydantic>=2.0.0",
+]
+requires-python = ">=3.8"
+license = "MIT"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.8.0",
+    "build>=0.10.0",
+    "twine>=4.0.0",
+]
+
+test = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/rocketride-ai/rocketride-server"
+Documentation = "https://github.com/rocketride-ai/rocketride-server#readme"
+Repository = "https://github.com/rocketride-ai/rocketride-server.git"
+"Bug Reports" = "https://github.com/rocketride-ai/rocketride-server/issues"
+
+[project.scripts]
+rocketride = "rocketride.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["rocketride*"]
+
+[tool.setuptools.package-data]
+rocketride = ["py.typed"]

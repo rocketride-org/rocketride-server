@@ -1,0 +1,572 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "LLM - Ollama",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "llm_ollama://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"llm"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"invoke"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if 
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.llm_ollama",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "llm",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A component that integrates with locally-hosted language models through Ollama. ",
+		"It enables on-premise text generation, summarization, and question answering ",
+		"without relying on external APIs. Ideal for privacy-sensitive applications, the ",
+		"component offers low-latency inference and supports various open-source models. It ",
+		"allows organizations to leverage LLM capabilities while maintaining full control ",
+		"over data and infrastructure."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "ollama.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/3JFO3zk",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": [
+		"Model: ${parameters.llm_ollama.profile}"
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": [
+			"answers"
+		]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [
+				{
+					"lane": "answers"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "llama3_3",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"custom": {
+				"title": "Custom",
+				"model": "",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 16385
+			},
+			"llama3_3": {
+				"title": "Llama 3.3",
+				"model": "llama3.3:latest",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"llama3_1-8b": {
+				"title": "Llama 3.1 8B",
+				"model": "llama3.1:8b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"llama3_1-70b": {
+				"title": "Llama 3.1 70B",
+				"model": "llama3.1:70b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"llama3_1-405b": {
+				"title": "Llama 3.1 405B",
+				"model": "llama3.1:405b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"phi4-14b": {
+				"title": "Phi 4 14B",
+				"model": "phi4",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 16000
+			},
+			"llama3_2-3b": {
+				"title": "Llama 3.2 3B",
+				"model": "llama3.2",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"llama3_2-1b": {
+				"title": "Llama 3.2 1B",
+				"model": "llama3.2:1b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"llama4-latest": {
+				"title": "Llama 4 Latest",
+				"model": "llama4:latest",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 10000000
+			},
+			"mistral-7b": {
+				"title": "Mistral 7B",
+				"model": "mistral",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 32000
+			},
+			"qwen2_5-7b": {
+				"title": "Qwen 2.5 7B",
+				"model": "qwen2.5",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"qwen2_5-0_5b": {
+				"title": "Qwen 2.5 0.5B",
+				"model": "qwen2.5:0.5b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"qwen2_5-1_5b": {
+				"title": "Qwen 2.5 1.5B",
+				"model": "qwen2.5:1.5b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"qwen2_5-3b": {
+				"title": "Qwen 2.5 3B",
+				"model": "qwen2.5:3b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"qwen2_5-14b": {
+				"title": "Qwen 2.5 14B",
+				"model": "qwen2.5:14b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"qwen2_5-32b": {
+				"title": "Qwen 2.5 32B",
+				"model": "qwen2.5:32b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"qwen2_5-72b": {
+				"title": "Qwen 2.5 72B",
+				"model": "qwen2.5:72b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"qwen3-latest": {
+				"title": "Qwen 3 Latest",
+				"model": "qwen3:latest",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"deepseek-r1-1_5b": {
+				"title": "DeepSeek R1 1.5B",
+				"model": "deepseek-r1:1.5b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"deepseek-r1-7b": {
+				"title": "DeepSeek R1 7B",
+				"model": "deepseek-r1:7b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"deepseek-r1-14b": {
+				"title": "DeepSeek R1 14B",
+				"model": "deepseek-r1:14b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"deepseek-r1-32b": {
+				"title": "DeepSeek R1 32B",
+				"model": "deepseek-r1:32b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"deepseek-r1-671b": {
+				"title": "DeepSeek R1 671B",
+				"model": "deepseek-r1:671b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Ollama model"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total Tokens"
+		},
+		"ollama.custom": {
+			"object": "custom",
+			"properties": [
+				"model",
+				"modelTotalTokens",
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.llama3_3": {
+			"object": "llama3_3",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.llama3_1-8b": {
+			"object": "llama3_1-8b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.llama3_1-70b": {
+			"object": "llama3_1-70b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.llama3_1-405b": {
+			"object": "llama3_1-405b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.phi4-14b": {
+			"object": "phi4-14b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.llama3_2-3b": {
+			"object": "llama3_2-3b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.llama3_2-1b": {
+			"object": "llama3_2-1b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.llama4-latest": {
+			"object": "llama4-latest",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.mistral-7b": {
+			"object": "mistral-7b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.qwen2_5-7b": {
+			"object": "qwen2_5-7b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.qwen2_5-0_5b": {
+			"object": "qwen2_5-0_5b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.qwen2_5-1_5b": {
+			"object": "qwen2_5-1_5b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.qwen2_5-3b": {
+			"object": "qwen2_5-3b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.qwen2_5-14b": {
+			"object": "qwen2_5-14b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.qwen2_5-32b": {
+			"object": "qwen2_5-32b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.qwen2_5-72b": {
+			"object": "qwen2_5-72b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.qwen3-latest": {
+			"object": "qwen3-latest",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.deepseek-r1-1_5b": {
+			"object": "deepseek-r1-1_5b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.deepseek-r1-7b": {
+			"object": "deepseek-r1-7b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.deepseek-r1-14b": {
+			"object": "deepseek-r1-14b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.deepseek-r1-32b": {
+			"object": "deepseek-r1-32b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.deepseek-r1-671b": {
+			"object": "deepseek-r1-671b",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"ollama.profile": {
+			"title": "Model",
+			"description": "LLM model",
+			"type": "string",
+			"default": "llama3_3",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": [
+						"ollama.custom"
+					]
+				},
+				{
+					"value": "llama3_3",
+					"properties": [
+						"ollama.llama3_3"
+					]
+				},
+				{
+					"value": "llama3_1-8b",
+					"properties": [
+						"ollama.llama3_1-8b"
+					]
+				},
+				{
+					"value": "llama3_1-70b",
+					"properties": [
+						"ollama.llama3_1-70b"
+					]
+				},
+				{
+					"value": "llama3_1-405b",
+					"properties": [
+						"ollama.llama3_1-405b"
+					]
+				},
+				{
+					"value": "llama4-latest",
+					"properties": [
+						"ollama.llama4-latest"
+					]
+				},
+				{
+					"value": "phi4-14b",
+					"properties": [
+						"ollama.phi4-14b"
+					]
+				},
+				{
+					"value": "llama3_2-3b",
+					"properties": [
+						"ollama.llama3_2-3b"
+					]
+				},
+				{
+					"value": "llama3_2-1b",
+					"properties": [
+						"ollama.llama3_2-1b"
+					]
+				},
+				{
+					"value": "mistral-7b",
+					"properties": [
+						"ollama.mistral-7b"
+					]
+				},
+				{
+					"value": "qwen2_5-7b",
+					"properties": [
+						"ollama.qwen2_5-7b"
+					]
+				},
+				{
+					"value": "qwen2_5-0_5b",
+					"properties": [
+						"ollama.qwen2_5-0_5b"
+					]
+				},
+				{
+					"value": "qwen2_5-1_5b",
+					"properties": [
+						"ollama.qwen2_5-1_5b"
+					]
+				},
+				{
+					"value": "qwen2_5-3b",
+					"properties": [
+						"ollama.qwen2_5-3b"
+					]
+				},
+				{
+					"value": "qwen2_5-14b",
+					"properties": [
+						"ollama.qwen2_5-14b"
+					]
+				},
+				{
+					"value": "qwen2_5-32b",
+					"properties": [
+						"ollama.qwen2_5-32b"
+					]
+				},
+				{
+					"value": "qwen2_5-72b",
+					"properties": [
+						"ollama.qwen2_5-72b"
+					]
+				},
+				{
+					"value": "qwen3-latest",
+					"properties": [
+						"ollama.qwen3-latest"
+					]
+				},
+				{
+					"value": "deepseek-r1-1_5b",
+					"properties": [
+						"ollama.deepseek-r1-1_5b"
+					]
+				},
+				{
+					"value": "deepseek-r1-7b",
+					"properties": [
+						"ollama.deepseek-r1-7b"
+					]
+				},
+				{
+					"value": "deepseek-r1-14b",
+					"properties": [
+						"ollama.deepseek-r1-14b"
+					]
+				},
+				{
+					"value": "deepseek-r1-32b",
+					"properties": [
+						"ollama.deepseek-r1-32b"
+					]
+				},
+				{
+					"value": "deepseek-r1-671b",
+					"properties": [
+						"ollama.deepseek-r1-671b"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "LLM - Ollama",
+			"properties": [
+				"ollama.profile"
+			]
+		}
+	]
+}

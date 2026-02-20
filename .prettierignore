@@ -1,0 +1,28 @@
+# Build outputs
+dist/
+build/
+node_modules/
+coverage/
+
+# Generated files
+*.min.js
+*.min.css
+pnpm-lock.yaml
+
+# Storybook
+storybook-static/
+
+# C++ and other non-JS files
+packages/server/**/*.cpp
+packages/server/**/*.hpp
+packages/server/**/*.h
+packages/server/**/*.c
+packages/server/**/*.cmake
+*.cmake
+
+# Python
+**/*.py
+
+# Java
+**/*.java
+

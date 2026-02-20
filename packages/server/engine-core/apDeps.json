@@ -1,0 +1,26 @@
+{
+	"install": [
+		"boost-crc",
+		"boost-stacktrace",
+		"boost-system",
+		"boost-uuid",
+                "fastpfor",
+		"bzip2",
+		"catch2",
+		"cpprestsdk[compression,core]",
+		"date",
+		"icu",
+		"liblzma",
+		"libxml2",
+		"lz4",
+		"range-v3",
+		"replxx",
+		"tinyxml2"
+	],
+	"windows_install": [
+		"wil"
+	],
+	"linux_install": [
+		"breakpad"
+	]
+}

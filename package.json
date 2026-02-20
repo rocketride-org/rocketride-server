@@ -1,0 +1,100 @@
+{
+	"name": "aparavi-engine",
+	"version": "3.2.0",
+	"description": "Aparavi Engine - A high-performance data processing engine with modular nodes, AI capabilities, and cross-platform clients",
+	"private": true,
+	"license": "MIT",
+	"vcpkg": {
+		"version": "2025.08.27"
+	},
+	"java": {
+		"jdkVersion": "17",
+		"mavenVersion": "3.9.6"
+	},
+	"tika": {
+		"version": "3.2.3"
+	},
+	"author": "Aparavi Inc.",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Aparavi-Operations/engine-new.git"
+	},
+	"bugs": {
+		"url": "https://github.com/aparavi/aparavi-engine/issues"
+	},
+	"homepage": "https://github.com/aparavi/aparavi-engine#readme",
+	"keywords": [
+		"aparavi",
+		"engine",
+		"data-processing",
+		"ai",
+		"nodes",
+		"pipeline"
+	],
+	"engines": {
+		"node": ">=18.0.0",
+		"pnpm": ">=8.0.0"
+	},
+	"scripts": {
+		"build": "node scripts/build.js build",
+		"clean": "node scripts/build.js clean",
+		"setup": "node scripts/build.js setup",
+		"test": "node scripts/build.js test",
+		"dev": "node scripts/build.js dev",
+		"lint": "eslint .",
+		"lint:fix": "eslint . --fix",
+		"format": "prettier --check .",
+		"format:fix": "prettier --write .",
+		"lint:python": "ruff check . && ruff format --check .",
+		"licenses": "node scripts/licenses.js",
+		"docker:engine": "docker build --progress=plain -f docker/Dockerfile.engine -t aparavi-engine .",
+		"docker:eaas": "docker build --progress=plain -f docker/Dockerfile.eaas -t aparavi-eaas .",
+		"package": "cpack --config build/CPackConfig.cmake"
+	},
+	"pnpm": {
+		"peerDependencyRules": {
+			"allowedVersions": {
+				"@rjsf/mui>@mui/material": "6",
+				"@rjsf/mui>@mui/icons-material": "6",
+				"@mui/icons-material>@mui/material": "6",
+				"react-json-view>react": "18",
+				"react-json-view>react-dom": "18",
+				"flux>react": "18",
+				"@typescript-eslint/utils>eslint": "9"
+			}
+		},
+		"overrides": {
+			"cross-spawn": ">=6.0.6",
+			"glob": ">=11.1.0",
+			"js-yaml": ">=4.1.1",
+			"postcss": ">=8.4.31",
+			"qs": ">=6.14.1"
+		},
+		"supportedArchitectures": {
+			"os": ["current"],
+			"cpu": ["current"]
+		}
+	},
+	"devDependencies": {
+		"@eslint/js": "^9.15.0",
+		"adm-zip": "^0.5.16",
+		"@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
+		"@types/node": "^20.0.0",
+		"concurrently": "^8.2.2",
+		"dotenv": "^16.4.5",
+		"eslint": "^9.15.0",
+		"eslint-config-prettier": "^9.1.0",
+		"eslint-plugin-react": "^7.37.2",
+		"eslint-plugin-react-hooks": "^5.0.0",
+		"eslint-plugin-react-refresh": "^0.4.14",
+		"execa": "^9.6.1",
+		"globals": "^15.12.0",
+		"listr2": "^9.0.5",
+		"npm-run-all": "^4.1.5",
+		"prettier": "^3.3.3",
+		"rimraf": "^5.0.5",
+		"tar": "^7.4.3",
+		"typescript": "^5.3.3",
+		"typescript-eslint": "^8.15.0"
+	}
+}

@@ -1,0 +1,50 @@
+from ai.web import WebServer, exception, response, Request, Query, Header, ResultBase
+from clients.python import RocketRideClient
+
+
+async def task_Status(
+    request: Request,
+    token: str = Query(..., description='Token returned from task execute'),
+    authorization: str = Header(..., description='Bearer API key'),
+) -> ResultBase:
+    """
+    Get the status of a task.
+
+    Args:
+        token (str): The task token received from task_Execute.
+        authorization (str): API key for authentication.
+
+    Returns:
+        ResultBase: A response containing the task's current status.
+    """
+    client = None
+
+    try:
+        # Get our server
+        server: WebServer = request.app.state.server
+
+        # Get the port we are serving
+        port = server.get_port()
+
+        # Create the client
+        client = RocketRideClient(
+            uri=f'http://localhost:{port}',
+            auth=request.state.account.auth,
+        )
+
+        # Connect to the socket interface
+        await client.connect()
+
+        # Get the task status from the server
+        status = await client.get_task_status(token)
+
+        # Return current status
+        return response(status)
+
+    except Exception as e:
+        return exception(e)
+
+    finally:
+        # Always disconnect the client to clean up resources
+        if client:
+            await client.disconnect()

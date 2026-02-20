@@ -1,0 +1,9 @@
+# Install pytorch and its requirements
+# The --extra-index-url allow us to load the gpu version. This will
+# work on the cpu if cuda or gpu is not available
+#
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.10.0 ; platform_system == 'Darwin' and platform_machine == 'arm64'
+torch==2.10.0+cu128; platform_system != 'Darwin'
+torchvision==0.25.0 ; platform_system == 'Darwin' and platform_machine == 'arm64'
+torchvision==0.25.0+cu128 ; platform_system != 'Darwin'

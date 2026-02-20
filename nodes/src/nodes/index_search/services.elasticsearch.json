@@ -1,0 +1,381 @@
+{
+	"title": "Vector Store - Elasticsearch",
+	"protocol": "elasticsearch://",
+	"classType": [
+		"store"
+	],
+	"capabilities": [],
+	"register": "filter",
+	"connector": "python",
+	"path": "connectors.index_search",
+	"prefix": "Elasticsearch Vector Store",
+	"description": [
+		"A vector database component for Elasticsearch, enabling efficient storage and ", 
+		"retrieval of vector embeddings. It supports similarity search, filtering, ",
+		"and management of vector data with high performance. Supports Elastic Cloud ",
+		"Serverless, Elastic Cloud Hosted, and self-managed Elasticsearch deployments."
+	],
+	"icon": "elasticsearch.svg",
+	"documentation": "https://www.elastic.co/elasticsearch",
+	"tile": [
+		"Host/Port: ${parameters.elasticsearch.${profile}.host}:${parameters.elasticsearch.${profile}.port}",
+		"Index: ${parameters.elasticsearch.${profile}.index}"
+	],
+	"lanes": {
+		"text": [],
+		"documents": [],
+		"questions": [
+			"text",
+			"documents",
+			"answers",
+			"questions"
+		]
+	},
+	"input": [
+		{
+			"lane": "text",
+			"description": [
+				"Store text into the Elasticsearch index (index mode only)."
+			],
+			"output": []
+		},
+		{
+			"lane": "documents",
+			"description": [
+				"Stores the documents into the vector database. The documents must be ",
+				"run through an embedding model prior to this step to compute the vectors. ",
+				"This node supports both storing documents and searching them - you can use ",
+				"the same Elasticsearch node for both upload and retrieve operations."
+			],
+			"output": []
+		},
+		{
+			"lane": "questions",
+			"description": [
+				"Searches the database for documents most similar to the given questions. ",
+				"This node supports both storing documents and searching them - you can use ",
+				"the same Elasticsearch node for both upload and retrieve operations."
+			],
+			"output": [
+				{
+					"lane": "text",
+					"description": [
+						"Produces text that is most similar to the given question."
+					],
+					"output": []
+				},
+				{
+					"lane": "documents",
+					"description": [
+						"Produces documents that are most similar to the given question."
+					],
+					"output": []
+				},
+				{
+					"lane": "answers",
+					"description": [
+						"Produces an answer with the documents that are most similar ",
+						"to the given question."
+					],
+					"output": []
+				},
+				{
+					"lane": "questions",
+					"description": [
+						"Updates the question with documents most similar to the ",
+						"question and sets up a filter so piping this to another store ",
+						"driver will limit its answers to the given subset of documents."
+					],
+					"output": []
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "self-managed",
+		"profiles": {
+			"self-managed": {
+				"mode": "self-managed",
+				"title": "Self-managed Elasticsearch",
+				"host": "localhost",
+				"port": 9200,
+				"index": "aparavi",
+				"type": "vector_database",
+				"store_enabled": true,
+				"provider": "elasticsearch"
+			},
+			"cloud-hosted": {
+				"mode": "cloud-hosted",
+				"title": "Elastic Cloud Hosted",
+				"host": "",
+				"port": 9243,
+				"apikey": "",
+				"index": "aparavi",
+				"type": "vector_database",
+				"store_enabled": true,
+				"provider": "elasticsearch"
+			},
+			"cloud-serverless": {
+				"mode": "cloud-serverless",
+				"title": "Elastic Cloud Serverless",
+				"host": "",
+				"port": 443,
+				"apikey": "",
+				"index": "aparavi",
+				"type": "vector_database",
+				"store_enabled": true,
+				"provider": "elasticsearch"
+			}
+		}
+	},
+	"fields": {
+		"vector.cloud.host": {
+			"description": "Enter the Elastic Cloud host URL e.g. <your-deployment-id>.es.<region>.cloud.es.io"
+		},
+		"vector.cloud.port": {
+			"default": 9243
+		},
+		"vector.local.host": {
+			"default": "localhost"
+		},
+		"vector.local.port": {
+			"default": 9200
+		},
+		"vector.index": {
+			"type": "string",
+			"title": "Index Name / Collection Name",
+			"description": "Enter the name of the Elasticsearch index (must be lowercase)",
+			"default": "aparavi"
+		},
+		"elasticsearch.index": {
+			"type": "string",
+			"title": "Index Name / Collection Name",
+			"description": "Enter the name of the Elasticsearch index",
+			"default": "aparavi"
+		},
+		"elasticsearch.type": {
+			"type": "string",
+			"title": "Type",
+			"description": "Elasticsearch operation type",
+			"enum": [
+				["datastore", "Datastore"],
+				["vector_database", "Vector database"],
+				["search_engine", "Search engine"]
+			],
+			"default": "vector_database"
+		},
+		"elasticsearch.store_enabled": {
+			"type": "boolean",
+			"title": "Store",
+			"description": "Enable document storage",
+			"default": true
+		},
+		"elasticsearch.mode": {
+			"title": "Store Mode",
+			"type": "boolean",
+			"default": true,
+			"description": "Toggle between index (text search) and vector store (semantic search).",
+			"conditional": [
+				{
+					"value": false,
+					"properties": [
+						"elasticsearch.index_label",
+						"elasticsearch.search"
+					]
+				},
+				{
+					"value": true,
+					"properties": [
+						"elasticsearch.vstore_label"
+					]
+				}
+			]
+		},
+		"elasticsearch.index_label": {
+			"title": "Index Mode",
+			"type": "object"
+		},
+		"elasticsearch.vstore_label": {
+			"title": "Vector Store Mode",
+			"type": "object"
+		},
+		"elasticsearch.search": {
+			"title": "Customize Indexing Search Behavior",
+			"type": "boolean",
+			"default": false,
+			"description": "Customize the search behavior of the index. This option does not affect the ingestion and creation of the index. You can switch between behaviors when searching between pipeline runs.",
+			"conditional": [
+				{
+					"value": true,
+					"properties": [
+						"elasticsearch.matchOperator",
+						"elasticsearch.search.highlight"
+					]
+				}
+			]
+		},
+		"elasticsearch.matchOperator": {
+			"type": "string",
+			"title": "Match Operator",
+			"description": [
+				"Controls how multiple query terms are matched: ",
+				"'or' (default) matches documents containing ANY of the query terms, ",
+				"'and' matches documents containing ALL of the query terms, ",
+				"'exact' requires the exact phrase to appear in order (phrase matching)."
+			],
+			"default": "or",
+			"enum": [
+				"and",
+				"or",
+				"exact"
+			],
+			"conditional": [
+				{
+					"value": "exact",
+					"properties": [
+						"elasticsearch.search.exact.slop"
+					]
+				}
+			]
+		},
+		"elasticsearch.search.exact.slop": {
+			"title": "Slop",
+			"type": "number",
+			"default": 0,
+			"description": "The number of words to allow between terms when exact phrase search is enabled."
+		},
+		"elasticsearch.search.highlight": {
+			"title": "Return contextual snippets",
+			"type": "boolean",
+			"default": false,
+			"description": "Use the unified highlighter to return snippets around matches.",
+			"conditional": [
+				{
+					"value": true,
+					"properties": [
+						"elasticsearch.search.highlight.fragment_size"
+					]
+				}
+			]
+		},
+		"elasticsearch.search.highlight.fragment_size": {
+			"title": "Snippet size (characters)",
+			"type": "number",
+			"default": 250,
+			"description": "Maximum characters in the returned highlight snippet (context window) per hit."
+		},
+		"elasticsearch.self-managed": {
+			"object": "self-managed",
+			"properties": [
+				"vector.local.host",
+				"vector.local.port",
+				"vector.score",
+				"vector.index",
+				"elasticsearch.mode"
+			]
+		},
+		"elasticsearch.cloud-hosted": {
+			"object": "cloud-hosted",
+			"properties": [
+				"vector.cloud.host",
+				"vector.cloud.port",
+				"vector.apikey",
+				"vector.score",
+				"vector.index",
+				"elasticsearch.mode"
+			]
+		},
+		"elasticsearch.cloud-serverless": {
+			"object": "cloud-serverless",
+			"properties": [
+				"vector.cloud.host",
+				"vector.cloud.port",
+				"vector.apikey",
+				"vector.score",
+				"vector.index",
+				"elasticsearch.mode"
+			]
+		},
+		"elasticsearch.profile": {
+			"title": "Deployment Type",
+			"description": "Connect to...",
+			"type": "string",
+			"default": "self-managed",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "self-managed",
+					"properties": [
+						"elasticsearch.self-managed"
+					]
+				},
+				{
+					"value": "cloud-hosted",
+					"properties": [
+						"elasticsearch.cloud-hosted"
+					]
+				},
+				{
+					"value": "cloud-serverless",
+					"properties": [
+						"elasticsearch.cloud-serverless"
+					]
+				}
+			]
+		},
+		"elasticsearch.provider": {
+			"type": "string",
+			"const": "elasticsearch",
+			"default": "elasticsearch"
+		},
+		"elasticsearch.elasticsearch": {
+			"object": "elasticsearch",
+			"properties": [
+				"elasticsearch.profile"
+			]
+		},
+		"elasticsearch.store": {
+			"object": "store",
+			"title": "Store",
+			"properties": [
+				"elasticsearch.provider",
+				"elasticsearch.elasticsearch"
+			]
+		},
+		"elasticsearch.target.autopipe": {
+			"object": "parameters",
+			"properties": [
+				"remote",
+				"elasticsearch.store",
+				"all.embedding"
+			]
+		},
+		"elasticsearch.target.parameters": {
+			"object": "parameters",
+			"properties": [
+				"elasticsearch.target.autopipe"
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Elasticsearch Vector Store",
+			"properties": [
+				"elasticsearch.profile"
+			]
+		},
+		{
+			"section": "Transform",
+			"title": "Elasticsearch",
+			"properties": [
+				"type",
+				"elasticsearch.target.parameters",
+				"target.mode"
+			]
+		}
+	]
+}
+

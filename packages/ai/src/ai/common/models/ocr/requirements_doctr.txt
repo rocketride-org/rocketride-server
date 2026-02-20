@@ -1,0 +1,5 @@
+# Requirements for docTR loader
+# Direct imports only
+# opencv is handled by ai.common.opencv module
+
+python-doctr[torch]

@@ -1,0 +1,5 @@
+# Requirements for SentenceTransformer loader
+# Direct imports only
+
+sentence-transformers
+numpy

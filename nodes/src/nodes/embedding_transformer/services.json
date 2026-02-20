@@ -1,0 +1,181 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Embedding - Transformer",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "embedding_transformer://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"embedding"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"gpu"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if 
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.embedding_transformer",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "embedding",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A component that transforms text into numerical vector representations using advanced embedding ",
+		"models. It converts input text—ranging from individual words to entire documents—into high-dimensional ",
+		"vectors that capture semantic meaning and relationships. These embeddings enable efficient similarity ",
+		"searches, clustering, and other advanced natural language processing tasks. The text embedder is highly ",
+		"configurable, supporting various pre-trained models and fine-tuning options, ensuring flexibility for ",
+		"different use cases across domains."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "embedding-text.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/4oLkyLt",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"documents": [
+			"documents"
+		],
+		"questions": [
+			"questions"
+		]
+	},
+	"input": [
+		{
+			"lane": "documents",
+			"output": [
+				{
+					"lane": "documents"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "miniLM",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"custom": {
+				"title": "Custom model"
+			},
+			"miniLM": {
+				"title": "miniLM  - General use embeddings, good performance",
+				"model": "sentence-transformers/multi-qa-MiniLM-L6-cos-v1"
+			},
+			"miniAll": {
+				"title": "miniAll - Another good one",
+				"model": "sentence-transformers/all-MiniLM-L6-v2"
+			},
+			"mpnet": {
+				"title": "mpnet   - Yet another good one",
+				"model": "sentence-transformers/multi-qa-mpnet-base-cos-v1"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"embedding.model": {
+			"type": "string",
+			"title": "Model name",
+			"minLength": 2,
+			"maxLength": 32,
+			"description": "Hugging face model to use for embedding"
+		},
+		"embedding.custom": {
+			"object": "custom",
+			"title": "",
+			"properties": [
+				"embedding.model"
+			]
+		},
+		"embedding.profile": {
+			"title": "Model",
+			"description": "Embedding model",
+			"type": "string",
+			"default": "miniLM",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": [
+						"embedding.custom"
+					]
+				}
+			]
+		},
+		"embedding.preprocessor": {
+			"default": "preprocessor_langchain",
+			"providerTitle": "Preprocessor (chunking)",
+			"combo": "preprocessor"
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Embedding - Sentence Transformer",
+			"properties": [
+				"embedding.profile"
+			]
+		}
+	]
+}

@@ -1,0 +1,32 @@
+{
+	"fields": {
+		"llm.local.serverbase": {
+			"type": "string",
+			"title": "LLM URL",
+			"description": "Base url the model is hosted under.",
+			"default": "http://localhost:11434/v1"
+		},
+		"llm.cloud.apikey": {
+			"type": "string",
+			"title": "API key (Token)",
+			"description": "Enter your API key or token",
+			"optional": false,
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"llm.cloud.project": {
+			"type": "string",
+			"title": "Project (Organization)",
+			"optional": false,
+			"description": "LLM project or organization name"
+		},
+		"llm.cloud.location": {
+			"type": "string",
+			"title": "Location",
+			"optional": false,
+			"description": "LLM server location"
+		}
+	}
+}

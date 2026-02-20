@@ -1,0 +1,10 @@
+# Plugin Gemini core
+google-genai
+
+# Google deps
+google-api-core
+google-auth
+googleapis-common-protos
+proto-plus
+protobuf
+

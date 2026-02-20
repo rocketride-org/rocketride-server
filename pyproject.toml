@@ -1,0 +1,82 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 RocketRide, Inc.
+#
+# This file contains shared Python tooling configuration for the monorepo.
+# Individual packages may extend or override these settings.
+# =============================================================================
+
+[tool.ruff]
+# Line length disabled - set high to avoid enforcement
+line-length = 320
+
+# Target Python version
+target-version = "py310"
+
+# Directories to exclude from linting
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    ".eggs",
+    "*.egg-info",
+]
+
+[tool.ruff.format]
+# Use single quotes for strings (except docstrings)
+quote-style = "single"
+
+# Format docstrings
+docstring-code-format = true
+
+# Line ending style
+line-ending = "auto"
+
+[tool.ruff.lint]
+# Enable general linting, quote rules, and docstyle (matching engine.3.00)
+select = ["E", "F", "Q", "D"]
+
+# Allow Ruff to auto-fix docstring and quote issues
+fixable = ["D", "Q"]
+
+# Rules to ignore
+# D100 Ignore no public module docstring
+# D101 Ignore no public class docstring
+# D102 Ignore no public function docstring
+# D104 Ignore no public package docstring
+# D200 Ignore single line docstring
+# D205 1 blank line required between summary line and description
+# D301 Use `r"""` if any backslashes in a docstring
+# D400 First line should end with a period
+# E203 Ignore whitespace before ':' - ruff puts it there and then produces an error on it
+# E402 Ignore missing module level docstring - we need depends first
+# E501 Line too long
+ignore = ["D100", "D101", "D102", "D104", "D200", "D205", "D301", "D400", "E203", "E402", "E501"]
+
+[tool.ruff.lint.flake8-quotes]
+# Enforce single quotes for inline strings
+inline-quotes = "single"
+
+[tool.ruff.lint.pydocstyle]
+# Use PEP 257 docstring conventions
+convention = "pep257"
+
+[tool.pytest.ini_options]
+# Pytest configuration
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]

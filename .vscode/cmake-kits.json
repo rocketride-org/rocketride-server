@@ -1,0 +1,19 @@
+[
+    {
+        "name": "RocketRide Linux",
+        "toolchainFile": "${workspaceFolder}/packages/server/engine-core/cmake/triplets/x64-linux-clang-rocketride.cmake"
+    },
+    {
+        "name": "RocketRide macOS x64",
+        "toolchainFile": "${workspaceFolder}/packages/server/engine-core/cmake/triplets/x64-osx-appleclang-rocketride.cmake"
+    },
+    {
+        "name": "RocketRide macOS arm64",
+        "toolchainFile": "${workspaceFolder}/packages/server/engine-core/cmake/triplets/arm64-osx-appleclang-rocketride.cmake"
+    },
+    {
+        "name": "RocketRide Windows",
+        "toolchainFile": "${workspaceFolder}/packages/server/engine-core/cmake/triplets/x64-windows-vs2019-rocketride.cmake",
+        "environmentSetupScript": "${workspaceFolder}/scripts/vsvars.cmd"
+    }
+]

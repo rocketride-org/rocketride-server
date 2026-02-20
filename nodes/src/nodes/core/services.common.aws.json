@@ -1,0 +1,92 @@
+//
+// Common field defintions for accessing AWS - these will be merged into the 
+// service defintion as required by the service
+//
+{
+	"fields": {
+		"aws.accessKey": {
+			"type": "string",
+			"title": "Access key",
+			"secure": true,
+			"optional": true,
+			"description": "This is a key which gives access to your AWS resources. It is provided by the service provider. It is used to sign the requests you send to Amazon S3."
+		},
+		"aws.secretKey": {
+			"type": "string",
+			"title": "Secret key",
+			"description": "This is a key used to access the AWS services.",
+			"secure": true,
+			"optional": true,
+			"ui:widget": "password"
+		},
+		"aws.region": {
+			"type": "string",
+			"title": "Region",
+			"description": "This is defined and provided by the service provider.",
+			"default": "",
+			"minLength": 1,
+			"enum": [
+				[
+					"",
+					"Select Region"
+				],
+				[
+					"us-east-1",
+					"US East (N.Virginia)"
+				],
+				[
+					"us-east-2",
+					"US East (Ohio)"
+				],
+				[
+					"us-west-1",
+					"US West (N. California)"
+				],
+				[
+					"us-west-2",
+					"US West (Oregon)"
+				],
+				[
+					"ca-central-1",
+					"Canada (Central)"
+				],
+				[
+					"ap-south-1",
+					"Asia Pacific (Mumbai)"
+				],
+				[
+					"ap-northeast-2",
+					"Asia Pacific (Seoul)"
+				],
+				[
+					"ap-southeast-1",
+					"Asia Pacific (Singapore)"
+				],
+				[
+					"ap-southeast-2",
+					"Asia Pacific (Sydney)"
+				],
+				[
+					"ap-northeast-1",
+					"Asia Pacific (Tokyo)"
+				],
+				[
+					"eu-central-1",
+					"EU (Frankfurt)"
+				],
+				[
+					"eu-west-1",
+					"EU (Ireland)"
+				],
+				[
+					"eu-west-2",
+					"EU (London)"
+				],
+				[
+					"sa-east-1",
+					"South America (São Paulo)"
+				]
+			]
+		}
+	}
+}

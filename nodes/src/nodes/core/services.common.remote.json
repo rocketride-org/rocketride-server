@@ -1,0 +1,99 @@
+{
+	"fields": {
+		"remote.host": {
+			"type": "string",
+			"title": "Host",
+			"minLength": 2,
+			"maxLength": 32,
+			"default": "pipe.aparavi.com"
+		},
+		"remote.port": {
+			"type": "number",
+			"title": "Port",
+			"default": 5565,
+			"minimum": 0
+		},
+		"remote.apikey": {
+			"type": "string",
+			"title": "API key",
+			"description": "Enter your API key",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"remote.local.mode": {
+			"type": "string",
+			"const": "local",
+			"default": "local"
+		},
+		"remote.remote.mode": {
+			"type": "string",
+			"const": "remote",
+			"default": "remote"
+		},
+		"remote.process.remote": {
+			"object": "remote",
+			"properties": [
+				"remote.remote.mode",
+				"remote.host",
+				"remote.port",
+				"remote.apikey"
+			]
+		},
+		"remote.process.local": {
+			"object": "local",
+			"properties": [
+				"remote.local.mode"
+			]
+		},
+		"remote.profile": {
+			"title": "Processing Mode",
+			"type": "string",
+			"enum": [
+				[
+					"local",
+					"Process everything locally"
+				],
+				[
+					"remote",
+					"Process CPU/GPU heavy tasks remotely"
+				]
+			],
+			"default": "local",
+			"conditional": [
+				{
+					"value": "remote",
+					"properties": [
+						"remote.process.remote"
+					]
+				},
+				{
+					"value": "local",
+					"properties": [
+						"remote.process.local"
+					]
+				}
+			]
+		},
+		"remote.provider": {
+			"type": "string",
+			"const": "remote",
+			"default": "remote"
+		},
+		"remote.remote": {
+			"object": "remote",
+			"properties": [
+				"remote.profile"
+			]
+		},
+		"remote": {
+			"object": "remote",
+			"title": "Remote/Local Processing",
+			"properties": [
+				"remote.provider",
+				"remote.remote"
+			]
+		}
+	}
+}
