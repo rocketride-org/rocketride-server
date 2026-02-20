@@ -1,0 +1,303 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "LLM - OpenAI",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "llm_openai://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"llm"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"invoke"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if 
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.llm_openai",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "llm",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A component that connects to OpenAI's latest GPT models for advanced natural language ",
+		"processing. It supports tasks such as text generation, summarization, question ",
+		"answering, and chat-based interactions. With access to state-of-the-art language ",
+		"models like GPT-5, GPT-4o, GPT-4o-mini, and GPT-4 Turbo, this component enables ",
+		"high-quality, context-aware responses and creative text generation. Configurable with ",
+		"API keys and deployment options, it allows seamless integration into AI-driven ",
+		"workflows with scalable performance and enhanced multimodal capabilities."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "openai.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/47jkQmV",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": [
+		"Model: ${parameters.llm_openai.profile}"
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": [
+			"answers"
+		]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [
+				{
+					"lane": "answers"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "openai-4o",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"custom": {
+				"model": "",
+				"modelTotalTokens": 16384,
+				"apikey": ""
+			},
+		"openai-4o": {
+				"title": "GPT-4o",
+			"model": "gpt-4o",
+			"modelTotalTokens": 128000,
+			"apikey": ""
+		},
+		"openai-4o-mini": {
+				"title": "GPT-4o-mini",
+			"model": "gpt-4o-mini",
+			"modelTotalTokens": 128000,
+			"apikey": ""
+		},
+			"openai-5": {
+				"title": "GPT-5",
+				"model": "gpt-5",
+			"modelTotalTokens": 128000,
+			"apikey": ""
+		},
+			"openai-5-1": {
+				"title": "GPT-5.1",
+				"model": "gpt-5.1",
+				"modelTotalTokens": 128000,
+				"apikey": ""
+			},
+			"openai-5-2": {
+				"title": "GPT-5.2",
+				"model": "gpt-5.2",
+				"modelTotalTokens": 128000,
+				"apikey": ""
+			},
+			"openai-5-mini": {
+				"title": "GPT-5-mini",
+				"model": "gpt-5-mini",
+				"modelTotalTokens": 128000,
+				"apikey": ""
+			},
+			"openai-5-nano": {
+				"title": "GPT-5-nano",
+				"model": "gpt-5-nano",
+			"modelTotalTokens": 128000,
+			"apikey": ""
+		}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "OpenAI model"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total Tokens"
+		},
+		"openai.custom": {
+			"object": "custom",
+			"properties": [
+				"model",
+				"modelTotalTokens",
+				"llm.cloud.apikey"
+			]
+		},
+		
+		"openai.openai-4o": {
+			"object": "openai-4o",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"openai.openai-4o-mini": {
+			"object": "openai-4o-mini",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"openai.openai-5": {
+			"object": "openai-5",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"openai.openai-5-1": {
+			"object": "openai-5-1",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"openai.openai-5-2": {
+      		"object": "openai-5-2",
+      		"properties": [
+        		"llm.cloud.apikey"
+			]
+		},
+		"openai.openai-5-mini": {
+			"object": "openai-5-mini",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"openai.openai-5-nano": {
+			"object": "openai-5-nano",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"openai.profile": {
+			"title": "Model",
+			"description": "LLM model",
+			"type": "string",
+			"default": "openai-4o",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": [
+						"openai.custom"
+					]
+				},
+				{
+					"value": "openai-4o",
+					"properties": [
+						"openai.openai-4o"
+					]
+				},
+				{
+					"value": "openai-4o-mini",
+					"properties": [
+						"openai.openai-4o-mini"
+					]
+				},
+				{
+					"value": "openai-5",
+					"properties": [
+						"openai.openai-5"
+					]
+				},
+				{
+					"value": "openai-5-1",
+					"properties": [
+						"openai.openai-5-1"
+					]
+				},
+				{
+					"value": "openai-5-2",
+					"properties": [
+					  "openai.openai-5-2"
+					]
+				},
+				{
+					"value": "openai-5-mini",
+					"properties": [
+						"openai.openai-5-mini"
+					]
+				},
+				{
+					"value": "openai-5-nano",
+					"properties": [
+						"openai.openai-5-nano"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "LLM - OpenAI",
+			"properties": [
+				"openai.profile"
+			]
+		}
+	]
+}

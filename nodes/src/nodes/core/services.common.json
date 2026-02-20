@@ -1,0 +1,341 @@
+//
+// Common field defintions - these will be merged into the service defintion
+// as required by the service
+//
+{
+	"fields": {
+		//
+		// Basic fields
+		//
+		"name": {
+			"type": "string",
+			"title": "Data Catalog Name",
+			"minLength": 2,
+			"maxLength": 32,
+			"description": "Use a unique name to identify this data set inside of Aparavi.",
+			"readonly": true
+		},
+		"storePath": {
+			"type": "string",
+			"title": "Store path",
+			"description": "This path defines the exact specific folder in the filesystem.\n\nFormat for Windows : C:\\foldername (for local filesystem) or \\\\file.core.net\\foldername (for shared folders)\n\nFormat for Linux : /file.core.net/foldername\n\nFormat for AWS/S3 : bucketname/foldername\nFormat for Azure blob : containername/foldername\nFormat for SharePoint: sitename/drivename/foldername\nFormat for onedrive: account/foldername"
+		},
+		"url": {
+			"type": "string",
+			"title": "URL",
+			"format": "url",
+			"description": "URL to connect to the service. E.g: https://[dnsname].com",
+			"default": "https://",
+			"readonly": true
+		},
+		"sync": {
+			"hidden": true,
+			"type": "boolean",
+			"default": true
+		},
+		"actions": {
+			"hidden": true,
+			"type": "object"
+		},
+		"source.mode": {
+			"hidden":true,
+			"type": "string",
+			"default": "Source"
+		},
+		"target.mode": {
+			"hidden": true,
+			"type": "string",
+			"default": "Target"
+		},
+		"hideForm": {
+			"hidden":true,
+			"type": "boolean",
+			"default": true
+		},
+		//
+		// These are the defintions for the estimation subsection
+		//
+		"estimation.accessCost": {
+			"title": "Access cost",
+			"description": "The egress cost per MB to recall a file.",
+			"type": "number",
+			"default": 0,
+			"minimum": 0,
+			"optional": true
+		},
+		"estimation.accessDelay": {
+			"title": "Access delay",
+			"description": "Elapsed time before access to a file starts. (For example: S3 could be 0 second delay, while Glacier could be hours.",
+			"type": "number",
+			"default": 0,
+			"minimum": 0,
+			"optional": true
+		},
+		"estimation.accessRate": {
+			"title": "Access rate",
+			"description": "Time required to recall a file in MB per second.",
+			"type": "number",
+			"default": 0,
+			"minimum": 0,
+			"optional": true
+		},
+		"estimation.storeCost": {
+			"title": "Store cost",
+			"description": "The cost per MB to store a file for a month.",
+			"type": "number",
+			"default": 0,
+			"minimum": 0,
+			"optional": true
+		},
+		"estimation": {
+			"section": "estimation",
+			"title": "Cost estimations",
+			"properties": [
+				"estimation.accessDelay",
+				"estimation.accessRate",
+				"estimation.storeCost",
+				"estimation.accessCost"
+			]
+		},
+		//
+		// Include - subform to add/remove paths/enable*
+		//
+		"include.path": {
+			"title": "Include path",
+			"type": "string"
+		},
+		"include.classify": {
+			"title": "Enable Classification",
+			"description": "Classification will assign each file to one or more classification policies. Once enabled, all supported files will be classified into one or more of the activated classification policies.",
+			"type": "boolean",
+			"default": false,
+			"ui": {
+				"chip": "Classify"
+			}
+		},
+		"include.ocr": {
+			"title": "Enable OCR",
+			"description": "Optical Character Recognition (OCR) will convert typed or handwritten text found in images into text.Once enabled, all image files such as jpgs will have text extracted for use in classification and search.",
+			"type": "boolean",
+			"default": false,
+			"ui": {
+				"chip": "OCR"
+			}
+		},
+		"include.signing": {
+			"title": "Content Signature",
+			"description": "Content Signature executes a hash algorithm on the content of every object to generate a \"signature\". Identical signatures indicate identical content and are an effective method to detect duplicate objects.",
+			"type": "boolean",
+			"default": true,
+			"ui": {
+				"chip": "Signing"
+			},
+			"conditional": [
+				{
+					"value": true,
+					"properties": [
+						"include.index",
+						"include.vectorize"
+					]
+				},
+				{
+					"value": false,
+					"properties": [
+					]
+				}
+			]
+		},
+		"include.index": {
+			"title": "Enable Indexing",
+			"type": "boolean",
+			"description": "Indexing will allow for full-text search of all processed files. Once enabled, all supported files will be scanned and indexed as they are processed.\nOnce Index is enabled, other parameters like OCR and classify could be enabled too.",
+			"default": false,
+			"ui": {
+				"chip": "Index"
+			},
+			"conditional": [
+				{
+					"value": true,
+					"properties": [
+						"include.classify",
+						"include.ocr"
+					]
+				},
+				{
+					"value": false,
+					"properties": [
+					]
+				}
+			]
+		},
+		"include.permissions": {
+			"title": "Enable Permissions",
+			"description": "Permissions allow gathering of file ownerships and permissions from all connected and scanned sources.",
+			"type": "boolean",
+			"default": false,
+			"ui": {
+				"chip": "Permissions"
+			}
+		},
+		"include.vectorize": {
+			"title": "Enable AI Embeddings",
+			"description": "AI embeddings make text content accessible to AI technologies like semantic relevancy and generative AP chants.\nOnce AI embeddings are enabled, other parameters like OCR and classify could be enabled too.",
+			"type": "boolean",
+			"default": false,
+			"ui": {
+				"chip": "AI"
+			},
+			"conditional": [
+				{
+					"value": true,
+					"properties": [
+						"include.classify",
+						"include.ocr"
+					]
+				},
+				{
+					"value": false,
+					"properties": [
+					]
+				}
+			]
+		},
+		"include": {
+			"title": "Include paths",
+			"type": "array",
+			"minItems": 1,
+			"items": {
+				"type": "object",
+				"properties": [
+					"include.path",
+					"include.permissions",
+					"include.signing"
+				]
+			}
+		},
+		//
+		// Exclude - subform to add/remove paths
+		//
+		"exclude.path": {
+			"title": "Exclude path",
+			"type": "string"
+		},
+		"exclude": {
+			"title": "Exclude paths",
+			"type": "array",
+			"optional": true,
+			"items": {
+				"type": "object",
+				"properties": [ "exclude.path" ]
+			}
+		},
+		//
+		// DTC Features
+		//
+		"DTC.features": {
+			"title": "What features do you want?",
+			"description": "Please be advised that selecting additional features will increase the time it takes to scan your data.",
+			"type": "object",
+			"properties": {
+				"ocr": {
+					"type": "boolean",
+					"title": "Optical Character Recognition",
+					"description": "Optical Character Recognition (OCR) will convert typed or handwritten text found in images into text.Once enabled, all image files such as jpgs will have text extracted for use in classification and search."
+				},
+				"permissions": {
+					"type": "boolean",
+					"title": "Permissions",
+					"description": "Permissions feature gathers all associated relationships between users and files. This provides deeper ability to control data accessability."
+				}
+			}
+		},
+		//
+		// DTC Include
+		//
+		"DTC.include.path": {
+			"title": "Include path",
+			"type": "string"
+		},
+		"DTC.include": {
+			"title": "Provide the path to your data",
+			"type": "array",
+			"minItems": 1,
+			"items": {
+				"type": "object",
+				"properties": [
+					"DTC.include.path"
+				]
+			}
+		},
+		//
+		// DTC Exclude
+		//
+		"DTC.exclude.path": {
+			"title": "Exclude path",
+			"type": "string"
+		},
+		"DTC.exclude": {
+			"title": "Provide the path to exclude",
+			"type": "array",
+			"optional": true,
+			"items": {
+				"type": "object",
+				"properties": [ "DTC.exclude.path" ]
+			}
+		},
+		//
+		// Pipe Features
+		//
+		"Pipe.features": {
+			"title": "What features do you want?",
+			"description": "Please be advised that selecting additional features will increase the time it takes to scan your data.",
+			"type": "object",
+			"properties": {
+				"ocr": {
+					"type": "boolean",
+					"title": "Optical Character Recognition",
+					"description": "Optical Character Recognition (OCR) will convert typed or handwritten text found in images into text.Once enabled, all image files such as jpgs will have text extracted for use in classification and search."
+				},
+				"permissions": {
+					"type": "boolean",
+					"title": "Permissions",
+					"description": "Permissions feature gathers all associated relationships between users and files. This provides deeper ability to control data accessability."
+				}
+			}
+		},
+		//
+		// Pipe Include
+		//
+		"Pipe.include.path": {
+			"title": "Include path",
+			"type": "string"
+		},
+		"Pipe.include": {
+			"title": "Provide the path to your data",
+			"type": "array",
+			"minItems": 1,
+			"items": {
+				"type": "object",
+				"properties": [
+					"Pipe.include.path"
+				]
+			}
+		},
+		//
+		// DTC Exclude
+		//
+		"Pipe.exclude.path": {
+			"title": "Exclude path",
+			"type": "string"
+		},
+		"Pipe.exclude": {
+			"title": "Provide the path to exclude",
+			"type": "array",
+			"optional": true,
+			"items": {
+				"type": "object",
+				"properties": [ "Pipe.exclude.path" ]
+			}
+		}
+	}
+}

@@ -1,0 +1,19 @@
+# Plugin Anthropic core
+transformers
+langchain-anthropic
+tokenizers
+
+
+# Transformers deps
+accelerate
+huggingface-hub
+pyyaml
+filelock
+regex
+tqdm
+safetensors
+
+# LangChain deps
+langchain-core
+langchain
+anthropic

@@ -1,0 +1,132 @@
+{
+    "pipeline": {
+        "source": "source_1",
+        "components": [
+            {
+                "id": "source_1",
+                "provider": "filesys",
+                "config": {
+                    "actions": {},
+                    "estimation": {
+                        "accessCost": 0,
+                        "accessDelay": 0,
+                        "accessRate": 0,
+                        "storeCost": 0
+                    },
+                    "include": [
+                        {
+                            "classify": true,
+                            "index": true,
+                            "ocr": true,
+                            // Required file path below: /engine/testdata/source/<filename>
+                            "path": "C:\\question.txt", 
+                            "permissions": true,
+                            "signing": true,
+                            "vectorize": false
+                        }
+                    ],
+                    "key": "filesys://*",
+                    "mode": "Source",
+                    "name": "File System",
+                    "parameters": {
+                        "auth": "secure",
+                        "format": "native",
+                        "secureParameters": {
+                            "readonly": [],
+                            "secure": [],
+                            "token": "ToIyPoSGQk2sB2Mw+p3jh3R0L2Xdwltcgj4bZln2dHV7/huJ"
+                        }
+                    },
+                    "sync": false,
+                    "type": "filesys"
+                },
+                "ui": {}
+            },
+            {
+                "id": "parser_1",
+                "provider": "parse",
+                "config": {},
+                "ui": {},
+                "input": [
+                    {
+                        "lane": "tags",
+                        "from": "source_1"
+                    }
+                ]
+            },
+            {
+                "id": "embedding_1",
+                "provider": "embedding_transformer",
+                "ui": {},
+                "config": {},
+                "input": [
+                    {
+                        "lane": "questions",
+                        "from": "input_1"
+                    }
+                ]
+            },
+            {
+                "id": "qdrant_1",
+                "provider": "qdrant",
+                "ui": {},
+                "config": {
+                    "profile": "local",
+                    "local": {
+                        "collection": "denodo_collection"
+                    }
+                },
+                "input": [
+                    {
+                        "lane": "questions",
+                        "from": "embedding_1"
+                    }
+                ]
+            },
+            {
+                "id": "input_1",
+                "provider": "question",
+                "ui": {},
+                "config":{
+                    "profile": "default"
+                },
+                "input": [
+                    {
+                        "lane": "text",
+                        "from": "parser_1"
+                    }
+                ]
+            },
+            {
+                "id": "chat_1",
+                "provider": "llm_openai",
+                "ui": {},
+                "config": {
+                    "apikey": "%openai_apikey%"
+                },
+                "input": [
+                    {
+                        "lane": "questions",
+                        "from": "qdrant_1"
+                    }
+                ]
+            },
+            {
+                "id": "response_1",
+                "provider": "response",
+                "ui": {},
+                "config": {
+                    "keys": {
+                        "answers": "search_answers"
+                    }
+                },
+                "input": [
+                    {
+                        "lane": "answers",
+                        "from": "chat_1"
+                    }
+                ]
+            }
+       ]
+    }
+}

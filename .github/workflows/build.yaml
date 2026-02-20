@@ -1,0 +1,207 @@
+name: Build engine
+run-name: ${{ github.event.pull_request.title || github.event.head_commit.message }} ${{ (github.event_name == 'workflow_dispatch' && github.ref_name) || '' }} ${{ github.event_name == 'merge_group' && 'merge queue' || '' }}
+
+concurrency:
+  group: ${{ github.head_ref || github.run_id }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  packages: write
+  pull-requests: write
+  repository-projects: read
+  security-events: read
+  statuses: read
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  VCPKG_NUGET_USER: ${{ github.repository_owner }}
+  NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+
+on:
+  push:
+    branches:
+      - develop
+      - 'release/**'
+  pull_request:
+    branches:
+      - develop
+      - 'release/**'
+  merge_group:
+    types:
+      - checks_requested
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Build number MAJOR.MINOR.PATCH'
+        required: false
+        default: ''
+      release_type:
+        description: 'Publish'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - draft
+          - prerelease
+          - release
+
+jobs:
+  init:
+    name: Initialize variables
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.init.outputs.version }}
+      build_number: ${{ steps.init.outputs.build_number }}
+      full_version: ${{ steps.init.outputs.full_version }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set version and build number
+        id: init
+        run: |
+          APARAVI_ENGINE_VERSION="${{ inputs.version }}"
+          if [ -z "${APARAVI_ENGINE_VERSION}" ]; then
+            APARAVI_ENGINE_VERSION="$(jq -r '.version' ${{ github.workspace }}/package.json)"
+          fi
+          full_version="${APARAVI_ENGINE_VERSION}.$((${{ github.run_number }}+${{ vars.ENGINE_BUILD_NUMBER_CONSTANT }}))"
+          echo "version=${APARAVI_ENGINE_VERSION}" >> $GITHUB_OUTPUT
+          echo "build_number=$((${{ github.run_number }}+${{ vars.ENGINE_BUILD_NUMBER_CONSTANT }}))" >> $GITHUB_OUTPUT
+          echo "full_version=${full_version}" >> $GITHUB_OUTPUT
+          echo "Full version: ${full_version}"
+          echo "Publish: ${{ inputs.release_type }}"
+
+  build:
+    name: Build / ${{ matrix.label }}
+    needs: init
+    timeout-minutes: 90
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu
+            label: Ubuntu 22.04
+            runner: ubuntu-22.04
+            builder_cmd: ./builder
+            vcpkg_cmd: ./build/vcpkg/vcpkg
+          - platform: windows
+            label: Windows Server 2022
+            runner: windows-2022
+            builder_cmd: ./builder.cmd
+            vcpkg_cmd: ./build/vcpkg/vcpkg.exe
+          - platform: macos
+            label: macOS (ARM64)
+            runner: macos-14
+            builder_cmd: ./builder
+            vcpkg_cmd: ./build/vcpkg/vcpkg
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Bootstrap vcpkg
+        run: ${{ matrix.builder_cmd }} vcpkg:build
+      - name: Configure vcpkg NuGet source (Linux/macOS)
+        if: matrix.platform != 'windows'
+        run: |
+          NUGET_EXE=$(${{ matrix.vcpkg_cmd }} fetch nuget | tail -n1)
+          mono $NUGET_EXE sources add \
+            -Source "${{ env.NUGET_FEED_URL }}" \
+            -StorePasswordInClearText \
+            -Name GitHubPackages \
+            -UserName "${{ env.VCPKG_NUGET_USER }}" \
+            -Password "${{ secrets.GITHUB_TOKEN }}" || true
+          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
+            -Source "${{ env.NUGET_FEED_URL }}"
+      - name: Configure vcpkg NuGet source (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $NUGET_EXE = $(${{ matrix.vcpkg_cmd }} fetch nuget | Select-Object -Last 1)
+          & $NUGET_EXE sources add `
+            -Source "${{ env.NUGET_FEED_URL }}" `
+            -StorePasswordInClearText `
+            -Name GitHubPackages `
+            -UserName "${{ env.VCPKG_NUGET_USER }}" `
+            -Password "${{ secrets.GITHUB_TOKEN }}"
+          & $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" `
+            -Source "${{ env.NUGET_FEED_URL }}"
+
+      - name: Build
+        env:
+          APARAVI_VERSION: ${{ needs.init.outputs.full_version }}
+        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall
+
+      - name: Package
+        if: github.event_name == 'workflow_dispatch' && inputs.release_type != ''
+        run: ${{ matrix.builder_cmd }} package --verbose
+
+      - name: Test server
+        run: ${{ matrix.builder_cmd }} server:test --verbose
+      - name: Test nodes
+        run: ${{ matrix.builder_cmd }} nodes:test --verbose
+      - name: Test python client
+        run: ${{ matrix.builder_cmd }} client-python:test --verbose
+      - name: Test client typescript
+        run: ${{ matrix.builder_cmd }} client-typescript:test --verbose
+
+      - name: Upload artifacts
+        if: github.event_name == 'workflow_dispatch' && inputs.release_type != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.platform }}
+          path: |
+            ${{ github.workspace }}/artifacts/*.zip
+            ${{ github.workspace }}/artifacts/*.tar.gz
+          if-no-files-found: ignore
+
+  release:
+    name: Publish
+    needs: [init, build]
+    if: github.event_name == 'workflow_dispatch' && inputs.release_type != ''
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create and push tag
+        run: |
+          TAG_NAME="v${{ needs.init.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG_NAME"
+          git push origin "$TAG_NAME"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'artifacts-*'
+          merge-multiple: true
+          path: release-assets
+
+      - name: Create release and upload artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.init.outputs.version }}
+          name: Release v${{ needs.init.outputs.version }}
+          generate_release_notes: true
+          draft: ${{ inputs.release_type == 'draft' }}
+          prerelease: ${{ inputs.release_type == 'prerelease' }}
+          files: |
+            release-assets/*.zip
+            release-assets/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

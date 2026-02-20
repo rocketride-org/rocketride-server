@@ -1,0 +1,47 @@
+{
+	"fields": {
+		"smb.server": {
+			"title": "Server Name or Host",
+			"description": "Defines the Server Name.\nFormat for Windows & Linux : hostname (file.core.net) OR IP Address (192.168.1.1)",
+			"type": "string",
+			"minLength": 3,
+			// Each element of the hostname must be from 1 to 63 characters long
+			// and the entire hostname, including the dots, can be at most 253
+			// characters long.
+			"maxLength": 253,
+			"readonly": true
+		},
+		"smb.username": {
+			"title": "User Name",
+			"description": "Defines the username to connect to the file share. Enter the username in the order as defined below for Windows & Linux.\nFormat must contain a domain name or computer name regardless Windows or Linux, like: domainname\\username OR computername\\username OR .\\username.",
+			"type": "string",
+			"minLength": 3,
+			"optional": true,
+			// Windows Username maximum length
+			"maxLength": 256
+		},
+		"smb.password": {
+			"title": "Password",
+			"description": "Defines the Password to connect to the file share.",
+			"type": "string",
+			"minLength": 1,
+			// Technically, the length of passwords can be a maximum of 127 characters according to Microsoft.
+			"maxLength": 127,
+			"optional": true,
+			"secure": true,
+			"ui:widget": "password"
+		},
+		"smb.storePath": {
+			"title": "Target Path",
+			"description": "Defines the SMB Target Path.\nFormat ShareName\\Path",
+			"type": "string",
+			"minLength": 1,
+			"readonly": true
+		},
+		"excludeSymlinks": {
+			"title": "Exclude symlinks",
+			"type": "boolean",
+			"default": true
+		}
+	}
+}

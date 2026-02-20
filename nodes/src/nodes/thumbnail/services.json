@@ -1,0 +1,107 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Image - Thumbnail",
+	//
+	// Required:
+	//     The protocol is the endpoint protocol
+	//
+	"protocol": "thumbnail://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"image"
+	],
+	//
+	// Required:
+	//     Capabilities are flags that change the behavior of the underlying
+	//     engine
+	//
+	"capabilities": [
+	],
+	//
+	// Optional:
+	//     The node is the actual pyhsical node to instantiate - if
+	//     not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//     The path is the executable/script code - it is node dependent
+	//     and is optional for most node
+	//
+	"path": "nodes.thumbnail",
+	//
+	// Required:
+	//     The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "Thumbnail",
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A processing component that creates thumbnails from input images. It resizes ",
+		"and optimizes images for quick previews or compact storage, preserving aspect ",
+		"ratio and visual clarity."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "thumbnail.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/4hG9Pjh",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"image": ["documents", "image"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"output": [{
+				"lane": "documents"
+			},{
+				"lane": "image"
+			}]
+		}
+	],
+	//
+	// Optional:
+	//     Local fields defintions - these define fields only for the
+	//     current service. You may specify them here, or directly
+	//     in the shape
+	//
+	"fields": {
+	},
+	//
+	// Required:
+	//     Defines the fields (shape) of the service. Either source or target
+	//     map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Thumbnail",
+			"properties": [
+			]
+		}
+	]
+}

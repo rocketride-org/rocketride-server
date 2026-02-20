@@ -1,0 +1,83 @@
+{
+	"fields": {
+		"vector.host": {
+			"type": "string",
+			"title": "Host",
+			"description": "Enter the server IP address e.g. Localhost"
+		},
+		"vector.port": {
+			"type": "number",
+			"minimum": 0,
+			"title": "Port",
+			"description": "Enter the port number"
+		},
+		"vector.cloud.host": {
+			"type": "string",
+			"title": "Host",
+			"description": "Enter the server IP address e.g. Localhost"
+		},
+		"vector.cloud.port": {
+			"type": "number",
+			"minimum": 0,
+			"title": "Port",
+			"description": "Enter the port number"
+		},
+		"vector.local.host": {
+			"type": "string",
+			"title": "Host",
+			"description": "Enter the server IP address e.g. Localhost"
+		},
+		"vector.local.port": {
+			"type": "number",
+			"minimum": 0,
+			"title": "Port",
+			"description": "Enter the port number"
+		},
+		"vector.local.grpc_port": {
+			"type": "number",
+			"minimum": 0,
+			"title": "gRPC Port",
+			"description": "Enter the port number"
+		},
+		"vector.collection": {
+			"type": "string",
+			"title": "Collection",
+			"description": "Enter the name of the collection",
+			"default": "APARAVI"
+		},
+		"vector.score": {
+			"type": "number",
+			"title": "Retrieval Score",
+			"minimum": 0,
+			"maximum": 1,
+			"description": "Minumum retrieval score",
+			"default": 0.7,
+			"enum": [
+				[0.0, "All results"],
+				[0.4, "Likely not related"],
+				[0.6, "Possibly related"],
+				[0.7, "Related"],
+				[0.8, "Strongly related"],
+				[0.9, "Highly relevant"],
+				[1.0, "Almost identical"]
+			]
+		},
+		"vector.apikey": {
+			"type": "string",
+			"title": "API key",
+			"description": "Enter your API key",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"vectorizer.embedding": {
+			"title": "Embedding",
+			"combo": "embedding"
+		},
+		"vectorizer.store": {
+			"title": "Vector Store",
+			"combo": "store"
+		}
+	}
+}

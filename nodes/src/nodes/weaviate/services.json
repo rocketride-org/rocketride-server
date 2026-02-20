@@ -1,0 +1,296 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Vector Store - Weaviate",
+	//
+	// Required:
+	//     The protocol is the endpoint protocol
+	//
+	"protocol": "weaviate://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"store"
+	],
+	//
+	// Required:
+	//     Capabilities are flags that change the behavior of the underlying
+	//     engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//     The node is the actual pyhsical node to instantiate - if
+	//     not specified, the protocol will be used
+	//
+	"node": "python", //ai
+	//
+	// Optional:
+	//     The path is the executable/script code - it is node dependent
+	//     and is optional for most node
+	//
+	"path": "nodes.weaviate",
+	//
+	// Required:
+	//     The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "Weaviate Vector Store",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A component that stores vector embeddings in a Weaviate instance ",
+		"for semantic search and retrieval. It supports structured metadata and schema ",
+		"configuration, enabling efficient storage, indexing, and querying ",
+		"of high-dimensional data. Ideal for AI pipelines involving similarity search, ",
+		"recommendation systems, and knowledge management."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "weaviate.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/4qDAEbC",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": [
+		"Host/Port: ${parameters.weaviate.${profile}.host}:${parameters.weaviate.${profile}.port}",
+		"Collection: ${parameters.weaviate.${profile}.collection}"
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"documents": [],
+		"questions": [
+			"documents",
+			"answers",
+			"questions"
+		]
+	},
+	//
+	// Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["local"],
+		"cases": [
+			{
+				"name": "Add document to store",
+				"documents": [
+					{
+						"page_content": "The capital of France is Paris.",
+						"metadata": {
+							"objectId": "test-doc-1",
+							"nodeId": "test-node",
+							"parent": "/test",
+							"chunkId": 0,
+							"isDeleted": false
+						},
+						"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+						"embedding_model": "test-model"
+					}
+				],
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "capital of France"
+					}
+				}
+			},
+			{
+				"name": "Search with question",
+				"questions": {
+					"type": "semantic",
+					"questions": [
+						{
+							"text": "What is the capital of France?",
+							"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+							"embedding_model": "test-model"
+						}
+					]
+				},
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "Paris",
+						"property": [
+							{"path": "[0].score", "greaterThanOrEqual": 0.5},
+							{"path": "[0].metadata.objectId", "equals": "test-doc-1"}
+						]
+					}
+				}
+			}
+		]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "cloud",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"local": {
+				"mode": "local",
+				"title": "Your own Weaviate server",
+				"host": "localhost",
+				"port": 8080,
+				"collection": "APARAVI"
+			},
+			"cloud": {
+				"mode": "cloud",
+				"title": "Weaviate cloud server",
+				"host": "",
+				"port": 433,
+				"apikey": "",
+				"collection": "APARAVI"
+			}
+		}
+	},
+	//
+	// Optional:
+	//     Local fields defintions - these define fields only for the
+	//     current service. You may specify them here, or directly
+	//     in the shape
+	//
+	"fields": {
+		"vector.cloud.host": {
+			"description": "Enter the server IP address e.g. <your-instance-name>.weaviate.cloud"
+		},
+		"vector.cloud.port": {
+			"default": 433
+		},
+		"vector.local.host": {
+			"default": "localhost"
+		},
+		"vector.local.port": {
+			"default": 8080
+		},
+		"vector.local.grpc_port": {
+			"default": 50051
+		},
+		"weaviate.cloud": {
+			"object": "cloud",
+			"properties": [
+				"vector.cloud.host",
+				"vector.apikey",
+				"vector.score",
+				"vector.collection"
+			]
+		},
+		"weaviate.local": {
+			"object": "local",
+			"properties": [
+				"vector.local.host",
+				"vector.local.port",
+				"vector.local.grpc_port",
+				"vector.score",
+				"vector.collection"
+			]
+		},
+		"weaviate.profile": {
+			"title": "Type of Weaviate host",
+			"description": "Connect to...",
+			"type": "string",
+			"default": "local",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "cloud",
+					"properties": [
+						"weaviate.cloud"
+					]
+				},
+				{
+					"value": "local",
+					"properties": [
+						"weaviate.local"
+					]
+				}
+			]
+		},
+		"weaviate.provider": {
+			"type": "string",
+			"const": "weaviate",
+			"default": "weaviate"
+		},
+		"weaviate.weaviate": {
+			"object": "weaviate",
+			"properties": [
+				"weaviate.profile"
+			]
+		},
+		"weaviate.store": {
+			"object": "store",
+			"title": "Store",
+			"properties": [
+				"weaviate.provider",
+				"weaviate.weaviate"
+			]
+		},
+		"weaviate.target.autopipe": {
+			"object": "parameters",
+			"title": "Parameters",
+			"properties": [
+				"remote",
+				"weaviate.store",
+				"all.embedding"
+			]
+		},
+		"weaviate.target.parameters": {
+			"object": "parameters",
+			"title": "Parameters",
+			"properties": [
+				"weaviate.target.autopipe"
+			]
+		}
+	},
+	//
+	// Required:
+	//     Defines the fields (shape) of the service. Either source or target
+	//     map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Weaviate Vector Store",
+			"properties": [
+				"weaviate.profile"
+			]
+		},
+		{
+			"section": "Transform",
+			"title": "Weaviate",
+			"properties": [
+				"type",
+				"weaviate.target.parameters",
+				"target.mode"
+			]
+		}
+	]
+}

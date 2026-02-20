@@ -1,0 +1,7 @@
+# Requirements for TrOCR loader (detection + recognition)
+# Direct imports only
+# opencv is handled by ai.common.opencv module
+
+transformers
+craft-text-detector
+Pillow

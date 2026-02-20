@@ -1,0 +1,16 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"module": "commonjs",
+		"outDir": "./dist/cli",
+		"declaration": false,
+		"declarationMap": false,
+		"sourceMap": true,
+		"noUnusedLocals": false
+	},
+	"include": [
+		"./src/cli/**/*",
+		"./src/client/**/*"
+	]
+}
+

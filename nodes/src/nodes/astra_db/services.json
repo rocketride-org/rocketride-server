@@ -1,0 +1,268 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Vector Store - Astra DB",
+	//
+	// Required:
+	//     The protocol is the endpoint protocol
+	//
+	"protocol": "astra_db://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"store"
+	],
+	//
+	// Required:
+	//     Capabilities are flags that change the behavior of the underlying
+	//     engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//     The node is the actual pyhsical node to instantiate - if
+	//     not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//     The path is the executable/script code - it is node dependent
+	//     and is optional for most node
+	//
+	"path": "nodes.astra_db",
+	//
+	// Required:
+	//     The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "Astra DB Vector Store",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A vector database component for Astra DB, enabling efficient storage and ", 
+		"retrieval of vector embeddings. It supports similarity search, filtering, ",
+		"and management of vector data with high performance and advanced matching capabilities."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "astra_db.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": " ",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	"tile": [
+		"Mode : ${parameters.astra_db.profile}",
+		"Collection: ${parameters.astra_db.${profile}.collection}"
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"documents": [],
+		"questions": ["documents", "answers", "questions"]
+	},
+	"input": [
+		{
+			"lane": "documents",
+			"description": [
+				"Stores the documents into the vector database. The documents must be ",
+				"run through an embedding model prior to this step to compute the vectors."
+			],
+			"output": []
+		},
+		{
+			"lane": "questions",
+			"description": "Searchs the database for documents most similar to the given questions.",
+			"output": [
+				{
+					"lane": "documents",
+					"description": [
+						"Produces documents that are most similar to the given question."
+					],
+					"output": []
+				},
+				{
+					"lane": "answers",
+					"description": [
+						"Produces an answer with the documents that are most similar ",
+						"to the given question."
+					],
+					"output": []
+				},
+				{
+					"lane": "questions",
+					"description": [
+						"Updates the question with documents most similar to the ",
+						"question and sets up a filter so piping this to another store ",
+						"driver will limit its answers to the given subset of documents."
+					],
+					"output": []
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	//
+	// Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["local"],
+		"cases": [
+			{
+				"name": "Add document to store",
+				"documents": [
+					{
+						"page_content": "The capital of France is Paris.",
+						"metadata": {
+							"objectId": "test-doc-1",
+							"nodeId": "test-node",
+							"parent": "/test",
+							"chunkId": 0,
+							"isDeleted": false
+						},
+						"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+						"embedding_model": "test-model"
+					}
+				],
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "capital of France"
+					}
+				}
+			},
+			{
+				"name": "Search with question",
+				"questions": {
+					"type": "semantic",
+					"questions": [
+						{
+							"text": "What is the capital of France?",
+							"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+							"embedding_model": "test-model"
+						}
+					]
+				},
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "Paris",
+						"property": [
+							{"path": "[0].score", "greaterThan": 0.5},
+							{"path": "[0].metadata.objectId", "equals": "test-doc-1"}
+						]
+					}
+				}
+			}
+		]
+	},
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "cloud",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"local": {
+				"mode": "local",
+				"title": "Local test server",
+				"api_endpoint": "http://localhost:8080",
+				"application_token": "test-token",
+				"collection": "APARAVI"
+			},
+			"cloud": {
+				"mode": "cloud",
+				"title": "Astra DB cloud server",
+				"api_endpoint": "",
+                "application_token": "",
+                "collection": "APARAVI"
+			}
+		}
+	},
+	//
+	// Optional:
+	//     Local fields defintions - these define fields only for the
+	//     current service. You may specify them here, or directly
+	//     in the shape
+	//
+	"fields": {
+		"astra_db.api_endpoint": {
+			"type": "string",
+			"title": "API Endpoint",
+			"description": "Enter the server API endpoint e.g. <instance-name>.<region>.apps.astra.datastax.com"
+		},
+		"astra_db.application_token": {
+			"type": "string",
+			"title": "Application Token",
+			"description": "Enter the server API application token"
+		},
+		"astra_db.provider": {
+			"type": "string",
+			"const": "astra_db",
+			"default": "astra_db"
+		},
+		"astra_db.target.autopipe": {
+			"object": "parameters",
+			"properties": [
+				"remote",
+				"astra_db.provider",
+				"all.embedding"
+			]
+		},
+		"astra_db.target.parameters": {
+			"object": "parameters",
+			"properties": [
+				"astra_db.target.autopipe"
+			]
+		}
+	},
+	//
+	// Required:
+	//     Defines the fields (shape) of the service. Either source or target
+	//     map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Astra DB Vector Store",
+			"properties": [
+				"astra_db.api_endpoint",
+				"astra_db.application_token",
+				"vector.score",
+				"vector.collection"
+			]
+		},
+		{
+			"section": "Transform",
+			"title": "Astra DB",
+			"properties": [
+				"type",
+				"astra_db.target.parameters",
+				"target.mode"
+			]
+		}
+	]
+}

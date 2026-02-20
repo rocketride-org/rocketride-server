@@ -1,0 +1,8 @@
+grpcio
+grpcio-tools
+portalocker
+pydantic
+urllib3
+httpx
+qdrant_client
+numpy

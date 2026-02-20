@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 
+	=========================================================================
+	These DefaultParser and TesseractOCR parser are updated depending on 
+	where tesseract/magick are available other values and settings can be 
+	added/updated as needed
+	=========================================================================
+-->
+<properties>
+	<parsers>
+		<parser class="org.apache.tika.parser.DefaultParser">
+			<parser-exclude class="org.apache.tika.parser.ocr.TesseractOCRParser"/>
+			<parser-exclude class="org.apache.tika.parser.microsoft.ooxml.OOXMLParser"/>
+			<parser-exclude class="org.apache.tika.parser.microsoft.OfficeParser"/>
+			<parser-exclude class="org.apache.tika.parser.gdal.GDALParser"/>
+		</parser>
+		<parser class="org.apache.tika.parser.microsoft.ooxml.OOXMLParser">
+			<params>
+				<param name="extractMacros" type="bool">true</param>
+			</params>
+		</parser>
+		<parser class="org.apache.tika.parser.microsoft.OfficeParser">
+			<params>
+				<param name="extractMacros" type="bool">true</param>
+			</params>
+		</parser>
+		<parser class="org.apache.tika.parser.pdf.PDFParser">
+			<params>
+				<param name="sortByPosition" type="bool">true</param>
+				<param name="extractAcroFormContent" type="bool">true</param>
+				<param name="extractAnnotationText" type="bool">true</param>
+				<param name="extractBookmarksText" type="bool">true</param>
+			</params>
+		</parser>
+		<!-- 
+			Uncomment below <parser> block to enable GDALParser, excludes
+			should be added in order to prevent the parser to be used instead 
+			of the OCRParser or other Parser with overlapping media type, 
+			as it seems to have higher presedence over other parsers as explained 
+			here: https://issues.apache.org/jira/browse/TIKA-3812 -->
+		<!--<parser class="org.apache.tika.parser.gdal.GDALParser">
+			<mime-exclude>image/jpeg</mime-exclude>
+			<mime-exclude>image/png</mime-exclude>
+			<mime-exclude>image/jp2</mime-exclude>
+			<mime-exclude>image/gif</mime-exclude>
+		</parser>-->
+	</parsers>
+	<languages>
+		<param name="languages" type="string">eng+fra+ita+deu+spa+rus</param>
+	</languages>
+</properties>

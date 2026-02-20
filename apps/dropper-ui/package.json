@@ -1,0 +1,43 @@
+{
+	"name": "@rocketride/dropper-ui",
+	"version": "2.0.0",
+	"description": "RocketRide AI Dropper Interface",
+	"private": true,
+	"scripts": {},
+	"copylist": {
+		"dist/*": "dist"
+	},
+	"dependencies": {
+		"rocketride": "workspace:*",
+		"@textea/json-viewer": "^4.0.1",
+		"@types/ws": "^8.18.1",
+		"lucide-react": "^0.540.0",
+		"react": "^18.2.0",
+		"react-dom": "^18.2.0",
+		"react-markdown": "^10.1.0",
+		"react-syntax-highlighter": "^15.6.6",
+		"recharts": "^2.8.0",
+		"rehype-raw": "^7.0.0",
+		"remark-gfm": "^4.0.1",
+		"web-vitals": "^5.1.0",
+		"ws": "^8.18.3"
+	},
+	"devDependencies": {
+		"@rsbuild/core": "^0.4.0",
+		"@rsbuild/plugin-react": "^0.4.0",
+		"@rsbuild/plugin-type-check": "^0.4.0",
+		"@tailwindcss/aspect-ratio": "^0.4.2",
+		"@tailwindcss/forms": "^0.5.10",
+		"@tailwindcss/typography": "^0.5.16",
+		"@types/react": "^18.2.43",
+		"@types/react-dom": "^18.2.17",
+		"@types/react-syntax-highlighter": "^15.5.13",
+		"@types/ws": "^8.18.1",
+		"autoprefixer": "^10.4.16",
+		"concurrently": "^8.2.2",
+		"postcss": "^8.4.32",
+		"rimraf": "^5.0.5",
+		"tailwindcss": "^3.3.6",
+		"typescript": "^5.2.2"
+	}
+}

@@ -1,0 +1,126 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Audio - Player",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "audio_player://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"audio"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"nosaas"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if 
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.audio_player",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "audio_player",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"description": [
+		"The Audio Player component plays audio through the system’s default audio",
+		"output device, including the audio track from video content. It supports",
+		"a variety of common audio formats and delivers clear, consistent playback",
+		"for speech, music, or sound effects."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "audio-player.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/4lMXevQ",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"audio": [],
+		"video": []
+	},
+	"input": [
+		{
+			"lane": "audio",
+			"description": "Audio input",
+			"output": []
+		},
+		{
+			"lane": "video",
+			"description": "Video input",
+			"output": []
+		}
+	],
+	//
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "default",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"default": {}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Audio Player",
+			"properties": []
+		}
+	]
+}

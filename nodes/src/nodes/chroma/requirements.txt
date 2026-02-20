@@ -1,0 +1,2 @@
+# ChromaDB HTTP client only (not the full embedded database)
+chromadb-client

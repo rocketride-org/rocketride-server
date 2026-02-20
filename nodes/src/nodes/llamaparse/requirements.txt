@@ -1,0 +1,3 @@
+llama-parse
+llama-index-core
+llama-cloud

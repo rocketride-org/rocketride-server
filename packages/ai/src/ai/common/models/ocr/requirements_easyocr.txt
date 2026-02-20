@@ -1,0 +1,5 @@
+# Requirements for EasyOCR loader
+# Direct imports only
+# opencv is handled by ai.common.opencv module
+
+easyocr

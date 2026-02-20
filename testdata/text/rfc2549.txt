@@ -1,0 +1,339 @@
+
+
+
+
+
+
+Network Working Group                                    D. Waitzman
+Request for Comments: 2549                       IronBridge Networks
+Updates: 1149                                           1 April 1999
+Category: Experimental
+
+
+             IP over Avian Carriers with Quality of Service
+
+Status of this Memo
+
+   This memo defines an Experimental Protocol for the Internet
+   community.  It does not specify an Internet standard of any kind.
+   Discussion and suggestions for improvement are requested.
+   Distribution of this memo is unlimited.
+
+Copyright Notice
+
+   Copyright (C) The Internet Society (1999).  All Rights Reserved.
+
+Abstract
+
+   This memo amends RFC 1149, "A Standard for the Transmission of IP
+   Datagrams on Avian Carriers", with Quality of Service information.
+   This is an experimental, not recommended standard.
+
+Overview and Rational
+
+   The following quality of service levels are available: Concorde,
+   First, Business, and Coach.  Concorde class offers expedited data
+   delivery.  One major benefit to using Avian Carriers is that this is
+   the only networking technology that earns frequent flyer miles, plus
+   the Concorde and First classes of service earn 50% bonus miles per
+   packet.  Ostriches are an alternate carrier that have much greater
+   bulk transfer capability but provide slower delivery, and require the
+   use of bridges between domains.
+
+   The service level is indicated on a per-carrier basis by bar-code
+   markings on the wing.  One implementation strategy is for a bar-code
+   reader to scan each carrier as it enters the router and then enqueue
+   it in the proper queue, gated to prevent exit until the proper time.
+   The carriers may sleep while enqueued.
+
+   For secure networks, carriers may have classes Prime or Choice.
+   Prime carriers are self-keying when using public key encryption.
+   Some distributors have been known to falsely classify Choice carriers
+   as Prime.
+
+   Packets MAY be marked for deletion using RED paint while enqueued.
+
+
+
+Waitzman                      Experimental                      [Page 1]
+
+RFC 2549            IP over Avian Carriers with QoS         1 April 1999
+
+
+   Weighted fair queueing (WFQ) MAY be implemented using scales, as
+   shown:
+
+                                                  __
+                                  _____/-----\   / o\
+                                 <____   _____\_/    >--
+                 +-----+              \ /    /______/
+                 | 10g |               /|:||/
+                 +-----+              /____/|
+                 | 10g |                    |
+                 +-----+          ..        X
+               ===============================
+                              ^
+                              |
+                          =========
+
+   Carriers in the queue too long may leave log entries, as shown on the
+   scale.
+
+   The following is a plot of traffic shaping, from coop-erative host
+   sites.
+
+
+        Alt |       Plot of Traffic Shaping showing carriers in flight
+            |
+         2k |           ....................
+            |          .                    .
+            |         .                      .
+         1k |        .                        .
+            |   +---+                          +---+
+            |   | A |                          | B |
+            |   +---+                          +---+
+            |_____________________________________________
+
+
+   Avian carriers normally bypass bridges and tunnels but will seek out
+   worm hole tunnels.  When carrying web traffic, the carriers may
+   digest the spiders, leaving behind a more compact representation.
+   The carriers may be confused by mirrors.
+
+   Round-robin queueing is not recommended.  Robins make for well-tuned
+   networks but do not support the necessary auto-homing feature.
+
+   A BOF was held at the last IETF but only Avian Carriers were allowed
+   entry, so we don't know the results other than we're sure they think
+   MPLS is great.  Our attempts at attaching labels to the carriers have
+   been met with resistance.
+
+
+
+
+Waitzman                      Experimental                      [Page 2]
+
+RFC 2549            IP over Avian Carriers with QoS         1 April 1999
+
+
+   NATs are not recommended either -- as with many protocols, modifying
+   the brain-embedded IP addresses is difficult, plus Avian Carriers MAY
+   eat the NATs.
+
+   Encapsulation may be done with saran wrappers.  Unintentional
+   encapsulation in hawks has been known to occur, with decapsulation
+   being messy and the packets mangled.
+
+   Loose source routes are a viable evolutionary alternative enhanced
+   standards-based MSWindows-compliant technology, but strict source
+   routes MUST NOT be used, as they are a choke-point.
+
+   The ITU has offered the IETF formal alignment with its corresponding
+   technology, Penguins, but that won't fly.
+
+   Multicasting is supported, but requires the implementation of a clone
+   device.  Carriers may be lost if they are based on a tree as it is
+   being pruned.  The carriers propagate via an inheritance tree.  The
+   carriers have an average TTL of 15 years, so their use in expanding
+   ring searches is limited.
+
+   Additional quality of service discussion can be found in a Michelin's
+   guide.
+
+MIB and Management issues
+
+   AvCarrier2 OBJECT-TYPE
+     SYNTAX     SEQUENCE OF DNA
+     MAX-ACCESS can't-read
+     STATUS     living
+     DESCRIPTION "Definition of an avian carrier"
+     ::= { life eukaryotes mitochondrial_eukaryotes crown_eukaryotes
+           metazoa chordata craniata vertebrata gnathostomata
+           sarcopterygii terrestrial_vertebrates amniota diapsida
+           archosauromorpha archosauria dinosauria aves neornithes
+           columbiformes columbidae columba livia }
+
+   AvCarrier OBJECT-TYPE
+     SYNTAX     SET OF Cells
+     MAX-ACCESS not-accessible
+     STATUS     obsolete
+     DESCRIPTION "Definition of an avian carrier"
+     ::= { life animalia chordata vertebrata aves
+           columbiformes columbidae columba livia }
+
+   PulseRate OBJECT-TYPE
+     SYNTAX     Gauge(0..300)
+     MAX-ACCESS read-only
+
+
+
+Waitzman                      Experimental                      [Page 3]
+
+RFC 2549            IP over Avian Carriers with QoS         1 April 1999
+
+
+     STATUS     current
+     DESCRIPTION "Pulse rate of carrier, as measured in neck.
+                  Frequent sampling is disruptive to operations."
+     ::= { AvCarrier 1}
+
+   The carriers will not line up in lexigraphic order but will
+   naturally order in a large V shape.  Bulk retrieval is possible
+   using the Powerful Get-Net operator.
+
+Specification of Requirements
+
+   In this document, several words are used to signify the requirements
+   of the specification.  These words are often capitalized.
+
+   MUST      Usually.
+
+   MUST NOT  Usually not.
+
+   SHOULD    Only when Marketing insists.
+
+   MAY       Only if it doesn't cost extra.
+
+Security Considerations
+
+   There are privacy issues with stool pigeons.
+
+   Agoraphobic carriers are very insecure in operation.
+
+Patent Considerations
+
+   There is ongoing litigation about which is the prior art: carrier or
+   egg.
+
+References
+
+   Waitzman, D., "A Standard for the Transmission of IP Datagrams on
+   Avian Carriers", RFC 1149, 1 April 1990.
+
+ACKnowledgments
+
+   Jim.Carlson.Ibnets.com > Jon.Saperia . ack 32 win 123 (DF)
+   Ross Callon, Scott Bradner, Charlie Lynn ...
+
+
+
+
+
+
+
+
+
+Waitzman                      Experimental                      [Page 4]
+
+RFC 2549            IP over Avian Carriers with QoS         1 April 1999
+
+
+Author's Address
+
+   David Waitzman
+   IronBridge Networks
+   55 Hayden Ave
+   Lexington, MA 02421
+   Phone: (781) 372-8161
+
+   EMail: djw@vineyard.net
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Waitzman                      Experimental                      [Page 5]
+
+RFC 2549            IP over Avian Carriers with QoS         1 April 1999
+
+
+Full Copyright Statement
+
+   Copyright (C) The Internet Society (1999).  All Rights Reserved.
+
+   This document and translations of it may be copied and furnished to
+   others, and derivative works that comment on or otherwise explain it
+   or assist in its implementation may be prepared, copied, published
+   and distributed, in whole or in part, without restriction of any
+   kind, provided that the above copyright notice and this paragraph are
+   included on all such copies and derivative works.  However, this
+   document itself may not be modified in any way, such as by removing
+   the copyright notice or references to the Internet Society or other
+   Internet organizations, except as needed for the purpose of
+   developing Internet standards in which case the procedures for
+   copyrights defined in the Internet Standards process must be
+   followed, or as required to translate it into languages other than
+   English.
+
+   The limited permissions granted above are perpetual and will not be
+   revoked by the Internet Society or its successors or assigns.
+
+   This document and the information contained herein is provided on an
+   "AS IS" basis and THE INTERNET SOCIETY AND THE INTERNET ENGINEERING
+   TASK FORCE DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING
+   BUT NOT LIMITED TO ANY WARRANTY THAT THE USE OF THE INFORMATION
+   HEREIN WILL NOT INFRINGE ANY RIGHTS OR ANY IMPLIED WARRANTIES OF
+   MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Waitzman                      Experimental                      [Page 6]
+

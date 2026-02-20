@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<document>
+	<!--This is a comment that should not be parsed as element text-->
+	<linefeed-test>This has
+	a linefeed</linefeed-test><no-linefeed-test>This has no preceding whitespace</no-linefeed-test>
+	<base-test>This is just some text</base-test>
+	<cdata-test><![CDATA[This has <, >, &, and
+a linefeed]]></cdata-test>
+	<predefined-entity-test>This has &lt;, &gt;, and &amp;</predefined-entity-test>
+	<unicode-entity-test>These are all delta: &#916; &#x0394; &#x394;</unicode-entity-test>
+	<whitespace-test>This   has non-   collapsed white	  space</whitespace-test>
+</document>

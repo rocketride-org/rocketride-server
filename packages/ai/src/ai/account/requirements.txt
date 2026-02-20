@@ -1,0 +1,13 @@
+# Core dependencies for Store
+aiofiles
+
+# Retry logic for cloud operations
+tenacity
+
+# Cloud storage backends
+# AWS S3 support
+boto3
+
+# Azure Blob Storage support
+azure-storage-blob
+azure-identity

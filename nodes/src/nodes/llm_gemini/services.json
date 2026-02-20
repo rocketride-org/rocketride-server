@@ -1,0 +1,353 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "LLM - Gemini",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "llm_gemini://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"llm"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"invoke"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if 
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.llm_gemini",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "llm",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A component that connects to Gemini models for advanced natural language ",
+		"processing. It supports tasks such as text generation, summarization, question ",
+		"answering, and chat-based interactions. With access to state-of-the-art language ",
+		"models like Gemini-2.0-pro, this component enables high-quality, context-aware responses and ",
+		"creative text generation. Configurable with API keys and deployment options, it allows ",
+		"seamless integration into AI-driven workflows with scalable performance."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "gemini.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/4oLbC8P",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": [
+		"Model: ${parameters.llm_gemini.profile}"
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": [
+			"answers"
+		]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [
+				{
+					"lane": "answers"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+		"preconfig": {
+			"default": "gemini-2_5-flash",
+			"profiles": {
+				"custom": {
+					"model": "",
+					"modelTotalTokens": 1114112,
+					"outputTokens": 65536,
+					"apikey": ""
+				},
+				"gemini-3-pro": {
+					"model": "models/gemini-3-pro-preview",
+					"title": "Gemini 3 Pro",
+					"modelTotalTokens": 1114112,
+					"outputTokens": 65536,
+					"apikey": ""
+				},
+				"gemini-3-pro-image": {
+					"model": "models/gemini-3-pro-image-preview",
+					"title": "Gemini 3 Pro Image",
+					"modelTotalTokens": 98304,
+					"outputTokens": 32768,
+					"apikey": ""
+				},
+				"gemini-2_5-pro": {
+					"model": "models/gemini-2.5-pro",
+					"title": "Gemini 2.5 Pro",
+					"modelTotalTokens": 1114112,
+					"outputTokens": 65536,
+					"apikey": ""
+				},
+				"gemini-2_5-flash": {
+					"model": "models/gemini-2.5-flash",
+					"title": "Gemini 2.5 Flash",
+					"modelTotalTokens": 1114112,
+					"outputTokens": 65536,
+					"apikey": ""
+				},
+				"gemini-2_5-flash-lite": {
+					"model": "models/gemini-2.5-flash-lite",
+					"title": "Gemini 2.5 Flash Lite",
+					"modelTotalTokens": 1114112,
+					"outputTokens": 65536,
+					"apikey": ""
+				},
+				"gemini-2_5-flash-image": {
+					"model": "models/gemini-2.5-flash-image",
+					"title": "Gemini 2.5 Flash Image",
+					"modelTotalTokens": 98304,
+					"outputTokens": 32768,
+					"apikey": ""
+				},
+				"gemini-2_0-flash": {
+					"model": "models/gemini-2.0-flash",
+					"title": "Gemini 2.0 Flash",
+					"modelTotalTokens": 1056768,
+					"outputTokens": 8192,
+					"apikey": ""
+				},
+				"gemini-2_0-flash-lite": {
+					"model": "models/gemini-2.0-flash-lite",
+					"title": "Gemini 2.0 Flash Lite",
+					"modelTotalTokens": 1056768,
+					"outputTokens": 8192,
+					"apikey": ""
+				}
+			}
+		},
+
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"gemini.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Gemini model"
+		},
+		"gemini.modelTotalTokens": {
+			"type": "number",
+			"title": "Total Tokens",
+			"description": "Maximum number of input + output tokens"
+		},
+		"gemini.outputTokens": {
+			"type": "number",
+			"title": "Output Tokens",
+			"description": "Maximum number of output tokens"
+		},
+		"gemini.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Google AI Developer API key",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"gemini.gemini-3-pro": {
+			"object": "gemini-3-pro",
+			"properties": [
+			"gemini.apikey"
+			]
+		},
+		"gemini.gemini-3-pro-image": {
+			"object": "gemini-3-pro-image",
+			"properties": [
+			"gemini.apikey"
+			]
+		},
+		"gemini.gemini-2_5-pro": {
+			"object": "gemini-2_5-pro",
+			"properties": [
+			"gemini.apikey"
+			]
+		},
+		"gemini.gemini-2_5-flash": {
+			"object": "gemini-2_5-flash",
+			"properties": [
+			"gemini.apikey"
+			]
+		},
+		"gemini.gemini-2_5-flash-lite": {
+			"object": "gemini-2_5-flash-lite",
+			"properties": [
+			"gemini.apikey"
+			]
+		},
+		"gemini.gemini-2_5-flash-image": {
+			"object": "gemini-2_5-flash-image",
+			"properties": [
+			"gemini.apikey"
+			]
+		},
+		"gemini.gemini-2_0-flash": {
+			"object": "gemini-2_0-flash",
+			"properties": [
+			"gemini.apikey"
+			]
+		},
+		"gemini.gemini-2_0-flash-lite": {
+			"object": "gemini-2_0-flash-lite",
+			"properties": [
+			"gemini.apikey"
+			]
+		},
+		"gemini.gemini-2_5-pro-preview": {
+			"object": "gemini-2_5-pro-preview",
+			"properties": [
+			"gemini.apikey"
+			]
+		},
+		"gemini.custom": {
+			"object": "custom",
+			"properties": [
+			"gemini.model",
+			"gemini.modelTotalTokens",
+			"gemini.outputTokens",
+			"gemini.apikey"
+			]
+		},
+		"gemini.profile": {
+			"title": "Model",
+			"description": "Gemini LLM model",
+			"type": "string",
+			"default": "gemini-2_5-flash",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+			{
+				"value": "custom",
+				"properties": [
+				"gemini.custom"
+				]
+			},
+			{
+				"value": "gemini-3-pro",
+				"properties": [
+				"gemini.gemini-3-pro"
+				]
+			},
+			{
+				"value": "gemini-3-pro-image",
+				"properties": [
+				"gemini.gemini-3-pro-image"
+				]
+			},
+			{
+				"value": "gemini-2_5-pro",
+				"properties": [
+				"gemini.gemini-2_5-pro"
+				]
+			},
+			{
+				"value": "gemini-2_5-flash",
+				"properties": [
+				"gemini.gemini-2_5-flash"
+				]
+			},
+			{
+				"value": "gemini-2_5-flash-lite",
+				"properties": [
+				"gemini.gemini-2_5-flash-lite"
+				]
+			},
+			{
+				"value": "gemini-2_5-flash-image",
+				"properties": [
+				"gemini.gemini-2_5-flash-image"
+				]
+			},
+			{
+				"value": "gemini-2_0-flash",
+				"properties": [
+				"gemini.gemini-2_0-flash"
+				]
+			},
+			{
+				"value": "gemini-2_0-flash-lite",
+				"properties": [
+				"gemini.gemini-2_0-flash-lite"
+				]
+			},
+			{
+				"value": "gemini-2_5-pro-preview",
+				"properties": [
+				"gemini.gemini-2_5-pro-preview"
+				]
+			}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "LLM - Gemini",
+			"properties": [
+				"gemini.profile"
+			]
+		}
+	]
+}

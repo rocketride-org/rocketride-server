@@ -1,0 +1,269 @@
+{
+	"title": "OpenSearch",
+	"protocol": "opensearch://",
+	"classType": [
+		"store"
+	],
+	"capabilities": [],
+	"register": "filter",
+	"connector": "python",
+	"path": "connectors.index_search",
+	"preconfig": {
+		"default": "local",
+		"profiles": {
+			"local": {
+				"mode": "local",
+				"title": "Local OpenSearch",
+				"provider": "opensearch"
+			}
+		}
+	},
+	"prefix": "OpenSearch Index",
+	"description": [
+		"An OpenSearch connector that supports classic BM25 search and vector search ",
+		"for ingestion and retrieval workflows. Works with self-managed OpenSearch."
+	],
+	"icon": "opensearch.svg",
+	"documentation": "https://opensearch.org/docs/latest/",
+	"tile": [
+		"Host: ${parameters.opensearch.host}"
+	],
+	"lanes": {
+		"text": [],
+		"documents": [],
+		"questions": [
+			"text",
+			"answers",
+			"documents"
+		]
+	},
+	"input": [
+		{
+			"lane": "text",
+			"description": [
+				"Store text into the OpenSearch index. "
+			],
+			"output": []
+		},
+		{
+			"lane": "documents",
+			"description": [
+				"Ingest documents (embeddings) into the OpenSearch vector store."
+			],
+			"output": []
+		},
+		{
+			"lane": "questions",
+			"description": "Searches the index for the best matching documents (text or vector).",
+			"output": [
+				{
+					"lane": "text",
+					"description": [
+						"Produces text that is most similar to the given question."
+					],
+					"output": []
+				},
+				{
+					"lane": "answers",
+					"description": [
+						"Produces an answer with the documents that are most similar ",
+						"to the given question."
+					],
+					"output": []
+				},
+				{
+					"lane": "documents",
+					"description": [
+						"Produces documents that contain the given question, the document id, and the retrieved text, when using index mode."
+					],
+					"output": []
+				}
+			]
+		}
+	],
+	"fields": {
+		"opensearch.host": {
+			"title": "Host",
+			"type": "string",
+			"description": "Localhost URL for OpenSearch.",
+			"default": "http://localhost:9200"
+		},
+		"opensearch.auth.enabled": {
+			"title": "Use basic auth",
+			"type": "boolean",
+			"default": true,
+			"description": "Enable basic authentication when connecting.",
+			"conditional": [
+				{
+					"value": true,
+					"properties": [
+						"opensearch.auth.username",
+						"opensearch.auth.password"
+					]
+				}
+			]
+		},
+		"opensearch.auth.username": {
+			"title": "Username",
+			"type": "string",
+			"default": "admin"
+		},
+		"opensearch.auth.password": {
+			"title": "Password",
+			"type": "string",
+			"default": "",
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"opensearch.collection": {
+			"title": "Collection",
+			"type": "string",
+			"description": "The name of the collection to use for the OpenSearch index. Only lowercase letters, numbers, and underscores are allowed.",
+			"default": "aparavi"
+		},		
+		"opensearch.mode": {
+			"title": "Store Mode",
+			"type": "boolean",
+			"default": false,
+			"description": "Toggle between index and vector store.",
+			"conditional": [
+				{
+					"value": false,
+					"properties": [
+						"opensearch.index_label",
+						"opensearch.search"
+					]
+				},
+				{
+					"value": true,
+					"properties": [
+						"opensearch.vstore_label",
+						"opensearch.dim",
+						"opensearch.score"
+					]
+				}
+			]
+		},
+		"opensearch.search": {
+			"title": "Customize Indexing Search Behavior",
+			"type": "boolean",
+			"default": false,
+			"description": "Customize the search behavior of the index. This option does not affect the ingestion and creation of the index. You can switch between behaviors when searching between pipeline runs.",
+			"conditional": [
+				{
+					"value": true,
+					"properties": [
+						"opensearch.matchOperator",
+						"opensearch.search.highlight"
+					]
+				}
+			]
+		},
+		"opensearch.matchOperator": {
+			"type": "string",
+			"title": "Match Operator",
+			"description": [
+				"Controls how multiple query terms are matched: ",
+				"'or' (default) matches documents containing ANY of the query terms, ",
+				"'and' matches documents containing ALL of the query terms, ",
+				"'exact' requires the exact phrase to appear in order (phrase matching)."
+			],
+			"default": "or",
+			"enum": [
+				"and",
+				"or",
+				"exact"
+			],
+			"conditional": [
+				{
+					"value": "exact",
+					"properties": [
+						"opensearch.search.exact.slop"
+					]
+				}
+			]
+		},
+		"opensearch.search.exact.slop": {
+			"title": "Slop",
+			"type": "number",
+			"default": 0,
+			"description": "The number of words to allow between terms when exact phrase search is enabled."
+		},
+		"opensearch.search.highlight": {
+			"title": "Return contextual snippets",
+			"type": "boolean",
+			"default": false,
+			"description": "Use the unified highlighter to return snippets around matches.",
+			"conditional": [
+				{
+					"value": true,
+					"properties": [
+						"opensearch.search.highlight.fragment_size"
+					]
+				}
+			]
+		},
+		"opensearch.search.highlight.fragment_size": {
+			"title": "Snippet size (characters)",
+			"type": "number",
+			"default": 250,
+			"description": "Maximum characters in the returned highlight snippet (context window) per hit."
+		},
+		"opensearch.score": {
+			"title": "Retrieval Score",
+			"type": "number",
+			"description": "Minimum retrieval score for vector stores",
+			"default": 0.5,
+			"minimum": 0,
+			"maximum": 1,
+			"enum": [
+				[0.0, "All results"],
+				[0.4, "Likely not related"],
+				[0.6, "Possibly related"],
+				[0.7, "Related"],
+				[0.8, "Strongly related"],
+				[0.9, "Highly relevant"],
+				[1.0, "Almost identical"]
+			]
+		},
+		"opensearch.dim": {
+			"title": "Embedding Dimension",
+			"type": "integer",
+			"default": 768,
+			"minimum": 1,
+			"description": "Required in vector store mode; dimension of embedding vectors."
+		},
+		"opensearch.index_label": {
+			"title": "Index Mode",
+			"type": "object"
+		},
+		"opensearch.vstore_label": {
+			"title": "Vector Store Mode",
+			"type": "object"
+		},
+		"opensearch.provider": {
+			"type": "string",
+			"const": "opensearch",
+			"default": "opensearch"
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "OpenSearch Index/Vector",
+			"properties": [
+				"opensearch.host",
+				"opensearch.collection",
+				"opensearch.auth.enabled",
+				"opensearch.mode"
+			]
+		}
+	],
+	"required": [
+		"opensearch.host",
+		"opensearch.collection",
+		"opensearch.mode"
+	]
+}
+

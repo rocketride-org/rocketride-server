@@ -1,0 +1,71 @@
+// =============================================================================
+// MIT License
+// Copyright (c) 2026 RocketRide, Inc.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+// =============================================================================
+
+#include <engLib/eng.h>
+
+namespace engine::store::filter::outlook {
+using namespace utility;
+
+//-------------------------------------------------------------------------
+/// @details
+///		Checks if the object has changed.
+///     NOTE: Emails can change, the modify time will change.
+///	@param[inout] object
+///		The entry to update
+///	@returns
+///		Error
+//-------------------------------------------------------------------------
+Error IFilterInstance::checkChanged(Entry &object) noexcept {
+    if (auto ccode = getClient()) {
+        object.completionCode(ccode);
+        return {};
+    }
+    auto fullPath = object.url().path();
+    // path is /username/path
+    Text userName = fullPath.at(USERNAME_POS);
+    auto objectDetails = m_msEmailNode->getMetaData(userName, object.name());
+    if (!objectDetails.hasValue()) return {};
+    auto objectValue = objectDetails.value();
+    if (object.createTime() != objectValue.createTime()) {
+        object.createTime.set(objectValue.createTime.get());
+        object.changed.set(true);
+    }
+    if (object.accessTime() != objectValue.accessTime()) {
+        object.accessTime.set(objectValue.accessTime.get());
+    }
+    if (object.modifyTime() != objectValue.modifyTime()) {
+        object.modifyTime.set(objectValue.modifyTime.get());
+        object.changed.set(true);
+    }
+    if (object.size() != objectValue.size()) {
+        object.size.set(objectValue.size.get());
+        object.changed.set(true);
+    }
+    if (object.storeSize() != objectValue.storeSize()) {
+        object.storeSize.set(objectValue.storeSize.get());
+        object.changed.set(true);
+    }
+    return {};
+}
+
+};  // namespace engine::store::filter::outlook

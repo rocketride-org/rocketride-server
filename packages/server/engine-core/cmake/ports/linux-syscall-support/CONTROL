@@ -1,0 +1,4 @@
+Source: linux-syscall-support
+Version: 2022-10-12
+Homepage: https://chromium.googlesource.com/linux-syscall-support/
+Description: This project provides a header file that can be included into your application whenever you need to make direct system calls.

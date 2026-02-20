@@ -1,0 +1,4 @@
+# 
+# Install Schema module
+#
+pillow

@@ -1,0 +1,344 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "NER - Named Entity Recognition",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "ner://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"text"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"gpu"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if 
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.ner",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "ner",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A text processing component that identifies and extracts named entities from text using ",
+		"state-of-the-art transformer models. It can detect and classify entities such as persons, ",
+		"organizations, locations, dates, and more. The extracted entities are added to document ",
+		"metadata for enhanced search, filtering, and analysis capabilities.</br>",
+		"</br>",
+		"The component supports multiple pre-trained models optimized for different languages and ",
+		"use cases, from general-purpose entity recognition to specialized domains."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "util-text.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://huggingface.co/models?pipeline_tag=token-classification",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"text": [
+			"text"
+		],
+		"documents": [
+			"documents"
+		]
+	},
+	"input": [
+		{
+			"lane": "text",
+			"description": "Text to extract entities from",
+			"output": [
+				{
+					"lane": "text",
+					"description": "Original text (passed through)"
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Documents to extract entities from",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Documents with entity metadata"
+				}
+			]
+		}
+	],
+	//
+	//	Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["distilbert"],
+		"cases": [
+			{
+				"text": "Barack Obama was the 44th President of the United States.",
+				"expect": {
+					"text": {
+						"notEmpty": true,
+						"contains": "Obama"
+					}
+				}
+			}
+		]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "bertLarge",
+		"profiles": {
+			"custom": {
+				"title": "Custom model",
+				"model": "",
+				"aggregation_strategy": "simple",
+				"min_confidence": 0.9
+			},
+			"bertLarge": {
+				"title": "BERT Large (English) - High accuracy for English text",
+				"model": "dbmdz/bert-large-cased-finetuned-conll03-english",
+				"aggregation_strategy": "simple",
+				"min_confidence": 0.9
+			},
+			"bertBase": {
+				"title": "BERT Base (English) - Balanced performance",
+				"model": "dslim/bert-base-NER",
+				"aggregation_strategy": "simple",
+				"min_confidence": 0.9
+			},
+			"distilbert": {
+				"title": "DistilBERT (English) - Fast and lightweight",
+				"model": "Davlan/distilbert-base-multilingual-cased-ner-hrl",
+				"aggregation_strategy": "simple",
+				"min_confidence": 0.9
+			},
+			"xlmRoberta": {
+				"title": "XLM-RoBERTa (Multilingual) - Supports 100+ languages",
+				"model": "Davlan/xlm-roberta-base-ner-hrl",
+				"aggregation_strategy": "simple",
+				"min_confidence": 0.9
+			},
+			"deberta": {
+				"title": "DeBERTa v3 (English) - State-of-the-art accuracy",
+				"model": "dslim/distilbert-NER",
+				"aggregation_strategy": "simple",
+				"min_confidence": 0.9
+			},
+			"biomedical": {
+				"title": "BioBERT (Biomedical) - Medical/scientific entities",
+				"model": "dmis-lab/biobert-base-cased-v1.1",
+				"aggregation_strategy": "simple",
+				"min_confidence": 0.85
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"ner.model": {
+			"type": "string",
+			"title": "Model name",
+			"minLength": 2,
+			"maxLength": 128,
+			"description": "HuggingFace model to use for NER"
+		},
+		"ner.aggregation_strategy": {
+			"type": "string",
+			"title": "Entity aggregation strategy",
+			"description": "How to combine word pieces into entities",
+			"default": "simple",
+			"enum": [
+				"none",
+				"simple",
+				"first",
+				"average",
+				"max"
+			]
+		},
+		"ner.min_confidence": {
+			"type": "number",
+			"title": "Minimum confidence threshold",
+			"description": "Minimum confidence score (0.0-1.0) for entity detection",
+			"default": 0.9,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"ner.store_in_metadata": {
+			"type": "boolean",
+			"title": "Store entities in document metadata",
+			"description": "Add extracted entities to document metadata fields",
+			"default": true
+		},
+		"ner.custom": {
+			"object": "custom",
+			"properties": [
+				"ner.model",
+				"ner.aggregation_strategy",
+				"ner.min_confidence",
+				"ner.store_in_metadata"
+			]
+		},
+		"ner.bertLarge": {
+			"object": "bertLarge",
+			"properties": [
+				"ner.aggregation_strategy",
+				"ner.min_confidence",
+				"ner.store_in_metadata"
+			]
+		},
+		"ner.bertBase": {
+			"object": "bertBase",
+			"properties": [
+				"ner.aggregation_strategy",
+				"ner.min_confidence",
+				"ner.store_in_metadata"
+			]
+		},
+		"ner.distilbert": {
+			"object": "distilbert",
+			"properties": [
+				"ner.aggregation_strategy",
+				"ner.min_confidence",
+				"ner.store_in_metadata"
+			]
+		},
+		"ner.xlmRoberta": {
+			"object": "xlmRoberta",
+			"properties": [
+				"ner.aggregation_strategy",
+				"ner.min_confidence",
+				"ner.store_in_metadata"
+			]
+		},
+		"ner.deberta": {
+			"object": "deberta",
+			"properties": [
+				"ner.aggregation_strategy",
+				"ner.min_confidence",
+				"ner.store_in_metadata"
+			]
+		},
+		"ner.biomedical": {
+			"object": "biomedical",
+			"properties": [
+				"ner.aggregation_strategy",
+				"ner.min_confidence",
+				"ner.store_in_metadata"
+			]
+		},
+		"ner.profile": {
+			"title": "Model",
+			"description": "NER model configuration",
+			"type": "string",
+			"default": "bertLarge",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": [
+						"ner.custom"
+					]
+				},
+				{
+					"value": "bertLarge",
+					"properties": [
+						"ner.bertLarge"
+					]
+				},
+				{
+					"value": "bertBase",
+					"properties": [
+						"ner.bertBase"
+					]
+				},
+				{
+					"value": "distilbert",
+					"properties": [
+						"ner.distilbert"
+					]
+				},
+				{
+					"value": "xlmRoberta",
+					"properties": [
+						"ner.xlmRoberta"
+					]
+				},
+				{
+					"value": "deberta",
+					"properties": [
+						"ner.deberta"
+					]
+				},
+				{
+					"value": "biomedical",
+					"properties": [
+						"ner.biomedical"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Named Entity Recognition",
+			"properties": [
+				"ner.profile"
+			]
+		}
+	]
+}
+

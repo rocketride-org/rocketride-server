@@ -1,0 +1,221 @@
+/**
+ * Build tasks for @aparavi/nodes
+ * 
+ * Commands:
+ *   build - Sync nodes to dist
+ *   test  - Run node integration tests (starts test server automatically)
+ *   clean - Remove build artifacts
+ */
+const path = require('path');
+const { 
+    syncDir, 
+    formatSyncStats, 
+    removeDir, 
+    PROJECT_ROOT, 
+    startServer, 
+    stopServer,
+    execCommand,
+    parallel,
+    bracket
+} = require('../../scripts/lib');
+
+const PACKAGE_DIR = path.join(__dirname, '..');
+const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'nodes');
+const TEST_DIR = path.join(PACKAGE_DIR, 'test');
+const DIST_DIR = path.join(PROJECT_ROOT, 'dist', 'server', 'nodes');
+
+// Engine (built by server:build; execCommand resolves extension on Windows)
+const ENGINE = path.join(PROJECT_ROOT, 'dist', 'server', 'engine');
+
+// ============================================================================
+// Action Factories
+// ============================================================================
+
+function makeSyncNodesAction() {
+    return {
+        run: async (ctx, task) => {
+            task.output = 'Scanning for changes...';
+            const stats = await syncDir(SRC_DIR, DIST_DIR);
+            task.output = formatSyncStats(stats);
+        }
+    };
+}
+
+function makeStartTestServerAction(options = {}) {
+    return {
+        run: async (ctx, task) => {
+            if (options.testport) {
+                ctx.port = options.testport;
+                task.output = `Using existing server on port ${ctx.port}`;
+                return { port: ctx.port, server: null };
+            }
+            
+            task.output = 'Starting server...';
+            let taskComplete = false;
+            
+            // Set APARAVI_MOCK to enable mock modules for testing
+            const mocksPath = path.join(PACKAGE_DIR, 'test', 'mocks');
+            
+            const result = await startServer({
+                script: 'ai/eaas.py',
+                trace: options.trace,
+                basePort: 40000,  // Use 40000 range for node tests
+                env: {
+                    APARAVI_MOCK: mocksPath
+                },
+                onOutput: (text) => {
+                    if (taskComplete) return;
+                    const lines = text.trim().split('\n');
+                    if (lines.length > 0) {
+                        task.output = lines[lines.length - 1];
+                    }
+                }
+            });
+            
+            ctx.port = result.port;
+            task.output = `Server ready on port ${ctx.port} (mocks enabled)`;
+            taskComplete = true;
+            return { port: result.port, server: result.server };
+        }
+    };
+}
+
+function makeStopTestServerAction() {
+    return {
+        run: async (ctx, task) => {
+            const bracket = ctx.brackets?.['node-test-server'];
+            if (bracket?.server) {
+                task.output = 'Stopping server...';
+                await stopServer({ server: bracket.server });
+                task.output = 'Server stopped';
+            } else {
+                task.output = 'No server to stop';
+            }
+        }
+    };
+}
+
+function makeRunPytestAction(options = {}) {
+    return {
+        run: async (ctx, task) => {
+            // Load .env for test configuration
+            require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
+            
+            const port = ctx.brackets?.['node-test-server']?.port || ctx.port;
+            
+            const testEnv = {
+                ...process.env,
+                APARAVI_URI: `http://localhost:${port}`
+            };
+            
+            // Use absolute paths since cwd is dist/server
+            const pytestArgs = ['-m', 'pytest', TEST_DIR, '-v', '--rootdir', PACKAGE_DIR];
+            
+            // Add any additional pytest options (from CLI or direct options)
+            // ctx.options comes from CLI args like --pytest="-s -v"
+            const pytestOpts = options.pytest || ctx.options?.pytest;
+            if (pytestOpts) {
+                // Handle both string and array formats
+                // CLI passes array like ["-v -s"], so split each element by spaces
+                if (typeof pytestOpts === 'string') {
+                    pytestArgs.push(...pytestOpts.split(/\s+/).filter(x => x));
+                } else if (Array.isArray(pytestOpts)) {
+                    for (const opt of pytestOpts) {
+                        pytestArgs.push(...opt.split(/\s+/).filter(x => x));
+                    }
+                }
+            }
+            
+            // Allow filtering tests by marker or pattern
+            const markers = options.markers || ctx.options?.markers;
+            const pattern = options.pattern || ctx.options?.pattern;
+            if (markers) {
+                pytestArgs.push('-m', markers);
+            }
+            if (pattern) {
+                pytestArgs.push('-k', pattern);
+            }
+            
+            await execCommand(ENGINE, pytestArgs, { 
+                task, 
+                cwd: PACKAGE_DIR,
+                env: testEnv,
+            });
+        }
+    };
+}
+
+function makeRunContractTestsAction() {
+    return {
+        run: async (ctx, task) => {
+            const pytestArgs = [
+                '-m', 'pytest', 
+                path.join(TEST_DIR, 'test_contracts.py'), 
+                '-v', 
+                '--rootdir', PACKAGE_DIR
+            ];
+            
+            await execCommand(ENGINE, pytestArgs, { 
+                task, 
+                cwd: PACKAGE_DIR
+            });
+        }
+    };
+}
+
+// ============================================================================
+// Module Export
+// ============================================================================
+
+module.exports = {
+    name: 'nodes',
+    description: 'Pipeline Nodes',
+    
+    actions: [
+        // Internal actions
+        { name: 'nodes:sync', action: makeSyncNodesAction },
+        { name: 'nodes:start-server', action: makeStartTestServerAction },
+        { name: 'nodes:stop-server', action: makeStopTestServerAction },
+        { name: 'nodes:run-pytest', action: makeRunPytestAction },
+        { name: 'nodes:run-contracts', action: makeRunContractTestsAction },
+        
+        // Public actions (have descriptions)
+        { name: 'nodes:build', action: () => ({ 
+            description: 'Sync pipeline nodes',
+            steps: ['nodes:sync'] 
+        })},
+        { name: 'nodes:test', action: () => ({
+            description: 'Run node integration tests',
+            steps: [
+                'server:build',
+                parallel([
+                    'nodes:build',
+                    'ai:build',
+                    'client-python:build'
+                ], 'Build modules'),
+                bracket({
+                    name: 'node-test-server',
+                    setup: makeStartTestServerAction(),
+                    teardown: makeStopTestServerAction(),
+                    steps: ['nodes:run-pytest']
+                })
+            ]
+        })},
+        { name: 'nodes:test-contracts', action: () => ({
+            description: 'Run contract validation tests',
+            steps: ['server:build', 'nodes:run-contracts']
+        })},
+        { name: 'nodes:clean', action: () => ({
+            description: 'Remove nodes build artifacts',
+            run: async (ctx, task) => {
+                await removeDir(DIST_DIR);
+                task.output = 'Cleaned nodes';
+            }
+        })}
+    ]
+};
+
+// Export paths for external use
+module.exports.SRC_DIR = SRC_DIR;
+module.exports.DIST_DIR = DIST_DIR;
+module.exports.TEST_DIR = TEST_DIR;

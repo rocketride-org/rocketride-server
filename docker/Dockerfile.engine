@@ -1,0 +1,115 @@
+# =============================================================================
+# MIT License
+# 
+# Copyright (c) 2026 RocketRide, Inc.
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+# Multi-stage build for the RocketRide Engine
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Build Stage
+# -----------------------------------------------------------------------------
+FROM ubuntu:22.04 AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    ninja-build \
+    git \
+    curl \
+    zip \
+    unzip \
+    tar \
+    pkg-config \
+    python3 \
+    python3-pip \
+    openjdk-11-jdk \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js and pnpm
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs \
+    && npm install -g pnpm
+
+# Set working directory
+WORKDIR /build
+
+# Copy source
+COPY . .
+
+# Install dependencies and build
+RUN pnpm install \
+    && pnpm run configure:release \
+    && pnpm run build:native
+
+# -----------------------------------------------------------------------------
+# Runtime Stage
+# -----------------------------------------------------------------------------
+FROM ubuntu:22.04 AS runtime
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libssl3 \
+    libcurl4 \
+    liblz4-1 \
+    libicu70 \
+    python3 \
+    python3-pip \
+    openjdk-11-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd -m -s /bin/bash rocketride
+
+# Set working directory
+WORKDIR /app
+
+# Copy built engine from builder
+COPY --from=builder /build/build/apps/engine/Engine /app/
+COPY --from=builder /build/packages/server/engine-lib/rocketride-python /app/rocketride-python/
+COPY --from=builder /build/packages/tika/lib /app/lib/
+COPY --from=builder /build/packages/nodes /app/nodes/
+COPY --from=builder /build/packages/ai /app/ai/
+
+# Install Python dependencies
+RUN pip3 install --no-cache-dir -r /app/nodes/requirements.txt || true
+
+# Set ownership
+RUN chown -R rocketride:rocketride /app
+
+# Switch to non-root user
+USER rocketride
+
+# Create data directories
+RUN mkdir -p /app/data /app/logs /app/cache
+
+# Expose ports
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD ./Engine --verify || exit 1
+
+# Entry point
+ENTRYPOINT ["./Engine"]
+CMD ["--service", "--port", "8080"]
+

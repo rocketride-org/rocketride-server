@@ -1,0 +1,20 @@
+# Plugin Vertex AI core
+numpy
+versioneer
+langchain-google-vertexai
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+google-cloud-aiplatform
+
+# LangChain deps
+langchain-core
+langchain
+
+# Google deps
+google-api-core
+googleapis-common-protos
+proto-plus
+protobuf
+Cython
+bottleneck

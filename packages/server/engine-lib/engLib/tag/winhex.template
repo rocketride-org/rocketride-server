@@ -1,0 +1,11 @@
+template "RocketRide V1 Tags"
+
+description "Debug stuff"
+applies_to disk
+multiple
+
+begin
+	char[8]	"Signature"
+	char[8]	"Class"
+	char[8]	"Type"
+end

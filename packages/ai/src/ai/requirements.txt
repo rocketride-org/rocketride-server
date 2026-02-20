@@ -1,0 +1,10 @@
+#
+# Install all our other modules
+#
+
+requests
+pydantic
+httpx
+psutil
+tenacity
+nvidia-ml-py

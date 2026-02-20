@@ -1,0 +1,125 @@
+{
+	/**
+		Use IntelliSense to learn about possible attributes.
+		Hover to view descriptions of existing attributes.
+		For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	*/
+	"version": "0.2.0",
+	"configurations": [
+		//--------------------------------------------------------------------------------------
+		// EaaS - python debug
+		//
+		// If subProcess is true, executing a task will automatically connect that task
+		// as a subprocess to the existing debugger. You cannot debug with the vscode extension
+		// if this is true.
+		//--------------------------------------------------------------------------------------
+		{
+			"name": "Python - EaaS",
+			"type": "debugpy",
+			"request": "launch",
+			"console": "integratedTerminal",
+			"windows": {
+				"python": "${workspaceFolder}/dist/server/engine.exe",
+			},
+			"linux": {
+				"python": "${workspaceFolder}/dist/server/engine",
+			},
+			"justMyCode": true,
+			"subProcess": false,
+			"program": "${workspaceFolder}/dist/server/ai/eaas.py",
+			"args": [
+				// "--trace=debugOut,debugProtocol,servicePython"
+			]
+		},
+		{
+		//--------------------------------------------------------------------------------------
+		// CLI - python debug
+		//
+		//	Debug the python cli client
+		//--------------------------------------------------------------------------------------
+		"name": "Python - CLI",
+			"type": "debugpy",
+			"request": "launch",
+			"console": "externalTerminal",
+			"windows": {
+				"python": "${workspaceFolder}/dist/server/engine.exe",
+			},
+			"linux": {
+				"python": "${workspaceFolder}/dist/server/engine",
+			},
+			"justMyCode": true,
+			"subProcess": false,
+			"program": "${workspaceFolder}/packages/client-python/src/rocketride/cli",
+			"args": [
+				"-m"
+			],
+			"env": {
+				"ROCKETRIDE_URI": "http://localhost:5565",
+				"ROCKETRIDE_APIKEY": "MYAPIKEY",
+				"ROCKETRIDE_TOKEN": "MYTOKEN"
+			}
+		},
+		//-----------------------------------------------------------
+		// Debug C++ code
+		//
+		// NOTE: These templates are setup for Windows debugging. To
+		// use Linux debugging, change the types in all launch 
+		// configurations from "cppvsdbg" to "cppdbg"
+		//-----------------------------------------------------------
+		{
+			//
+			// Attaches to an existing engine running C++
+			//
+			"name": "C++ (Attach)",
+			"type": "cppvsdbg",
+			"request": "attach",
+			"processId": "${command:pickProcess}"
+		},
+		{
+			//
+			// Runs tasks with C++ debug
+			//
+			"name": "C++ - Task",
+			"type": "cppvsdbg",
+			"program": "${workspaceFolder}/build/Engine/engine.exe",
+			"request": "launch",
+			"cwd": "${workspaceFolder}",
+			"console": "externalTerminal",
+			"args": [
+				//-- Options
+				"--monitor=App",
+				"testdata/tasks/1000-pipeline/80-pipelineArg.json"
+			]
+		},
+		//--------------------------------------------------------------------------------------
+		// VSCode
+		//
+		// Starts up an extension host for debugging the vscode extension
+		//--------------------------------------------------------------------------------------
+		{
+			"name": "VSCode Extension (with build)",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": [
+				"--extensionDevelopmentPath=${workspaceFolder}/build/vscode"
+			],
+			"outFiles": [
+				"${workspaceFolder}/build/vscode/**/*.js"
+			],
+			"debugWebviews": true,
+			"preLaunchTask": "build all"
+		},
+		{
+			"name": "VSCode Extension (no build)",
+			"type": "extensionHost",
+			"request": "launch",
+			"args": [
+				"--extensionDevelopmentPath=${workspaceFolder}/build/vscode"
+			],
+			"outFiles": [
+				"${workspaceFolder}/build/vscode/**/*.js"
+			],
+			"debugWebviews": true
+		}
+	]
+}

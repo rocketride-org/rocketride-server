@@ -1,0 +1,3 @@
+Source: replxx
+Version: 0.0.1
+Description: A readline and libedit replacement that supports UTF-8, syntax highlighting, hints and Windows and is BSD licensed.

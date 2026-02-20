@@ -1,0 +1,3 @@
+pinecone
+pinecone-plugin-assistant
+pinecone-plugin-interface

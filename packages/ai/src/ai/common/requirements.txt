@@ -1,0 +1,5 @@
+# 
+# Install Schema module
+#
+rank_bm25
+json5

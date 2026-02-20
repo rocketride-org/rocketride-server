@@ -1,0 +1,4 @@
+elasticsearch>=8.0.0,<9.0.0
+opensearch-py==3.1.0
+numpy>=1.24.0
+

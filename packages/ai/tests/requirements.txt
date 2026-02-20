@@ -1,0 +1,11 @@
+# Test dependencies for Aparavi AI tests
+
+# Core testing framework
+pytest
+pytest-asyncio
+
+# Optional: For code coverage reports
+pytest-cov
+
+# AI module dependencies
+-r ../src/ai/requirements.txt

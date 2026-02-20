@@ -1,0 +1,332 @@
+{
+	//
+	// Required:
+	//      The displayable name of this node
+	//
+	"title": "Vector Store - Chroma",
+	//
+	// Required:
+	//      The protocol is the endpoint protocol
+	//
+	"protocol": "chroma://",
+	//
+	// Required:
+	//      Class type of the node - what it does
+	//
+	"classType": [
+		"store"
+	],
+	//
+	// Required:
+	//      Capabilities are flags that change the behavior of the underlying
+	//      engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//      The node is the actual physical node to instantiate - if
+	//      not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//      The path is the executable/script code - it is node dependent
+	//      and is optional for most nodes
+	//
+	"path": "nodes.chroma",
+	//
+	// Required:
+	//      The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "Chroma Vector Store",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A vector database component for Chroma, enabling efficient storage and ", 
+		"retrieval of vector embeddings. It supports similarity search, filtering, ",
+		"and management of vector data with high performance."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "chroma.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/4hGqkf2",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	"tile": [
+		"Host/Port: ${parameters.chroma.${profile}.host}:${parameters.chroma.${profile}.port}",
+		"Collection: ${parameters.chroma.${profile}.collection}"
+	],
+	//
+	// Optional:
+	//      As a pipe component, define what this pipe component takes
+	//      and what it produces
+	//
+	"lanes": {
+		"documents": [],
+		"questions": [
+			"documents",
+			"answers",
+			"questions"
+		]
+	},
+	//
+	// Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["local"],
+		"cases": [
+			{
+				"name": "Add document to store",
+				"documents": [
+					{
+						"page_content": "The capital of France is Paris.",
+						"metadata": {
+							"objectId": "test-doc-1",
+							"nodeId": "test-node",
+							"parent": "/test",
+							"chunkId": 0,
+							"isDeleted": false
+						},
+						"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+						"embedding_model": "test-model"
+					}
+				],
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "capital of France"
+					}
+				}
+			},
+			{
+				"name": "Search with question",
+				"questions": {
+					"type": "semantic",
+					"questions": [
+						{
+							"text": "What is the capital of France?",
+							"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+							"embedding_model": "test-model"
+						}
+					]
+				},
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "Paris",
+						"property": [
+							{"path": "[0].score", "greaterThanOrEqual": 0.5},
+							{"path": "[0].metadata.objectId", "equals": "test-doc-1"}
+						]
+					}
+				}
+			}
+		]
+	},
+	"input": [
+		{
+			"lane": "documents",
+			"description": [
+				"Stores the documents into the vector database. The documents must be ",
+				"run through an embedding model prior to this step to compute the vectors."
+			],
+			"output": []
+		},
+		{
+			"lane": "questions",
+			"description": "Searchs the database for documents most similar to the given questions.",
+			"output": [
+				{
+					"lane": "documents",
+					"description": [
+						"Produces documents that are most similar to the given question."
+					],
+					"output": []
+				},
+				{
+					"lane": "answers",
+					"description": [
+						"Produces an answer with the documents that are most similar ",
+						"to the given question."
+					],
+					"output": []
+				},
+				{
+					"lane": "questions",
+					"description": [
+						"Updates the question with documents most similar to the ",
+						"question and sets up a filter so piping this to another store ",
+						"driver will limit its answers to the given subset of documents."
+					],
+					"output": []
+				}
+			]
+		}
+	],
+	//
+	// Optional:
+	//      Local fields definitions - these define fields only for the
+	//      current service. You may specify them here, or directly
+	//      in the shape
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "local",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"local": {
+				"mode": "local",
+				"title": "Your own ChromaDB server",
+				"host": "localhost",
+				"port": "8000",
+				"collection": "APARAVI"
+			},
+			"cloud": {
+				"mode": "cloud",
+				"title": "ChromaDB Cloud Server",
+				"host": "",
+				"port": "443",
+				"apikey": "",
+				"collection": "APARAVI"
+			}
+		}
+	},
+	//
+	// Optional:
+	//      Local fields definitions - these define fields only for the
+	//      current service. You may specify them here, or directly
+	//      in the shape
+	//
+	"fields": {
+		"vector.cloud.host": {
+			"description": "Enter the server IP address e.g. <your-instance-url>"
+		},
+		"vector.local.host": {
+			"default": "localhost"
+		},
+		"vector.cloud.port": {
+			"default": 443
+		},
+		"vector.local.port": {
+			"default": 8330
+		},
+		//
+		// Cloud configuration for ChromaDB
+		//
+		"chroma.cloud": {
+			"object": "cloud",
+			"properties": [
+				"vector.cloud.host",
+				"vector.cloud.port",
+				"vector.apikey",
+				"vector.collection"
+			]
+		},
+		"chroma.local": {
+			"object": "local",
+			"properties": [
+				"vector.local.host",
+				"vector.local.port",
+				"vector.collection"
+			]
+		},
+		//
+		// Profile selection for ChromaDB service
+		//
+		"chroma.profile": {
+			"title": "Type of chroma host",
+			"description": "Connect to...",
+			"type": "string",
+			"default": "cloud",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "cloud",
+					"properties": [
+						"chroma.cloud"
+					]
+				},
+				{
+					"value": "local",
+					"properties": [
+						"chroma.local"
+					]
+				}
+			]
+		},
+		"chroma.provider": {
+			"type": "string",
+			"const": "chroma"
+		},
+		"chroma.chroma": {
+			"object": "chroma",
+			"properties": [
+				"chroma.profile"
+			]
+		},
+		"chroma.store": {
+			"object": "store",
+			"title": "Store",
+			"properties": [
+				"chroma.provider",
+				"chroma.chroma"
+			]
+		},
+		"chroma.target.autopipe": {
+			"object": "parameters",
+			"properties": [
+				"remote",
+				"chroma.store",
+				"all.embedding"
+			]
+		},
+		"chroma.target.parameters": {
+			"object": "parameters",
+			"properties": [
+				"chroma.target.autopipe"
+			]
+		}
+	},
+	//
+	// Required:
+	//      Defines the fields (shape) of the service. Either source or target
+	//      may be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Chroma Vector Store",
+			"properties": [
+				"chroma.profile"
+			]
+		},
+		{
+			"section": "Transform",
+			"title": "Chroma",
+			"properties": [
+				"type",
+				"chroma.target.parameters",
+				"target.mode"
+			]
+		}
+	]
+}

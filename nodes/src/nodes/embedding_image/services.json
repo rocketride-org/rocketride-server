@@ -1,0 +1,188 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Embedding - Image",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "embedding_image://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"embedding"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"gpu"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if 
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.embedding_image",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "embedding",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A processing component that generates vector embeddings from image content ",
+		"using advanced computer vision models. It transforms visual features into ",
+		"numerical representations that capture the semantic and structural characteristics ",
+		"of the image. These embeddings enable similarity search, clustering, and ",
+		"integration into multimodal workflows. Ideal for use cases involving image retrieval, ",
+		"classification, or content understanding."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "embedding-image.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/3WyHtO0",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"documents": [
+			"documents"
+		],
+		"image": [
+			"documents"
+		]
+	},
+	"input": [
+		{
+			"lane": "documents",
+			"description": "Documents container images to embed.",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Documents containg embeddings."
+				}
+			]
+		},
+		{
+			"lane": "image",
+			"description": "Documents container images to embed.",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Documents containg embeddings."
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "openai-patch16",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"custom": {
+				"title": "Custom model"
+			},
+			"openai-patch16": {
+				"title": "OpenAI - 16x16 - good performance, lower memory",
+				"model": "openai/clip-vit-base-patch16"
+			},
+			"openai-patch32": {
+				"title": "OpenAI - 32x32 - lower performance, better recognition",
+				"model": "openai/clip-vit-base-patch32"
+			},
+			"google16x224": {
+				"title": "Google - 16x16 - fast, accurate, general-purpose",
+				"model": "google/vit-base-patch16-224"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"embedding.model": {
+			"type": "string",
+			"title": "Model name",
+			"minLength": 2,
+			"maxLength": 32,
+			"description": "Hugging face model to use for embedding"
+		},
+		"embedding.custom": {
+			"object": "custom",
+			"title": "",
+			"properties": [
+				"embedding.model"
+			]
+		},
+		"embedding.profile": {
+			"title": "Model",
+			"description": "Embedding model",
+			"type": "string",
+			"default": "openai-patch16",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": [
+						"embedding.custom"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Embedding - Image",
+			"properties": [
+				"embedding.profile"
+			]
+		}
+	]
+}

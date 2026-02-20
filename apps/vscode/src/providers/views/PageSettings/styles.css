@@ -1,0 +1,510 @@
+ * =============================================================================
+ * MIT License
+ * Copyright (c) 2026 RocketRide, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ * ============================================================================= */
+
+/**
+ * Settings View Styles
+ * 
+ * Styles for PageSettings and its components:
+ * - ConnectionSettings
+ * - PipelineSettings  
+ * - LocalEngineSettings
+ * - DebuggingSettings
+ * - MessageDisplay
+ */
+
+/* ============================================================================ */
+/* SETTINGS APP LAYOUT */
+/* ============================================================================ */
+
+.settings-app {
+	max-width: 800px;
+	margin: 0 auto;
+	padding: 10px;
+}
+
+.header {
+	border-bottom: 1px solid var(--vscode-widget-border);
+	padding-bottom: 16px;
+	margin-bottom: 24px;
+}
+
+.header h1 {
+	margin: 0 0 8px 0;
+	font-size: 24px;
+	font-weight: 600;
+	color: var(--vscode-foreground);
+}
+
+.header p {
+	margin: 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 14px;
+}
+
+/* ============================================================================ */
+/* ACTION BUTTONS */
+/* ============================================================================ */
+
+.action-buttons {
+	display: flex;
+	gap: 12px;
+	margin-bottom: 24px;
+}
+
+/* ============================================================================ */
+/* SETTINGS SECTIONS */
+/* ============================================================================ */
+
+.settings-container {
+	display: grid;
+	gap: 24px;
+}
+
+.section {
+	border: 1px solid var(--vscode-widget-border);
+	border-radius: 8px;
+	padding: 20px;
+	background-color: var(--vscode-editor-background);
+}
+
+.section.warning {
+	border-color: var(--vscode-editorWarning-foreground);
+	background-color: var(--vscode-editorWarning-background);
+}
+
+.section-title {
+	font-size: 18px;
+	font-weight: 600;
+	margin: 0 0 16px 0;
+	color: var(--vscode-foreground);
+}
+
+.section-description {
+	color: var(--vscode-descriptionForeground);
+	font-size: 13px;
+	margin-bottom: 16px;
+}
+
+/* ============================================================================ */
+/* FORM LAYOUT */
+/* ============================================================================ */
+
+.form-grid {
+	display: grid;
+	gap: 16px;
+	grid-template-columns: 1fr;
+	padding-left: 50px;
+}
+
+.form-group {
+	display: flex;
+	flex-direction: column;
+}
+
+/* Test buttons aligned right, not full width */
+.form-group.form-group-test {
+	align-items: flex-end;
+}
+
+.form-group.form-group-test button {
+	width: auto;
+}
+
+label {
+	font-weight: 600;
+	margin-bottom: 6px;
+	color: var(--vscode-input-foreground);
+	font-size: 13px;
+}
+
+/* ============================================================================ */
+/* HELP TEXT */
+/* ============================================================================ */
+
+.help-text {
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	margin-top: 4px;
+	line-height: 1.4;
+}
+
+.error-text {
+	color: var(--vscode-errorForeground);
+	font-size: 12px;
+	margin-top: 4px;
+}
+
+/* ============================================================================ */
+/* PASSWORD INPUT CONTAINER */
+/* ============================================================================ */
+
+.password-input-container {
+	display: flex;
+	gap: 4px;
+	align-items: stretch;
+}
+
+.password-input-container input {
+	flex: 1;
+}
+
+.password-toggle {
+	background-color: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	border: 1px solid var(--vscode-input-border);
+	padding: 8px 12px;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 20px;
+	min-width: 44px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: all 0.2s;
+}
+
+.password-toggle:hover {
+	background-color: var(--vscode-button-secondaryHoverBackground);
+	border-color: var(--vscode-focusBorder);
+}
+
+/* ============================================================================ */
+/* CHECKBOX STYLING */
+/* ============================================================================ */
+
+.form-group input[type="checkbox"] {
+	margin-right: 8px;
+	vertical-align: middle;
+}
+
+.form-group input[type="checkbox"]+label {
+	display: inline;
+	font-weight: normal;
+	margin: 0;
+	vertical-align: middle;
+	cursor: pointer;
+}
+
+.checkbox-group {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.checkbox-group label {
+	display: flex;
+	align-items: center;
+	cursor: pointer;
+	font-weight: normal;
+	margin: 0;
+}
+
+.checkbox-group label input[type="checkbox"] {
+	margin: 0 8px 0 0;
+	flex-shrink: 0;
+	cursor: pointer;
+}
+
+.checkbox-group label span {
+	font-weight: 600;
+	font-size: 13px;
+}
+
+.checkbox-group .help-text {
+	margin-left: 24px;
+	margin-top: 2px;
+	margin-bottom: 8px;
+}
+
+.checkbox-group .help-text code {
+	background-color: var(--vscode-textCodeBlock-background);
+	padding: 1px 4px;
+	border-radius: 3px;
+	font-family: var(--vscode-editor-font-family);
+	font-size: 12px;
+}
+
+/* ============================================================================ */
+/* LOCAL ENGINE ARGUMENTS */
+/* ============================================================================ */
+
+.args-container {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.arg-item {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.arg-item input {
+	flex: 1;
+}
+
+/* ============================================================================ */
+/* MESSAGE DISPLAY */
+/* ============================================================================ */
+
+.message {
+	padding: 12px 16px;
+	border-radius: 4px;
+	margin-bottom: 20px;
+	font-size: 13px;
+	display: none;
+}
+
+.message.success {
+	background-color: var(--vscode-testing-iconPassed);
+	color: var(--vscode-editor-background);
+}
+
+.message.error {
+	background-color: var(--vscode-inputValidation-errorBackground);
+	color: var(--vscode-inputValidation-errorForeground);
+	border: 1px solid var(--vscode-inputValidation-errorBorder);
+}
+
+.message.info {
+	background-color: var(--vscode-inputValidation-infoBackground);
+	color: var(--vscode-inputValidation-infoForeground);
+	border: 1px solid var(--vscode-inputValidation-infoBorder);
+}
+
+.message.warning {
+	background-color: var(--vscode-inputValidation-warningBackground);
+	color: var(--vscode-inputValidation-warningForeground);
+	border: 1px solid var(--vscode-inputValidation-warningBorder);
+}
+
+/* In-section test result (inside Development / Deployment boxes) */
+.message-inline {
+	grid-column: 1 / -1;
+	margin-top: 4px;
+	display: block;
+}
+
+/* ============================================================================ */
+/* MODAL CONTENT (Settings-specific modal styling) */
+/* ============================================================================ */
+
+.modal-content {
+	background: var(--vscode-editor-background);
+	border: 1px solid var(--vscode-widget-border);
+	border-radius: 8px;
+	padding: 0;
+	min-width: 400px;
+	max-width: 500px;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.modal-footer {
+	padding: 16px 24px;
+	border-top: 1px solid var(--vscode-panel-border);
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	background: var(--vscode-sideBarSectionHeader-background);
+}
+
+/* ============================================================================ */
+/* ENVIRONMENT VARIABLES SECTION */
+/* ============================================================================ */
+
+.env-error-message {
+	margin-bottom: 12px;
+	padding: 8px 12px;
+	background-color: var(--vscode-inputValidation-errorBackground);
+	border: 1px solid var(--vscode-inputValidation-errorBorder);
+	border-radius: 3px;
+}
+
+.env-delete-confirm {
+	margin-bottom: 16px;
+	padding: 12px;
+	background-color: var(--vscode-inputValidation-warningBackground);
+	border: 1px solid var(--vscode-inputValidation-warningBorder);
+	border-radius: 4px;
+}
+
+.env-delete-confirm-message {
+	margin-bottom: 12px;
+	font-weight: 500;
+}
+
+.env-delete-confirm-buttons {
+	display: flex;
+	gap: 8px;
+}
+
+.env-delete-confirm-buttons button {
+	padding: 6px 12px;
+}
+
+.env-delete-confirm-buttons button.danger {
+	background-color: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+}
+
+.env-delete-confirm-buttons button.danger:hover {
+	background-color: var(--vscode-button-hoverBackground);
+}
+
+.env-add-form {
+	margin-bottom: 20px;
+	background-color: var(--vscode-editor-background);
+	border-radius: 4px;
+	border: 1px solid var(--vscode-panel-border);
+	padding: 12px;
+}
+
+.env-add-form > label {
+	display: block;
+	margin-bottom: 12px;
+	font-weight: 500;
+}
+
+.env-add-form-content {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.env-add-form-row {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.env-add-form-row input {
+	width: 100%;
+	box-sizing: border-box;
+}
+
+.env-add-form-value-row {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.env-add-form-value-row input {
+	flex: 1;
+}
+
+.env-add-form-value-row button {
+	white-space: nowrap;
+	flex-shrink: 0;
+}
+
+.env-variables-list-container {
+	margin-top: 16px;
+}
+
+.env-variables-section-label {
+	display: block;
+	margin-bottom: 8px;
+	font-weight: 500;
+}
+
+.env-variables-list {
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.env-variable-row {
+	display: grid;
+	grid-template-columns: 200px 1fr auto;
+	gap: 8px;
+	padding: 12px;
+	align-items: center;
+}
+
+.env-variable-row:not(:last-child) {
+	border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.env-variable-row:nth-child(even) {
+	background-color: var(--vscode-editor-background);
+}
+
+.env-variable-name {
+	font-family: var(--vscode-editor-font-family);
+	font-size: var(--vscode-editor-font-size);
+	font-weight: 500;
+	color: var(--vscode-terminal-ansiGreen);
+}
+
+.env-variable-value-container {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.env-variable-value-container input {
+	flex: 1;
+	font-family: var(--vscode-editor-font-family);
+}
+
+.env-variable-value-code {
+	flex: 1;
+	font-family: var(--vscode-editor-font-family);
+	font-size: var(--vscode-editor-font-size);
+	padding: 4px 8px;
+	background-color: var(--vscode-textCodeBlock-background);
+	border-radius: 3px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.env-variable-value-toggle {
+	padding: 2px 6px;
+	min-width: 30px;
+}
+
+.env-variable-actions {
+	display: flex;
+	gap: 4px;
+	justify-content: flex-end;
+}
+
+.env-variable-actions button {
+	padding: 2px 8px;
+}
+
+.env-empty-state {
+	padding: 24px;
+	text-align: center;
+	color: var(--vscode-descriptionForeground);
+	border: 1px dashed var(--vscode-panel-border);
+	border-radius: 4px;
+	margin-top: 16px;
+}
+
+.env-note {
+	margin-top: 16px;
+}

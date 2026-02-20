@@ -1,0 +1,284 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "LLM - Anthropic",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "llm_anthropic://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"llm"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"invoke"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if 
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.llm_anthropic",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "llm",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A component that integrates with Anthropic’s Claude models for natural ",
+		"language understanding and generation. It enables tasks such as ",
+		"summarization, question answering, content generation, and conversational ",
+		"AI. Configurable with model selection and prompt settings, the component ",
+		"provides access to Claude’s advanced language capabilities with a strong focus ",
+		"on safety, alignment, and reliability. Ideal for enterprise-grade workflows requiring ",
+		"trustworthy AI outputs."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "anthropic.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/3X6j1DP",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": [
+		"Model: ${parameters.llm_anthropic.profile}"
+	],
+	//
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": [
+			"answers"
+		]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [
+				{
+					"lane": "answers"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "claude-3_5-haiku",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"custom": {
+				"model": "",
+				"modelTotalTokens": 200000,
+				"apikey": ""
+			},
+			"claude-haiku-4-5": {
+				"title": "Claude Haiku 4.5",
+				"model": "claude-haiku-4-5",
+				"modelTotalTokens": 200000,
+				"apikey": ""
+			},
+			"claude-sonnet-4-5": {
+				"title": "Claude Sonnet 4.5",
+				"model": "claude-sonnet-4-5",
+				"modelTotalTokens": 200000,
+				"apikey": ""
+			},
+			"claude-opus-4-5": {
+				"title": "Claude Opus 4.5",
+				"model": "claude-opus-4-5",
+				"modelTotalTokens": 200000,
+				"apikey": ""
+			},
+			"claude-3_5-haiku": {
+				"title": "Claude Haiku 3.5",
+				"model": "claude-3-5-haiku-latest",
+				"modelTotalTokens": 200000,
+				"apikey": ""
+			},
+			"claude-3_7-sonnet": {
+				"title": "Claude Sonnet 3.7", 
+				"model": "claude-3-7-sonnet-latest",
+				"modelTotalTokens": 200000,
+				"apikey": ""
+			},
+			"claude-opus-4-1": {
+				"title": "Claude Opus 4.1",
+				"model": "claude-opus-4-1",
+				"modelTotalTokens": 200000,
+				"apikey": ""
+			}
+		}
+	},
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Anthropic model"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total Tokens"
+		},
+		"anthropic.custom": {
+			"object": "custom",
+			"properties": [
+				"model",
+				"modelTotalTokens",
+				"llm.cloud.apikey"
+			]
+		},
+		"anthropic.claude-sonnet-4-5": {
+			"object": "claude-sonnet-4-5",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"anthropic.claude-haiku-4-5": {
+			"object": "claude-haiku-4-5",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"anthropic.claude-opus-4-5": {
+			"object": "claude-opus-4-5",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"anthropic.claude-opus-4-1": {
+			"object": "claude-opus-4-1",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"anthropic.claude-3_5-haiku": {
+			"object": "claude-3_5-haiku",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"anthropic.claude-3_7-sonnet": {
+			"object": "claude-3_7-sonnet",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"anthropic.profile": {
+			"title": "Model",
+			"description": "LLM model",
+			"type": "string",
+			"default": "claude-3_5-haiku",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": [
+						"anthropic.custom"
+					]
+				},
+				{
+					"value": "claude-haiku-4-5",
+					"properties": [
+						"anthropic.claude-haiku-4-5"
+					]
+				},
+				{
+					"value": "claude-sonnet-4-5",
+					"properties": [
+						"anthropic.claude-sonnet-4-5"
+					]
+				},
+				{
+					"value": "claude-opus-4-5",
+					"properties": [
+						"anthropic.claude-opus-4-5"
+					]
+				},
+				{
+					"value": "claude-3_5-haiku",
+					"properties": [
+						"anthropic.claude-3_5-haiku"
+					]
+				},
+				{
+					"value": "claude-3_7-sonnet",
+					"properties": [
+						"anthropic.claude-3_7-sonnet"
+					]
+				},
+				{
+					"value": "claude-opus-4-1",
+					"properties": [
+						"anthropic.claude-opus-4-1"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "LLM - Anthropic",
+			"properties": [
+				"anthropic.profile"
+			]
+		}
+	]
+}

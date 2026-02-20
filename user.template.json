@@ -1,0 +1,32 @@
+{
+    "_comment": "Copy this file to user.json and customize for your environment",
+    "dataPath": "./data",
+    "logPath": "./logs",
+    "cachePath": "./cache",
+    "port": 8080,
+    "workers": 4,
+    "logging": {
+        "level": "info",
+        "console": true,
+        "file": true
+    },
+    "java": {
+        "enabled": true,
+        "home": ""
+    },
+    "python": {
+        "enabled": true,
+        "path": ""
+    },
+    "llm": {
+        "provider": "openai",
+        "apiKey": "",
+        "model": "gpt-4"
+    },
+    "vectorDb": {
+        "provider": "chroma",
+        "host": "localhost",
+        "port": 8000
+    }
+}
+

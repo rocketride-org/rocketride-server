@@ -1,0 +1,355 @@
+{
+    "title": "LLM - Mistral AI",
+    "protocol": "llm_mistral://",
+    "classType": ["llm"],
+    "capabilities": ["invoke"],
+    "register": "filter",
+    "node": "python",
+    "path": "nodes.llm_mistral",
+    "prefix": "llm",
+    "description": [
+        "A component that connects to Mistral AI's advanced language models for natural language processing. ",
+        "Supports a wide range of models from large (128K context) to small (32K context), including specialized ",
+        "models for reasoning and technical tasks. Features high-quality chat completions with robust error handling ",
+        "and automatic token management."
+    ],
+    "documentation": "https://bit.ly/3X7t1wC",
+    "icon": "mistral.svg",
+    "tile": [
+        "Model: ${parameters.llm_mistral.profile}"
+    ],
+    "lanes": {
+        "questions": ["answers"]
+    },
+    "input": [
+        {
+            "lane": "questions",
+            "output": [
+                {
+                    "lane": "answers"
+                }
+            ]
+        }
+    ],
+    "preconfig": {
+        "default": "mistral-large",
+        "profiles": {
+            "custom": {
+                "title": "Custom Model",
+                "model": "",
+                "modelTotalTokens": 32768,
+                "apikey": ""
+            },
+            "mistral-large": {
+                "title": "Mistral Large 2.1",
+                "model": "mistral-large-2411",
+                "modelTotalTokens": 131072,
+                "apikey": ""
+            },
+            "mistral-medium": {
+                "title": "Mistral Medium 3.1",
+                "model": "mistral-medium-2508",
+                "modelTotalTokens": 131072,
+                "apikey": ""
+            },
+            "mistral-small": {
+                "title": "Mistral Small 3.2",
+                "model": "mistral-small-2506",
+                "modelTotalTokens": 131072,
+                "apikey": ""
+            },
+            "mistral-small-base": {
+                "title": "Mistral Small 3.0",
+                "model": "mistral-small-2501",
+                "modelTotalTokens": 32768,
+                "apikey": ""
+            },
+            "mistral-nemo": {
+                "title": "Mistral Nemo 12B",
+                "model": "open-mistral-nemo-2407",
+                "modelTotalTokens": 131072,
+                "apikey": ""
+            },
+            "codestral": {
+                "title": "Codestral",
+                "model": "codestral-2508",
+                "modelTotalTokens": 262144,
+                "apikey": ""
+            },
+            "magistral-medium": {
+                "title": "Magistral Medium 1.2",
+                "model": "magistral-medium-2509",
+                "modelTotalTokens": 40960,
+                "apikey": ""
+            },
+            "magistral-small": {
+                "title": "Magistral Small 1.2",
+                "model": "magistral-small-2509",
+                "modelTotalTokens": 40960,
+                "apikey": ""
+            },
+            "devstral-medium": {
+                "title": "Devstral Medium 1.0",
+                "model": "devstral-medium-2507",
+                "modelTotalTokens": 131072,
+                "apikey": ""
+            },
+            "devstral-small": {
+                "title": "Devstral Small 1.1",
+                "model": "devstral-small-2507",
+                "modelTotalTokens": 131072,
+                "apikey": ""
+            },
+            "ministral-3b": {
+                "title": "Ministral 3B",
+                "model": "ministral-3b-2410",
+                "modelTotalTokens": 131072,
+                "apikey": ""
+            },
+            "ministral-8b": {
+                "title": "Ministral 8B",
+                "model": "ministral-8b-2410",
+                "modelTotalTokens": 131072,
+                "apikey": ""
+            }
+        }
+    },
+    "fields": {
+        "model": {
+            "type": "string",
+            "title": "Model",
+            "description": "Mistral AI model"
+        },
+        "modelTotalTokens": {
+            "type": "number",
+            "title": "Tokens",
+            "description": "Maximum context length in tokens"
+        },
+        "mistral.custom": {
+            "object": "custom",
+            "properties": [
+                "model",
+                "modelTotalTokens",
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.mistral-large": {
+            "object": "mistral-large",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.mistral-medium": {
+            "object": "mistral-medium",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.mistral-small": {
+            "object": "mistral-small",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.mistral-small-latest": {
+            "object": "mistral-small-latest",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.mistral-small-previous": {
+            "object": "mistral-small-previous",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.mistral-small-base": {
+            "object": "mistral-small-base",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.magistral-small": {
+            "object": "magistral-small",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.devstral-small": {
+            "object": "devstral-small",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.devstral-small-legacy": {
+            "object": "devstral-small-legacy",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.ministral-8b": {
+            "object": "ministral-8b",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.ministral-3b": {
+            "object": "ministral-3b",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.magistral-medium": {
+            "object": "magistral-medium",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.codestral": {
+            "object": "codestral",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.devstral-medium": {
+            "object": "devstral-medium",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.mistral-nemo": {
+            "object": "mistral-nemo",
+            "properties": [
+                "llm.cloud.apikey"
+            ]
+        },
+        "mistral.profile": {
+            "title": "Model",
+            "description": "Mistral AI model selection",
+            "type": "string",
+            "default": "mistral-large",
+            "enum": [
+                ["custom", "Custom Model"],
+                ["mistral-large", "Mistral Large 2.1"],
+                ["mistral-medium", "Mistral Medium 3.1"],
+                ["mistral-small", "Mistral Small 3.2"],
+                ["mistral-small-base", "Mistral Small 3.0"],
+                ["mistral-nemo", "Mistral Nemo 12B"],
+                ["magistral-medium", "Magistral Medium 1.2"],
+                ["magistral-small", "Magistral Small 1.2"],
+                ["devstral-medium", "Devstral Medium 1.0"],
+                ["devstral-small", "Devstral Small 1.1"],
+                ["ministral-8b", "Ministral 8B"],
+                ["ministral-3b", "Ministral 3B"],
+                ["codestral", "Codestral"]
+            ],
+            "conditional": [
+                {
+                    "value": "custom",
+                    "properties": [
+                        "mistral.custom"
+                    ]
+                },
+                {
+                    "value": "mistral-large",
+                    "properties": [
+                        "mistral.mistral-large"
+                    ]
+                },
+                {
+                    "value": "mistral-medium",
+                    "properties": [
+                        "mistral.mistral-medium"
+                    ]
+                },
+                {
+                    "value": "magistral-medium",
+                    "properties": [
+                        "mistral.magistral-medium"
+                    ]
+                },
+                {
+                    "value": "codestral",
+                    "properties": [
+                        "mistral.codestral"
+                    ]
+                },
+                {
+                    "value": "devstral-medium",
+                    "properties": [
+                        "mistral.devstral-medium"
+                    ]
+                },
+                {
+                    "value": "mistral-small",
+                    "properties": [
+                        "mistral.mistral-small"
+                    ]
+                },
+                {
+                    "value": "mistral-small-latest",
+                    "properties": [
+                        "mistral.mistral-small-latest"
+                    ]
+                },
+                {
+                    "value": "mistral-small-previous",
+                    "properties": [
+                        "mistral.mistral-small-previous"
+                    ]
+                },
+                {
+                    "value": "mistral-small-base",
+                    "properties": [
+                        "mistral.mistral-small-base"
+                    ]
+                },
+                {
+                    "value": "magistral-small",
+                    "properties": [
+                        "mistral.magistral-small"
+                    ]
+                },
+                {
+                    "value": "devstral-small",
+                    "properties": [
+                        "mistral.devstral-small"
+                    ]
+                },
+                {
+                    "value": "devstral-small-legacy",
+                    "properties": [
+                        "mistral.devstral-small-legacy"
+                    ]
+                },
+                {
+                    "value": "mistral-nemo",
+                    "properties": [
+                        "mistral.mistral-nemo"
+                    ]
+                },
+                {
+                    "value": "ministral-8b",
+                    "properties": [
+                        "mistral.ministral-8b"
+                    ]
+                },
+                {
+                    "value": "ministral-3b",
+                    "properties": [
+                        "mistral.ministral-3b"
+                    ]
+                }
+            ]
+        }
+    },
+    "shape": [
+        {
+            "section": "Pipe",
+            "title": "LLM - Mistral AI",
+            "properties": [
+                "mistral.profile"
+            ]
+        }
+    ]
+}

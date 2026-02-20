@@ -1,0 +1,12 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -7,9 +7,6 @@ IF(BIICODE)
+ ENDIF(BIICODE)
+ cmake_minimum_required(VERSION 2.6 FATAL_ERROR)
+ cmake_policy(VERSION 2.6)
+-if(POLICY CMP0063)
+-       cmake_policy(SET CMP0063 OLD)
+-endif()
+
+ project(tinyxml2)
+ include(GNUInstallDirs)

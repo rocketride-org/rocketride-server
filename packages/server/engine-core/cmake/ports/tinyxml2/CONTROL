@@ -1,0 +1,4 @@
+Source: tinyxml2
+Version: 8.0.0
+Homepage: https://github.com/leethomason/tinyxml2
+Description: A simple, small, efficient, C++ XML parser

@@ -1,0 +1,7 @@
+# smbprotocol
+cffi
+cryptography
+pycparser
+pyspnego
+smbprotocol
+sspilib

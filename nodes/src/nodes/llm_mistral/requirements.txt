@@ -1,0 +1,3 @@
+# Plugin Mistral Vision core
+mistralai
+mistral-common[sentencepiece]

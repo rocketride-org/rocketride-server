@@ -1,0 +1,315 @@
+ * =============================================================================
+ * MIT License
+ * Copyright (c) 2026 RocketRide, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ * ============================================================================= */
+
+/**
+ * Application Global Styles
+ * 
+ * This file contains application-specific styles that are used across
+ * multiple views and components. These are common patterns and utilities
+ * that don't fit into view-specific stylesheets.
+ * 
+ * Categories:
+ * - Common utility classes
+ * - Shared component patterns
+ * - Animation definitions
+ * - Responsive utilities
+ */
+
+/* ============================================================================ */
+/* UTILITY CLASSES */
+/* ============================================================================ */
+
+.no-data {
+	text-align: center;
+	color: var(--vscode-descriptionForeground);
+	font-style: italic;
+	padding: 24px;
+	font-size: 13px;
+}
+
+/* ============================================================================ */
+/* LOADING SPINNER */
+/* ============================================================================ */
+
+.spinner {
+	border: 3px solid var(--vscode-panel-border);
+	border-top: 3px solid var(--vscode-focusBorder);
+	border-radius: 50%;
+	width: 40px;
+	height: 40px;
+	animation: spin 1s linear infinite;
+	margin: 0 auto 16px;
+}
+
+@keyframes spin {
+	0% {
+		transform: rotate(0deg);
+	}
+
+	100% {
+		transform: rotate(360deg);
+	}
+}
+
+/* ============================================================================ */
+/* COMMON SECTION STYLES */
+/* ============================================================================ */
+
+.status-section,
+.pipeline {
+	margin-bottom: 24px;
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 8px;
+	overflow: hidden;
+	transition: all 0.3s;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.status-section:hover,
+.pipeline:hover {
+	border-color: var(--vscode-focusBorder);
+	box-shadow: 0 4px 16px rgba(0, 122, 204, 0.2);
+}
+
+.section-header,
+.pipeline-header {
+	background: var(--vscode-sideBarSectionHeader-background);
+	padding: 12px 16px;
+	font-weight: 600;
+	border-bottom: 1px solid var(--vscode-panel-border);
+	font-size: 14px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.section-content {
+	padding: 16px;
+	font-size: 13px;
+}
+
+/* ============================================================================ */
+/* STATUS ROW PATTERN */
+/* ============================================================================ */
+
+.status-row {
+	display: flex;
+	justify-content: space-between;
+	margin-bottom: 8px;
+	align-items: center;
+}
+
+.status-label {
+	color: var(--vscode-descriptionForeground);
+	min-width: 100px;
+}
+
+.status-value {
+	font-weight: 500;
+	text-align: right;
+	flex-grow: 1;
+	font-family: var(--vscode-editor-font-family);
+	color: var(--vscode-focusBorder);
+}
+
+.status-spacer {
+	height: 12px;
+}
+
+/* ============================================================================ */
+/* SERVICE INDICATOR DOTS */
+/* ============================================================================ */
+
+.service-indicator {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	margin-left: 6px;
+}
+
+.service-up {
+	background: var(--vscode-charts-green);
+}
+
+.service-down {
+	background: var(--vscode-charts-red);
+}
+
+.service-inactive {
+	background: var(--vscode-descriptionForeground);
+}
+
+.service-stopping {
+	background: var(--vscode-charts-yellow);
+}
+
+/* ============================================================================ */
+/* COMMON BADGE STYLES */
+/* ============================================================================ */
+
+.component-count {
+	margin-left: auto;
+	padding: 2px 8px;
+	border-radius: 4px;
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.component-count.active {
+	background: var(--vscode-charts-green);
+	color: var(--vscode-editor-background);
+}
+
+.component-count.inactive {
+	background: var(--vscode-descriptionForeground);
+	color: var(--vscode-editor-background);
+}
+
+.pipeline-id {
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+	padding: 2px 8px;
+	border-radius: 4px;
+	font-size: 11px;
+	font-weight: 600;
+}
+
+/* ============================================================================ */
+/* MODAL OVERLAY & DIALOG (Shared across views) */
+/* ============================================================================ */
+
+.modal-overlay {
+	display: none;
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.5);
+	z-index: 1000;
+	align-items: center;
+	justify-content: center;
+	backdrop-filter: blur(2px);
+}
+
+.modal-overlay.active {
+	display: flex;
+}
+
+.modal {
+	background: var(--vscode-editor-background);
+	border: 1px solid var(--vscode-widget-border);
+	border-radius: 8px;
+	width: 90%;
+	max-width: 600px;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+	animation: modalSlideIn 0.2s ease-out;
+}
+
+@keyframes modalSlideIn {
+	from {
+		opacity: 0;
+		transform: translateY(-20px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.modal-header {
+	background: var(--vscode-sideBarSectionHeader-background);
+	padding: 16px 20px;
+	border-bottom: 1px solid var(--vscode-panel-border);
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.modal-title {
+	font-size: 16px;
+	font-weight: 600;
+	color: var(--vscode-foreground);
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.close-btn {
+	background: transparent;
+	border: none;
+	color: var(--vscode-foreground);
+	font-size: 20px;
+	cursor: pointer;
+	padding: 4px 8px;
+	border-radius: 4px;
+	transition: all 0.2s;
+}
+
+.close-btn:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.modal-body {
+	padding: 24px;
+}
+
+/* ============================================================================ */
+/* ANIMATION UTILITIES */
+/* ============================================================================ */
+
+@keyframes pulse {
+
+	0%,
+	100% {
+		opacity: 1;
+	}
+
+	50% {
+		opacity: 0.5;
+	}
+}
+
+/* ============================================================================ */
+/* RESPONSIVE BREAKPOINTS */
+/* ============================================================================ */
+
+@media (max-width: 768px) {
+	.status-row {
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 4px;
+	}
+
+	.status-label {
+		min-width: auto;
+	}
+
+	.status-value {
+		text-align: left;
+	}
+}

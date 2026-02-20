@@ -1,0 +1,595 @@
+{
+  "version": 6,
+  "entities": [
+    {
+      "entity": {
+        "type": "Project",
+        "description": "Process the denodo pipeline\n\nengine --trace=ServicePipe ai\\cloud.py\n\nThis will startup a cloud endpoint and allow you to create any pipeline you want\n",
+        "id": "d37e3ba6-3a40-479c-9bf8-5e8da4bae5ae",
+        "name": "Cloud - Denodo"
+      },
+      "children": [
+        {
+          "entity": {
+            "type": "Request",
+            "method": {
+              "requestBody": true,
+              "link": "http://tools.ietf.org/html/rfc7231#section-4.3.3",
+              "name": "POST"
+            },
+            "body": {
+              "formBody": {
+                "overrideContentType": true,
+                "encoding": "application/x-www-form-urlencoded",
+                "items": []
+              },
+              "bodyType": "Text",
+              "textBody": ""
+            },
+            "uri": {
+              "query": {
+                "delimiter": "&",
+                "items": [
+                  {
+                    "enabled": true,
+                    "name": "name",
+                    "value": "pipe"
+                  }
+                ]
+              },
+              "scheme": {
+                "name": "http",
+                "version": "V11"
+              },
+              "host": "127.0.0.1:5565",
+              "path": "/use"
+            },
+            "description": "Tell server to load the pipe module",
+            "id": "0dda2060-9585-49d6-b87a-d4f6c9ea5ce0",
+            "name": "00 - Use pipe module",
+            "headers": [
+              {
+                "enabled": true,
+                "name": "Authorization",
+                "value": "MYAPIKEY"
+              },
+              {
+                "enabled": true,
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "entity": {
+            "type": "Request",
+            "method": {
+              "requestBody": true,
+              "link": "http://tools.ietf.org/html/rfc7231#section-4.3.3",
+              "name": "POST"
+            },
+            "body": {
+              "formBody": {
+                "overrideContentType": true,
+                "encoding": "application/x-www-form-urlencoded",
+                "items": []
+              },
+              "bodyType": "Text",
+              "textBodyEditorHeight": 362,
+              "textBody": "{\n    \"pipeline\": {\n        \"source\": \"source_1\",\n        \"components\": [\n            {\n                \"id\": \"source_1\",\n                \"provider\": \"filesys\",\n                \"config\": {\n                    \"actions\": {},\n                    \"estimation\": {\n                        \"accessCost\": 0,\n                        \"accessDelay\": 0,\n                        \"accessRate\": 0,\n                        \"storeCost\": 0\n                    },\n                    \"include\": [\n                        {\n                            \"classify\": true,\n                            \"index\": true,\n                            \"ocr\": true,\n                            \"path\": \"C:\\\\test\",\n                            \"permissions\": true,\n                            \"signing\": true,\n                            \"vectorize\": false\n                        }\n                    ],\n                    \"key\": \"filesys://*\",\n                    \"mode\": \"Source\",\n                    \"name\": \"File System\",\n                    \"parameters\": {\n                        \"auth\": \"secure\",\n                        \"format\": \"native\",\n                        \"secureParameters\": {\n                            \"readonly\": [],\n                            \"secure\": [],\n                            \"token\": \"ToIyPoSGQk2sB2Mw+p3jh3R0L2Xdwltcgj4bZln2dHV7/huJ\"\n                        }\n                    },\n                    \"sync\": false,\n                    \"type\": \"filesys\"\n                },\n                \"ui\": {}\n            },\n            {\n                \"id\": \"parser_1\",\n                \"provider\": \"parse\",\n                \"config\": {},\n                \"ui\": {},\n                \"input\": [\n                    {\n                        \"lane\": \"tag\",\n                        \"from\": \"source_1\"\n                    }\n                ]\n            },\n            {\n                \"id\": \"preprocessor_1\",\n                \"provider\": \"preprocessor_langchain\",\n                \"ui\": {},\n                \"config\": {\n                    \"profile\": \"string\",\n                    \"chunk_size\": 1024\n                },\n                \"input\": [\n                    {\n                        \"lane\": \"text\",\n                        \"from\": \"parser_1\"\n                    }\n                ]\n            },\n            {\n                \"id\": \"embedding_1\",\n                \"provider\": \"embedding_transformer\",\n                \"ui\": {},\n                \"config\": {},\n                \"input\": [\n                    {\n                        \"lane\": \"documents\",\n                        \"from\": \"preprocessor_1\"\n                    }\n                ]\n            },\n            {\n                \"id\": \"qdrant_1\",\n                \"provider\": \"qdrant\",\n                \"ui\": {},\n                \"profile\": \"local\",\n                \"config\": {\n                    \"collection\": \"denodo_collection\"\n                },\n                \"input\": [\n                    {\n                        \"lane\": \"documents\",\n                        \"from\": \"embedding_1\"\n                    }\n                ]\n            },\n            {\n                \"id\": \"definitions_1\",\n                \"provider\": \"definitions\",\n                \"ui\": {},\n                \"config\": {},\n                \"input\": [\n                    {\n                        \"lane\": \"text\",\n                        \"from\": \"parser_1\"\n                    },\n                    {\n                        \"lane\": \"answers\",\n                        \"from\": \"chat_1\"\n                    }\n                ]\n            },\n            {\n                \"id\": \"chat_1\",\n                \"provider\": \"chat_openai\",\n                \"ui\": {},\n                \"config\": {\n                    \"apikey\": \"insert your key here\"\n                },\n                \"input\": [\n                    {\n                        \"lane\": \"questions\",\n                        \"from\": \"definitions_1\"\n                    }\n                ]\n            },\n            {\n                \"id\": \"embedding_2\",\n                \"provider\": \"embedding_transformer\",\n                \"ui\": {},\n                \"input\": [\n                    {\n                        \"lane\": \"documents\",\n                        \"from\": \"definitions_1\"\n                    }\n                ]\n            },\n            {\n                \"id\": \"response_1\",\n                \"provider\": \"response\",\n                \"ui\": {},\n                \"config\": {\n                    \"keys\": {\n                        \"documents\": \"procdocs\"\n                    }\n                },\n                \"input\": [\n                    {\n                        \"lane\": \"documents\",\n                        \"from\": \"embedding_1\"\n                    }\n                ]\n            },\n            {\n                \"id\": \"response_2\",\n                \"provider\": \"response\",\n                \"ui\": {},\n                \"config\": {\n                    \"keys\": {\n                        \"documents\": \"defdocs\",\n                        \"answers\": \"defanswers\"\n                    }\n                },\n                \"input\": [\n                    {\n                        \"lane\": \"documents\",\n                        \"from\": \"embedding_2\"\n                    },\n                    {\n                        \"lane\": \"answers\",\n                        \"from\": \"chat_1\"\n                    },\n                    {\n                        \"lane\": \"questions\",\n                        \"from\": \"definitions_1\"\n                    }\n                ]\n            },\n            {\n                \"id\": \"qdrant_2\",\n                \"provider\": \"qdrant\",\n                \"ui\": {},\n                \"profile\": \"local\",\n                \"config\": {\n                    \"collection\": \"denodo_dictionary\"\n                },\n                \"input\": [\n                    {\n                        \"lane\": \"documents\",\n                        \"from\": \"embedding_2\"\n                    }\n                ]\n            }\n        ]\n    }\n}"
+            },
+            "uri": {
+              "query": {
+                "delimiter": "&",
+                "items": [
+                  {
+                    "enabled": true,
+                    "name": "pipe",
+                    "value": "myPipe"
+                  }
+                ]
+              },
+              "scheme": {
+                "name": "http",
+                "version": "V11"
+              },
+              "host": "localhost:5565",
+              "path": "/pipe"
+            },
+            "description": "Add the processing pipe",
+            "id": "1ea53d5c-6055-4abf-9dd3-8184b6c90d03",
+            "name": "10 - Create pipe endpoint",
+            "headers": [
+              {
+                "enabled": true,
+                "name": "Authorization",
+                "value": "MYAPIKEY"
+              },
+              {
+                "enabled": true,
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "entity": {
+            "type": "Request",
+            "method": {
+              "requestBody": true,
+              "link": "http://tools.ietf.org/html/rfc7231#section-4.3.4",
+              "name": "PUT"
+            },
+            "body": {
+              "formBody": {
+                "overrideContentType": true,
+                "encoding": "multipart/form-data",
+                "items": [
+                  {
+                    "enabled": true,
+                    "type": "File",
+                    "name": "files"
+                  },
+                  {
+                    "enabled": true,
+                    "type": "File",
+                    "name": "files"
+                  }
+                ]
+              },
+              "bodyType": "Form",
+              "textBody": "{\n    \"files\": [\n        \"C:\\\\denodo\\\\Chat-english.txt\"\n    ]\n}"
+            },
+            "uri": {
+              "query": {
+                "delimiter": "&",
+                "items": [
+                  {
+                    "enabled": true,
+                    "name": "pipe",
+                    "value": "myPipe"
+                  }
+                ]
+              },
+              "scheme": {
+                "name": "http",
+                "version": "V11"
+              },
+              "host": "127.0.0.1:5565",
+              "path": "/pipe/process"
+            },
+            "description": "Process a document sending it through the pipe. Add as many documents as you like withing the \"files\" form field",
+            "id": "88fcd930-a955-4926-942d-fbf03ee277e5",
+            "name": "20 - Process document",
+            "headers": [
+              {
+                "enabled": true,
+                "name": "Content-Type",
+                "value": "multipart/form-data"
+              },
+              {
+                "enabled": true,
+                "name": "Authorization",
+                "value": "MYAPIKEY"
+              }
+            ]
+          }
+        },
+        {
+          "entity": {
+            "type": "Request",
+            "method": {
+              "link": "http://tools.ietf.org/html/rfc7231#section-4.3.5",
+              "name": "DELETE"
+            },
+            "body": {
+              "formBody": {
+                "overrideContentType": true,
+                "encoding": "application/x-www-form-urlencoded",
+                "items": []
+              },
+              "bodyType": "Text",
+              "textBodyEditorHeight": 362,
+              "textBody": "{\n      \"pipeline\": [\n            {\n                  \"provider\": \"parse\",\n                  \"config\": {}\n            },\n            {\n                  \"provider\": \"response\",\n                  \"config\": {\n                    \"output\": [\"tables\"]\n                  }\n            }\n      ]\n}"
+            },
+            "uri": {
+              "query": {
+                "delimiter": "&",
+                "items": [
+                  {
+                    "enabled": true,
+                    "name": "pipe",
+                    "value": "myPipe"
+                  }
+                ]
+              },
+              "scheme": {
+                "name": "http",
+                "version": "V11"
+              },
+              "host": "localhost:5565",
+              "path": "/pipe"
+            },
+            "id": "c7d273ea-e5ea-483c-a57e-f7154fd716c3",
+            "name": "30 - Delete pipe endpoint",
+            "headers": [
+              {
+                "enabled": true,
+                "name": "Authorization",
+                "value": "MYAPIKEY"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "entity": {
+        "type": "Project",
+        "description": "Process a simple document returning text, image and video data\n\nengine --trace=ServicePipe ai\\cloud.py\n\nThis will startup a cloud endpoint and allow you to create any pipeline you want",
+        "id": "f4e83a61-c04e-4032-af0c-646566541b5e",
+        "name": "Cloud - Text"
+      },
+      "children": [
+        {
+          "entity": {
+            "type": "Request",
+            "method": {
+              "requestBody": true,
+              "link": "http://tools.ietf.org/html/rfc7231#section-4.3.3",
+              "name": "POST"
+            },
+            "body": {
+              "formBody": {
+                "overrideContentType": true,
+                "encoding": "application/x-www-form-urlencoded",
+                "items": []
+              },
+              "bodyType": "Text",
+              "textBody": ""
+            },
+            "uri": {
+              "query": {
+                "delimiter": "&",
+                "items": [
+                  {
+                    "enabled": true,
+                    "name": "name",
+                    "value": "pipe"
+                  }
+                ]
+              },
+              "scheme": {
+                "name": "http",
+                "version": "V11"
+              },
+              "host": "127.0.0.1:5565",
+              "path": "/use"
+            },
+            "description": "Tell server to load the pipe module",
+            "id": "3f0423b3-997e-4d60-8f34-6776b87b520f",
+            "name": "00 - Use pipe module",
+            "headers": [
+              {
+                "enabled": true,
+                "name": "Authorization",
+                "value": "MYAPIKEY"
+              },
+              {
+                "enabled": true,
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "entity": {
+            "type": "Request",
+            "method": {
+              "requestBody": true,
+              "link": "http://tools.ietf.org/html/rfc7231#section-4.3.3",
+              "name": "POST"
+            },
+            "body": {
+              "formBody": {
+                "overrideContentType": true,
+                "encoding": "application/x-www-form-urlencoded",
+                "items": []
+              },
+              "bodyType": "Text",
+              "textBodyEditorHeight": 362,
+              "textBody": "{\n\t\"pipeline\": {\n\t\t\"source\": \"source_1\",\n\t\t\"components\": [\n\t\t\t{\n\t\t\t\t\"id\": \"source_1\",\n\t\t\t\t\"provider\": \"webhook\",\n\t\t\t\t\"config\": {\n\t\t\t\t\t\"key\": \"webhook://*\",\n\t\t\t\t\t\"mode\": \"Source\",\n\t\t\t\t\t\"name\": \"Web Hook\",\n\t\t\t\t\t\"include\": [\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\"path\": \"*\"\n\t\t\t\t\t\t}\n\t\t\t\t\t],\n\t\t\t\t\t\"parameters\": {\n\t\t\t\t\t\t\"endpoint\": \"/processDocs\",\n\t\t\t\t\t\t\"port\": 8799\n\t\t\t\t\t},\n\t\t\t\t\t\"sync\": false,\n\t\t\t\t\t\"type\": \"webhook\"\n\t\t\t\t},\n\t\t\t\t\"ui\": {}\n\t\t\t},\n\t\t\t{\n\t\t\t\t\"id\": \"parser_1\",\n\t\t\t\t\"provider\": \"parse\",\n\t\t\t\t\"config\": {},\n\t\t\t\t\"ui\": {},\n\t\t\t\t\"input\": [\n\t\t\t\t\t{\n\t\t\t\t\t\t\"lane\": \"tag\",\n\t\t\t\t\t\t\"from\": \"source_1\"\n\t\t\t\t\t}\n\t\t\t\t]\n\t\t\t},\n\t\t\t{\n\t\t\t\t\"id\": \"response_1\",\n\t\t\t\t\"provider\": \"response\",\n\t\t\t\t\"ui\": {},\n\t\t\t\t\"config\": {},\n\t\t\t\t\"input\": [\n\t\t\t\t\t{\n\t\t\t\t\t\t\"lane\": \"audio\",\n\t\t\t\t\t\t\"from\": \"parser_1\"\n\t\t\t\t\t},\n\t\t\t\t\t{\n\t\t\t\t\t\t\"lane\": \"audio\",\n\t\t\t\t\t\t\"from\": \"source_1\"\n\t\t\t\t\t},\n\t\t\t\t\t{\n\t\t\t\t\t\t\"lane\": \"video\",\n\t\t\t\t\t\t\"from\": \"parser_1\"\n\t\t\t\t\t},\n\t\t\t\t\t{\n\t\t\t\t\t\t\"lane\": \"video\",\n\t\t\t\t\t\t\"from\": \"source_1\"\n\t\t\t\t\t},\n\t\t\t\t\t{\n\t\t\t\t\t\t\"lane\": \"image\",\n\t\t\t\t\t\t\"from\": \"parser_1\"\n\t\t\t\t\t},\n\t\t\t\t\t{\n\t\t\t\t\t\t\"lane\": \"image\",\n\t\t\t\t\t\t\"from\": \"source_1\"\n\t\t\t\t\t},\n\t\t\t\t\t{\n\t\t\t\t\t\t\"lane\": \"text\",\n\t\t\t\t\t\t\"from\": \"parser_1\"\n\t\t\t\t\t},\n\t\t\t\t\t{\n\t\t\t\t\t\t\"lane\": \"text\",\n\t\t\t\t\t\t\"from\": \"source_1\"\n\t\t\t\t\t}\n\t\t\t\t]\n\t\t\t}\n\t\t]\n\t}\n}"
+            },
+            "uri": {
+              "query": {
+                "delimiter": "&",
+                "items": [
+                  {
+                    "enabled": true,
+                    "name": "pipe",
+                    "value": "myPipe"
+                  }
+                ]
+              },
+              "scheme": {
+                "name": "http",
+                "version": "V11"
+              },
+              "host": "localhost:5565",
+              "path": "/pipe"
+            },
+            "description": "Add the processing pipe",
+            "id": "23914ba6-6f45-4afe-9f24-069cc9322ca8",
+            "name": "10 - Create pipe endpoint",
+            "headers": [
+              {
+                "enabled": true,
+                "name": "Authorization",
+                "value": "MYAPIKEY"
+              },
+              {
+                "enabled": true,
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "entity": {
+            "type": "Request",
+            "method": {
+              "requestBody": true,
+              "link": "http://tools.ietf.org/html/rfc7231#section-4.3.4",
+              "name": "PUT"
+            },
+            "body": {
+              "formBody": {
+                "overrideContentType": true,
+                "encoding": "multipart/form-data",
+                "items": [
+                  {
+                    "enabled": true,
+                    "type": "File",
+                    "name": "files"
+                  },
+                  {
+                    "enabled": true,
+                    "type": "File",
+                    "name": "files"
+                  }
+                ]
+              },
+              "bodyType": "Form",
+              "textBody": "{\n    \"files\": [\n        \"C:\\\\denodo\\\\Chat-english.txt\"\n    ]\n}"
+            },
+            "uri": {
+              "query": {
+                "delimiter": "&",
+                "items": [
+                  {
+                    "enabled": true,
+                    "name": "pipe",
+                    "value": "myPipe"
+                  }
+                ]
+              },
+              "scheme": {
+                "name": "http",
+                "version": "V11"
+              },
+              "host": "127.0.0.1:5565",
+              "path": "/pipe/process"
+            },
+            "description": "Process a document sending it through the pipe. Add as many documents as you like withing the \"files\" form field",
+            "id": "fbd71752-d354-4831-a9eb-ea716ffae21b",
+            "name": "20 - Process document",
+            "headers": [
+              {
+                "enabled": true,
+                "name": "Content-Type",
+                "value": "multipart/form-data"
+              },
+              {
+                "enabled": true,
+                "name": "Authorization",
+                "value": "MYAPIKEY"
+              }
+            ]
+          }
+        },
+        {
+          "entity": {
+            "type": "Request",
+            "method": {
+              "link": "http://tools.ietf.org/html/rfc7231#section-4.3.5",
+              "name": "DELETE"
+            },
+            "body": {
+              "formBody": {
+                "overrideContentType": true,
+                "encoding": "application/x-www-form-urlencoded",
+                "items": []
+              },
+              "bodyType": "Text",
+              "textBodyEditorHeight": 362,
+              "textBody": "{\n      \"pipeline\": [\n            {\n                  \"provider\": \"parse\",\n                  \"config\": {}\n            },\n            {\n                  \"provider\": \"response\",\n                  \"config\": {\n                    \"output\": [\"tables\"]\n                  }\n            }\n      ]\n}"
+            },
+            "uri": {
+              "query": {
+                "delimiter": "&",
+                "items": [
+                  {
+                    "enabled": true,
+                    "name": "pipe",
+                    "value": "myPipe"
+                  }
+                ]
+              },
+              "scheme": {
+                "name": "http",
+                "version": "V11"
+              },
+              "host": "localhost:5565",
+              "path": "/pipe"
+            },
+            "id": "8c4e87cf-5142-4496-b65a-0e6b5324472a",
+            "name": "30 - Delete pipe endpoint",
+            "headers": [
+              {
+                "enabled": true,
+                "name": "Authorization",
+                "value": "MYAPIKEY"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "entity": {
+        "type": "Project",
+        "id": "f8a16fa2-3e1b-496f-9fc9-a4570b8f36ac",
+        "name": "Documentation"
+      },
+      "children": [
+        {
+          "entity": {
+            "type": "Request",
+            "method": {
+              "link": "http://tools.ietf.org/html/rfc7231#section-4.3.1",
+              "name": "GET"
+            },
+            "body": {
+              "formBody": {
+                "overrideContentType": true,
+                "encoding": "application/x-www-form-urlencoded",
+                "items": []
+              },
+              "bodyType": "Text"
+            },
+            "uri": {
+              "query": {
+                "delimiter": "&",
+                "items": []
+              },
+              "scheme": {
+                "name": "http",
+                "version": "V11"
+              },
+              "host": "localhost:5565",
+              "path": "/openapi.json"
+            },
+            "description": "If you want to view in redoc, just take this same link and open it in the browser.",
+            "id": "cd3d6f72-7699-4bed-a4f6-75c10629e52f",
+            "name": "OpenAPI",
+            "headers": []
+          }
+        },
+        {
+          "entity": {
+            "type": "Request",
+            "method": {
+              "link": "http://tools.ietf.org/html/rfc7231#section-4.3.1",
+              "name": "GET"
+            },
+            "body": {
+              "formBody": {
+                "overrideContentType": true,
+                "encoding": "application/x-www-form-urlencoded",
+                "items": []
+              },
+              "bodyType": "Text"
+            },
+            "uri": {
+              "query": {
+                "delimiter": "&",
+                "items": []
+              },
+              "scheme": {
+                "name": "http",
+                "version": "V11"
+              },
+              "host": "localhost:5565",
+              "path": "/redoc"
+            },
+            "description": "If you want to view in redoc, just take this same link and open it in the browser.",
+            "id": "714d64fe-4fb3-4f16-b707-34ae5a019477",
+            "name": "Redoc",
+            "headers": []
+          }
+        }
+      ]
+    },
+    {
+      "entity": {
+        "type": "Project",
+        "description": "Process the denodo pipeline using a webhook task\n\nengine --trace=ServicePipe ..\\..\\testdata\\tasks\\1000-pipeline\\40-pipelineWebHook.json\n\nThis will run a task with the denodo pipeline available as the processing pipe. Since the task has already created its one and only pipe, not further action is necessary except send data through it\n ",
+        "id": "b785ad55-690c-41bf-969b-58e1fedff7ca",
+        "name": "Webhook"
+      },
+      "children": [
+        {
+          "entity": {
+            "type": "Request",
+            "method": {
+              "requestBody": true,
+              "link": "http://tools.ietf.org/html/rfc7231#section-4.3.4",
+              "name": "PUT"
+            },
+            "body": {
+              "formBody": {
+                "overrideContentType": true,
+                "encoding": "multipart/form-data",
+                "items": [
+                  {
+                    "enabled": true,
+                    "type": "File",
+                    "name": "files"
+                  }
+                ]
+              },
+              "bodyType": "Form",
+              "textBody": "{\n    \"files\": [\n        \"C:\\\\denodo\\\\Chat-english.txt\"\n    ]\n}"
+            },
+            "uri": {
+              "query": {
+                "delimiter": "&",
+                "items": [
+                  {
+                    "enabled": true,
+                    "name": "pipe",
+                    "value": "myPipe"
+                  }
+                ]
+              },
+              "scheme": {
+                "name": "http",
+                "version": "V11"
+              },
+              "host": "127.0.0.1:5565",
+              "path": "/pipe/process"
+            },
+            "id": "c506184c-dd1a-4ba3-88ba-8f6f6f4aade9",
+            "name": "10 - Process document",
+            "headers": [
+              {
+                "enabled": true,
+                "name": "Authorization",
+                "value": "MYAPIKEY"
+              },
+              {
+                "enabled": true,
+                "name": "Content-Type",
+                "value": "multipart/form-data"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

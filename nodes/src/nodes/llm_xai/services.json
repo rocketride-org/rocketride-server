@@ -1,0 +1,319 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "LLM - xAI",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "llm_xai://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"llm"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"invoke"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if 
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.llm_xai",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "llm",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A component that integrates with xAI's Grok language models for intelligent text generation ",
+		"and analysis. Designed for advanced natural language understanding, it supports a wide range ",
+		"of use cases including question answering, summarization, and conversational AI. With a focus ",
+		"on reasoning and accuracy, this component provides access to cutting-edge capabilities from xAI, ",
+		"enabling rich, context-aware responses for enterprise and technical applications. Configuration ",
+		"options allow flexible deployment within secure and performance-optimized pipelines."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "xai.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://bit.ly/4oN1QmG",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": [
+		"Model: ${parameters.llm_xai.profile}"
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": [
+			"answers"
+		]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [
+				{
+					"lane": "answers"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "grok-3",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"custom": {
+				"title": "Custom Model",
+				"model": "",
+				"modelTotalTokens": 131072
+			},
+			"grok-4-1-fast-reasoning": {
+				"title": "Grok 4.1 Fast",
+				"model": "grok-4-1-fast-reasoning",
+				"modelTotalTokens": 2000000
+			},
+			"grok-4-1-fast-non-reasoning": {
+				"title": "Grok 4.1 Fast Non-Reasoning",
+				"model": "grok-4-1-fast-non-reasoning",
+				"modelTotalTokens": 2000000
+			},
+			"grok-code-fast-1": {
+				"title": "Grok Code Fast 1",
+				"model": "grok-code-fast-1",
+				"modelTotalTokens": 256000
+			},
+			"grok-4-fast-reasoning": {
+				"title": "Grok 4 Fast",
+				"model": "grok-4-fast-reasoning",
+				"modelTotalTokens": 2000000
+			},
+			"grok-4-fast-non-reasoning": {
+				"title": "Grok 4 Fast Non-Reasoning",
+				"model": "grok-4-fast-non-reasoning",
+				"modelTotalTokens": 2000000
+			},
+			"grok-4": {
+				"title": "Grok 4",
+				"model": "grok-4-0709",
+				"modelTotalTokens": 256000
+			},
+			"grok-3-mini": {
+				"title": "Grok 3 Mini",
+				"model": "grok-3-mini",
+				"modelTotalTokens": 131072
+			},
+			"grok-3": {
+				"title": "Grok 3",
+				"model": "grok-3",
+				"modelTotalTokens": 131072
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "xAI model"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total Tokens"
+		},
+		"xai.custom": {
+			"object": "custom",
+			"properties": [
+				"model",
+				"modelTotalTokens",
+				"llm.cloud.apikey"
+			]
+		},
+		"xai.grok-4-1-fast-reasoning": {
+			"object": "grok-4-1-fast-reasoning",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"xai.grok-4-1-fast-non-reasoning": {
+			"object": "grok-4-1-fast-non-reasoning",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"xai.grok-code-fast-1": {
+			"object": "grok-code-fast-1",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"xai.grok-4-fast-reasoning": {
+			"object": "grok-4-fast-reasoning",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"xai.grok-4-fast-non-reasoning": {
+			"object": "grok-4-fast-non-reasoning",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"xai.grok-4": {
+			"object": "grok-4",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"xai.grok-3-mini": {
+			"object": "grok-3-mini",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"xai.grok-3": {
+			"object": "grok-3",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"xai.profile": {
+			"title": "Model",
+			"description": "LLM model",
+			"type": "string",
+			"default": "grok-3",
+			"enum": [
+				["custom", "Custom Model"],
+				["grok-4-1-fast-reasoning", "Grok 4.1 Fast"],
+				["grok-4-1-fast-non-reasoning", "Grok 4.1 Fast Non-Reasoning"],
+				["grok-code-fast-1", "Grok Code Fast 1"],
+				["grok-4-fast-reasoning", "Grok 4 Fast"],
+				["grok-4-fast-non-reasoning", "Grok 4 Fast Non-Reasoning"],
+				["grok-4", "Grok 4"],
+				["grok-3-mini", "Grok 3 Mini"],
+				["grok-3", "Grok 3"]
+			],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": [
+						"xai.custom"
+					]
+				},
+				{
+					"value": "grok-4-1-fast-reasoning",
+					"properties": [
+						"xai.grok-4-1-fast-reasoning"
+					]
+				},
+				{
+					"value": "grok-4-1-fast-non-reasoning",
+					"properties": [
+						"xai.grok-4-1-fast-non-reasoning"
+					]
+				},
+				{
+					"value": "grok-code-fast-1",
+					"properties": [
+						"xai.grok-code-fast-1"
+					]
+				},
+				{
+					"value": "grok-4-fast-reasoning",
+					"properties": [
+						"xai.grok-4-fast-reasoning"
+					]
+				},
+				{
+					"value": "grok-4-fast-non-reasoning",
+					"properties": [
+						"xai.grok-4-fast-non-reasoning"
+					]
+				},
+				{
+					"value": "grok-4",
+					"properties": [
+						"xai.grok-4"
+					]
+				},
+				{
+					"value": "grok-3-mini",
+					"properties": [
+						"xai.grok-3-mini"
+					]
+				},
+				{
+					"value": "grok-3",
+					"properties": [
+						"xai.grok-3"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "LLM - xAI",
+			"properties": [
+				"xai.profile"
+			]
+		}
+	]
+}
