@@ -8,11 +8,11 @@ This module provides:
   (used by connectors)
 """
 
+from __future__ import annotations
+
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple, Union
-
-import numpy as np
 
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
@@ -342,6 +342,8 @@ class SentenceTransformer:
         Returns:
             numpy array of embeddings
         """
+        import numpy as np
+
         if isinstance(sentences, str):
             sentences = [sentences]
 
@@ -352,6 +354,8 @@ class SentenceTransformer:
 
     def _encode_local(self, sentences: List[str], batch_size: int, **kwargs) -> np.ndarray:
         """Execute local encoding using loader methods."""
+        import numpy as np
+
         all_embeddings = []
 
         # Process in batches
@@ -372,6 +376,8 @@ class SentenceTransformer:
 
     def _encode_remote(self, sentences: List[str], batch_size: int, **kwargs) -> np.ndarray:
         """Execute remote encoding via model server."""
+        import numpy as np
+
         result = self._client.send_command(
             'inference',
             {

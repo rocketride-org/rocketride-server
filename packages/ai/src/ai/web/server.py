@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.routing import compile_path
 from rocketlib import debug
 from ai.constants import CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_HOST, CONST_WEB_WS_MAX_SIZE
-from clients.python import CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
+from rocketride import CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 from ai.web import exception, error, Result
 from ai.account import Account, AccountInfo, Reporter
 from .middleware import AuthMiddleware

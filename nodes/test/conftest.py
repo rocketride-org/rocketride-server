@@ -77,7 +77,7 @@ TEST_CONFIG = TestConfig()
 async def is_server_available() -> bool:
     """Check if test server is available."""
     try:
-        from clients.python import RocketRideClient
+        from rocketride import RocketRideClient
         
         client = RocketRideClient(
             uri=TEST_CONFIG.uri,
@@ -125,7 +125,7 @@ async def client(server_available):
             result = await client.use(pipeline=pipeline)
             ...
     """
-    from clients.python import RocketRideClient
+    from rocketride import RocketRideClient
     
     _client = RocketRideClient(
         uri=TEST_CONFIG.uri,

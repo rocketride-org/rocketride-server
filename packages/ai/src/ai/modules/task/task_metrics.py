@@ -31,7 +31,7 @@ from ai.constants import (
 )
 
 if TYPE_CHECKING:
-    from clients.python import TASK_STATUS
+    from rocketride import TASK_STATUS
 
 
 class TaskMetrics:

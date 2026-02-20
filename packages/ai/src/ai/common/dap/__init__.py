@@ -1,7 +1,7 @@
 # Go grab these from the client repo but make them available
 # from common.dap
-from clients.python.core import DAPBase, DAPClient, DAPException
-from clients.python.core import TransportBase, TransportWebSocket
+from rocketride.core import DAPBase, DAPClient, DAPException
+from rocketride.core import TransportBase, TransportWebSocket
 
 # These are not included in the client distribution
 # but are only for the backend

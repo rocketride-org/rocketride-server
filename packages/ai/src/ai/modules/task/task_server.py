@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from typing import Dict, Any, Optional
 from ai.constants import CONST_CLEANUP_DELAY_TIME, CONST_CLEANUP_SLEEP_TIME, CONST_DEFAULT_TTL, CONST_TTL_CHECK
 from ai.common.dap import TransportWebSocket, DAPBase
-from clients.python import TASK_STATUS, EVENT_TYPE
+from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer, AccountInfo
 from ai.account.store import Store
 from .task_conn import TaskConn

@@ -8,7 +8,7 @@ from ai.constants import CONST_HTTP_CHUNK_SIZE
 from ai.web import WebServer, exception, response, Request, Query, Header, formatException
 from fastapi.responses import Response
 from starlette.datastructures import UploadFile
-from clients.python import RocketRideClient
+from rocketride import RocketRideClient
 
 
 class DataResult(BaseModel):

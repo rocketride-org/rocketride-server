@@ -1,5 +1,5 @@
 from ai.web import WebServer, exception, response, Request, Query, Header, ResultBase
-from clients.python import RocketRideClient
+from rocketride import RocketRideClient
 
 
 async def task_Cancel(

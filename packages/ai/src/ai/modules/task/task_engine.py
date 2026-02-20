@@ -55,7 +55,7 @@ from ai.constants import (
 from ai import CONST_AI_NODE_SCRIPT
 from ai.web.metrics import metrics
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
-from clients.python import TASK_STATUS, TASK_STATE, EVENT_TYPE
+from rocketride import TASK_STATUS, TASK_STATE, EVENT_TYPE
 from .dbg_debugpy import DbgDebugpy
 from .dbg_stdio import DbgStdio
 from .types import LAUNCH_TYPE
