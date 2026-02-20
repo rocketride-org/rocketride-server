@@ -1,6 +1,6 @@
 from .autopipe import Autopipe
 
-from clients.python import (
+from rocketride import (
     Answer,
     Question,
     QuestionExample,

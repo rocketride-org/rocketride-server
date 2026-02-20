@@ -32,7 +32,7 @@ hub that respects access permissions and client preferences.
 
 from typing import TYPE_CHECKING, Dict, Any, List
 from ai.common.dap import DAPConn, TransportBase
-from clients.python import EVENT_TYPE, TASK_STATE, TASK_STATUS
+from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:

@@ -1,6 +1,6 @@
 from typing import Any, Dict
 from ai.web import WebServer, exception, Request, ResultBase, Header, Query, response
-from clients.python import RocketRideClient
+from rocketride import RocketRideClient
 
 
 async def task_Execute(

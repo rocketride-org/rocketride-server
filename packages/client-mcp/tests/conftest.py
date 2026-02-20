@@ -60,7 +60,7 @@ def event_loop() -> Iterator[asyncio.AbstractEventLoop]:
 async def server_available() -> bool:
     """Skip if RocketRide server is not reachable (same pattern as nodes/test)."""
     try:
-        from clients.python import RocketRideClient
+        from rocketride import RocketRideClient
         client = RocketRideClient(uri=TEST_CONFIG['uri'], auth=TEST_CONFIG['auth'])
         await client.connect()
         await client.ping()
@@ -79,7 +79,7 @@ async def client(server_available: bool) -> AsyncGenerator[Any, None]:
     Provide a connected RocketRideClient when server is available.
     Skips the test when server is not running (e.g. unit-only runs).
     """
-    from clients.python import RocketRideClient
+    from rocketride import RocketRideClient
     _client = RocketRideClient(uri=TEST_CONFIG['uri'], auth=TEST_CONFIG['auth'])
     await _client.connect()
     try:

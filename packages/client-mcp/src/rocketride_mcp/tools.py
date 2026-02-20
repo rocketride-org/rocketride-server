@@ -30,7 +30,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from clients.python import RocketRideClient
+from rocketride import RocketRideClient
 
 
 async def get_tools(client: RocketRideClient) -> List[Dict[str, Any]]:

@@ -32,7 +32,7 @@ from mcp.server.models import InitializationOptions
 import mcp.server.stdio
 import mcp.types as types
 
-from clients.python import RocketRideClient
+from rocketride import RocketRideClient
 
 from .config import load_settings
 from .tools import get_tools, format_tools, execute_tool

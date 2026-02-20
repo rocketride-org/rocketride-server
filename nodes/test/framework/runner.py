@@ -32,8 +32,8 @@ from .expectations import ExpectationValidator, ExpectationError
 
 class NodeTestRunner:
     """
-    Executes node tests using clients.python
-    
+    Executes node tests using rocketride
+
     Handles:
         - Pipeline setup and teardown
         - Test data loading (inline or from files)

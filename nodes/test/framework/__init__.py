@@ -1,7 +1,7 @@
 # =============================================================================
 # Dynamic test framework for RocketRide pipeline nodes.
 # Discovers test configurations from service*.json files and executes
-# integration tests using clients.python.python
+# integration tests using rocketride
 # =============================================================================
 
 from .discovery import discover_testable_nodes, NodeTestConfig, TestCase

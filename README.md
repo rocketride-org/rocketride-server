@@ -215,7 +215,7 @@ const result = await client.send(token, 'Hello, pipeline!');
 #### Python SDK
 
 ```python
-from clients.python import RocketRideClient
+from rocketride import RocketRideClient
 
 async with RocketRideClient(uri='wss://eaas.example.com', auth='your-api-key') as client:
     result = await client.use(filepath='pipeline.json')
