@@ -1,0 +1,6 @@
+# Step 1 scaffolding: no external dependencies required yet.
+#
+# Step 2 will add MCP client dependencies for STDIO transport, likely:
+# mcp
+# anyio / httpx (if needed by chosen transport implementation)
+
