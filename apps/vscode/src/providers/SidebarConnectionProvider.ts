@@ -265,14 +265,17 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 			items.push(errorItem);
 		}
 
-		// Show progress message (e.g. download progress) during connecting states
-		if (connectionState.progressMessage && this.isConnectingState(connectionState.state)) {
-			const progressItem = new ConnectionItem(
-				connectionState.progressMessage,
-				vscode.TreeItemCollapsibleState.None,
-				'progress-detail'
-			);
-			items.push(progressItem);
+		// Show detail line during connecting states: progressMessage or state-based fallback
+		if (this.isConnectingState(connectionState.state)) {
+			const detail = connectionState.progressMessage || this.getStateDetail(connectionState);
+			if (detail) {
+				const progressItem = new ConnectionItem(
+					detail,
+					vscode.TreeItemCollapsibleState.None,
+					'progress-detail'
+				);
+				items.push(progressItem);
+			}
 		}
 
 		// Blank line after status/retry info
@@ -353,6 +356,27 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 	}
 
 	/**
+	 * Returns a detail string describing what is happening in the current state
+	 */
+	private getStateDetail(connectionState: ConnectionStatus): string {
+		switch (connectionState.state) {
+			case 'downloading-engine':
+				return 'Downloading server...';
+			case 'starting-engine':
+				return 'Starting server...';
+			case 'connecting':
+				if (connectionState.retryAttempt > 0) {
+					return 'Retrying...';
+				}
+				return 'Connecting to server...';
+			case 'stopping-engine':
+				return 'Stopping server...';
+			default:
+				return '';
+		}
+	}
+
+	/**
 	 * Generates status label with animated dots for connecting states
 	 */
 	private getStatusLabel(connectionState: ConnectionStatus): string {
@@ -370,29 +394,19 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 
 		switch (connectionState.state) {
 			case 'connected':
-				return `Connected (${connectionState.connectionMode})`;
+				return 'Connected';
 
-			case 'downloading-engine': {
-				const downloadingDots = getConnectingDots(connectionState.retryAttempt);
-				return `Downloading Engine${downloadingDots}`;
-			}
-
-			case 'starting-engine': {
-				const startingDots = getConnectingDots(connectionState.retryAttempt);
-				return `Starting Engine${startingDots}`;
-			}
-
-			case 'connecting': {
+			case 'downloading-engine':
+			case 'starting-engine':
+			case 'connecting':
+			case 'stopping-engine': {
 				const connectingDots = getConnectingDots(connectionState.retryAttempt);
 				return `Connecting${connectingDots}`;
 			}
 
-			case 'stopping-engine':
-				return `Stopping Engine...`;
-
 			case 'disconnected':
 			default:
-				return `Disconnected`;
+				return 'Disconnected';
 		}
 	}
 
@@ -425,26 +439,26 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 				return `Successfully connected to ${config.hostUrl} in ${connectionState.connectionMode} mode`;
 
 			case 'downloading-engine':
-				return 'Downloading engine from GitHub releases...';
+				return 'Downloading RocketRide server from GitHub releases...';
 
 			case 'starting-engine':
-				return 'Starting local engine process...';
+				return 'Starting local RocketRide server...';
 
 			case 'connecting':
 				if (connectionState.connectionMode === 'local') {
 					if (connectionState.retryAttempt > 0) {
-						return `Engine started, retrying WebSocket connection (attempt ${connectionState.retryAttempt}/${connectionState.maxRetryAttempts})...`;
+						return 'Server started, retrying connection...';
 					}
-					return 'Engine started, connecting to WebSocket...';
+					return 'Server started, connecting...';
 				} else {
 					if (connectionState.retryAttempt > 0) {
-						return `Retrying connection (attempt ${connectionState.retryAttempt}/${connectionState.maxRetryAttempts})...`;
+						return 'Retrying connection...';
 					}
 					return 'Connecting to server...';
 				}
 
 			case 'stopping-engine':
-				return 'Stopping local engine process...';
+				return 'Stopping local RocketRide server...';
 
 			case 'disconnected':
 			default:

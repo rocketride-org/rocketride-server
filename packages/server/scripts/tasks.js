@@ -23,7 +23,8 @@ const PACKAGES_DIR = path.join(PROJECT_ROOT, 'packages');
 const SERVER_DIR = path.join(PACKAGES_DIR, 'server');
 const DIST_DIR = path.join(PROJECT_ROOT, 'dist', 'server');
 const VCPKG_DIR = path.join(BUILD_DIR, 'vcpkg');
-const ARTIFACTS_DIR = path.join(PROJECT_ROOT, 'artifacts');
+const BUILD_ARTIFACTS_DIR = path.join(PROJECT_ROOT, 'build', 'artifacts');
+const DIST_ARTIFACTS_DIR = path.join(PROJECT_ROOT, 'dist', 'artifacts');
 
 // Get package info (loaded async)
 let VERSION = '0.0.0';
@@ -1014,7 +1015,8 @@ function makeCleanServerAction() {
                 path.join(BUILD_DIR, 'engine-lib'),
                 path.join(BUILD_DIR, 'packages'),
                 path.join(BUILD_DIR, '_download_temp'),
-                ARTIFACTS_DIR,
+                BUILD_ARTIFACTS_DIR,
+                DIST_ARTIFACTS_DIR,
                 DIST_DIR
             ]);
 
@@ -1100,13 +1102,13 @@ function makePackageAction(options = {}) {
         run: async (_ctx, _task) => {
             const { version } = await loadPackageJson();
             const platform = getPlatformInfo(options);
-            const distFilename = `engine-v${version}-${platform.name}.${platform.ext}`;
-            const distPath = path.join(ARTIFACTS_DIR, distFilename);
-            const symDistPath = isWindows() ? path.join(ARTIFACTS_DIR, `engine-v${version}-${platform.name}.symbols.${platform.ext}`) : null;
+            const distFilename = `rocketride-v${version}-${platform.name}.${platform.ext}`;
+            const distPath = path.join(DIST_ARTIFACTS_DIR, distFilename);
+            const symDistPath = isWindows() ? path.join(DIST_ARTIFACTS_DIR, `rocketride-v${version}-${platform.name}.symbols.${platform.ext}`) : null;
             const symFilename = isWindows() ? 'engine.pdb' : null;
 
             // temp dir for packaging
-            options.destDir = path.join(ARTIFACTS_DIR, `engine-v${version}-${platform.name}`);
+            options.destDir = path.join(BUILD_ARTIFACTS_DIR, `rocketride-v${version}-${platform.name}`);
 
             const sourceHash = await getState('server.srcHash');
             const packageHash = await getState('server.pkgHash');
@@ -1131,7 +1133,7 @@ function makePackageAction(options = {}) {
                     syncDir(path.join(DIST_DIR, 'java'), path.join(options.destDir, 'java')),
                     syncDir(path.join(PROJECT_ROOT, 'nodes', 'src', 'nodes'), path.join(options.destDir, 'nodes')),
                     syncDir(path.join(PACKAGES_DIR, 'ai', 'src', 'ai'), path.join(options.destDir, 'ai')),
-                    syncDir(path.join(PACKAGES_DIR, 'client-python', 'src', 'clients', 'python'), path.join(options.destDir, 'clients', 'python')),
+                    syncDir(path.join(PACKAGES_DIR, 'client-python', 'src', 'rocketride'), path.join(options.destDir, 'rocketride')),
                     (async(options) => {
                         const exeExt = isWindows() ? '.exe' : '';
                         const enginePaths = [
@@ -1149,6 +1151,7 @@ function makePackageAction(options = {}) {
                 _task.output = `Prepared files for packaging ${distFilename}`;
 
                 _task.output = `Packaging ${distFilename}...`;
+                await mkdir(DIST_ARTIFACTS_DIR);
                 await removeFile(distPath);
                 await createArchive(distPath, options.destDir, ".");
                 _task.output = `Packaged ${distFilename}`;
@@ -1169,10 +1172,8 @@ function makePackageAction(options = {}) {
                     await removeFile(symDistPath);
                 }
                 throw err;
-
-            } finally {
-                await removeDir(options.destDir);
             }
+            // Leave options.destDir (./build/artifacts/rocketride-v*...) in place for testing
         }
     };
 }

@@ -55,7 +55,7 @@ interface PlatformInfo {
 }
 
 export class EngineInstaller {
-	private static readonly GITHUB_OWNER = 'rocketride-ai';
+	private static readonly GITHUB_OWNER = 'rocketride-org';
 	private static readonly GITHUB_REPO = 'rocketride-server';
 
 	private readonly engineDir: string;
@@ -114,7 +114,7 @@ export class EngineInstaller {
 		token?: vscode.CancellationToken,
 		githubToken?: string
 	): Promise<string> {
-		this.logger.output(`${icons.info} Engine not found, downloading latest release...`);
+		this.logger.output(`${icons.info} Server not found locally, downloading...`);
 
 		// Fetch latest release info from GitHub
 		progress?.report({ message: 'Fetching latest release info...' });
@@ -138,7 +138,7 @@ export class EngineInstaller {
 			fs.mkdirSync(this.engineDir, { recursive: true });
 
 			// Extract
-			progress?.report({ message: 'Extracting engine...' });
+			progress?.report({ message: 'Extracting server...' });
 			await this.extractArchive(tmpPath, this.engineDir);
 
 			// Set executable permissions on Unix
@@ -151,8 +151,8 @@ export class EngineInstaller {
 				);
 			}
 
-			this.logger.output(`${icons.success} Engine installed successfully at ${this.engineDir}`);
-			progress?.report({ message: 'Engine ready!' });
+			this.logger.output(`${icons.success} Server installed at ${this.engineDir}`);
+			progress?.report({ message: 'Server ready!' });
 
 			return this.getExecutablePath();
 		} finally {
@@ -171,18 +171,24 @@ export class EngineInstaller {
 		this.throwIfCancelled(token);
 
 		const octokit = await this.createOctokit(githubToken);
-		const { data } = await octokit.repos.getLatestRelease({
+		const { data } = await octokit.repos.listReleases({
 			owner: EngineInstaller.GITHUB_OWNER,
-			repo: EngineInstaller.GITHUB_REPO
+			repo: EngineInstaller.GITHUB_REPO,
+			per_page: 1
 		});
 
-		if (!data.tag_name || !data.assets || data.assets.length === 0) {
-			throw new Error('Invalid release data from GitHub API');
+		if (data.length === 0) {
+			throw new Error('No releases found on GitHub');
+		}
+
+		const release = data[0];
+		if (!release.tag_name || !release.assets || release.assets.length === 0) {
+			throw new Error(`Release ${release.tag_name} has no assets`);
 		}
 
 		return {
-			tag_name: data.tag_name,
-			assets: data.assets.map(a => ({
+			tag_name: release.tag_name,
+			assets: release.assets.map(a => ({
 				id: a.id,
 				name: a.name,
 				browser_download_url: a.browser_download_url,
@@ -209,7 +215,7 @@ export class EngineInstaller {
 
 	private getPlatformAssetName(tagName: string): string {
 		const info = this.getPlatformInfo();
-		return `engine-${tagName}-${info.name}.${info.ext}`;
+		return `rocketride-${tagName}-${info.name}.${info.ext}`;
 	}
 
 	private findPlatformAsset(release: ReleaseInfo): ReleaseAsset {
