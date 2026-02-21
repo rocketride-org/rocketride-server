@@ -1,0 +1,19 @@
+# Basic requirments
+requests
+pydantic
+httpx
+psutil
+tenacity
+nvidia-ml-py
+
+# Config/building
+setuptools>=75
+wheel
+build
+
+# Core testing framework
+pytest
+pytest-asyncio
+
+# Optional: For code coverage reports
+pytest-cov

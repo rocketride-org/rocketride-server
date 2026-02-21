@@ -10,8 +10,7 @@
  */
 const path = require('path');
 const { 
-    execCommand, syncDir, formatSyncStats, removeDir, PROJECT_ROOT,
-    parallel
+    execCommand, syncDir, formatSyncStats, PROJECT_ROOT
 } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
@@ -33,24 +32,6 @@ function makeSyncAiAction() {
             task.output = 'Scanning for changes...';
             const stats = await syncDir(SRC_DIR, DIST_DIR);
             task.output = formatSyncStats(stats);
-        }
-    };
-}
-
-
-
-function makeRunPytestAction(options = {}) {
-    return {
-        run: async (ctx, task) => {
-            const pytestArgs = ['-m', 'pytest', TESTS_DIR, '-v', '--rootdir', PACKAGE_DIR];
-            if (options.pytest) {
-                pytestArgs.push(...options.pytest);
-            }
-            
-            await execCommand(ENGINE_EXE, pytestArgs, { 
-                task, 
-                cwd: SERVER_DIR
-            });
         }
     };
 }

@@ -845,10 +845,37 @@ function makeInstallPipAction() {
                 task.output = 'Upgrading pip...';
                 await execCommand(enginePath, ['-m', 'pip', 'install', '--upgrade', 'pip'], { task, cwd: DIST_DIR });
                 task.output = 'Installing setuptools, wheel, build, pytest, pytest-asyncio...';
-                await execCommand(enginePath, ['-m', 'pip', 'install', 'setuptools>=75', 'wheel', 'build', 'pytest', 'pytest-asyncio'], { task, cwd: DIST_DIR });
                 await setState('server.pipInstalled', true);
             } else {
-                task.output = 'Pip and build deps already installed (skipped)';
+                task.output = 'Pip already installed (skipped)';
+            }
+        }
+    };
+}
+
+function makeInstallDependsAction() {
+    return {
+        run: async (ctx, task) => {
+            // Install server scripts requirements via depends (once; tracked in state)
+            const dependsInstalled = await getState('server.dependsInstalled');
+            if (!dependsInstalled) {
+                const enginePath = path.join(DIST_DIR, 'engine');
+                const dependsDir = isWindows() ? path.join(DIST_DIR, 'lib') : path.join(DIST_DIR, 'lib', 'python3.10');
+                const dependsPath = path.join(dependsDir, 'depends.py');
+                const requirementsPath = path.join(SERVER_DIR, 'scripts', 'requirements.txt');
+                if (!await exists(dependsPath)) {
+                    task.output = 'depends.py not found (run server build first)';
+                    return;
+                }
+                if (!await exists(requirementsPath)) {
+                    task.output = 'Server scripts requirements.txt not found';
+                    return;
+                }
+                task.output = 'Installing server scripts requirements (depends)...';
+                await execCommand(enginePath, [dependsPath, 'install', '-r', requirementsPath], { task, cwd: DIST_DIR });
+                await setState('server.dependsInstalled', true);
+            } else {
+                task.output = 'Server scripts requirements already installed (skipped)';
             }
         }
     };
@@ -988,7 +1015,8 @@ function makeBuildAction() {
                     'tika:copy-outputs'
                 ]
             }),
-            'server:install-pip'
+            'server:install-pip',
+            'server:install-depends'
         ]
     };
 }
@@ -1211,6 +1239,7 @@ module.exports = {
         { name: 'server:compile-engine', action: makeCompileEngineAction },
         { name: 'server:compile-tests', action: makeCompileTestsAction },
         { name: 'server:install-pip', action: makeInstallPipAction },
+        { name: 'server:install-depends', action: makeInstallDependsAction },
         { name: 'server:copy-test-data', action: makeCopyTestDataAction },
         { name: 'server:run-aptest', action: makeRunAptestAction },
         { name: 'server:run-engtest', action: makeRunEngtestAction },
