@@ -857,8 +857,14 @@ export class RocketRideClient extends DAPClient {
 			throw new Error('data must be either a string or Uint8Array');
 		}
 
+		// Include size so parse filter does not skip as "empty"
+		const objinfoWithSize = {
+			...objinfo,
+			size: buffer.length,
+		};
+
 		// Create and use a temporary pipe for the data
-		const pipe = await this.pipe(token, objinfo, mimetype);
+		const pipe = await this.pipe(token, objinfoWithSize, mimetype);
 
 		try {
 			await pipe.open();
