@@ -26,15 +26,38 @@ import { TransportBase } from './TransportBase';
 import { DAPMessage } from '../types';
 import { CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT, CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT } from '../constants';
 
-// Conditional import for Node.js WebSocket library (ws package)
+/**
+ * Node.js WebSocket (ws package) loading - ESM/CJS compatibility
+ *
+ * We use dynamic import() instead of require() because:
+ * - In ESM (type: "module"), require is not defined; require('ws') throws ReferenceError at load time
+ * - The package is dual-mode (exports both CJS and ESM builds); ESM consumers would hit this
+ *
+ * Loading is deferred until connect() (lazy) so:
+ * - Browser builds never load ws (no window check needed at module load)
+ * - Single load is cached; concurrent connect() calls share the same promise
+ *
+ * Install ws in Node.js projects: npm install ws
+ */
 let NodeWebSocket: typeof import('ws') | undefined;
-if (typeof window === 'undefined') {
-	// Node.js environment - dynamically import ws
-	try {
-		NodeWebSocket = require('ws');
-	} catch {
-		// ws not available - will fail if trying to use in Node.js without ws installed
-	}
+let NodeWebSocketPromise: Promise<typeof import('ws') | undefined> | null = null;
+
+async function ensureNodeWebSocket(): Promise<typeof import('ws') | undefined> {
+	if (NodeWebSocket !== undefined) return NodeWebSocket;
+	if (typeof window !== 'undefined') return undefined;
+	if (NodeWebSocketPromise) return NodeWebSocketPromise;
+	NodeWebSocketPromise = (async () => {
+		try {
+			const wsModule = await import('ws');
+			// ESM interop: default export is the constructor; CJS-style modules may expose it directly
+			const WsConstructor = (wsModule as { default?: typeof import('ws') }).default ?? wsModule;
+			NodeWebSocket = WsConstructor as typeof import('ws');
+			return NodeWebSocket;
+		} catch {
+			return undefined;
+		}
+	})();
+	return NodeWebSocketPromise;
 }
 
 // Type for Node.js ws WebSocket instance
@@ -200,6 +223,17 @@ export class TransportWebSocket extends TransportBase {
 	 * Works in both browser and Node.js environments.
 	 */
 	async connect(timeout?: number): Promise<void> {
+		const isBrowser = typeof window !== 'undefined';
+		let nodeWs: typeof import('ws') | undefined;
+		if (!isBrowser) {
+			// Must load ws before creating the connection; ensureNodeWebSocket() uses dynamic import()
+			// so it works when this package is consumed as ESM (e.g. from a project with "type": "module")
+			nodeWs = await ensureNodeWebSocket();
+			if (!nodeWs) {
+				throw new Error('WebSocket library (ws) not available in Node.js environment. Install it with: npm install ws');
+			}
+		}
+
 		return new Promise((resolve, reject) => {
 			let promiseResolved = false;
 
@@ -224,8 +258,6 @@ export class TransportWebSocket extends TransportBase {
 					clearTimeout(this._connectionTimeout);
 					this._connectionTimeout = undefined;
 				}
-
-				const isBrowser = typeof window !== 'undefined';
 
 				if (isBrowser) {
 					// ============================================================
@@ -304,13 +336,9 @@ export class TransportWebSocket extends TransportBase {
 					// ============================================================
 					// NODE.JS WebSocket (ws library)
 					// ============================================================
-
-					if (!NodeWebSocket) {
-						throw new Error('WebSocket library (ws) not available in Node.js environment');
-					}
-
-					// Connect without auth on upgrade; first DAP message must be auth (sent by connect flow via request())
-					this._websocket = new NodeWebSocket.WebSocket(this._uri);
+					// nodeWs is the WebSocket constructor from 'ws' (loaded above via ensureNodeWebSocket)
+					// ws exports the constructor directly: new WebSocket(url)
+					this._websocket = new (nodeWs as new (url: string) => NodeWsInstance)(this._uri);
 
 					this._websocket.on('open', async () => {
 						if (this._connectionTimeout) {
