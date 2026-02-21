@@ -96,10 +96,11 @@ class Chat(ChatBase):
         model = config.get('model')
 
         # Get the API key, don't save it
-        apikey = config.get('apikey')
+        apikey = (config.get('apikey') or '').strip()
 
-        # API key validation logic
-        if not apikey or not apikey.startswith('sk-ant-'):
+        # API key validation: must be non-empty and look like an Anthropic key
+        # Formats: sk-ant-... (standard), sk-ant-api03-... (newer keys)
+        if not apikey or not apikey.startswith('sk-ant'):
             raise ValueError('Invalid Anthropic API key format, please check your API key.')
 
         # Init the chat base
