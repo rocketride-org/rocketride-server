@@ -55,19 +55,6 @@ function makeRunPytestAction(options = {}) {
     };
 }
 
-function makeInstallPytestAction() {
-    const os = require('os');
-    const dependsPath = os.platform() === 'win32' ? 'lib/depends.py' : 'lib/python3.10/depends.py';
-    return {
-        run: async (ctx, task) => {
-            await execCommand(ENGINE_EXE, [dependsPath, 'install', 'pytest', 'pytest-asyncio'], {
-                task,
-                cwd: SERVER_DIR
-            });
-        }
-    };
-}
-
 function makeRunPytestAction(options = {}) {
     return {
         run: async (ctx, task) => {
@@ -95,7 +82,6 @@ module.exports = {
     actions: [
         // Internal actions
         { name: 'ai:sync', action: makeSyncAiAction },
-        { name: 'ai:install-pytest', action: makeInstallPytestAction },
         { name: 'ai:run-pytest', action: makeRunPytestAction },
         
         // Public actions (have descriptions)
@@ -107,10 +93,7 @@ module.exports = {
             description: 'Run AI module tests',
             steps: [
                 'server:build',
-                parallel([
-                    'ai:build',
-                    'ai:install-pytest'
-                ], 'Prepare AI tests'),
+                'ai:build',
                 'ai:run-pytest'
             ]
         })},
