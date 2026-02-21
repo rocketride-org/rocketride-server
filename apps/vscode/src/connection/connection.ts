@@ -189,8 +189,7 @@ export class ConnectionManager extends EventEmitter {
 			return;
 		}
 
-		const wsUrl = this.configManager.getWebSocketUrl();
-		this.logger.output(`${icons.connecting} Connecting to ${wsUrl}...`);
+		this.logger.output(`${icons.connecting} Connecting...`);
 
 		this.updateConnectionStatus({
 			state: ConnectionState.CONNECTING,
@@ -291,7 +290,10 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	private async _connectClientWithRetries(): Promise<void> {
-		this.updateConnectionStatus({ state: ConnectionState.CONNECTING });
+		this.updateConnectionStatus({
+			state: ConnectionState.CONNECTING,
+			progressMessage: undefined
+		});
 
 		// Clean up any previous client
 		if (this.client) {
@@ -304,6 +306,9 @@ export class ConnectionManager extends EventEmitter {
 
 		while (attempts < maxAttempts && this.connectionStatus.state === 'connecting') {
 			try {
+				if (attempts > 0) {
+					this.updateConnectionStatus({ progressMessage: 'Attempting connection...' });
+				}
 				this.client = this.createClient();
 				await this.client.connect(5000);
 				this.onConnectionEstablished();
@@ -318,18 +323,19 @@ export class ConnectionManager extends EventEmitter {
 					this.client = undefined;
 				}
 
-				if (!this.retryingMessageShown) {
-					this.logger.output(`${icons.loading} Retrying connection...`);
-					this.retryingMessageShown = true;
-				}
-
 				if (attempts >= maxAttempts) {
 					const msg = error instanceof Error ? error.message : String(error);
+					this.logger.output(`${icons.error} Connection failed after ${maxAttempts} attempts: ${msg}`);
 					throw new Error(`Connection failed after ${maxAttempts} attempts: ${msg}`);
 				}
 
 				if (this.connectionStatus.state === 'connecting') {
 					const delayMs = this.getBackoffDelayMs(attempts - 1);
+					const delaySec = Math.round(delayMs / 1000);
+					this.logger.output(`${icons.info} Connection attempt ${attempts} failed, waiting ${delaySec}s...`);
+					this.updateConnectionStatus({
+						progressMessage: `Waiting ${delaySec}s before next attempt`
+					});
 					await this.delay(delayMs);
 				}
 			}
@@ -355,7 +361,7 @@ export class ConnectionManager extends EventEmitter {
 
 		const executablePath = this.engineInstaller!.getExecutablePath();
 
-		this.logger.output(`${icons.launch} Starting local engine at ${config.local.host}:${config.local.port}`);
+		this.logger.output(`${icons.launch} Starting local server at ${config.local.host}:${config.local.port}`);
 
 		if (this.dapServer) {
 			this.dapServer.removeAllListeners();
@@ -376,11 +382,11 @@ export class ConnectionManager extends EventEmitter {
 			await this.dapServer.startServer(executablePath, args);
 
 			this.dapServer.on('terminated', (details) => {
-				this.logger.output(`${icons.warning} Local engine terminated (code=${details.code}, signal=${details.signal})`);
+				this.logger.output(`${icons.warning} Local server terminated (code=${details.code}, signal=${details.signal})`);
 				this.handleConnectionLoss();
 			});
 
-			this.logger.output(`${icons.success} Local engine started and ready`);
+			this.logger.output(`${icons.success} Local server started`);
 		} catch (error) {
 			this.updateConnectionStatus({ state: ConnectionState.DISCONNECTED });
 			throw error;
@@ -392,7 +398,8 @@ export class ConnectionManager extends EventEmitter {
 			state: ConnectionState.CONNECTED,
 			lastConnected: new Date(),
 			lastError: undefined,
-			retryAttempt: 0
+			retryAttempt: 0,
+			progressMessage: undefined
 		});
 
 		this.resetRetryState();
@@ -436,6 +443,7 @@ export class ConnectionManager extends EventEmitter {
 		}
 
 		const errorMessage = error instanceof Error ? error.message : String(error);
+		this.logger.output(`${icons.error} ${errorMessage}`);
 
 		const shouldReconnect = !this.isManualDisconnect &&
 			this.connectionStatus.hasCredentials &&
@@ -477,15 +485,18 @@ export class ConnectionManager extends EventEmitter {
 			return;
 		}
 
-		if (this.connectionStatus.retryAttempt === 0) {
-			this.logger.output(`${icons.info} Waiting for connection...`);
-		}
-
 		const delayMs = this.getBackoffDelayMs(this.connectionStatus.retryAttempt);
+		const delaySec = Math.round(delayMs / 1000);
+		this.logger.output(`${icons.info} Waiting ${delaySec}s before retrying...`);
+		this.updateConnectionStatus({
+			progressMessage: `Waiting ${delaySec}s before next attempt`
+		});
 		this.reconnectTimeout = setTimeout(async () => {
 			if (this.connectionStatus.state === 'connecting' && !this.isManualDisconnect && !this.isDisposing) {
+				this.logger.output(`${icons.connecting} Reconnecting...`);
 				this.updateConnectionStatus({
-					retryAttempt: this.connectionStatus.retryAttempt + 1
+					retryAttempt: this.connectionStatus.retryAttempt + 1,
+					progressMessage: 'Attempting connection...'
 				});
 
 				try {
@@ -647,7 +658,7 @@ export class ConnectionManager extends EventEmitter {
 		if (this.dapServer) {
 			this.updateConnectionStatus({ state: ConnectionState.STOPPING_ENGINE });
 
-			this.logger.output(`${icons.stop} Stopping local engine...`);
+			this.logger.output(`${icons.stop} Stopping local server...`);
 
 			this.dapServer.removeAllListeners();
 			this.dapServer.stopServer();

@@ -105,20 +105,14 @@ export const PageConnection: React.FC = () => {
 	const getStatusLabel = (): string => {
 		if (!connectionData) return 'Loading...';
 
-		const { state, connectionMode } = connectionData.connectionState;
-		const modeLabel = connectionMode === 'onprem' ? 'On-prem' : connectionMode === 'cloud' ? 'Cloud' : 'Local';
-
-		switch (state) {
+		switch (connectionData.connectionState.state) {
 			case 'connected':
-				return `Connected (${modeLabel})`;
+				return 'Connected';
 			case 'downloading-engine':
-				return `Downloading Engine${getAnimatedDots()}`;
 			case 'starting-engine':
-				return `Starting Engine${getAnimatedDots()}`;
 			case 'connecting':
-				return `Connecting${getAnimatedDots()}`;
 			case 'stopping-engine':
-				return 'Stopping Engine...';
+				return `Connecting${getAnimatedDots()}`;
 			case 'disconnected':
 			default:
 				return 'Disconnected';
@@ -159,13 +153,32 @@ export const PageConnection: React.FC = () => {
 		}
 	};
 
-	/** Single line for status detail: "" -> "Fetching..." -> "No release info." (or short error). Keeps layout stable. */
 	const getStatusDetailLine = (): string => {
 		if (!connectionData) return '';
-		const { lastError, progressMessage } = connectionData.connectionState;
-		const connecting = isConnecting;
-		if (connecting && progressMessage) return progressMessage;
-		if (connecting && lastError) {
+		const { state, lastError, progressMessage } = connectionData.connectionState;
+
+		// Show progressMessage first if available (e.g. download progress, retry wait)
+		if (isConnecting && progressMessage) return progressMessage;
+
+		// State-specific detail
+		switch (state) {
+			case 'downloading-engine':
+				return 'Downloading server...';
+			case 'starting-engine':
+				return 'Starting server...';
+			case 'connecting':
+				if (connectionData.connectionState.retryAttempt > 0) {
+					return 'Retrying...';
+				}
+				return 'Connecting to server...';
+			case 'stopping-engine':
+				return 'Stopping server...';
+			default:
+				break;
+		}
+
+		// Show error for connecting states
+		if (isConnecting && lastError) {
 			const lower = lastError.toLowerCase();
 			if (lower.includes('rate limit') || lower.includes('github')) return 'No release info.';
 			return lastError.length > 40 ? lastError.slice(0, 37) + '...' : lastError;
@@ -248,7 +261,7 @@ export const PageConnection: React.FC = () => {
 							onClick={handleConnect}
 							disabled={isConnecting || needsApiKeySetup}
 						>
-							{isConnecting ? 'Connecting...' : 'Connect'}
+							Connect
 						</button>
 					)}
 			<button
