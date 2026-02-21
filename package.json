@@ -1,6 +1,6 @@
 {
 	"name": "aparavi-engine",
-	"version": "3.2.0",
+	"version": "1.0.0",
 	"description": "Aparavi Engine - A high-performance data processing engine with modular nodes, AI capabilities, and cross-platform clients",
 	"private": true,
 	"license": "MIT",

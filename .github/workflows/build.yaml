@@ -153,8 +153,8 @@ jobs:
         with:
           name: artifacts-${{ matrix.platform }}
           path: |
-            ${{ github.workspace }}/artifacts/*.zip
-            ${{ github.workspace }}/artifacts/*.tar.gz
+            ${{ github.workspace }}/dist/artifacts/*.zip
+            ${{ github.workspace }}/dist/artifacts/*.tar.gz
           if-no-files-found: ignore
 
   release:

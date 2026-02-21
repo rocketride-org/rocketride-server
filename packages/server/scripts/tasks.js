@@ -7,7 +7,7 @@ const path = require('path');
 const os = require('os');
 const {
     getState, setState, updateState,
-    removeDir, removeDirs, resetDir, syncDir, removeFiles,
+    removeDirs, resetDir, syncDir, removeFiles,
     overlayDir, formatSyncStats,
     execCommand, PROJECT_ROOT, BUILD_DIR, isWindows, isMac, isLinux,
     exists, readFile, readJson, readDir, mkdir, copyFile, removeFile, stat, chmod, realpath, 
@@ -23,7 +23,7 @@ const PACKAGES_DIR = path.join(PROJECT_ROOT, 'packages');
 const SERVER_DIR = path.join(PACKAGES_DIR, 'server');
 const DIST_DIR = path.join(PROJECT_ROOT, 'dist', 'server');
 const VCPKG_DIR = path.join(BUILD_DIR, 'vcpkg');
-const BUILD_ARTIFACTS_DIR = path.join(PROJECT_ROOT, 'build', 'artifacts');
+const BUILD_ARTIFACTS_DIR = path.join(BUILD_DIR, 'artifacts');
 const DIST_ARTIFACTS_DIR = path.join(PROJECT_ROOT, 'dist', 'artifacts');
 
 // Get package info (loaded async)
@@ -1102,13 +1102,14 @@ function makePackageAction(options = {}) {
         run: async (_ctx, _task) => {
             const { version } = await loadPackageJson();
             const platform = getPlatformInfo(options);
-            const distFilename = `rocketride-v${version}-${platform.name}.${platform.ext}`;
+            const baseName = `rocketride-v${version}-${platform.name}`;
+            const distFilename = `${baseName}.${platform.ext}`;
             const distPath = path.join(DIST_ARTIFACTS_DIR, distFilename);
-            const symDistPath = isWindows() ? path.join(DIST_ARTIFACTS_DIR, `rocketride-v${version}-${platform.name}.symbols.${platform.ext}`) : null;
+            const symDistPath = isWindows() ? path.join(DIST_ARTIFACTS_DIR, `${baseName}.symbols.${platform.ext}`) : null;
             const symFilename = isWindows() ? 'engine.pdb' : null;
 
             // temp dir for packaging
-            options.destDir = path.join(BUILD_ARTIFACTS_DIR, `rocketride-v${version}-${platform.name}`);
+            options.destDir = path.join(BUILD_ARTIFACTS_DIR, baseName);
 
             const sourceHash = await getState('server.srcHash');
             const packageHash = await getState('server.pkgHash');
@@ -1172,8 +1173,11 @@ function makePackageAction(options = {}) {
                     await removeFile(symDistPath);
                 }
                 throw err;
+
+            } finally {
+                // Leave it in place for testing
+                // await removeDir(options.destDir);
             }
-            // Leave options.destDir (./build/artifacts/rocketride-v*...) in place for testing
         }
     };
 }
