@@ -269,6 +269,13 @@ class DataMixin(DAPClient):
         """Initialize data operations."""
         super().__init__(**kwargs)
 
+    @staticmethod
+    def _objinfo_with_size(objinfo: Dict[str, Any] = None, size: int = 0) -> Dict[str, Any]:
+        """Return objinfo with size set; never 0 (parse filter skips "empty")."""
+        out = dict(objinfo) if objinfo else {}
+        out['size'] = size if size else 1
+        return out
+
     async def pipe(self, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None) -> DataPipe:
         r"""
         Create a data pipe for streaming operations.
@@ -362,7 +369,7 @@ class DataMixin(DAPClient):
             raise ValueError('data must be either a string or bytes')
 
         # Create and use a temporary pipe for the data
-        pipe = await self.pipe(token, objinfo, mimetype)
+        pipe = await self.pipe(token, self._objinfo_with_size(objinfo, len(buffer)), mimetype)
 
         try:
             await pipe.open()
@@ -533,13 +540,8 @@ class DataMixin(DAPClient):
                 # Get file size for progress tracking
                 file_size = os.path.getsize(filepath)
 
-                # Add file size to metadata
-                if 'size' not in objinfo:
-                    objinfo = dict(objinfo)
-                    objinfo['size'] = file_size
-
                 # Step 1: Create and open pipe (waits for server to allocate)
-                pipe = await self.pipe(token, objinfo, mimetype)
+                pipe = await self.pipe(token, self._objinfo_with_size(objinfo, file_size), mimetype)
                 self.debug_message(f'Opening pipe for {filepath}')
                 await pipe.open()
                 self.debug_message(f'Pipe {pipe.pipe_id} opened for {filepath}')

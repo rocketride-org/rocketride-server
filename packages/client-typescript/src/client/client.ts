@@ -826,6 +826,11 @@ export class RocketRideClient extends DAPClient {
 	// DATA METHODS
 	// ============================================================================
 
+	/** Return objinfo with size set; never 0 (parse filter skips "empty"). */
+	private _objinfoWithSize(objinfo: Record<string, unknown>, size: number): Record<string, unknown> {
+		return { ...objinfo, size: size || 1 };
+	}
+
 	/**
 	 * Create a data pipe for streaming operations.
 	 */
@@ -858,7 +863,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Create and use a temporary pipe for the data
-		const pipe = await this.pipe(token, objinfo, mimetype);
+		const pipe = await this.pipe(token, this._objinfoWithSize(objinfo, buffer.length), mimetype);
 
 		try {
 			await pipe.open();
@@ -953,18 +958,22 @@ export class RocketRideClient extends DAPClient {
 			let error: string | undefined;
 			let result: PIPELINE_RESULT | undefined;
 
-			const fullObjinfo = {
-				name: file.name,
-				size: file.size,
-				...objinfo,
-			};
+			// Get file size: from filesystem when filepath in objinfo (Node.js), else file.size (same as Python os.path.getsize)
+			let fileSize = file.size;
+			if (typeof window === 'undefined' && objinfo?.filepath && typeof objinfo.filepath === 'string') {
+				try {
+					const fs = require('fs');
+					fileSize = fs.statSync(objinfo.filepath as string).size;
+				} catch {
+					// fallback to file.size
+				}
+			}
 
 			const finalMimetype = mimetype || file.type || 'application/octet-stream';
-			const fileSize = file.size;
 
 			try {
 				// Step 1: Create and open pipe (waits for server to allocate)
-				pipe = await this.pipe(token, fullObjinfo, finalMimetype);
+				pipe = await this.pipe(token, this._objinfoWithSize({ name: file.name, ...objinfo }, fileSize), finalMimetype);
 				await pipe.open();
 
 				// Step 2: Send status update AFTER we have the pipe
