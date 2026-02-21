@@ -58,7 +58,7 @@ pip install https://cloud.rocketride.ai/client/python/rocketride_client_python-l
 ### Step 4: Create Python Script (`main.py`)
 ```python
 import asyncio
-from rocketride_client import RocketRideClient
+from rocketride import RocketRideClient
 
 async def main():
     # Client reads configuration from .env automatically

@@ -49,7 +49,7 @@ pip uninstall rocketride-client-python
 
 **Note:** The distribution files use underscores (`rocketride_client_python`), but the module is imported as `rocketride_client`:
 ```python
-from rocketride_client import RocketRideClient
+from rocketride import RocketRideClient
 ```
 
 The package includes both the SDK library and a CLI tool.
@@ -205,7 +205,7 @@ The CLI supports `.env` file configuration. See the Configuration section above.
 ### Basic Pipeline Execution
 
 ```python
-from rocketride_client import RocketRideClient
+from rocketride import RocketRideClient
 
 # Create client - configuration from .env
 client = RocketRideClient()
@@ -239,7 +239,7 @@ await client.disconnect()
 The Python client supports automatic resource cleanup using async context managers:
 
 ```python
-from rocketride_client import RocketRideClient
+from rocketride import RocketRideClient
 
 # Context manager handles connect/disconnect automatically
 # Configuration is read from .env file
@@ -257,7 +257,7 @@ async with RocketRideClient() as client:
 ### Persistent Connection with Auto-Reconnect
 
 ```python
-from rocketride_client import RocketRideClient
+from rocketride import RocketRideClient
 
 # Declare connection callbacks
 async def on_connected(info: str) -> None:
@@ -288,7 +288,7 @@ await client.disconnect()
 ### Data Transfer with Pipes
 
 ```python
-from rocketride_client import RocketRideClient
+from rocketride import RocketRideClient
 
 client = RocketRideClient(
     uri='https://cloud.rocketride.ai',
@@ -323,7 +323,7 @@ async with await client.pipe(token=myToken, mimetype='application/json') as pipe
 ### Bulk File Upload (Parallel)
 
 ```python
-from rocketride_client import RocketRideClient
+from rocketride import RocketRideClient
 
 # Declare event handler
 async def handle_events(event):
@@ -660,7 +660,7 @@ When using a chat system, starting the pipeline should be done as a global part 
 #### Basic Questions
 
 ```python
-from rocketride_client import RocketRideClient
+from rocketride import RocketRideClient
 from rocketride_client.schema import Question
 
 # Start your chat pipeline once at the beginning
@@ -750,7 +750,7 @@ response = await client.chat(token='chat-token', question=question)
 ### Document Processing
 
 ```python
-from rocketride_client import RocketRideClient
+from rocketride import RocketRideClient
 
 async def process_documents():
     async with RocketRideClient() as client:  # Configuration from .env
@@ -770,7 +770,7 @@ async def process_documents():
 
 ```python
 import json
-from rocketride_client import RocketRideClient
+from rocketride import RocketRideClient
 
 async def stream_sensor_data(data_generator):
     async with RocketRideClient() as client:  # Configuration from .env
@@ -888,7 +888,7 @@ await client.set_events(token=token, event_types=['summary'])
 The SDK provides comprehensive error handling:
 
 ```python
-from rocketride_client import RocketRideClient, RocketRideException
+from rocketride import RocketRideClient, RocketRideException
 
 try:
     client = RocketRideClient()  # Configuration from .env

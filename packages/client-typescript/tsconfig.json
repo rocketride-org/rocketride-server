@@ -6,6 +6,7 @@
 			"DOM",
 			"DOM.Iterable"
 		],
+		"module": "ESNext",
 		"moduleResolution": "node",
 		"strict": true,
 		"esModuleInterop": true,
