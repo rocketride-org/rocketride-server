@@ -31,8 +31,8 @@ depends(requirements)
 
 # Load what we need
 from typing import List, Dict, Any
-from langchain import text_splitter
-from langchain.text_splitter import TextSplitter
+import langchain_text_splitters
+from langchain_text_splitters import TextSplitter
 from rocketlib import monitorStatus
 
 from ai.common.config import Config
@@ -156,8 +156,7 @@ class PreProcessor(PreProcessorBase):
         monitorStatus(f'Loading preprocessor {provider}/{splitter}')
 
         try:
-            # Dynamically get the class
-            SplitterClass = getattr(text_splitter, splitter)
+            SplitterClass = getattr(langchain_text_splitters, splitter)
         except AttributeError:
             raise Exception(f"Splitter '{splitter}' not found in LangChain")
 
@@ -210,7 +209,7 @@ class PreProcessor(PreProcessorBase):
             monitorStatus(f'Loading preprocessor complete {provider}/{splitter}')
             return splitter_instance
 
-        elif splitter == 'MarkdownSplitter':
+        elif splitter == 'MarkdownTextSplitter':
             # Create and return the splitter
             kwargs = dict(base_kwargs)
             kwargs['keep_separator'] = True
@@ -218,7 +217,7 @@ class PreProcessor(PreProcessorBase):
             monitorStatus(f'Loading preprocessor complete {provider}/{splitter}')
             return splitter_instance
 
-        elif splitter == 'LatexSplitter':
+        elif splitter == 'LatexTextSplitter':
             # Create and return the splitter
             kwargs = dict(base_kwargs)
             kwargs['keep_separator'] = True

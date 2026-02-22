@@ -42,7 +42,7 @@ monitorStatus('Loading transformers')
 
 # Load all the heavy weight stuff
 from numpy import ndarray
-from ai.common.models.sentence_transformers import SentenceTransformer
+from ai.common.models import SentenceTransformer
 from ai.common.config import Config
 from ai.common.embedding import EmbeddingBase
 from ai.common.schema import Doc, Question
