@@ -1,7 +1,7 @@
 {
-	"name": "aparavi-engine",
+	"name": "rocketride-server",
 	"version": "1.0.0",
-	"description": "Aparavi Engine - A high-performance data processing engine with modular nodes, AI capabilities, and cross-platform clients",
+	"description": "RocketRide Server - A high-performance data processing engine with modular nodes, AI capabilities, and cross-platform clients",
 	"private": true,
 	"license": "MIT",
 	"vcpkg": {
@@ -14,18 +14,18 @@
 	"tika": {
 		"version": "3.2.3"
 	},
-	"author": "Aparavi Inc.",
+	"author": "rocketride.org",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/Aparavi-Operations/engine-new.git"
+		"url": "git+https://github.com/rocketride-org/rocketride-server.git"
 	},
 	"bugs": {
-		"url": "https://github.com/aparavi/aparavi-engine/issues"
+		"url": "https://github.com/rocketride-org/rocketride-server/issues"
 	},
-	"homepage": "https://github.com/aparavi/aparavi-engine#readme",
+	"homepage": "https://github.com/rocketride-org/rocketride-server#readme",
 	"keywords": [
-		"aparavi",
-		"engine",
+		"rocketride",
+		"server",
 		"data-processing",
 		"ai",
 		"nodes",
