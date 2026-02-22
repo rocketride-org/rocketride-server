@@ -1,4 +1,4 @@
-name: Build engine
+name: Build server
 run-name: ${{ github.event.pull_request.title || github.event.head_commit.message }} ${{ (github.event_name == 'workflow_dispatch' && github.ref_name) || '' }} ${{ github.event_name == 'merge_group' && 'merge queue' || '' }}
 
 concurrency:
@@ -63,13 +63,13 @@ jobs:
       - name: Set version and build number
         id: init
         run: |
-          APARAVI_ENGINE_VERSION="${{ inputs.version }}"
-          if [ -z "${APARAVI_ENGINE_VERSION}" ]; then
-            APARAVI_ENGINE_VERSION="$(jq -r '.version' ${{ github.workspace }}/package.json)"
+          SERVER_VERSION="${{ inputs.version }}"
+          if [ -z "${SERVER_VERSION}" ]; then
+            SERVER_VERSION="$(jq -r '.version' ${{ github.workspace }}/package.json)"
           fi
-          full_version="${APARAVI_ENGINE_VERSION}.$((${{ github.run_number }}+${{ vars.ENGINE_BUILD_NUMBER_CONSTANT }}))"
-          echo "version=${APARAVI_ENGINE_VERSION}" >> $GITHUB_OUTPUT
-          echo "build_number=$((${{ github.run_number }}+${{ vars.ENGINE_BUILD_NUMBER_CONSTANT }}))" >> $GITHUB_OUTPUT
+          full_version="${SERVER_VERSION}.$((${{ github.run_number }}+${{ vars.SERVER_BUILD_NUMBER }}))"
+          echo "version=${SERVER_VERSION}" >> $GITHUB_OUTPUT
+          echo "build_number=$((${{ github.run_number }}+${{ vars.SERVER_BUILD_NUMBER }}))" >> $GITHUB_OUTPUT
           echo "full_version=${full_version}" >> $GITHUB_OUTPUT
           echo "Full version: ${full_version}"
           echo "Publish: ${{ inputs.release_type }}"
@@ -136,8 +136,6 @@ jobs:
             -Source "${{ env.NUGET_FEED_URL }}"
 
       - name: Build
-        env:
-          APARAVI_VERSION: ${{ needs.init.outputs.full_version }}
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall
 
       - name: Package
@@ -173,7 +171,7 @@ jobs:
 
       - name: Create and push tag
         run: |
-          TAG_NAME="v${{ needs.init.outputs.version }}"
+          TAG_NAME="server-v${{ needs.init.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "$TAG_NAME"
@@ -189,8 +187,8 @@ jobs:
       - name: Create release and upload artifacts
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.init.outputs.version }}
-          name: Release v${{ needs.init.outputs.version }}
+          tag_name: server-v${{ needs.init.outputs.version }}
+          name: RocketRide Server v${{ needs.init.outputs.version }}
           generate_release_notes: true
           draft: ${{ inputs.release_type == 'draft' }}
           prerelease: ${{ inputs.release_type == 'prerelease' }}

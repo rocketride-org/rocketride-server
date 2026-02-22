@@ -65,6 +65,27 @@ function getPlatformInfo(options = {}) {
     throw new Error(`Unsupported platform: ${platform}-${arch}`);
 }
 
+async function getDistInfo(options = {}) {
+    const { version, repo } = await loadPackageJson();
+    const platform = getPlatformInfo(options);
+    const releaseTag = `server-v${version}`;
+    const baseName = `rocketride-${releaseTag}-${platform.name}`;
+    const distFilename = `${baseName}.${platform.ext}`;
+    const symDistFilename = isWindows() ? `${baseName}.symbols.${platform.ext}` : null;
+    const releaseUrl = `https://github.com/${repo}/releases/download/${releaseTag}`;
+
+    return {
+        baseName: baseName,
+        repo: repo,
+        releaseTag: releaseTag,
+        distFilename: distFilename,
+        symDistFilename: symDistFilename,
+        releaseUrl: releaseUrl,
+        distUrl: `${releaseUrl}/${distFilename}`,
+        symDistUrl: symDistFilename ? `${releaseUrl}/${symDistFilename}` : null
+    };
+}
+
 // =============================================================================
 // State Management
 // =============================================================================
@@ -457,21 +478,20 @@ function makeCheckPrebuiltAction(options = {}) {
                 return;
             }
 
-            const { version, repo } = await loadPackageJson();
-            const downloadedVersion = await getState('server.downloadedVersion');
+            const {
+                repo, releaseTag, distFilename, symDistFilename, distUrl, symDistUrl,
+            } = await getDistInfo(options);
 
-            if (downloadedVersion === version && await exists(DIST_DIR)) {
-                task.output = `Server v${version} (downloaded)`;
+            const downloadedTag = await getState('server.downloadedTag');
+
+            if (downloadedTag === releaseTag && await exists(DIST_DIR)) {
+                task.output = `Server ${releaseTag} (downloaded)`;
                 ctx.downloaded = true;
                 return;
             }
 
-            const platform = getPlatformInfo(options);
-            const releaseTag = `v${version}`;
-            const distFilename = `engine-${releaseTag}-${platform.name}.${platform.ext}`;
-            const symDistFilename = `engine-${releaseTag}-${platform.name}.symbols.${platform.ext}`;
             var distPath = path.join(DOWNLOADS_DIR, distFilename);
-            var symDistPath = path.join(DOWNLOADS_DIR, symDistFilename);
+            var symDistPath = symDistFilename ? path.join(DOWNLOADS_DIR, symDistFilename) : null;
 
             try {
                 task.output = `Downloading GitHub Release ${releaseTag}...`;
@@ -484,7 +504,7 @@ function makeCheckPrebuiltAction(options = {}) {
                 ], { task });
                 task.output = `Downloaded GitHub Release ${releaseTag}`;
 
-                if (isWindows()) {
+                if (symDistFilename) {
                     task.output = `Downloading GitHub Release ${releaseTag} symbols...`;
                     await execCommand('gh', [
                         'release', 'download', releaseTag,
@@ -497,20 +517,19 @@ function makeCheckPrebuiltAction(options = {}) {
                 }
             } catch (e) {
                 task.output = `GitHub Release ${releaseTag} not available by CLI:\n${e.message.trim()}\nWill try downloading from GitHub Releases API`;
-                removeFile(distPath);
-                removeFile(symDistPath);
+                await removeFile(distPath);
+                if (symDistPath)
+                    await removeFile(symDistPath);
             }
 
             try {
                 if (!await exists(distPath)) {
                     task.output = `Downloading ${distFilename}...`;
-                    const distUrl = `https://github.com/${repo}/releases/download/${releaseTag}/${distFilename}`;
                     distPath = await downloadFile(distUrl, distFilename, task);
                     task.output = `Downloaded ${distFilename}`;
 
-                    if (isWindows()) {
+                    if (symDistFilename) {
                         task.output = `Downloading ${symDistFilename}...`;
-                        const symDistUrl = `https://github.com/${repo}/releases/download/${releaseTag}/${symDistFilename}`;
                         symDistPath = await downloadFile(symDistUrl, symDistFilename, task);
                         task.output = `Downloaded ${symDistFilename}`;
                     }
@@ -529,7 +548,7 @@ function makeCheckPrebuiltAction(options = {}) {
                 await updateServerState({
                     downloaded: true,
                     downloadedAt: new Date().toISOString(),
-                    downloadedVersion: version,
+                    downloadedTag: releaseTag,
                     downloadFailed: false,
                     source: 'github-release'
                 });
@@ -540,6 +559,9 @@ function makeCheckPrebuiltAction(options = {}) {
                 await updateServerState({ downloadFailed: true });
                 ctx.downloaded = false;
                 task.output = `GitHub Release ${releaseTag} not available by URL:\n${e.message.trim()}\nWill compile from source`;
+                await removeFile(distPath);
+                if (symDistPath)
+                    await removeFile(symDistPath);
             }
         }
     };
@@ -1100,12 +1122,9 @@ function makePackageAction(options = {}) {
     return {
         description: 'Package server',
         run: async (_ctx, _task) => {
-            const { version } = await loadPackageJson();
-            const platform = getPlatformInfo(options);
-            const baseName = `rocketride-v${version}-${platform.name}`;
-            const distFilename = `${baseName}.${platform.ext}`;
+            const { baseName, distFilename, symDistFilename } = await getDistInfo(options);
             const distPath = path.join(DIST_ARTIFACTS_DIR, distFilename);
-            const symDistPath = isWindows() ? path.join(DIST_ARTIFACTS_DIR, `${baseName}.symbols.${platform.ext}`) : null;
+            const symDistPath = symDistFilename ? path.join(DIST_ARTIFACTS_DIR, symDistFilename) : null;
             const symFilename = isWindows() ? 'engine.pdb' : null;
 
             // temp dir for packaging
@@ -1121,10 +1140,9 @@ function makePackageAction(options = {}) {
             }
 
             try {
-
                 _task.output = `Preparing files for packaging ${distFilename}...`;
                 await resetDir(options.destDir);
-                // TODO: refactoring is needed here
+                // TODO: refactor this
                 await Promise.all([
                     copyClangRuntimeLibs(options),
                     copySambaLibs(options),
