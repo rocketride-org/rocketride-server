@@ -173,18 +173,31 @@ jobs:
           if-no-files-found: warn
 
   release:
-    name: Release
-    needs: build
-    # if: github.event_name == 'workflow_dispatch' && inputs.release_type != ''
+    name: Release / ${{ matrix.name }}
+    needs: [init, build]
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # environment: release
     # permissions:
     #   contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - type: server
+            name: Server
+            release_input: ${{ inputs.server_release_type }}
+          - type: vscode
+            name: VS Code Extension
+            release_input: ${{ inputs.vscode_release_type }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Temp
+        run: echo "Release type for ${{ matrix.name }} (${{ matrix.type }}) ${{ matrix.release_input }}"
 
       # - name: Create and push tag
       #   run: |
