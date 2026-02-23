@@ -22,6 +22,16 @@
 		"dist/**/*",
 		"README.md"
 	],
+	"scripts": {},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/rocketride-org/rocketride-server.git",
+		"directory": "packages/client-typescript"
+	},
+	"homepage": "https://rocketride.ai/",
+	"bugs": {
+		"url": "https://github.com/rocketride-org/rocketride-server/issues/"
+	},
 	"keywords": [
 		"rocketride",
 		"data-processing",
