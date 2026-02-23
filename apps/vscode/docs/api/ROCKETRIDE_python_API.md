@@ -23,31 +23,31 @@ A Python SDK for executing RocketRide pipelines using the Debug Adapter Protocol
 
 ```bash
 # Install from PyPI (when published)
-pip install rocketride-client-python
+pip install rocketride
 
 # Install from RocketRide server (production) - latest version
-pip install https://cloud.rocketride.ai/client/python/rocketride_client_python-latest-py3-none-any.whl
+pip install https://cloud.rocketride.ai/client/python/rocketride-latest-py3-none-any.whl
 
 # Install from local development server - latest version
-pip install http://localhost:5565/client/python/rocketride_client_python-latest-py3-none-any.whl
+pip install http://localhost:5565/client/python/rocketride-latest-py3-none-any.whl
 
 # Install from local wheel file
-pip install /path/to/rocketride_client_python-1.1.0-py3-none-any.whl
+pip install /path/to/rocketride-1.1.0-py3-none-any.whl
 
 # Install with development dependencies
-pip install rocketride-client-python[dev]
+pip install rocketride[dev]
 
 # Install with test dependencies
-pip install rocketride-client-python[test]
+pip install rocketride[test]
 ```
 
 ### Uninstalling
 
 ```bash
-pip uninstall rocketride-client-python
+pip uninstall rocketride
 ```
 
-**Note:** The distribution files use underscores (`rocketride_client_python`), but the module is imported as `rocketride_client`:
+**Usage:**
 ```python
 from rocketride import RocketRideClient
 ```
@@ -150,10 +150,10 @@ After installing the package, the `rocketride` command becomes available:
 
 ```bash
 # Installation from PyPI
-pip install rocketride-client-python
+pip install rocketride
 
 # Or from local wheel file:
-pip install /path/to/rocketride_client_python-1.1.0-py3-none-any.whl
+pip install /path/to/rocketride-1.1.0-py3-none-any.whl
 
 # Check CLI is available
 rocketride --help
