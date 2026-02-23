@@ -17,7 +17,7 @@ Configuration via environment variables:
 
 Running tests:
     # Run all tests (requires server)
-    builder test:nodes
+    builder nodes:test
     
     # Run contract tests only (no server needed)
     pytest nodes/test/test_contracts.py -v
@@ -106,7 +106,7 @@ async def server_available():
     if not available:
         pytest.skip(
             f"Server not available at {TEST_CONFIG.uri}. "
-            "Run 'builder test:nodes' to start server automatically."
+            "Run 'builder nodes:test' to start server automatically."
         )
     return True
 
