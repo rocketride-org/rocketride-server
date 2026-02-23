@@ -108,11 +108,11 @@ jobs:
           #   runner: windows-2022
           #   builder_cmd: ./builder.cmd
           #   vcpkg_cmd: ./build/vcpkg/vcpkg.exe
-          # - platform: macos
-          #   label: macOS (ARM64)
-          #   runner: macos-14
-          #   builder_cmd: ./builder
-          #   vcpkg_cmd: ./build/vcpkg/vcpkg
+          - platform: macos
+            label: macOS (ARM64)
+            runner: macos-14
+            builder_cmd: ./builder
+            vcpkg_cmd: ./build/vcpkg/vcpkg
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -160,17 +160,27 @@ jobs:
       # - name: Test
       #   run: ${{ matrix.builder_cmd }} test --verbose
 
-      - name: Upload artifacts
+      - name: Upload Server artifacts
         if: github.event_name == 'workflow_dispatch' &&
-            (inputs.release_server || inputs.release_vscode)
+            inputs.release_server
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-${{ matrix.platform }}
           path: |
             ${{ github.workspace }}/dist/artifacts/*.zip
             ${{ github.workspace }}/dist/artifacts/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload VC Code extension artifacts
+        if: github.event_name == 'workflow_dispatch' &&
+            inputs.release_vscode &&
+            matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.platform }}
+          path: |
             ${{ github.workspace }}/dist/vscode/*.vsix
-          if-no-files-found: warn
+          if-no-files-found: error
 
   release:
     name: Release / ${{ matrix.name }} - ${{ matrix.should_release }}
