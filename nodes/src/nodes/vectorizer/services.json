@@ -39,7 +39,7 @@
 	//     The path is the executable/script code - it is node dependent
 	//     and is optional for most node
 	//
-	"path": "nodes.vectorizer", // Qdrant node resides in "../aparavi_ai/ai"
+	"path": "nodes.vectorizer", // Qdrant node resides in "../rocketride_ai/ai"
 	//
 	// Required:
 	//     The prefix map when added/removed when convertting URLs <=> paths
@@ -64,7 +64,7 @@
 	//      on the tile box. For example:
 	//          Qdrant VectorDB           (from service.tile)
 	//              localhost
-	//              aparavi
+	//              rocketride
 	//
 	"tile": [],
 	//

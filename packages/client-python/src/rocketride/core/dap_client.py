@@ -271,7 +271,7 @@ class DAPClient(DAPBase):
         Equivalent to ``build_request(command, ...)`` + ``request(...)``.
 
         Args:
-            command: The DAP command name (e.g. 'apaext_services', 'apaext_monitor', 'initialize').
+            command: The DAP command name (e.g. 'rrext_services', 'rrext_monitor', 'initialize').
             arguments: Optional arguments for the command.
             token: Optional task/session token.
             timeout: Optional per-request timeout in ms. Overrides the default request_timeout.
@@ -280,7 +280,7 @@ class DAPClient(DAPBase):
             The response message (DAP dict) from the server.
 
         Example:
-            response = await client.dap_request('apaext_services', {}, timeout=5000)
+            response = await client.dap_request('rrext_services', {}, timeout=5000)
             if client.did_fail(response):
                 raise RuntimeError(response.get('message', 'Request failed'))
         """

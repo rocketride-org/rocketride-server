@@ -337,7 +337,7 @@ class TaskConn(
         request_command = request.get('command', '')
 
         # Reject internal commands
-        if not request_command or request_command.startswith('apaext_'):
+        if not request_command or request_command.startswith('rrext_'):
             return self.build_error(request, f'Invalid command: {request_command}')
 
         # Get the task
@@ -402,7 +402,7 @@ class TaskConn(
         request_command = request.get('command', '')
 
         # Reject internal commands
-        if not request_command or request_command.startswith('apaext_'):
+        if not request_command or request_command.startswith('rrext_'):
             return self.build_error(request, f'Invalid command: {request_command}')
 
         # We know this is now a vscode debugging command. Inject
@@ -412,7 +412,7 @@ class TaskConn(
         # Call it
         return await self.request(request)
 
-    async def on_apaext_ping(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_ping(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle DAP ping/ping.
 

@@ -47,8 +47,6 @@
 		"format:fix": "prettier --write .",
 		"lint:python": "ruff check . && ruff format --check .",
 		"licenses": "node scripts/licenses.js",
-		"docker:engine": "docker build --progress=plain -f docker/Dockerfile.engine -t aparavi-engine .",
-		"docker:eaas": "docker build --progress=plain -f docker/Dockerfile.eaas -t aparavi-eaas .",
 		"package": "cpack --config build/CPackConfig.cmake"
 	},
 	"pnpm": {

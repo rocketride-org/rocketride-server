@@ -128,7 +128,7 @@ flowchart TB
 ### Quick Start
 
 ```bash
-git clone https://github.com/aparavi/engine-new.git
+git clone https://github.com/rocketride-org/rocketride-server.git
 cd engine-new
 ./builder build
 ```

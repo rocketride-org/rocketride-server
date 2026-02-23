@@ -122,7 +122,7 @@ await client.connect();
 **Example — custom DAP command:**
 
 ```ts
-const req = client.buildRequest('apaext_monitor', { token, arguments: { types: ['apaevt_status_upload'] } });
+const req = client.buildRequest('rrext_monitor', { token, arguments: { types: ['apaevt_status_upload'] } });
 const res = await client.request(req, 5000);
 if (client.didFail(res)) throw new Error(res.message);
 ```
@@ -444,7 +444,7 @@ const services = await client.getServices();
 console.log('Available:', Object.keys(services));
 const ocrSchema = await client.getService('ocr');
 
-const req = client.buildRequest('apaext_ping', { token: myToken });
+const req = client.buildRequest('rrext_ping', { token: myToken });
 const res = await client.request(req, 5000);
 if (client.didFail(res)) throw new Error(res.message);
 await client.disconnect();

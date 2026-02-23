@@ -196,7 +196,7 @@
 				"title": "Your own ChromaDB server",
 				"host": "localhost",
 				"port": "8000",
-				"collection": "APARAVI"
+				"collection": "ROCKETRIDE"
 			},
 			"cloud": {
 				"mode": "cloud",
@@ -204,7 +204,7 @@
 				"host": "",
 				"port": "443",
 				"apikey": "",
-				"collection": "APARAVI"
+				"collection": "ROCKETRIDE"
 			}
 		}
 	},

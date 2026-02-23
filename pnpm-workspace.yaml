@@ -1,4 +1,4 @@
-# Aparavi Engine Monorepo Workspace Configuration
+# Rocketride Engine Monorepo Workspace Configuration
 # This file defines which directories contain packages in the monorepo
 
 # Allow all dependency postinstall/preinstall scripts to run (disables the

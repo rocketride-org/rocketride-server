@@ -95,16 +95,16 @@
 			"hidden": true
 		},
 		"include": {
-			"description": "This path defines the paths included for Scan, Index, Classify and OCR. By default, its empty.\n\nUse * to scan all the user accounts. For individual user folders, use user ID\\FolderName. Example: aparavitest@microsoft.com\\Folder1\\*"
+			"description": "This path defines the paths included for Scan, Index, Classify and OCR. By default, its empty.\n\nUse * to scan all the user accounts. For individual user folders, use user ID\\FolderName. Example: testuser@microsoft.com\\Folder1\\*"
 		},
 		"include.path": {
-			"description": "This path defines the paths included for Scan, Index, Classify and OCR. By default, its empty.\n\nUse * to scan all the user accounts. For individual user folders, use user ID\\FolderName. Example: aparavitest@microsoft.com\\Folder1\\*"
+			"description": "This path defines the paths included for Scan, Index, Classify and OCR. By default, its empty.\n\nUse * to scan all the user accounts. For individual user folders, use user ID\\FolderName. Example: testuser@microsoft.com\\Folder1\\*"
 		},
 		"exclude": {
-			"description": "This path defines the paths excluded for Scan, Index, Classify and OCR. By default, its empty.\n\n Use * to exclude all the user accounts. For individual user account, use user ID\\FolderName. Example: aparavitest@microsoft.com\\Folder1\\*"
+			"description": "This path defines the paths excluded for Scan, Index, Classify and OCR. By default, its empty.\n\n Use * to exclude all the user accounts. For individual user account, use user ID\\FolderName. Example: testuser@microsoft.com\\Folder1\\*"
 		},
 		"exclude.path": {
-			"description": "This path defines the paths excluded for Scan, Index, Classify and OCR. By default, its empty.\n\n Use * to exclude all the user accounts. For individual user account, use user ID\\FolderName. Example: aparavitest@microsoft.com\\Folder1\\*"
+			"description": "This path defines the paths excluded for Scan, Index, Classify and OCR. By default, its empty.\n\n Use * to exclude all the user accounts. For individual user account, use user ID\\FolderName. Example: testuser@microsoft.com\\Folder1\\*"
 		},
 		"outlook.source.parameters": {
 			"section": "parameters",

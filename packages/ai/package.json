@@ -1,7 +1,7 @@
 {
-  "name": "@aparavi/ai",
+  "name": "@rocketride/ai",
   "version": "3.1.0",
-  "description": "Aparavi AI/ML modules",
+  "description": "RocketRide AI/ML modules",
   "private": true,
   "license": "MIT",
   "scripts": {}

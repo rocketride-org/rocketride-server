@@ -198,13 +198,13 @@
 				"mode": "pod-based",
 				"title": "Pinecone Pod-Based Index",
 				"apikey": "",
-				"collection": "aparavi"
+				"collection": "rocketride"
 			},
 			"serverless-dense": {
 				"mode": "serverless-dense",
 				"title": "Pinecone Serverless Dense Index",
 				"apikey": "",
-				"collection": "aparavi"
+				"collection": "rocketride"
 			}
 		}
 	},
@@ -219,7 +219,7 @@
 			"type": "string",
 			"title": "Collection",
 			"description": "Enter the name of the collection. Accepted are: Lower case, alphanumeric characters, hyphens",
-			"default": "aparavi"
+			"default": "rocketride"
 		},
 		"pinecone.pod-based": {
 			"object": "pod-based",

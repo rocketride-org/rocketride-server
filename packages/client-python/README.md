@@ -142,11 +142,11 @@ async with RocketRideClient(uri="wss://cloud.rocketride.ai", auth=os.environ["RO
 
 ```py
 # Two-step (build then request)
-req = client.build_request("apaext_monitor", token=token, arguments={"types": ["apaevt_status_upload"]})
+req = client.build_request("rrext_monitor", token=token, arguments={"types": ["apaevt_status_upload"]})
 res = await client.request(req, timeout=5000)
 
 # One-step with dap_request
-res = await client.dap_request("apaext_services", {}, timeout=5000)
+res = await client.dap_request("rrext_services", {}, timeout=5000)
 
 if client.did_fail(res):
     raise RuntimeError(res.get("message", "Request failed"))
@@ -497,7 +497,7 @@ async def main():
     ocr = await client.get_service("ocr")
     if ocr:
         print("OCR schema:", ocr.get("schema"))
-    req = client.build_request("apaext_ping", token=my_token)
+    req = client.build_request("rrext_ping", token=my_token)
     res = await client.request(req, timeout=5000)
     if client.did_fail(res):
         raise RuntimeError(res.get("message", "Ping failed"))

@@ -627,7 +627,7 @@ export class ConnectionManager extends EventEmitter {
 
 		this.servicesRefreshPromise = (async () => {
 			try {
-				const response = await this.client!.dapRequest('apaext_services', {});
+				const response = await this.client!.dapRequest('rrext_services', {});
 				if (response?.success === false) {
 					const msg = response?.message ?? 'Failed to load services';
 					this.cachedServices = null;

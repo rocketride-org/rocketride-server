@@ -1,5 +1,5 @@
 /**
- * Aparavi Build System
+ * RocketRide Build System
  * 
  * Unified build orchestrator that discovers and runs build tasks
  * from tasks.js files throughout the project.
@@ -148,7 +148,7 @@ function expandGlobalCommands(globalCommands, registry) {
 
 function showHelp(registry) {
     console.log(`
-Aparavi Build System
+Rocketride Build System
 
 Usage: builder <action> [...] [options]
 

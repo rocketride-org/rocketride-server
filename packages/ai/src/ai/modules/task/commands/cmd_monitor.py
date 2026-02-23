@@ -343,9 +343,9 @@ class MonitorCommands(DAPConn):
             self.debug_message(f'Error configuring monitoring: {str(e)}')
             raise
 
-    async def on_apaext_monitor(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_monitor(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle DAP 'apaext_monitor' command to establish or modify event subscriptions.
+        Handle DAP 'rrext_monitor' command to establish or modify event subscriptions.
 
         This is the main entry point for clients to configure their event monitoring
         preferences. It processes the monitoring request, updates subscriptions,

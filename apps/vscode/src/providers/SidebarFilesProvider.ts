@@ -330,7 +330,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 		// Listen for connected events
 		const connectedEventListener = this.connectionManager.addListener('connected', _e => {
 			// Turn on the task monitors
-			this.connectionManager.request('apaext_monitor', {
+			this.connectionManager.request('rrext_monitor', {
 				"types": ["task"]
 			}, '*');
 		});
@@ -585,7 +585,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 		// Use DAP command to execute pipeline without debugging
 		try {
 			// We need the token to attach...
-			const response = await this.connectionManager.request('apaext_get_token', {
+			const response = await this.connectionManager.request('rrext_get_token', {
 				projectId: projectId,
 				source: sourceId
 			}) as GenericResponse | undefined;

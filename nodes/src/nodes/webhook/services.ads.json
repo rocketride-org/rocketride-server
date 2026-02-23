@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Aparavi Data Catalog",
+	"title": "RocketRide Data Catalog",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -52,10 +52,10 @@
 	//		Description to of this driver
 	//
 	"description": [
-		"A source component that listens for incoming data from Aparavi Data Suite's intelligent ",
+		"A source component that listens for incoming data from RocketRide Data Suite's intelligent ",
 		"preparation pipeline, receiving AI-optimized documents that have been automatically ",
 		"discovered, curated, and enhanced across your organization's data landscape. Unlike ",
-		"basic webhook ingestion, this leverages Aparavi's enterprise-grade data intelligence ",
+		"basic webhook ingestion, this leverages RocketRide's enterprise-grade data intelligence ",
 		"to deliver pre-processed, metadata-rich datasets rather than raw files. Configurable ",
 		"with endpoint and authentication settings for secure, reliable transfer of quality-assured data."
 	],
@@ -63,7 +63,7 @@
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
-	"icon": "aparavi.png",
+	"icon": "rocketride.png",
 	//
 	// Optional:
 	//	  Documentation link for this driver
@@ -122,7 +122,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Aparavi Data Catalog",
+			"title": "RocketRide Data Catalog",
 			"properties": [
 				"hideForm",
 				"type",

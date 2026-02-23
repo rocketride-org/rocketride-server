@@ -232,7 +232,7 @@ export class PageStatusProvider {
 
 		try {
 			// Send DAP command to start monitoring
-			await this.connectionManager.request('apaext_monitor', {
+			await this.connectionManager.request('rrext_monitor', {
 				projectId: projectId,
 				source: sourceId,
 				types: ['summary']
@@ -279,7 +279,7 @@ export class PageStatusProvider {
 		if (this.connectionManager.isConnected()) {
 			try {
 				// Send DAP command to stop monitoring
-				await this.connectionManager.request('apaext_monitor', {
+				await this.connectionManager.request('rrext_monitor', {
 					projectId: projectId,
 					source: sourceId,
 				});
@@ -733,7 +733,7 @@ export class PageStatusProvider {
 					// Use DAP command to stop the running pipeline process
 					try {
 						// We need the token to attach...
-						const response = await this.connectionManager.request('apaext_get_token', {
+						const response = await this.connectionManager.request('rrext_get_token', {
 							projectId: viewState.projectId,
 							source: viewState.sourceId
 						}) as GenericResponse | undefined;
@@ -801,7 +801,7 @@ export class PageStatusProvider {
 					// Use DAP command to execute pipeline without debugging
 					try {
 						// We need the token to attach...
-						const response = await this.connectionManager.request('apaext_get_token', {
+						const response = await this.connectionManager.request('rrext_get_token', {
 							projectId: viewState.projectId,
 							source: viewState.sourceId
 						}) as GenericResponse | undefined;

@@ -338,7 +338,7 @@ class EventMixin(DAPClient):
         """
         # Build event subscription request
         request = self.build_request(
-            command='apaext_monitor',
+            command='rrext_monitor',
             arguments={'types': event_types},
             token=token,
         )
