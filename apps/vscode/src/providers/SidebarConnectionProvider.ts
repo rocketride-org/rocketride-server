@@ -371,6 +371,8 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 				return 'Connecting to server...';
 			case 'stopping-engine':
 				return 'Stopping server...';
+			case 'engine-startup-failed':
+				return connectionState.lastError ?? 'Error starting local engine';
 			default:
 				return '';
 		}
@@ -405,6 +407,7 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 			}
 
 			case 'disconnected':
+			case 'engine-startup-failed':
 			default:
 				return 'Disconnected';
 		}
@@ -425,6 +428,7 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 				return new vscode.ThemeIcon('loading~spin', new vscode.ThemeColor('charts.yellow'));
 
 			case 'disconnected':
+			case 'engine-startup-failed':
 			default:
 				return new vscode.ThemeIcon('circle-outline', new vscode.ThemeColor('charts.red'));
 		}
@@ -461,6 +465,7 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 				return 'Stopping local RocketRide server...';
 
 			case 'disconnected':
+			case 'engine-startup-failed':
 			default:
 				// Handle various disconnected reasons
 				if (connectionState.lastError) {

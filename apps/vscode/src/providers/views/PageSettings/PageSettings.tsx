@@ -25,7 +25,6 @@ import React, { useState } from 'react';
 import { useMessaging } from '../../../shared/util/useMessaging';
 import { ConnectionSettings } from './ConnectionSettings';
 import { PipelineSettings } from './PipelineSettings';
-import { LocalEngineSettings } from './LocalEngineSettings';
 import { DebuggingSettings } from './DebuggingSettings';
 import { EnvVariablesSettings } from './EnvVariablesSettings';
 import { IntegrationSettings } from './IntegrationSettings';
@@ -48,11 +47,17 @@ export interface SettingsData {
 	autoConnect: boolean;
 	deployUrl?: string;
 	defaultPipelinePath: string;
+	localEngineVersion: string;
 	localEngineArgs: string[];
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
 	envVars?: Record<string, string>;
 	copilotIntegration?: boolean;
 	cursorIntegration?: boolean;
+}
+
+export interface EngineVersionItem {
+	tag_name: string;
+	prerelease: boolean;
 }
 
 export interface MessageData {
@@ -70,6 +75,10 @@ export type PageSettingsIncomingMessage
 		level: 'success' | 'error' | 'info' | 'warning';
 		message: string;
 		context?: 'development' | 'deploy';
+	}
+	| {
+		type: 'engineVersionsLoaded';
+		versions: EngineVersionItem[];
 	};
 
 export type PageSettingsOutgoingMessage
@@ -90,6 +99,9 @@ export type PageSettingsOutgoingMessage
 	}
 	| {
 		type: 'clearCredentials';
+	}
+	| {
+		type: 'fetchEngineVersions';
 	};
 
 // ============================================================================
@@ -115,13 +127,14 @@ export const PageSettings: React.FC = () => {
 	// ========================================================================
 
 	const [settings, setSettings] = useState<SettingsData>({
-		hostUrl: '',
-		connectionMode: 'cloud',
+		hostUrl: 'http://localhost:5565',
+		connectionMode: 'local',
 		hasApiKey: false,
 		apiKey: '', // Initialize empty - will be loaded from secure storage
 		autoConnect: true,
 		deployUrl: '',
 		defaultPipelinePath: 'pipelines', // Initialize with default value
+		localEngineVersion: 'latest',
 		localEngineArgs: [],
 		pipelineRestartBehavior: 'prompt',
 		envVars: {},
@@ -131,6 +144,8 @@ export const PageSettings: React.FC = () => {
 	const [message, setMessage] = useState<MessageData | null>(null);
 	const [developmentTestMessage, setDevelopmentTestMessage] = useState<MessageData | null>(null);
 	const [deployTestMessage, setDeployTestMessage] = useState<MessageData | null>(null);
+	const [engineVersions, setEngineVersions] = useState<EngineVersionItem[]>([]);
+	const [engineVersionsLoading, setEngineVersionsLoading] = useState(false);
 
 	// ========================================================================
 	// WEBVIEW MESSAGING
@@ -143,6 +158,15 @@ export const PageSettings: React.FC = () => {
 				switch (message.type) {
 					case 'settingsLoaded':
 						setSettings(message.settings);
+						if (message.settings.connectionMode === 'local') {
+							setEngineVersionsLoading(true);
+							sendMessage({ type: 'fetchEngineVersions' });
+						}
+						break;
+
+					case 'engineVersionsLoaded':
+						setEngineVersions(message.versions);
+						setEngineVersionsLoading(false);
 						break;
 
 					case 'showMessage': {
@@ -202,7 +226,14 @@ export const PageSettings: React.FC = () => {
 	 * Update settings with partial changes
 	 */
 	const handleSettingsChange = (newSettings: Partial<SettingsData>): void => {
-		setSettings(prev => ({ ...prev, ...newSettings }));
+		setSettings(prev => {
+			// If switching to local mode, fetch engine versions
+			if (newSettings.connectionMode === 'local' && prev.connectionMode !== 'local') {
+				setEngineVersionsLoading(true);
+				sendMessage({ type: 'fetchEngineVersions' });
+			}
+			return { ...prev, ...newSettings };
+		});
 	};
 
 	/**
@@ -271,6 +302,8 @@ export const PageSettings: React.FC = () => {
 					onTestDeployEndpoint={handleTestDeployEndpoint}
 					developmentTestMessage={developmentTestMessage}
 					deployTestMessage={deployTestMessage}
+					engineVersions={engineVersions}
+					engineVersionsLoading={engineVersionsLoading}
 				/>
 
 				<PipelineSettings
@@ -288,12 +321,6 @@ export const PageSettings: React.FC = () => {
 					onEnvVarAdd={handleEnvVarAdd}
 					onEnvVarUpdate={handleEnvVarUpdate}
 					onEnvVarDelete={handleEnvVarDelete}
-				/>
-
-				<LocalEngineSettings
-					settings={settings}
-					onSettingsChange={handleSettingsChange}
-					visible={settings.connectionMode === 'local'}
 				/>
 
 				<DebuggingSettings

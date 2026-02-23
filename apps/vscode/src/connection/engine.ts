@@ -54,20 +54,13 @@ export class EngineServer extends EventEmitter {
 			let processReady = false;
 			let processErrored = false;
 
-			// Set up timeout for process startup
-			const startupTimeout = setTimeout(() => {
-				if (!processReady && !processErrored) {
-					this.logger.output(`${icons.error} DAP server startup timeout`);
-					this.cleanup();
-					reject(new Error('Process startup timeout'));
-				}
-			}, 10000); // 10 second timeout
+			// No fixed timeout: keep reading stdio until we see "Application startup complete."
+			// or the process errors/exits.
 
 			// Handle process launch errors
 			this.child.on('error', (err) => {
 				if (!processReady && !processErrored) {
 					processErrored = true;
-					clearTimeout(startupTimeout);
 					this.logger.output(`${icons.error} DAP server failed to launch: ${err.message}`);
 					this.cleanup();
 					reject(err);
@@ -78,7 +71,6 @@ export class EngineServer extends EventEmitter {
 			this.child.on('exit', (code, signal) => {
 				if (!processReady && !processErrored) {
 					processErrored = true;
-					clearTimeout(startupTimeout);
 					this.logger.output(`${icons.error} DAP server exited during startup (code=${code}, signal=${signal})`);
 					this.cleanup();
 					reject(new Error(`Process exited during startup: code=${code}, signal=${signal}`));
@@ -92,7 +84,16 @@ export class EngineServer extends EventEmitter {
 				this.emit('terminated', { code, signal });
 			});
 
-			// Monitor stdout for startup indicators
+			const tryResolveReady = (): void => {
+				if (!processReady && !processErrored) {
+					processReady = true;
+					this.started = true;
+					this.logger.output(`${icons.success} DAP server is ready`);
+					resolve();
+				}
+			};
+
+			// Monitor stdout: forward every line to RocketRide output channel; resolve when "Application startup complete." is seen
 			this.child.stdout?.on('data', (data) => {
 				const output = data.toString();
 				const messages = output.split('\n');
@@ -100,21 +101,14 @@ export class EngineServer extends EventEmitter {
 				for (const message of messages) {
 					if (message.trim()) {
 						this.logger.output(`${icons.message} ${message.trim()}`);
-
-						// Look for indicators that the server is ready
-						// Common patterns: "Server listening", "Started", "Ready", port binding messages
-						if (!processReady && this.isServerReadyMessage(message)) {
-							processReady = true;
-							this.started = true;
-							clearTimeout(startupTimeout);
-							this.logger.output(`${icons.success} DAP server is ready`);
-							resolve();
+						if (this.isServerReadyMessage(message)) {
+							tryResolveReady();
 						}
 					}
 				}
 			});
 
-			// Monitor stderr 
+			// Monitor stderr: same as stdout (all engine stdio goes to RocketRide output)
 			this.child.stderr?.on('data', (data) => {
 				const output = data.toString();
 				const messages = output.split('\n');
@@ -122,52 +116,20 @@ export class EngineServer extends EventEmitter {
 				for (const message of messages) {
 					if (message.trim()) {
 						this.logger.output(`${icons.message} ${message.trim()}`);
-
-						// Also check stderr for ready indicators (some servers log to stderr)
-						if (!processReady && this.isServerReadyMessage(message)) {
-							processReady = true;
-							this.started = true;
-							clearTimeout(startupTimeout);
-							this.logger.output(`${icons.success} DAP server is ready`);
-							resolve();
+						if (this.isServerReadyMessage(message)) {
+							tryResolveReady();
 						}
 					}
 				}
 			});
-
-			// Fallback: if we don't see a ready message, assume ready after a short delay
-			// This handles servers that don't output clear ready indicators
-			setTimeout(() => {
-				if (!processReady && !processErrored && this.child && !this.child.killed) {
-					processReady = true;
-					this.started = true;
-					clearTimeout(startupTimeout);
-					this.logger.output(`${icons.success} DAP server assumed ready (no explicit ready message)`);
-					resolve();
-				}
-			}, 3000); // 3 second fallback
 		});
 	}
 
 	/**
-	 * Check if a log message indicates the server is ready to accept connections
+	 * Check if a log message indicates the server is ready to accept connections.
 	 */
 	private isServerReadyMessage(message: string): boolean {
-		const readyIndicators = [
-			'server listening',
-			'server started',
-			'listening on',
-			'ready to accept',
-			'server ready',
-			'started on port',
-			'listening at',
-			'bound to',
-			'server running',
-			'accepting connections'
-		];
-
-		const lowerMessage = message.toLowerCase();
-		return readyIndicators.some(indicator => lowerMessage.includes(indicator));
+		return message.trim().includes('Uvicorn running');
 	}
 
 	/**
@@ -182,10 +144,23 @@ export class EngineServer extends EventEmitter {
 	}
 
 	/**
-	 * Stops the external DAP server process gracefully.
+	 * Stops the external DAP server process.
+	 * With --autoterm the engine exits when stdin closes, so we close stdin first
+	 * for graceful shutdown, then kill if still running.
 	 */
 	public stopServer(): void {
 		this.logger.output(`${icons.stop} Stopping DAP server...`);
-		this.child?.kill();
+		if (!this.child) {
+			return;
+		}
+		// Close stdin so engine with --autoterm exits gracefully
+		if (this.child.stdin && !this.child.killed) {
+			this.child.stdin.end();
+		}
+		if (!this.child.killed) {
+			this.child.kill();
+		}
+		this.started = false;
+		this.child = undefined;
 	}
 }
