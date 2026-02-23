@@ -126,7 +126,7 @@ export default function AnnotationNode({ id, type, parentId, data, selected }: N
 				className="nowheel"
 			>
 				{/* Header — hidden until hover via CSS */}
-				<Box sx={styles.header} className="annotation-header">
+				<Box sx={{ ...styles.header, color: 'text.primary' }} className="annotation-header">
 					<ProjectNodeHeader
 						id={id}
 						title={title}

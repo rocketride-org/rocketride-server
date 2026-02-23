@@ -150,8 +150,10 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 							projectId = parsedPipeline.projectId;
 							source = componentId;
 
-							// Create a meaningful title for the panel
-							displayName = sourceComponent?.name || componentId;
+							// Create a meaningful title: component name, provider title, or component id
+						const services = this.connectionManager.getCachedServices()?.services ?? {};
+						const providerDef = sourceComponent?.provider ? (services[sourceComponent.provider] as { title?: string } | undefined) : undefined;
+						displayName = sourceComponent?.name || providerDef?.title || componentId;
 						} else {
 							vscode.window.showErrorMessage(`Invalid pipeline file or missing project_id: ${path.basename(resourceUri.fsPath)}`);
 							return;
@@ -736,18 +738,16 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					new vscode.ThemeColor(isActive ? 'charts.red' : 'descriptionForeground')
 				);
 
-				// Description: id only when no display name, plus warnings if any (status is shown by the icon)
+				// Description: warnings only. The label already shows the name or id.
 				const warnText = comp.warnings.length > 0 ? `${comp.warnings.length} warning(s)` : '';
-				const hasDisplayName = !!(comp.name || providerTitle);
-				item.description = hasDisplayName ? warnText : (warnText ? `${comp.id} · ${warnText}` : comp.id);
+				item.description = warnText;
 
 				// Update context value to include running state
 				contextValue = isActive ? 'pipelineSource:running' : 'pipelineSource:stopped';
 			} else {
 				// Show error state - invalid pipeline or missing IDs
 				item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground'));
-				const hasDisplayName = !!(comp.name || providerTitle);
-				item.description = hasDisplayName ? '' : comp.id;
+				item.description = '';
 			}
 		} else {
 			// Default icon for other items
