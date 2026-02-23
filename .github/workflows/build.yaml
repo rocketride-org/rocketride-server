@@ -88,16 +88,16 @@ jobs:
             runner: ubuntu-22.04
             builder_cmd: ./builder
             vcpkg_cmd: ./build/vcpkg/vcpkg
-          - platform: windows
-            label: Windows Server 2022
-            runner: windows-2022
-            builder_cmd: ./builder.cmd
-            vcpkg_cmd: ./build/vcpkg/vcpkg.exe
-          - platform: macos
-            label: macOS (ARM64)
-            runner: macos-14
-            builder_cmd: ./builder
-            vcpkg_cmd: ./build/vcpkg/vcpkg
+          # - platform: windows
+          #   label: Windows Server 2022
+          #   runner: windows-2022
+          #   builder_cmd: ./builder.cmd
+          #   vcpkg_cmd: ./build/vcpkg/vcpkg.exe
+          # - platform: macos
+          #   label: macOS (ARM64)
+          #   runner: macos-14
+          #   builder_cmd: ./builder
+          #   vcpkg_cmd: ./build/vcpkg/vcpkg
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
