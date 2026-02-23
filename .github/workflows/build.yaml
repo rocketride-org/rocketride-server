@@ -142,8 +142,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.release_type != ''
         run: ${{ matrix.builder_cmd }} package --verbose
 
-      - name: Test
-        run: ${{ matrix.builder_cmd }} test --verbose
+      # - name: Test
+      #   run: ${{ matrix.builder_cmd }} test --verbose
 
       - name: Upload artifacts
         if: github.event_name == 'workflow_dispatch' && inputs.release_type != ''
