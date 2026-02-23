@@ -157,13 +157,14 @@ export default function Canvas({
 		<ThemeProvider theme={currentTheme}>
 			<SnackbarProvider>
 				<CssBaseline />
-				{/* Full-viewport flex container so the canvas fills the entire host window */}
+				{/* Fixed-position container bypasses any body padding/margin the host injects */}
 				<div
 					style={{
-						width: '100vw',
-						height: '100vh',
+						position: 'fixed',
+						inset: 0,
 						display: 'flex',
 						flexDirection: 'column',
+						overflow: 'hidden',
 					}}
 				>
 					<_Canvas.Container

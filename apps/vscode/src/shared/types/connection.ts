@@ -39,6 +39,9 @@ export enum ConnectionState {
 	/** Local mode: engine process is starting up */
 	STARTING_ENGINE = 'starting-engine',
 
+	/** Local mode: engine process failed to start (e.g. exited during startup) */
+	ENGINE_STARTUP_FAILED = 'engine-startup-failed',
+
 	/** Connecting to WebSocket (cloud or local after engine ready) */
 	CONNECTING = 'connecting',
 

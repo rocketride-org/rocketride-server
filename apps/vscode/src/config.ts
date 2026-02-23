@@ -54,6 +54,8 @@ export interface ConfigManagerInfo {
 		port: number;
 		/** Additional engine arguments */
 		engineArgs: string[];
+		/** Engine version to download: 'latest', 'prerelease', or a specific tag */
+		engineVersion: string;
 	};
 
 	/** General settings */
@@ -87,15 +89,16 @@ export class ConfigManager {
 
 	// Cached configuration
 	private config: ConfigManagerInfo = {
-		connectionMode: 'cloud',
+		connectionMode: 'local',
 		apiKey: '',
-		hostUrl: '',
+		hostUrl: 'http://localhost:5565',
 		deployUrl: '',
 		defaultPipelinePath: '',
 		local: {
 			host: '',
 			port: 5565,
 			engineArgs: [],
+			engineVersion: 'latest',
 		},
 		autoConnect: true,
 		pipelineRestartBehavior: 'prompt',
@@ -170,7 +173,7 @@ export class ConfigManager {
 	 */
 	private async refreshConfig(): Promise<void> {
 		const config = vscode.workspace.getConfiguration(this.configSection);
-		const hostUrl = config.get('hostUrl', 'https://cloud.rocketride.ai');
+		const hostUrl = config.get('hostUrl', 'http://localhost:5565');
 		const deployUrl = config.get('deployUrl', 'https://cloud.rocketride.ai');
 
 		// Parse host and port from the hostUrl - host will always be localhost
@@ -194,7 +197,7 @@ export class ConfigManager {
 		}
 
 		this.config = {
-			connectionMode: config.get('connectionMode', 'cloud') as ConnectionMode,
+			connectionMode: config.get('connectionMode', 'local') as ConnectionMode,
 			apiKey: apiKey,
 			hostUrl: hostUrl,
 			deployUrl: deployUrl,
@@ -202,7 +205,8 @@ export class ConfigManager {
 			local: {
 				host: parsedHost,
 				port: parsedPort,
-				engineArgs: config.get('local.engineArgs', [])
+				engineArgs: config.get('local.engineArgs', []),
+				engineVersion: config.get('local.engineVersion', 'latest')
 			},
 			autoConnect: config.get('autoConnect', true),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),

@@ -64,7 +64,7 @@
 						"onprem",
 						"local"
 					],
-					"default": "cloud",
+					"default": "local",
 					"description": "Connection mode for RocketRide debugging",
 					"enumDescriptions": [
 						"Cloud (RocketRide.ai cloud) – needs a RocketRide account",
@@ -74,7 +74,7 @@
 				},
 				"rocketride.hostUrl": {
 					"type": "string",
-					"default": "https://cloud.rocketride.ai",
+					"default": "http://localhost:5565",
 					"description": "Host URL for RocketRide service (used by both cloud and local modes). Host and port will be parsed from this URL.",
 					"format": "uri"
 				},
@@ -93,6 +93,11 @@
 						"src/pipelines",
 						"workflows"
 					]
+				},
+				"rocketride.local.engineVersion": {
+					"type": "string",
+					"default": "latest",
+					"description": "Engine version to download. 'latest' for newest stable, 'prerelease' for newest prerelease, or a specific tag like 'server-v3.1.1'."
 				},
 				"rocketride.local.engineArgs": {
 					"type": "array",
