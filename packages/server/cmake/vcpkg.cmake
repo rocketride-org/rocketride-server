@@ -184,7 +184,7 @@ function(rocketride_install_dependency NAME TRIPLET DEPS_PLAT)
             "--recurse"
             "--triplet=${TRIPLET}"
             "--host-triplet=${TRIPLET}"
-            "--overlay-ports=${CMAKE_SOURCE_DIR}/engine-core/cmake/ports"
+            "--overlay-ports=${ROCKETRIDE_OVERLAY_PORTS}"
             "--binarysource=${VCPKG_BINARY_SOURCE}"
         WORKING_DIRECTORY ${VCPKG_ROOT}
         COMMAND_ERROR_IS_FATAL ANY
@@ -460,6 +460,9 @@ function(rocketride_setup_vcpkg PATH)
         set(VCPKG_BINARY_SOURCE "clear;default,readwrite" CACHE STRING "" FORCE)
     endif()
     message(STATUS "vcpkg binary cache: ${VCPKG_BINARY_SOURCE}")
+
+    # Make overlay-ports path available to rocketride_install_dependency
+    set(ROCKETRIDE_OVERLAY_PORTS "${PATH}/packages/server/engine-core/cmake/ports" CACHE STRING "" FORCE)
 
     # Install dependencies
     rocketride_install_file(${PATH}/packages/server/engine-core/apDeps.json ${DEPS_PLAT} ${DEPS_TYPE})
