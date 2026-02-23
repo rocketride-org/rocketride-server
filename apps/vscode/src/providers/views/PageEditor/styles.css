@@ -43,5 +43,14 @@
 	background-color: var(--vscode-editor-background);
 }
 
+/* Center the connection status spinner vertically in the editor */
+.pipeline-editor-container .connection-status {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	height: 100%;
+	text-align: center;
+}
+
 /* The Canvas component from rocketride-canvas handles its own internal styling */
 /* We just ensure it has proper space and integration with VS Code theme */

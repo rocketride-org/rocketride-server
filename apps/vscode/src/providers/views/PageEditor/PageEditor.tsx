@@ -330,6 +330,22 @@ export const PageEditor: React.FC = () => {
 	// ========================================================================
 	// RENDER
 	// ========================================================================
+
+	const hasServices = Object.keys(servicesJson).length > 0;
+
+	if (!hasServices) {
+		return (
+			<div className="pipeline-editor-container">
+				<div className="connection-status">
+					<div className="connecting-message">
+						<div className="spinner"></div>
+						<p>Establishing connection to server...</p>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
 	return (
 		<div className="pipeline-editor-container">
 			<Canvas
