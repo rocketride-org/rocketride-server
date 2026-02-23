@@ -24,7 +24,7 @@ Add a `test` property to your node's `service.json`:
 
 Run tests:
 ```bash
-builder test:nodes
+builder nodes:test
 ```
 
 ---
@@ -337,13 +337,13 @@ Multiple matchers can be combined:
 
 ```bash
 # Run all node tests
-builder test:nodes
+builder nodes:test
 
 # Run with verbose output
-builder test:nodes --pytest="-v -s"
+builder nodes:test --pytest="-v -s"
 
 # Run specific test
-builder test:nodes --pytest="-k question"
+builder nodes:test --pytest="-k question"
 
 # Run only contract tests (no server needed)
 pytest nodes/test/test_contracts.py -v
