@@ -2,16 +2,6 @@
 
 RocketRide TypeScript Client — TypeScript/JavaScript SDK for the RocketRide Engine. Complete API reference below.
 
-## Building (from source)
-
-From the repository root:
-
-```bash
-./builder client-typescript:build
-```
-
-This compiles TypeScript and creates the npm package. For a full project build, use `./builder build`.
-
 ## Installation
 
 ```bash
@@ -27,7 +17,7 @@ import { RocketRideClient } from 'rocketride';
 
 const client = new RocketRideClient({
   auth: process.env.ROCKETRIDE_APIKEY!,
-  uri: 'https://eaas.example.com',
+  uri: 'https://cloud.rocketride.ai',
 });
 await client.connect();
 const { token } = await client.use({ filepath: './pipeline.json' });
@@ -75,7 +65,7 @@ Configuration object passed to `new RocketRideClient(config)`.
 ```ts
 const client = new RocketRideClient({
   auth: process.env.ROCKETRIDE_APIKEY!,
-  uri: 'wss://eaas.example.com',
+  uri: 'wss://cloud.rocketride.ai',
   persist: true,
   maxRetryTime: 300000,
   requestTimeout: 30000,
@@ -101,7 +91,7 @@ Creates a client instance; it does **not** connect until you call `connect()`. Y
 **Example:**
 
 ```ts
-const client = new RocketRideClient({ auth: 'my-key', uri: 'https://eaas.example.com' });
+const client = new RocketRideClient({ auth: 'my-key', uri: 'https://cloud.rocketride.ai' });
 await client.connect();
 ```
 
@@ -126,6 +116,7 @@ await client.connect();
 |--------|-----------|---------|-------------|
 | `buildRequest` | `buildRequest(command: string, options?: { token?: string; arguments?: Record<string, unknown>; data?: Uint8Array \| string }): DAPMessage` | `DAPMessage` | Builds a DAP request message with the next sequence number. Use when you need a custom command not wrapped by `use()`, `send()`, etc. |
 | `request` | `request(request: DAPMessage, timeout?: number): Promise<DAPMessage>` | `Promise<DAPMessage>` | Sends the request and returns the response. Pass `timeout` (ms) to override the config default for this call. Check `didFail(response)` or `response.success` before using `response.body`. |
+| `dapRequest` | `dapRequest(command: string, args?: Record<string, unknown>, token?: string, timeout?: number): Promise<DAPMessage>` | `Promise<DAPMessage>` | Shorthand: builds a request and sends it in one call. Equivalent to `buildRequest()` + `request()`. |
 | `didFail` | `didFail(response: DAPMessage): boolean` | `boolean` | Returns `true` when the server indicated failure (`success === false`). Use after `request()` to decide whether to use `body` or surface `message` as an error. |
 
 **Example — custom DAP command:**
@@ -143,6 +134,7 @@ if (client.didFail(res)) throw new Error(res.message);
 | Method | Signature | Returns | Description |
 |--------|-----------|---------|-------------|
 | `use` | `use(options?: { token?: string; filepath?: string; pipeline?: PipelineConfig; source?: string; threads?: number; useExisting?: boolean; args?: string[]; ttl?: number }): Promise<Record<string, any> & { token: string }>` | `Promise<{ token: string, ... }>` | Starts a pipeline. You must pass either `pipeline` (object) or `filepath` (path to a JSON file; Node only). The client substitutes `${ROCKETRIDE_*}` in the config from its `env` (or `.env`). Returns at least `token`; use that token for `send()`, `sendFiles()`, `pipe()`, `chat()`, `getTaskStatus()`, and `terminate()`. |
+| `validate` | `validate(options: { pipeline: PipelineConfig \| Record<string, unknown>; source?: string }): Promise<Record<string, unknown>>` | `Promise<Record<string, unknown>>` | Validates a pipeline configuration without starting it. Returns validation results (e.g. errors, warnings). Use to check pipeline correctness before `use()`. |
 | `terminate` | `terminate(token: string): Promise<void>` | — | Stops the pipeline for that token and frees server resources. Call when the user cancels or when you are done sending data. |
 | `getTaskStatus` | `getTaskStatus(token: string): Promise<TASK_STATUS>` | `Promise<TASK_STATUS>` | Returns current task status: e.g. `completedCount`, `totalCount`, `completed`, `state`, `exitCode`. Use to poll until `completed` is true or to show progress. |
 
@@ -199,7 +191,7 @@ const result = await pipe.close();
 
 ---
 
-### Services and ping
+### Services, validation, and ping
 
 | Method | Signature | Returns | Description |
 |--------|-----------|---------|-------------|
@@ -236,7 +228,7 @@ const result = await pipe.close();
 
 ---
 
-## DataPipe (TypeScript)
+## DataPipe
 
 Returned by `client.pipe()`. Represents one streaming upload: **open** → one or more **write** → **close**. The server assigns a `pipeId` when you open; each `write()` sends a chunk for that pipe, and `close()` finalizes the stream and returns the pipeline result.
 
@@ -253,7 +245,7 @@ Returned by `client.pipe()`. Represents one streaming upload: **open** → one o
 
 ---
 
-## Question (TypeScript)
+## Question
 
 From `rocketride`. Build a question for `client.chat({ token, question })`. You can add instructions (how to answer), examples (example input/output), context (background), history (prior messages), and documents (what to reference).
 
@@ -268,7 +260,7 @@ constructor(options?: {
 })
 ```
 
-`QuestionType`: `QUESTION`, `SEMANTIC`, `KEYWORD`, `GET`, `PROMPT`. Default filter and `expectJson: false`, `role: ''` if omitted.
+`QuestionType`: `QUESTION`, `SEMANTIC`, `KEYWORD`, `GET`, `PROMPT`. Default type is `QUESTION`. Default filter and `expectJson: false`, `role: ''` if omitted.
 
 ### Methods
 
@@ -284,7 +276,7 @@ constructor(options?: {
 
 ---
 
-## Answer (TypeScript)
+## Answer
 
 Used to parse chat response content. The client does not attach an `Answer` instance to the pipeline result; you read the response body and, if needed, use these static helpers to extract JSON or code from AI text (which often includes markdown or code fences).
 
@@ -295,16 +287,20 @@ Used to parse chat response content. The client does not attach an `Answer` inst
 
 ---
 
-## Types (TypeScript)
+## Types
 
 - **DAPMessage**: `{ type, seq, command?, arguments?, body?, success?, message?, request_seq?, event?, token?, data?, trace? }`.
-- **TASK_STATUS**: Task status object (e.g. `completedCount`, `totalCount`, `completed`, `state`, `exitCode`).
+- **TASK_STATUS**: Task status with `completedCount`, `totalCount`, `completed`, `state`, `exitCode`, and many more fields.
 - **PIPELINE_RESULT**: `{ name, path, objectId, result_types?, [key: string]: any }`.
+- **PipelineConfig**: Pipeline definition with `name`, `description`, `version`, `components`, `source`, `project_id`.
 - **UPLOAD_RESULT**: Per-file result with e.g. `action` (`'complete'` \| `'error'`), `filepath`, `error?`, `result?`, `upload_time?`.
+- **QuestionHistory**: `{ role: string, content: string }`.
+- **QuestionInstruction**: `{ subtitle: string, instructions: string }`.
+- **QuestionExample**: `{ given: string, result: string }`.
 
 ---
 
-## Exceptions (TypeScript)
+## Exceptions
 
 `AuthenticationException` extends `ConnectionException`; thrown on DAP auth failure. In persist mode the client catches it, calls `onConnectError`, and does not retry so the app can fix credentials and call `connect()` again.
 
@@ -319,7 +315,7 @@ import { RocketRideClient } from 'rocketride';
 
 const client = new RocketRideClient({
   auth: process.env.ROCKETRIDE_APIKEY!,
-  uri: 'https://eaas.example.com',
+  uri: 'https://cloud.rocketride.ai',
 });
 await client.connect();
 const { token } = await client.use({ filepath: './pipeline.json' });
@@ -335,7 +331,7 @@ await client.disconnect();
 import { RocketRideClient } from 'rocketride';
 
 const status = await RocketRideClient.withConnection(
-  { auth: 'my-key', uri: 'wss://eaas.example.com' },
+  { auth: 'my-key', uri: 'wss://cloud.rocketride.ai' },
   async (client) => {
     const { token } = await client.use({ pipeline: { pipeline: myPipelineConfig } });
     await client.send(token, JSON.stringify({ data: 1 }));
@@ -345,7 +341,7 @@ const status = await RocketRideClient.withConnection(
 console.log(status);
 ```
 
-### 3. Long-lived UI: persist mode, callbacks, and status handling
+### 3. Long-lived app: persist mode, callbacks, and status handling
 
 ```ts
 import { RocketRideClient } from 'rocketride';
@@ -458,7 +454,7 @@ await client.disconnect();
 
 ## Directory structure
 
-```
+```text
 packages/client-typescript/
 ├── src/
 │   ├── client/           # Main client (RocketRideClient, DAP, transport)

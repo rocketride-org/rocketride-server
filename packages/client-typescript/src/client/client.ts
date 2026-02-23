@@ -1973,7 +1973,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param timeout - Optional per-request timeout in ms
 	 * @returns The response DAPMessage from the server
 	 */
-	async rawRequest(
+	async dapRequest(
 		command: string,
 		args?: Record<string, unknown>,
 		token?: string,

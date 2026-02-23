@@ -41,7 +41,6 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 |--------|-------------|----------|
 | `ai` | AI/ML modules | build, clean, test |
 | `chat-ui` | Chat web interface | build, clean, dev |
-| `classify` | Classification wrapper DLL (native) | clean |
 | `client-mcp` | MCP Protocol client | build, clean, test |
 | `client-python` | Python SDK | build, clean, test |
 | `client-typescript` | TypeScript/JavaScript SDK | build, clean, test |
@@ -1236,9 +1235,12 @@ builder server:build nodes:build ai:build
 builder build
 
 # Run with options
-builder my-package:test --force           # Force rebuild
+builder my-package:test --force           # Force rebuild (ignore cache/state)
 builder my-package:test --verbose         # Detailed output
 builder my-package:test --pytest="-s -v"  # Pass pytest args
+builder build --sequential               # Run modules sequentially
+builder build --autoinstall              # Install missing tools automatically
+builder build --arch=arm                 # Target architecture (macOS cross-compile)
 
 # Show help
 builder --help

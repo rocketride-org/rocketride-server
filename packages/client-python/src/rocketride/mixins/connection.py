@@ -307,16 +307,19 @@ class ConnectionMixin(DAPClient):
         if self._transport is not None and self.is_connected():
             await self._internal_disconnect()
 
-    def get_connection_info(self) -> Optional[str]:
+    def get_connection_info(self) -> dict:
         """
-        Return current connection info from the transport (e.g. URI or peer details).
+        Return current connection state and URI.
 
-        Returns None if not connected or no transport. Useful for debugging or
-        displaying "Connected to …" in the UI.
+        Returns a dict with ``connected`` (bool), ``transport`` (str),
+        and ``uri`` (str).  Useful for debugging or displaying
+        "Connected to …" in the UI.
         """
-        if self._transport is None:
-            return None
-        return self._transport.get_connection_info()
+        return {
+            'connected': self.is_connected(),
+            'transport': 'WebSocket',
+            'uri': getattr(self, '_uri', ''),
+        }
 
     def get_apikey(self) -> Optional[str]:
         """

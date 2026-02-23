@@ -398,7 +398,7 @@ export class PageSettingsProvider {
 
 			let response;
 			try {
-				response = await testClient.rawRequest('initialize', testArgs, '', 5000);
+				response = await testClient.dapRequest('initialize', testArgs, '', 5000);
 			} catch (requestError) {
 				await testClient.disconnect();
 				const errorMessage = requestError instanceof Error ? requestError.message : String(requestError);
@@ -497,7 +497,7 @@ export class PageSettingsProvider {
 
 			let response;
 			try {
-				response = await testClient.rawRequest('initialize', testArgs, '', 5000);
+				response = await testClient.dapRequest('initialize', testArgs, '', 5000);
 			} catch (requestError) {
 				await testClient.disconnect();
 				const errorMessage = requestError instanceof Error ? requestError.message : String(requestError);

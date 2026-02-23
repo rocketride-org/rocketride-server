@@ -266,7 +266,7 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 			// Include token in the request
 			message.token = this.token;
 
-			const response = await this.client.rawRequest(
+			const response = await this.client.dapRequest(
 				message.command,
 				message.arguments,
 				message.token

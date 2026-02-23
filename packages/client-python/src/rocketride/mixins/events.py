@@ -97,6 +97,20 @@ class EventMixin(DAPClient):
         self._caller_on_connected: Optional[ConnectCallback] = kwargs.get('on_connected', None)
         self._caller_on_disconnected: Optional[DisconnectCallback] = kwargs.get('on_disconnected', None)
         self._caller_on_connect_error: Optional[ConnectErrorCallback] = kwargs.get('on_connect_error', None)
+        self._caller_on_protocol_message: Optional[Any] = kwargs.get('on_protocol_message', None)
+        self._caller_on_debug_message: Optional[Any] = kwargs.get('on_debug_message', None)
+
+    def debug_message(self, msg: str) -> None:
+        """Forward debug messages to the user callback (if set) after internal logging."""
+        super().debug_message(msg)
+        if self._caller_on_debug_message is not None:
+            self._caller_on_debug_message(f'[{self._msg_type}]: {msg}')
+
+    def debug_protocol(self, packet: str) -> None:
+        """Forward protocol messages to the user callback (if set) after internal logging."""
+        super().debug_protocol(packet)
+        if self._caller_on_protocol_message is not None:
+            self._caller_on_protocol_message(f'[{self._msg_type}]: {packet}')
 
     def _send_vscode_event(self, event_type: str, body: Dict[str, Any]) -> None:
         """

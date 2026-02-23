@@ -40,10 +40,8 @@ packages:
   - 'packages/tika'
   
   # Applications
-  - 'apps/engine'
   - 'apps/chat-ui'
   - 'apps/dropper-ui'
-  - 'apps/rocket-ui'
   - 'apps/vscode'
   
   # Examples
