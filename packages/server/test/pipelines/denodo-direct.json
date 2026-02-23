@@ -1,196 +1,194 @@
 {
-    "pipeline": {
-        "source": "source_1",
-        "components": [
-            {
-                "id": "source_1",
-                "provider": "filesys",
-                "config": {
-                    "actions": {},
-                    "estimation": {
-                        "accessCost": 0,
-                        "accessDelay": 0,
-                        "accessRate": 0,
-                        "storeCost": 0
-                    },
-                    "include": [
-                        {
-                            "classify": true,
-                            "index": true,
-                            "ocr": true,
-                            "path": "%testdata%/source/*",
-                            "permissions": true,
-                            "signing": true,
-                            "vectorize": false
-                        }
-                    ],
-                    "key": "filesys://*",
-                    "mode": "Source",
-                    "name": "File System",
-                    "parameters": {
-                        "auth": "secure",
-                        "secureParameters": {
-                            "readonly": [],
-                            "secure": [],
-                            "token": "ToIyPoSGQk2sB2Mw+p3jh3R0L2Xdwltcgj4bZln2dHV7/huJ"
-                        }
-                    },
-                    "sync": false,
-                    "type": "filesys"
-                },
-                "ui": {}
-            },
-            {
-                "id": "parser_1",
-                "provider": "parse",
-                "config": {},
-                "ui": {},
-                "input": [
-                    {
-                        "lane": "tags",
-                        "from": "source_1"
-                    }
-                ]
-            },
-            {
-                "id": "preprocessor_1",
-                "provider": "preprocessor_langchain",
-                "ui": {},
-                "config": {
-                    "profile": "default"
-                },
-                "input": [
-                    {
-                        "lane": "text",
-                        "from": "parser_1"
-                    }
-                ]
-            },
-            {
-                "id": "embedding_1",
-                "provider": "embedding_transformer",
-                "ui": {},
-                "config": {},
-                "input": [
-                    {
-                        "lane": "documents",
-                        "from": "preprocessor_1"
-                    }
-                ]
-            },
-            {
-                "id": "qdrant_1",
-                "provider": "qdrant",
-                "ui": {},
-                "profile": "local",
-                "config": {
-                    "collection": "denodo_collection"
-                },
-                "input": [
-                    {
-                        "lane": "documents",
-                        "from": "embedding_1"
-                    }
-                ]
-            },
-            {
-                "id": "dictionary_1",
-                "provider": "dictionary",
-                "ui": {},
-                "config": {},
-                "input": [
-                    {
-                        "lane": "text",
-                        "from": "parser_1"
-                    },
-                    {
-                        "lane": "answers",
-                        "from": "chat_1"
-                    }
-                ]
-            },
-            {
-                "id": "chat_1",
-                "provider": "llm_openai",
-                "ui": {},
-                "config": {
-                    "apikey": "%openai_apikey%"
-                },
-                "input": [
-                    {
-                        "lane": "questions",
-                        "from": "dictionary_1"
-                    }
-                ]
-            },
-            {
-                "id": "embedding_2",
-                "provider": "embedding_transformer",
-                "config": {},
-                "ui": {},
-                "input": [
-                    {
-                        "lane": "documents",
-                        "from": "dictionary_1"
-                    }
-                ]
-            },
-            {
-                "id": "response_1",
-                "provider": "response",
-                "ui": {},
-                "config": {
-                    "keys": {
-                        "documents": "procdocs"
-                    }
-                },
-                "input": [
-                    {
-                        "lane": "documents",
-                        "from": "embedding_1"
-                    }
-                ]
-            },
-            {
-                "id": "response_2",
-                "provider": "response",
-                "ui": {},
-                "config": {
-                    "keys": {
-                        "documents": "defdocs",
-                        "answers": "defanswers"
-                    }
-                },
-                "input": [
-                    {
-                        "lane": "documents",
-                        "from": "embedding_2"
-                    },
-                    {
-                        "lane": "answers",
-                        "from": "chat_1"
-                    },
-                    {
-                        "lane": "questions",
-                        "from": "dictionary_1"
-                    }
-                ]
-            },
-            {
-                "id": "qdrant_2",
-                "provider": "qdrant",
-                "ui": {},
-                "profile": "local",
-                "config": {
-                    "collection": "denodo_dictionary"
-                },
-                "input": [
-                    {
-                        "lane": "documents",
-                        "from": "embedding_2"
-                    }
-                ]
-            }
-        ]
+  "source": "source_1",
+  "components": [
+    {
+      "id": "source_1",
+      "provider": "filesys",
+      "config": {
+        "actions": {},
+        "estimation": {
+          "accessCost": 0,
+          "accessDelay": 0,
+          "accessRate": 0,
+          "storeCost": 0
+        },
+        "include": [
+          {
+            "classify": true,
+            "index": true,
+            "ocr": true,
+            "path": "%testdata%/source/*",
+            "permissions": true,
+            "signing": true,
+            "vectorize": false
+          }
+        ],
+        "key": "filesys://*",
+        "mode": "Source",
+        "name": "File System",
+        "parameters": {
+          "auth": "secure",
+          "secureParameters": {
+            "readonly": [],
+            "secure": [],
+            "token": "ToIyPoSGQk2sB2Mw+p3jh3R0L2Xdwltcgj4bZln2dHV7/huJ"
+          }
+        },
+        "sync": false,
+        "type": "filesys"
+      },
+      "ui": {}
+    },
+    {
+      "id": "parser_1",
+      "provider": "parse",
+      "config": {},
+      "ui": {},
+      "input": [
+        {
+          "lane": "tags",
+          "from": "source_1"
+        }
+      ]
+    },
+    {
+      "id": "preprocessor_1",
+      "provider": "preprocessor_langchain",
+      "ui": {},
+      "config": {
+        "profile": "default"
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "parser_1"
+        }
+      ]
+    },
+    {
+      "id": "embedding_1",
+      "provider": "embedding_transformer",
+      "ui": {},
+      "config": {},
+      "input": [
+        {
+          "lane": "documents",
+          "from": "preprocessor_1"
+        }
+      ]
+    },
+    {
+      "id": "qdrant_1",
+      "provider": "qdrant",
+      "ui": {},
+      "profile": "local",
+      "config": {
+        "collection": "denodo_collection"
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "embedding_1"
+        }
+      ]
+    },
+    {
+      "id": "dictionary_1",
+      "provider": "dictionary",
+      "ui": {},
+      "config": {},
+      "input": [
+        {
+          "lane": "text",
+          "from": "parser_1"
+        },
+        {
+          "lane": "answers",
+          "from": "chat_1"
+        }
+      ]
+    },
+    {
+      "id": "chat_1",
+      "provider": "llm_openai",
+      "ui": {},
+      "config": {
+        "apikey": "%openai_apikey%"
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "dictionary_1"
+        }
+      ]
+    },
+    {
+      "id": "embedding_2",
+      "provider": "embedding_transformer",
+      "config": {},
+      "ui": {},
+      "input": [
+        {
+          "lane": "documents",
+          "from": "dictionary_1"
+        }
+      ]
+    },
+    {
+      "id": "response_1",
+      "provider": "response",
+      "ui": {},
+      "config": {
+        "keys": {
+          "documents": "procdocs"
+        }
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "embedding_1"
+        }
+      ]
+    },
+    {
+      "id": "response_2",
+      "provider": "response",
+      "ui": {},
+      "config": {
+        "keys": {
+          "documents": "defdocs",
+          "answers": "defanswers"
+        }
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "embedding_2"
+        },
+        {
+          "lane": "answers",
+          "from": "chat_1"
+        },
+        {
+          "lane": "questions",
+          "from": "dictionary_1"
+        }
+      ]
+    },
+    {
+      "id": "qdrant_2",
+      "provider": "qdrant",
+      "ui": {},
+      "profile": "local",
+      "config": {
+        "collection": "denodo_dictionary"
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "embedding_2"
+        }
+      ]
     }
+  ]
 }

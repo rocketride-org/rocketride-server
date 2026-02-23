@@ -1009,6 +1009,77 @@ describe('RocketRideClient Integration Tests', () => {
 		}, TEST_CONFIG.timeout);
 	});
 
+	describe('Validation Operations', () => {
+		beforeEach(async () => {
+			await client.connect();
+		});
+
+		it('should validate echo pipeline with source in config', async () => {
+			const pipeline = getEchoPipeline();
+			const result = await client.validate({ pipeline });
+
+			expect(result).toBeDefined();
+			expect(result).toHaveProperty('pipeline');
+		}, TEST_CONFIG.timeout);
+
+		it('should validate echo pipeline with explicit source override', async () => {
+			const pipeline = getEchoPipeline();
+			const result = await client.validate({
+				pipeline,
+				source: 'webhook_1',
+			});
+
+			expect(result).toBeDefined();
+			expect(result).toHaveProperty('pipeline');
+		}, TEST_CONFIG.timeout);
+
+		it('should validate pipeline with implied source from component mode', async () => {
+			// Pipeline with no explicit source field — webhook_1 has config.mode == 'Source'
+			const pipeline = {
+				components: [
+					{
+						id: "webhook_1",
+						provider: "webhook",
+						config: { hideForm: true, mode: "Source", type: "webhook" },
+					},
+					{
+						id: "response_1",
+						provider: "response",
+						config: { lanes: [] },
+						input: [{ lane: "text", from: "webhook_1" }],
+					},
+				],
+				project_id: "e612b741-748c-4b35-a8b7-186797a8ea42",
+			};
+
+			const result = await client.validate({ pipeline });
+
+			expect(result).toBeDefined();
+			expect(result).toHaveProperty('pipeline');
+		}, TEST_CONFIG.timeout);
+
+		it('should return errors for invalid pipeline configuration', async () => {
+			const invalidPipeline = {
+				components: [
+					{
+						id: "invalid_1",
+						provider: "nonexistent_provider",
+						config: {},
+					},
+				],
+				source: "invalid_1",
+				project_id: "e612b741-748c-4b35-a8b7-186797a8ea42",
+			};
+
+			const result = await client.validate({ pipeline: invalidPipeline });
+
+			expect(result).toBeDefined();
+			expect(result.errors).toBeDefined();
+			expect(Array.isArray(result.errors)).toBe(true);
+			expect((result.errors as unknown[]).length).toBeGreaterThan(0);
+		}, TEST_CONFIG.timeout);
+	});
+
 	describe('Error Handling', () => {
 		const ERROR_TOKEN = 'TS-ERROR-OPS';
 
@@ -1023,17 +1094,15 @@ describe('RocketRideClient Integration Tests', () => {
 
 		it('should handle invalid pipeline configuration', async () => {
 			const invalidPipeline = {
-				pipeline: {
-					components: [
-						{
-							id: "invalid_1",
-							provider: "nonexistent_provider",
-							config: {}
-						}
-					],
-					source: "invalid_1",
-					project_id: "e612b741-748c-4b35-a8b7-186797a8ea42"
-				}
+				components: [
+					{
+						id: "invalid_1",
+						provider: "nonexistent_provider",
+						config: {}
+					}
+				],
+				source: "invalid_1",
+				project_id: "e612b741-748c-4b35-a8b7-186797a8ea42"
 			};
 
 			await expect(

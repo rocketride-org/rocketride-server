@@ -93,29 +93,12 @@ export interface IProjectComponent {
 }
 
 /**
- * Serialised pipeline definition within a project.
- * Contains the ordered list of components, an optional execution chain,
- * and metadata such as version, name, and description.
- */
-export interface IProjectPipeline {
-	version?: number;
-	name?: string;
-	description?: string;
-	source?: string; // sourceId, we will need to send it to API, but not needed to store in DB
-	project_id?: string;
-	components?: IProjectComponent[];
-	chain?: string[];
-}
-
-/**
- * Top-level project entity that wraps a pipeline, its saved viewport,
- * and optional metadata (author, version).  Persisted to the project file.
- * Project identity is pipeline.project_id only (no top-level id).
+ * Top-level project entity persisted to the project file.
+ * Contains components, metadata, and viewport state.
+ * Project identity is project_id (no nested pipeline wrapper).
  */
 export interface IProject {
-	/** @deprecated Use pipeline.name instead - kept for backward compatibility with templates */
 	name?: string;
-	/** @deprecated Use pipeline.description instead - kept for backward compatibility with templates */
 	description?: string;
 	author?: string;
 	viewport?: {
@@ -123,13 +106,11 @@ export interface IProject {
 		y: number;
 		zoom: number;
 	};
-	pipeline?: IProjectPipeline;
-	version?: string;
-}
-
-/** Request payload sent to the backend to start a pipeline execution. */
-export interface StartPipelineRequest {
-	pipeline?: IProjectPipeline;
+	source?: string; // sourceId, sent to API but not stored in DB
+	project_id?: string;
+	components?: IProjectComponent[];
+	chain?: string[]; // Returned by validation, never stored
+	version?: number;
 }
 
 /**
@@ -200,7 +181,7 @@ export interface IValidateResponse {
 			message: string;
 		}[];
 		component: IProjectComponent;
-		pipeline: IProjectPipeline;
+		pipeline: IProject;
 	};
 }
 

@@ -89,7 +89,7 @@ Write-Host "Delete after test: $(-not $NoDelete)"
 Write-Host ""
 
 # Define a simple pipeline as JSON
-$Pipeline = '{"source":"source_1","pipeline":{"name":"Test Pipeline","description":"Testing inline JSON","components":[{"id":"source_1","provider":"filesystem","config":{"mode":"Source","name":"Test Source","path":"C:\\tmp\\test"}}]}}'
+$Pipeline = '{"name":"Test Pipeline","description":"Testing inline JSON","source":"source_1","components":[{"id":"source_1","provider":"filesystem","config":{"mode":"Source","name":"Test Source","path":"C:\\tmp\\test"}}]}'
 
 Write-Host "Step 1: Save NEW project with --project-json (no version needed for new)" -ForegroundColor Yellow
 Write-Host "-------------------------------------------------------------------------"
@@ -129,7 +129,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ""
 Write-Host "Step 4: Update project with modified JSON (version auto-fetched)" -ForegroundColor Yellow
 Write-Host "-----------------------------------------------------------------"
-$UpdatedPipeline = '{"source":"source_1","pipeline":{"name":"Test Pipeline (Updated)","description":"Updated via inline JSON","components":[{"id":"source_1","provider":"filesystem","config":{"mode":"Source","name":"Test Source","path":"C:\\tmp\\test"}},{"id":"source_2","provider":"s3","config":{"mode":"Source","name":"S3 Source","bucket":"test-bucket"}},{"id":"processor_1","provider":"transform","config":{"mode":"Not-a-source","name":"Data Processor"}}]}}'
+$UpdatedPipeline = '{"name":"Test Pipeline (Updated)","description":"Updated via inline JSON","source":"source_1","components":[{"id":"source_1","provider":"filesystem","config":{"mode":"Source","name":"Test Source","path":"C:\\tmp\\test"}},{"id":"source_2","provider":"s3","config":{"mode":"Source","name":"S3 Source","bucket":"test-bucket"}},{"id":"processor_1","provider":"transform","config":{"mode":"Not-a-source","name":"Data Processor"}}]}'
 
 python $RunCliPath apaext_store save_project `
     --apikey $ApiKey `
@@ -243,7 +243,7 @@ Write-Host "Template ID: $TemplateId"
 Write-Host ""
 
 # Define a simple template as JSON
-$Template = '{"source":"source_1","pipeline":{"name":"Test Template","description":"Testing template inline JSON","components":[{"id":"source_1","provider":"filesystem","config":{"mode":"Source","name":"Template Source","path":"C:\\tmp\\template"}}]}}'
+$Template = '{"name":"Test Template","description":"Testing template inline JSON","source":"source_1","components":[{"id":"source_1","provider":"filesystem","config":{"mode":"Source","name":"Template Source","path":"C:\\tmp\\template"}}]}'
 
 Write-Host "Step T1: Save NEW template with --template-json" -ForegroundColor Yellow
 Write-Host "------------------------------------------------"
@@ -283,7 +283,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ""
 Write-Host "Step T4: Update template with modified JSON" -ForegroundColor Yellow
 Write-Host "---------------------------------------------"
-$UpdatedTemplate = '{"source":"source_1","pipeline":{"name":"Test Template (Updated)","description":"Updated via inline JSON","components":[{"id":"source_1","provider":"filesystem","config":{"mode":"Source","name":"Template Source","path":"C:\\tmp\\template"}},{"id":"source_2","provider":"s3","config":{"mode":"Source","name":"S3 Template Source","bucket":"template-bucket"}}]}}'
+$UpdatedTemplate = '{"name":"Test Template (Updated)","description":"Updated via inline JSON","source":"source_1","components":[{"id":"source_1","provider":"filesystem","config":{"mode":"Source","name":"Template Source","path":"C:\\tmp\\template"}},{"id":"source_2","provider":"s3","config":{"mode":"Source","name":"S3 Template Source","bucket":"template-bucket"}}]}'
 
 python $RunCliPath apaext_store save_template `
     --apikey $ApiKey `

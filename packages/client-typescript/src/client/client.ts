@@ -651,9 +651,66 @@ export class RocketRideClient extends DAPClient {
 		return obj;
 	}
 
+	// ============================================================================
+	// VALIDATION METHODS
+	// ============================================================================
+
+	/**
+	 * Validate a pipeline configuration.
+	 *
+	 * Sends the pipeline to the server for structural validation, checking
+	 * component compatibility, connection integrity, and the resolved
+	 * execution chain.
+	 *
+	 * Source resolution follows the same logic as {@link use}:
+	 * 1. Explicit `source` option (if provided)
+	 * 2. `source` field inside the pipeline config
+	 * 3. Implied source: the single component whose config.mode is 'Source'
+	 *
+	 * @param options.pipeline - Pipeline configuration to validate
+	 * @param options.source - Optional override for the source component ID
+	 * @returns Promise resolving to validation result with errors, warnings,
+	 *          resolved component, and execution chain
+	 * @throws Error if the server returns a validation error
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await client.validate({
+	 *   pipeline: { components: [...], project_id: '123' },
+	 *   source: 'webhook_1'
+	 * });
+	 * if (result.errors?.length) {
+	 *   console.log('Validation errors:', result.errors);
+	 * }
+	 * ```
+	 */
+	async validate(options: {
+		pipeline: PipelineConfig | Record<string, unknown>;
+		source?: string;
+	}): Promise<Record<string, unknown>> {
+		const { pipeline, source } = options;
+		const arguments_: Record<string, unknown> = { pipeline };
+		if (source !== undefined) {
+			arguments_.source = source;
+		}
+		const request = this.buildRequest('apaext_validate', {
+			arguments: arguments_
+		});
+		const response = await this.request(request);
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Validation failed';
+			throw new Error(`Pipeline validation failed: ${errorMsg}`);
+		}
+		return response.body || {};
+	}
+
+	// ============================================================================
+	// PIPELINE EXECUTION METHODS
+	// ============================================================================
+
 	/**
 	 * Start an RocketRide pipeline for processing data.
-	 * 
+	 *
 	 * This method loads and executes a pipeline configuration. It automatically performs
 	 * environment variable substitution on the pipeline config, replacing ${ROCKETRIDE_*}
 	 * placeholders with values from the .env file.
@@ -678,7 +735,7 @@ export class RocketRideClient extends DAPClient {
 	 * 
 	 * // Using pipeline object
 	 * const result = await client.use({
-	 *   pipeline: { components: [...], source: 'local', project_id: '123' }
+	 *   pipeline: { name: 'My Pipeline', components: [...], source: 'local', project_id: '123' }
 	 * });
 	 * 
 	 * // With environment variable substitution
@@ -737,7 +794,7 @@ export class RocketRideClient extends DAPClient {
 
 		// Override source if specified (after substitution)
 		if (source !== undefined) {
-			processedConfig.pipeline.source = source;
+			processedConfig.source = source;
 		}
 
 		// Build execution request with all parameters
@@ -1300,10 +1357,10 @@ export class RocketRideClient extends DAPClient {
 	 * 
 	 * // Update existing project with version check
 	 * const existing = await client.getProject({ projectId: 'proj-123' });
-	 * existing.pipeline.name = 'Updated Name';
+	 * existing.name = 'Updated Name';
 	 * const updated = await client.saveProject({
 	 *   projectId: 'proj-123',
-	 *   pipeline: existing.pipeline,
+	 *   pipeline: existing,
 	 *   expectedVersion: existing.version
 	 * });
 	 * ```
@@ -1372,7 +1429,7 @@ export class RocketRideClient extends DAPClient {
 	 * // Get a project
 	 * try {
 	 *   const project = await client.getProject({ projectId: 'proj-123' });
-	 *   console.log(`Project: ${project.pipeline.name}`);
+	 *   console.log(`Project: ${project.name}`);
 	 *   console.log(`Version: ${project.version}`);
 	 * } catch (error) {
 	 *   if (error.message.includes('NOT_FOUND')) {
@@ -1382,10 +1439,10 @@ export class RocketRideClient extends DAPClient {
 	 * 
 	 * // Before updating - get current version
 	 * const project = await client.getProject({ projectId: 'proj-123' });
-	 * project.pipeline.name = 'Updated';
+	 * project.name = 'Updated';
 	 * await client.saveProject({
 	 *   projectId: 'proj-123',
-	 *   pipeline: project.pipeline,
+	 *   pipeline: project,
 	 *   expectedVersion: project.version
 	 * });
 	 * ```

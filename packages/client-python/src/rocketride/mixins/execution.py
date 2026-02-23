@@ -56,8 +56,9 @@ Usage:
 import json
 import re
 import copy
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from ..core import DAPClient
+from ..types.pipeline import PipelineConfig
 from ..types.task import TASK_STATUS
 
 try:
@@ -143,7 +144,7 @@ class ExecutionMixin(DAPClient):
         *,
         token: str = None,
         filepath: str = None,
-        pipeline: Dict[str, Any] = None,
+        pipeline: Optional[PipelineConfig] = None,
         source: str = None,
         threads: int = None,
         use_existing: bool = None,
@@ -165,7 +166,7 @@ class ExecutionMixin(DAPClient):
         Args:
             token: Custom task token (server generates one if not provided)
             filepath: Path to JSON/JSON5 pipeline configuration file
-            pipeline: Pipeline configuration as a Python dictionary
+            pipeline: Pipeline configuration as a PipelineConfig dict
             source: Override the source specified in the pipeline config
             threads: Number of processing threads to use (default: server decides)
             use_existing: Whether to reuse existing pipeline with same token
@@ -200,25 +201,30 @@ class ExecutionMixin(DAPClient):
             )
 
             # Start from Python configuration
-            config = {
+            config: PipelineConfig = {
                 "name": "My Pipeline",
-                "steps": [
-                    {"type": "text_reader", "source": "input"},
-                    {"type": "sentiment_analyzer"},
-                    {"type": "json_writer", "output": "results"}
+                "project_id": "my-project",
+                "source": "webhook_1",
+                "components": [
+                    {"id": "webhook_1", "provider": "webhook", "config": {}},
+                    {"id": "ai_chat_1", "provider": "ai_chat", "config": {"model": "gpt-4"},
+                     "input": [{"from": "webhook_1", "lane": "output"}]},
+                    {"id": "response_1", "provider": "response", "config": {},
+                     "input": [{"from": "ai_chat_1", "lane": "answer"}]}
                 ]
             }
             result = await client.use(pipeline=config)
 
-        Pipeline Configuration Format:
+        Pipeline Configuration Format (PipelineConfig):
             {
                 "name": "Pipeline Name",
                 "description": "What this pipeline does",
-                "source": "input_source_name",
-                "steps": [
-                    {"type": "reader_type", "source": "input"},
-                    {"type": "processor_type", "param": "value"},
-                    {"type": "writer_type", "output": "results"}
+                "source": "entry_component_id",
+                "project_id": "project-identifier",
+                "components": [
+                    {"id": "comp_1", "provider": "webhook", "config": {...}},
+                    {"id": "comp_2", "provider": "ai_chat", "config": {...},
+                     "input": [{"from": "comp_1", "lane": "output"}]}
                 ]
             }
 

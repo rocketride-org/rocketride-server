@@ -117,26 +117,24 @@ def get_chat_pipeline() -> Dict[str, Any]:
     llm_component = _create_llm_component()
     
     return {
-        'pipeline': {
-            'components': [
-                {
-                    'id': 'chat_1',
-                    'provider': 'chat',
-                    'config': {
-                        'hideForm': True,
-                        'mode': 'Source',
-                        'type': 'chat',
-                    },
+        'components': [
+            {
+                'id': 'chat_1',
+                'provider': 'chat',
+                'config': {
+                    'hideForm': True,
+                    'mode': 'Source',
+                    'type': 'chat',
                 },
-                llm_component,
-                {
-                    'id': 'response_1',
-                    'provider': 'response',
-                    'config': {'lanes': []},
-                    'input': [{'lane': 'answers', 'from': llm_component['id']}],
-                },
-            ],
-            'source': 'chat_1',
-            'project_id': '8b866c3b-6c76-42d7-8091-301be3dce0f2',
-        }
+            },
+            llm_component,
+            {
+                'id': 'response_1',
+                'provider': 'response',
+                'config': {'lanes': []},
+                'input': [{'lane': 'answers', 'from': llm_component['id']}],
+            },
+        ],
+        'source': 'chat_1',
+        'project_id': '8b866c3b-6c76-42d7-8091-301be3dce0f2',
     }

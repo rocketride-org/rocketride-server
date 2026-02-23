@@ -52,22 +52,6 @@ import {
 import { IControl, IInputLane, INodeData, IProject, IProjectComponent, LaneObject } from './types';
 
 /**
- * Normalizes project structure by moving root-level name/description into pipeline.
- * This handles backward compatibility with templates and old project formats.
- */
-export const normalizeProject = (project: IProject): IProject => {
-	// Fall back to root-level name/description for legacy projects that stored them outside pipeline
-	return {
-		...project,
-		pipeline: {
-			...project.pipeline,
-			name: project.pipeline?.name ?? project.name ?? '',
-			description: project.pipeline?.description ?? project.description ?? '',
-		},
-	};
-};
-
-/**
  * Generates an ID for a new component based on a class type
  *
  * @param {Node[]} nodes
@@ -212,12 +196,10 @@ export const objectToProperty = (
 
 	return {
 		viewport: object.viewport,
-		pipeline: {
-			version,
-			name: name || '',
-			description: description || '',
-			components: components,
-		},
+		version,
+		name: name || '',
+		description: description || '',
+		components: components,
 	};
 };
 
@@ -337,7 +319,7 @@ export const propertyToObject = (
 	};
 
 	// Start traversal from the top-level components
-	traverse(property?.pipeline?.components);
+	traverse(property?.components);
 
 	// Derive edges from nodes' input/control arrays rather than storing them separately
 	const computedEdges = computeEdgesFromNodes(nodes);

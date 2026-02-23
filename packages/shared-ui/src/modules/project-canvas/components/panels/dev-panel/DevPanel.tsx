@@ -57,7 +57,7 @@ export default function DevPanel({ onClose }: IBasePanelProps): ReactNode {
 				<Grid container sx={{ w: 1, p: 1 }}>
 					<ReactJson
 						src={{
-							components: currentProject?.pipeline?.components,
+							components: currentProject?.components,
 						}}
 					/>
 				</Grid>

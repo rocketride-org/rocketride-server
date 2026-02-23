@@ -38,15 +38,13 @@ def main():
     print('=' * 70)
 
     pipeline = {
+        'name': 'My Demo Pipeline',
+        'description': 'Example pipeline for store demonstration',
         'source': 'source_1',
-        'pipeline': {
-            'name': 'My Demo Pipeline',
-            'description': 'Example pipeline for store demonstration',
-            'components': [
-                {'id': 'source_1', 'provider': 'filesystem', 'config': {'mode': 'Source', 'name': 'Local Files', 'path': '/data/input'}},
-                {'id': 'processor_1', 'provider': 'ai_chat', 'config': {'model': 'gpt-4'}, 'input': [{'lane': 'output', 'from': 'source_1'}]},
-            ],
-        },
+        'components': [
+            {'id': 'source_1', 'provider': 'filesystem', 'config': {'mode': 'Source', 'name': 'Local Files', 'path': '/data/input'}},
+            {'id': 'processor_1', 'provider': 'ai_chat', 'config': {'model': 'gpt-4'}, 'input': [{'lane': 'output', 'from': 'source_1'}]},
+        ],
     }
 
     # Convert to JSON string
@@ -68,9 +66,9 @@ def main():
     print('=' * 70)
 
     # Add another source component
-    pipeline['pipeline']['components'].append({'id': 'source_2', 'provider': 's3', 'config': {'mode': 'Source', 'name': 'S3 Bucket', 'bucket': 'my-data-bucket', 'prefix': 'input/'}})
+    pipeline['components'].append({'id': 'source_2', 'provider': 's3', 'config': {'mode': 'Source', 'name': 'S3 Bucket', 'bucket': 'my-data-bucket', 'prefix': 'input/'}})
 
-    pipeline['pipeline']['description'] = 'Updated with S3 source'
+    pipeline['description'] = 'Updated with S3 source'
 
     pipeline_json = json.dumps(pipeline)
 

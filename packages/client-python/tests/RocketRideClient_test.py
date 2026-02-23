@@ -1355,6 +1355,96 @@ class TestEventHandling:
                 await client.disconnect()
 
 
+class TestValidationOperations:
+    """Test pipeline validation operations."""
+
+    @pytest.mark.asyncio
+    async def test_should_validate_echo_pipeline_with_source_in_config(self):
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+
+            pipeline = get_echo_pipeline()
+            result = await client.validate(pipeline)
+
+            assert result is not None
+            assert 'pipeline' in result
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_validate_echo_pipeline_with_explicit_source(self):
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+
+            pipeline = get_echo_pipeline()
+            result = await client.validate(pipeline, source='webhook_1')
+
+            assert result is not None
+            assert 'pipeline' in result
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_validate_pipeline_with_implied_source(self):
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+
+            # Pipeline with no explicit source field — webhook_1 has config.mode == 'Source'
+            pipeline = {
+                'components': [
+                    {
+                        'id': 'webhook_1',
+                        'provider': 'webhook',
+                        'config': {'hideForm': True, 'mode': 'Source', 'type': 'webhook'},
+                    },
+                    {
+                        'id': 'response_1',
+                        'provider': 'response',
+                        'config': {'lanes': []},
+                        'input': [{'lane': 'text', 'from': 'webhook_1'}],
+                    },
+                ],
+                'project_id': 'e612b741-748c-4b35-a8b7-186797a8ea42',
+            }
+
+            result = await client.validate(pipeline)
+
+            assert result is not None
+            assert 'pipeline' in result
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_return_errors_for_invalid_pipeline_configuration(self):
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+
+            invalid_pipeline = {
+                'components': [
+                    {'id': 'invalid_1', 'provider': 'nonexistent_provider', 'config': {}},
+                ],
+                'source': 'invalid_1',
+                'project_id': 'e612b741-748c-4b35-a8b7-186797a8ea42',
+            }
+
+            result = await client.validate(invalid_pipeline)
+
+            assert result is not None
+            assert 'errors' in result
+            assert isinstance(result['errors'], list)
+            assert len(result['errors']) > 0
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+
 class TestErrorHandling:
     """Test error handling scenarios."""
 
@@ -1367,7 +1457,7 @@ class TestErrorHandling:
             await client.connect()
             await ensure_clean_pipeline(client, self.ERROR_TOKEN)
 
-            invalid_pipeline = {'pipeline': {'components': [{'id': 'invalid_1', 'provider': 'nonexistent_provider', 'config': {}}], 'source': 'invalid_1', 'project_id': 'e612b741-748c-4b35-a8b7-186797a8ea42'}}
+            invalid_pipeline = {'components': [{'id': 'invalid_1', 'provider': 'nonexistent_provider', 'config': {}}], 'source': 'invalid_1', 'project_id': 'e612b741-748c-4b35-a8b7-186797a8ea42'}
 
             with pytest.raises(Exception):
                 await client.use(pipeline=invalid_pipeline, token=self.ERROR_TOKEN)

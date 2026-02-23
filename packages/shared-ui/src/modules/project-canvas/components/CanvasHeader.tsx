@@ -108,8 +108,8 @@ const CanvasHeader = ({
 	const { saveChanges, currentProject, toolchainState } = useFlow();
 
 	// Fall back to empty strings if pipeline metadata is not yet available
-	const name = currentProject?.pipeline?.name ?? '';
-	const description = currentProject?.pipeline?.description ?? '';
+	const name = currentProject?.name ?? '';
+	const description = currentProject?.description ?? '';
 
 	// Sync the external prop to local state whenever the parent changes it
 	useEffect(() => setShowSaveAsModal(showSaveAsModal), [showSaveAsModal]);
@@ -235,9 +235,9 @@ const CanvasHeader = ({
 				nameFieldError={nameFieldError}
 				mode="saveAs"
 				hideDescription={hideDescription}
-				handleSave={async (name, description) => { await saveChanges({ pipeline: { name, description } }); }}
+				handleSave={async (name, description) => { await saveChanges({ name, description }); }}
 				onDiscard={onDiscard}
-				showDiscard={!currentProject.pipeline?.project_id}
+				showDiscard={!currentProject.project_id}
 			/>
 		</>
 	);

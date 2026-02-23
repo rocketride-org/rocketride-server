@@ -204,7 +204,7 @@ export default function Canvas(): ReactElement {
 	const disableSaveAs = useMemo(() => {
 		// A project is "new" if its ID does not exist in the projects map (not yet persisted)
 		const projectIsNew = Object.keys(projects).every(
-			(projectId: string) => projectId !== currentProject.pipeline?.project_id
+			(projectId: string) => projectId !== currentProject.project_id
 		);
 
 		// Disable Save As for new projects since there is nothing to fork from
@@ -292,7 +292,7 @@ export default function Canvas(): ReactElement {
 					/>
 				)}
 				<Controls
-					itemName={currentProject?.pipeline?.name}
+					itemName={currentProject?.name}
 					disableSave={toolchainState.isSaved}
 					disableSaveAs={disableSaveAs}
 					enableLog={features?.logs}

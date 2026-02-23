@@ -85,15 +85,13 @@ def demo_store_operations():
         print('=' * 70)
 
         pipeline_data = {
+            'name': 'Test Project',
+            'description': 'A test project for store operations',
             'source': 'source_1',
-            'pipeline': {
-                'name': 'Test Project',
-                'description': 'A test project for store operations',
-                'components': [
-                    {'id': 'source_1', 'provider': 'filesystem', 'config': {'mode': 'Source', 'name': 'Filesystem Source', 'path': '/data/source1'}},
-                    {'id': 'source_2', 'provider': 's3', 'config': {'mode': 'Source', 'name': 'S3 Source', 'bucket': 'my-bucket'}},
-                ],
-            },
+            'components': [
+                {'id': 'source_1', 'provider': 'filesystem', 'config': {'mode': 'Source', 'name': 'Filesystem Source', 'path': '/data/source1'}},
+                {'id': 'source_2', 'provider': 's3', 'config': {'mode': 'Source', 'name': 'S3 Source', 'bucket': 'my-bucket'}},
+            ],
         }
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
@@ -124,7 +122,7 @@ def demo_store_operations():
             print('✓ Project retrieved successfully')
             pipeline = response.get('pipeline')
             print(f'  Name: {pipeline.get("name")}')
-            sources = [c for c in pipeline.get('pipeline', {}).get('components', []) if c.get('config', {}).get('mode') == 'Source']
+            sources = [c for c in pipeline.get('components', []) if c.get('config', {}).get('mode') == 'Source']
             print(f'  Sources: {len(sources)} source(s)')
         else:
             print('✗ Failed to get project')
@@ -136,7 +134,7 @@ def demo_store_operations():
         print('=' * 70)
 
         pipeline_data['description'] = 'Updated description'
-        pipeline_data['pipeline']['components'].append({'id': 'source_3', 'provider': 'azure', 'config': {'mode': 'Source', 'name': 'Azure Source', 'container': 'data'}})
+        pipeline_data['components'].append({'id': 'source_3', 'provider': 'azure', 'config': {'mode': 'Source', 'name': 'Azure Source', 'container': 'data'}})
 
         pipeline_json = json.dumps(pipeline_data)
         response, _ = run_store_command('save_project', '--project-id', test_project_id, '--project-json', pipeline_json)
@@ -155,7 +153,7 @@ def demo_store_operations():
         print('Demo 4: Create another project')
         print('=' * 70)
 
-        project_data2 = {'id': 'test-project-002', 'pipeline': {'name': 'Second Test Project', 'components': []}}
+        project_data2 = {'id': 'test-project-002', 'name': 'Second Test Project', 'components': []}
 
         project_json = json.dumps(project_data2)
         response, code = run_store_command('save_project', '--project-id', 'test-project-002', '--project-json', project_json)

@@ -926,35 +926,32 @@ class TestStoreProjects:
 
     @pytest.mark.asyncio
     async def test_get_all_projects_with_nested_pipeline_structure(self, store, account_info):
-        """Test that get_all_projects correctly extracts sources from nested pipeline.components structure."""
-        # Create a project with the new nested structure (pipeline.pipeline.components)
+        """Test that get_all_projects correctly extracts sources from pipeline components."""
         project_id = 'test-proj-001'
         pipeline_data = {
             'source': 'source_1',
-            'pipeline': {
-                'name': 'Test Pipeline',
-                'components': [
-                    {
-                        'id': 'source_1',
-                        'provider': 'filesystem',
-                        'config': {
-                            'mode': 'Source',
-                            'name': 'Filesystem Source',
-                            'path': '/data/input',
-                        },
+            'name': 'Test Pipeline',
+            'components': [
+                {
+                    'id': 'source_1',
+                    'provider': 'filesystem',
+                    'config': {
+                        'mode': 'Source',
+                        'name': 'Filesystem Source',
+                        'path': '/data/input',
                     },
-                    {
-                        'id': 'source_2',
-                        'provider': 's3',
-                        'config': {'mode': 'Source', 'name': 'S3 Source', 'bucket': 'my-bucket'},
-                    },
-                    {
-                        'id': 'processor_1',
-                        'provider': 'transform',
-                        'config': {'mode': 'Transform', 'name': 'Data Processor'},
-                    },
-                ],
-            },
+                },
+                {
+                    'id': 'source_2',
+                    'provider': 's3',
+                    'config': {'mode': 'Source', 'name': 'S3 Source', 'bucket': 'my-bucket'},
+                },
+                {
+                    'id': 'processor_1',
+                    'provider': 'transform',
+                    'config': {'mode': 'Transform', 'name': 'Data Processor'},
+                },
+            ],
         }
 
         # Save the project
@@ -991,11 +988,12 @@ class TestStoreProjects:
 
     @pytest.mark.asyncio
     async def test_get_all_projects_with_empty_pipeline(self, store, account_info):
-        """Test get_all_projects with empty pipeline.components."""
+        """Test get_all_projects with empty components list."""
         project_id = 'empty-proj'
         pipeline_data = {
             'source': 'source_1',
-            'pipeline': {'name': 'Empty Pipeline', 'components': []},
+            'name': 'Empty Pipeline',
+            'components': [],
         }
 
         await store.save_project(account_info, project_id, pipeline_data)
@@ -1011,12 +1009,10 @@ class TestStoreProjects:
         assert project['totalComponents'] == 0
 
     @pytest.mark.asyncio
-    async def test_get_all_projects_with_missing_pipeline_key(self, store, account_info):
-        """Test get_all_projects handles projects without nested pipeline key."""
-        project_id = 'legacy-proj'
-        # Simulate a legacy project without the nested pipeline structure
+    async def test_get_all_projects_with_missing_name(self, store, account_info):
+        """Test get_all_projects defaults to 'Untitled' when project has no name."""
+        project_id = 'no-name-proj'
         pipeline_data = {
-            'name': 'Legacy Pipeline',
             'source': 'source_1',
             'components': [
                 {
@@ -1035,11 +1031,9 @@ class TestStoreProjects:
         assert all_projects['count'] == 1
 
         project = all_projects['projects'][0]
-        # Legacy structure should result in 'Untitled' name and empty sources
-        # (no pipeline.components)
         assert project['name'] == 'Untitled'
-        assert project['sources'] == []
-        assert project['totalComponents'] == 0
+        assert len(project['sources']) == 1
+        assert project['totalComponents'] == 1
 
 
 # ============================================================================
@@ -1070,19 +1064,17 @@ class TestStoreTemplates:
         pipeline_data = {
             'name': 'Test Template',
             'source': 'source_1',
-            'pipeline': {
-                'components': [
-                    {
-                        'id': 'source_1',
-                        'provider': 'filesystem',
-                        'config': {
-                            'mode': 'Source',
-                            'name': 'Template Source',
-                            'path': '/data/template',
-                        },
-                    }
-                ]
-            },
+            'components': [
+                {
+                    'id': 'source_1',
+                    'provider': 'filesystem',
+                    'config': {
+                        'mode': 'Source',
+                        'name': 'Template Source',
+                        'path': '/data/template',
+                    },
+                }
+            ],
         }
 
         # Save template
@@ -1104,7 +1096,7 @@ class TestStoreTemplates:
         pipeline_data = {
             'name': 'Original Template',
             'source': 'source_1',
-            'pipeline': {'components': []},
+            'components': [],
         }
 
         # Save initial template
@@ -1115,7 +1107,7 @@ class TestStoreTemplates:
         updated_pipeline = {
             'name': 'Updated Template',
             'source': 'source_1',
-            'pipeline': {'components': []},
+            'components': [],
         }
         update_result = await store.save_template(
             template_id, updated_pipeline, expected_version=version
@@ -1134,7 +1126,7 @@ class TestStoreTemplates:
         pipeline_data = {
             'name': 'Delete Me Template',
             'source': 'source_1',
-            'pipeline': {'components': []},
+            'components': [],
         }
 
         # Save template
@@ -1157,16 +1149,14 @@ class TestStoreTemplates:
         for i in range(3):
             pipeline_data = {
                 'source': 'source_1',
-                'pipeline': {
-                    'name': f'Template {i}',
-                    'components': [
-                        {
-                            'id': 'source_1',
-                            'provider': 'filesystem',
-                            'config': {'mode': 'Source', 'name': f'Source {i}'},
-                        }
-                    ],
-                },
+                'name': f'Template {i}',
+                'components': [
+                    {
+                        'id': 'source_1',
+                        'provider': 'filesystem',
+                        'config': {'mode': 'Source', 'name': f'Source {i}'},
+                    }
+                ],
             }
             await store.save_template(f'tmpl-{i:03d}', pipeline_data)
 

@@ -242,9 +242,11 @@ export const PageConnection: React.FC = () => {
 					</div>
 					<div className="status-text">
 						<div className="status-label">{getStatusLabel()}</div>
-						<div className="status-detail" title={connectionData?.connectionState.lastError || undefined}>
-							{getStatusDetailLine()}
-						</div>
+						{getStatusDetailLine() && (
+							<div className="status-detail" title={connectionData?.connectionState.lastError || undefined}>
+								{getStatusDetailLine()}
+							</div>
+						)}
 					</div>
 				</div>
 

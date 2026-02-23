@@ -142,7 +142,6 @@ async def run(config: Dict[str, Any] = None) -> None:
 
     # Add our modules
     server.use('services')
-    server.use('pipe')
     server.use('chat')
     server.use('dropper')
     server.use('clients')

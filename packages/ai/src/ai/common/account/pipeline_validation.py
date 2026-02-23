@@ -26,13 +26,11 @@ class AccountPipelineValidation:
         """
         required_plans = set()
 
-        _pipeline = pipeline.get('pipeline', {})
-
-        source = _pipeline.get('source')
+        source = pipeline.get('source')
         if not source:
             return required_plans
 
-        components = _pipeline.get('components', [])
+        components = pipeline.get('components', [])
         if not components:
             return required_plans
 

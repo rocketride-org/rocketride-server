@@ -36,14 +36,14 @@ python run_cli.py apaext_store save_project \
 ```bash
 python run_cli.py apaext_store save_project \
   --project-id project-1 \
-  --project-json "{\"source\":\"source_1\",\"pipeline\":{\"name\":\"TestPipeline\",\"components\":[{\"id\":\"source_1\",\"provider\":\"filesystem\",\"config\":{\"mode\":\"Source\",\"path\":\"/tmp\"}}]}}" \
+  --project-json "{\"name\":\"TestPipeline\",\"source\":\"source_1\",\"components\":[{\"id\":\"source_1\",\"provider\":\"filesystem\",\"config\":{\"mode\":\"Source\",\"path\":\"/tmp\"}}]}" \
   --apikey MYAPIKEY \
   --uri http://localhost:5565
 ```
 
 **From PowerShell:**
 ```powershell
-$pipeline = '{"source":"source_1","pipeline":{"name":"TestPipeline","components":[{"id":"source_1","provider":"filesystem","config":{"mode":"Source","path":"/tmp"}}]}}'
+$pipeline = '{"name":"TestPipeline","source":"source_1","components":[{"id":"source_1","provider":"filesystem","config":{"mode":"Source","path":"/tmp"}}]}'
 
 python run_cli.py apaext_store save_project `
   --project-id project-1 `
@@ -182,7 +182,7 @@ apaext_store save_project --project-id proj-1 --project-file x.json --apikey KEY
 # Provide one:
 --project-file pipeline.json
 # OR
---project-json '{"source":"s1","pipeline":{"name":"Test","components":[...]}}'
+--project-json '{"name":"Test","source":"s1","components":[...]}'
 ```
 
 ### Error: "Pipeline data cannot be empty"
@@ -192,20 +192,18 @@ apaext_store save_project --project-id proj-1 --project-file x.json --apikey KEY
 **Solution:** Ensure valid pipeline structure:
 ```json
 {
+  "name": "Pipeline Name",
   "source": "source_1",
-  "pipeline": {
-    "name": "Pipeline Name",
-    "components": [
-      {
-        "id": "source_1",
-        "provider": "filesystem",
-        "config": {
-          "mode": "Source",
-          "path": "/data"
-        }
+  "components": [
+    {
+      "id": "source_1",
+      "provider": "filesystem",
+      "config": {
+        "mode": "Source",
+        "path": "/data"
       }
-    ]
-  }
+    }
+  ]
 }
 ```
 
@@ -225,7 +223,7 @@ curl http://localhost:5565/health
 
 ```bash
 # Create minimal test file
-echo '{"source":"s1","pipeline":{"name":"MinimalTest","components":[{"id":"s1","provider":"filesystem","config":{"mode":"Source","path":"/tmp"}}]}}' > test-min.json
+echo '{"name":"MinimalTest","source":"s1","components":[{"id":"s1","provider":"filesystem","config":{"mode":"Source","path":"/tmp"}}]}' > test-min.json
 
 # Save it
 python run_cli.py apaext_store save_project --project-id test-min --project-file test-min.json --apikey MYAPIKEY --uri http://localhost:5565
@@ -258,7 +256,7 @@ python run_cli.py apaext_store save_project ^
 
 3. **Test with simple inline JSON:**
    ```bash
-   --project-json '{"source":"s1","pipeline":{"name":"Test","components":[]}}'
+   --project-json '{"name":"Test","source":"s1","components":[]}'
    ```
 
 4. **Verify server is running:**

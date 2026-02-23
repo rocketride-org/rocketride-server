@@ -297,12 +297,10 @@ class TaskCommands(DAPConn):
                 # Get current status for name and status string
                 status = control.task.get_status()
 
-                # Parse the pipeline configuration to get the name and description
-                pipeline_wrapper = control.pipeline or {}
-                pipeline_inner = pipeline_wrapper.get('pipeline') if isinstance(pipeline_wrapper, dict) else {}
-                if isinstance(pipeline_inner, dict):
-                    pipeline_name = pipeline_inner.get('name')
-                    pipeline_desc = pipeline_inner.get('description') if isinstance(pipeline_inner.get('description'), str) else None
+                # Read name and description from the flat project
+                project = control.pipeline or {}
+                pipeline_name = project.get('name') if isinstance(project, dict) else None
+                pipeline_desc = project.get('description') if isinstance(project, dict) and isinstance(project.get('description'), str) else None
 
                 # Build the name and description
                 name = pipeline_name or control.source

@@ -41,6 +41,7 @@ import { TaskStatus, GenericEvent, GenericResponse } from '../shared/types';
 import { ConnectionManager } from '../connection/connection';
 import { ConfigManager } from '../config';
 import { getLogger } from '../shared/util/output';
+import { icons } from '../shared/util/icons';
 
 /**
  * Interface for tracking editor state per document
@@ -194,11 +195,10 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 		try {
 			const content = document.getText();
 			const parsed = JSON.parse(content);
-			const pipelineData = parsed.pipeline || parsed;
 
 			return {
-				projectId: pipelineData.project_id,
-				sourceId: pipelineData.source
+				projectId: parsed.project_id,
+				sourceId: parsed.source
 			};
 		} catch {
 			// If parsing fails, return undefined values
@@ -497,6 +497,23 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 					});
 				}
 				break;
+
+			case 'validate': {
+				this.logger.output(`${icons.pipeline} Validating pipeline...`);
+				const pipeline = ConfigManager.getInstance().substituteEnvVariables(data.pipeline);
+				try {
+					const client = this.connectionManager.getClient();
+					if (!client) throw new Error('Not connected to server');
+					const result = await client.validate({ pipeline });
+					this.logger.output(`${icons.success} Pipeline validation passed`);
+					webview.postMessage({ type: 'validateResponse', result });
+				} catch (error) {
+					const msg = error instanceof Error ? error.message : String(error);
+					this.logger.output(`${icons.error} Pipeline validation failed: ${msg}`);
+					webview.postMessage({ type: 'validateResponse', result: null, error: msg });
+				}
+				break;
+			}
 			}
 		});
 
@@ -559,41 +576,63 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 	}
 
 	/**
-	 * Applies content to the document (marks dirty). Does not save to disk.
+	 * Normalizes pipeline JSON to verbose (pretty-printed) format for consistent comparison and display.
+	 * Accepts string or object; returns a string with 2-space indentation.
 	 */
-	private applyDocumentEdit(document: vscode.TextDocument, content: string): void {
-		const docLen = document.getText().length;
+	private toVerboseJson(content: string | Record<string, unknown>): string {
+		const obj = typeof content === 'string' ? JSON.parse(content) : content;
+		return JSON.stringify(obj, null, 2);
+	}
+
+	/**
+	 * Applies content to the document (marks dirty). Does not save to disk.
+	 * Formats as verbose JSON and skips the edit if content is unchanged.
+	 * @returns { changed, applied } - changed: content differed from document; applied: edit was applied successfully
+	 */
+	private async applyDocumentEdit(document: vscode.TextDocument, content: string): Promise<{ changed: boolean; applied: boolean }> {
+		let normalizedNew: string;
+		try {
+			normalizedNew = this.toVerboseJson(content);
+		} catch {
+			// Invalid JSON: apply as-is and let the user see the problem
+			normalizedNew = content;
+		}
+		const currentText = document.getText();
+		let normalizedCurrent: string;
+		try {
+			normalizedCurrent = this.toVerboseJson(currentText);
+		} catch {
+			normalizedCurrent = currentText;
+		}
+		if (normalizedNew === normalizedCurrent) {
+			return { changed: false, applied: false };
+		}
+		const docLen = currentText.length;
 		const edit = new vscode.WorkspaceEdit();
 		const fullRange = new vscode.Range(
 			document.positionAt(0),
 			document.positionAt(docLen)
 		);
-		edit.replace(document.uri, fullRange, content);
-		vscode.workspace.applyEdit(edit).then((success) => {
-			if (!success) {
-				this.logger.error('[PageEditorProvider] Failed to apply contentChanged edit');
-			}
-		});
+		edit.replace(document.uri, fullRange, normalizedNew);
+		const success = await vscode.workspace.applyEdit(edit);
+		if (!success) {
+			this.logger.error('[PageEditorProvider] Failed to apply document edit');
+		}
+		return { changed: true, applied: success };
 	}
 
 	/**
-	 * Saves new content to the document
+	 * Saves new content to the document. Uses applyDocumentEdit then persists to disk if the document changed.
 	 *
 	 * @param document The document to update
-	 * @param content The new content to save
+	 * @param content The new content to save (JSON string or object)
 	 */
-	private async saveDocument(document: vscode.TextDocument, content: string): Promise<void> {
-		const edit = new vscode.WorkspaceEdit();
-		const fullRange = new vscode.Range(
-			document.positionAt(0),
-			document.positionAt(document.getText().length)
-		);
-		edit.replace(document.uri, fullRange, content);
-		const success = await vscode.workspace.applyEdit(edit);
-		if (success) {
+	private async saveDocument(document: vscode.TextDocument, content: string | Record<string, unknown>): Promise<void> {
+		const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+		const { changed, applied } = await this.applyDocumentEdit(document, contentStr);
+		if (applied) {
 			await document.save();
-		} else {
-			this.logger.error('[PageEditorProvider] Failed to apply document edit');
+		} else if (changed) {
 			vscode.window.showErrorMessage('Failed to save pipeline file');
 		}
 	}
@@ -603,20 +642,20 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 	 */
 	private async runPipeline(document: { pipeline: Record<string, unknown> }): Promise<void> {
 		try {
-			const pipeline = document.pipeline;
+			const project = document.pipeline;
 
 			// Substitute environment variables
-			const pipelineTransformed = ConfigManager.getInstance().substituteEnvVariables(pipeline);
+			const projectTransformed = ConfigManager.getInstance().substituteEnvVariables(project);
 
-			// Get the source and project id
-			const projectId = pipeline.project_id;
-			const source = pipeline.source;
+			// Get the source and project id from the flat project
+			const projectId = project.project_id;
+			const source = project.source;
 
 			// Use DAP command to execute pipeline
 			await this.connectionManager.request('execute', {
 				projectId: projectId,
 				source: source,
-				pipeline: pipelineTransformed
+				pipeline: projectTransformed
 			}, '*');
 
 		} catch (error: unknown) {
@@ -631,9 +670,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 	private async stopPipeline(componentId: string, document: vscode.TextDocument): Promise<void> {
 		try {
 			const parsed = JSON.parse(document.getText());
-			const pipeline = parsed.pipeline ?? parsed;
-			// Project identity is pipeline.project_id only (no top-level id).
-			const projectId = pipeline.project_id;
+			const projectId = parsed.project_id;
 
 			if (!projectId || !componentId) {
 				this.logger.error(`[PageEditorProvider] Missing projectId or componentId: projectId=${projectId}, componentId=${componentId}`);

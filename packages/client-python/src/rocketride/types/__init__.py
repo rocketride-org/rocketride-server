@@ -70,8 +70,9 @@ from .client import (
 )
 
 from .pipeline import (
-    PipelineConfig,
+    PipelineInputConnection,
     PipelineComponent,
+    PipelineConfig,
 )
 
 from .task import (
@@ -105,8 +106,9 @@ __all__ = [
     'DAPMessage',
     'TransportCallbacks',
     # Pipeline types
-    'PipelineConfig',
+    'PipelineInputConnection',
     'PipelineComponent',
+    'PipelineConfig',
     # Task types
     'TASK_STATUS',
     'TASK_STATE',

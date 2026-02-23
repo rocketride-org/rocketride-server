@@ -318,7 +318,7 @@ You can also test individual `apaext_store` commands manually:
 ```cmd
 python run_cli.py apaext_store save_project ^
   --project-id my-test-project ^
-  --project-json "{\"source\":\"s1\",\"pipeline\":{\"name\":\"Test\",\"components\":[]}}" ^
+  --project-json "{\"name\":\"Test\",\"source\":\"s1\",\"components\":[]}" ^
   --apikey YOUR_KEY ^
   --uri http://localhost:5565
 ```
