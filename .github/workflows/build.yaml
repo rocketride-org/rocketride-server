@@ -34,36 +34,36 @@ on:
       - checks_requested
   workflow_dispatch:
     inputs:
-      server_release_type:
-        description: 'Release server'
-        required: false
-        default: ''
+      release_type:
+        description: 'Release'
+        default: 'draft'
         type: choice
         options:
-          - ''
           - draft
           - prerelease
           - release
-      vscode_release_type:
+      release_server:
+        description: 'Release Server'
+        required: false
+        default: false
+        type: boolean
+      release_vscode:
         description: 'Release VS Code extension'
         required: false
-        default: ''
-        type: choice
-        options:
-          - ''
-          - draft
-          - prerelease
-          - release
+        default: false
+        type: boolean
 
 jobs:
   init:
     name: Initialize variables
     runs-on: ubuntu-latest
     outputs:
+      release_type: ${{ steps.init.outputs.release_type }}
+      release_server: ${{ steps.init.outputs.release_server }}
       server_version: ${{ steps.init.outputs.server_version }}
       server_version_full: ${{ steps.init.outputs.server_version_full }}
       server_tag: ${{ steps.init.outputs.server_tag }}
-
+      release_vscode: ${{ steps.init.outputs.release_vscode }}
       vscode_version: ${{ steps.init.outputs.vscode_version }}
       vscode_version_full: ${{ steps.init.outputs.vscode_version_full }}
       vscode_tag: ${{ steps.init.outputs.vscode_tag }}
@@ -77,11 +77,12 @@ jobs:
           server_version="$(jq -r '.version' ${{ github.workspace }}/package.json)"
           vscode_version="$(jq -r '.version' ${{ github.workspace }}/apps/vscode/package.json)"
 
-          echo "server_release_type=${{ inputs.server_release_type }}"          >> $GITHUB_OUTPUT
+          echo "release_type=${{ inputs.release_type }}"                        >> $GITHUB_OUTPUT
+          echo "release_server=${{ inputs.release_server }}"                    >> $GITHUB_OUTPUT
           echo "server_version=${server_version}"                               >> $GITHUB_OUTPUT
           echo "server_version_full=${server_version}.${{ github.run_number }}" >> $GITHUB_OUTPUT
           echo "server_tag=server-v${server_version}"                           >> $GITHUB_OUTPUT
-          echo "vscode_release_type=${{ inputs.vscode_release_type }}"          >> $GITHUB_OUTPUT
+          echo "release_vscode=${{ inputs.release_vscode }}"                    >> $GITHUB_OUTPUT
           echo "vscode_version=${vscode_version}"                               >> $GITHUB_OUTPUT
           echo "vscode_version_full=${vscode_version}.${{ github.run_number }}" >> $GITHUB_OUTPUT
           echo "vscode_tag=vscode-v${vscode_version}"                           >> $GITHUB_OUTPUT
@@ -153,7 +154,7 @@ jobs:
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall
 
       - name: Package
-        if: github.event_name == 'workflow_dispatch' && inputs.server_release_type != ''
+        if: github.event_name == 'workflow_dispatch' && inputs.release_server
         run: ${{ matrix.builder_cmd }} package --verbose
 
       # - name: Test
@@ -161,8 +162,7 @@ jobs:
 
       - name: Upload artifacts
         if: github.event_name == 'workflow_dispatch' &&
-            (inputs.server_release_type != '' ||
-             inputs.vscode_release_type != '')
+            (inputs.release_server || inputs.release_vscode)
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-${{ matrix.platform }}
@@ -173,7 +173,7 @@ jobs:
           if-no-files-found: warn
 
   release:
-    name: Release / ${{ matrix.name }}
+    name: Release / ${{ matrix.name }} - ${{ matrix.should_release }}
     needs: [init, build]
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -186,18 +186,15 @@ jobs:
         include:
           - type: server
             name: Server
-            release_input: ${{ inputs.server_release_type }}
+            should_release: ${{ inputs.release_server }}
           - type: vscode
             name: VS Code Extension
-            release_input: ${{ inputs.vscode_release_type }}
+            should_release: ${{ inputs.release_vscode }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Temp
-        run: echo "Release type for ${{ matrix.name }} (${{ matrix.type }}) ${{ matrix.release_input }}"
 
       # - name: Create and push tag
       #   run: |
