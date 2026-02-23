@@ -34,36 +34,36 @@ on:
       - checks_requested
   workflow_dispatch:
     inputs:
-      server_release_type:
-        description: 'Release server'
-        required: false
-        default: ''
+      release_type:
+        description: 'Release'
+        default: 'draft'
         type: choice
         options:
-          - ''
           - draft
           - prerelease
           - release
-      vscode_release_type:
+      release_server:
+        description: 'Release Server'
+        required: false
+        default: false
+        type: boolean
+      release_vscode:
         description: 'Release VS Code extension'
         required: false
-        default: ''
-        type: choice
-        options:
-          - ''
-          - draft
-          - prerelease
-          - release
+        default: false
+        type: boolean
 
 jobs:
   init:
     name: Initialize variables
     runs-on: ubuntu-latest
     outputs:
+      release_type: ${{ steps.init.outputs.release_type }}
+      release_server: ${{ steps.init.outputs.release_server }}
       server_version: ${{ steps.init.outputs.server_version }}
       server_version_full: ${{ steps.init.outputs.server_version_full }}
       server_tag: ${{ steps.init.outputs.server_tag }}
-
+      release_vscode: ${{ steps.init.outputs.release_vscode }}
       vscode_version: ${{ steps.init.outputs.vscode_version }}
       vscode_version_full: ${{ steps.init.outputs.vscode_version_full }}
       vscode_tag: ${{ steps.init.outputs.vscode_tag }}
@@ -77,11 +77,12 @@ jobs:
           server_version="$(jq -r '.version' ${{ github.workspace }}/package.json)"
           vscode_version="$(jq -r '.version' ${{ github.workspace }}/apps/vscode/package.json)"
 
-          echo "server_release_type=${{ inputs.server_release_type }}"          >> $GITHUB_OUTPUT
+          echo "release_type=${{ inputs.release_type }}"                        >> $GITHUB_OUTPUT
+          echo "release_server=${{ inputs.release_server }}"                    >> $GITHUB_OUTPUT
           echo "server_version=${server_version}"                               >> $GITHUB_OUTPUT
           echo "server_version_full=${server_version}.${{ github.run_number }}" >> $GITHUB_OUTPUT
           echo "server_tag=server-v${server_version}"                           >> $GITHUB_OUTPUT
-          echo "vscode_release_type=${{ inputs.vscode_release_type }}"          >> $GITHUB_OUTPUT
+          echo "release_vscode=${{ inputs.release_vscode }}"                    >> $GITHUB_OUTPUT
           echo "vscode_version=${vscode_version}"                               >> $GITHUB_OUTPUT
           echo "vscode_version_full=${vscode_version}.${{ github.run_number }}" >> $GITHUB_OUTPUT
           echo "vscode_tag=vscode-v${vscode_version}"                           >> $GITHUB_OUTPUT
@@ -121,9 +122,9 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 10
-      - name: Bootstrap vcpkg
+      - name: Set up vcpkg
         run: ${{ matrix.builder_cmd }} vcpkg:build
-      - name: Configure vcpkg NuGet source (Linux/macOS)
+      - name: Set up vcpkg nuget / Linux/macOS
         if: matrix.platform != 'windows'
         run: |
           NUGET_EXE=$(${{ matrix.vcpkg_cmd }} fetch nuget | tail -n1)
@@ -135,7 +136,7 @@ jobs:
             -Password "${{ secrets.GITHUB_TOKEN }}" || true
           mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
             -Source "${{ env.NUGET_FEED_URL }}"
-      - name: Configure vcpkg NuGet source (Windows)
+      - name: Set up vcpkg nuget / Windows
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
@@ -153,64 +154,94 @@ jobs:
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall
 
       - name: Package
-        if: github.event_name == 'workflow_dispatch' && inputs.server_release_type != ''
+        if: github.event_name == 'workflow_dispatch' && inputs.release_server
         run: ${{ matrix.builder_cmd }} package --verbose
 
       - name: Test
         run: ${{ matrix.builder_cmd }} test --verbose
 
-      - name: Upload artifacts
+      - name: Upload Server artifacts
         if: github.event_name == 'workflow_dispatch' &&
-            (inputs.server_release_type != '' ||
-             inputs.vscode_release_type != '')
+            inputs.release_server
         uses: actions/upload-artifact@v4
         with:
-          name: artifacts-${{ matrix.platform }}
+          name: server-artifacts-${{ matrix.platform }}
           path: |
             ${{ github.workspace }}/dist/artifacts/*.zip
             ${{ github.workspace }}/dist/artifacts/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload VC Code extension artifacts
+        if: github.event_name == 'workflow_dispatch' &&
+            inputs.release_vscode &&
+            matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-artifacts-${{ matrix.platform }}
+          path: |
             ${{ github.workspace }}/dist/vscode/*.vsix
-          if-no-files-found: warn
+          if-no-files-found: error
 
   release:
-    name: Release
-    needs: build
-    # if: github.event_name == 'workflow_dispatch' && inputs.release_type != ''
+    name: Release / ${{ matrix.name }}
+    needs: [init, build]
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    # environment: release
-    # permissions:
-    #   contents: write
+    environment: release
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - type: server
+            name: Server
+            version: ${{ needs.init.outputs.server_version }}
+            should_release: ${{ needs.init.outputs.release_server }}
+            tag_name: ${{ needs.init.outputs.server_tag }}
+            download_pattern: server-artifacts-*
+          - type: vscode
+            name: VS Code Extension
+            version: ${{ needs.init.outputs.vscode_version }}
+            should_release: ${{ needs.init.outputs.release_vscode }}
+            tag_name: ${{ needs.init.outputs.vscode_tag }}
+            download_pattern: vscode-artifacts-*
     steps:
       - name: Check out repository
+        if: matrix.should_release == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # - name: Create and push tag
-      #   run: |
-      #     TAG_NAME="server-v${{ needs.init.outputs.version }}"
-      #     git config user.name "github-actions[bot]"
-      #     git config user.email "github-actions[bot]@users.noreply.github.com"
-      #     git tag "$TAG_NAME"
-      #     git push origin "$TAG_NAME"
+      - name: Download artifacts
+        if: matrix.should_release == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ matrix.download_pattern }}
+          merge-multiple: true
+          path: release-assets
 
-      # - name: Download artifacts
-      #   uses: actions/download-artifact@v4
-      #   with:
-      #     pattern: 'artifacts-*'
-      #     merge-multiple: true
-      #     path: release-assets
+      - name: Verify artifacts
+        if: matrix.should_release == 'true'
+        run: ls -la release-assets
 
-      # - name: Create release and upload artifacts
-      #   uses: softprops/action-gh-release@v2
-      #   with:
-      #     tag_name: server-v${{ needs.init.outputs.version }}
-      #     name: RocketRide Server v${{ needs.init.outputs.version }}
-      #     generate_release_notes: true
-      #     draft: ${{ inputs.release_type == 'draft' }}
-      #     prerelease: ${{ inputs.release_type == 'prerelease' }}
-      #     files: |
-      #       release-assets/*.zip
-      #       release-assets/*.tar.gz
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create tag
+        if: matrix.should_release == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ matrix.tag_name }}"
+          git push origin "${{ matrix.tag_name }}"
+
+      - name: Create release and upload artifacts
+        if: matrix.should_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ matrix.tag_name }}
+          name: RocketRide ${{ matrix.name }} v${{ matrix.version }}
+          generate_release_notes: true
+          draft: ${{ needs.init.outputs.release_type == 'draft' }}
+          prerelease: ${{ needs.init.outputs.release_type == 'prerelease' }}
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
