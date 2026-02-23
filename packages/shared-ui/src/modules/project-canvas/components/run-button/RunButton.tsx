@@ -60,7 +60,7 @@ export default function RunButton({ nodeId }: IProps): ReactElement {
 	 * by checking real-time task status events from the DAP.
 	 */
 	const isRunning = useMemo(() => {
-		const projectId = currentProject?.pipeline?.project_id;
+		const projectId = currentProject?.project_id;
 		// Cannot be running without an active project
 		if (!projectId) return false;
 

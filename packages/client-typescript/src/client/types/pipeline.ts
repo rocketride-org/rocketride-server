@@ -25,7 +25,7 @@
 /**
  * Data flow connection between pipeline components.
  */
-export interface ComponentInputConnection {
+export interface PipelineInputConnection {
 	/** Data lane/channel name (e.g., 'text', 'data', 'image') */
 	lane: string;
 
@@ -60,7 +60,7 @@ export interface PipelineComponent {
 	ui?: Record<string, unknown>;
 
 	/** Input connections from other components */
-	input?: ComponentInputConnection[];
+	input?: PipelineInputConnection[];
 }
 
 /**
@@ -71,14 +71,24 @@ export interface PipelineComponent {
  * of connected components that transform, analyze, or route information.
  */
 export interface PipelineConfig {
-	pipeline: {
-		/** Array of pipeline components that process data */
-		components: PipelineComponent[];
+	/** Human-readable pipeline name */
+	name?: string;
 
-		/** ID of the component that serves as the pipeline entry point */
-		source?: string;
+	/** Pipeline description */
+	description?: string;
 
-		/** Project identifier for organization and permissions */
-		project_id: string;
-	}
+	/** Pipeline version number */
+	version?: number;
+
+	/** Array of pipeline components that process data */
+	components: PipelineComponent[];
+
+	/** ID of the component that serves as the pipeline entry point */
+	source?: string;
+
+	/** Project identifier for organization and permissions */
+	project_id?: string;
+
+	/** UI viewport settings for visual editors */
+	viewport?: { x: number; y: number; zoom: number };
 }

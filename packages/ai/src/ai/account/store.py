@@ -960,7 +960,7 @@ class Store:
 
                 # Read pipeline data
                 pipeline_json = await self._store.read_file(file_path)
-                pipeline = json.loads(pipeline_json).get('pipeline', {})
+                pipeline = json.loads(pipeline_json)
 
                 # Extract name (from pipeline.name or source component name)
                 pipeline_name = pipeline.get('name', 'Untitled')

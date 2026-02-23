@@ -111,27 +111,25 @@ export function getChatPipeline() {
 	const llmComponent = createLLMComponent();
 	
 	return {
-		pipeline: {
-			components: [
-				{
-					id: "chat_1",
-					provider: "chat",
-					config: {
-						hideForm: true,
-						mode: "Source",
-						type: "chat"
-					},
+		components: [
+			{
+				id: "chat_1",
+				provider: "chat",
+				config: {
+					hideForm: true,
+					mode: "Source",
+					type: "chat"
 				},
-				llmComponent,
-				{
-					id: "response_1",
-					provider: "response",
-					config: { lanes: [] },
-					input: [{ lane: "answers", from: llmComponent.id }]
-				}
-			],
-			source: "chat_1",
-			project_id: "8b866c3b-6c76-42d7-8091-301be3dce0f2"
-		}
+			},
+			llmComponent,
+			{
+				id: "response_1",
+				provider: "response",
+				config: { lanes: [] },
+				input: [{ lane: "answers", from: llmComponent.id }]
+			}
+		],
+		source: "chat_1",
+		project_id: "8b866c3b-6c76-42d7-8091-301be3dce0f2"
 	};
 }

@@ -884,12 +884,9 @@ class TaskServer(DAPBase):
         control.pipeline = args.get('pipeline', None)
         control.source = args.get('source', None)
 
-        # Get the pipeline definition
-        task_pipe = control.pipeline.get('pipeline', {})
-
         # If a source was not specified, in the args, get it from the pipeline
         if not control.source:
-            control.source = task_pipe.get('source', None)
+            control.source = control.pipeline.get('source', None)
 
         # If the pipeline doesn't have a source, try and find the implied
         # source. We can get the implied source by looking at the components
@@ -897,7 +894,7 @@ class TaskServer(DAPBase):
         # sources, it is ambigouous and we should raise an error.
         if not control.source:
             # Look for the source component
-            for component in task_pipe.get('components', []):
+            for component in control.pipeline.get('components', []):
                 config = component.get('config', {})
                 if config.get('mode', '') == 'Source':
                     if control.source is not None:
@@ -910,15 +907,13 @@ class TaskServer(DAPBase):
 
         # Find the actual source component
         source_component = None
-        for component in task_pipe.get('components', []):
+        for component in control.pipeline.get('components', []):
             if component.get('id') == control.source:
                 source_component = component
                 break
 
-        # Update the source - it may actually be there already, but this is the case
-        # where there is a source specified in the pipeline file, but it is overriden
-        # by the request source
-        task_pipe['source'] = control.source
+        # Update the source on the pipeline
+        control.pipeline['source'] = control.source
 
         if source_component is None:
             raise ValueError(f'Pipeline source component "{control.source}" not found in components list')
@@ -927,13 +922,13 @@ class TaskServer(DAPBase):
             source_component['config'] = {}
         config = source_component['config']
 
-        # Project identity is pipeline.project_id only (no top-level id).
-        control.project_id = control.pipeline.get('pipeline', {}).get('project_id', None)
+        # Project identity is project_id on the flat project.
+        control.project_id = control.pipeline.get('project_id', None)
         if not control.project_id:
             control.project_id = str(uuid.uuid4())
 
         # Find the component so we can look up the provider
-        components = control.pipeline.get('pipeline', {}).get('components', [])
+        components = control.pipeline.get('components', [])
         if type(components) is not list:
             raise ValueError('Invalid components in pipeline')
 
@@ -1160,7 +1155,7 @@ class TaskServer(DAPBase):
                 raise RuntimeError('Cannot restart task while debugger is attached. Please detach the debugger first.')
 
             # Find and validate the provider from new pipeline
-            components = pipeline.get('pipeline', {}).get('components', [])
+            components = pipeline.get('components', [])
             if type(components) is not list:
                 raise ValueError('Invalid components in pipeline')
 

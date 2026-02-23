@@ -38,7 +38,6 @@ import { FlowProvider } from './FlowContext';
 import { FlowFeatures, DEFAULT_FLOW_FEATURES } from './types/features';
 import { IProject, IValidateResponse, TaskStatus } from './types';
 import { reactFlowStyles } from './components/ReactFlow.styles';
-import { StartPipelineRequest } from './types';
 
 // Compound Components Export
 import _Canvas from './components/Canvas';
@@ -64,9 +63,9 @@ interface IProps {
 	servicesJson?: Record<string, unknown>;
 	servicesJsonError?: string;
 	inventoryConnectorTitleMap?: Record<string, string>;
-	handleValidatePipeline?: (pipeline: StartPipelineRequest) => Promise<IValidateResponse>;
+	handleValidatePipeline?: (pipeline: IProject) => Promise<IValidateResponse>;
 	saveProject?: (project: IProject) => Promise<void>;
-	runPipeline: (pipeline: StartPipelineRequest) => Promise<void>;
+	runPipeline: (pipeline: IProject) => Promise<void>;
 	stopPipeline: (projectId: string, source: string) => void;
 	handleOpenTemplates?: () => void;
 	onAddNodeSuccess?: (data: { nodeData: { provider: string } }) => void;
@@ -131,7 +130,7 @@ function ProjectCanvas({
 					width: '100%',
 					height: '100%',
 				}}
-				key={`${project.pipeline?.project_id ?? 'new'}-${project.pipeline?.name}`}
+				key={`${project.project_id ?? 'new'}-${project.name}`}
 			>
 				<FlowProvider
 					oauth2RootUrl={oauth2RootUrl}

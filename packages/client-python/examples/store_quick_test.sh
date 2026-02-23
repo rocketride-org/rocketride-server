@@ -65,24 +65,22 @@ echo "Server URI: $URI"
 echo "Delete after test: $DELETE_PROJECT"
 echo ""
 
-# Define a simple pipeline as JSON (with nested pipeline.components structure)
+# Define a simple pipeline as JSON (flat project format)
 PIPELINE='{
+  "name": "Test Pipeline",
+  "description": "Testing inline JSON",
   "source": "source_1",
-  "pipeline": {
-    "name": "Test Pipeline",
-    "description": "Testing inline JSON",
-    "components": [
-      {
-        "id": "source_1",
-        "provider": "filesystem",
-        "config": {
-          "mode": "Source",
-          "name": "Test Source",
-          "path": "/tmp/test"
-        }
+  "components": [
+    {
+      "id": "source_1",
+      "provider": "filesystem",
+      "config": {
+        "mode": "Source",
+        "name": "Test Source",
+        "path": "/tmp/test"
       }
-    ]
-  }
+    }
+  ]
 }'
 
 echo "Step 1: Save NEW project with --project-json (no version needed for new)"
@@ -112,39 +110,37 @@ echo ""
 echo "Step 4: Update project with modified JSON (version auto-fetched)"
 echo "-----------------------------------------------------------------"
 UPDATED_PIPELINE='{
+  "name": "Test Pipeline (Updated)",
+  "description": "Updated via inline JSON",
   "source": "source_1",
-  "pipeline": {
-    "name": "Test Pipeline (Updated)",
-    "description": "Updated via inline JSON",
-    "components": [
-      {
-        "id": "source_1",
-        "provider": "filesystem",
-        "config": {
-          "mode": "Source",
-          "name": "Test Source",
-          "path": "/tmp/test"
-        }
-      },
-      {
-        "id": "source_2",
-        "provider": "s3",
-        "config": {
-          "mode": "Source",
-          "name": "S3 Source",
-          "bucket": "test-bucket"
-        }
-      },
-      {
-        "id": "processor_1",
-        "provider": "transform",
-        "config": {
-          "mode": "Not-a-source",
-          "name": "Data Processor"
-        }
+  "components": [
+    {
+      "id": "source_1",
+      "provider": "filesystem",
+      "config": {
+        "mode": "Source",
+        "name": "Test Source",
+        "path": "/tmp/test"
       }
-    ]
-  }
+    },
+    {
+      "id": "source_2",
+      "provider": "s3",
+      "config": {
+        "mode": "Source",
+        "name": "S3 Source",
+        "bucket": "test-bucket"
+      }
+    },
+    {
+      "id": "processor_1",
+      "provider": "transform",
+      "config": {
+        "mode": "Not-a-source",
+        "name": "Data Processor"
+      }
+    }
+  ]
 }'
 
 python "$RUN_CLI_PATH" apaext_store save_project \
@@ -230,24 +226,22 @@ TEMPLATE_ID="test-tmpl-$(date +%s)"
 echo "Template ID: $TEMPLATE_ID"
 echo ""
 
-# Define a simple template as JSON
+# Define a simple template as JSON (flat project format)
 TEMPLATE='{
+  "name": "Test Template",
+  "description": "Testing template inline JSON",
   "source": "source_1",
-  "pipeline": {
-    "name": "Test Template",
-    "description": "Testing template inline JSON",
-    "components": [
-      {
-        "id": "source_1",
-        "provider": "filesystem",
-        "config": {
-          "mode": "Source",
-          "name": "Template Source",
-          "path": "/tmp/template"
-        }
+  "components": [
+    {
+      "id": "source_1",
+      "provider": "filesystem",
+      "config": {
+        "mode": "Source",
+        "name": "Template Source",
+        "path": "/tmp/template"
       }
-    ]
-  }
+    }
+  ]
 }'
 
 echo "Step T1: Save NEW template with --template-json"
@@ -277,31 +271,29 @@ echo ""
 echo "Step T4: Update template with modified JSON"
 echo "---------------------------------------------"
 UPDATED_TEMPLATE='{
+  "name": "Test Template (Updated)",
+  "description": "Updated via inline JSON",
   "source": "source_1",
-  "pipeline": {
-    "name": "Test Template (Updated)",
-    "description": "Updated via inline JSON",
-    "components": [
-      {
-        "id": "source_1",
-        "provider": "filesystem",
-        "config": {
-          "mode": "Source",
-          "name": "Template Source",
-          "path": "/tmp/template"
-        }
-      },
-      {
-        "id": "source_2",
-        "provider": "s3",
-        "config": {
-          "mode": "Source",
-          "name": "S3 Template Source",
-          "bucket": "template-bucket"
-        }
+  "components": [
+    {
+      "id": "source_1",
+      "provider": "filesystem",
+      "config": {
+        "mode": "Source",
+        "name": "Template Source",
+        "path": "/tmp/template"
       }
-    ]
-  }
+    },
+    {
+      "id": "source_2",
+      "provider": "s3",
+      "config": {
+        "mode": "Source",
+        "name": "S3 Template Source",
+        "bucket": "template-bucket"
+      }
+    }
+  ]
 }'
 
 python "$RUN_CLI_PATH" apaext_store save_template \

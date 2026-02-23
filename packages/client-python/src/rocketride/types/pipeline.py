@@ -30,9 +30,8 @@ custom data processing workflows.
 
 Types Defined:
     PipelineComponent: Individual processing unit within a pipeline
-    ComponentInputConnection: Data flow connection between components
-    Pipeline: Complete pipeline definition with components and execution parameters
-    PipelineConfig: Top-level configuration wrapper for pipeline execution
+    PipelineInputConnection: Data flow connection between components
+    PipelineConfig: Complete pipeline configuration with components and execution parameters
 
 Pipeline Architecture:
     Pipelines consist of components connected in a directed graph where data flows
@@ -46,18 +45,19 @@ Pipeline Architecture:
 
 Data Flow Model:
     Components receive input on named "lanes" and send output to downstream components.
-    The ComponentInputConnection type defines these connections:
+    The PipelineInputConnection type defines these connections:
     - 'from': Source component ID that provides data
     - 'lane': Named output lane from the source component
-    
+
     Example flow:
     webhook (source) --> [lane: 'output'] --> ai_chat --> [lane: 'answer'] --> response
 
 Usage:
-    from rocketride.types import Pipeline, PipelineComponent, PipelineConfig
-    
-    # Define a simple pipeline
-    pipeline: Pipeline = {
+    from rocketride.types import PipelineComponent, PipelineConfig
+
+    # Define a pipeline configuration
+    config: PipelineConfig = {
+        'name': 'My Pipeline',
         'project_id': 'my-project',
         'source': 'webhook_input',
         'components': [
@@ -80,17 +80,16 @@ Usage:
             }
         ]
     }
-    
+
     # Use the pipeline
-    config: PipelineConfig = {'pipeline': pipeline}
-    token = await client.use(config)
+    token = await client.use(pipeline=config)
 """
 
 from typing import Any, TypedDict, Optional
 
 # Create TypedDict dynamically to avoid keyword conflict
-ComponentInputConnection = TypedDict(
-    'ComponentInputConnection',
+PipelineInputConnection = TypedDict(
+    'PipelineInputConnection',
     {
         'lane': str,  # REQUIRED
         'from': str,  # REQUIRED
@@ -111,23 +110,10 @@ class PipelineComponent(TypedDict, total=False):
     name: str  # Human-readable component name
     description: str  # Component description for documentation
     ui: dict[str, Any]  # UI-specific configuration for visual editors
-    input: list[ComponentInputConnection]  # Input connections from other components
+    input: list[PipelineInputConnection]  # Input connections from other components
 
 
-class Pipeline(TypedDict, total=False):
-    """
-    Pipeline definition with components and execution parameters.
-
-    Required: components, project_id
-    Optional: source
-    """
-
-    components: list[PipelineComponent]  # Array of pipeline components that process data - REQUIRED
-    source: Optional[str]  # ID of the component that serves as the pipeline entry point - OPTIONAL
-    project_id: str  # Project identifier for organization and permissions - REQUIRED
-
-
-class PipelineConfig(TypedDict):
+class PipelineConfig(TypedDict, total=False):
     """
     Pipeline configuration for RocketRide data processing workflows.
 
@@ -136,6 +122,12 @@ class PipelineConfig(TypedDict):
     of connected components that transform, analyze, or route information.
     """
 
-    pipeline: Pipeline  # REQUIRED
+    name: str  # Human-readable pipeline name
+    description: str  # Pipeline description
+    version: int  # Pipeline version number
+    components: list[PipelineComponent]  # Array of pipeline components - REQUIRED
+    source: Optional[str]  # ID of the component that serves as the pipeline entry point
+    project_id: str  # Project identifier for organization and permissions
+    viewport: dict[str, Any]  # UI viewport settings for visual editors
 
 

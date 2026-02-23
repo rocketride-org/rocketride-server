@@ -31,3 +31,5 @@
 // eslint-disable-next-line react-refresh/only-export-components
 export * from './components';
 export { default as Canvas } from './modules/canvas';
+export type { IProject, IValidateResponse } from './modules/project-canvas/types';
+export type { IDynamicForms } from './services/dynamic-forms/types';

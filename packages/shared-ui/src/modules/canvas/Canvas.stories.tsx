@@ -32,9 +32,7 @@ import Canvas from './index';
 import {
 	IProject,
 	IProjectComponent,
-	IProjectPipeline,
 	IValidateResponse,
-	StartPipelineRequest,
 } from '../project-canvas/types';
 import { IDynamicForms } from '../../services/dynamic-forms/types';
 
@@ -577,17 +575,16 @@ function DefaultRender() {
 			}}
 			handleRunPipeline={() => {}}
 			handleValidatePipeline={async (
-				pipeline: StartPipelineRequest
+				pipeline: IProject
 			): Promise<IValidateResponse> => {
-				const pl = pipeline.pipeline ?? ({} as IProjectPipeline);
-				const component = pl.components?.[0] ?? ({} as IProjectComponent);
+				const component = pipeline.components?.[0] ?? ({} as IProjectComponent);
 				return {
 					status: 'success',
 					data: {
 						errors: [],
 						warnings: [],
 						component,
-						pipeline: pl,
+						pipeline,
 					},
 				};
 			}}

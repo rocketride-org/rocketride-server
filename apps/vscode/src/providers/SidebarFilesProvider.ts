@@ -343,8 +343,13 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			this.refresh();
 		});
 
+		// Refresh tree when service definitions arrive so component names resolve
+		const servicesUpdatedListener = this.connectionManager.addListener('servicesUpdated', () => {
+			this.refresh();
+		});
+
 		// Keep track of disposables
-		this.disposables.push(eventListener, connectedEventListener, disconnectedEventListener);
+		this.disposables.push(eventListener, connectedEventListener, disconnectedEventListener, servicesUpdatedListener);
 	}
 
 	/**
@@ -842,9 +847,14 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			return Promise.resolve(items);
 		}
 
-		// Return source components for expanded pipeline files
+		// Return source components for expanded pipeline files (sorted by display name)
 		if (element.contextValue === 'pipelineFile' && element.parsedFile?.isValid) {
-			const children = element.parsedFile.sourceComponents.map(sourceComponent => {
+			const sortedSources = [...element.parsedFile.sourceComponents].sort((a, b) => {
+				const nameA = (a.name || a.id || '').toLowerCase();
+				const nameB = (b.name || b.id || '').toLowerCase();
+				return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+			});
+			const children = sortedSources.map(sourceComponent => {
 				// Use component name if available, otherwise use id for display
 				const displayName = sourceComponent.name || sourceComponent.id;
 
@@ -927,6 +937,9 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 
 		this.pipelineFiles.push(item);
 	}
+
+	// Sort files by label (file name) for consistent display
+	this.pipelineFiles.sort((a, b) => (a.label || '').localeCompare(b.label || '', undefined, { sensitivity: 'base' }));
 
 	this.refresh();
 	this.updateContextBasedOnData();

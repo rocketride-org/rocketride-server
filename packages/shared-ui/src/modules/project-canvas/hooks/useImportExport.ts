@@ -91,9 +91,9 @@ export const useImportExport = ({
 		const { components } = data;
 
 		// Preserve existing project metadata for the merge
-		const name = project?.pipeline?.name;
-		const description = project?.pipeline?.description;
-		const version = project?.pipeline?.version;
+		const name = project?.name;
+		const description = project?.description;
+		const version = project?.version;
 
 		// Serialise the current canvas state so we can compare with the import
 		const flowObject = toObject();
@@ -102,7 +102,7 @@ export const useImportExport = ({
 		// Detect ID collisions: if any imported component shares an ID with an existing one,
 		// we replace the entire pipeline rather than appending (avoids duplicate IDs).
 		let shouldOverwrite = false;
-		const currentComponents = currentProject?.pipeline?.components ?? [];
+		const currentComponents = currentProject?.components ?? [];
 		const currentComponentsIdSet = new Set(currentComponents.map((c) => c.id));
 		for (const c of components) {
 			if (currentComponentsIdSet.has(c.id)) {
@@ -117,10 +117,7 @@ export const useImportExport = ({
 			// Full replacement: imported components become the new pipeline
 			newProject = {
 				...currentProject,
-				pipeline: {
-					...(currentProject?.pipeline ?? {}),
-					components,
-				},
+				components,
 			};
 		} else {
 			// Append: shift imported components below the existing graph to avoid overlap
@@ -140,10 +137,7 @@ export const useImportExport = ({
 
 			newProject = {
 				...currentProject,
-				pipeline: {
-					...(currentProject?.pipeline ?? {}),
-					components: [...(currentProject?.pipeline?.components ?? []), ..._components],
-				},
+				components: [...(currentProject?.components ?? []), ..._components],
 			};
 		}
 
@@ -170,19 +164,19 @@ export const useImportExport = ({
 			? sanitizePipeline(toObject())
 			: toObject();
 
-		const name = project?.pipeline?.name;
-		const description = project?.pipeline?.description;
-		const version = project?.pipeline?.version;
+		const name = project?.name;
+		const description = project?.description;
+		const version = project?.version;
 
 		// Convert the ReactFlow graph to the portable IProject format
 		const property = objectToProperty(flowObject, name, description, version);
-		const components = property?.pipeline?.components ?? [];
+		const components = property?.components ?? [];
 
 		// Build the export payload including a version marker for compatibility checking
 		const data: IToolchainExport = {
 			components,
 			servicesVersion: version,
-			id: project.pipeline?.project_id ?? '',
+			id: project.project_id ?? '',
 		};
 
 		const json = JSON.stringify(data, null, 2);

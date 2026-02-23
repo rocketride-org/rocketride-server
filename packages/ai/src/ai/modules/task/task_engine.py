@@ -332,12 +332,9 @@ class Task(DAPBase):
         Raises:
             ValueError: If pipeline lacks required source component
         """
-        # Get the pipeline definition
-        task_pipe = pipeline.get('pipeline', {})
-
         # Find the actual source component
         source_component = None
-        for component in task_pipe.get('components', []):
+        for component in pipeline.get('components', []):
             if component.get('id') == self.source:
                 source_component = component
                 break
@@ -377,7 +374,14 @@ class Task(DAPBase):
         return {
             'config': {
                 'keystore': 'kvsfile://data/keystore.json',
-                'pipeline': self._pipeline['pipeline'],
+                'pipeline': {
+                    'version': self._pipeline.get('version', 1),
+                    'source': self._pipeline.get('source'),
+                    'project_id': self._pipeline.get('project_id'),
+                    'name': self._pipeline.get('name'),
+                    'description': self._pipeline.get('description'),
+                    'components': self._pipeline.get('components', []),
+                },
                 'threadCount': self._threads,
             },
             'paths': {'base': data_path},

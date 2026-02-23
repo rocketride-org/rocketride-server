@@ -32,28 +32,26 @@
  */
 export function getEchoPipeline() {
 	return {
-		pipeline: {
-			components: [
-				{
-					id: "webhook_1",
-					provider: "webhook",
-					name: "My webhook",
-					description: "A webhook to receive data",
-					config: {
-						hideForm: true,
-						mode: "Source",
-						type: "webhook"
-					}
-				},
-				{
-					id: "response_1",
-					provider: "response",
-					config: { lanes: [] },
-					input: [{ lane: "text", from: "webhook_1" }]
+		components: [
+			{
+				id: "webhook_1",
+				provider: "webhook",
+				name: "My webhook",
+				description: "A webhook to receive data",
+				config: {
+					hideForm: true,
+					mode: "Source",
+					type: "webhook"
 				}
-			],
-			source: "webhook_1",
-			project_id: "e612b741-748c-4b35-a8b7-186797a8ea42"
-		}
+			},
+			{
+				id: "response_1",
+				provider: "response",
+				config: { lanes: [] },
+				input: [{ lane: "text", from: "webhook_1" }]
+			}
+		],
+		source: "webhook_1",
+		project_id: "e612b741-748c-4b35-a8b7-186797a8ea42"
 	};
 }

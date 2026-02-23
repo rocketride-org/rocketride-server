@@ -1,139 +1,137 @@
 {
-    "pipeline": {
-        "source": "source_1",
-        "components": [
-            {
-                "id": "source_1",
-                "provider": "filesys",
-                "config": {
-                    "actions": {},
-                    "estimation": {
-                        "accessCost": 0,
-                        "accessDelay": 0,
-                        "accessRate": 0,
-                        "storeCost": 0
-                    },
-                    "include": [
-                        {
-                            "path": "%testdata%/source/*",
-                            "signing": true,
-                            "permissions": false,
-                            "index": true,
-                            "vectorize": false,
-                            "ocr": false,
-                            "classify": false
-                        }
-                    ],
-                    "key": "filesys://*",
-                    "mode": "Source",
-                    "name": "File System",
-                    "parameters": {
-                        "auth": "secure",
-                        "secureParameters": {
-                            "readonly": [],
-                            "secure": [],
-                            "token": "ToIyPoSGQk2sB2Mw+p3jh3R0L2Xdwltcgj4bZln2dHV7/huJ"
-                        }
-                    },
-                    "sync": false,
-                    "type": "filesys"
-                },
-                "ui": {}
+  "source": "source_1",
+  "components": [
+    {
+      "id": "source_1",
+      "provider": "filesys",
+      "config": {
+        "actions": {},
+        "estimation": {
+          "accessCost": 0,
+          "accessDelay": 0,
+          "accessRate": 0,
+          "storeCost": 0
+        },
+        "include": [
+          {
+            "path": "%testdata%/source/*",
+            "signing": true,
+            "permissions": false,
+            "index": true,
+            "vectorize": false,
+            "ocr": false,
+            "classify": false
+          }
+        ],
+        "key": "filesys://*",
+        "mode": "Source",
+        "name": "File System",
+        "parameters": {
+          "auth": "secure",
+          "secureParameters": {
+            "readonly": [],
+            "secure": [],
+            "token": "ToIyPoSGQk2sB2Mw+p3jh3R0L2Xdwltcgj4bZln2dHV7/huJ"
+          }
+        },
+        "sync": false,
+        "type": "filesys"
+      },
+      "ui": {}
+    },
+    {
+      "id": "remote",
+      "provider": "remote",
+      "config": {
+        "remote": {
+          "provider": "remote",
+          "remote": {
+            "profile": "%remote-profile%",
+            "remote": {
+              "mode": "remote",
+              "host": "%remote-host%",
+              "port": "%remote-port%",
+              "apikey": "%remote-apikey%"
             },
-            {
-                "id": "remote",
-                "provider": "remote",
-                "config": {
-                    "remote": {
-                        "provider": "remote",
-                        "remote": {
-                            "profile": "%remote-profile%",
-                            "remote": {
-                                "mode": "remote",
-                                "host": "%remote-host%",
-                                "port": "%remote-port%",
-                                "apikey": "%remote-apikey%"
-                            },
-                            "local": {
-                                "mode": "local"
-                            }
-                        }
-                    },
-                    "pipeline": {
-                        "components": [
-                            {
-                                "id": "parser_1",
-                                "provider": "parse",
-                                "config": {},
-                                "ui": {},
-                                "input": [
-                                    {
-                                        "lane": "tags",
-                                        "from": "source_1"
-                                    }
-                                ]
-                            },
-                            {
-                                "id": "preprocessor_1",
-                                "provider": "preprocessor_langchain",
-                                "preprocessor_langchain": {
-                                    "profile": "default",
-                                    "default": {
-                                        "profile": "string",
-                                        "chunk_size": 1024
-                                    }
-                                },
-                                "input": [
-                                    {
-                                        "lane": "text",
-                                        "from": "parser_1"
-                                    }
-                                ]
-                            },
-                            {
-                                "id": "embedding_1",
-                                "provider": "embedding_transformer",
-                                "ui": {},
-                                "config": {},
-                                "input": [
-                                    {
-                                        "lane": "documents",
-                                        "from": "preprocessor_1"
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-                },
-                "ui": {}
-            },
-            {
-                "id": "response_1",
-                "provider": "response",
-                "ui": {},
-                "config": {},
-                "input": [
-                    {
-                        "lane": "documents",
-                        "from": "embedding_1"
-                    }
-                ]
-            },
-            {
-                "id": "qdrant_1",
-                "provider": "qdrant",
-                "ui": {},
-                "profile": "local",
-                "config": {
-                    "collection": "collection_by_remote_pipeline"
-                },
-                "input": [
-                    {
-                        "lane": "documents",
-                        "from": "embedding_1"
-                    }
-                ]
+            "local": {
+              "mode": "local"
             }
-        ]
+          }
+        },
+        "pipeline": {
+          "components": [
+            {
+              "id": "parser_1",
+              "provider": "parse",
+              "config": {},
+              "ui": {},
+              "input": [
+                {
+                  "lane": "tags",
+                  "from": "source_1"
+                }
+              ]
+            },
+            {
+              "id": "preprocessor_1",
+              "provider": "preprocessor_langchain",
+              "preprocessor_langchain": {
+                "profile": "default",
+                "default": {
+                  "profile": "string",
+                  "chunk_size": 1024
+                }
+              },
+              "input": [
+                {
+                  "lane": "text",
+                  "from": "parser_1"
+                }
+              ]
+            },
+            {
+              "id": "embedding_1",
+              "provider": "embedding_transformer",
+              "ui": {},
+              "config": {},
+              "input": [
+                {
+                  "lane": "documents",
+                  "from": "preprocessor_1"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "ui": {}
+    },
+    {
+      "id": "response_1",
+      "provider": "response",
+      "ui": {},
+      "config": {},
+      "input": [
+        {
+          "lane": "documents",
+          "from": "embedding_1"
+        }
+      ]
+    },
+    {
+      "id": "qdrant_1",
+      "provider": "qdrant",
+      "ui": {},
+      "profile": "local",
+      "config": {
+        "collection": "collection_by_remote_pipeline"
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "embedding_1"
+        }
+      ]
     }
+  ]
 }

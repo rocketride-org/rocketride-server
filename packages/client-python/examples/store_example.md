@@ -12,21 +12,19 @@ python run_cli.py apaext_store save_project \
   --apikey YOUR_KEY \
   --project-id my-proj \
   --project-json '{
+    "name": "My Pipeline",
     "source": "source_1",
-    "pipeline": {
-      "name": "My Pipeline",
-      "components": [
-        {
-          "id": "source_1",
-          "provider": "filesystem",
-          "config": {
-            "mode": "Source",
-            "name": "Local Files",
-            "path": "/data"
-          }
+    "components": [
+      {
+        "id": "source_1",
+        "provider": "filesystem",
+        "config": {
+          "mode": "Source",
+          "name": "Local Files",
+          "path": "/data"
         }
-      ]
-    }
+      }
+    ]
   }'
 
 # 2. Get the project
@@ -79,7 +77,7 @@ python run_cli.py apaext_store save_project \
 python run_cli.py apaext_store save_project \
   --apikey YOUR_KEY \
   --project-id proj1 \
-  --project-json '{"source":"source_1","pipeline":{"name":"My Project","components":[]}}'
+  --project-json '{"name":"My Project","source":"source_1","components":[]}'
 
 # With explicit version for atomic update
 python run_cli.py apaext_store save_project \
@@ -92,22 +90,20 @@ python run_cli.py apaext_store save_project \
 **Pipeline JSON Format:**
 ```json
 {
+  "name": "My Project",
+  "description": "Optional description",
   "source": "source_1",
-  "pipeline": {
-    "name": "My Project",
-    "description": "Optional description",
-    "components": [
-      {
-        "id": "source_1",
-        "provider": "filesystem",
-        "config": {
-          "mode": "Source",
-          "name": "Filesystem Source",
-          "path": "/data"
-        }
+  "components": [
+    {
+      "id": "source_1",
+      "provider": "filesystem",
+      "config": {
+        "mode": "Source",
+        "name": "Filesystem Source",
+        "path": "/data"
       }
-    ]
-  }
+    }
+  ]
 }
 ```
 
@@ -134,11 +130,9 @@ python run_cli.py apaext_store get_project --apikey YOUR_KEY --project-id projec
 {
   "success": true,
   "pipeline": {
+    "name": "My Project",
     "source": "source_1",
-    "pipeline": {
-      "name": "My Project",
-      "components": [...]
-    }
+    "components": [...]
   },
   "version": "abc123def456..."
 }

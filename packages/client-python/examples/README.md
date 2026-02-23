@@ -41,21 +41,19 @@ python run_cli.py apaext_store save_project \
   --apikey YOUR_KEY \
   --project-id test-proj \
   --project-json '{
+    "name": "Test Pipeline",
     "source": "source_1",
-    "pipeline": {
-      "name": "Test Pipeline",
-      "components": [
-        {
-          "id": "source_1",
-          "provider": "filesystem",
-          "config": {
-            "mode": "Source",
-            "name": "Test Source",
-            "path": "/tmp/data"
-          }
+    "components": [
+      {
+        "id": "source_1",
+        "provider": "filesystem",
+        "config": {
+          "mode": "Source",
+          "name": "Test Source",
+          "path": "/tmp/data"
         }
-      ]
-    }
+      }
+    ]
   }'
 
 # Get the project
@@ -71,36 +69,34 @@ For more complex pipelines, use a JSON file:
 **pipeline.json:**
 ```json
 {
+  "name": "My Pipeline",
+  "description": "A more complex example",
   "source": "source_1",
-  "pipeline": {
-    "name": "My Pipeline",
-    "description": "A more complex example",
-    "components": [
-      {
-        "id": "source_1",
-        "provider": "filesystem",
-        "config": {
-          "mode": "Source",
-          "name": "Local Files",
-          "path": "/data/input"
-        }
-      },
-      {
-        "id": "processor_1",
-        "provider": "ai_chat",
-        "config": {
-          "model": "gpt-4",
-          "system_prompt": "You are a helpful assistant"
-        },
-        "input": [
-          {
-            "lane": "output",
-            "from": "source_1"
-          }
-        ]
+  "components": [
+    {
+      "id": "source_1",
+      "provider": "filesystem",
+      "config": {
+        "mode": "Source",
+        "name": "Local Files",
+        "path": "/data/input"
       }
-    ]
-  }
+    },
+    {
+      "id": "processor_1",
+      "provider": "ai_chat",
+      "config": {
+        "model": "gpt-4",
+        "system_prompt": "You are a helpful assistant"
+      },
+      "input": [
+        {
+          "lane": "output",
+          "from": "source_1"
+        }
+      ]
+    }
+  ]
 }
 ```
 
@@ -150,27 +146,25 @@ Projects must follow the RocketRide pipeline structure:
 
 ```json
 {
+  "name": "Pipeline Name",
+  "description": "Optional description",
   "source": "source_component_id",
-  "pipeline": {
-    "name": "Pipeline Name",
-    "description": "Optional description",
-    "components": [
-      {
-        "id": "unique_id",
-        "provider": "component_type",
-        "config": {
-          "mode": "Source",
-          "name": "Component Name"
-        },
-        "input": [
-          {
-            "lane": "output_lane_name",
-            "from": "source_component_id"
-          }
-        ]
-      }
-    ]
-  }
+  "components": [
+    {
+      "id": "unique_id",
+      "provider": "component_type",
+      "config": {
+        "mode": "Source",
+        "name": "Component Name"
+      },
+      "input": [
+        {
+          "lane": "output_lane_name",
+          "from": "source_component_id"
+        }
+      ]
+    }
+  ]
 }
 ```
 
@@ -217,7 +211,7 @@ Provide one of these:
 --project-file pipeline.json
 
 # Option 2: Inline JSON
---project-json '{"source":"source_1","pipeline":{"name":"My Pipeline",...}}'
+--project-json '{"name":"My Pipeline","source":"source_1",...}'
 ```
 
 ### Error: "API key is required"
