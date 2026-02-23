@@ -21,6 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
+import os
 import re
 
 
@@ -30,8 +31,12 @@ class RuleParser:
         self.id_to_name = self._load_rules(file_path)
 
     def _load_rules(self, file_path):
-        """Read the file once and stores all idRef -> English name mappings."""
+        """Read the file once and stores all idRef -> English name mappings.
+        Returns empty dict if file does not exist (nucleuz/rulePack.dat was removed, GLiNER-only mode).
+        """
         id_to_name = {}
+        if not os.path.exists(file_path):
+            return id_to_name
 
         with open(file_path, 'r', encoding='utf-16') as f:
             content = f.read()
