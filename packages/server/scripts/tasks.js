@@ -1006,7 +1006,7 @@ function makeBuildAction() {
                     parallel([
                         'tika:build-dbgconn',
                         'tika:build-jar'
-                    ], 'tika:build'),
+                    ], 'tika:_build'),
                     'tika:copy-outputs'
                 ]
             }),

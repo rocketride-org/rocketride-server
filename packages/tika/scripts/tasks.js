@@ -240,10 +240,10 @@ module.exports = {
         { name: 'tika:copy-outputs', action: makeCopyTikaOutputsAction },
         
         // Public actions (have descriptions)
-        { name: 'tika:build', action: () => ({
+        { name: 'tika:_build', action: () => ({
             description: 'Build Java modules and copy to dist',
             steps: [
-                'java:build',
+                'java:_build',
                 'tika:sync-source',
                 parallel([
                     'tika:build-dbgconn',

@@ -156,7 +156,7 @@ module.exports = {
         { name: 'java:setup-jre', action: makeSetupJreAction },
         
         // Public actions (have descriptions)
-        { name: 'java:build', action: () => ({
+        { name: 'java:_build', action: () => ({
             description: 'Install JDK, JRE, and Maven',
             steps: [
                 parallel([
