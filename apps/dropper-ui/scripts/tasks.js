@@ -72,22 +72,22 @@ module.exports = {
         
         // Public actions (have descriptions)
         { name: 'dropper-ui:build', action: () => ({
-            description: 'Build production bundle',
+            description: 'Build dropper UI',
             steps: [
-                'client-typescript:compile',
+                'client-typescript:build',
                 'dropper-ui:bundle',
                 'dropper-ui:copy'
             ]
         })},
         { name: 'dropper-ui:dev', action: () => ({
-            description: 'Start development server',
+            description: 'Dev dropper UI',
             run: async (ctx, task) => {
                 task.output = 'Starting development server on http://localhost:3000';
                 await execCommand('npx', ['rsbuild', 'dev'], { task, cwd: APP_ROOT });
             }
         })},
         { name: 'dropper-ui:clean', action: () => ({
-            description: 'Remove dropper-ui build artifacts',
+            description: 'Clean dropper UI',
             run: async (ctx, task) => {
                 await removeDir(BUILD_DIR);
                 await removeDir(SERVER_STATIC_DIR);

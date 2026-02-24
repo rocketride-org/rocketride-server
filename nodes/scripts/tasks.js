@@ -1,18 +1,41 @@
+// =============================================================================
+// MIT License
+// Copyright (c) 2026 RocketRide, Inc.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+// =============================================================================
+
 /**
- * Build tasks for @aparavi/nodes
- * 
+ * Build tasks for @rocketride/nodes
+ *
  * Commands:
  *   build - Sync nodes to dist
  *   test  - Run node integration tests (starts test server automatically)
  *   clean - Remove build artifacts
  */
 const path = require('path');
-const { 
-    syncDir, 
-    formatSyncStats, 
-    removeDir, 
-    PROJECT_ROOT, 
-    startServer, 
+const {
+    syncDir,
+    formatSyncStats,
+    removeDir,
+    PROJECT_ROOT,
+    startServer,
     stopServer,
     execCommand,
     parallel,
@@ -53,7 +76,7 @@ function makeStartTestServerAction(options = {}) {
             task.output = 'Starting server...';
             let taskComplete = false;
             
-            // Set APARAVI_MOCK to enable mock modules for testing
+            // Set ROCKETRIDE_MOCK to enable mock modules for testing
             const mocksPath = path.join(PACKAGE_DIR, 'test', 'mocks');
             
             const result = await startServer({
@@ -61,7 +84,7 @@ function makeStartTestServerAction(options = {}) {
                 trace: options.trace,
                 basePort: 40000,  // Use 40000 range for node tests
                 env: {
-                    APARAVI_MOCK: mocksPath
+                    ROCKETRIDE_MOCK: mocksPath
                 },
                 onOutput: (text) => {
                     if (taskComplete) return;
@@ -105,7 +128,7 @@ function makeRunPytestAction(options = {}) {
             
             const testEnv = {
                 ...process.env,
-                APARAVI_URI: `http://localhost:${port}`
+                ROCKETRIDE_URI: `http://localhost:${port}`
             };
             
             // Use absolute paths since cwd is dist/server
@@ -181,18 +204,22 @@ module.exports = {
         
         // Public actions (have descriptions)
         { name: 'nodes:build', action: () => ({ 
-            description: 'Sync pipeline nodes',
-            steps: ['nodes:sync'] 
+            description: 'Build pipeline nodes',
+            steps: ['server:build', 'nodes:sync'] 
         })},
         { name: 'nodes:test', action: () => ({
-            description: 'Run node integration tests',
+            description: 'Test pipeline nodes',
+            steps: ['nodes:build', 'nodes:run-contracts']
+        })},
+        { name: 'nodes:test-full', action: () => ({
+            description: 'Test pipeline nodes (full integration)',
             steps: [
                 'server:build',
                 parallel([
                     'nodes:build',
                     'ai:build',
                     'client-python:build'
-                ], 'Build modules'),
+                ], 'Build dependencies'),
                 bracket({
                     name: 'node-test-server',
                     setup: makeStartTestServerAction(),
@@ -202,11 +229,11 @@ module.exports = {
             ]
         })},
         { name: 'nodes:test-contracts', action: () => ({
-            description: 'Run contract validation tests',
+            description: 'Test node contracts',
             steps: ['server:build', 'nodes:run-contracts']
         })},
         { name: 'nodes:clean', action: () => ({
-            description: 'Remove nodes build artifacts',
+            description: 'Clean pipeline nodes',
             run: async (ctx, task) => {
                 await removeDir(DIST_DIR);
                 task.output = 'Cleaned nodes';

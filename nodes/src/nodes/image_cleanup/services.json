@@ -109,5 +109,19 @@
 			"properties": [
 			]
 		}
-	]
+	],
+	"test": {
+		"outputs": ["image"],
+		"cases": [
+			{
+				"name": "Clean image for OCR",
+				"image": "images/ocr_test_text.png",
+				"expect": {
+					"image": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	}
 }

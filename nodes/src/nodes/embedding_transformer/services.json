@@ -26,13 +26,13 @@
 	],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -177,5 +177,23 @@
 				"embedding.profile"
 			]
 		}
-	]
+	]//,
+	// "test": {
+	// 	"profiles": ["miniLM"],
+	// 	"outputs": ["documents"],
+	// 	"cases": [
+	// 		{
+	// 			"name": "Embed text chunks",
+	// 			"documents": [
+	// 				{"page_content": "Hello world, this is a test document."},
+	// 				{"page_content": "Second chunk for embedding."}
+	// 			],
+	// 			"expect": {
+	// 				"documents": {
+	// 					"notEmpty": true
+	// 				}
+	// 			}
+	// 		}
+	// 	]
+	// }
 }

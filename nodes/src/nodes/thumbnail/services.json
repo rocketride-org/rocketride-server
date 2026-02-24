@@ -103,5 +103,19 @@
 			"properties": [
 			]
 		}
-	]
+	],
+	"test": {
+		"outputs": ["image", "documents"],
+		"cases": [
+			{
+				"name": "Create thumbnail from image",
+				"image": "images/ocr_test_text.png",
+				"expect": {
+					"image": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	}
 }

@@ -35,7 +35,7 @@ from rocketride import RocketRideClient
 
 async def get_tools(client: RocketRideClient) -> List[Dict[str, Any]]:
     """Return list of available tasks for the authenticated user."""
-    req = client.build_request(command='apaext_get_tasks')
+    req = client.build_request(command='rrext_get_tasks')
     resp = await client.request(req)
     body = (resp or {}).get('body') or {}
     raw_tasks = body.get('tasks', [])

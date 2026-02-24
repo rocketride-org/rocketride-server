@@ -1,5 +1,28 @@
+// =============================================================================
+// MIT License
+// Copyright (c) 2026 RocketRide, Inc.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+// =============================================================================
+
 /**
- * Build tasks for @rocketride/client-python
+ * Build tasks for rocketride (Python client)
  * 
  * Commands:
  *   setup - Sync source files to server dist (for server's internal use)
@@ -209,36 +232,33 @@ module.exports = {
     
     actions: [
         // Internal actions
-        { name: 'client-python:sync', action: makeSyncClientPythonAction },
+        { name: 'client-python:sync-source', action: makeSyncClientPythonAction },
         { name: 'client-python:wheel-source', action: makeWheelSourceAction },
         { name: 'client-python:wheel-build', action: makeWheelBuildAction },
-        { name: 'client-python:copy-to-static', action: makeCopyToServerStaticAction },
+        { name: 'client-python:sync', action: makeCopyToServerStaticAction },
         { name: 'client-python:start-server', action: makeStartTestServerAction },
         { name: 'client-python:stop-server', action: makeStopTestServerAction },
         { name: 'client-python:run-pytest', action: makeRunPytestAction },
         
         // Public actions (have descriptions)
         { name: 'client-python:build', action: () => ({ 
-            description: 'Build Python client wheel and sync to server',
+            description: 'Build Python client',
             steps: [
                 'server:build',
-                'client-python:sync',
+                'client-python:sync-source',
                 'client-python:wheel-source',
                 'client-python:wheel-build',
-                'client-python:copy-to-static'
+                'client-python:sync'
             ]
         })},
         { name: 'client-python:test', action: () => ({
-            description: 'Run python client tests',
+            description: 'Test Python client',
             steps: [
-                'server:build',
                 parallel([
                     'nodes:build',
                     'ai:build',
                     'client-python:build'
-                ], 'Build modules'),
-                'client-python:wheel-source',
-                'client-python:wheel-build',
+                ], 'Build dependencies'),
                 bracket({
                     name: 'py-test-server',
                     setup: makeStartTestServerAction(),
@@ -248,7 +268,7 @@ module.exports = {
             ]
         })},
         { name: 'client-python:clean', action: () => ({
-            description: 'Remove client-python build artifacts',
+            description: 'Clean Python client',
             run: async (ctx, task) => {
                 await removeDirs([
                     path.join(PACKAGE_DIR, 'build'),

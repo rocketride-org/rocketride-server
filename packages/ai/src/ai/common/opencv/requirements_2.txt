@@ -1,0 +1,2 @@
+# Install the full module now
+opencv-contrib-python==4.13.0.92

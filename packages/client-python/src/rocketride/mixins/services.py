@@ -49,7 +49,7 @@ class ServicesMixin(DAPClient):
     Provides service definition retrieval for the RocketRide client.
 
     This mixin adds get_services() and get_service() to fetch connector
-    definitions from the server via the DAP apaext_services command.
+    definitions from the server via the DAP rrext_services command.
     Definitions include schemas, UI schemas, and metadata.
 
     This is automatically included when you use RocketRideClient.
@@ -73,7 +73,7 @@ class ServicesMixin(DAPClient):
         Raises:
             RuntimeError: If the server returns an error.
         """
-        request = self.build_request(command='apaext_services', arguments={})
+        request = self.build_request(command='rrext_services', arguments={})
         response = await self.request(request)
 
         if self.did_fail(response):
@@ -100,7 +100,7 @@ class ServicesMixin(DAPClient):
             raise ValueError('Service name is required')
 
         request = self.build_request(
-            command='apaext_services',
+            command='rrext_services',
             arguments={'service': service},
         )
         response = await self.request(request)
@@ -155,7 +155,7 @@ class ServicesMixin(DAPClient):
             arguments['source'] = source
 
         request = self.build_request(
-            command='apaext_validate',
+            command='rrext_validate',
             arguments=arguments,
         )
         response = await self.request(request)

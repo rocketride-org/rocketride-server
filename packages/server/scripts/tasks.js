@@ -1,3 +1,26 @@
+// =============================================================================
+// MIT License
+// Copyright (c) 2026 RocketRide, Inc.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+// =============================================================================
+
 /**
  * Server Build Module
  * 
@@ -10,7 +33,7 @@ const {
     removeDirs, resetDir, syncDir, removeFiles,
     overlayDir, formatSyncStats,
     execCommand, PROJECT_ROOT, BUILD_DIR, isWindows, isMac, isLinux,
-    exists, readFile, readJson, readDir, mkdir, copyFile, removeFile, stat, chmod, realpath, 
+    exists, readFile, readJson, readDir, mkdir, copyFile, removeFile, chmod, 
     downloadFile, createArchive, extractArchive,
     parallel, sequence, whenNot, fingerprint,
     taskDebug,
@@ -217,29 +240,6 @@ async function getCachedGeneratorArgs(buildDir) {
         return args;
     } catch {
         return null;
-    }
-}
-
-async function copyDirDereferenceSymlinks(srcDir, destDir) {
-    await mkdir(destDir);
-    const entries = await readDir(srcDir, { withFileTypes: true });
-
-    for (const entry of entries) {
-        const srcPath = path.join(srcDir, entry.name);
-        const destPath = path.join(destDir, entry.name);
-
-        if (entry.isSymbolicLink()) {
-            const realPath = await realpath(srcPath);
-            await copyFile(realPath, destPath);
-            const srcStats = await stat(realPath);
-            await chmod(destPath, srcStats.mode);
-        } else if (entry.isDirectory()) {
-            await copyDirDereferenceSymlinks(srcPath, destPath);
-        } else {
-            await copyFile(srcPath, destPath);
-            const srcStats = await stat(srcPath);
-            await chmod(destPath, srcStats.mode);
-        }
     }
 }
 
@@ -460,6 +460,12 @@ function makeCheckPrebuiltAction(options = {}) {
         run: async (ctx, task) => {
             if (options.force) {
                 task.output = 'Force rebuild requested';
+                ctx.downloaded = false;
+                return;
+            }
+
+            if (ctx.options?.nodownload) {
+                task.output = 'Download skipped (--nodownload)';
                 ctx.downloaded = false;
                 return;
             }
@@ -967,9 +973,8 @@ function makeRunEngtestAction(options = {}) {
     };
 }
 
-function makeBuildAction() {
+function makeBuildCoreAction() {
     return {
-        description: 'Install server (download prebuilt or build from source)',
         steps: [
             'server:download',
             whenNot({
@@ -986,38 +991,48 @@ function makeBuildAction() {
                         'server:compile-engine',
                         'java:setup-maven',
                         'java:setup-jre'
-                    ], 'server:compile'),
-                    // Sync nodes, ai, and clients into dist/server before any engine invocation
-                    // (engine startup requires nodes dir; setup-python runs engine for pip)
-                    parallel([
-                        'nodes:sync',
-                        'ai:sync',
-                        'client-python:sync'
-                    ], 'Sync modules to server dist'),
+                    ], 'Compile engine'),
                     parallel([
                         'server:setup-python',
                         'server:setup-jre'
-                    ], 'server:setup-dependencies'),
+                    ], 'Setup dependencies'),
                     parallel([
                         'server:setup-runtime-libs',
                         'server:setup-samba'
-                    ], 'server:finalize'),
+                    ], 'Setup runtime'),
                     'tika:sync-source',
                     parallel([
                         'tika:build-dbgconn',
                         'tika:build-jar'
-                    ], 'tika:build'),
-                    'tika:copy-outputs'
+                    ], 'Build Tika'),
+                    'tika:sync'
                 ]
             }),
-            'server:install-pip'
+        ]
+    };
+}
+
+function makeBuildAction() {
+    return {
+        description: 'Build server',
+        steps: [
+            'server:build-core',
+            'server:setup-pip',
+            // Sync nodes, ai, and clients into dist/server regardless of whether
+            // the engine was downloaded or compiled — the prebuilt binary doesn't
+            // include these modules, and they must match the current repo checkout.
+            parallel([
+                'nodes:sync',
+                'ai:sync',
+                'client-python:sync-source'
+            ], 'Sync modules')
         ]
     };
 }
 
 function makeCleanServerAction() {
     return {
-        description: 'Remove server build artifacts',
+        description: 'Clean server',
         run: async (ctx, task) => {
             await setState('server', {});
 
@@ -1057,7 +1072,7 @@ function makeCleanServerAction() {
 
 function makeBuildAllAction() {
     return {
-        description: 'Build server and all modules',
+        description: 'Build server and modules',
         steps: [
             'server:build',
             // Build external modules
@@ -1072,7 +1087,7 @@ function makeBuildAllAction() {
 
 function makeCompileAction() {
     return {
-        description: 'Compile server from source',
+        description: 'Compile server',
         steps: [
             'server:configure',
             'server:setup-python',
@@ -1083,7 +1098,7 @@ function makeCompileAction() {
 
 function makeConfigureAction() {
     return {
-        description: 'Configure CMake only',
+        description: 'Configure server',
         steps: [
             'server:setup-tools',
             'server:configure'
@@ -1093,7 +1108,7 @@ function makeConfigureAction() {
 
 function makeTestAction() {
     return {
-        description: 'Build and run C++ tests',
+        description: 'Test server',
         steps: [
             'server:build',
             whenNot({
@@ -1105,7 +1120,7 @@ function makeTestAction() {
                         'nodes:build',
                         'ai:build',
                         'client-python:build'
-                    ], 'Build modules'),
+                    ], 'Build dependencies'),
                     'server:compile-tests',
                     'server:copy-test-data',
                     parallel([
@@ -1120,7 +1135,7 @@ function makeTestAction() {
 
 function makePackageAction(options = {}) {
     return {
-        description: 'Package server',
+        description: 'Package server distribution',
         run: async (_ctx, _task) => {
             const { baseName, distFilename, symDistFilename } = await getDistInfo(options);
             const distPath = path.join(DIST_ARTIFACTS_DIR, distFilename);
@@ -1202,7 +1217,7 @@ function makePackageAction(options = {}) {
 
 function makeCleanAction() {
     return {
-        description: 'Clean build artifacts',
+        description: 'Clean all',
         steps: [
             'server:clean'
         ]
@@ -1220,6 +1235,7 @@ module.exports = {
     actions: [
         // Internal actions (no description in help)
         { name: 'server:download', action: makeCheckPrebuiltAction },
+        { name: 'server:build-core', action: makeBuildCoreAction },
         { name: 'server:setup-tools', action: makeSetupToolsAction },
         { name: 'server:configure', action: makeConfigureServerAction },
         { name: 'server:setup-python', action: makeSetupPythonAction },
@@ -1228,12 +1244,12 @@ module.exports = {
         { name: 'server:setup-samba', action: makeSetupSambaAction },
         { name: 'server:compile-engine', action: makeCompileEngineAction },
         { name: 'server:compile-tests', action: makeCompileTestsAction },
-        { name: 'server:install-pip', action: makeInstallPipAction },
+        { name: 'server:setup-pip', action: makeInstallPipAction },
         { name: 'server:copy-test-data', action: makeCopyTestDataAction },
         { name: 'server:run-aptest', action: makeRunAptestAction },
         { name: 'server:run-engtest', action: makeRunEngtestAction },
         { name: 'server:clean', action: makeCleanServerAction },
-        
+
         // Public actions (have descriptions, shown in help)
         { name: 'server:build', action: makeBuildAction },
         { name: 'server:build-all', action: makeBuildAllAction },

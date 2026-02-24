@@ -54,7 +54,7 @@ Quick Start:
 For more information, see the documentation at https://docs.rocketride.ai
 """
 
-__version__ = '1.1.0'
+__version__ = '1.0.0'
 __author__ = 'RocketRide, Inc.'
 __email__ = 'dev@rocketride.ai'
 

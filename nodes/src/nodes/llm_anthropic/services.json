@@ -262,5 +262,20 @@
 				"anthropic.profile"
 			]
 		}
-	]
+	],
+	"test": {
+	"profiles": ["claude-opus-4-5"],
+	"outputs": ["answers"],
+	 	"cases": [
+	 		{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
 }

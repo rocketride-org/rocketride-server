@@ -22,32 +22,32 @@ A Python SDK for executing RocketRide pipelines using the Debug Adapter Protocol
 ### Using pip
 
 ```bash
-# Install from PyPI (when published)
-pip install rocketride-client-python
+# Install from PyPI
+pip install rocketride
 
 # Install from RocketRide server (production) - latest version
-pip install https://cloud.rocketride.ai/client/python/rocketride_client_python-latest-py3-none-any.whl
+pip install https://cloud.rocketride.ai/client/python/rocketride-latest-py3-none-any.whl
 
 # Install from local development server - latest version
-pip install http://localhost:5565/client/python/rocketride_client_python-latest-py3-none-any.whl
+pip install http://localhost:5565/client/python/rocketride-latest-py3-none-any.whl
 
 # Install from local wheel file
-pip install /path/to/rocketride_client_python-1.1.0-py3-none-any.whl
+pip install /path/to/rocketride-1.1.0-py3-none-any.whl
 
 # Install with development dependencies
-pip install rocketride-client-python[dev]
+pip install rocketride[dev]
 
 # Install with test dependencies
-pip install rocketride-client-python[test]
+pip install rocketride[test]
 ```
 
 ### Uninstalling
 
 ```bash
-pip uninstall rocketride-client-python
+pip uninstall rocketride
 ```
 
-**Note:** The distribution files use underscores (`rocketride_client_python`), but the module is imported as `rocketride_client`:
+**Usage:**
 ```python
 from rocketride import RocketRideClient
 ```
@@ -150,10 +150,10 @@ After installing the package, the `rocketride` command becomes available:
 
 ```bash
 # Installation from PyPI
-pip install rocketride-client-python
+pip install rocketride
 
 # Or from local wheel file:
-pip install /path/to/rocketride_client_python-1.1.0-py3-none-any.whl
+pip install /path/to/rocketride-1.1.0-py3-none-any.whl
 
 # Check CLI is available
 rocketride --help
@@ -475,7 +475,7 @@ Ask a question to RocketRide's AI and get an intelligent response.
 
 **Example:**
 ```python
-from rocketride_client.schema import Question
+from rocketride.schema import Question
 
 question = Question()
 question.addQuestion('What are the key findings?')
@@ -552,7 +552,7 @@ Add conversation history for context.
 
 **QuestionHistory:**
 ```python
-from rocketride_client.schema import QuestionHistory
+from rocketride.schema import QuestionHistory
 
 history = QuestionHistory(role='user', content='Previous question')
 ```
@@ -661,7 +661,7 @@ When using a chat system, starting the pipeline should be done as a global part 
 
 ```python
 from rocketride import RocketRideClient
-from rocketride_client.schema import Question
+from rocketride.schema import Question
 
 # Start your chat pipeline once at the beginning
 client = RocketRideClient()  # Configuration from .env
@@ -694,7 +694,7 @@ print(answer)
 #### Structured JSON Responses
 
 ```python
-from rocketride_client.schema import Question
+from rocketride.schema import Question
 
 async def extract(source_document: str):
     question = Question(expectJson=True)
@@ -721,7 +721,7 @@ print(result)
 #### Advanced Question Configuration
 
 ```python
-from rocketride_client.schema import Question, QuestionHistory
+from rocketride.schema import Question, QuestionHistory
 
 # Build a question
 question = Question()

@@ -104,7 +104,7 @@ def env_rocketride(monkeypatch: pytest.MonkeyPatch) -> None:
 def mock_rocketride_client() -> MagicMock:
     """Minimal mock RocketRideClient for unit tests (no server)."""
     client = MagicMock()
-    client.build_request = MagicMock(return_value={'command': 'apaext_get_tasks'})
+    client.build_request = MagicMock(return_value={'command': 'rrext_get_tasks'})
     client.request = AsyncMock(return_value={
         'body': {
             'tasks': [

@@ -35,22 +35,6 @@
 		"node": ">=18.0.0",
 		"pnpm": ">=8.0.0"
 	},
-	"scripts": {
-		"build": "node scripts/build.js build",
-		"clean": "node scripts/build.js clean",
-		"setup": "node scripts/build.js setup",
-		"test": "node scripts/build.js test",
-		"dev": "node scripts/build.js dev",
-		"lint": "eslint .",
-		"lint:fix": "eslint . --fix",
-		"format": "prettier --check .",
-		"format:fix": "prettier --write .",
-		"lint:python": "ruff check . && ruff format --check .",
-		"licenses": "node scripts/licenses.js",
-		"docker:engine": "docker build --progress=plain -f docker/Dockerfile.engine -t aparavi-engine .",
-		"docker:eaas": "docker build --progress=plain -f docker/Dockerfile.eaas -t aparavi-eaas .",
-		"package": "cpack --config build/CPackConfig.cmake"
-	},
 	"pnpm": {
 		"peerDependencyRules": {
 			"allowedVersions": {

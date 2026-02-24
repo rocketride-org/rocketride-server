@@ -299,5 +299,20 @@
 				"openai.profile"
 			]
 		}
-	]
+	],
+	"test": {
+		"profiles": ["openai-5-mini"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
 }

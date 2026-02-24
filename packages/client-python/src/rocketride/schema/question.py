@@ -399,7 +399,7 @@ class Question(BaseModel):
         questions: List of questions to ask
     """
 
-    type: QuestionType = Field(QuestionType.SEMANTIC, description='Type of question - semantic uses AI understanding, keyword uses text matching.')
+    type: QuestionType = Field(QuestionType.QUESTION, description='Type of question - question uses basic Q&A, semantic uses AI understanding, keyword uses text matching.')
     filter: Optional[DocFilter] = Field(default_factory=DocFilter, description='Controls which documents to search and how to process results.')
     expectJson: Optional[bool] = Field(False, description='Set to True to get structured JSON responses instead of text.')
     role: Optional[str] = Field('', description='AI role or persona for the conversation (e.g., "You are a financial analyst").')

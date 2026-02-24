@@ -1,6 +1,6 @@
 @echo off
 REM =============================================================================
-REM Aparavi Engine - Visual Studio Build Environment (Windows)
+REM RocketRide Engine - Visual Studio Build Environment (Windows)
 REM =============================================================================
 REM Expects the VS installation path as the first argument (found by the caller
 REM via vswhere). Sets up the build environment by calling vcvars64 or VsDevCmd.

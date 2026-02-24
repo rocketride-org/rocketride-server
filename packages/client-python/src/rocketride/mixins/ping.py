@@ -146,7 +146,7 @@ class PingMixin(DAPClient):
             - Regular pings can detect connection problems early
         """
         # Build ping request
-        request = self.build_request(command='apaext_ping')
+        request = self.build_request(command='rrext_ping')
 
         # Send to server and wait for response
         response = await self.request(request)

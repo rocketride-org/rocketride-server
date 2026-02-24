@@ -120,7 +120,7 @@
 			"title": "Collection",
 			"type": "string",
 			"description": "The name of the collection to use for the OpenSearch index. Only lowercase letters, numbers, and underscores are allowed.",
-			"default": "aparavi"
+			"default": "rocketride"
 		},		
 		"opensearch.mode": {
 			"title": "Store Mode",

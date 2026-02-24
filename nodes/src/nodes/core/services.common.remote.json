@@ -5,7 +5,7 @@
 			"title": "Host",
 			"minLength": 2,
 			"maxLength": 32,
-			"default": "pipe.aparavi.com"
+			"default": "pipe.rocketride.ai"
 		},
 		"remote.port": {
 			"type": "number",

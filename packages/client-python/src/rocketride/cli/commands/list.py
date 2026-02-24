@@ -28,7 +28,7 @@ through the RocketRide CLI. Use this command to view all running tasks
 for the authenticated user.
 
 The list command retrieves and displays all active tasks using the
-apaext_get_tasks request, providing a comprehensive view of running
+rrext_get_tasks request, providing a comprehensive view of running
 pipelines and their current status.
 
 Key Features:
@@ -58,7 +58,7 @@ class ListCommand(BaseCommand):
     Command implementation for listing all active tasks.
 
     Retrieves and displays all active tasks for the authenticated user
-    using the apaext_get_tasks request. Provides both human-readable
+    using the rrext_get_tasks request. Provides both human-readable
     and JSON output formats for different use cases.
 
     Example:
@@ -100,7 +100,7 @@ class ListCommand(BaseCommand):
 
         Process Flow:
             1. Connect to server if not already connected
-            2. Build apaext_get_tasks request
+            2. Build rrext_get_tasks request
             3. Send request to server
             4. Check for errors in response
             5. Extract tasks from response body
@@ -112,8 +112,8 @@ class ListCommand(BaseCommand):
             if not self.cli.client.is_connected():
                 await self.cli.connect()
 
-            # Build the apaext_get_tasks request
-            request = client.build_request(command='apaext_get_tasks')
+            # Build the rrext_get_tasks request
+            request = client.build_request(command='rrext_get_tasks')
 
             # Send the request
             response = await client.request(request)

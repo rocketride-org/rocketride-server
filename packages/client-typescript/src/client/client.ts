@@ -123,7 +123,7 @@ export class DataPipe {
 			throw new Error('Pipe already opened');
 		}
 
-		const request = this._client.buildRequest('apaext_process', {
+		const request = this._client.buildRequest('rrext_process', {
 			arguments: {
 				subcommand: 'open',
 				object: this._objinfo,
@@ -162,7 +162,7 @@ export class DataPipe {
 			throw new Error('Buffer must be Uint8Array');
 		}
 
-		const request = this._client.buildRequest('apaext_process', {
+		const request = this._client.buildRequest('rrext_process', {
 			arguments: {
 				subcommand: 'write',
 				pipe_id: this._pipeId,
@@ -194,7 +194,7 @@ export class DataPipe {
 		}
 
 		try {
-			const request = this._client.buildRequest('apaext_process', {
+			const request = this._client.buildRequest('rrext_process', {
 				arguments: {
 					subcommand: 'close',
 					pipe_id: this._pipeId,
@@ -595,7 +595,7 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async ping(token?: string): Promise<void> {
 		// Build ping request
-		const request = this.buildRequest('apaext_ping', { token });
+		const request = this.buildRequest('rrext_ping', { token });
 
 		// Send to server and wait for response
 		const response = await this.request(request);
@@ -693,7 +693,7 @@ export class RocketRideClient extends DAPClient {
 		if (source !== undefined) {
 			arguments_.source = source;
 		}
-		const request = this.buildRequest('apaext_validate', {
+		const request = this.buildRequest('rrext_validate', {
 			arguments: arguments_
 		});
 		const response = await this.request(request);
@@ -865,7 +865,7 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async getTaskStatus(token: string): Promise<TASK_STATUS> {
 		// Send status request
-		const request = this.buildRequest('apaext_get_task_status', { token });
+		const request = this.buildRequest('rrext_get_task_status', { token });
 		const response = await this.request(request);
 
 		// Check for status retrieval errors
@@ -1309,7 +1309,7 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async setEvents(token: string, eventTypes: string[]): Promise<void> {
 		// Build event subscription request
-		const request = this.buildRequest('apaext_monitor', {
+		const request = this.buildRequest('rrext_monitor', {
 			arguments: { types: eventTypes },
 			token,
 		});
@@ -1397,7 +1397,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1468,7 +1468,7 @@ export class RocketRideClient extends DAPClient {
 		};
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1539,7 +1539,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1600,7 +1600,7 @@ export class RocketRideClient extends DAPClient {
 		};
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1666,7 +1666,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1705,7 +1705,7 @@ export class RocketRideClient extends DAPClient {
 		};
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1749,7 +1749,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1787,7 +1787,7 @@ export class RocketRideClient extends DAPClient {
 		};
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1840,7 +1840,7 @@ export class RocketRideClient extends DAPClient {
 		};
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1888,7 +1888,7 @@ export class RocketRideClient extends DAPClient {
 		};
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1940,7 +1940,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1967,13 +1967,13 @@ export class RocketRideClient extends DAPClient {
 	 * full DAPMessage objects. It builds the request internally and delegates
 	 * to the underlying request() method.
 	 *
-	 * @param command - The DAP command name (e.g., 'apaext_services', 'apaext_monitor')
+	 * @param command - The DAP command name (e.g., 'rrext_services', 'rrext_monitor')
 	 * @param args - Optional arguments for the command
 	 * @param token - Optional task/session token
 	 * @param timeout - Optional per-request timeout in ms
 	 * @returns The response DAPMessage from the server
 	 */
-	async rawRequest(
+	async dapRequest(
 		command: string,
 		args?: Record<string, unknown>,
 		token?: string,
@@ -2047,7 +2047,7 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async getServices(): Promise<Record<string, unknown>> {
 		// Build services request (no service argument = get all)
-		const request = this.buildRequest('apaext_services', {});
+		const request = this.buildRequest('rrext_services', {});
 
 		// Send to server and wait for response
 		const response = await this.request(request);
@@ -2090,7 +2090,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Build services request with specific service name
-		const request = this.buildRequest('apaext_services', {
+		const request = this.buildRequest('rrext_services', {
 			arguments: { service }
 		});
 

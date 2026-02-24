@@ -1,9 +1,7 @@
 {
-  "name": "@rocketride/core",
-  "version": "3.1.0",
-  "description": "RocketRide Core Library - High-performance C++ foundational library",
-  "private": true,
-  "license": "MIT",
-  "scripts": {}
+    "name": "@rocketride/core",
+    "version": "3.1.0",
+    "description": "RocketRide Core Library - High-performance C++ foundational library",
+    "private": true,
+    "license": "MIT"
 }
-

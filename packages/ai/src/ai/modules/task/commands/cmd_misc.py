@@ -8,7 +8,7 @@ information and metadata services.
 
 Primary Responsibilities:
 --------------------------
-1. Handles DAP 'apaext_services' command for service definition retrieval
+1. Handles DAP 'rrext_services' command for service definition retrieval
 2. Provides access to connector schemas, UI schemas, and metadata
 3. Returns service information for pipeline configuration and validation
 
@@ -68,9 +68,9 @@ class MiscCommands(DAPConn):
         """
         pass
 
-    async def on_apaext_services(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_services(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle DAP 'apaext_services' command to retrieve service definitions.
+        Handle DAP 'rrext_services' command to retrieve service definitions.
 
         This method provides access to connector service definitions including
         schemas, UI schemas, and other metadata. It can return either a single
@@ -91,8 +91,8 @@ class MiscCommands(DAPConn):
             Exception: If the specified service is not found
 
         Usage Examples:
-        - Get all services: { "command": "apaext_services" }
-        - Get specific service: { "command": "apaext_services", "arguments": { "service": "ocr" } }
+        - Get all services: { "command": "rrext_services" }
+        - Get specific service: { "command": "rrext_services", "arguments": { "service": "ocr" } }
         """
         try:
             # Extract optional service name from request arguments
@@ -120,9 +120,9 @@ class MiscCommands(DAPConn):
             # Re-raise to let DAP error handling create proper error response
             raise
 
-    async def on_apaext_validate(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_validate(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle DAP 'apaext_validate' command to validate a pipeline configuration.
+        Handle DAP 'rrext_validate' command to validate a pipeline configuration.
 
         Validates pipeline structure, component compatibility, and connection
         integrity using rocketlib's validatePipeline function.
@@ -144,7 +144,7 @@ class MiscCommands(DAPConn):
                   component, and execution chain
 
         Usage Example:
-        { "command": "apaext_validate", "arguments": { "pipeline": { ... }, "source": "chat_1" } }
+        { "command": "rrext_validate", "arguments": { "pipeline": { ... }, "source": "chat_1" } }
         """
         try:
             args = request.get('arguments', {})

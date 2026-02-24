@@ -191,14 +191,14 @@
 				"title": "Local test server",
 				"api_endpoint": "http://localhost:8080",
 				"application_token": "test-token",
-				"collection": "APARAVI"
+				"collection": "ROCKETRIDE"
 			},
 			"cloud": {
 				"mode": "cloud",
 				"title": "Astra DB cloud server",
 				"api_endpoint": "",
                 "application_token": "",
-                "collection": "APARAVI"
+                "collection": "ROCKETRIDE"
 			}
 		}
 	},
