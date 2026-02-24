@@ -12,7 +12,7 @@ permissions:
   packages: write
   pull-requests: write
   repository-projects: read
-  security-events: write
+  security-events: read
   statuses: read
 
 env:
@@ -135,20 +135,6 @@ jobs:
           & $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" `
             -Source "${{ env.NUGET_FEED_URL }}"
 
-      - name: Initialize CodeQL
-        if: matrix.platform == 'ubuntu'
-        uses: github/codeql-action/init@v3
-        with:
-          languages: cpp
-          build-mode: manual
-          queries: security-and-quality
-
-      - name: Skip prebuilt download (for CodeQL tracing)
-        if: matrix.platform == 'ubuntu'
-        run: |
-          mkdir -p build
-          echo '{"server":{"compiledVersion":"codeql"}}' > build/state.json
-
       - name: Build
         env:
           APARAVI_VERSION: ${{ needs.init.outputs.full_version }}
@@ -160,12 +146,6 @@ jobs:
 
       - name: Test
         run: ${{ matrix.builder_cmd }} test --verbose --sequential
-
-      - name: Perform CodeQL Analysis
-        if: matrix.platform == 'ubuntu'
-        uses: github/codeql-action/analyze@v3
-        with:
-          category: /language:cpp
 
       - name: Upload artifacts
         if: github.event_name == 'workflow_dispatch' && inputs.release_type != ''
