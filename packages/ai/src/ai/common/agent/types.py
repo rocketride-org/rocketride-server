@@ -8,13 +8,30 @@ It should not import engine runtime modules so it can be reused by framework dri
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, Protocol, TypedDict
 
 from ai.common.schema import Question
 
 
 CONTINUATION_TYPE = 'aparavi.agent.continuation.v1'
 AGENT_TOOL_CALLS_TYPE = 'aparavi.agent.tool_calls.v1'
+
+
+class AgentHostLLM(Protocol):
+    def invoke(self, param: Any) -> Any: ...
+
+
+class AgentHostTools(Protocol):
+    def query(self) -> Any: ...
+
+    def validate(self, tool_name: str, input: Any) -> Any: ...
+
+    def invoke(self, tool_name: str, input: Any) -> Any: ...
+
+
+class AgentHost(Protocol):
+    llm: AgentHostLLM
+    tools: AgentHostTools
 
 
 class AgentControl(TypedDict, total=False):

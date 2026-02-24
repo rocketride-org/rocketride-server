@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from rocketlib import debug, error
 from ai.common.schema import Answer, Question
 
-from .types import AgentEnvelope, AgentInput, AgentRunResult
+from .types import AgentEnvelope, AgentHost, AgentInput, AgentRunResult
 from ._internal.envelope import failed_envelope, to_envelope
 from ._internal.host import AgentHostServices
 from ._internal.trace import attach_tool_calls_artifact, make_tracing_invoker
@@ -118,6 +118,75 @@ class Agent(ABC):
             pSelf.instance.writeAnswers(answer)
 
         return envelope
+
+    # ---------------------------------------------------------------------
+    # Framework-facing host operations (normalization lives here)
+    # ---------------------------------------------------------------------
+    def _discover_tool_names(self, *, host: AgentHost) -> List[str]:
+        """Best-effort connected tool discovery (names only)."""
+        try:
+            catalog = host.tools.query()
+        except Exception as e:
+            catalog = {'error': str(e), 'type': type(e).__name__}
+        return extract_tool_names(catalog)
+
+    def _invoke_host_tool(
+        self,
+        *,
+        host: AgentHost,
+        tool_name: str,
+        input: Any = None,  # noqa: A002
+        kwargs: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        """Invoke a host tool after normalizing invocation payload shapes."""
+        from ._internal.tool_payload import normalize_invocation_payload
+
+        payload = normalize_invocation_payload(input=input, kwargs=kwargs)
+        return host.tools.invoke(tool_name, payload)
+
+    def _call_host_llm_text(
+        self,
+        *,
+        host: AgentHost,
+        messages: Any,
+        question_role: str,
+        stop_words: Any = None,
+    ) -> str:
+        """Call host LLM and return normalized text (best-effort)."""
+        from ._internal.llm_text import extract_text, messages_to_transcript, truncate_at_stop_words
+        from rocketlib.types import IInvokeLLM
+
+        transcript = messages_to_transcript(messages)
+        q = Question(role=question_role)
+        q.addQuestion(transcript)
+        result = host.llm.invoke(IInvokeLLM(op='ask', question=q))
+        text = extract_text(result)
+        return truncate_at_stop_words(text, stop_words)
+
+    # ---------------------------------------------------------------------
+    # Framework binding hooks (framework drivers implement these)
+    # ---------------------------------------------------------------------
+    @abstractmethod
+    def _bind_framework_llm(
+        self,
+        *,
+        host: AgentHost,
+        call_llm_text: Callable[..., str],
+        ctx: Dict[str, Any],
+    ) -> Any:
+        raise NotImplementedError
+
+    @abstractmethod
+    def _bind_framework_tools(
+        self,
+        *,
+        host: AgentHost,
+        tool_names: List[str],
+        invoke_tool: Callable[..., Any],
+        log_tool_call: Callable[..., None],
+        ctx: Dict[str, Any],
+    ) -> List[Any]:
+        raise NotImplementedError
 
     # ---------------------------------------------------------------------
     # Tool-provider surface (agent-as-tool)
@@ -238,14 +307,15 @@ class Agent(ABC):
 
     @staticmethod
     def _agent_tool_parse_input(input_obj: Any) -> tuple[str, Optional[Dict[str, Any]]]:
-        if isinstance(input_obj, dict) and 'input' in input_obj and len(input_obj) == 1:
-            input_obj = input_obj.get('input')
-        if not isinstance(input_obj, dict):
+        from ._internal.tool_payload import normalize_invocation_payload
+
+        payload = normalize_invocation_payload(input=input_obj)
+        if not isinstance(payload, dict):
             raise ValueError('agent tool: input must be an object')
-        query = input_obj.get('query')
+        query = payload.get('query')
         if not isinstance(query, str):
             raise ValueError('agent tool: input.query must be a string')
-        ctx = input_obj.get('context')
+        ctx = payload.get('context')
         if ctx is None:
             return query, None
         if not isinstance(ctx, dict):
@@ -255,16 +325,15 @@ class Agent(ABC):
     def _discover_connected_tool_names(self, pSelf: Any) -> List[str]:
         try:
             host = AgentHostServices(pSelf.instance.invoke)
-            catalog = host.tools.query()
-            return extract_tool_names(catalog)
+            return self._discover_tool_names(host=host)
         except Exception:
             return []
 
     # ---------------------------------------------------------------------
-    # Abstract hook
+    # Abstract hook: framework run
     # ---------------------------------------------------------------------
     @abstractmethod
-    def _run(self, *, agent_input: AgentInput, host: AgentHostServices, ctx: Dict[str, Any]) -> AgentRunResult:
+    def _run(self, *, agent_input: AgentInput, host: AgentHost, ctx: Dict[str, Any]) -> AgentRunResult:
         raise NotImplementedError
 
     # ---------------------------------------------------------------------

@@ -7,16 +7,13 @@ engine runtime objects (it receives config via __init__ and host services via ca
 
 from __future__ import annotations
 
-from typing import Any, Dict
+import json
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from rocketlib import debug
 
 from ai.common.agent import Agent
-from ai.common.agent.types import AgentInput, AgentRunResult
-from ai.common.agent._internal.host import AgentHostServices
-
-from .host_llm import make_host_llm
-from .host_tools import extract_tool_names, make_host_tools, query_tool_catalog
+from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
 
 
 def _safe_str(v: Any) -> str:
@@ -36,11 +33,85 @@ class CrewDriver(Agent):
         self._instructions = _safe_str(instructions).strip()
         self._process = process
 
+    def _bind_framework_llm(
+        self,
+        *,
+        host: AgentHost,
+        call_llm_text: Callable[..., str],
+        ctx: Dict[str, Any],
+    ) -> Any:
+        # Lazy import to avoid CrewAI import at module import time.
+        from crewai import BaseLLM  # type: ignore
+
+        class HostInvokeLLM(BaseLLM):
+            def __init__(self):
+                super().__init__(model='aparavi-host-llm', temperature=None)
+
+            def supports_function_calling(self) -> bool:
+                return False
+
+            def supports_stop_words(self) -> bool:
+                # CrewAI may still provide `self.stop`; we truncate manually.
+                return False
+
+            def call(
+                self,
+                messages: Union[str, List[Dict[str, str]]],
+                tools: Optional[List[dict]] = None,
+                callbacks: Optional[List[Any]] = None,
+                available_functions: Optional[Dict[str, Any]] = None,
+                **kwargs: Any,
+            ) -> Union[str, Any]:
+                stop_words = getattr(self, 'stop', None)
+                return call_llm_text(messages, stop_words=stop_words)
+
+        return HostInvokeLLM()
+
+    def _bind_framework_tools(
+        self,
+        *,
+        host: AgentHost,
+        tool_names: List[str],
+        invoke_tool: Callable[..., Any],
+        log_tool_call: Callable[..., None],
+        ctx: Dict[str, Any],
+    ) -> List[Any]:
+        # Lazy import to avoid CrewAI import at module import time.
+        from crewai.tools import BaseTool  # type: ignore
+        from pydantic import BaseModel, ConfigDict, Field  # type: ignore
+
+        class _ToolInput(BaseModel):
+            input: Any = Field(default=None, description='Tool input payload')
+            model_config = ConfigDict(extra='allow')
+
+        class HostTool(BaseTool):
+            name: str
+            description: str
+            args_schema: type[BaseModel] = _ToolInput
+
+            def _run(self, input: Any = None, **kwargs: Any) -> str:
+                try:
+                    out = invoke_tool(self.name, input=input, kwargs=kwargs)
+                except Exception as e:
+                    out = {'error': str(e), 'type': type(e).__name__}
+
+                try:
+                    log_tool_call(tool_name=self.name, input={'input': input, **kwargs}, output=out)
+                except Exception:
+                    pass
+
+                try:
+                    return json.dumps(out, default=str) if isinstance(out, (dict, list)) else _safe_str(out)
+                except Exception:
+                    return _safe_str(out)
+
+        return [HostTool(name=tool_name, description=f'Invoke host tool: {tool_name}') for tool_name in tool_names]
+
     def _run(
         self,
         *,
         agent_input: AgentInput,
-        host: AgentHostServices,
+        host: AgentHost,
         ctx: Dict[str, Any],
     ) -> AgentRunResult:
         run_id = ctx.get('run_id', '')
@@ -48,14 +119,26 @@ class CrewDriver(Agent):
 
         from crewai import Agent, Crew, Task  # type: ignore
 
-        llm = make_host_llm(host=host)
+        tool_names = self._discover_tool_names(host=host)
 
-        tool_catalog = query_tool_catalog(host=host)
-        tools_to_use = extract_tool_names(tool_catalog)
-        tools_for_agent = make_host_tools(
+        def _call_llm_text(messages: Any, stop_words: Any = None) -> str:
+            return self._call_host_llm_text(
+                host=host,
+                messages=messages,
+                question_role='You are a helpful assistant.',
+                stop_words=stop_words,
+            )
+
+        def _invoke_tool(tool_name: str, input: Any = None, kwargs: Optional[Dict[str, Any]] = None) -> Any:  # noqa: A002
+            return self._invoke_host_tool(host=host, tool_name=tool_name, input=input, kwargs=kwargs)
+
+        llm = self._bind_framework_llm(host=host, call_llm_text=_call_llm_text, ctx=ctx)
+        tools_for_agent = self._bind_framework_tools(
             host=host,
-            tool_names=tools_to_use,
+            tool_names=tool_names,
+            invoke_tool=_invoke_tool,
             log_tool_call=lambda **_: None,
+            ctx=ctx,
         )
 
         agent_obj = Agent(
