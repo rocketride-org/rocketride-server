@@ -106,7 +106,7 @@
 	"preconfig": {
 		// Define the values that will be merged into any profile configuration
 		// specified, unless the profile is 'absolute'
-		"default": "openai-4o",
+		"default": "openai-5-2",
 		// Defines profiles used with the "profile": key
 		"profiles": {
 			"custom": {
@@ -230,7 +230,7 @@
 			"title": "Model",
 			"description": "LLM model",
 			"type": "string",
-			"default": "openai-4o",
+			"default": "openai-5-2",
 			"enum": [
 				"*>preconfig.profiles.*.title"
 			],

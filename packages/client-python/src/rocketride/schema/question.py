@@ -593,10 +593,6 @@ class Question(BaseModel):
         if self.role:
             prompt += self.role + crlf
 
-        # Add default instruction if none provided
-        if not len(self.instructions):
-            addPromptInstruction(QuestionInstruction(subtitle='Answer the following questions', instructions='I will provide the questions listed in order and then documents as context. Use the given context to provide an answer to the questions.'))
-
         # Add all instructions
         for instruction in self.instructions:
             addPromptInstruction(instruction)
@@ -642,10 +638,13 @@ class Question(BaseModel):
 
         # Add questions
         if len(self.questions):
-            questionNum = 1
-            for question in self.questions:
-                prompt += f'Question {questionNum}: ' + question.text + crlf
-                questionNum += 1
+            if len(self.questions) == 1:
+                prompt += self.questions[0].text + crlf
+            else:
+                questionNum = 1
+                for question in self.questions:
+                    prompt += f'Question {questionNum}: ' + question.text + crlf
+                    questionNum += 1
 
         # Add context
         for context in self.context:

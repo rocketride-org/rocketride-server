@@ -32,7 +32,7 @@
 export interface Message {
 	id: number;
 	text: string;
-	sender: 'user' | 'bot';
+	sender: 'user' | 'bot' | 'system';
 	timestamp: string;
 }
 

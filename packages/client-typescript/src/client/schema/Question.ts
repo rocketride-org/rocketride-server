@@ -382,14 +382,6 @@ export class Question {
 			prompt += this.role + crlf;
 		}
 
-		// Add default instruction if none provided
-		if (this.instructions.length === 0) {
-			addPromptInstruction({
-				subtitle: 'Answer the following questions',
-				instructions: 'I will provide the questions listed in order and then documents as context. Use the given context to provide an answer to the questions.'
-			});
-		}
-
 		// Add all instructions
 		for (const instruction of this.instructions) {
 			addPromptInstruction(instruction);
@@ -441,10 +433,14 @@ export class Question {
 
 		// Add questions
 		if (this.questions.length > 0) {
-			let questionNum = 1;
-			for (const question of this.questions) {
-				prompt += `Question ${questionNum}: ${question.text}` + crlf;
-				questionNum++;
+			if (this.questions.length === 1) {
+				prompt += this.questions[0].text + crlf;
+			} else {
+				let questionNum = 1;
+				for (const question of this.questions) {
+					prompt += `Question ${questionNum}: ${question.text}` + crlf;
+					questionNum++;
+				}
 			}
 		}
 
