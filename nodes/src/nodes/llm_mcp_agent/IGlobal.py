@@ -32,7 +32,7 @@ Expected format::
 
     {
         "mcpServers": {
-            "aql":  { "url": "http://localhost:8000/sse" },
+            "mcp1":  { "url": "http://localhost:8000/sse" },
             "docs": { "url": "http://other:4000/sse", "headers": { "Authorization": "Bearer tok" } }
         },
         "prompt": "You are a data analyst. Always return structured results."

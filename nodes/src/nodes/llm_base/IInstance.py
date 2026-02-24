@@ -42,23 +42,15 @@ class IInstanceGenericLLM(IInstanceBase):
         self.instance.writeAnswers(answer)
 
     def _question_with_tools(self, question: Question, tools: list, tools_steps_callback=None) -> Answer:
-        """Run chat_with_tools and return an Answer with { text, aql_queries }."""
+        """Run chat_with_tools and return an Answer with { text, tool_calls }."""
         out = self.IGlobal._chat.chat_with_tools(question, tools, return_tool_calls=True, tools_steps_callback=tools_steps_callback)
         if isinstance(out, tuple):
             answer_obj, tool_calls_log = out
         else:
             answer_obj = out
             tool_calls_log = []
-        aql_queries = []
-        for entry in tool_calls_log:
-            if entry.get('name') == 'execute_aql':
-                args = entry.get('args') or {}
-                aql_queries.append({
-                    'query': args.get('query') or '',
-                    'result': entry.get('result'),
-                })
         final_text = answer_obj.getText() if callable(getattr(answer_obj, 'getText', None)) else getattr(answer_obj, 'answer', '') or ''
-        response = {'text': final_text, 'aql_queries': aql_queries}
+        response = {'text': final_text, 'tool_calls': tool_calls_log}
         answer = Answer(expectJson=True)
         answer.setAnswer(response)
         return answer

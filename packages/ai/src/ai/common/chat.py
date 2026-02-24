@@ -450,7 +450,7 @@ class ChatBase:
         """
         Return True if the underlying LLM supports tool/function calling (bind_tools).
         When True, chat_with_tools() can be used so the model can choose to call tools
-        (e.g. execute_aql) and then generate a final answer from the results.
+        and then generate a final answer from the results.
         """
         llm = getattr(self, '_llm', None)
         return getattr(llm, 'bind_tools', None) is not None
@@ -464,7 +464,7 @@ class ChatBase:
             tools_steps_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
             ):
             """
-            Chat with tool use: the LLM can call tools (e.g. execute_aql) and then
+            Chat with tool use: the LLM can call tools and then
             produce a final answer from the results. Works with any provider whose
             underlying _llm supports bind_tools (e.g. Anthropic, OpenAI).
             If the LLM does not support bind_tools, falls back to normal chat(question).
@@ -472,8 +472,8 @@ class ChatBase:
                 question: The user question.
                 tools: List of LangChain tools (e.g. StructuredTool) the model can call.
                     Must have .name and be invocable with the tool's arguments.
-                    Example: use nodes.llm_tools_agent.aql_tool.get_execute_aql_tool(base_url, token)
-                    so the LLM can call execute_aql to run AQL and then answer from the results.
+                    Example: use nodes.llm_tools_agent.tool.get_execute_tool(base_url, token)
+                    so the LLM can call execute to run tool and then answer from the results.
                 max_tool_rounds: Maximum number of tool-call rounds before returning.
                 return_tool_calls: If True, return (Answer, tool_calls_list) where tool_calls_list
                                 is [{"name", "args", "result"}, ...] for the chat UI to display.
@@ -526,47 +526,23 @@ class ChatBase:
                     else:
                         # Emit tools-steps: tool starting
                         if tools_steps_callback:
-                            debug(f'[chat_with_tools] Calling tools_steps_callback for {name} (running)')
-                            tool_desc = getattr(tool_map[name], 'description', '') or ''
-                            message = f'Executing {name}...'
-                            if name == 'execute_aql' and isinstance(args, dict) and 'query' in args:
-                                message = f'Executing query: {args.get("query", "")[:100]}'
-                            elif name == 'get_aql_context':
-                                message = 'Fetching database schema...'
-                            try:
-                                tools_steps_callback({
-                                    'tool': name,
-                                    'status': 'running',
-                                    'message': message,
-                                    'timestamp': datetime.utcnow().isoformat() + 'Z',
-                                    'args': dict(args) if isinstance(args, dict) else {},
-                                })
-                                debug(f'[chat_with_tools] tools_steps_callback completed for {name} (running)')
-                            except Exception as e:
-                                debug(f'[chat_with_tools] tools_steps_callback failed for {name}: {e}')
-                        else:
-                            debug(f'[chat_with_tools] No tools_steps_callback available')
+                            tools_steps_callback({
+                                'tool': name,
+                                'status': 'running',
+                                'message': f'Executing {name}...',
+                                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                                'args': dict(args) if isinstance(args, dict) else {},
+                            })
                         try:
                             result = tool_map[name].invoke(args)
                             content = result if isinstance(result, str) else json.dumps(result)
                             tool_calls_log.append({'name': name, 'args': dict(args), 'result': result})
                             # Emit tools-steps: tool completed
                             if tools_steps_callback:
-                                result_summary = ''
-                                if isinstance(result, dict):
-                                    if 'columns' in result:
-                                        count = len(result.get('columns', []))
-                                        result_summary = f'Schema retrieved: {count} columns found'
-                                    elif 'objects' in result or 'count' in result:
-                                        count = result.get('count', len(result.get('objects', [])))
-                                        result_summary = f'Query executed: {count} objects returned'
-                                message = f'{name} completed successfully'
-                                if result_summary:
-                                    message = result_summary
                                 tools_steps_callback({
                                     'tool': name,
                                     'status': 'completed',
-                                    'message': message,
+                                    'message': f'{name} completed',
                                     'timestamp': datetime.utcnow().isoformat() + 'Z',
                                     'args': dict(args) if isinstance(args, dict) else {},
                                     'result': result,

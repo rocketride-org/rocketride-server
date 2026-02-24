@@ -31,7 +31,7 @@
 			"provider": "llm_mcp_agent",
 			"config": {
 				"mcpServers": {
-					"aql": { "url": "http://localhost:8000/sse" }
+					"mcp1": { "url": "http://localhost:8000/sse" }
 				}
 			},
 			"input": [
