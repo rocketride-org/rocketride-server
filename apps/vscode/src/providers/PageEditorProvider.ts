@@ -222,7 +222,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 
 		try {
 			// Send DAP command to start monitoring all components (*) for this project
-			await this.connectionManager.request('apaext_monitor', {
+			await this.connectionManager.request('rrext_monitor', {
 				projectId: editorState.projectId,
 				source: '*',  // Monitor ALL components in this project
 				types: ['summary']
@@ -254,7 +254,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 		if (this.connectionManager.isConnected()) {
 			try {
 				// Send DAP command to stop monitoring (no types parameter)
-				await this.connectionManager.request('apaext_monitor', {
+				await this.connectionManager.request('rrext_monitor', {
 					projectId: editorState.projectId,
 					source: '*'
 				});
@@ -679,7 +679,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 			}
 
 			// Get the token for the running task
-			const response = await this.connectionManager.request('apaext_get_token', {
+			const response = await this.connectionManager.request('rrext_get_token', {
 				projectId: projectId,
 				source: componentId
 			}) as GenericResponse | undefined;

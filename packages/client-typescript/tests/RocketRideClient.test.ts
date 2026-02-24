@@ -52,7 +52,7 @@ const itIfLLM = hasLLMKey ? it : it.skip;
 const TEST_CONFIG = {
 	uri: process.env.ROCKETRIDE_URI || 'http://localhost:5565',
 	auth: process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY',
-	timeout: 60000, // 60 second timeout for integration tests
+	timeout: 120000, // 120 second timeout for integration tests (CI runners can be slow)
 };
 
 

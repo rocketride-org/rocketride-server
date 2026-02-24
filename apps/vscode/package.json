@@ -434,7 +434,6 @@
 		]
 	},
 	"main": "./dist/rocketride.js",
-	"scripts": {},
 	"devDependencies": {
 		"@rsbuild/core": "^1.4.10",
 		"@rsbuild/plugin-react": "^1.3.4",

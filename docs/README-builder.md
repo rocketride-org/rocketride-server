@@ -41,7 +41,6 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 |--------|-------------|----------|
 | `ai` | AI/ML modules | build, clean, test |
 | `chat-ui` | Chat web interface | build, clean, dev |
-| `classify` | Classification wrapper DLL (native) | clean |
 | `client-mcp` | MCP Protocol client | build, clean, test |
 | `client-python` | Python SDK | build, clean, test |
 | `client-typescript` | TypeScript/JavaScript SDK | build, clean, test |
@@ -481,14 +480,14 @@ Build systems often have tasks that don't depend on each other. Running them seq
 
 ```
 Sequential (slow):
-  nodes:sync ─────────────► ai:sync ─────────────► client-python:sync
+  nodes:sync ─────────────► ai:sync ─────────────► client-python:sync-source
   [2 seconds]                [2 seconds]           [1 second]
   Total: 5 seconds
 
 Parallel (fast):  
   ┌─ nodes:sync ─────────┐
   ├─ ai:sync ────────────┼─► Done
-  └─ client-python:sync ─┘
+  └─ client-python:sync-source ─┘
   Total: 2 seconds (limited by slowest)
 ```
 
@@ -1236,9 +1235,12 @@ builder server:build nodes:build ai:build
 builder build
 
 # Run with options
-builder my-package:test --force           # Force rebuild
+builder my-package:test --force           # Force rebuild (ignore cache/state)
 builder my-package:test --verbose         # Detailed output
 builder my-package:test --pytest="-s -v"  # Pass pytest args
+builder build --sequential               # Run modules sequentially
+builder build --autoinstall              # Install missing tools automatically
+builder build --arch=arm                 # Target architecture (macOS cross-compile)
 
 # Show help
 builder --help
@@ -1302,7 +1304,7 @@ This section covers common patterns and **when** to use them based on the proble
     description: 'Build Python client',
     steps: [
         'nodes:build',  // Skipped if already run
-        'client-python:sync'
+        'client-python:sync-source'
     ]
 })}
 ```

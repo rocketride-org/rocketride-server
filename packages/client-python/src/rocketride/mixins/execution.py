@@ -410,7 +410,7 @@ class ExecutionMixin(DAPClient):
             - Performance metrics help optimize pipeline configurations
         """
         # Send status request
-        request = self.build_request(command='apaext_get_task_status', token=token)
+        request = self.build_request(command='rrext_get_task_status', token=token)
         response = await self.request(request)
 
         # Check for status retrieval errors

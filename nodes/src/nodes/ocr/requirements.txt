@@ -8,3 +8,5 @@
 # as that can corrupt already-loaded modules in the server process.
 #
 img2table
+pillow
+numpy

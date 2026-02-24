@@ -54,7 +54,7 @@
 		"retrieval of vector embeddings using MongoDB's native vector search capabilities. ",
 		"It supports similarity search, filtering, and management of vector data with ",
 		"high performance and advanced matching capabilities using Atlas Vector Search.",
-		"</br></br>To access local services from AI Cloud, follow these steps: <a href=\"https://bit.ly/4maRLPL\" target=\"_blank\">Setting Up Ngrok to Local Services from Aparavi Data Toolchain for AI Cloud</a></br>",
+		"</br></br>To access local services from AI Cloud, follow these steps: <a href=\"https://bit.ly/4maRLPL\" target=\"_blank\">Setting Up Ngrok to Local Services from RocketRide Data Toolchain for AI Cloud</a></br>",
 		"</br></br><a href=\"https://www.mongodb.com/products/platform/atlas-vector-search\" target=\"_blank\">MongoDB Atlas Vector Search</a>"
 	],
 	//
@@ -153,7 +153,7 @@
 			"description": "Enter the server IP address e.g. <your-instance-name>.<region>.atlas.io"
 		},
 		"vector.database": {
-			"default": "aparavi_db"
+			"default": "rocketride_db"
 		},
 		"atlas.provider": {
 			"type": "string",

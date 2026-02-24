@@ -60,7 +60,7 @@ async function _download(url, destPath, task) {
     const makeRequest = (currentUrl) => {
         return new Promise((resolve, reject) => {
             const protocol = currentUrl.startsWith('https') ? https : require('http');
-            const req = protocol.get(currentUrl, { headers: { 'User-Agent': 'aparavi-build' } }, resolve);
+            const req = protocol.get(currentUrl, { headers: { 'User-Agent': 'rocketride-build' } }, resolve);
             req.on('error', reject);
         });
     };

@@ -128,7 +128,7 @@ flowchart TB
 ### Quick Start
 
 ```bash
-git clone https://github.com/aparavi/engine-new.git
+git clone https://github.com/rocketride-org/rocketride-server.git
 cd engine-new
 ./builder build
 ```
@@ -205,7 +205,7 @@ import { RocketRideClient } from '@rocketride/client-typescript';
 
 const client = new RocketRideClient({
   auth: process.env.ROCKETRIDE_APIKEY!,
-  uri: 'https://eaas.example.com',
+  uri: 'https://cloud.rocketride.ai',
 });
 await client.connect();
 const { token } = await client.use({ filepath: './pipeline.json' });
@@ -217,7 +217,7 @@ const result = await client.send(token, 'Hello, pipeline!');
 ```python
 from rocketride import RocketRideClient
 
-async with RocketRideClient(uri='wss://eaas.example.com', auth='your-api-key') as client:
+async with RocketRideClient(uri='wss://cloud.rocketride.ai', auth='your-api-key') as client:
     result = await client.use(filepath='pipeline.json')
     token = result['token']
     await client.send(token, 'Hello, pipeline!')

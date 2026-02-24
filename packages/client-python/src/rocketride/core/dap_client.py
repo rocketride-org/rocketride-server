@@ -257,6 +257,40 @@ class DAPClient(DAPBase):
             # Always clean up the pending request
             self._pending_requests.pop(seq, None)
 
+    async def dap_request(
+        self,
+        command: str,
+        arguments: Optional[Dict[str, Any]] = None,
+        token: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Send an arbitrary DAP command with command name, arguments, and optional token.
+
+        Convenience method that builds the request and sends it in one call.
+        Equivalent to ``build_request(command, ...)`` + ``request(...)``.
+
+        Args:
+            command: The DAP command name (e.g. 'rrext_services', 'rrext_monitor', 'initialize').
+            arguments: Optional arguments for the command.
+            token: Optional task/session token.
+            timeout: Optional per-request timeout in ms. Overrides the default request_timeout.
+
+        Returns:
+            The response message (DAP dict) from the server.
+
+        Example:
+            response = await client.dap_request('rrext_services', {}, timeout=5000)
+            if client.did_fail(response):
+                raise RuntimeError(response.get('message', 'Request failed'))
+        """
+        request = self.build_request(
+            command,
+            token=token,
+            arguments=arguments or {},
+        )
+        return await self.request(request, timeout=timeout)
+
     async def connect(self, timeout: Optional[float] = None) -> None:
         """
         Establish connection to the DAP server.

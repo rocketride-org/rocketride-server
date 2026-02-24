@@ -1,18 +1,17 @@
 {
-  "name": "@rocketride/example-console-chat",
-  "version": "1.0.0",
-  "description": "A simple console-based chat application written in TypeScript.",
-  "private": true,
-  "main": "dist/chat.js",
-  "scripts": {},
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "ts-node": "^10.9.0",
-    "typescript": "^5.0.0"
-  },
-  "author": "RocketRide, Inc.",
-  "license": "MIT",
-  "dependencies": {
-    "rocketride": "workspace:*"
-  }
+    "name": "@rocketride/example-console-chat",
+    "version": "1.0.0",
+    "description": "A simple console-based chat application written in TypeScript.",
+    "private": true,
+    "main": "dist/chat.js",
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "ts-node": "^10.9.0",
+        "typescript": "^5.0.0"
+    },
+    "author": "RocketRide, Inc.",
+    "license": "MIT",
+    "dependencies": {
+        "rocketride": "workspace:*"
+    }
 }

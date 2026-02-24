@@ -587,7 +587,7 @@ export class ConnectionManager extends EventEmitter {
 			return undefined;
 		}
 		try {
-			const response = await this.client.rawRequest(command, args, token);
+			const response = await this.client.dapRequest(command, args, token);
 			return response as unknown as GenericResponse;
 		} catch {
 			return undefined;
@@ -627,7 +627,7 @@ export class ConnectionManager extends EventEmitter {
 
 		this.servicesRefreshPromise = (async () => {
 			try {
-				const response = await this.client!.rawRequest('apaext_services', {});
+				const response = await this.client!.dapRequest('rrext_services', {});
 				if (response?.success === false) {
 					const msg = response?.message ?? 'Failed to load services';
 					this.cachedServices = null;
