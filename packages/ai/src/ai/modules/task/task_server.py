@@ -97,6 +97,9 @@ class TASK_CONTROL:
     provider: str = None
     pipeline: Optional[Dict[str, Any]] = None
 
+    # Chargebee subscription ID for usage billing
+    chargebee_subscription_id: str = ''
+
     # And finally, the task reference
     task: Optional[Task] = None
 
@@ -804,6 +807,7 @@ class TaskServer(DAPBase):
         *,
         attach_debugger=False,
         wait_for_running=False,
+        chargebee_subscription_id: str = '',
     ) -> str:
         """
         Create and start a new computational task with full lifecycle management.
@@ -880,6 +884,7 @@ class TaskServer(DAPBase):
 
         # Parse task configuration from request arguments
         control.apikey = apikey
+        control.chargebee_subscription_id = chargebee_subscription_id
         control.token = args.get('token', None)
         control.pipeline = args.get('pipeline', None)
         control.source = args.get('source', None)
@@ -1019,6 +1024,7 @@ class TaskServer(DAPBase):
                 launch_type=control.launch_type,
                 provider=control.provider,
                 ttl=ttl,
+                chargebee_subscription_id=control.chargebee_subscription_id,
             )
 
             # Register task in central registry
@@ -1069,6 +1075,7 @@ class TaskServer(DAPBase):
         *,
         attach_debugger=False,
         wait_for_running=False,
+        chargebee_subscription_id: str = '',
     ) -> Dict[str, Any]:
         """
         Restart an existing task with a new pipeline configuration.

@@ -194,6 +194,7 @@ class Task(DAPBase):
         launch_type: LAUNCH_TYPE = LAUNCH_TYPE.LAUNCH,
         provider: str = None,
         ttl: int = 900,
+        chargebee_subscription_id: str = '',
         **kwargs,
     ) -> None:
         """
@@ -230,6 +231,9 @@ class Task(DAPBase):
 
         # Save the source provider type
         self._provider = provider
+
+        # Chargebee subscription ID for billing
+        self._chargebee_subscription_id = chargebee_subscription_id
 
         # Status annotations for operational context
         self._service_up_notes = []
@@ -1471,6 +1475,7 @@ class Task(DAPBase):
                     pid=self._engine_process.pid,
                     task_status=self._status,
                     on_update_callback=self._on_metrics_updated,
+                    chargebee_subscription_id=self._chargebee_subscription_id,
                 )
                 self._task_metrics.start_monitoring()
                 self.debug_message(f'Started metrics monitoring for PID {self._engine_process.pid}')

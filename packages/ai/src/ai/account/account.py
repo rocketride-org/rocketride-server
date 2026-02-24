@@ -28,6 +28,9 @@ class AccountInfo:
     # Plans the account subscribes to
     plans: list[str] = field(default_factory=list)
 
+    # Chargebee subscription ID for usage-based billing
+    chargebee_subscription_id: str = ''
+
 
 class Account:
     """
@@ -140,6 +143,7 @@ class Account:
                 ms_balance=data.get('ms_balance', 0),
                 permissions=data.get('permissions', ['*']),
                 plans=[plan] if plan else ['free'],
+                chargebee_subscription_id=data.get('chargebee_subscription_id', ''),
             )
 
             # And return it

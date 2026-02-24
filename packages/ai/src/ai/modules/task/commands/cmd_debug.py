@@ -194,6 +194,7 @@ class DebugCommands(DAPConn):
                 request,
                 self,
                 attach_debugger=True,
+                chargebee_subscription_id=self._account_info.chargebee_subscription_id,
             )
 
             # Save the debug token and the event id
