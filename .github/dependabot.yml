@@ -29,7 +29,7 @@ updates:
 
   # Maven — Tika
   - package-ecosystem: "maven"
-    directory: "/packages/tika"
+    directory: "/packages/tika/lib/dbgconn"
     schedule:
       interval: "daily"
     target-branch: "develop"
