@@ -34,10 +34,9 @@ const {
     overlayDir, formatSyncStats,
     execCommand, PROJECT_ROOT, BUILD_DIR, isWindows, isMac, isLinux,
     exists, readFile, readJson, readDir, mkdir, copyFile, removeFile, chmod,
-    downloadFile, createArchive, extractArchive,
+    loadPackageJson, downloadGitHubFile, createArchive, extractArchive,
     parallel, whenNot, fingerprint, contentHash,
     taskDebug,
-    DOWNLOADS_DIR,
     STATE_FILE
 } = require('../../../scripts/lib');
 const { runCompilerSetup } = require('../../../scripts/compiler');
@@ -49,21 +48,6 @@ const DIST_DIR = path.join(PROJECT_ROOT, 'dist', 'server');
 const VCPKG_DIR = path.join(BUILD_DIR, 'vcpkg');
 const BUILD_ARTIFACTS_DIR = path.join(BUILD_DIR, 'artifacts');
 const DIST_ARTIFACTS_DIR = path.join(PROJECT_ROOT, 'dist', 'artifacts');
-
-// Get package info (loaded async)
-let VERSION = '0.0.0';
-let REPO = 'rocketride/rocketride-engine';
-let packageJsonLoaded = false;
-
-async function loadPackageJson() {
-    if (!packageJsonLoaded) {
-        const packageJson = await readJson(path.join(PROJECT_ROOT, 'package.json'));
-        VERSION = packageJson.version;
-        REPO = packageJson.repository?.url?.match(/github\.com[/:](.+?)(?:\.git)?$/)?.[1] || 'rocketride/rocketride-engine';
-        packageJsonLoaded = true;
-    }
-    return { version: VERSION, repo: REPO };
-}
 
 // =============================================================================
 // Platform Detection
@@ -90,23 +74,20 @@ function getPlatformInfo(options = {}) {
 }
 
 async function getDistInfo(options = {}) {
-    const { version, repo } = await loadPackageJson();
+    const { version } = await loadPackageJson();
     const platform = getPlatformInfo(options);
     const releaseTag = `server-v${version}`;
     const baseName = `rocketride-${releaseTag}-${platform.name}`;
+    const manifestFilename = `${baseName}.manifest.json`;
     const distFilename = `${baseName}.${platform.ext}`;
     const symDistFilename = isWindows() ? `${baseName}.symbols.${platform.ext}` : null;
-    const releaseUrl = `https://github.com/${repo}/releases/download/${releaseTag}`;
 
     return {
-        baseName: baseName,
-        repo: repo,
         releaseTag: releaseTag,
+        baseName: baseName,
+        manifestFilename: manifestFilename,
         distFilename: distFilename,
-        symDistFilename: symDistFilename,
-        releaseUrl: releaseUrl,
-        distUrl: `${releaseUrl}/${distFilename}`,
-        symDistUrl: symDistFilename ? `${releaseUrl}/${symDistFilename}` : null
+        symDistFilename: symDistFilename
     };
 }
 
@@ -485,21 +466,15 @@ function makeCheckPrebuiltAction(options = {}) {
             }
 
             const {
-                repo, releaseTag, distFilename, symDistFilename, distUrl, symDistUrl,
+                releaseTag, manifestFilename, distFilename, symDistFilename
             } = await getDistInfo(options);
 
-            // Fetch release manifest and compare content hash
-            const manifestName = `builder-${releaseTag}.json`;
-            const manifestPath = path.join(DOWNLOADS_DIR, manifestName);
             let hashMatches = false;
 
             try {
-                task.output = 'Checking source compatibility...';
-                await removeFile(manifestPath);
-                const manifestUrl = `https://github.com/${repo}/releases/download/${releaseTag}/${manifestName}`;
-                await downloadFile(manifestUrl, manifestName, task);
-
-                if (await exists(manifestPath)) {
+                // Fetch release manifest and compare content hash
+                const manifestPath = await downloadGitHubFile(releaseTag, manifestFilename, task);
+                if (manifestPath) {
                     const manifest = await readJson(manifestPath);
                     await setState('server.releaseManifest', manifest);
                     hashMatches = manifest?.server?.contentHash === localHash;
@@ -516,24 +491,28 @@ function makeCheckPrebuiltAction(options = {}) {
                 return;
             }
 
-            // Hash matches (or no manifest) — download the binary
             try {
                 task.output = `Downloading ${distFilename}...`;
-                const distPath = await downloadFile(distUrl, distFilename, task);
+                const distPath = await downloadGitHubFile(releaseTag, distFilename, task);
+                if (!distPath)
+                    throw new Error(`Dist file ${distFilename} cannot be downloaded`);
                 task.output = `Downloaded ${distFilename}`;
 
                 let symDistPath = null;
                 if (symDistFilename) {
                     task.output = `Downloading ${symDistFilename}...`;
-                    symDistPath = await downloadFile(symDistUrl, symDistFilename, task);
-                    task.output = `Downloaded ${symDistFilename}`;
+                    symDistPath = await downloadGitHubFile(releaseTag, symDistFilename, task);
+                    if (symDistPath)
+                        task.output = `Downloaded ${symDistFilename}`;
+                    else
+                        task.output = `Symbol dist file ${symDistFilename} not available, skipping`;
                 }
 
                 task.output = `Extracting ${distFilename}...`;
                 await extractArchive(distPath, DIST_DIR);
                 task.output = `Extracted ${distFilename}`;
 
-                if (isWindows() && symDistPath) {
+                if (symDistPath) {
                     task.output = `Extracting ${symDistFilename}...`;
                     await extractArchive(symDistPath, DIST_DIR);
                     task.output = `Extracted ${symDistFilename}`;
@@ -544,11 +523,11 @@ function makeCheckPrebuiltAction(options = {}) {
                 task.output = `Downloaded server ${releaseTag}`;
                 ctx.downloaded = true;
 
-            } catch (e) {
+            } catch {
                 await setState('server.contentHash', null);
                 await setState('server.downloadAttempted', true);
                 ctx.downloaded = false;
-                task.output = `Release ${releaseTag} download failed:\n${e.message.trim()}\nWill compile from source`;
+                task.output = `Release ${releaseTag} download failed: Will compile from source`;
             }
         }
     };
@@ -1085,7 +1064,9 @@ function makePackageAction(options = {}) {
     return {
         description: 'Package server distribution',
         run: async (_ctx, _task) => {
-            const { baseName, releaseTag, distFilename, symDistFilename } = await getDistInfo(options);
+            const {
+                baseName, manifestFilename, distFilename, symDistFilename
+            } = await getDistInfo(options);
             const distPath = path.join(DIST_ARTIFACTS_DIR, distFilename);
             const symDistPath = symDistFilename ? path.join(DIST_ARTIFACTS_DIR, symDistFilename) : null;
             const symFilename = isWindows() ? 'engine.pdb' : null;
@@ -1145,13 +1126,10 @@ function makePackageAction(options = {}) {
                     _task.output = `Packaged ${path.basename(symDistPath)}`;
                 }
 
-
                 await setState('server.pkgHash', sourceHash);
 
                 // Copy state.json as build manifest for download validation
-                const manifestName = `builder-${releaseTag}.json`;
-                await copyFile(STATE_FILE, path.join(DIST_ARTIFACTS_DIR, manifestName));
-                _task.output = `Packaged ${distFilename} + ${manifestName}`;
+                await copyFile(STATE_FILE, path.join(DIST_ARTIFACTS_DIR, manifestFilename));
 
             } catch (err) {
                 await removeFile(distPath);
