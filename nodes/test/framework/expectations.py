@@ -160,6 +160,14 @@ class ExpectationValidator:
             content_expect = {k: v for k, v in expect.items() if k in CONTENT_MATCHERS}
             other_expect = {k: v for k, v in expect.items() if k not in CONTENT_MATCHERS}
             
+            # Lane has no content (None or missing) — avoid subscript errors
+            if result is None:
+                errors.append(ExpectationError(
+                    f"Lane ${lane} has no content (result is None); cannot validate '{content_path}'",
+                    f"${lane}", content_path, result
+                ))
+                return errors
+            
             # Get content value using lane shortcut path
             try:
                 content_value = self._get_property(result, content_path)
@@ -405,7 +413,9 @@ class ExpectationValidator:
         for part in parts:
             if not part:
                 continue
-            
+            if current is None:
+                raise TypeError("Cannot access path: value is None")
+
             # Handle array index
             if part.endswith(']'):
                 part = part[:-1]
@@ -415,7 +425,7 @@ class ExpectationValidator:
                     continue
                 except ValueError:
                     pass
-            
+
             # Handle dict/object property
             if isinstance(current, dict):
                 current = current[part]

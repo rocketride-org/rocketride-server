@@ -315,5 +315,20 @@
 				"xai.profile"
 			]
 		}
-	]
+	],
+	"test": {
+		"profiles": ["grok-4-1-fast-reasoning"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
 }

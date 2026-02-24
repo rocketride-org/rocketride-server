@@ -21,9 +21,26 @@
 # SOFTWARE.
 # =============================================================================
 
+import os
 import uuid
 from typing import List, Dict, Any, Optional
 from .discovery import NodeTestConfig, get_node_test_config
+
+# Placeholder credentials for LLM nodes when ROCKETRIDE_MOCK is set (mocks handle requests)
+# apikey: format must pass each provider's validation (sk-ant, xai-, sk-, AI..., etc.)
+# Bedrock uses accessKey/secretKey; Vertex uses GCP service account (not covered here)
+_LLM_MOCK_CREDENTIALS = {
+    'llm_anthropic': {'apikey': 'sk-ant-mock-placeholder-for-tests'},
+    'llm_xai': {'apikey': 'xai-mock-placeholder-for-tests'},
+    'llm_openai': {'apikey': 'sk-mock-placeholder-for-tests'},
+    'llm_perplexity': {'apikey': 'sk-mock-placeholder-for-tests'},
+    'llm_deepseek': {'apikey': 'sk-mock-placeholder-for-tests'},
+    'llm_mistral': {'apikey': 'mock-mistral-placeholder-for-tests'},
+    'llm_vision_mistral': {'apikey': 'mock-mistral-placeholder-for-tests'},
+    'llm_gemini': {'apikey': 'AIza-mock-placeholder-for-tests'},
+    'llm_ibm_watson': {'apikey': 'mock-watson-placeholder-for-tests'},
+    'llm_bedrock': {'accessKey': 'mock-access-key', 'secretKey': 'mock-secret-key', 'region': 'us-east-1'},
+}
 
 
 class PipelineBuilder:
@@ -67,22 +84,39 @@ class PipelineBuilder:
         config = {}
         if profile:
             config['profile'] = profile
+        # Inject placeholder credentials for LLM nodes when using mocks
+        if os.environ.get('ROCKETRIDE_MOCK') and provider in _LLM_MOCK_CREDENTIALS and profile:
+            overrides = config.get(profile, {})
+            if isinstance(overrides, dict):
+                config[profile] = {**overrides, **_LLM_MOCK_CREDENTIALS[provider]}
         return config
     
-    def _build_chain_component(self, provider: str, component_id: str, 
-                                input_from: str, input_lane: str) -> Dict[str, Any]:
-        """Build a component for a chain node."""
-        # Try to get the node's test config for its profile
+    def _build_chain_component(self, provider: str, component_id: str,
+                                input_from: str, input_lanes: List[str]) -> Dict[str, Any]:
+        """Build a component for a chain node.
+        
+        Wires all input_lanes that the chain node supports (e.g. embedding_transformer
+        receives both documents and questions so vector DB search-with-question works).
+        """
         node_config = get_node_test_config(provider)
         profile = None
         if node_config and node_config.profiles:
             profile = node_config.profiles[0]  # Use first profile
-        
+
+        # Wire every lane that both the pipeline and the chain node support
+        if node_config and node_config.lanes:
+            chain_lanes = list(node_config.lanes.keys())
+            lanes_to_wire = [lane for lane in input_lanes if lane in chain_lanes]
+        else:
+            lanes_to_wire = []
+        if not lanes_to_wire:
+            lanes_to_wire = [input_lanes[0]] if input_lanes else ['text']
+
         return {
             'id': component_id,
             'provider': provider,
             'config': self._get_node_config(provider, profile),
-            'input': [{'lane': input_lane, 'from': input_from}]
+            'input': [{'lane': lane, 'from': input_from} for lane in lanes_to_wire]
         }
     
     def _build_control_components(self, target_id: str) -> List[Dict[str, Any]]:
@@ -120,7 +154,10 @@ class PipelineBuilder:
                 'input': [{'lane': output_lane, 'from': input_from}]
             })
         
-        # If no outputs specified, add a default response on text lane
+        # Sink nodes (outputs=[]): no response components needed
+        if not self.config.outputs:
+            return components
+        # No outputs inferred: add default response on text lane
         if not components:
             response_id = self._next_id('response')
             components.append({
@@ -200,7 +237,7 @@ class PipelineBuilder:
                 # Chain node (before or after node under test)
                 chain_id = self._next_id(chain_item)
                 components.append(
-                    self._build_chain_component(chain_item, chain_id, prev_id, prev_lane)
+                    self._build_chain_component(chain_item, chain_id, prev_id, input_lanes)
                 )
                 prev_id = chain_id
         

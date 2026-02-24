@@ -26,13 +26,13 @@
 	],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -140,7 +140,7 @@
 				"apikey": ""
 			},
 			"claude-3_7-sonnet": {
-				"title": "Claude Sonnet 3.7", 
+				"title": "Claude Sonnet 3.7",
 				"model": "claude-3-7-sonnet-latest",
 				"modelTotalTokens": 200000,
 				"apikey": ""
@@ -280,5 +280,20 @@
 				"anthropic.profile"
 			]
 		}
-	]
+	],
+	"test": {
+	"profiles": ["claude-opus-4-5"],
+	"outputs": ["answers"],
+	 	"cases": [
+	 		{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
 }

@@ -126,5 +126,20 @@
 				"local_text_output.target.parameters"
 			]
 		}
-	]
+	],
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Write text to output",
+				"text": "Test output content for local text output.",
+				"expect": {
+					"default": {
+						"noError": true
+					}
+				}
+			}
+		]
+	}
 }

@@ -641,5 +641,20 @@
 				"bedrock.profile"
 			]
 		}
-	]
+	],
+	"test": {
+		"profiles": ["meta_llama4-maverick-17b"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
 }
