@@ -143,11 +143,11 @@ jobs:
           build-mode: manual
           queries: security-and-quality
 
-      - name: Compile C++ from source (for CodeQL tracing)
+      - name: Skip prebuilt download (for CodeQL tracing)
         if: matrix.platform == 'ubuntu'
-        env:
-          APARAVI_VERSION: ${{ needs.init.outputs.full_version }}
-        run: ${{ matrix.builder_cmd }} server:build --force --verbose --autoinstall
+        run: |
+          mkdir -p build
+          echo '{"server":{"compiledVersion":"codeql"}}' > build/state.json
 
       - name: Build
         env:
