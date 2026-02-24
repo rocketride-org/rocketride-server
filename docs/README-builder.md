@@ -12,6 +12,8 @@ The recommended way to build the project is:
 
 This configures the environment, resolves dependencies, and builds all modules. Use `./builder build --sequential` if parallel builds cause resource issues.
 
+---
+
 ## User Reference: Commands, Modules, and Output
 
 ### Per-module builds
@@ -27,7 +29,7 @@ This configures the environment, resolves dependencies, and builds all modules. 
 ### Build commands
 
 | Command | Description |
-|---------|-------------|
+| ------- | ----------- |
 | `<module>:build` | Full build with all dependencies |
 | `<module>:compile` | Quick compile (skip setup if already done) |
 | `<module>:clean` | Remove build artifacts |
@@ -38,7 +40,7 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 ### Modules reference
 
 | Module | Description | Commands |
-|--------|-------------|----------|
+| ------ | ----------- | -------- |
 | `ai` | AI/ML modules | build, clean, test |
 | `chat-ui` | Chat web interface | build, clean, dev |
 | `client-mcp` | MCP Protocol client | build, clean, test |
@@ -69,7 +71,7 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 ### Build output layout
 
 | Directory | Contents |
-|-----------|----------|
+| --------- | -------- |
 | `build/` | Temporary build artifacts |
 | `dist/` | Final distributable outputs |
 | `dist/server/` | Engine executable and runtime |
@@ -111,17 +113,18 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 The build system uses **declarative task definitions** in JavaScript. Each package/module defines its build tasks in a `scripts/tasks.js` file, which is automatically discovered and registered.
 
 Key features:
+
 - **Auto-discovery**: `tasks.js` files are found in `packages/`, `apps/`, `nodes/`, and `examples/`
 - **Parallel execution**: Tasks can run concurrently with automatic deduplication
 - **Incremental builds**: Built-in source fingerprinting skips unchanged builds
 - **Declarative flow**: Use `parallel()`, `sequence()`, `bracket()`, and `when()` to define complex workflows
-- **Unified action model**: All tasks are "actions" - public ones have descriptions, internal ones don't
+- **Unified action model**: All tasks are "actions" -- public ones have descriptions, internal ones don't
 
 ---
 
 ## Why This Build System?
 
-### The Problem with Traditional Build Scripts
+### The problem with traditional build scripts
 
 Traditional build approaches have several pain points:
 
@@ -135,10 +138,10 @@ Traditional build approaches have several pain points:
 
 5. **Test infrastructure is fragile**: Tests need servers running. If tests fail, servers must still be stopped. Try-finally blocks everywhere, and forgotten cleanups leave zombie processes.
 
-### What This System Provides
+### What this system provides
 
 | Problem | Solution |
-|---------|----------|
+| ------- | -------- |
 | Cross-platform shell scripts | JavaScript with platform abstractions |
 | No dependency tracking | Declarative steps with automatic deduplication |
 | Sequential-only execution | `parallel()` for concurrent tasks |
@@ -147,9 +150,10 @@ Traditional build approaches have several pain points:
 | Complex conditional logic | `when()`/`whenNot()` for runtime decisions |
 | Shared resource conflicts | Named locks prevent concurrent access |
 
-### A Real Example
+### A real example
 
 Consider running the TypeScript client tests. This requires:
+
 1. Build the C++ server binary (or download pre-built)
 2. Sync Python nodes to dist/
 3. Sync AI modules to dist/
@@ -183,6 +187,7 @@ Without this system, you'd need 100+ lines of bash with error handling. With it:
 ```
 
 The system handles:
+
 - Running builds in parallel where possible
 - Skipping unchanged modules
 - Deduplicating if `server:build` was already run
@@ -211,7 +216,7 @@ const DIST_DIR = path.join(PROJECT_ROOT, 'dist', 'my-package');
 module.exports = {
     name: 'my-package',
     description: 'My Amazing Package',
-    
+
     actions: [
         // Internal action (no description = not shown in help)
         { name: 'my-package:sync', action: () => ({
@@ -221,7 +226,7 @@ module.exports = {
                 task.output = formatSyncStats(stats);
             }
         })},
-        
+
         // Public action (has description = shown in help)
         { name: 'my-package:build', action: () => ({
             description: 'Build my package',
@@ -235,44 +240,48 @@ module.exports = {
 
 ## Creating a tasks.js File
 
-### File Location
+### File location
 
 Place your `tasks.js` file at:
-```
+
+Directory Structure
+
+```text
 your-package/
 ├── scripts/
-│   └── tasks.js    ← Build tasks go here
+│   └── tasks.js    <- Build tasks go here
 ├── src/
 │   └── ...
 └── package.json
 ```
 
 The build system searches these directories:
+
 - `packages/*/scripts/tasks.js`
 - `apps/*/scripts/tasks.js`
 - `nodes/scripts/tasks.js`
 - `examples/*/scripts/tasks.js`
 
-### Required Imports
+### Required imports
 
 ```javascript
 const path = require('path');
-const { 
+const {
     // File operations
     syncDir, formatSyncStats, removeDir, exists, mkdir, copyFile,
-    
+
     // Execution
     execCommand,
-    
+
     // State management
     getState, setState, withLock,
-    
+
     // Fingerprinting (incremental builds)
     hasSourceChanged, saveSourceHash,
-    
+
     // Control flow helpers
     parallel, sequence, bracket, when, whenNot,
-    
+
     // Path constants
     PROJECT_ROOT, BUILD_DIR
 } = require('../../../scripts/lib');
@@ -286,10 +295,10 @@ const {
 module.exports = {
     // REQUIRED: Unique module identifier (used in action names)
     name: 'my-package',
-    
+
     // REQUIRED: Human-readable description (shown in --list-modules)
     description: 'My Package Description',
-    
+
     // REQUIRED: Array of action definitions
     actions: [
         { name: 'my-package:action-name', action: actionFactory },
@@ -298,7 +307,7 @@ module.exports = {
 };
 ```
 
-### Naming Convention
+### Naming convention
 
 - Module name: lowercase with hyphens (e.g., `client-python`, `model_server`)
 - Action names: `module-name:action-name` (e.g., `client-python:build`, `server:compile`)
@@ -309,7 +318,7 @@ module.exports = {
 
 Actions are the building blocks of the build system. There are two types:
 
-### Leaf Actions
+### Leaf actions
 
 Leaf actions perform actual work via a `run` function.
 
@@ -349,7 +358,7 @@ function makeSyncAction() {
         locks: ['resource-name'],  // Acquire named locks before running
         multi: false,              // If true, can run multiple times per session
         outputLines: 10,           // Max lines to show in task output
-        
+
         // REQUIRED: The actual work
         run: async (ctx, task) => {
             task.output = 'Working...';
@@ -365,7 +374,7 @@ actions: [
 ]
 ```
 
-### Compound Actions
+### Compound actions
 
 Compound actions orchestrate other actions via a `steps` array:
 
@@ -385,7 +394,7 @@ Compound actions orchestrate other actions via a `steps` array:
 })}
 ```
 
-### Public vs Internal Actions
+### Public vs internal actions
 
 **Why have both?**
 
@@ -395,23 +404,23 @@ Compound actions orchestrate other actions via a `steps` array:
 The **only difference** is the `description` property:
 
 | Property | Public Action | Internal Action |
-|----------|---------------|-----------------|
-| `description` | ✅ Has description | ❌ No description |
-| Shown in `builder --help` | ✅ Yes | ❌ No |
-| Can be run via CLI | ✅ Yes | ✅ Yes |
+| -------- | ------------- | --------------- |
+| `description` | Has description | No description |
+| Shown in `builder --help` | Yes | No |
+| Can be run via CLI | Yes | Yes |
 
 ```javascript
 actions: [
-    // Internal: No description → not shown in help
+    // Internal: No description -- not shown in help
     // Users CAN run this, but shouldn't need to
     { name: 'pkg:sync', action: () => ({
         run: async (ctx, task) => { /* ... */ }
     })},
-    
-    // Public: Has description → shown in help
+
+    // Public: Has description -- shown in help
     // Users SHOULD run this - it's the stable interface
     { name: 'pkg:build', action: () => ({
-        description: 'Build the package',  // ← This makes it public
+        description: 'Build the package',  // <- This makes it public
         steps: ['pkg:sync']
     })}
 ]
@@ -423,41 +432,41 @@ actions: [
 
 ## Action Properties
 
-### For Leaf Actions (with `run`)
+### For leaf actions (with `run`)
 
 | Property | Type | Default | Description |
-|----------|------|---------|-------------|
+| -------- | ---- | ------- | ----------- |
 | `run` | `async (ctx, task) => {}` | required | The work function |
 | `locks` | `string[]` | `[]` | Named locks to acquire before running |
 | `multi` | `boolean` | `false` | If true, action can run multiple times per session |
 | `outputLines` | `number` | `10` | Max lines to show in task output |
 
-### For Compound Actions (with `steps`)
+### For compound actions (with `steps`)
 
 | Property | Type | Default | Description |
-|----------|------|---------|-------------|
+| -------- | ---- | ------- | ----------- |
 | `description` | `string` | - | Makes action public (shown in help) |
 | `steps` | `array` | required | Array of step definitions |
 | `concurrent` | `boolean` | `false` | Run steps in parallel |
 | `locks` | `string[]` | `[]` | Named locks to acquire before running |
 
-### The `run` Function
+### The `run` function
 
 ```javascript
 run: async (ctx, task, options) => {
     // ctx: Shared context object (persists across all actions)
     // task: Listr2 task object for output
     // options: { logModule: 'module:action' } for logging
-    
+
     // Update task output (shown in terminal)
     task.output = 'Doing something...';
-    
+
     // Access shared context
     const serverPort = ctx.port;
-    
+
     // Store data for later actions
     ctx.myData = { foo: 'bar' };
-    
+
     // Return value is ignored (unless in a bracket setup)
 }
 ```
@@ -478,16 +487,16 @@ const { parallel, sequence, bracket, when, whenNot } = require('../../../scripts
 
 Build systems often have tasks that don't depend on each other. Running them sequentially wastes time:
 
-```
+```text
 Sequential (slow):
-  nodes:sync ─────────────► ai:sync ─────────────► client-python:sync-source
+  nodes:sync ----------------> ai:sync ----------------> client-python:sync-source
   [2 seconds]                [2 seconds]           [1 second]
   Total: 5 seconds
 
-Parallel (fast):  
-  ┌─ nodes:sync ─────────┐
-  ├─ ai:sync ────────────┼─► Done
-  └─ client-python:sync-source ─┘
+Parallel (fast):
+  +-- nodes:sync -----------+
+  +-- ai:sync --------------+-> Done
+  +-- client-python:sync-source --+
   Total: 2 seconds (limited by slowest)
 ```
 
@@ -500,9 +509,9 @@ Parallel (fast):
 
 **When NOT to use parallel:**
 
-- Tasks that depend on each other (compile → bundle)
+- Tasks that depend on each other (compile -> bundle)
 - Tasks that use the same external resource (two cmake builds)
-- Tasks where order matters (clean → build)
+- Tasks where order matters (clean -> build)
 
 **Syntax:**
 
@@ -511,7 +520,7 @@ steps: [
     'action:first',
     parallel([
         'action:a',
-        'action:b', 
+        'action:b',
         'action:c'
     ], 'Run A, B, C in parallel'),
     'action:last'  // Waits for all parallel tasks to complete
@@ -519,8 +528,6 @@ steps: [
 ```
 
 The second argument is a title shown in the output. Nested parallels are automatically flattened into one group.
-
----
 
 ### sequence()
 
@@ -530,7 +537,7 @@ Sometimes you need sequential execution *inside* a parallel block. Consider:
 
 ```javascript
 // We want to run these two pipelines in parallel:
-// Pipeline 1: vcpkg:clone → vcpkg:bootstrap  (must be sequential)
+// Pipeline 1: vcpkg:clone -> vcpkg:bootstrap  (must be sequential)
 // Pipeline 2: java:download-jdk, java:download-maven  (can be parallel)
 
 parallel([
@@ -562,13 +569,12 @@ steps: [
 ]
 ```
 
----
-
 ### bracket()
 
 **Why use bracket?**
 
 Testing often requires infrastructure that must be:
+
 1. **Started** before tests run
 2. **Stopped** after tests complete
 3. **Always cleaned up**, even when tests fail
@@ -576,14 +582,14 @@ Testing often requires infrastructure that must be:
 Without brackets, you'd write:
 
 ```javascript
-// ❌ Fragile - if tests fail, server keeps running
+// [BAD] Fragile -- if tests fail, server keeps running
 run: async (ctx, task) => {
     await startServer();
     await runTests();      // If this throws, stopServer never runs!
     await stopServer();
 }
 
-// ❌ Better but verbose
+// [BETTER] But verbose
 run: async (ctx, task) => {
     await startServer();
     try {
@@ -597,7 +603,7 @@ run: async (ctx, task) => {
 With brackets, cleanup is **guaranteed**:
 
 ```javascript
-// ✅ Clean, declarative, guaranteed cleanup
+// [GOOD] Clean, declarative, guaranteed cleanup
 bracket({
     name: 'test-server',
     setup: makeStartServerAction(),
@@ -647,8 +653,6 @@ bracket({
 - Setup return value is accessible to both steps AND teardown via `ctx.brackets[name]`
 - If setup fails, teardown is skipped (nothing to clean up)
 
----
-
 ### when() / whenNot()
 
 **Why use conditional execution?**
@@ -663,7 +667,7 @@ Sometimes build steps depend on runtime decisions:
 Without conditionals, you'd check conditions inside actions:
 
 ```javascript
-// ❌ Scattered conditionals, unclear flow
+// [BAD] Scattered conditionals, unclear flow
 'server:maybe-compile': {
     run: async (ctx, task) => {
         if (ctx.downloaded) {
@@ -678,7 +682,7 @@ Without conditionals, you'd check conditions inside actions:
 With `when`/`whenNot`, the flow is declarative:
 
 ```javascript
-// ✅ Clear conditional flow
+// [GOOD] Clear conditional flow
 steps: [
     'server:try-download',
     whenNot({
@@ -695,8 +699,8 @@ steps: [
 
 **when vs whenNot:**
 
-- `when()` - Run `then` steps when condition is **true**
-- `whenNot()` - Run `then` steps when condition is **false** (more readable for "unless" logic)
+- `when()` -- Run `then` steps when condition is **true**
+- `whenNot()` -- Run `then` steps when condition is **false** (more readable for "unless" logic)
 
 **Common patterns:**
 
@@ -711,7 +715,7 @@ steps: [
     })
 ]
 
-// Pattern 2: CI-specific behavior  
+// Pattern 2: CI-specific behavior
 steps: [
     when({
         name: 'is-ci',
@@ -734,7 +738,7 @@ steps: [
 **Important:** Conditions are evaluated at **runtime**, not when the task tree is built. This means:
 
 ```javascript
-// This works - ctx.downloaded is set by a previous step
+// This works -- ctx.downloaded is set by a previous step
 steps: [
     'server:try-download',   // Sets ctx.downloaded
     whenNot({
@@ -752,13 +756,13 @@ steps: [
 
 In a complex build, the same action often appears multiple times in the dependency graph:
 
-```
+```text
 client-typescript:test
-├── server:build
-│   └── nodes:build
-├── client-python:build
-│   └── nodes:build      ← Same as above!
-└── nodes:build          ← Same as above!
++-- server:build
+|   +-- nodes:build
++-- client-python:build
+|   +-- nodes:build      <- Same as above!
++-- nodes:build          <- Same as above!
 ```
 
 Without deduplication, `nodes:build` would run 3 times. With deduplication, it runs once.
@@ -788,7 +792,7 @@ Some actions should run multiple times per session:
 ```javascript
 // Development server should restart each time it's called
 { name: 'dev:start', action: () => ({
-    multi: true,  // ← Disables deduplication
+    multi: true,  // <- Disables deduplication
     run: async (ctx, task) => {
         await startDevServer();
     }
@@ -822,15 +826,16 @@ If both `a:build` and `b:build` have `shared:build` in their steps, one of them 
 There are two types of state in the build system, for different purposes:
 
 | Type | Lifetime | Use Case |
-|------|----------|----------|
+| ---- | -------- | -------- |
 | Runtime Context (`ctx`) | Single build session | Passing data between actions |
 | Persistent State | Across sessions | Remembering what was built |
 
-### Runtime Context (`ctx`)
+### Runtime context (`ctx`)
 
 **Why use context?**
 
 Actions need to share data. Without shared context, you'd resort to:
+
 - Global variables (brittle, hard to test)
 - File-based communication (slow, race conditions)
 - Environment variables (limited, no structured data)
@@ -841,31 +846,33 @@ Context is the clean solution:
 run: async (ctx, task) => {
     // Read from context (set by previous action)
     const port = ctx.port || 8080;
-    
+
     // Write to context (visible to subsequent actions)
     ctx.buildOutput = '/path/to/output';
-    
+
     // Access CLI options (always available)
     const force = ctx.options?.force;
     const pytestArgs = ctx.options?.pytest;
-    
+
     // Bracket data (set by bracket setup)
     const serverInfo = ctx.brackets?.['my-server'];
 }
 ```
 
 **Context rules:**
+
 - Created fresh for each `builder` invocation
 - Shared across ALL actions in that invocation
 - Supports any JavaScript value (objects, arrays, functions)
 - Parallel actions can READ the same keys safely
 - Parallel actions should NOT WRITE the same keys (race condition)
 
-### Persistent State
+### Persistent state
 
 **Why use persistent state?**
 
 Some information should survive across build sessions:
+
 - Source hashes (for incremental builds)
 - Configuration flags (was vcpkg bootstrapped?)
 - Timestamps (when was this last built?)
@@ -879,11 +886,11 @@ run: async (ctx, task) => {
     // Read state (dot notation supports nesting)
     const version = await getState('my-package.version');
     const configured = await getState('my-package.configured');
-    
+
     // Write state
     await setState('my-package.version', '1.0.0');
     await setState('my-package.configured', true);
-    
+
     // Update multiple keys atomically (avoids partial writes)
     await updateState({
         'my-package.built': true,
@@ -892,10 +899,10 @@ run: async (ctx, task) => {
 }
 ```
 
-**State vs Context - when to use which:**
+**State vs Context -- when to use which:**
 
 | Scenario | Use |
-|----------|-----|
+| -------- | --- |
 | Pass server port from setup to tests | Context (`ctx.port`) |
 | Remember if source was already compiled | State (`setState('pkg.compiled', true)`) |
 | Share computed version number | Context (`ctx.version`) |
@@ -907,7 +914,7 @@ run: async (ctx, task) => {
 
 ## Available Utilities
 
-### File Operations
+### File operations
 
 ```javascript
 const {
@@ -915,24 +922,24 @@ const {
     exists,           // async (path) => boolean
     isFile,           // async (path) => boolean
     isDirectory,      // async (path) => boolean
-    
+
     // Read
     readFile,         // async (path) => string
     readJson,         // async (path) => object
     readDir,          // async (path, opts) => string[]
-    
+
     // Write
     writeFile,        // async (path, content) => void
     writeJson,        // async (path, obj) => void
     mkdir,            // async (path) => void (recursive)
     copyFile,         // async (src, dest) => void
     copyDir,          // async (src, dest) => void
-    
+
     // Delete
     removeDir,        // async (path) => void
     removeFile,       // async (path) => void
     removeDirs,       // async (paths[]) => void
-    
+
     // Sync directories
     syncDir,          // async (src, dest, opts) => stats
     overlayDir,       // async (src, dest, opts) => stats
@@ -940,7 +947,7 @@ const {
 } = require('../../../scripts/lib');
 ```
 
-### Incremental Builds
+### Incremental builds
 
 ```javascript
 const { hasSourceChanged, saveSourceHash } = require('../../../scripts/lib');
@@ -950,21 +957,21 @@ const SRC_HASH_KEY = 'my-package.srcHash';
 run: async (ctx, task) => {
     // Check if source changed since last build
     const { changed, hash } = await hasSourceChanged(SRC_DIR, SRC_HASH_KEY);
-    
+
     if (!changed && await exists(OUTPUT_DIR)) {
         task.output = 'No changes detected';
         return;
     }
-    
+
     // Do the build...
     await doBuild();
-    
+
     // Save hash after successful build
     await saveSourceHash(SRC_HASH_KEY, hash);
 }
 ```
 
-### Command Execution
+### Command execution
 
 ```javascript
 const { execCommand } = require('../../../scripts/lib');
@@ -972,7 +979,7 @@ const { execCommand } = require('../../../scripts/lib');
 run: async (ctx, task) => {
     // Basic usage
     await execCommand('npm', ['install'], { task, cwd: PACKAGE_DIR });
-    
+
     // With environment variables
     await execCommand('python', ['-m', 'pytest'], {
         task,
@@ -982,7 +989,7 @@ run: async (ctx, task) => {
             PYTHONPATH: '/custom/path'
         }
     });
-    
+
     // Collect output
     const result = await execCommand('git', ['rev-parse', 'HEAD'], {
         task,
@@ -1026,14 +1033,14 @@ run: async (ctx, task) => {
         'file.tar.gz',
         task  // For progress output
     );
-    
+
     await extractArchive(archivePath, DEST_DIR, {
         stripLevels: 1  // Remove top-level directory
     });
 }
 ```
 
-### Platform Detection
+### Platform detection
 
 ```javascript
 const { isWindows, isMac, isLinux, getPlatform } = require('../../../scripts/lib');
@@ -1044,7 +1051,7 @@ run: async (ctx, task) => {
     } else {
         await execCommand('bash', ['build.sh'], { task });
     }
-    
+
     const { os, arch, ext } = getPlatform();
     // os: 'windows' | 'darwin' | 'linux'
     // arch: 'x64' | 'arm64'
@@ -1052,7 +1059,7 @@ run: async (ctx, task) => {
 }
 ```
 
-### Path Constants
+### Path constants
 
 ```javascript
 const { PROJECT_ROOT, BUILD_DIR } = require('../../../scripts/lib');
@@ -1072,7 +1079,7 @@ Here's a complete `tasks.js` for a Python package:
  * Build tasks for @rocketride/my-python-package
  */
 const path = require('path');
-const { 
+const {
     syncDir, formatSyncStats, removeDirs, removeMatching,
     execCommand, exists, mkdir,
     hasSourceChanged, saveSourceHash,
@@ -1106,18 +1113,18 @@ function makeCompileAction() {
     return {
         run: async (ctx, task) => {
             const { changed, hash } = await hasSourceChanged(SRC_DIR, SRC_HASH_KEY);
-            
+
             if (!changed && await exists(BUILD_DIR)) {
                 task.output = 'No changes detected';
                 return;
             }
-            
+
             await mkdir(BUILD_DIR);
             await execCommand('python', ['-m', 'build', '--outdir', BUILD_DIR], {
                 task,
                 cwd: PACKAGE_DIR
             });
-            
+
             await saveSourceHash(SRC_HASH_KEY, hash);
         }
     };
@@ -1147,7 +1154,7 @@ function makeRunTestsAction() {
     return {
         run: async (ctx, task) => {
             const port = ctx.brackets?.['test-server']?.port || ctx.port;
-            
+
             await execCommand('python', ['-m', 'pytest', '-v'], {
                 task,
                 cwd: PACKAGE_DIR,
@@ -1177,7 +1184,7 @@ function makeCleanAction() {
 module.exports = {
     name: 'my-package',
     description: 'My Python Package',
-    
+
     actions: [
         // Internal actions (no description)
         { name: 'my-package:sync', action: makeSyncAction },
@@ -1185,7 +1192,7 @@ module.exports = {
         { name: 'my-package:start-server', action: makeStartServerAction },
         { name: 'my-package:stop-server', action: makeStopServerAction },
         { name: 'my-package:run-tests', action: makeRunTestsAction },
-        
+
         // Public actions (have descriptions)
         { name: 'my-package:build', action: () => ({
             description: 'Build the package',
@@ -1194,7 +1201,7 @@ module.exports = {
                 'my-package:compile'
             ]
         })},
-        
+
         { name: 'my-package:test', action: () => ({
             description: 'Run tests (starts server automatically)',
             steps: [
@@ -1207,7 +1214,7 @@ module.exports = {
                 })
             ]
         })},
-        
+
         { name: 'my-package:clean', action: () => ({
             description: 'Remove build artifacts',
             run: async (ctx, task) => {
@@ -1258,7 +1265,7 @@ builder my-package:test --list-deps
 
 This section covers common patterns and **when** to use them based on the problem you're solving.
 
-### Pattern: Download or Compile
+### Pattern: download or compile
 
 **Problem:** A binary can be downloaded pre-built OR compiled from source. Don't waste time compiling if a download is available.
 
@@ -1281,9 +1288,7 @@ This section covers common patterns and **when** to use them based on the proble
 
 **Why this works:** The decision happens at runtime. If CI caches exist, download; if not, compile. The consumer just calls `server:build` without knowing how.
 
----
-
-### Pattern: Build Dependencies Once
+### Pattern: build dependencies once
 
 **Problem:** Multiple packages depend on `nodes:build`. Running the full build triggers it redundantly.
 
@@ -1311,9 +1316,7 @@ This section covers common patterns and **when** to use them based on the proble
 
 **Why this works:** Running `builder ai:build client-python:build` only runs `nodes:build` once, even though both request it.
 
----
-
-### Pattern: Integration Tests with Server
+### Pattern: integration tests with server
 
 **Problem:** Tests need a running server. Server must stop even if tests fail.
 
@@ -1346,9 +1349,7 @@ This section covers common patterns and **when** to use them based on the proble
 
 **Why brackets not try/finally:** Brackets are declarative. The build system manages the flow. You can nest brackets, combine with parallel, and still get guaranteed cleanup.
 
----
-
-### Pattern: Parallel Independent Modules
+### Pattern: parallel independent modules
 
 **Problem:** Building `ai`, `nodes`, and `client-python` takes 6 seconds sequentially when they could run in 2 seconds parallel.
 
@@ -1369,12 +1370,11 @@ This section covers common patterns and **when** to use them based on the proble
 ```
 
 **Why parallel helps:** If `nodes:build` takes 2s, `ai:build` takes 3s, and `client-python:build` takes 1s:
+
 - Sequential: 2 + 3 + 1 = 6 seconds
 - Parallel: max(2, 3, 1) = 3 seconds
 
----
-
-### Pattern: Sequential Dependencies Inside Parallel
+### Pattern: sequential dependencies inside parallel
 
 **Problem:** You want parallel execution overall, but some tasks have internal dependencies.
 
@@ -1401,9 +1401,7 @@ This section covers common patterns and **when** to use them based on the proble
 
 **Why this works:** The outer parallel runs three tracks concurrently. Each `sequence` track runs its steps in order. `download:models` runs alongside the sequences.
 
----
-
-### Pattern: Exclusive Resource Access
+### Pattern: exclusive resource access
 
 **Problem:** Two tasks both call `cmake`, but CMake locks its build directory. Running them in parallel causes errors.
 
@@ -1418,7 +1416,7 @@ This section covers common patterns and **when** to use them based on the proble
 })}
 
 { name: 'tests:compile', action: () => ({
-    locks: ['cmake'],  // Same lock - waits for server:compile to release
+    locks: ['cmake'],  // Same lock -- waits for server:compile to release
     run: async (ctx, task) => {
         await execCommand('cmake', ['--build', 'tests'], { task });
     }
@@ -1426,16 +1424,15 @@ This section covers common patterns and **when** to use them based on the proble
 ```
 
 **When to use locks:**
+
 - Build tools that lock directories (cmake, gradle)
 - Downloading to the same cache directory
 - Modifying shared configuration files
 - Any resource that doesn't support concurrent access
 
-**How it works:** If `server:compile` is running, `tests:compile` waits at "Acquiring lock" until `server:compile` releases. The lock is automatic - acquired before `run()`, released after (even on error).
+**How it works:** If `server:compile` is running, `tests:compile` waits at "Acquiring lock" until `server:compile` releases. The lock is automatic -- acquired before `run()`, released after (even on error).
 
----
-
-### Pattern: Incremental Builds
+### Pattern: incremental builds
 
 **Problem:** A full build takes anywhere from 10 minutes to 2 or 3 hours. But usually only a few files changed.
 
@@ -1447,17 +1444,17 @@ function makeBuildAction() {
         run: async (ctx, task) => {
             // 1. Check if source changed since last successful build
             const { changed, hash } = await hasSourceChanged(SRC_DIR, 'pkg.srcHash');
-            
+
             // 2. Skip if nothing changed AND output exists
             if (!changed && await exists(OUTPUT_DIR)) {
                 task.output = 'Up to date (no changes)';
                 return;
             }
-            
+
             // 3. Do the actual build
             task.output = 'Building...';
             await build();
-            
+
             // 4. Save hash AFTER successful build
             await saveSourceHash('pkg.srcHash', hash);
             task.output = 'Build complete';
@@ -1469,13 +1466,12 @@ function makeBuildAction() {
 **Why save hash after?** If the build fails, the hash isn't saved. Next run will still see "changed" and retry.
 
 **What gets hashed?**
+
 - File timestamps and size
 - File paths relative to the directory
 - Recursively through all files
 
----
-
-### Pattern: Global Commands with :build Convention
+### Pattern: global commands with :build convention
 
 **Problem:** You want a single `builder build` command that builds everything, but each package owns its own `:build` action.
 
@@ -1483,7 +1479,7 @@ function makeBuildAction() {
 
 ```javascript
 // server/scripts/tasks.js
-{ name: 'server:build', action: () => ({ 
+{ name: 'server:build', action: () => ({
     description: 'Build server',
     // ...
 })}
@@ -1497,9 +1493,7 @@ function makeBuildAction() {
 
 Now `builder build` runs all `*:build` actions. Same for `builder test` (runs all `*:test` actions).
 
----
-
-### Pattern: Passing Options to Actions
+### Pattern: passing options to actions
 
 **Problem:** Tests should accept pytest arguments like `-s -v` from the command line.
 
@@ -1519,13 +1513,12 @@ builder tests:pytest --pytest="-s -v -k test_login"
 ```
 
 **Available options:**
-- `ctx.options.force` - `--force` flag was passed
-- `ctx.options.verbose` - `--verbose` flag was passed
-- `ctx.options.<name>` - custom `--<name>=value` arguments
 
----
+- `ctx.options.force` -- `--force` flag was passed
+- `ctx.options.verbose` -- `--verbose` flag was passed
+- `ctx.options.<name>` -- custom `--<name>=value` arguments
 
-### Pattern: Sharing Data Between Actions
+### Pattern: sharing data between actions
 
 **Problem:** Action A computes something that Action B needs.
 
@@ -1558,6 +1551,7 @@ builder tests:pytest --pytest="-s -v -k test_login"
 ```
 
 **Context rules:**
+
 - Context lives for one build session (one `builder` invocation)
 - Sequential steps can reliably share data
 - Parallel steps should NOT write to the same keys (race condition)
@@ -1566,9 +1560,9 @@ builder tests:pytest --pytest="-s -v -k test_login"
 
 ## Best Practices
 
-### 1. Use Incremental Builds
+### 1. Use incremental builds
 
-**Why?** A full Python sync takes 2 seconds. Checking hashes takes 50ms. If nothing changed, you save 1.95 seconds—multiplied across 10 modules, that's 20 seconds saved on every build.
+**Why?** A full Python sync takes 2 seconds. Checking hashes takes 50ms. If nothing changed, you save 1.95 seconds -- multiplied across 10 modules, that's 20 seconds saved on every build.
 
 ```javascript
 const { changed, hash } = await hasSourceChanged(SRC_DIR, HASH_KEY);
@@ -1581,20 +1575,22 @@ await saveSourceHash(HASH_KEY, hash);
 ```
 
 **When NOT to use:**
+
 - `--force` flag should bypass (check `ctx.options?.force`)
 - Clean builds should always rebuild
 - External dependencies might have changed (network resources, system libraries)
 
-### 2. Keep Internal Actions Simple
+### 2. Keep internal actions simple
 
 **Why?** Single-responsibility actions provide:
+
 - **Reusability**: `pkg:compile` can be used by both `pkg:build` and `pkg:dev` without duplication
 - **Parallelism**: You can't run half of a monolithic function in parallel
 - **Debuggability**: When `pkg:compile` fails, you know exactly what failed
 - **Incremental execution**: Each action can check its own "up to date" status
 
 ```javascript
-// ❌ Bad: Monolithic action
+// [BAD] Monolithic action
 { name: 'pkg:build', action: () => ({
     description: 'Build everything',
     run: async (ctx, task) => {
@@ -1605,7 +1601,7 @@ await saveSourceHash(HASH_KEY, hash);
     }
 })}
 
-// ✅ Good: Composed actions
+// [GOOD] Composed actions
 { name: 'pkg:clean', action: makeCleanAction },
 { name: 'pkg:compile', action: makeCompileAction },
 { name: 'pkg:bundle', action: makeBundleAction },
@@ -1623,9 +1619,10 @@ await saveSourceHash(HASH_KEY, hash);
 
 **Rule of thumb:** If you're putting `await` on multiple unrelated operations in one action, split them.
 
-### 3. Use Consistent Naming
+### 3. Use consistent naming
 
 **Why?** Consistent naming enables:
+
 - **Global commands**: `builder build` finds all `*:build` actions automatically
 - **Discoverability**: Developers know to look for `pkg:build` without reading docs
 - **Tab completion**: Predictable names work better with shell completion
@@ -1640,12 +1637,12 @@ await saveSourceHash(HASH_KEY, hash);
 'pkg:bundle'     // Create bundle (internal) - package output
 ```
 
-### 4. Always Clean Up with Brackets
+### 4. Always clean up with brackets
 
 **Why?** Try/finally blocks don't compose. What if you need to start two servers? Nest try/finally? With brackets, you nest naturally:
 
 ```javascript
-// ❌ Try/finally nesting gets ugly fast
+// [BAD] Try/finally nesting gets ugly fast
 try {
     await startServerA();
     try {
@@ -1658,7 +1655,7 @@ try {
     await stopServerA();
 }
 
-// ✅ Brackets compose cleanly
+// [GOOD] Brackets compose cleanly
 steps: [
     bracket({
         name: 'server-a',
@@ -1676,17 +1673,17 @@ steps: [
 ]
 ```
 
-Teardowns run in reverse order: server-b stops, then server-a stops—even if tests fail.
+Teardowns run in reverse order: server-b stops, then server-a stops -- even if tests fail.
 
-### 5. Export Path Constants
+### 5. Export path constants
 
 **Why?** Other modules may need your paths. Without exports, they'd duplicate the path logic:
 
 ```javascript
-// ❌ Another module guessing your paths
+// [BAD] Another module guessing your paths
 const NODES_DIST = path.join(PROJECT_ROOT, 'dist', 'nodes');  // Might be wrong!
 
-// ✅ Import from the source of truth
+// [GOOD] Import from the source of truth
 const { DIST_DIR: NODES_DIST } = require('../nodes/scripts/tasks');
 ```
 
@@ -1703,18 +1700,18 @@ module.exports.DIST_DIR = DIST_DIR;
 
 **Common exports:** `SRC_DIR`, `DIST_DIR`, `BUILD_DIR`, `CONFIG_PATH`
 
-### 6. Use Locks for Shared Resources
+### 6. Use locks for shared resources
 
 **Why?** Parallel execution can cause conflicts:
 
-```
+```text
 Without locks (broken):
-  server:compile ─── cmake --build server ────┐
-  tests:compile ──── cmake --build tests ─────┼── CRASH! CMake locked
-                                              │
+  server:compile --- cmake --build server ----+
+  tests:compile ---- cmake --build tests -----+-- CRASH! CMake locked
+                                              |
 With locks (correct):
-  server:compile ─── [lock cmake] ─── build ─── [unlock] ──┐
-  tests:compile ──── [waiting...] ─────────────────────────┼── [lock cmake] ─── build
+  server:compile --- [lock cmake] --- build --- [unlock] --+
+  tests:compile ---- [waiting...] --------------------------+-- [lock cmake] --- build
 ```
 
 ```javascript
@@ -1735,17 +1732,19 @@ With locks (correct):
 
 ### Action not found
 
-```
+```text
 Error: Unknown action 'my-package:build'
 ```
 
 **Why it happens:**
+
 - The `tasks.js` file isn't where the system expects it
 - The action name doesn't match the module name prefix
 
 **Fixes:**
+
 - Check that `tasks.js` is in `scripts/` subdirectory
-- Verify `module.exports.name` matches the action prefix (e.g., name `my-package` → actions must start with `my-package:`)
+- Verify `module.exports.name` matches the action prefix (e.g., name `my-package` -> actions must start with `my-package:`)
 - Run `builder --list-actions` to see what actions ARE registered
 
 ### Task skipped unexpectedly
@@ -1755,6 +1754,7 @@ Error: Unknown action 'my-package:build'
 **How to tell:** The output shows the task completing instantly, or `builder --verbose` shows "already completed".
 
 **Fixes:**
+
 - If the action should run once per session: this is correct behavior
 - If the action should run every time it's requested:
 
@@ -1771,7 +1771,7 @@ Error: Unknown action 'my-package:build'
 
 **Why this is intentional:** If `compile` fails, there's no point continuing `bundle` and `test`. Cancelling saves time and avoids confusing cascading errors.
 
-**If you need independent failures:** Wrap each task in its own error handling (not recommended—usually you want fail-fast).
+**If you need independent failures:** Wrap each task in its own error handling (not recommended -- usually you want fail-fast).
 
 ### State not persisting
 
@@ -1780,6 +1780,7 @@ Error: Unknown action 'my-package:build'
 **Symptoms:** Builds that should be "up to date" run from scratch.
 
 **Fixes:**
+
 - Check if `build/state.json` exists and is valid JSON
 - Use `--force` to bypass cached state and rebuild everything
 - If state is corrupted, delete `build/state.json` and rebuild
@@ -1789,6 +1790,7 @@ Error: Unknown action 'my-package:build'
 **Why it happens:** Another task has a lock and is taking a long time (or crashed without releasing).
 
 **Fixes:**
+
 - Check if another builder process is running
 - Kill stuck processes
 
@@ -1797,7 +1799,11 @@ Error: Unknown action 'my-package:build'
 **Why it happens:** Source hashing only checks files in the specified directory. If you changed a file outside that directory, it won't be detected.
 
 **Fixes:**
+
 - Use `--force` to force rebuild
 - Ensure the hash directory includes all relevant source files
 - Check that the hash key is unique to your package
 
+---
+
+MIT License -- see [LICENSE](../LICENSE).

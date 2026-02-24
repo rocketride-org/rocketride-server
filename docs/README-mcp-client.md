@@ -1,8 +1,6 @@
 # rocketride-mcp
 
-RocketRide MCP Client — Model Context Protocol integration for the RocketRide Engine. Complete API reference below.
-
----
+RocketRide MCP Client -- Model Context Protocol integration for the RocketRide Engine. Complete API reference below.
 
 ## Overview
 
@@ -62,12 +60,12 @@ rocketride-mcp
 python -m rocketride_mcp
 ```
 
-### Available Tools
+### Available tools
 
 Tools are **discovered from the RocketRide server** (pipelines/tasks available to your account) plus a built-in convenience tool:
 
-- **Server tasks** — Any pipelines or tasks returned by the server for your API key are exposed as MCP tools. Each tool accepts a `filepath` argument and sends that file’s contents to the corresponding pipeline.
-- **RocketRide_Document_Processor** — A convenience tool that runs the bundled document-parsing pipeline (`simpleparser.json`) without requiring a pre-started task. Supports multi-modal parsing (text, images, video, tables, audio).
+- **Server tasks** -- Any pipelines or tasks returned by the server for your API key are exposed as MCP tools. Each tool accepts a `filepath` argument and sends that file's contents to the corresponding pipeline.
+- **RocketRide_Document_Processor** -- A convenience tool that runs the bundled document-parsing pipeline (`simpleparser.json`) without requiring a pre-started task. Supports multi-modal parsing (text, images, video, tables, audio).
 
 All tools accept a single `filepath` parameter (path to the file to process). File paths support:
 
@@ -86,11 +84,11 @@ Tool results include both human-readable text and structured data:
 
 Set these environment variables (required; no config file is used):
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ROCKETRIDE_URI` | Yes | Server URI (e.g. `https://your-engine.example.com`) |
-| `ROCKETRIDE_APIKEY` | Yes* | API key for authentication |
-| `ROCKETRIDE_AUTH` | Yes* | Alternative to `ROCKETRIDE_APIKEY` |
+| Variable           | Required | Description                                          |
+| ------------------ | -------- | ---------------------------------------------------- |
+| `ROCKETRIDE_URI`   | Yes      | Server URI (e.g. `https://your-engine.example.com`)  |
+| `ROCKETRIDE_APIKEY` | Yes*    | API key for authentication                           |
+| `ROCKETRIDE_AUTH`  | Yes*     | Alternative to `ROCKETRIDE_APIKEY`                   |
 
 \* Provide either `ROCKETRIDE_APIKEY` or `ROCKETRIDE_AUTH`.
 
@@ -101,6 +99,8 @@ export ROCKETRIDE_APIKEY=your-api-key
 
 ## Directory Structure
 
+Source location in the repository:
+
 ```text
 packages/client-mcp/
 ├── src/rocketride_mcp/
@@ -110,9 +110,9 @@ packages/client-mcp/
 │   └── pipelines/     # Bundled pipelines
 │       └── simpleparser.json  # Document-parsing pipeline
 ├── pyproject.toml     # Python package config
-└── README.md          # This file
+└── README.md
 ```
 
 ## License
 
-MIT License — see [LICENSE](./LICENSE)
+MIT License -- see [LICENSE](../LICENSE).
