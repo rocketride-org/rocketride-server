@@ -593,6 +593,12 @@ class Question(BaseModel):
         if self.role:
             prompt += self.role + crlf
 
+        # Add default instruction if none provided
+        if not len(self.instructions):
+            addPromptInstruction(QuestionInstruction(subtitle='Answer the following questions', instructions='Answer the following questions.'))
+            if len(self.documents):
+                addPromptInstruction(QuestionInstruction(subtitle='Documents', instructions='Use the provided documents as context for your answer.'))
+
         # Add all instructions
         for instruction in self.instructions:
             addPromptInstruction(instruction)
