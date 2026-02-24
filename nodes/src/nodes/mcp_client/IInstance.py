@@ -35,45 +35,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from nodes.tools_base import IInstanceGenericTools
+from rocketlib import IInstanceBase
 
 from .IGlobal import IGlobal
 
 
-class IInstance(IInstanceGenericTools):
+class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
-    # Step 2: inherit base `invoke()` routing and provide provider hooks later.
-    # Step 3 will implement these hooks to back tool calls with MCP over STDIO.
-
-    def _tool_query(self):  # noqa: ANN201
-        return self.IGlobal.list_namespaced_tools()
-
-    def _tool_validate(self, *, server_name: str, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
-        tool = self.IGlobal.get_tool(server_name=server_name, tool_name=tool_name)
-        if tool is None:
-            raise ValueError(f'Unknown tool {server_name}.{tool_name}')
-
-        schema = tool.inputSchema or {}
-        if not isinstance(schema, dict):
-            return
-        required = schema.get('required', [])
-        if not required:
-            return
-        if not isinstance(input_obj, dict):
-            raise ValueError(f'Tool input must be an object; required fields={required}')
-        missing = [k for k in required if k not in input_obj]
-        if missing:
-            raise ValueError(f'Tool input missing required fields: {missing}')
-
-    def _tool_invoke(self, *, server_name: str, tool_name: str, input_obj: Any) -> Any:  # noqa: ANN401
-        if input_obj is None:
-            arguments = {}
-        elif isinstance(input_obj, dict):
-            arguments = input_obj
-        else:
-            raise ValueError('Tool input must be a JSON object (dict)')
-
-        result = self.IGlobal.call_tool(server_name=server_name, tool_name=tool_name, arguments=arguments)
-        return result
+    def invoke(self, param: Any) -> Any:  # noqa: ANN401
+        driver = getattr(self.IGlobal, 'driver', None)
+        if driver is None:
+            raise RuntimeError('mcp_client: driver not initialized')
+        return driver.handle_invoke(param)
 
