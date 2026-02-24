@@ -32,7 +32,7 @@
  * Note: Model server tests moved to packages/model_server/scripts/tasks.js
  */
 const path = require('path');
-const { 
+const {
     execCommand, syncDir, formatSyncStats, PROJECT_ROOT
 } = require('../../../scripts/lib');
 
@@ -68,9 +68,9 @@ function makeRunPytestAction(options = {}) {
             if (options.pytest) {
                 pytestArgs.push(...options.pytest);
             }
-            
-            await execCommand(ENGINE_EXE, pytestArgs, { 
-                task, 
+
+            await execCommand(ENGINE_EXE, pytestArgs, {
+                task,
                 cwd: SERVER_DIR
             });
         }
@@ -84,33 +84,38 @@ function makeRunPytestAction(options = {}) {
 module.exports = {
     name: 'ai',
     description: 'AI/ML Modules',
-    
+
     actions: [
         // Internal actions
         { name: 'ai:sync', action: makeSyncAiAction },
         { name: 'ai:run-pytest', action: makeRunPytestAction },
-        
+
         // Public actions (have descriptions)
-        { name: 'ai:build', action: () => ({ 
-            description: 'Sync AI modules',
-            steps: ['ai:sync'] 
-        })},
-        { name: 'ai:test', action: () => ({
-            description: 'Run AI module tests',
-            steps: [
-                'server:build',
-                'ai:build',
-                'ai:run-pytest'
-            ]
-        })},
-        { name: 'ai:clean', action: () => ({
-            description: 'Remove AI module build artifacts',
-            run: async (ctx, task) => {
-                const { removeDir } = require('../../../scripts/lib');
-                await removeDir(DIST_DIR);
-                task.output = 'Cleaned AI modules';
-            }
-        })}
+        {
+            name: 'ai:build', action: () => ({
+                description: 'Sync AI modules',
+                steps: ['server:build', 'ai:sync']
+            })
+        },
+        {
+            name: 'ai:test', action: () => ({
+                description: 'Run AI module tests',
+                steps: [
+                    'ai:build',
+                    'ai:run-pytest'
+                ]
+            })
+        },
+        {
+            name: 'ai:clean', action: () => ({
+                description: 'Remove AI module build artifacts',
+                run: async (ctx, task) => {
+                    const { removeDir } = require('../../../scripts/lib');
+                    await removeDir(DIST_DIR);
+                    task.output = 'Cleaned AI modules';
+                }
+            })
+        }
     ]
 };
 
