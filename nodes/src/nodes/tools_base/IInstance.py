@@ -40,7 +40,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
-from aparavi import IInstanceBase
+from rocketlib import IInstanceBase
 
 
 class IInstanceGenericTools(IInstanceBase):

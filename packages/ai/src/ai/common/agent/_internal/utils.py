@@ -1,31 +1,3 @@
-# =============================================================================
-# MIT License
-# Copyright (c) 2024 RocketRide Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF OTHER DEALINGS IN THE
-# SOFTWARE.
-# =============================================================================
-
-"""
-Small agent-boundary utilities.
-"""
-
 from __future__ import annotations
 
 import json
@@ -33,19 +5,17 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from .types import CONTINUATION_TYPE
+from ..types import CONTINUATION_TYPE
 
 
 def extract_prompt(question: Any) -> str:
     """Extract the user prompt string from a Question-like object."""
-    # Prefer the first QuestionText.text
     if hasattr(question, 'questions') and getattr(question, 'questions', None):
         first = question.questions[0]
         if hasattr(first, 'text'):
             text = (first.text or '').strip()
             if text:
                 return text
-    # Fallback: attempt best-effort string conversion
     text = str(question).strip()
     if not text:
         raise ValueError('No prompt provided in Question.questions[0].text')
@@ -73,17 +43,17 @@ def extract_continuation(context: Any) -> Optional[Dict[str, Any]]:
 
 
 def new_run_id() -> str:
-    """Generate a new run identifier."""
+    """Return a new UUID string for an agent run."""
     return str(uuid.uuid4())
 
 
 def now_iso() -> str:
-    """Return current UTC timestamp as ISO-8601 string."""
+    """Return current UTC timestamp as an ISO-8601 string."""
     return datetime.now(timezone.utc).isoformat()
 
 
 def safe_str(value: Any) -> str:
-    """Best-effort stringify helper."""
+    """Best-effort string conversion (never raises)."""
     if value is None:
         return ''
     try:
@@ -92,11 +62,8 @@ def safe_str(value: Any) -> str:
         return ''
 
 
-# -----------------------------------------------------------------------------
-# Invoke / tool payload helpers (kept here to avoid cross-module drift)
-# -----------------------------------------------------------------------------
 def get_field(obj: Any, name: str) -> Any:
-    """Get a field from a dict-like or attribute-like object (best-effort)."""
+    """Get `name` from a dict-like or attribute-like object (best-effort)."""
     if obj is None:
         return None
     if isinstance(obj, dict):
@@ -105,7 +72,7 @@ def get_field(obj: Any, name: str) -> Any:
 
 
 def set_field(obj: Any, name: str, value: Any) -> None:
-    """Set a field on a dict-like or attribute-like object (best-effort)."""
+    """Set `name` on a dict-like or attribute-like object (best-effort)."""
     if obj is None:
         return
     if isinstance(obj, dict):
@@ -139,7 +106,7 @@ def split_namespaced_tool_name(tool_name: Any) -> tuple[str, str]:
 
 
 def is_agent_run_tool_name(tool_name: Any) -> bool:
-    """Return True if tool_name looks like an agent-tool run entry: `<server>.run_agent`."""
+    """Return True if `tool_name` looks like `<server>.run_agent`."""
     try:
         _server, bare = split_namespaced_tool_name(tool_name)
         return bare == 'run_agent'
@@ -148,7 +115,7 @@ def is_agent_run_tool_name(tool_name: Any) -> bool:
 
 
 def extract_tool_names(tool_catalog: Any) -> List[str]:
-    """Extract tool names from a host.tools.query response"""
+    """Extract tool names from a host tool catalog response (best-effort)."""
     try:
         tools_obj = None
         if isinstance(tool_catalog, list):

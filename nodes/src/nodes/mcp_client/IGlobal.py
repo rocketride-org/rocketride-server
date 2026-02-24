@@ -38,7 +38,7 @@ import shlex
 from typing import Any, Dict, List, Optional
 
 from ai.common.config import Config
-from aparavi import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 from .mcp_stdio_client import McpStdioClient, McpToolDef
 from .mcp_sse_client import McpSseClient
