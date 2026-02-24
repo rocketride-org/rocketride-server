@@ -1,0 +1,3 @@
+# MCP SDK for SSE transport + LangChain tool interface
+mcp
+langchain-core

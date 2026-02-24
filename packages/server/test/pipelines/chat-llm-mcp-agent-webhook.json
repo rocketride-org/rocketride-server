@@ -1,0 +1,50 @@
+{
+	"source": "webhook_1",
+	"components": [
+		{
+			"id": "webhook_1",
+			"provider": "webhook",
+			"config": {
+				"mode": "Source",
+				"parameters": {
+					"endpoint": "/webhook",
+					"host": "0.0.0.0",
+					"port": 5567
+				},
+				"type": "webhook"
+			},
+			"input": []
+		},
+		{
+			"id": "llm_1",
+			"provider": "llm_anthropic",
+			"config": {
+				"profile": "claude-haiku-4-5",
+				"claude-haiku-4-5": { "apikey": "" }
+			},
+			"control": [
+				{ "classType": "llm", "from": "agent_1" }
+			]
+		},
+		{
+			"id": "agent_1",
+			"provider": "llm_mcp_agent",
+			"config": {
+				"mcpServers": {
+					"aql": { "url": "http://localhost:8000/sse" }
+				}
+			},
+			"input": [
+				{ "lane": "questions", "from": "webhook_1" }
+			]
+		},
+		{
+			"id": "response_1",
+			"provider": "response",
+			"config": {},
+			"input": [
+				{ "lane": "answers", "from": "agent_1" }
+			]
+		}
+	]
+}

@@ -41,6 +41,28 @@ class IInstanceGenericLLM(IInstanceBase):
         # Send off the answer
         self.instance.writeAnswers(answer)
 
+    def _question_with_tools(self, question: Question, tools: list, tools_steps_callback=None) -> Answer:
+        """Run chat_with_tools and return an Answer with { text, aql_queries }."""
+        out = self.IGlobal._chat.chat_with_tools(question, tools, return_tool_calls=True, tools_steps_callback=tools_steps_callback)
+        if isinstance(out, tuple):
+            answer_obj, tool_calls_log = out
+        else:
+            answer_obj = out
+            tool_calls_log = []
+        aql_queries = []
+        for entry in tool_calls_log:
+            if entry.get('name') == 'execute_aql':
+                args = entry.get('args') or {}
+                aql_queries.append({
+                    'query': args.get('query') or '',
+                    'result': entry.get('result'),
+                })
+        final_text = answer_obj.getText() if callable(getattr(answer_obj, 'getText', None)) else getattr(answer_obj, 'answer', '') or ''
+        response = {'text': final_text, 'aql_queries': aql_queries}
+        answer = Answer(expectJson=True)
+        answer.setAnswer(response)
+        return answer
+    
     def invoke(self, param: IInvokeLLM) -> Answer:
         if not isinstance(param, IInvokeLLM):
             raise Exception(f'Invoke param should be IInvokeLLM, but found {type(param)}')
@@ -53,5 +75,10 @@ class IInstanceGenericLLM(IInstanceBase):
                 return self.IGlobal._chat.getTokens
             case 'ask':
                 return self._question(param.question)
+            case 'askWithTools':
+                # Get tools_steps_callback from invoke param if available
+                tools_steps_callback = getattr(param, 'tools_steps_callback', None)
+                return self._question_with_tools(param.question, getattr(param, 'tools', None) or [], tools_steps_callback=tools_steps_callback)
             case _:
                 raise Exception(f'Invoke operation {param.op} is not defined')
+

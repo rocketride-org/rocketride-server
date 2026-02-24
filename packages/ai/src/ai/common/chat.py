@@ -13,7 +13,8 @@ communication with their respective APIs.
 import time
 import json
 import importlib
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional, Callable
+from datetime import datetime
 from rocketlib import debug
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
@@ -444,6 +445,160 @@ class ChatBase:
         answer.setAnswer(response)
 
         return answer
+    
+    def supports_tools(self) -> bool:
+        """
+        Return True if the underlying LLM supports tool/function calling (bind_tools).
+        When True, chat_with_tools() can be used so the model can choose to call tools
+        (e.g. execute_aql) and then generate a final answer from the results.
+        """
+        llm = getattr(self, '_llm', None)
+        return getattr(llm, 'bind_tools', None) is not None
+
+    def chat_with_tools(
+            self,
+            question: Question,
+            tools: List[Any],
+            max_tool_rounds: int = 5,
+            return_tool_calls: bool = False,
+            tools_steps_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+            ):
+            """
+            Chat with tool use: the LLM can call tools (e.g. execute_aql) and then
+            produce a final answer from the results. Works with any provider whose
+            underlying _llm supports bind_tools (e.g. Anthropic, OpenAI).
+            If the LLM does not support bind_tools, falls back to normal chat(question).
+            Args:
+                question: The user question.
+                tools: List of LangChain tools (e.g. StructuredTool) the model can call.
+                    Must have .name and be invocable with the tool's arguments.
+                    Example: use nodes.llm_tools_agent.aql_tool.get_execute_aql_tool(base_url, token)
+                    so the LLM can call execute_aql to run AQL and then answer from the results.
+                max_tool_rounds: Maximum number of tool-call rounds before returning.
+                return_tool_calls: If True, return (Answer, tool_calls_list) where tool_calls_list
+                                is [{"name", "args", "result"}, ...] for the chat UI to display.
+                tools_steps_callback: Optional callback function to emit tools-steps events.
+                                    Called with dict: {"tool": str, "status": str, "message": str, 
+                                    "timestamp": str, "args": dict, "result": any}
+            Returns:
+                Answer with the model's final text; if return_tool_calls=True, returns (Answer, list).
+            """
+            if not self.supports_tools() or not tools:
+                ans = self.chat(question)
+                return (ans, []) if return_tool_calls else ans
+
+            from langchain_core.messages import HumanMessage, ToolMessage
+
+            bind_tools = getattr(self._llm, 'bind_tools', None)
+            if not callable(bind_tools):
+                ans = self.chat(question)
+                return (ans, []) if return_tool_calls else ans
+
+            llm_with_tools = bind_tools(tools)
+            tool_map = {t.name: t for t in tools}
+            tool_calls_log: List[Dict[str, Any]] = []
+
+            messages: List[Any] = [HumanMessage(content=question.getPrompt())]
+            response = None
+            for _ in range(max_tool_rounds):
+                response = llm_with_tools.invoke(messages)
+                tool_calls = getattr(response, 'tool_calls', None) or []
+                if not tool_calls:
+                    break
+                tool_messages = []
+                for tc in tool_calls:
+                    name = getattr(tc, 'name', None) or (tc.get('name') if isinstance(tc, dict) else None)
+                    args = getattr(tc, 'args', None) or (tc.get('args') if isinstance(tc, dict) else {})
+                    args = args if isinstance(args, dict) else (args or {})
+                    tid = getattr(tc, 'id', None) or (tc.get('id') if isinstance(tc, dict) else str(id(tc)))
+                    if not name or name not in tool_map:
+                        content = json.dumps({'error': f'Unknown tool: {name}'})
+                        tool_calls_log.append({'name': name or '?', 'args': args, 'result': content})
+                        # Emit tools-steps for unknown tool
+                        if tools_steps_callback:
+                            tools_steps_callback({
+                                'tool': name or '?',
+                                'status': 'error',
+                                'message': f'Unknown tool: {name}',
+                                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                                'args': dict(args) if isinstance(args, dict) else {},
+                            })
+                    else:
+                        # Emit tools-steps: tool starting
+                        if tools_steps_callback:
+                            debug(f'[chat_with_tools] Calling tools_steps_callback for {name} (running)')
+                            tool_desc = getattr(tool_map[name], 'description', '') or ''
+                            message = f'Executing {name}...'
+                            if name == 'execute_aql' and isinstance(args, dict) and 'query' in args:
+                                message = f'Executing query: {args.get("query", "")[:100]}'
+                            elif name == 'get_aql_context':
+                                message = 'Fetching database schema...'
+                            try:
+                                tools_steps_callback({
+                                    'tool': name,
+                                    'status': 'running',
+                                    'message': message,
+                                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                                    'args': dict(args) if isinstance(args, dict) else {},
+                                })
+                                debug(f'[chat_with_tools] tools_steps_callback completed for {name} (running)')
+                            except Exception as e:
+                                debug(f'[chat_with_tools] tools_steps_callback failed for {name}: {e}')
+                        else:
+                            debug(f'[chat_with_tools] No tools_steps_callback available')
+                        try:
+                            result = tool_map[name].invoke(args)
+                            content = result if isinstance(result, str) else json.dumps(result)
+                            tool_calls_log.append({'name': name, 'args': dict(args), 'result': result})
+                            # Emit tools-steps: tool completed
+                            if tools_steps_callback:
+                                result_summary = ''
+                                if isinstance(result, dict):
+                                    if 'columns' in result:
+                                        count = len(result.get('columns', []))
+                                        result_summary = f'Schema retrieved: {count} columns found'
+                                    elif 'objects' in result or 'count' in result:
+                                        count = result.get('count', len(result.get('objects', [])))
+                                        result_summary = f'Query executed: {count} objects returned'
+                                message = f'{name} completed successfully'
+                                if result_summary:
+                                    message = result_summary
+                                tools_steps_callback({
+                                    'tool': name,
+                                    'status': 'completed',
+                                    'message': message,
+                                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                                    'args': dict(args) if isinstance(args, dict) else {},
+                                    'result': result,
+                                })
+                        except Exception as e:
+                            content = json.dumps({'error': str(e)})
+                            tool_calls_log.append({'name': name, 'args': dict(args), 'result': {'error': str(e)}})
+                            # Emit tools-steps: tool error
+                            if tools_steps_callback:
+                                tools_steps_callback({
+                                    'tool': name,
+                                    'status': 'error',
+                                    'message': f'Error: {str(e)}',
+                                    'timestamp': datetime.utcnow().isoformat() + 'Z',
+                                    'args': dict(args) if isinstance(args, dict) else {},
+                                    'result': {'error': str(e)},
+                                })
+                    tool_messages.append(ToolMessage(tool_call_id=tid, content=content))
+                messages.append(response)
+                messages.extend(tool_messages)
+
+            if response is None:
+                ans = self.chat(question)
+                return (ans, []) if return_tool_calls else ans
+            final_content = getattr(response, 'content', None) or ''
+            if isinstance(final_content, list):
+                final_content = ''.join(
+                    (c.get('text', '') if isinstance(c, dict) else str(c)) for c in final_content
+                )
+            answer = Answer(expectJson=question.expectJson)
+            answer.setAnswer(final_content)
+            return (answer, tool_calls_log) if return_tool_calls else answer
 
 
 def getChat(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> ChatBase:

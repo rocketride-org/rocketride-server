@@ -1,0 +1,33 @@
+{
+	"title": "LLM MCP Agent",
+	"protocol": "llm_mcp_agent://",
+	"classType": ["agentic"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.llm_mcp_agent",
+	"prefix": "llm_mcp_agent",
+	"description": [
+		"Generic MCP agent — connects to one or more MCP servers via SSE, discovers tools dynamically via tools/list, and uses a connected LLM to orchestrate tool calls. No hardcoded tools — everything comes from MCP. Config: mcpServers dict of {name: {url, headers?}}."
+	],
+	"invoke": {
+		"llm": {
+			"description": "LLM with tool-calling support",
+			"min": 1
+		}
+	},
+	"lanes": {
+		"questions": ["answers"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [{ "lane": "answers" }]
+		}
+	],
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {}
+		}
+	}
+}
