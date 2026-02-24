@@ -103,8 +103,8 @@ jobs:
         run: |
           server_version="$(jq -r '.version' ${{ github.workspace }}/package.json)"
           vscode_version="$(jq -r '.version' ${{ github.workspace }}/apps/vscode/package.json)"
-          client_mcp_version="$(jq -r '.version' ${{ github.workspace }}/packages/client-mcp/package.json)"
-          client_python_version="$(jq -r '.version' ${{ github.workspace }}/packages/client-python/package.json)"
+          client_mcp_version="$(yq -r '.project.version' ${{ github.workspace }}/packages/client-mcp/pyproject.toml)"
+          client_python_version="$(yq -r '.project.version' ${{ github.workspace }}/packages/client-python/pyproject.toml)"
           client_typescript_version="$(jq -r '.version' ${{ github.workspace }}/packages/client-typescript/package.json)"
 
           echo "release_type=${{ inputs.release_type }}"                                              >> $GITHUB_OUTPUT
