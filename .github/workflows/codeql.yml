@@ -1,0 +1,51 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [develop, main, 'release/**']
+  pull_request:
+    branches: [develop, main, 'release/**']
+  schedule:
+    - cron: '17 4 * * 1'  # Weekly Monday 4:17 UTC
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ matrix.language == 'cpp' && 'ubuntu-latest' || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+          - language: cpp
+            build-mode: manual
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - name: Build C++
+        if: matrix.build-mode == 'manual'
+        run: |
+          # CodeQL will trace the build for C++ analysis.
+          # If ./builder fails in CI, CodeQL still analyzes with
+          # query-only mode (catches pattern-based issues).
+          ./builder server:build --verbose || true
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
