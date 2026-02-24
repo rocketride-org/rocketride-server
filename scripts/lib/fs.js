@@ -524,6 +524,58 @@ async function fingerprint(dirPath, options = {}) {
 }
 
 /**
+ * Compute a SHA-256 content hash of all files in a directory tree.
+ *
+ * Uses the same exclusion patterns as fingerprint() but hashes actual
+ * file contents rather than metadata, making it fully deterministic
+ * across machines and git clones.
+ *
+ * @param {string} dirPath - Directory to hash
+ * @param {Object} [options] - Options
+ * @param {string[]} [options.exclude] - Patterns to exclude
+ * @returns {Promise<string|null>} Hex hash string, or null if directory doesn't exist
+ */
+async function contentHash(dirPath, options = {}) {
+    const { exclude = ['node_modules', '.git', '__pycache__', '.pyc'] } = options;
+    const files = [];
+
+    try {
+        await fsp.access(dirPath);
+    } catch {
+        return null;
+    }
+
+    async function walk(dir, relativePath = '') {
+        const items = await fsp.readdir(dir, { withFileTypes: true });
+
+        for (const item of items) {
+            if (exclude.some(pattern => item.name === pattern || item.name.endsWith(pattern))) {
+                continue;
+            }
+
+            const fullPath = path.join(dir, item.name);
+            const relPath = path.join(relativePath, item.name);
+
+            if (item.isDirectory()) {
+                await walk(fullPath, relPath);
+            } else if (item.isFile()) {
+                files.push({ rel: relPath.replace(/\\/g, '/'), full: fullPath });
+            }
+        }
+    }
+
+    await walk(dirPath);
+    files.sort((a, b) => a.rel.localeCompare(b.rel));
+
+    const hash = crypto.createHash('sha256');
+    for (const f of files) {
+        hash.update(f.rel);
+        hash.update(await fsp.readFile(f.full));
+    }
+    return hash.digest('hex');
+}
+
+/**
  * Check if source has changed since last build.
  * Returns true if rebuild is needed, false if unchanged.
  * 
@@ -632,6 +684,7 @@ module.exports = {
     
     // Fingerprinting
     fingerprint,
+    contentHash,
     hasSourceChanged,
     saveSourceHash
 };

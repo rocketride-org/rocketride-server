@@ -33,11 +33,12 @@ const {
     removeDirs, resetDir, syncDir, removeFiles,
     overlayDir, formatSyncStats,
     execCommand, PROJECT_ROOT, BUILD_DIR, isWindows, isMac, isLinux,
-    exists, readFile, readJson, readDir, mkdir, copyFile, removeFile, chmod, 
+    exists, readFile, readJson, readDir, mkdir, copyFile, removeFile, chmod,
     downloadFile, createArchive, extractArchive,
-    parallel, sequence, whenNot, fingerprint,
+    parallel, whenNot, fingerprint, contentHash,
     taskDebug,
-    DOWNLOADS_DIR
+    DOWNLOADS_DIR,
+    STATE_FILE
 } = require('../../../scripts/lib');
 const { runCompilerSetup } = require('../../../scripts/compiler');
 
@@ -458,8 +459,14 @@ async function copyClangRuntimeLibs(options = {}) {
 function makeCheckPrebuiltAction(options = {}) {
     return {
         run: async (ctx, task) => {
+            // Compute content hash of local source (always, ~110ms)
+            task.output = 'Computing source hash...';
+            const localHash = await contentHash(SERVER_DIR);
+            ctx.contentHash = localHash;
+
             if (options.force) {
                 task.output = 'Force rebuild requested';
+                await setState('server.contentHash', null);
                 ctx.downloaded = false;
                 return;
             }
@@ -470,17 +477,10 @@ function makeCheckPrebuiltAction(options = {}) {
                 return;
             }
 
-            const compiledVersion = await getState('server.compiledVersion');
-            if (compiledVersion) {
-                task.output = 'Using compiled version';
-                ctx.downloaded = false;
-                return;
-            }
-
-            const downloadFailed = await getState('server.downloadFailed');
-            if (downloadFailed) {
-                task.output = 'No prebuilt binary available';
-                ctx.downloaded = false;
+            // Already attempted download — nothing more to do
+            const downloadAttempted = await getState('server.downloadAttempted');
+            if (downloadAttempted) {
+                task.output = 'Download already attempted';
                 return;
             }
 
@@ -488,86 +488,67 @@ function makeCheckPrebuiltAction(options = {}) {
                 repo, releaseTag, distFilename, symDistFilename, distUrl, symDistUrl,
             } = await getDistInfo(options);
 
-            const downloadedTag = await getState('server.downloadedTag');
+            // Fetch release manifest and compare content hash
+            const manifestName = `builder-${releaseTag}.json`;
+            const manifestPath = path.join(DOWNLOADS_DIR, manifestName);
+            let hashMatches = false;
 
-            if (downloadedTag === releaseTag && await exists(DIST_DIR)) {
-                task.output = `Server ${releaseTag} (downloaded)`;
-                ctx.downloaded = true;
+            try {
+                task.output = 'Checking source compatibility...';
+                await removeFile(manifestPath);
+                const manifestUrl = `https://github.com/${repo}/releases/download/${releaseTag}/${manifestName}`;
+                await downloadFile(manifestUrl, manifestName, task);
+
+                if (await exists(manifestPath)) {
+                    const manifest = await readJson(manifestPath);
+                    await setState('server.releaseManifest', manifest);
+                    hashMatches = manifest?.server?.contentHash === localHash;
+                }
+            } catch {
+                // Manifest not available — cannot verify, must compile
+            }
+
+            if (!hashMatches) {
+                task.output = 'Source differs from release — will compile';
+                await setState('server.contentHash', null);
+                await setState('server.downloadAttempted', true);
+                ctx.downloaded = false;
                 return;
             }
 
-            var distPath = path.join(DOWNLOADS_DIR, distFilename);
-            var symDistPath = symDistFilename ? path.join(DOWNLOADS_DIR, symDistFilename) : null;
-
+            // Hash matches (or no manifest) — download the binary
             try {
-                task.output = `Downloading GitHub Release ${releaseTag}...`;
-                await execCommand('gh', [
-                    'release', 'download', releaseTag,
-                    '--repo', repo,
-                    '--pattern', distFilename,
-                    '--dir', DOWNLOADS_DIR,
-                    '--clobber'
-                ], { task });
-                task.output = `Downloaded GitHub Release ${releaseTag}`;
+                task.output = `Downloading ${distFilename}...`;
+                const distPath = await downloadFile(distUrl, distFilename, task);
+                task.output = `Downloaded ${distFilename}`;
 
+                let symDistPath = null;
                 if (symDistFilename) {
-                    task.output = `Downloading GitHub Release ${releaseTag} symbols...`;
-                    await execCommand('gh', [
-                        'release', 'download', releaseTag,
-                        '--repo', repo,
-                        '--pattern', symDistFilename,
-                        '--dir', DOWNLOADS_DIR,
-                        '--clobber'
-                    ], { task });
-                    task.output = `Downloaded GitHub Release ${releaseTag} symbols`;
-                }
-            } catch (e) {
-                task.output = `GitHub Release ${releaseTag} not available by CLI:\n${e.message.trim()}\nWill try downloading from GitHub Releases API`;
-                await removeFile(distPath);
-                if (symDistPath)
-                    await removeFile(symDistPath);
-            }
-
-            try {
-                if (!await exists(distPath)) {
-                    task.output = `Downloading ${distFilename}...`;
-                    distPath = await downloadFile(distUrl, distFilename, task);
-                    task.output = `Downloaded ${distFilename}`;
-
-                    if (symDistFilename) {
-                        task.output = `Downloading ${symDistFilename}...`;
-                        symDistPath = await downloadFile(symDistUrl, symDistFilename, task);
-                        task.output = `Downloaded ${symDistFilename}`;
-                    }
+                    task.output = `Downloading ${symDistFilename}...`;
+                    symDistPath = await downloadFile(symDistUrl, symDistFilename, task);
+                    task.output = `Downloaded ${symDistFilename}`;
                 }
 
                 task.output = `Extracting ${distFilename}...`;
                 await extractArchive(distPath, DIST_DIR);
                 task.output = `Extracted ${distFilename}`;
 
-                if (isWindows()) {
+                if (isWindows() && symDistPath) {
                     task.output = `Extracting ${symDistFilename}...`;
                     await extractArchive(symDistPath, DIST_DIR);
                     task.output = `Extracted ${symDistFilename}`;
                 }
 
-                await updateServerState({
-                    downloaded: true,
-                    downloadedAt: new Date().toISOString(),
-                    downloadedTag: releaseTag,
-                    downloadFailed: false,
-                    source: 'github-release'
-                });
-
+                await setState('server.contentHash', localHash);
+                await setState('server.downloadAttempted', true);
                 task.output = `Downloaded server ${releaseTag}`;
                 ctx.downloaded = true;
+
             } catch (e) {
-                await updateServerState({ downloadFailed: true });
+                await setState('server.contentHash', null);
+                await setState('server.downloadAttempted', true);
                 ctx.downloaded = false;
-                task.output = `GitHub Release ${releaseTag} not available by URL:\n${e.message.trim()}\nWill compile from source`;
-                await removeFile(distPath);
-                if (symDistPath)
-                    await removeFile(symDistPath);
+                task.output = `Release ${releaseTag} download failed:\n${e.message.trim()}\nWill compile from source`;
             }
         }
     };
@@ -713,33 +694,19 @@ function makeCompileEngineAction(options = {}) {
         locks: ['cmake'],
         run: async (ctx, task) => {
             const { version } = await loadPackageJson();
-            
-            // Check source hash to skip cmake if nothing changed
+
+            // Check content hash — skip if source matches last successful build
             if (!options.force) {
-                task.output = 'Checking for source changes...';
-                const [coreHash, libHash, cmakeHash] = await Promise.all([
-                    fingerprint(path.join(SERVER_DIR, 'engine-core')),
-                    fingerprint(path.join(SERVER_DIR, 'engine-lib')),
-                    fingerprint(path.join(SERVER_DIR, 'cmake'))
-                ]);
-                const combinedHash = require('crypto')
-                    .createHash('md5')
-                    .update(`${coreHash}:${libHash}:${cmakeHash}`)
-                    .digest('hex');
-                
-                const savedHash = await getState('server.srcHash');
+                const savedHash = await getState('server.contentHash');
                 const exeExt = isWindows() ? '.exe' : '';
                 const engineExists = await exists(path.join(DIST_DIR, 'engine' + exeExt));
-                
-                if (combinedHash === savedHash && engineExists) {
+
+                if (savedHash && savedHash === ctx.contentHash && engineExists) {
                     task.output = 'No source changes detected';
                     return;
                 }
-                
-                // Save hash after we decide to build (will be saved again after success)
-                ctx._serverSrcHash = combinedHash;
             }
-            
+
             task.output = `Compiling v${version}...`;
 
             const baseEnv = isWindows() ? await getVsEnvironment() : process.env;
@@ -790,18 +757,8 @@ function makeCompileEngineAction(options = {}) {
                 }
             }
 
-            await updateServerState({
-                compiled: true,
-                compiledAt: new Date().toISOString(),
-                compiledVersion: version,
-                downloadFailed: false,
-                source: 'compiled'
-            });
-            
-            // Save source hash after successful build
-            if (ctx._serverSrcHash) {
-                await setState('server.srcHash', ctx._serverSrcHash);
-            }
+            // Save content hash after successful compilation
+            await setState('server.contentHash', ctx.contentHash);
 
             task.output = `Compiled v${version}`;
         }
@@ -983,15 +940,11 @@ function makeBuildCoreAction() {
                 then: [
                     parallel([
                         'server:setup-tools',
-                        sequence(['vcpkg:clone', 'vcpkg:bootstrap']),
+                        'vcpkg:submodule-build',
                         'java:setup-jdk'
                     ], 'Setup build tools'),
                     'server:configure',
-                    parallel([
-                        'server:compile-engine',
-                        'java:setup-maven',
-                        'java:setup-jre'
-                    ], 'Compile engine'),
+                    'server:compile-engine',
                     parallel([
                         'server:setup-python',
                         'server:setup-jre'
@@ -1000,12 +953,7 @@ function makeBuildCoreAction() {
                         'server:setup-runtime-libs',
                         'server:setup-samba'
                     ], 'Setup runtime'),
-                    'tika:sync-source',
-                    parallel([
-                        'tika:build-dbgconn',
-                        'tika:build-jar'
-                    ], 'Build Tika'),
-                    'tika:sync'
+                    'tika:submodule-build'
                 ]
             }),
         ]
@@ -1137,7 +1085,7 @@ function makePackageAction(options = {}) {
     return {
         description: 'Package server distribution',
         run: async (_ctx, _task) => {
-            const { baseName, distFilename, symDistFilename } = await getDistInfo(options);
+            const { baseName, releaseTag, distFilename, symDistFilename } = await getDistInfo(options);
             const distPath = path.join(DIST_ARTIFACTS_DIR, distFilename);
             const symDistPath = symDistFilename ? path.join(DIST_ARTIFACTS_DIR, symDistFilename) : null;
             const symFilename = isWindows() ? 'engine.pdb' : null;
@@ -1145,10 +1093,10 @@ function makePackageAction(options = {}) {
             // temp dir for packaging
             options.destDir = path.join(BUILD_ARTIFACTS_DIR, baseName);
 
-            const sourceHash = await getState('server.srcHash');
+            const sourceHash = await getState('server.contentHash');
             const packageHash = await getState('server.pkgHash');
             if (!sourceHash) {
-                throw new Error('Source hash not found');
+                throw new Error('Content hash not found — build server first');
             } else if (!_ctx.force && sourceHash === packageHash && await exists(distPath)) {
                 _task.output = `Server package ${distFilename} is up to date`;
                 return;
@@ -1200,6 +1148,11 @@ function makePackageAction(options = {}) {
 
                 await setState('server.pkgHash', sourceHash);
 
+                // Copy state.json as build manifest for download validation
+                const manifestName = `builder-${releaseTag}.json`;
+                await copyFile(STATE_FILE, path.join(DIST_ARTIFACTS_DIR, manifestName));
+                _task.output = `Packaged ${distFilename} + ${manifestName}`;
+
             } catch (err) {
                 await removeFile(distPath);
                 if (symDistPath) {
@@ -1219,7 +1172,10 @@ function makeCleanAction() {
     return {
         description: 'Clean all',
         steps: [
-            'server:clean'
+            'server:clean',
+            'vcpkg:submodule-clean',
+            'java:submodule-clean',
+            'tika:submodule-clean'
         ]
     };
 }
