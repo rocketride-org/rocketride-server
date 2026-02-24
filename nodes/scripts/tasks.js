@@ -30,12 +30,12 @@
  *   clean - Remove build artifacts
  */
 const path = require('path');
-const { 
-    syncDir, 
-    formatSyncStats, 
-    removeDir, 
-    PROJECT_ROOT, 
-    startServer, 
+const {
+    syncDir,
+    formatSyncStats,
+    removeDir,
+    PROJECT_ROOT,
+    startServer,
     stopServer,
     execCommand,
     parallel,
@@ -209,6 +209,10 @@ module.exports = {
         })},
         { name: 'nodes:test', action: () => ({
             description: 'Test pipeline nodes',
+            steps: ['nodes:build', 'nodes:run-contracts']
+        })},
+        { name: 'nodes:test-full', action: () => ({
+            description: 'Test pipeline nodes (full integration)',
             steps: [
                 'server:build',
                 parallel([

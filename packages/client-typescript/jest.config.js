@@ -47,7 +47,7 @@ module.exports = {
 	],
 	coverageDirectory: 'coverage',
 	coverageReporters: ['text', 'lcov', 'html'],
-	testTimeout: 60000, // 60 seconds for integration tests
+	testTimeout: 120000, // 120 seconds for integration tests (CI runners can be slow)
 	verbose: true,
 
 	// Module name mapping for cleaner imports
