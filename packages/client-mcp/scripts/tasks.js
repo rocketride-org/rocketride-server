@@ -27,7 +27,7 @@
  *
  * Commands:
  *   build - Build Python wheel and sdist
- *   test  - Run pytest (starts test server automatically; same pattern as client-python)
+ *   test  - Run pytest (starts test server automatically)
  *   clean - Remove build artifacts
  */
 const path = require('path');
@@ -69,7 +69,7 @@ function makeSyncSourceAction() {
     };
 }
 
-function makeBuildMcpWheelAction() {
+function makeBuildWheelAction() {
     return {
         run: async (ctx, task) => {
             // Check if source changed
@@ -92,17 +92,8 @@ function makeBuildMcpWheelAction() {
                 '--outdir', DIST_DIR
             ], { task, cwd: serverDir });
 
-            // Save hash after successful build
-            await saveSourceHash(SRC_HASH_KEY, hash);
-        }
-    };
-}
-
-function makeCopyToServerStaticAction() {
-    return {
-        run: async (ctx, task) => {
+            // Copy wheel and sdist to server static directory
             await mkdir(SERVER_STATIC_DIR);
-
             const files = await readDir(DIST_DIR);
             let copied = 0;
             for (const file of files) {
@@ -114,7 +105,47 @@ function makeCopyToServerStaticAction() {
                     copied++;
                 }
             }
-            task.output = `Copied ${copied} files to server static`;
+
+            // Save hash after successful build
+            await saveSourceHash(SRC_HASH_KEY, hash);
+            task.output = `Built wheel, copied ${copied} files to server static`;
+        }
+    };
+}
+
+function makeRunPytestAction(options = {}) {
+    return {
+        run: async (ctx, task) => {
+            require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
+
+            const bracket = ctx.brackets?.['mcp-test-server'];
+            const port = bracket?.port || ctx.port;
+            const serverUri = bracket?.serverUri || `http://localhost:${port}`;
+
+            const serverDir = path.join(PROJECT_ROOT, 'dist', 'server');
+
+            // Install MCP test dependencies
+            task.output = 'Installing test deps (mcp, python-dotenv)...';
+            await execCommand(ENGINE, [
+                '-m', 'pip', 'install', 'mcp>=1.2.0', 'python-dotenv>=1.0.0', '--quiet'
+            ], { task, cwd: serverDir });
+
+            // Run pytest
+            const buildSrcDir = path.join(BUILD_DIR, 'src');
+            const testsDir = path.join(PACKAGE_DIR, 'tests');
+            const pytestArgs = ['-m', 'pytest', testsDir, '-v', '--rootdir', PACKAGE_DIR];
+            if (options.pytest) {
+                pytestArgs.push(...options.pytest);
+            }
+            await execCommand(ENGINE, pytestArgs, {
+                task,
+                cwd: serverDir,
+                env: {
+                    ...process.env,
+                    ROCKETRIDE_URI: serverUri,
+                    PYTHONPATH: buildSrcDir
+                }
+            });
         }
     };
 }
@@ -173,48 +204,6 @@ function makeStopTestServerAction() {
     };
 }
 
-function makeInstallTestDepsAction() {
-    return {
-        run: async (ctx, task) => {
-            const serverDir = path.join(PROJECT_ROOT, 'dist', 'server');
-            task.output = 'Installing client-mcp test deps (mcp, python-dotenv)...';
-            await execCommand(ENGINE, [
-                '-m', 'pip', 'install', 'mcp>=1.2.0', 'python-dotenv>=1.0.0', '--quiet'
-            ], { task, cwd: serverDir });
-        }
-    };
-}
-
-function makeRunPytestAction(options = {}) {
-    return {
-        run: async (ctx, task) => {
-            require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
-
-            const bracket = ctx.brackets?.['mcp-test-server'];
-            const port = bracket?.port || ctx.port;
-            const serverUri = bracket?.serverUri || `http://localhost:${port}`;
-
-            const serverDir = path.join(PROJECT_ROOT, 'dist', 'server');
-            const buildSrcDir = path.join(BUILD_DIR, 'src');
-            const testsDir = path.join(PACKAGE_DIR, 'tests');
-            const pytestArgs = ['-m', 'pytest', testsDir, '-v', '--rootdir', PACKAGE_DIR];
-            if (options.pytest) {
-                pytestArgs.push(...options.pytest);
-            }
-            const env = {
-                ...process.env,
-                ROCKETRIDE_URI: serverUri,
-                PYTHONPATH: buildSrcDir
-            };
-            await execCommand(ENGINE, pytestArgs, {
-                task,
-                cwd: serverDir,
-                env
-            });
-        }
-    };
-}
-
 // ============================================================================
 // Module Export
 // ============================================================================
@@ -226,25 +215,27 @@ module.exports = {
     actions: [
         // Internal actions
         { name: 'client-mcp:sync-source', action: makeSyncSourceAction },
-        { name: 'client-mcp:build-wheel', action: makeBuildMcpWheelAction },
-        { name: 'client-mcp:copy-to-static', action: makeCopyToServerStaticAction },
-        { name: 'client-mcp:start-server', action: makeStartTestServerAction },
-        { name: 'client-mcp:stop-server', action: makeStopTestServerAction },
-        { name: 'client-mcp:install-test-deps', action: makeInstallTestDepsAction },
         { name: 'client-mcp:run-pytest', action: makeRunPytestAction },
 
         // Public actions (have descriptions)
-        { name: 'client-mcp:test', action: () => ({
-            description: 'Run client-mcp pytest (starts test server automatically)',
+        { name: 'client-mcp:build', action: () => ({
+            description: 'Build MCP client',
             steps: [
                 'server:build',
-                parallel([
-                    'nodes:build',
-                    'ai:build',
-                    'client-python:build'
-                ], 'Build modules'),
                 'client-mcp:sync-source',
-                'client-mcp:install-test-deps',
+                'client-mcp:build-wheel',
+            ]
+        })},
+        { name: 'client-mcp:build-wheel', action: makeBuildWheelAction },
+        { name: 'client-mcp:test', action: () => ({
+            description: 'Test MCP client',
+            steps: [
+                parallel([
+                    'ai:build',
+                    'nodes:build',
+                    'client-mcp:build',
+                    'client-python:build'
+                ], 'Build dependencies'),
                 bracket({
                     name: 'mcp-test-server',
                     setup: makeStartTestServerAction(),
@@ -253,17 +244,8 @@ module.exports = {
                 })
             ]
         })},
-        { name: 'client-mcp:build', action: () => ({
-            description: 'Build Python wheel and sdist',
-            steps: [
-                'server:build',
-                'client-mcp:sync-source',
-                'client-mcp:build-wheel',
-                'client-mcp:copy-to-static'
-            ]
-        })},
         { name: 'client-mcp:clean', action: () => ({
-            description: 'Remove client-mcp build artifacts',
+            description: 'Clean MCP client',
             run: async (ctx, task) => {
                 await removeDirs([
                     path.join(PACKAGE_DIR, 'build'),

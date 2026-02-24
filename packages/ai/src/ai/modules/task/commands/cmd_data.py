@@ -8,7 +8,7 @@ facilitating real-time data processing and response handling.
 
 Primary Responsibilities:
 --------------------------
-1. Handles DAP 'apaext_process' commands for data processing requests
+1. Handles DAP 'rrext_process' commands for data processing requests
 2. Manages authentication and task identification for data access
 3. Ensures tasks are in running state before processing data requests
 4. Forwards data processing requests to appropriate task instances
@@ -44,7 +44,7 @@ class DataCommands(DAPConn):
     """
     DAP command handler for data processing requests to computational tasks.
 
-    This class processes DAP 'apaext_process' commands to facilitate data exchange
+    This class processes DAP 'rrext_process' commands to facilitate data exchange
     between clients and running task instances. It handles authentication,
     task validation, and data forwarding while maintaining DAP protocol
     compliance for seamless integration with debugging and monitoring tools.
@@ -57,7 +57,7 @@ class DataCommands(DAPConn):
     - DAP-compliant request/response handling
 
     Workflow:
-    1. Receive 'apaext_process' DAP command from client
+    1. Receive 'rrext_process' DAP command from client
     2. Extract authentication credentials and task identification
     3. Validate task exists and is in running state
     4. Forward data processing request to target task
@@ -91,9 +91,9 @@ class DataCommands(DAPConn):
         """
         pass
 
-    async def on_apaext_process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_process(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle DAP 'apaext_process' command for data processing requests.
+        Handle DAP 'rrext_process' command for data processing requests.
 
         This method processes data processing requests by locating the target task,
         ensuring it's in a running state, and forwarding the data processing request

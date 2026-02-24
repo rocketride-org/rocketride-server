@@ -99,7 +99,7 @@
 				"title": "Self-managed Elasticsearch",
 				"host": "localhost",
 				"port": 9200,
-				"index": "aparavi",
+				"index": "rocketride",
 				"type": "vector_database",
 				"store_enabled": true,
 				"provider": "elasticsearch"
@@ -110,7 +110,7 @@
 				"host": "",
 				"port": 9243,
 				"apikey": "",
-				"index": "aparavi",
+				"index": "rocketride",
 				"type": "vector_database",
 				"store_enabled": true,
 				"provider": "elasticsearch"
@@ -121,7 +121,7 @@
 				"host": "",
 				"port": 443,
 				"apikey": "",
-				"index": "aparavi",
+				"index": "rocketride",
 				"type": "vector_database",
 				"store_enabled": true,
 				"provider": "elasticsearch"
@@ -145,13 +145,13 @@
 			"type": "string",
 			"title": "Index Name / Collection Name",
 			"description": "Enter the name of the Elasticsearch index (must be lowercase)",
-			"default": "aparavi"
+			"default": "rocketride"
 		},
 		"elasticsearch.index": {
 			"type": "string",
 			"title": "Index Name / Collection Name",
 			"description": "Enter the name of the Elasticsearch index",
-			"default": "aparavi"
+			"default": "rocketride"
 		},
 		"elasticsearch.type": {
 			"type": "string",

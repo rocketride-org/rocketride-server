@@ -103,7 +103,7 @@
 					"qdrant": {
 						"profile": "local",
 						"local": {
-							"collection": "APARAVI",
+							"collection": "ROCKETRIDE",
 							"host": "localhost",
 							"port": 6333
 						}
@@ -127,7 +127,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Aparavi Autopipe",
+			"title": "RocketRide Autopipe",
 			"properties": [
 				"remote",
 				"all.embedding",
@@ -136,7 +136,7 @@
 		},
 		{
 			"section": "Transform",
-			"title": "Aparavi Autopipe",
+			"title": "RocketRide Autopipe",
 			"properties": [
 				"remote",
 				"all.embedding"

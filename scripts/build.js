@@ -1,5 +1,5 @@
 /**
- * Aparavi Build System
+ * RocketRide Build System
  * 
  * Unified build orchestrator that discovers and runs build tasks
  * from tasks.js files throughout the project.
@@ -91,6 +91,8 @@ function parseArgs(args) {
             } else {
                 options.overlayRoot = path.join(process.cwd(), overlayRoot);
             }
+        } else if (arg === '--nodownload') {
+            options.nodownload = true;
         } else if (arg.startsWith('--arch=')) {
             const archValue = arg.substring('--arch='.length).toLowerCase();
             if (archValue === 'arm' || archValue === 'arm64') {
@@ -148,7 +150,7 @@ function expandGlobalCommands(globalCommands, registry) {
 
 function showHelp(registry) {
     console.log(`
-Aparavi Build System
+Rocketride Build System
 
 Usage: builder <action> [...] [options]
 
@@ -180,6 +182,7 @@ Options:
   --force, -f         Force rebuild (ignore cache/state)
   --verbose, -v       Show detailed output
   --sequential, -s    Run modules sequentially (default: parallel)
+  --nodownload        Force compile from source (skip prebuilt download)
   --arch=arm|intel    Target architecture (macOS cross-compile)
   --pytest="args"     Pass arguments to pytest (can be repeated)
   --jest="args"       Pass arguments to Jest (can be repeated)

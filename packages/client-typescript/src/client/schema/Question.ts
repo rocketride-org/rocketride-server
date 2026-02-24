@@ -215,7 +215,7 @@ export class Answer {
  * Main class for asking questions to RocketRide's AI system.
  */
 export class Question {
-	type: QuestionType = QuestionType.SEMANTIC;
+	type: QuestionType = QuestionType.QUESTION;
 	filter: DocFilter;
 	expectJson = false;
 	role = '';
@@ -232,7 +232,7 @@ export class Question {
 		expectJson?: boolean;
 		role?: string;
 	} = {}) {
-		this.type = options.type || QuestionType.SEMANTIC;
+		this.type = options.type || QuestionType.QUESTION;
 		this.filter = options.filter || {
 			fullTables: false,
 			fullDocuments: false,

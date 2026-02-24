@@ -158,7 +158,7 @@ class DataMixin(DAPClient):
                 raise RuntimeError('Pipe already opened')
 
             request = self._client.build_request(
-                'apaext_process',
+                'rrext_process',
                 arguments={
                     'subcommand': 'open',
                     'object': self._objinfo,
@@ -203,7 +203,7 @@ class DataMixin(DAPClient):
                 raise ValueError('Buffer must be bytes')
 
             request = self._client.build_request(
-                'apaext_process',
+                'rrext_process',
                 arguments={
                     'subcommand': 'write',
                     'pipe_id': self._pipe_id,
@@ -239,7 +239,7 @@ class DataMixin(DAPClient):
 
             try:
                 request = self._client.build_request(
-                    'apaext_process',
+                    'rrext_process',
                     arguments={
                         'subcommand': 'close',
                         'pipe_id': self._pipe_id,

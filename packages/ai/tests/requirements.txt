@@ -1,4 +1,4 @@
-# Test dependencies for Aparavi AI tests
+# Test dependencies for RocketRide AI tests
 
 # Core testing framework
 pytest

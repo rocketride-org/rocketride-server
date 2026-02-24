@@ -52,6 +52,21 @@ on:
         required: false
         default: false
         type: boolean
+      release_client_mcp:
+        description: 'Release MCP client'
+        required: false
+        default: false
+        type: boolean
+      release_client_python:
+        description: 'Release Python client'
+        required: false
+        default: false
+        type: boolean
+      release_client_typescript:
+        description: 'Release TypeScript client'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   init:
@@ -67,6 +82,18 @@ jobs:
       vscode_version: ${{ steps.init.outputs.vscode_version }}
       vscode_version_full: ${{ steps.init.outputs.vscode_version_full }}
       vscode_tag: ${{ steps.init.outputs.vscode_tag }}
+      release_client_mcp: ${{ steps.init.outputs.release_client_mcp }}
+      client_mcp_version: ${{ steps.init.outputs.client_mcp_version }}
+      client_mcp_version_full: ${{ steps.init.outputs.client_mcp_version_full }}
+      client_mcp_tag: ${{ steps.init.outputs.client_mcp_tag }}
+      release_client_python: ${{ steps.init.outputs.release_client_python }}
+      client_python_version: ${{ steps.init.outputs.client_python_version }}
+      client_python_version_full: ${{ steps.init.outputs.client_python_version_full }}
+      client_python_tag: ${{ steps.init.outputs.client_python_tag }}
+      release_client_typescript: ${{ steps.init.outputs.release_client_typescript }}
+      client_typescript_version: ${{ steps.init.outputs.client_typescript_version }}
+      client_typescript_version_full: ${{ steps.init.outputs.client_typescript_version_full }}
+      client_typescript_tag: ${{ steps.init.outputs.client_typescript_tag }}
 
     steps:
       - name: Check out repository
@@ -76,16 +103,36 @@ jobs:
         run: |
           server_version="$(jq -r '.version' ${{ github.workspace }}/package.json)"
           vscode_version="$(jq -r '.version' ${{ github.workspace }}/apps/vscode/package.json)"
+          client_mcp_version="$(yq -r '.project.version' ${{ github.workspace }}/packages/client-mcp/pyproject.toml)"
+          client_python_version="$(yq -r '.project.version' ${{ github.workspace }}/packages/client-python/pyproject.toml)"
+          client_typescript_version="$(jq -r '.version' ${{ github.workspace }}/packages/client-typescript/package.json)"
 
-          echo "release_type=${{ inputs.release_type }}"                        >> $GITHUB_OUTPUT
-          echo "release_server=${{ inputs.release_server }}"                    >> $GITHUB_OUTPUT
-          echo "server_version=${server_version}"                               >> $GITHUB_OUTPUT
-          echo "server_version_full=${server_version}.${{ github.run_number }}" >> $GITHUB_OUTPUT
-          echo "server_tag=server-v${server_version}"                           >> $GITHUB_OUTPUT
-          echo "release_vscode=${{ inputs.release_vscode }}"                    >> $GITHUB_OUTPUT
-          echo "vscode_version=${vscode_version}"                               >> $GITHUB_OUTPUT
-          echo "vscode_version_full=${vscode_version}.${{ github.run_number }}" >> $GITHUB_OUTPUT
-          echo "vscode_tag=vscode-v${vscode_version}"                           >> $GITHUB_OUTPUT
+          echo "release_type=${{ inputs.release_type }}"                                              >> $GITHUB_OUTPUT
+
+          echo "release_server=${{ inputs.release_server }}"                                          >> $GITHUB_OUTPUT
+          echo "server_version=${server_version}"                                                     >> $GITHUB_OUTPUT
+          echo "server_version_full=${server_version}.${{ github.run_number }}"                       >> $GITHUB_OUTPUT
+          echo "server_tag=server-v${server_version}"                                                 >> $GITHUB_OUTPUT
+
+          echo "release_vscode=${{ inputs.release_vscode }}"                                          >> $GITHUB_OUTPUT
+          echo "vscode_version=${vscode_version}"                                                     >> $GITHUB_OUTPUT
+          echo "vscode_version_full=${vscode_version}.${{ github.run_number }}"                       >> $GITHUB_OUTPUT
+          echo "vscode_tag=vscode-v${vscode_version}"                                                 >> $GITHUB_OUTPUT
+
+          echo "release_client_mcp=${{ inputs.release_client_mcp }}"                                  >> $GITHUB_OUTPUT
+          echo "client_mcp_version=${client_mcp_version}"                                             >> $GITHUB_OUTPUT
+          echo "client_mcp_version_full=${client_mcp_version}.${{ github.run_number }}"               >> $GITHUB_OUTPUT
+          echo "client_mcp_tag=client-mcp-v${client_mcp_version}"                                     >> $GITHUB_OUTPUT
+
+          echo "release_client_python=${{ inputs.release_client_python }}"                            >> $GITHUB_OUTPUT
+          echo "client_python_version=${client_python_version}"                                       >> $GITHUB_OUTPUT
+          echo "client_python_version_full=${client_python_version}.${{ github.run_number }}"         >> $GITHUB_OUTPUT
+          echo "client_python_tag=client-python-v${client_python_version}"                            >> $GITHUB_OUTPUT
+
+          echo "release_client_typescript=${{ inputs.release_client_typescript }}"                    >> $GITHUB_OUTPUT
+          echo "client_typescript_version=${client_typescript_version}"                               >> $GITHUB_OUTPUT
+          echo "client_typescript_version_full=${client_typescript_version}.${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "client_typescript_tag=client-typescript-v${client_typescript_version}"                >> $GITHUB_OUTPUT
 
           cat $GITHUB_OUTPUT
 
@@ -154,7 +201,8 @@ jobs:
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall
 
       - name: Package
-        if: github.event_name == 'workflow_dispatch' && inputs.release_server
+        if: github.event_name == 'workflow_dispatch' &&
+            needs.init.outputs.release_server == 'true'
         run: ${{ matrix.builder_cmd }} package --verbose
 
       - name: Test
@@ -162,7 +210,7 @@ jobs:
 
       - name: Upload Server artifacts
         if: github.event_name == 'workflow_dispatch' &&
-            inputs.release_server
+            needs.init.outputs.release_server == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: server-artifacts-${{ matrix.platform }}
@@ -173,7 +221,7 @@ jobs:
 
       - name: Upload VC Code extension artifacts
         if: github.event_name == 'workflow_dispatch' &&
-            inputs.release_vscode &&
+            needs.init.outputs.release_vscode == 'true' &&
             matrix.platform == 'ubuntu'
         uses: actions/upload-artifact@v4
         with:
@@ -182,10 +230,50 @@ jobs:
             ${{ github.workspace }}/dist/vscode/*.vsix
           if-no-files-found: error
 
+      - name: Upload MCP client artifacts
+        if: github.event_name == 'workflow_dispatch' &&
+            needs.init.outputs.release_client_mcp == 'true' &&
+            matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-client-${{ matrix.platform }}
+          path: |
+            ${{ github.workspace }}/dist/clients/mcp/*.whl
+            ${{ github.workspace }}/dist/clients/mcp/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload Python client artifacts
+        if: github.event_name == 'workflow_dispatch' &&
+            needs.init.outputs.release_client_python == 'true' &&
+            matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-client-${{ matrix.platform }}
+          path: |
+            ${{ github.workspace }}/dist/clients/python/*.whl
+            ${{ github.workspace }}/dist/clients/python/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload TypeScript client artifacts
+        if: github.event_name == 'workflow_dispatch' &&
+            needs.init.outputs.release_client_typescript == 'true' &&
+            matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: typescript-client-${{ matrix.platform }}
+          path: |
+            ${{ github.workspace }}/dist/clients/typescript/*.tgz
+          if-no-files-found: error
+
   release:
     name: Release / ${{ matrix.name }}
     needs: [init, build]
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' &&
+        (needs.init.outputs.release_server == 'true' ||
+         needs.init.outputs.release_vscode == 'true' ||
+         needs.init.outputs.release_client_mcp == 'true' ||
+         needs.init.outputs.release_client_python == 'true' ||
+         needs.init.outputs.release_client_typescript == 'true')
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -206,6 +294,24 @@ jobs:
             should_release: ${{ needs.init.outputs.release_vscode }}
             tag_name: ${{ needs.init.outputs.vscode_tag }}
             download_pattern: vscode-artifacts-*
+          - type: client-mcp
+            name: MCP Client
+            version: ${{ needs.init.outputs.client_mcp_version }}
+            should_release: ${{ needs.init.outputs.release_client_mcp }}
+            tag_name: ${{ needs.init.outputs.client_mcp_tag }}
+            download_pattern: mcp-client-*
+          - type: client-python
+            name: Python Client
+            version: ${{ needs.init.outputs.client_python_version }}
+            should_release: ${{ needs.init.outputs.release_client_python }}
+            tag_name: ${{ needs.init.outputs.client_python_tag }}
+            download_pattern: python-client-*
+          - type: client-typescript
+            name: TypeScript Client
+            version: ${{ needs.init.outputs.client_typescript_version }}
+            should_release: ${{ needs.init.outputs.release_client_typescript }}
+            tag_name: ${{ needs.init.outputs.client_typescript_tag }}
+            download_pattern: typescript-client-*
     steps:
       - name: Check out repository
         if: matrix.should_release == 'true'

@@ -1,3 +1,26 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 RocketRide, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
 """
 Mock Modules for Node Testing
 ==============================
@@ -22,12 +45,35 @@ How Mock Loading Works:
 
 5. The mock completely shadows the real library - no code changes needed
 
+Mock Coverage (all external calls go through mocks when ROCKETRIDE_MOCK is set):
+------------------------------------------------------------------------------
+- LLM providers: langchain_openai, langchain_anthropic, langchain_google_vertexai,
+  langchain_aws, langchain_xai (Chat* classes return stub responses)
+- LLM validateConfig: openai, anthropic (direct SDK - no real API calls)
+- Vector stores: qdrant_client, weaviate, psycopg2, pgvector, pinecone,
+  chromadb, pymilvus, astrapy
+
+LLM credential placeholders (pipeline injects when ROCKETRIDE_MOCK): anthropic, xai,
+openai, perplexity, deepseek, mistral, vision_mistral, gemini, ibm_watson, bedrock.
+
+Not mocked (native SDK; would need mocks for full test): Mistral SDK, Google genai,
+IBM Watson. Vertex/Bedrock use langchain mocks + credential placeholders.
+Not mocked (tests use requires= or skip): OCR (img2table/opencv), embedding
+transformer (sentence-transformers), NER (transformers), ibm_watsonx_ai.
+
 Directory Structure:
 --------------------
 Each mock is a directory matching the library's package name:
 
     mocks/
         __init__.py              <- This file
+        openai/                  <- Mock for openai SDK (validateConfig)
+        anthropic/               <- Mock for anthropic SDK (validateConfig)
+        langchain_openai/        <- Mock for ChatOpenAI, OpenAIEmbeddings
+        langchain_anthropic/     <- Mock for ChatAnthropic
+        langchain_google_vertexai/
+        langchain_aws/
+        langchain_xai/
         qdrant_client/           <- Mock for qdrant_client library
             __init__.py          <- Main mock implementation
             models.py            <- Mock data models

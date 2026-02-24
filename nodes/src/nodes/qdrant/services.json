@@ -191,7 +191,7 @@
 				"title": "Your own Qdrant server",
 				"host": "localhost",
 				"port": 6333,
-				"collection": "APARAVI"
+				"collection": "ROCKETRIDE"
 			},
 			"cloud": {
 				"mode": "cloud",
@@ -199,7 +199,7 @@
 				"host": "",
 				"port": 6333,
 				"apikey": "",
-				"collection": "APARAVI"
+				"collection": "ROCKETRIDE"
 			}
 		}
 	},

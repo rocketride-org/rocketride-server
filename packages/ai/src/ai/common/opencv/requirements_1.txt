@@ -1,0 +1,5 @@
+# Install all the lower end modules - these include various parts
+# but not the full install
+opencv-python==4.13.0.92
+opencv-python-headless==4.13.0.92
+opencv-contrib-python-headless==4.13.0.92

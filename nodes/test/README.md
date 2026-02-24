@@ -270,7 +270,7 @@ Multiple matchers can be combined:
 ```json
 {
     "test": {
-        "requires": ["APARAVI_OPENAI_KEY"],
+        "requires": ["ROCKETRIDE_OPENAI_KEY"],
         "profiles": ["openai-gpt4"],
         "controls": ["llm_openai"],
         "cases": [

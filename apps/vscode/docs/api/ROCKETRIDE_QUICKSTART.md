@@ -19,10 +19,10 @@ ROCKETRIDE_OUTPUT_PATH=/data/output
 ### Step 2: Install Client
 ```bash
 # Use the server URL from your .env file (ROCKETRIDE_URI)
-pip install ${ROCKETRIDE_URI}/client/python/rocketride_client_python-latest-py3-none-any.whl
+pip install ${ROCKETRIDE_URI}/client/python/rocketride-latest-py3-none-any.whl
 
 # Or directly:
-pip install https://cloud.rocketride.ai/client/python/rocketride_client_python-latest-py3-none-any.whl
+pip install https://cloud.rocketride.ai/client/python/rocketride-latest-py3-none-any.whl
 ```
 
 ### Step 3: Create Pipeline (`pipeline.json`)
@@ -155,7 +155,7 @@ npm install https://cloud.rocketride.ai/client/typescript
 
 ### Step 4: Create TypeScript Script (`main.ts`)
 ```typescript
-import { RocketRideClient } from '@rocketride/client-typescript';
+import { RocketRideClient } from 'rocketride';
 
 async function main() {
   // Client reads configuration from .env automatically

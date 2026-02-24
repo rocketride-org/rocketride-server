@@ -1018,7 +1018,7 @@ export class RocketRideCLI {
 			if (!this.client) return false;
 
 			const arguments_ = { subscribe };
-			const monitorRequest = this.client.buildRequest('apaext_monitor', {
+			const monitorRequest = this.client.buildRequest('rrext_monitor', {
 				token,
 				arguments: arguments_
 			});

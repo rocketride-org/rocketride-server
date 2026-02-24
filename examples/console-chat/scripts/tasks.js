@@ -98,15 +98,15 @@ module.exports = {
         
         // Public actions (have descriptions)
         { name: 'console-chat:build', action: () => ({
-            description: 'Compile TypeScript example',
+            description: 'Build console chat example',
             steps: [
-                'client-typescript:compile',
+                'client-typescript:build',
                 'console-chat:compile',
                 'console-chat:copy-config'
             ]
         })},
         { name: 'console-chat:clean', action: () => ({
-            description: 'Remove console-chat build artifacts',
+            description: 'Clean console chat example',
             run: async (ctx, task) => {
                 await removeDirs([path.join(PACKAGE_DIR, 'dist')]);
                 await removeDirAndParents(PROJECT_ROOT, DIST_DIR);

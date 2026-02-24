@@ -30,7 +30,7 @@
  * - GPU information and system platform details
  * - Path-specific disk usage (cache, control, data, log)
  * 
- * Uses the DAP command 'apaext_sysinfo' to poll system information at regular intervals
+ * Uses the DAP command 'rrext_sysinfo' to poll system information at regular intervals
  * and provides visualization through Chart.js-based rolling charts.
  */
 
@@ -180,7 +180,7 @@ export class PageSystemProvider {
 		}
 
 		try {
-			const response = await this.connectionManager.request('apaext_sysinfo', {});
+			const response = await this.connectionManager.request('rrext_sysinfo', {});
 			
 			// Check if the response was successful
 			if (response && response.success === false) {
