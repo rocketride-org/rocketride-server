@@ -43,10 +43,13 @@ from rocketlib import IGlobalBase, OPEN_MODE, warning
 from .mcp_stdio_client import McpStdioClient, McpToolDef
 from .mcp_sse_client import McpSseClient
 from .mcp_streamable_http_client import McpStreamableHttpClient
+from .mcp_driver import McpDriver
 
 
 class IGlobal(IGlobalBase):
     """Global state for mcp_client."""
+
+    driver: McpDriver | None = None
 
     def beginGlobal(self) -> None:
         # Skip heavy initialization in CONFIG mode (matches other nodes).
@@ -128,6 +131,14 @@ class IGlobal(IGlobalBase):
             self._client.start()
             tools = self._client.list_tools()
             self._cache_tools(tools)
+
+            # Build tool-provider driver after cache is ready.
+            self.driver = McpDriver(
+                server_name=self.serverName,
+                list_namespaced_tools=self.list_namespaced_tools,
+                get_tool=lambda server, name: self.get_tool(server_name=server, tool_name=name),
+                call_tool=lambda server, name, args: self.call_tool(server_name=server, tool_name=name, arguments=args),
+            )
         except Exception as e:
             warning(str(e))
             raise
@@ -185,6 +196,7 @@ class IGlobal(IGlobalBase):
             if client is not None:
                 client.stop()
         finally:
+            self.driver = None
             self._client = None
             self._tools_by_original = {}
             self._tools_by_namespaced = {}

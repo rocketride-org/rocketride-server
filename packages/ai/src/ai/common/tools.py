@@ -1,49 +1,27 @@
-# =============================================================================
-# Aparavi Engine
-# =============================================================================
-# MIT License
-# Copyright (c) 2024 Aparavi Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-# =============================================================================
-
 """
-Tool base class (provider-agnostic invoke boundary).
+Tool provider base abstraction.
 
-This package is intentionally framework/provider agnostic. It will be used by
-tool provider nodes (for example `mcp_client`) to standardize behavior
-behind the control-plane invoke seam:
+This is the shared base class for tool-provider nodes that expose tools over the
+engine control-plane invoke seam:
 
-    instance.invoke('tool', IInvokeTool.*)
+  instance.invoke("tool", IInvokeTool.*)
 
-Step 1 scaffolding: this class is a placeholder. Step 2 will implement routing
-for `tool.query`, `tool.validate`, and `tool.invoke`.
+Providers implement three hooks:
+- `_tool_query`: return tool descriptors for discovery
+- `_tool_validate`: validate tool input
+- `_tool_invoke`: execute tool call and return output
+
+Shared routing logic for `tool.query`, `tool.validate`, and `tool.invoke` lives
+in `ToolsBase.invoke()`.
 """
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Tuple
 
-from rocketlib import IInstanceBase
 
-
-class IInstanceGenericTools(IInstanceBase):
+class ToolsBase(ABC):
     """
     Base class for tool-provider nodes.
 
@@ -56,10 +34,16 @@ class IInstanceGenericTools(IInstanceBase):
     Tool names are expected to be namespaced: `<serverName>.<toolName>`.
     """
 
-    def invoke(self, param: Any) -> Any:  # noqa: ANN401
+    def handle_invoke(self, param: Any) -> Any:  # noqa: ANN401
+        """
+        Handle a tool control-plane operation.
+
+        This is the driver-facing entrypoint. Node `IInstance.invoke(...)` should
+        typically delegate to this method.
+        """
         op = _get_field(param, 'op')
         if not isinstance(op, str) or not op:
-            raise ValueError('tools_base: invoke param must include a non-empty string field `op`')
+            raise ValueError('tools: invoke param must include a non-empty string field `op`')
 
         match op:
             case 'tool.query':
@@ -89,22 +73,30 @@ class IInstanceGenericTools(IInstanceBase):
                 return param
 
             case _:
-                raise ValueError(f'tools_base: invoke operation {op} is not defined')
+                raise ValueError(f'tools: invoke operation {op} is not defined')
+
+    def invoke(self, param: Any) -> Any:  # noqa: ANN401
+        """Alias for `handle_invoke()`."""
+        return self.handle_invoke(param)
 
     # ------------------------------------------------------------------
     # Provider hooks (override in concrete tool provider nodes)
     # ------------------------------------------------------------------
+    @abstractmethod
     def _tool_query(self) -> List[Dict[str, Any]]:
         """Return a list of tool descriptors for discovery."""
-        raise NotImplementedError('tools_base: _tool_query() must be implemented by tool provider')
+        raise NotImplementedError
 
+    @abstractmethod
     def _tool_validate(self, *, server_name: str, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
         """Validate tool input; raise on invalid input."""
-        raise NotImplementedError('tools_base: _tool_validate() must be implemented by tool provider')
+        raise NotImplementedError
 
+    @abstractmethod
     def _tool_invoke(self, *, server_name: str, tool_name: str, input_obj: Any) -> Any:  # noqa: ANN401
         """Execute tool call and return output."""
-        raise NotImplementedError('tools_base: _tool_invoke() must be implemented by tool provider')
+        raise NotImplementedError
+
 
 def _get_field(obj: Any, name: str) -> Any:  # noqa: ANN401
     if obj is None:
@@ -129,19 +121,18 @@ def _set_field(obj: Any, name: str, value: Any) -> None:  # noqa: ANN401
 
 def _split_namespaced_tool_name(tool_name: Any) -> Tuple[str, str]:  # noqa: ANN401
     if not isinstance(tool_name, str) or not tool_name.strip():
-        raise ValueError('tools_base: tool_name must be a non-empty string')
+        raise ValueError('tools: tool_name must be a non-empty string')
     s = tool_name.strip()
     if '.' not in s:
         raise ValueError(
-            'tools_base: tool_name must be namespaced as `<serverName>.<toolName>`; '
-            f'got {tool_name!r}'
+            'tools: tool_name must be namespaced as `<serverName>.<toolName>`; ' f'got {tool_name!r}'
         )
     server_name, bare_tool = s.split('.', 1)
     server_name = server_name.strip()
     bare_tool = bare_tool.strip()
     if not server_name or not bare_tool:
         raise ValueError(
-            'tools_base: tool_name must be namespaced as `<serverName>.<toolName>`; '
-            f'got {tool_name!r}'
+            'tools: tool_name must be namespaced as `<serverName>.<toolName>`; ' f'got {tool_name!r}'
         )
     return server_name, bare_tool
+
