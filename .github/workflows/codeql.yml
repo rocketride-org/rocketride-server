@@ -11,16 +11,19 @@ on:
 permissions:
   actions: read
   contents: read
+  packages: write
   security-events: write
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  VCPKG_NUGET_USER: ${{ github.repository_owner }}
+  NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
 
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    # C++ requires full build environment (vcpkg, cmake) which this
-    # workflow doesn't set up. Allow it to fail without blocking PRs.
-    continue-on-error: ${{ matrix.build-mode == 'manual' }}
+    runs-on: ${{ matrix.language == 'cpp' && 'ubuntu-22.04' || 'ubuntu-latest' }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +37,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: ${{ matrix.build-mode == 'manual' && 'recursive' || 'false' }}
+
+      - name: Setup pnpm
+        if: matrix.build-mode == 'manual'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Bootstrap vcpkg
+        if: matrix.build-mode == 'manual'
+        run: ./builder vcpkg:build
+
+      - name: Configure vcpkg NuGet cache
+        if: matrix.build-mode == 'manual'
+        run: |
+          NUGET_EXE=$(./build/vcpkg/vcpkg fetch nuget | tail -n1)
+          mono $NUGET_EXE sources add \
+            -Source "${{ env.NUGET_FEED_URL }}" \
+            -StorePasswordInClearText \
+            -Name GitHubPackages \
+            -UserName "${{ env.VCPKG_NUGET_USER }}" \
+            -Password "${{ secrets.GITHUB_TOKEN }}" || true
+          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
+            -Source "${{ env.NUGET_FEED_URL }}"
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
@@ -44,11 +72,7 @@ jobs:
 
       - name: Build C++
         if: matrix.build-mode == 'manual'
-        run: |
-          # CodeQL will trace the build for C++ analysis.
-          # If ./builder fails in CI, CodeQL still analyzes with
-          # query-only mode (catches pattern-based issues).
-          ./builder server:build --verbose || true
+        run: ./builder server:build --verbose --autoinstall
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
