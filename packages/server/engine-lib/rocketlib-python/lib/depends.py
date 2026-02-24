@@ -36,7 +36,6 @@ import os
 import platform
 import subprocess
 import sys
-import threading
 import time
 from glob import glob
 from typing import Optional
@@ -795,28 +794,24 @@ def depends(requirements: Optional[str] = None):
         requirements: Path to a requirements.txt file. If None, only
                       ensures the environment and constraints are ready.
     """
-    pid = os.getpid()
-    tid = threading.current_thread().name
-    tag = f'[pid={pid} tid={tid}]'
-    debug(f'{tag} depends({requirements})')
+    debug(f'depends({requirements})')
 
     # Normalize path
     if requirements:
         requirements = os.path.abspath(requirements)
-        debug(f'{tag}   Path: {requirements}')
+        debug(f'  Path: {requirements}')
         if not os.path.exists(requirements):
-            debug(f'{tag}   File not found, skipping')
+            debug(f'  File not found, skipping')
             return
         if requirements in _processed:
-            debug(f'{tag}   Already processed, skipping')
+            debug(f'  Already processed, skipping')
             return
 
     cache_dir = _get_cache_dir()
     lock_path = os.path.join(cache_dir, 'install.lock')
 
-    debug(f'{tag}   Waiting for lock: {lock_path}')
     with FileLock(lock_path):
-        debug(f'{tag}   Lock acquired: {lock_path}')
+        debug(f'  Lock acquired: {lock_path}')
 
         # Phase 1: Bootstrap
         bootstrap()
@@ -826,15 +821,12 @@ def depends(requirements: Optional[str] = None):
 
         # Phase 3: Install if requirements provided
         if requirements:
-            debug(f'{tag}   Installing: {requirements}')
             _install_requirements(requirements, constraints_path)
             _processed.add(requirements)
-            debug(f'{tag}   Completed: {os.path.basename(requirements)}')
+            debug(f'  Completed: {os.path.basename(requirements)}')
 
         # Phase 4: Apply platform-specific hacks (after packages may have been installed)
         _apply_pywin32_hack()
-
-    debug(f'{tag}   Lock released: {lock_path}')
 
 
 # ---------------------------------------------------------------------------
