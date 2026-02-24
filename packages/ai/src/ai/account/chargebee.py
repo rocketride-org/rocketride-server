@@ -70,7 +70,7 @@ class ChargebeeClient:
         self.enabled = bool(self._site and self._api_key)
 
     async def report_usage(
-        self, subscription_id: str, quantity: int, usage_date: str = ''
+        self, subscription_id: str, quantity: float, usage_date: str = ''
     ) -> None:
         """
         Report metered usage for a subscription.
@@ -92,7 +92,7 @@ class ChargebeeClient:
 
         data: dict[str, str] = {
             'item_price_id': self._item_price_id,
-            'quantity': str(quantity),
+            'quantity': str(int(round(quantity))),
         }
         if usage_date:
             data['usage_date'] = usage_date

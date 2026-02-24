@@ -377,7 +377,8 @@ class TaskMetrics:
         since the last report. Only the delta (new usage in this period) is
         sent to the billing system.
 
-        STUB: Implementation pending - will send HTTP POST to billing API.
+        Reports incremental usage to Chargebee via the Usage API.
+        Returns an optional coroutine that callers can await or fire-and-forget.
 
         The report includes:
         - Task identification (task_id, customer_id, etc. from status)
@@ -457,21 +458,22 @@ class TaskMetrics:
             pass
 
         # Report to Chargebee if subscription ID is available
+        # Returns the coroutine so callers can await it (e.g. stop_monitoring final report)
+        chargebee_coro = None
         if self._chargebee_subscription_id and self._chargebee_client.enabled and delta_tokens_total > 0:
             try:
                 from datetime import datetime, timezone
                 usage_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-                coro = self._chargebee_client.report_usage(
+                chargebee_coro = self._chargebee_client.report_usage(
                     subscription_id=self._chargebee_subscription_id,
                     quantity=round(delta_tokens_total, 2),
                     usage_date=usage_date,
                 )
-                # Schedule async reporting without blocking the metrics loop
-                asyncio.ensure_future(coro)
             except Exception as e:
-                debug(f'[Chargebee] Error scheduling usage report: {e}')
+                debug(f'[Chargebee] Error creating usage report: {e}')
 
         _ = report_data  # Keep reference for debugging
+        return chargebee_coro
 
     async def _monitoring_loop(self) -> None:
         """
@@ -509,7 +511,9 @@ class TaskMetrics:
                     time_since_last_report = current_time - self._last_report_time
                     if time_since_last_report >= self._report_interval_seconds:
                         try:
-                            self._report_to_billing_system()
+                            coro = self._report_to_billing_system()
+                            if coro:
+                                asyncio.create_task(coro)
                             self._last_report_time = current_time
                         except Exception as e:
                             # Log error but don't crash monitoring loop
@@ -582,5 +586,11 @@ class TaskMetrics:
                     pass
 
         # Send final billing report on shutdown (captures any remaining incremental usage)
+        # Await the Chargebee call directly to ensure it completes before shutdown
         async with self._metrics_lock:
-            self._report_to_billing_system()
+            coro = self._report_to_billing_system()
+            if coro:
+                try:
+                    await coro
+                except Exception as e:
+                    debug(f'[Chargebee] Error in final billing report: {e}')
