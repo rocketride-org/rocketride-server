@@ -436,11 +436,10 @@ export class Question {
 			if (this.questions.length === 1) {
 				prompt += this.questions[0].text + crlf;
 			} else {
-				let questionNum = 1;
-				for (const question of this.questions) {
-					prompt += `Question ${questionNum}: ${question.text}` + crlf;
-					questionNum++;
-				}
+				this.questions.forEach((question, index) => {
+				  prompt += `Question ${index + 1}: ${question.text}${crlf}`;
+				});
+}
 			}
 		}
 
