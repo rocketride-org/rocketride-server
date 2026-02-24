@@ -51,7 +51,7 @@ Mock Coverage (all external calls go through mocks when ROCKETRIDE_MOCK is set):
   langchain_aws, langchain_xai (Chat* classes return stub responses)
 - LLM validateConfig: openai, anthropic (direct SDK - no real API calls)
 - Vector stores: qdrant_client, weaviate, psycopg2, pgvector, pinecone,
-  chromadb, pymilvus, astrapy
+  chromadb, pymilvus, astrapy, elasticsearch, opensearchpy (index_search)
 
 LLM credential placeholders (pipeline injects when ROCKETRIDE_MOCK): anthropic, xai,
 openai, perplexity, deepseek, mistral, vision_mistral, gemini, ibm_watson, bedrock.
