@@ -21,6 +21,7 @@ import time
 import psutil
 from typing import Optional, TYPE_CHECKING, Callable
 from rocketlib import debug
+from ai.account.chargebee import ChargebeeClient
 from ai.constants import (
     CONST_METRICS_SAMPLE_INTERVAL,
     CONST_BILLING_REPORT_INTERVAL,
@@ -60,6 +61,7 @@ class TaskMetrics:
         task_status: 'TASK_STATUS',
         sample_interval: Optional[float] = None,
         on_update_callback: Optional[Callable[[], None]] = None,
+        chargebee_subscription_id: str = '',
     ):
         """
         Initialize metrics collector for a process tree.
@@ -80,6 +82,10 @@ class TaskMetrics:
         self.pid = pid
         self.sample_interval = sample_interval if sample_interval is not None else CONST_METRICS_SAMPLE_INTERVAL
         self._on_update_callback = on_update_callback
+
+        # Chargebee billing
+        self._chargebee_subscription_id = chargebee_subscription_id
+        self._chargebee_client = ChargebeeClient()
 
         # Process handle
         self._process = psutil.Process(pid)
@@ -444,31 +450,28 @@ class TaskMetrics:
         self._last_report_tokens_memory = self._status.tokens.cpu_memory
         self._last_report_tokens_gpu = self._status.tokens.gpu_memory
 
-        # STUB: Log the report (will be replaced with actual API call)
+        # Log the report
         try:
-            print('[TaskMetrics] Billing report:')
-            print(f'  Incremental Tokens (this period): CPU Utilization={delta_tokens_cpu:.2f}, CPU Memory={delta_tokens_memory:.2f}, GPU Memory={delta_tokens_gpu:.2f}, Total={delta_tokens_total:.2f}')
-            print(f'  Cumulative Tokens (lifetime): CPU Utilization={self._status.tokens.cpu_utilization}, CPU Memory={self._status.tokens.cpu_memory}, GPU Memory={self._status.tokens.gpu_memory}, Total={self._status.tokens.total}')
-            print(f'  Current Metrics: CPU={self._status.metrics.cpu_percent:.1f}%, CPU Memory={self._status.metrics.cpu_memory_mb:.1f}MB, GPU Memory={self._status.metrics.gpu_memory_mb:.1f}MB')
+            debug(f'[TaskMetrics] Billing report: Incremental={delta_tokens_total:.2f} Cumulative={self._status.tokens.total}')
         except Exception:
-            # Don't let print failures break billing tracking
             pass
 
-        # TODO: Implement actual billing API call
-        # When billing system is ready:
-        # 1. Add CONST_BILLING_API_TIMEOUT to imports at top of file
-        # 2. Send report_data via HTTP POST:
-        #
-        # import requests
-        # response = requests.post(
-        #     f'{billing_system_url}/api/v1/billing/report',
-        #     json=report_data,
-        #     timeout=CONST_BILLING_API_TIMEOUT
-        # )
-        # response.raise_for_status()
-        #
-        # For now, report_data is prepared but only logged above
-        _ = report_data  # Suppress unused variable warning
+        # Report to Chargebee if subscription ID is available
+        if self._chargebee_subscription_id and self._chargebee_client.enabled and delta_tokens_total > 0:
+            try:
+                from datetime import datetime, timezone
+                usage_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+                coro = self._chargebee_client.report_usage(
+                    subscription_id=self._chargebee_subscription_id,
+                    quantity=round(delta_tokens_total, 2),
+                    usage_date=usage_date,
+                )
+                # Schedule async reporting without blocking the metrics loop
+                asyncio.ensure_future(coro)
+            except Exception as e:
+                debug(f'[Chargebee] Error scheduling usage report: {e}')
+
+        _ = report_data  # Keep reference for debugging
 
     async def _monitoring_loop(self) -> None:
         """
