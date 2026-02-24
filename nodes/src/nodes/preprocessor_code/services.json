@@ -130,6 +130,23 @@
 		}
 	},
 	//
+	//	Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["python"],
+		"cases": [
+			{
+				"text": "def hello():\n    return \"world\"\n\nclass Foo:\n    pass",
+				"expect": {
+					"documents": {
+						"contains": "hello",
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	},
+	//
 	// Optional:
 	//		Local fields defintions - these define fields only for the
 	//		current service. You may specify them here, or directly

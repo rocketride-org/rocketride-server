@@ -130,6 +130,39 @@
 		}
 	},
 	//
+	//	Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["default"],
+		"cases": [
+			{
+				"questions": {
+					"questions": [{"text": "What is 2+2?"}]
+				},
+				"expect": {
+					"questions": {
+						"property": {
+							"path": "[1].instructions[0].instructions",
+							"contains": "Please provide a detailed and helpful response"
+						},
+						"notEmpty": true
+					}
+				}
+			},
+			{
+				"questions": {
+					"questions": [{"text": "What is the capital of France?"}]
+				},
+				"expect": {
+					"questions": {
+						"contains": "capital of France",
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	},
+	//
 	// Optional:
 	//		Local fields defintions - these define fields only for the
 	//		current service. You may specify them here, or directly

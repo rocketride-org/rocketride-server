@@ -234,9 +234,9 @@ def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any]) 
         raise ValueError(f"Node {node_name} missing required 'protocol' field in {service_file}")
     provider = protocol.replace('://', '')
     
-    # Infer outputs from expect keys if not explicitly specified
+    # Infer outputs from expect keys only when outputs key is not present
     outputs = test_data.get('outputs')
-    if not outputs:
+    if outputs is None:
         outputs = _infer_outputs_from_cases(cases)
     
     return NodeTestConfig(

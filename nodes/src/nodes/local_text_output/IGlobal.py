@@ -79,17 +79,19 @@ class IGlobal(IGlobalBase):
 
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-            storePath = config.get('parameters', {}).get('storePath')
-            excludePath = config.get('parameters', {}).get('exclude')
+            params = config.get('parameters')
+            params = params if isinstance(params, dict) else {}
+            storePath = params.get('storePath')
+            excludePath = params.get('exclude') or params.get('local_text_output.exclude')
 
             # Check if the path is valid
             if platform == 'win32':
                 invalid_characters = ['<', '>', ':', '"', '/', '|', '?', '*']
 
-                if any(char in storePath for char in invalid_characters):
+                if storePath is not None and isinstance(storePath, str) and any(char in storePath for char in invalid_characters):
                     raise Exception(f'Invalid output path: {storePath}')
 
-                if excludePath != 'N/A' and any(char in excludePath for char in invalid_characters):
+                if excludePath is not None and isinstance(excludePath, str) and excludePath != 'N/A' and any(char in excludePath for char in invalid_characters):
                     raise Exception(f'Invalid exclude path: {excludePath}')
 
         except Exception as e:

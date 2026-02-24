@@ -274,5 +274,20 @@
 				"grabber.profile"
 			]
 		}
-	]
+	],
+	"test": {
+		"profiles": ["interval"],
+		"outputs": ["image", "table"],
+		"cases": [
+			{
+				"name": "Extract frames at interval",
+				"video": "video/BBC - Tear down this wall.mp4",
+				"expect": {
+					"image": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	}
 }

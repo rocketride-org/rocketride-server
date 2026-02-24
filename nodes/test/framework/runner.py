@@ -76,6 +76,8 @@ class NodeTestRunner:
         
         builder = PipelineBuilder(self.config, self.profile)
         self.pipeline = builder.build()
+        # Client.use() expects the inner pipeline config (source, components at top level)
+        pipeline_for_use = self.pipeline.get('pipeline', self.pipeline)
         
         # Debug: Show pipeline structure
         print(f"\n{'='*60}")
@@ -87,7 +89,7 @@ class NodeTestRunner:
         print(f"[SETUP] Pipeline:\n{json.dumps(self.pipeline, indent=2)}")
         print(f"{'='*60}\n")
         
-        result = await self.client.use(pipeline=self.pipeline)
+        result = await self.client.use(pipeline=pipeline_for_use)
         self.token = result.get('token')
         self._is_started = True
         
@@ -167,23 +169,34 @@ class NodeTestRunner:
         if not self._is_started:
             raise RuntimeError("Pipeline not started. Call setup() first.")
         
-        # Load input data
-        data_bytes = self._load_input_data(case.input_data, case.input_lane)
+        # Use case's lane when the node accepts it; else use pipeline's first lane (e.g. LLM with "text" case → "questions")
+        if self.config.lanes and case.input_lane in self.config.lanes:
+            pipeline_input_lane = case.input_lane
+        elif self.config.lanes:
+            pipeline_input_lane = next(iter(self.config.lanes.keys()))
+        elif self.config.cases:
+            pipeline_input_lane = self.config.cases[0].input_lane
+        else:
+            pipeline_input_lane = 'text'
+        mime_type = f"lane/{pipeline_input_lane}"
         
-        # Use lane/* mime type to target the input lane directly
-        mime_type = f"lane/{case.input_lane}"
+        # Load input data (case.input_lane = type of input: text, image, etc.)
+        data_bytes = self._load_input_data(case.input_data, case.input_lane)
+        # Node expects Question JSON on "questions" lane; wrap plain text when case gave a string
+        if pipeline_input_lane == 'questions' and isinstance(case.input_data, str):
+            data_bytes = json.dumps({'questions': [{'text': case.input_data}]}).encode('utf-8')
         
         # Debug: Show what we're sending
         print(f"\n{'='*60}")
         print(f"[TEST] Node: {self.config.node_name}, Profile: {self.profile or 'default'}")
-        print(f"[TEST] Input lane: {case.input_lane}, MIME type: {mime_type}")
+        print(f"[TEST] Input lane: {pipeline_input_lane}, MIME type: {mime_type}")
         print(f"[TEST] Input data: {case.input_data}")
         print(f"[TEST] Expected outputs: {self.config.outputs}")
         
         # Get a pipe and send data
         pipe = await self.client.pipe(
             self.token,
-            objinfo={'name': f'test_{case.input_lane}'},
+            objinfo={'name': f'test_{pipeline_input_lane}'},
             mime_type=mime_type
         )
         
@@ -224,34 +237,27 @@ class NodeTestRunner:
     def _extract_results(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """
         Extract results organized by output lane.
-        
+
         The response node captures results, and we need to organize
         them by which output lane they came from.
         """
-        # Result structure depends on how response nodes capture data
-        # For now, return the raw result and let tests parse it
-        
         results = {}
-        
-        # Check for lane-specific results in the response
+
         if isinstance(result, dict):
-            # Look for known lane result keys
             for lane in self.config.outputs:
                 if lane in result:
                     results[lane] = result[lane]
                 elif f'{lane}_output' in result:
                     results[lane] = result[f'{lane}_output']
-            
-            # If no specific lanes found, use the whole result
+
             if not results:
-                # Try to detect the result structure
                 if 'response' in result:
                     results['default'] = result['response']
                 else:
                     results['default'] = result
         else:
             results['default'] = result
-        
+
         return results
     
     async def run_all_cases(self) -> List[Tuple[TestCase, Dict[str, Any], List[ExpectationError]]]:
