@@ -155,7 +155,7 @@ npm install https://cloud.rocketride.ai/client/typescript
 
 ### Step 4: Create TypeScript Script (`main.ts`)
 ```typescript
-import { RocketRideClient } from '@rocketride/client-typescript';
+import { RocketRideClient } from 'rocketride';
 
 async function main() {
   // Client reads configuration from .env automatically

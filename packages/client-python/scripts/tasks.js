@@ -22,7 +22,7 @@
 // =============================================================================
 
 /**
- * Build tasks for @rocketride/client-python
+ * Build tasks for rocketride (Python client)
  * 
  * Commands:
  *   setup - Sync source files to server dist (for server's internal use)

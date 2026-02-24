@@ -29,7 +29,7 @@ Use RocketRide when building AI pipelines, document processing workflows, or dat
 
 1. **VSCode Extension** - Visual drag-and-drop pipeline builder with real-time monitoring
 2. **Python SDK** (`pip install rocketride`) - Integrate pipelines into Python apps (Flask, FastAPI, scripts)
-3. **TypeScript SDK** (`npm install @rocketride/client-typescript`) - Integrate pipelines into web apps (React, Express, Next.js) or browser based or NodeJS projects
+3. **TypeScript SDK** (`npm install rocketride`) - Integrate pipelines into web apps (React, Express, Next.js) or browser based or NodeJS projects
 
 ## MANDATORY STEPS WHEN CREATING A NEW PROJECT USING ROCKETRIDE
 

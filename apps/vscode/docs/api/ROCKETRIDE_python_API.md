@@ -22,7 +22,7 @@ A Python SDK for executing RocketRide pipelines using the Debug Adapter Protocol
 ### Using pip
 
 ```bash
-# Install from PyPI (when published)
+# Install from PyPI
 pip install rocketride
 
 # Install from RocketRide server (production) - latest version
@@ -475,7 +475,7 @@ Ask a question to RocketRide's AI and get an intelligent response.
 
 **Example:**
 ```python
-from rocketride_client.schema import Question
+from rocketride.schema import Question
 
 question = Question()
 question.addQuestion('What are the key findings?')
@@ -552,7 +552,7 @@ Add conversation history for context.
 
 **QuestionHistory:**
 ```python
-from rocketride_client.schema import QuestionHistory
+from rocketride.schema import QuestionHistory
 
 history = QuestionHistory(role='user', content='Previous question')
 ```
@@ -661,7 +661,7 @@ When using a chat system, starting the pipeline should be done as a global part 
 
 ```python
 from rocketride import RocketRideClient
-from rocketride_client.schema import Question
+from rocketride.schema import Question
 
 # Start your chat pipeline once at the beginning
 client = RocketRideClient()  # Configuration from .env
@@ -694,7 +694,7 @@ print(answer)
 #### Structured JSON Responses
 
 ```python
-from rocketride_client.schema import Question
+from rocketride.schema import Question
 
 async def extract(source_document: str):
     question = Question(expectJson=True)
@@ -721,7 +721,7 @@ print(result)
 #### Advanced Question Configuration
 
 ```python
-from rocketride_client.schema import Question, QuestionHistory
+from rocketride.schema import Question, QuestionHistory
 
 # Build a question
 question = Question()
