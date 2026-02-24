@@ -146,7 +146,7 @@ jobs:
       - name: Build
         env:
           APARAVI_VERSION: ${{ needs.init.outputs.full_version }}
-        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall
+        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall ${{ matrix.platform == 'ubuntu' && '--force' || '' }}
 
       - name: Package
         if: github.event_name == 'workflow_dispatch' && inputs.release_type != ''
