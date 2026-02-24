@@ -407,7 +407,7 @@ class TaskMetrics:
         # Report to Chargebee if subscription ID is available
         # Returns the coroutine so callers can await it (e.g. stop_monitoring final report)
         chargebee_coro = None
-        if self._chargebee_subscription_id and self._chargebee_client.enabled and delta_tokens_total > 0:
+        if self._chargebee_subscription_id and self._chargebee_client.enabled and int(round(delta_tokens_total)) > 0:
             try:
                 chargebee_coro = self._chargebee_client.report_usage(
                     subscription_id=self._chargebee_subscription_id,
