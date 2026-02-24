@@ -35,6 +35,9 @@ packages:
   - 'packages/client-python'
   - 'packages/client-typescript'
   - 'packages/client-mcp'
+
+  # Observability
+  - 'packages/observability/typescript'
   
   # Java/Tika integration
   - 'packages/tika'
