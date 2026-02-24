@@ -369,26 +369,14 @@ class TaskMetrics:
         self._status.tokens.gpu_memory = round(gpu_tokens, 1)
         self._status.tokens.total = round(self._status.tokens.cpu_utilization + self._status.tokens.cpu_memory + self._status.tokens.gpu_memory, 1)
 
-    def _report_to_billing_system(self) -> None:
+    def _report_to_billing_system(self):
         """
-        Send periodic billing report to the billing system.
+        Report incremental token usage to the billing system.
 
-        This method is called every 5 minutes to report INCREMENTAL usage
-        since the last report. Only the delta (new usage in this period) is
-        sent to the billing system.
-
-        Reports incremental usage to Chargebee via the Usage API.
-        Returns an optional coroutine that callers can await or fire-and-forget.
-
-        The report includes:
-        - Task identification (task_id, customer_id, etc. from status)
-        - INCREMENTAL resource usage since last report:
-            * CPU usage delta (vCPU-seconds)
-            * Memory usage delta (MB-seconds)
-            * GPU memory usage delta (MB-seconds)
-        - INCREMENTAL token charges since last report (cpu, memory, gpu, total)
-        - Current metrics snapshot (cpu_percent, memory_mb, gpu_memory_mb)
-        - Peak and average metrics (lifetime cumulative)
+        Called every 5 minutes to report the delta of compute tokens consumed
+        since the last report. Returns an optional coroutine for the Chargebee
+        API call that callers can await (final report) or fire-and-forget
+        (periodic reports).
         """
         # Calculate incremental usage since last report
         delta_cpu_seconds = self._cpu_seconds - self._last_report_cpu_seconds
@@ -400,47 +388,6 @@ class TaskMetrics:
         delta_tokens_memory = self._status.tokens.cpu_memory - self._last_report_tokens_memory
         delta_tokens_gpu = self._status.tokens.gpu_memory - self._last_report_tokens_gpu
         delta_tokens_total = delta_tokens_cpu + delta_tokens_memory + delta_tokens_gpu
-
-        # Prepare incremental report data structure (will be sent to billing API)
-        report_data = {
-            'report_timestamp': time.time(),
-            'report_period_seconds': self._report_interval_seconds,
-            # INCREMENTAL usage for this 5-minute period only
-            'incremental_usage': {
-                'cpu_seconds': round(delta_cpu_seconds, 2),
-                'memory_mb_seconds': round(delta_memory_mb_seconds, 2),
-                'gpu_memory_mb_seconds': round(delta_gpu_memory_mb_seconds, 2),
-            },
-            # INCREMENTAL token charges for this 5-minute period only
-            'incremental_tokens': {
-                'cpu_utilization': round(delta_tokens_cpu, 1),
-                'cpu_memory': round(delta_tokens_memory, 1),
-                'gpu_memory': round(delta_tokens_gpu, 1),
-                'total': round(delta_tokens_total, 2),
-            },
-            # Cumulative values (for reference/validation)
-            'cumulative_total': {
-                'duration_seconds': self._duration_seconds,
-                'tokens_total': self._status.tokens.total,
-            },
-            # Current state snapshot
-            'current_metrics': {
-                'cpu_percent': self._status.metrics.cpu_percent,
-                'cpu_memory_mb': self._status.metrics.cpu_memory_mb,
-                'gpu_memory_mb': self._status.metrics.gpu_memory_mb,
-            },
-            # Lifetime peaks and averages
-            'peak_metrics': {
-                'cpu_percent': self._status.metrics.peak_cpu_percent,
-                'cpu_memory_mb': self._status.metrics.peak_cpu_memory_mb,
-                'gpu_memory_mb': self._status.metrics.peak_gpu_memory_mb,
-            },
-            'average_metrics': {
-                'cpu_percent': self._status.metrics.avg_cpu_percent,
-                'cpu_memory_mb': self._status.metrics.avg_cpu_memory_mb,
-                'gpu_memory_mb': self._status.metrics.avg_gpu_memory_mb,
-            },
-        }
 
         # Update "last report" tracking FIRST (before any potential failures)
         # This ensures we don't double-report the same period if logging fails
@@ -464,12 +411,11 @@ class TaskMetrics:
             try:
                 chargebee_coro = self._chargebee_client.report_usage(
                     subscription_id=self._chargebee_subscription_id,
-                    quantity=round(delta_tokens_total, 2),
+                    quantity=delta_tokens_total,
                 )
             except Exception as e:
                 debug(f'[Chargebee] Error creating usage report: {e}')
 
-        _ = report_data  # Keep reference for debugging
         return chargebee_coro
 
     async def _monitoring_loop(self) -> None:

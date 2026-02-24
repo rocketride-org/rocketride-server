@@ -28,6 +28,7 @@ Tests cover:
 - Usage reporting (success, retries, auth errors, edge cases)
 """
 
+import httpx
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -179,6 +180,49 @@ class TestChargebeeReportUsage:
         await client.report_usage('sub_123', 100)
 
         assert client.enabled is False
+
+    @pytest.mark.asyncio
+    @patch('ai.account.chargebee.httpx.AsyncClient')
+    async def test_report_usage_disables_on_403_error(self, mock_client_cls):
+        """Client disables itself on 403 forbidden error."""
+        mock_response_403 = MagicMock()
+        mock_response_403.status_code = 403
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response_403)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        client = ChargebeeClient(site='test-site', api_key='test-key')
+        assert client.enabled is True
+
+        await client.report_usage('sub_123', 100)
+
+        assert client.enabled is False
+
+    @pytest.mark.asyncio
+    @patch('ai.account.chargebee.asyncio.sleep', new_callable=AsyncMock)
+    @patch('ai.account.chargebee.httpx.AsyncClient')
+    async def test_report_usage_retries_on_connection_error(self, mock_client_cls, mock_sleep):
+        """Client retries on connection errors, then succeeds."""
+        mock_response_200 = MagicMock()
+        mock_response_200.status_code = 200
+        mock_response_200.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(
+            side_effect=[httpx.ConnectError('Connection refused'), mock_response_200]
+        )
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        client = ChargebeeClient(site='test-site', api_key='test-key')
+        await client.report_usage('sub_123', 100)
+
+        assert mock_client.post.call_count == 2
+        assert client.enabled is True
 
     @pytest.mark.asyncio
     async def test_report_usage_skips_no_subscription_id(self):

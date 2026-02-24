@@ -1075,7 +1075,6 @@ class TaskServer(DAPBase):
         *,
         attach_debugger=False,
         wait_for_running=False,
-        chargebee_subscription_id: str = '',
     ) -> Dict[str, Any]:
         """
         Restart an existing task with a new pipeline configuration.
@@ -1083,6 +1082,7 @@ class TaskServer(DAPBase):
         This method restarts the underlying engine process with updated configuration
         while preserving the task's identity, statistics, monitoring connections,
         and registry entry. The task must exist and not have a debugger attached.
+        The Chargebee subscription ID is inherited from the original start_task call.
 
         CRITICAL: The project_id and source in the new pipeline MUST match the existing
         task's project_id and source. These define the task's identity and cannot be

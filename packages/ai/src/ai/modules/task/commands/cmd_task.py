@@ -164,7 +164,6 @@ class TaskCommands(DAPConn):
                 request,
                 self,
                 wait_for_running=True,
-                chargebee_subscription_id=self._account_info.chargebee_subscription_id,
             )
 
             # Confirm successful task execution startup

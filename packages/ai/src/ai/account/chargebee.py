@@ -99,40 +99,40 @@ class ChargebeeClient:
 
         attempts = 1 + CONST_CHARGEBEE_USAGE_RETRY_COUNT  # initial + retries
 
-        for attempt in range(attempts):
-            try:
-                async with httpx.AsyncClient(
-                    timeout=CONST_BILLING_API_TIMEOUT
-                ) as client:
+        async with httpx.AsyncClient(
+            timeout=CONST_BILLING_API_TIMEOUT
+        ) as client:
+            for attempt in range(attempts):
+                try:
                     response = await client.post(url, data=data, auth=auth)
 
-                # Auth errors: disable and bail out immediately
-                if response.status_code in (401, 403):
+                    # Auth errors: disable and bail out immediately
+                    if response.status_code in (401, 403):
+                        debug(
+                            f'Chargebee auth error ({response.status_code}), '
+                            f'disabling usage reporting'
+                        )
+                        self.enabled = False
+                        return
+
+                    # Server errors: retry if we have attempts left
+                    if response.status_code >= 500:
+                        raise Exception(
+                            f'Chargebee server error: {response.status_code}'
+                        )
+
+                    # Success
+                    response.raise_for_status()
+                    return
+
+                except Exception as e:
+                    is_last = attempt >= attempts - 1
+                    if is_last:
+                        debug(f'Chargebee usage report failed after retries: {e}')
+                        return
+
                     debug(
-                        f'Chargebee auth error ({response.status_code}), '
-                        f'disabling usage reporting'
+                        f'Chargebee usage report attempt {attempt + 1} failed: {e}, '
+                        f'retrying in {CONST_CHARGEBEE_USAGE_RETRY_DELAY}s'
                     )
-                    self.enabled = False
-                    return
-
-                # Server errors: retry if we have attempts left
-                if response.status_code >= 500:
-                    raise Exception(
-                        f'Chargebee server error: {response.status_code}'
-                    )
-
-                # Success
-                response.raise_for_status()
-                return
-
-            except Exception as e:
-                is_last = attempt >= attempts - 1
-                if is_last:
-                    debug(f'Chargebee usage report failed after retries: {e}')
-                    return
-
-                debug(
-                    f'Chargebee usage report attempt {attempt + 1} failed: {e}, '
-                    f'retrying in {CONST_CHARGEBEE_USAGE_RETRY_DELAY}s'
-                )
-                await asyncio.sleep(CONST_CHARGEBEE_USAGE_RETRY_DELAY)
+                    await asyncio.sleep(CONST_CHARGEBEE_USAGE_RETRY_DELAY)
