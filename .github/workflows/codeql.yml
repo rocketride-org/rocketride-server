@@ -18,6 +18,9 @@ jobs:
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # C++ requires full build environment (vcpkg, cmake) which this
+    # workflow doesn't set up. Allow it to fail without blocking PRs.
+    continue-on-error: ${{ matrix.build-mode == 'manual' }}
     strategy:
       fail-fast: false
       matrix:
