@@ -1,0 +1,163 @@
+{
+	"title": "MCP Client",
+	"protocol": "mcp_client://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.mcp_client",
+	"prefix": "mcp",
+	"description": [
+		"Connects to an external MCP server and exposes its tools for agent tool-calling.",
+		"Transports: STDIO (local subprocess), Streamable HTTP (modern), and legacy HTTP+SSE."
+	],
+	"tile": [
+		"Server: ${parameters.mcp_client.serverName}",
+		"Transport: ${parameters.mcp_client.transport}"
+	],
+	"lanes": {},
+	"preconfig": {
+		"default": "aparavi",
+		"profiles": {
+			"aparavi": {
+				"title": "Aparavi MCP server (stdio)",
+				"serverName": "aparavi",
+				"transport": "stdio",
+				"commandLine": "python -m aparavi_mcp"
+			},
+			"streamable_http": {
+				"title": "Generic MCP server (Streamable HTTP)",
+				"serverName": "mcp",
+				"transport": "streamable-http",
+				"endpoint": ""
+			},
+			"sse": {
+				"title": "Generic MCP server (legacy HTTP+SSE)",
+				"serverName": "mcp",
+				"transport": "sse",
+				"sse_endpoint": ""
+			}
+		}
+	},
+	"fields": {
+		"mcp_client.serverName": {
+			"type": "string",
+			"title": "Server name",
+			"description": "Namespace prefix for tools: <serverName>.<toolName> (example: local.echo)",
+			"default": "mcp"
+		},
+		"mcp_client.transport": {
+			"type": "string",
+			"title": "Transport",
+			"description": "How to connect to the MCP server",
+			"default": "streamable-http",
+			"enum": [
+				"stdio",
+				"streamable-http",
+				"sse"
+			],
+			"conditional": [
+				{
+					"value": "stdio",
+					"properties": [
+						"mcp_client.stdio"
+					]
+				},
+				{
+					"value": "streamable-http",
+					"properties": [
+						"mcp_client.http"
+					]
+				},
+				{
+					"value": "sse",
+					"properties": [
+						"mcp_client.sse"
+					]
+				}
+			]
+		},
+
+		"mcp_client.commandLine": {
+			"type": "string",
+			"title": "Command line",
+			"description": "Command line to launch MCP server (stdio transport). Example: python -m aparavi_mcp",
+			"default": "python -m aparavi_mcp"
+		},
+		"mcp_client.env": {
+			"type": "object",
+			"title": "Env",
+			"description": "Extra environment variables for the child process (stdio transport)",
+			"default": {}
+		},
+
+		"mcp_client.endpoint": {
+			"type": "string",
+			"title": "Endpoint",
+			"description": "MCP Streamable HTTP endpoint URL. Example: http(s)://host:port/mcp",
+			"default": ""
+		},
+		"mcp_client.sse_endpoint": {
+			"type": "string",
+			"title": "SSE endpoint (legacy)",
+			"description": "Legacy MCP SSE URL (old transport). Example: http://127.0.0.1:8000/sse",
+			"default": ""
+		},
+		"mcp_client.headers": {
+			"type": "object",
+			"title": "Headers",
+			"description": "Extra HTTP headers for streamable-http/sse transports",
+			"default": {}
+		},
+		"mcp_client.bearer": {
+			"type": "string",
+			"title": "Bearer token",
+			"description": "Optional Authorization bearer token",
+			"secure": true,
+			"default": "",
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+
+		"mcp_client.stdio": {
+			"object": "stdio",
+			"title": "STDIO (subprocess)",
+			"properties": [
+				"mcp_client.commandLine",
+				"mcp_client.env"
+			]
+		},
+		"mcp_client.http": {
+			"object": "http",
+			"title": "HTTP (Streamable HTTP)",
+			"properties": [
+				"mcp_client.endpoint",
+				"mcp_client.headers",
+				"mcp_client.bearer"
+			]
+		},
+		"mcp_client.sse": {
+			"object": "sse",
+			"title": "Legacy HTTP+SSE",
+			"properties": [
+				"mcp_client.sse_endpoint",
+				"mcp_client.headers",
+				"mcp_client.bearer"
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "MCP Client",
+			"properties": [
+				"type",
+				"name",
+				"mcp_client.serverName",
+				"mcp_client.transport"
+			]
+		}
+	]
+}
+
