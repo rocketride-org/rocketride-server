@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rocketride-observability"
+version = "0.1.0"
+description = "Structured logging and observability for RocketRide services"
+readme = {text = "Structured logging and observability for RocketRide services.", content-type = "text/plain"}
+authors = [
+    {name = "RocketRide, Inc.", email = "dev@rocketride.ai"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+]
+dependencies = [
+    "structlog>=24.1.0",
+    "opentelemetry-api>=1.20.0",
+]
+requires-python = ">=3.10"
+license = "MIT"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.8.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["rocketride_observability*"]

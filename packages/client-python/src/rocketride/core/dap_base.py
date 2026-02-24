@@ -131,17 +131,30 @@ class DAPBase:
                 debug(Lvl.DebugProtocol, message)
 
         except ImportError:
-            # Create a logger for DAP components
-            logger = logging.getLogger('rocketride')
+            # Try structured logging from rocketride-observability, fall back to stdlib
+            try:
+                from rocketride_observability import get_logger as _get_obs_logger
 
-            # Extreme logging
-            logging.addLevelName(3, 'PROTOCOL')  # Very uncommon number
+                _obs_logger = _get_obs_logger('rocketride')
 
-            def _debug_message(message: str) -> None:
-                logger.debug(message)
+                def _debug_message(message: str) -> None:
+                    _obs_logger.debug(message)
 
-            def _debug_protocol(message: str) -> None:
-                logger.log(3, message)
+                def _debug_protocol(message: str) -> None:
+                    _obs_logger.debug(message, protocol=True)
+
+            except ImportError:
+                # Create a logger for DAP components
+                logger = logging.getLogger('rocketride')
+
+                # Extreme logging
+                logging.addLevelName(3, 'PROTOCOL')  # Very uncommon number
+
+                def _debug_message(message: str) -> None:
+                    logger.debug(message)
+
+                def _debug_protocol(message: str) -> None:
+                    logger.log(3, message)
 
         # Setup the callbacks for debug messages
         self._call_debug_message = _debug_message

@@ -65,6 +65,24 @@ export class DAPBase {
 		this._callDebugMessage = config.onDebugMessage;
 		this._callDebugProtocol = config.onProtocolMessage;
 
+		// When either debug callback is missing, try to fill it from @rocketride/observability
+		if (!this._callDebugMessage || !this._callDebugProtocol) {
+			try {
+				// eslint-disable-next-line @typescript-eslint/no-var-requires
+				const { createLogger } = require('@rocketride/observability');
+				const logger = createLogger('rocketride');
+				if (!this._callDebugMessage) {
+					this._callDebugMessage = (msg: string) => logger.debug(msg);
+				}
+				if (!this._callDebugProtocol) {
+					this._callDebugProtocol = (msg: string) => logger.debug(msg, { protocol: true });
+				}
+				this._logger = logger;
+			} catch {
+				// @rocketride/observability not installed — silent fallback
+			}
+		}
+
 		this._transport = transport;
 		if (this._transport) {
 			this._bindTransport(this._transport);
