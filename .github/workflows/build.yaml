@@ -199,3 +199,16 @@ jobs:
             release-assets/*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          format: cyclonedx-json
+          output-file: rocketride-sbom.cdx.json
+
+      - name: Attach SBOM to release
+        run: |
+          TAG_NAME="v${{ needs.init.outputs.version }}"
+          gh release upload "$TAG_NAME" rocketride-sbom.cdx.json --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
