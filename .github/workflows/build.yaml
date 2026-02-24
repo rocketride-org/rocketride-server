@@ -143,10 +143,16 @@ jobs:
           build-mode: manual
           queries: security-and-quality
 
+      - name: Compile C++ from source (for CodeQL tracing)
+        if: matrix.platform == 'ubuntu'
+        env:
+          APARAVI_VERSION: ${{ needs.init.outputs.full_version }}
+        run: ${{ matrix.builder_cmd }} server:build --force --verbose --autoinstall
+
       - name: Build
         env:
           APARAVI_VERSION: ${{ needs.init.outputs.full_version }}
-        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall ${{ matrix.platform == 'ubuntu' && '--force' || '' }}
+        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall
 
       - name: Package
         if: github.event_name == 'workflow_dispatch' && inputs.release_type != ''
