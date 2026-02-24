@@ -39,6 +39,13 @@ CONST_METRICS_STOP_TIMEOUT = 5.0  # seconds to wait for metrics monitoring to st
 CONST_BILLING_API_TIMEOUT = 10.0  # seconds timeout for HTTP requests to billing API
 
 # =============================================================================
+# Chargebee Configuration
+# =============================================================================
+CONST_CHARGEBEE_ITEM_PRICE_ID = 'compute-tokens-USD'  # default metered item price ID
+CONST_CHARGEBEE_USAGE_RETRY_COUNT = 1  # retry once on transient failure
+CONST_CHARGEBEE_USAGE_RETRY_DELAY = 2.0  # seconds between retries
+
+# =============================================================================
 # Billing Rates (tokens per resource-hour)
 # =============================================================================
 CONST_RATE_VCPU_HOUR = 1020  # tokens per vCPU-hour
