@@ -27,8 +27,8 @@ from __future__ import annotations
 import re
 from typing import Any, Dict
 
-# Email: redact local part, keep domain
-_EMAIL_RE = re.compile(r'[a-zA-Z0-9._%+\-]+@([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})')
+# Email: redact local part, keep domain (non-overlapping groups to avoid ReDoS)
+_EMAIL_RE = re.compile(r'[a-zA-Z0-9]+(?:[._%+\-][a-zA-Z0-9]+)*@([a-zA-Z0-9]+(?:[.\-][a-zA-Z0-9]+)*\.[a-zA-Z]{2,})')
 
 # Bearer / OAuth tokens in Authorization headers or inline
 _BEARER_RE = re.compile(r'(Bearer\s+)\S+', re.IGNORECASE)

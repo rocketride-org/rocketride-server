@@ -26,8 +26,8 @@
 
 const REDACTED = '***REDACTED***';
 
-// Email: redact local part, keep domain
-const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/g;
+// Email: redact local part, keep domain (atomic-safe character classes to avoid ReDoS)
+const EMAIL_RE = /[a-zA-Z0-9]+(?:[._%+\-][a-zA-Z0-9]+)*@([a-zA-Z0-9]+(?:[.\-][a-zA-Z0-9]+)*\.[a-zA-Z]{2,})/g;
 
 // Bearer / OAuth tokens
 const BEARER_RE = /(Bearer\s+)\S+/gi;

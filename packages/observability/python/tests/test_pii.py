@@ -4,8 +4,6 @@
 
 """Tests for PII scrubbing."""
 
-import pytest
-
 from rocketride_observability.pii import scrub_pii
 
 

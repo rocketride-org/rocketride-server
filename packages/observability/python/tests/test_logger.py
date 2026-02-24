@@ -10,7 +10,6 @@ import logging
 import pytest
 
 from rocketride_observability import configure_logging, get_logger
-from rocketride_observability.logger import _configured
 
 
 @pytest.fixture(autouse=True)
