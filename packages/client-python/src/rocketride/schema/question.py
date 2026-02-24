@@ -641,10 +641,8 @@ class Question(BaseModel):
             if len(self.questions) == 1:
                 prompt += self.questions[0].text + crlf
             else:
-                questionNum = 1
-                for question in self.questions:
-                    prompt += f'Question {questionNum}: ' + question.text + crlf
-                    questionNum += 1
+                for i, question in enumerate(self.questions, start=1):
+                    prompt += f"Question {i}: {question.text}{crlf}"
 
         # Add context
         for context in self.context:
