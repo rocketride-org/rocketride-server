@@ -281,12 +281,11 @@ class TestPipelineBuilder:
         builder = PipelineBuilder(config)
         pipeline = builder.build()
         
-        assert 'pipeline' in pipeline
-        assert 'components' in pipeline['pipeline']
-        assert 'source' in pipeline['pipeline']
-        
+        assert 'components' in pipeline
+        assert 'source' in pipeline
+
         # Should have webhook, node, response
-        components = pipeline['pipeline']['components']
+        components = pipeline['components']
         providers = [c['provider'] for c in components]
         
         assert 'webhook' in providers
@@ -308,9 +307,9 @@ class TestPipelineBuilder:
         builder = PipelineBuilder(config)
         pipeline = builder.build()
         
-        components = pipeline['pipeline']['components']
+        components = pipeline['components']
         providers = [c['provider'] for c in components]
-        
+
         # Should have all chain nodes plus responses
         assert 'webhook' in providers
         assert 'preprocessor_langchain' in providers

@@ -487,6 +487,12 @@ function makeCheckPrebuiltAction(options = {}) {
                 return;
             }
 
+            if (ctx.options?.nodownload) {
+                task.output = 'Download skipped (--nodownload)';
+                ctx.downloaded = false;
+                return;
+            }
+
             const compiledVersion = await getState('server.compiledVersion');
             if (compiledVersion) {
                 task.output = 'Using compiled version';

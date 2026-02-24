@@ -1,10 +1,7 @@
 {
-  "name": "@rocketride/ai",
-  "version": "3.1.0",
-  "description": "RocketRide AI/ML modules",
-  "private": true,
-  "license": "MIT",
-  "scripts": {}
+    "name": "@rocketride/ai",
+    "version": "3.1.0",
+    "description": "RocketRide AI/ML modules",
+    "private": true,
+    "license": "MIT"
 }
-
-

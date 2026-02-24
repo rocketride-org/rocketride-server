@@ -209,11 +209,9 @@ class PipelineBuilder:
         components.extend(response_components)
         
         return {
-            'pipeline': {
-                'project_id': project_id,
-                'source': webhook_id,
-                'components': components
-            }
+            'project_id': project_id,
+            'source': webhook_id,
+            'components': components
         }
     
     def get_required_env_vars(self) -> List[str]:
