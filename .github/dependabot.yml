@@ -1,0 +1,541 @@
+version: 2
+updates:
+  # npm — root
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # Docker
+  - package-ecosystem: "docker"
+    directory: "/docker"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # Maven — Tika
+  - package-ecosystem: "maven"
+    directory: "/packages/tika"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/astra_db
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/astra_db"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/atlas
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/atlas"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/audio_player
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/audio_player"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/audio_transcribe
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/audio_transcribe"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/chroma
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/chroma"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/db_mysql
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/db_mysql"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/dictionary
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/dictionary"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/embedding_image
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/embedding_image"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/embedding_openai
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/embedding_openai"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/embedding_transformer
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/embedding_transformer"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/extract_data
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/extract_data"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/frame_grabber
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/frame_grabber"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/image_cleanup
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/image_cleanup"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/index_search
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/index_search"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/llamaparse
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/llamaparse"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/llm_anthropic
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/llm_anthropic"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/llm_bedrock
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/llm_bedrock"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/llm_deepseek
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/llm_deepseek"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/llm_gemini
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/llm_gemini"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/llm_mistral
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/llm_mistral"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/llm_ollama
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/llm_ollama"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/llm_openai
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/llm_openai"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/llm_perplexity
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/llm_perplexity"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/llm_vertex
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/llm_vertex"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/llm_vision_mistral
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/llm_vision_mistral"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/llm_xai
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/llm_xai"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/local_text_output
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/local_text_output"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/milvus
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/milvus"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/ner
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/ner"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/ocr
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/ocr"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/pinecone
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/pinecone"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/preprocessor_code
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/preprocessor_code"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/preprocessor_langchain
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/preprocessor_langchain"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/preprocessor_llm
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/preprocessor_llm"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/qdrant
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/qdrant"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/question
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/question"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/reducto
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/reducto"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/remote
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/remote"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/response
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/response"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/summarization
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/summarization"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/text_output
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/text_output"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/thumbnail
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/thumbnail"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/vectordb_postgres
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/vectordb_postgres"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/vectorizer
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/vectorizer"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/weaviate
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/weaviate"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /nodes/src/nodes/webhook
+  - package-ecosystem: "pip"
+    directory: "/nodes/src/nodes/webhook"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /packages/ai/src/ai
+  - package-ecosystem: "pip"
+    directory: "/packages/ai/src/ai"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /packages/ai/src/ai/account
+  - package-ecosystem: "pip"
+    directory: "/packages/ai/src/ai/account"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /packages/ai/src/ai/common
+  - package-ecosystem: "pip"
+    directory: "/packages/ai/src/ai/common"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /packages/ai/src/ai/common/avi
+  - package-ecosystem: "pip"
+    directory: "/packages/ai/src/ai/common/avi"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /packages/ai/src/ai/common/image
+  - package-ecosystem: "pip"
+    directory: "/packages/ai/src/ai/common/image"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /packages/ai/src/ai/common/torch
+  - package-ecosystem: "pip"
+    directory: "/packages/ai/src/ai/common/torch"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /packages/ai/src/ai/modules/task
+  - package-ecosystem: "pip"
+    directory: "/packages/ai/src/ai/modules/task"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /packages/ai/src/ai/web
+  - package-ecosystem: "pip"
+    directory: "/packages/ai/src/ai/web"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
+
+  # pip — /packages/ai/tests
+  - package-ecosystem: "pip"
+    directory: "/packages/ai/tests"
+    schedule:
+      interval: "daily"
+    target-branch: "develop"
+    labels:
+      - "dependencies"
