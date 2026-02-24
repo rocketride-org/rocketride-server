@@ -347,7 +347,7 @@ The `send()` method is for raw data (webhook/dropper sources), not for conversat
 **Solution:**
 ```python
 # Python: Use the correct method for your pipeline source
-from rocketride_client.schema import Question
+from rocketride.schema import Question
 
 question = Question()
 question.addQuestion("Hello")
@@ -356,7 +356,7 @@ response = await client.chat(token, question)  # CORRECT: Correct for chat sourc
 
 ```typescript
 // TypeScript: Use the correct method for your pipeline source
-import { Question } from '@rocketride/client-typescript';
+import { Question } from 'rocketride';
 
 const question = new Question();
 question.addQuestion("Hello");

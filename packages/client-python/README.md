@@ -1,11 +1,11 @@
-# rocketride-client-python
+# rocketride
 
 RocketRide Python Client — Python SDK for the RocketRide Engine. Complete API reference below.
 
 ## Installation
 
 ```bash
-pip install rocketride-client-python
+pip install rocketride
 ```
 
 Import from the package (e.g. `from rocketride import RocketRideClient`).

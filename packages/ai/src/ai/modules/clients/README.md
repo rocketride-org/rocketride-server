@@ -8,13 +8,13 @@ This module provides HTTP endpoints to download the Python and TypeScript client
 - **URL**: `/client/python`
 - **Method**: GET
 - **Description**: Downloads the latest Python client wheel package
-- **Response**: `rocketride_client_python-{version}-py3-none-any.whl`
+- **Response**: `rocketride-{version}-py3-none-any.whl`
 
 ### TypeScript Client
 - **URL**: `/client/typescript`
 - **Method**: GET
 - **Description**: Downloads the latest TypeScript client package
-- **Response**: `rocketride-client-typescript-{version}.tgz`
+- **Response**: `rocketride-{version}.tgz`
 
 ### VSCode Extension
 - **URL**: `/client/vscode`
@@ -25,8 +25,8 @@ This module provides HTTP endpoints to download the Python and TypeScript client
 ## Files Served
 
 The module serves files from `./clients/` (relative to the engine's working directory at `build/Engine`):
-- `rocketride_client_python-*.whl` - Python client wheel package
-- `rocketride-client-typescript-*.tgz` - TypeScript client package
+- `rocketride-*.whl` - Python client wheel package
+- `rocketride-*.tgz` - TypeScript client package
 - `rocketride-*.vsix` - VSCode extension package
 
 ## Testing
@@ -67,12 +67,12 @@ Simply navigate to:
 
 ### Python Client
 ```bash
-pip install rocketride_client_python-1.1.0-py3-none-any.whl
+pip install rocketride-1.1.0-py3-none-any.whl
 ```
 
 ### TypeScript Client
 ```bash
-npm install rocketride-client-typescript-1.0.0.tgz
+npm install rocketride-1.0.0.tgz
 ```
 
 ### VSCode Extension

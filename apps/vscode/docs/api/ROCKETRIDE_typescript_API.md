@@ -23,13 +23,13 @@ A TypeScript/JavaScript SDK for executing RocketRide pipelines using the Debug A
 
 ```bash
 # Install from npm registry (when published)
-npm install @rocketride/client-typescript
+npm install rocketride
 
 # Install as dev dependency
-npm install -D @rocketride/client-typescript
+npm install -D rocketride
 
 # Install globally
-npm install -g @rocketride/client-typescript
+npm install -g rocketride
 
 # Install from RocketRide server (production)
 npm install https://cloud.rocketride.ai/client/typescript
@@ -38,20 +38,20 @@ npm install https://cloud.rocketride.ai/client/typescript
 npm install http://localhost:5565/client/typescript
 
 # Install from local tarball
-npm install /path/to/rocketride-client-typescript-1.0.0.tgz
+npm install /path/to/rocketride-1.0.0.tgz
 ```
 
 ### Using pnpm
 
 ```bash
 # Install from npm registry
-pnpm add @rocketride/client-typescript
+pnpm add rocketride
 
 # Install as dev dependency
-pnpm add -D @rocketride/client-typescript
+pnpm add -D rocketride
 
 # Install globally
-pnpm add -g @rocketride/client-typescript
+pnpm add -g rocketride
 
 # Install from RocketRide server (production)
 pnpm add https://cloud.rocketride.ai/client/typescript
@@ -60,22 +60,22 @@ pnpm add https://cloud.rocketride.ai/client/typescript
 pnpm add http://localhost:5565/client/typescript
 
 # Install from local tarball
-pnpm add /path/to/rocketride-client-typescript-1.0.0.tgz
+pnpm add /path/to/rocketride-1.0.0.tgz
 ```
 
 ### Uninstalling
 
 ```bash
 # Using npm
-npm uninstall @rocketride/client-typescript
-npm uninstall -g @rocketride/client-typescript  # global
+npm uninstall rocketride
+npm uninstall -g rocketride  # global
 
 # Using pnpm
-pnpm remove @rocketride/client-typescript
-pnpm remove -g @rocketride/client-typescript  # global
+pnpm remove rocketride
+pnpm remove -g rocketride  # global
 ```
 
-**Note:** The tarball filename is `rocketride-client-typescript-1.0.0.tgz`, but the package is installed as `@rocketride/client-typescript` (scoped package).
+**Note:** The tarball filename is `rocketride-1.0.0.tgz`, and the package is installed as `rocketride`.
 
 The package includes both the SDK library and a CLI tool.
 
@@ -168,15 +168,15 @@ After installing the package, the `rocketride` command becomes available:
 
 ```bash
 # Local installation (use with npx)
-npm install @rocketride/client-typescript
+npm install rocketride
 npx rocketride --help
 
 # Global installation
-npm install -g @rocketride/client-typescript
+npm install -g rocketride
 rocketride --help
 
 # Or from local tarball file:
-npm install /path/to/rocketride-client-typescript-1.0.0.tgz
+npm install /path/to/rocketride-1.0.0.tgz
 npx rocketride --help
 ```
 
@@ -224,7 +224,7 @@ The CLI supports `.env` file configuration. See the Configuration section above.
 ### Basic Pipeline Execution
 
 ```typescript
-import { RocketRideClient } from '@rocketride/client-typescript';
+import { RocketRideClient } from 'rocketride';
 
 const client = new RocketRideClient({
     uri: 'https://cloud.rocketride.ai',
@@ -258,7 +258,7 @@ The TypeScript client supports automatic resource cleanup using two patterns:
 #### Using Symbol.asyncDispose (ECMAScript Explicit Resource Management)
 
 ```typescript
-import { RocketRideClient } from '@rocketride/client-typescript';
+import { RocketRideClient } from 'rocketride';
 
 // Requires TypeScript 5.2+ and Node.js with Symbol.asyncDispose support
 await using client = new RocketRideClient({
@@ -274,7 +274,7 @@ const result = await client.use({ pipeline });
 #### Using Static withConnection Method
 
 ```typescript
-import { RocketRideClient } from '@rocketride/client-typescript';
+import { RocketRideClient } from 'rocketride';
 
 // Python-style async with pattern
 // Configuration from .env file
@@ -294,7 +294,7 @@ console.log('Result:', result);
 ### Persistent Connection with Auto-Reconnect
 
 ```typescript
-import { RocketRideClient } from '@rocketride/client-typescript';
+import { RocketRideClient } from 'rocketride';
 
 // Create client with automatic reconnection enabled
 const client = new RocketRideClient({
@@ -322,7 +322,7 @@ await client.disconnect();
 ### Data Transfer with Pipes
 
 ```typescript
-import { RocketRideClient } from '@rocketride/client-typescript';
+import { RocketRideClient } from 'rocketride';
 
 const client = new RocketRideClient({
     uri: 'https://cloud.rocketride.ai',
@@ -357,7 +357,7 @@ await client.disconnect();
 ### Bulk File Upload (Parallel)
 
 ```typescript
-import { RocketRideClient } from '@rocketride/client-typescript';
+import { RocketRideClient } from 'rocketride';
 
 const client = new RocketRideClient({
     auth: 'your-api-key',
@@ -473,7 +473,7 @@ Ask a question to RocketRide's AI and get an intelligent response.
 
 **Example:**
 ```typescript
-import { Question } from '@rocketride/client-typescript';
+import { Question } from 'rocketride';
 
 const question = new Question();
 question.addQuestion('What are the key findings?');
@@ -639,7 +639,7 @@ When using a chat system, starting the pipeline should be done as a global part 
 #### Basic Questions
 
 ```typescript
-import { RocketRideClient, Question } from '@rocketride/client-typescript';
+import { RocketRideClient, Question } from 'rocketride';
 
 // Start your chat pipeline once at the beginning
 const client = new RocketRideClient();  // Configuration from .env
@@ -673,7 +673,7 @@ console.log(answer);
 #### Structured JSON Responses
 
 ```typescript
-import { RocketRideClient, Question } from '@rocketride/client-typescript';
+import { RocketRideClient, Question } from 'rocketride';
 
 async function extract(sourceDocument: string) {
     const question = new Question({ expectJson: true });
@@ -701,7 +701,7 @@ console.log(result);
 #### Advanced Question Configuration
 
 ```typescript
-import { RocketRideClient, Question } from '@rocketride/client-typescript';
+import { RocketRideClient, Question } from 'rocketride';
 
 // Build a question
 const question = new Question();
@@ -730,7 +730,7 @@ const response = await client.chat({ token: 'chat-token', question });
 ### Document Processing
 
 ```typescript
-import { RocketRideClient } from '@rocketride/client-typescript';
+import { RocketRideClient } from 'rocketride';
 
 async function processDocuments() {
     const client = new RocketRideClient();  // Configuration from .env
@@ -760,7 +760,7 @@ async function processDocuments() {
 ### Real-time Data Streaming
 
 ```typescript
-import { RocketRideClient } from '@rocketride/client-typescript';
+import { RocketRideClient } from 'rocketride';
 
 async function streamSensorData(dataGenerator: AsyncIterable<SensorReading>) {
     const client = new RocketRideClient();  // Configuration from .env
@@ -896,7 +896,7 @@ await client.setEvents(token, ['summary']);
 The SDK provides comprehensive error handling:
 
 ```typescript
-import { RocketRideClient } from '@rocketride/client-typescript';
+import { RocketRideClient } from 'rocketride';
 
 try {
     const client = new RocketRideClient();  // Configuration from .env

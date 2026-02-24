@@ -23,7 +23,7 @@
  */
 
 /**
- * Build tasks for @rocketride/client-typescript
+ * Build tasks for rocketride (TypeScript client)
  * 
  * Commands:
  *   build - Compile TypeScript and create package

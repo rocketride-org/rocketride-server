@@ -201,7 +201,7 @@ The core engine provides high-performance data processing:
 #### TypeScript SDK
 
 ```typescript
-import { RocketRideClient } from '@rocketride/client-typescript';
+import { RocketRideClient } from 'rocketride';
 
 const client = new RocketRideClient({
   auth: process.env.ROCKETRIDE_APIKEY!,
