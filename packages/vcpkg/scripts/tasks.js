@@ -149,11 +149,11 @@ module.exports = {
         
         // Public actions (have descriptions)
         { name: 'vcpkg:build', action: () => ({
-            description: 'Install and bootstrap vcpkg',
+            description: 'Build vcpkg',
             steps: ['vcpkg:clone', 'vcpkg:bootstrap']
         })},
         { name: 'vcpkg:clean', action: () => ({
-            description: 'Remove vcpkg installation',
+            description: 'Clean vcpkg',
             run: async (ctx, task) => {
                 const { withLock, removeDir, setState } = require('../../../scripts/lib');
                 await withLock('vcpkg-setup', async () => {

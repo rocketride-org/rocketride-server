@@ -260,11 +260,11 @@ module.exports = {
         { name: 'tika:sync-source', action: makeSyncTikaSourceAction },
         { name: 'tika:build-dbgconn', action: makeBuildDbgconnAction },
         { name: 'tika:build-jar', action: makeBuildTikaJarAction },
-        { name: 'tika:copy-outputs', action: makeCopyTikaOutputsAction },
+        { name: 'tika:sync', action: makeCopyTikaOutputsAction },
         
         // Public actions (have descriptions)
         { name: 'tika:build', action: () => ({
-            description: 'Build Java modules and copy to dist',
+            description: 'Build Tika modules',
             steps: [
                 'java:build',
                 'tika:sync-source',
@@ -272,11 +272,11 @@ module.exports = {
                     'tika:build-dbgconn',
                     'tika:build-jar'
                 ], 'Build Java modules'),
-                'tika:copy-outputs'
+                'tika:sync'
             ]
         })},
         { name: 'tika:clean', action: () => ({
-            description: 'Remove tika build artifacts',
+            description: 'Clean Tika modules',
             run: async (ctx, task) => {
                 await removeDirs([
                     BUILD_DIR,

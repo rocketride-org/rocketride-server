@@ -204,18 +204,18 @@ module.exports = {
         
         // Public actions (have descriptions)
         { name: 'nodes:build', action: () => ({ 
-            description: 'Sync pipeline nodes',
-            steps: ['nodes:sync'] 
+            description: 'Build pipeline nodes',
+            steps: ['server:build', 'nodes:sync'] 
         })},
         { name: 'nodes:test', action: () => ({
-            description: 'Run node integration tests',
+            description: 'Test pipeline nodes',
             steps: [
                 'server:build',
                 parallel([
                     'nodes:build',
                     'ai:build',
                     'client-python:build'
-                ], 'Build modules'),
+                ], 'Build dependencies'),
                 bracket({
                     name: 'node-test-server',
                     setup: makeStartTestServerAction(),
@@ -225,11 +225,11 @@ module.exports = {
             ]
         })},
         { name: 'nodes:test-contracts', action: () => ({
-            description: 'Run contract validation tests',
+            description: 'Test node contracts',
             steps: ['server:build', 'nodes:run-contracts']
         })},
         { name: 'nodes:clean', action: () => ({
-            description: 'Remove nodes build artifacts',
+            description: 'Clean pipeline nodes',
             run: async (ctx, task) => {
                 await removeDir(DIST_DIR);
                 task.output = 'Cleaned nodes';

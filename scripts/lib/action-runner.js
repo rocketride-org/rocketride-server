@@ -6,7 +6,7 @@
  * 
  * Key design principles:
  * - Complete tree is built before execution (no dynamic task.newListr except for when blocks)
- * - Deduplication via simple skip checks, not promise waiting
+ * - Deduplication via completion promises (dedup tasks wait for first instance)
  * - Compound actions expanded at build time so Listr2 sees full structure
  * - Brackets flattened into visible setup → steps → teardown sequence
  */
@@ -21,6 +21,18 @@ const completedActions = new Set();
 
 // Lock management for mutual exclusion on external resources
 const locks = new Map();  // lockName -> { promise, resolve }
+
+// Completion tracking for build-time dedup (resolved when first instance finishes)
+const completions = new Map();  // name -> { promise, resolve }
+
+function getOrCreateCompletion(name) {
+    if (!completions.has(name)) {
+        let resolve;
+        const promise = new Promise(r => { resolve = r; });
+        completions.set(name, { promise, resolve });
+    }
+    return completions.get(name);
+}
 
 /**
  * Acquire one or more locks (waits if held)
@@ -61,6 +73,7 @@ function releaseLocks(lockNames) {
 function resetActionTracking() {
     completedActions.clear();
     locks.clear();
+    completions.clear();
 }
 
 // ============================================================================
@@ -134,11 +147,13 @@ function buildLeafTask(name, actionObj, logModule) {
                 // Pass logModule as third argument for actions that want to log
                 const result = await actionObj.run(ctx, task, { logModule });
                 
-                // Mark completed
+                // Mark completed and signal dedup waiters
                 if (!actionObj.multi) {
                     completedActions.add(name);
+                    const c = completions.get(name);
+                    if (c) c.resolve();
                 }
-                
+
                 return result;
             } finally {
                 if (actionObj.locks?.length) {
@@ -170,15 +185,20 @@ function buildCompoundTask(name, actionObj, seen, logModule) {
     if (!actionObj.multi && seen.has(name)) {
         return {
             title: name,
-            skip: () => true,  // Just show "↓ action-name"
-            task: () => {},
+            skip: () => completedActions.has(name) ? true : false,
+            task: async (ctx, task) => {
+                if (completedActions.has(name)) return;
+                task.output = `Waiting for: ${name}`;
+                await getOrCreateCompletion(name).promise;
+            },
             rendererOptions: { outputBar: 1, persistentOutput: false }
         };
     }
-    
-    // Mark as seen
+
+    // Mark as seen and pre-create completion promise for dedup waiters
     if (!actionObj.multi) {
         seen.add(name);
+        getOrCreateCompletion(name);
     }
     
     // Build children
@@ -195,10 +215,12 @@ function buildCompoundTask(name, actionObj, seen, logModule) {
                 if (actionObj.locks?.length) {
                     releaseLocks(actionObj.locks);
                 }
-                // Release automatic action-name lock
+                // Release automatic action-name lock and signal dedup waiters
                 if (!actionObj.multi) {
                     releaseLocks([name]);
                     completedActions.add(name);
+                    const c = completions.get(name);
+                    if (c) c.resolve();
                 }
             },
             rendererOptions: { outputBar: 0, persistentOutput: false }
@@ -480,13 +502,18 @@ function buildTask(step, seen, logModule) {
             if (!actionObj.multi && seen.has(name)) {
                 return {
                     title: name,
-                    skip: () => true,  // Just show "↓ action-name"
-                    task: () => {},
+                    skip: () => completedActions.has(name) ? true : false,
+                    task: async (ctx, task) => {
+                        if (completedActions.has(name)) return;
+                        task.output = `Waiting for: ${name}`;
+                        await getOrCreateCompletion(name).promise;
+                    },
                     rendererOptions: { outputBar: 1, persistentOutput: false }
                 };
             }
             if (!actionObj.multi) {
                 seen.add(name);
+                getOrCreateCompletion(name);
             }
             return buildLeafTask(name, actionObj, logModule);
         }
@@ -516,18 +543,23 @@ function buildTask(step, seen, logModule) {
             if (!actionObj.multi && seen.has(name)) {
                 return {
                     title: name,
-                    skip: () => true,  // Just show "↓ action-name"
-                    task: () => {},
+                    skip: () => completedActions.has(name) ? true : false,
+                    task: async (ctx, task) => {
+                        if (completedActions.has(name)) return;
+                        task.output = `Waiting for: ${name}`;
+                        await getOrCreateCompletion(name).promise;
+                    },
                     rendererOptions: { outputBar: 1, persistentOutput: false }
                 };
             }
             if (!actionObj.multi) {
                 seen.add(name);
+                getOrCreateCompletion(name);
             }
             return buildLeafTask(name, actionObj, logModule);
         }
     }
-    
+
     throw new Error(`Unknown step type: ${JSON.stringify(step)}`);
 }
 

@@ -180,17 +180,17 @@ module.exports = {
         
         // Public actions (have descriptions)
         { name: 'java:build', action: () => ({
-            description: 'Install JDK, JRE, and Maven',
+            description: 'Build Java tools',
             steps: [
                 parallel([
                     'java:setup-jdk',
                     'java:setup-maven',
                     'java:setup-jre'
-                ], 'Install Java components')
+                ], 'Setup Java tools')
             ]
         })},
         { name: 'java:clean', action: () => ({
-            description: 'Remove Java installation',
+            description: 'Clean Java tools',
             run: async (ctx, task) => {
                 await withLock('java-setup', async () => {
                     await removeDir(BUILD_DIR);

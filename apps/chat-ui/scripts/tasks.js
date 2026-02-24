@@ -89,22 +89,22 @@ module.exports = {
         
         // Public actions (have descriptions)
         { name: 'chat-ui:build', action: () => ({
-            description: 'Build production bundle',
+            description: 'Build chat UI',
             steps: [
-                'client-typescript:compile',
+                'client-typescript:build',
                 'chat-ui:bundle',
                 'chat-ui:copy'
             ]
         })},
         { name: 'chat-ui:dev', action: () => ({
-            description: 'Start development server',
+            description: 'Dev chat UI',
             run: async (ctx, task) => {
                 task.output = 'Starting development server on http://localhost:3000';
                 await execCommand('npx', ['rsbuild', 'dev'], { task, cwd: APP_ROOT });
             }
         })},
         { name: 'chat-ui:clean', action: () => ({
-            description: 'Remove chat-ui build artifacts',
+            description: 'Clean chat UI',
             run: async (ctx, task) => {
                 await removeDir(BUILD_DIR);
                 await removeDir(SERVER_STATIC_DIR);

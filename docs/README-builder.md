@@ -480,14 +480,14 @@ Build systems often have tasks that don't depend on each other. Running them seq
 
 ```
 Sequential (slow):
-  nodes:sync ─────────────► ai:sync ─────────────► client-python:sync
+  nodes:sync ─────────────► ai:sync ─────────────► client-python:sync-source
   [2 seconds]                [2 seconds]           [1 second]
   Total: 5 seconds
 
 Parallel (fast):  
   ┌─ nodes:sync ─────────┐
   ├─ ai:sync ────────────┼─► Done
-  └─ client-python:sync ─┘
+  └─ client-python:sync-source ─┘
   Total: 2 seconds (limited by slowest)
 ```
 
@@ -1304,7 +1304,7 @@ This section covers common patterns and **when** to use them based on the proble
     description: 'Build Python client',
     steps: [
         'nodes:build',  // Skipped if already run
-        'client-python:sync'
+        'client-python:sync-source'
     ]
 })}
 ```

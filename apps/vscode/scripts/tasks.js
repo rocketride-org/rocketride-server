@@ -243,7 +243,7 @@ module.exports = {
         
         // Public actions (have descriptions)
         { name: 'vscode:compile', action: () => ({
-            description: 'Compile extension code',
+            description: 'Compile VSCode extension',
             steps: [
                 'client-typescript:build',
                 'vscode:build-webview',
@@ -252,7 +252,7 @@ module.exports = {
             ]
         })},
         { name: 'vscode:build', action: () => ({
-            description: 'Build .vsix',
+            description: 'Build VSCode extension',
             steps: [
                 'client-typescript:build',
                 'vscode:build-webview',
@@ -263,7 +263,7 @@ module.exports = {
             ]
         })},
         { name: 'vscode:clean', action: () => ({
-            description: 'Remove all build artifacts',
+            description: 'Clean VSCode extension',
             run: async (ctx, task) => {
                 await removeDirs([
                     BUILD_DIR,
