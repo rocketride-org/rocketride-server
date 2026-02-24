@@ -22,113 +22,32 @@
 # =============================================================================
 
 """
-CrewAI agent framework adapter for Aparavi Engine.
+CrewAI agent framework node for Aparavi Engine.
 
-This node bridges CrewAI's multi-agent orchestration onto Aparavi's agent boundary:
-- Input: `questions` lane (Question) -> AgentInput.prompt
-- Execution: via host seams (host.llm.invoke + host.tools.invoke)
-- Output: standardized AgentEnvelope on `answers` lane (handled by base class)
+Node glue only: delegates to a CrewAI driver (`crew.py`) that implements the shared
+`ai.common.agent.AGENT` interface.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
-from aparavi import debug
+from rocketlib import IInstanceBase
+from ai.common.schema import Question
 
-from nodes.agent_base import (
-    IInstanceGenericAgent,
-    AgentInput,
-    AgentHostServices,
-    AgentRunResult,
-)
-
-from .host_llm import make_host_llm
-from .host_tools import extract_tool_names, make_host_tools, query_tool_catalog
+from .IGlobal import IGlobal
 
 
-def _safe_str(v: Any) -> str:
-    try:
-        return '' if v is None else str(v)
-    except Exception:
-        return ''
+class IInstance(IInstanceBase):
+    IGlobal: IGlobal
 
+    def writeQuestions(self, question: Question):
+        self.IGlobal.agent.run_agent(self, question, emit_answers_lane=True)
 
-class IInstance(IInstanceGenericAgent):
-    """CrewAI-backed agent framework node."""
-
-    FRAMEWORK = 'crewai'
-
-    def _run_agent(
-        self,
-        *,
-        agent_input: AgentInput,
-        host: AgentHostServices,
-        ctx: Dict[str, Any],
-    ) -> AgentRunResult:
-        run_id = ctx.get('run_id', '')
-        debug(f'agent_crewai _run_agent start run_id={run_id} prompt_len={len(agent_input.prompt or "")}')
-
-        instructions = _safe_str(getattr(getattr(self, 'IGlobal', None), 'instructions', '')).strip()
-
-        from crewai import Agent, Crew, Task
-        llm = make_host_llm(host=host)
-
-        tool_catalog = query_tool_catalog(host=host)
-        tools_to_use = extract_tool_names(tool_catalog)
-        tools_for_agent = make_host_tools(
-            host=host,
-            tool_names=tools_to_use,
-            log_tool_call=lambda **_: None,
-        )
-
-        agent_obj = Agent(
-            role='Assistant',
-            goal='Solve the user request using available tools when helpful.',
-            backstory=(
-                'You are an agent node in a tool-invocation hierarchy. '
-                'You may call tools wired to you via the host tools interface. '
-                'When a tool is needed, call it; otherwise respond directly. '
-                'Follow any additional instructions exactly.'
-            ),
-            tools=tools_for_agent,
-            llm=llm,
-            verbose=False,
-        )
-
-        desc_parts = [
-            'You are executing inside an agent pipeline.',
-            'Use tools when needed (and only those available to you).',
-            '',
-            'User request:',
-            _safe_str(agent_input.prompt or ''),
-        ]
-        if instructions:
-            desc_parts.extend(['', 'Additional instructions:', instructions])
-        desc = '\n'.join(desc_parts).strip()
-        task_obj = Task(
-            description=desc,
-            expected_output='A helpful, accurate response.',
-            agent=agent_obj,
-            markdown=False,
-        )
-
-        process = getattr(getattr(self, 'IGlobal', None), 'process', None)
-        crew = Crew(agents=[agent_obj], tasks=[task_obj], process=process)
-        result = crew.kickoff(inputs={'input': agent_input.prompt or ''})
-
-        # Extract final text.
-        final_text = ''
-        if hasattr(result, 'raw'):
-            try:
-                final_text = _safe_str(getattr(result, 'raw'))
-            except Exception:
-                final_text = ''
-        if not final_text:
-            final_text = _safe_str(result)
-
-        return {
-            'status': 'completed',
-            'result': {'type': 'agent_output', 'data': final_text},
-        }
+    def invoke(self, param: Any) -> Any:  # noqa: ANN401
+        # Only intercept tool.* control-plane operations; otherwise fall back.
+        op = param.get('op') if isinstance(param, dict) else getattr(param, 'op', None)
+        if isinstance(op, str) and op.startswith('tool.'):
+            return self.IGlobal.agent.handle_invoke(self, param)
+        return super().invoke(param)
 

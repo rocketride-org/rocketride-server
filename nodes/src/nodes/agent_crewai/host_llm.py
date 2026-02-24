@@ -34,7 +34,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Union
 
 from ai.common.schema import Question
-from aparavi.types import IInvokeLLM
+from rocketlib.types import IInvokeLLM
 
 
 def _safe_str(v: Any) -> str:

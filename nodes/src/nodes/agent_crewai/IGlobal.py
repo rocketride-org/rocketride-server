@@ -26,13 +26,14 @@ from __future__ import annotations
 import os
 from typing import Any, Dict
 
-from aparavi import IGlobalBase, IJson, OPEN_MODE
+from rocketlib import IGlobalBase, IJson, OPEN_MODE
 from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
     instructions: str = ''
     process: Any = None
+    agent: Any = None
 
     @staticmethod
     def normalize_and_validate_instructions(cfg: Dict[str, Any]) -> str:
@@ -69,6 +70,11 @@ class IGlobal(IGlobalBase):
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         self.instructions = self.normalize_and_validate_instructions(config)
 
+        # Build driver instance (framework-specific logic lives in crew.py).
+        from .crew import CrewDriver
+
+        self.agent = CrewDriver(instructions=self.instructions, process=self.process)
+
     def validateConfig(self):
         """
         Validate CrewAI config.
@@ -86,5 +92,7 @@ class IGlobal(IGlobalBase):
         return None
 
     def endGlobal(self) -> None:
-        pass
+        self.agent = None
+        self.process = None
+        self.instructions = ''
 
