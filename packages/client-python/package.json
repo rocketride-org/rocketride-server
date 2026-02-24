@@ -1,6 +1,6 @@
 {
     "name": "@rocketride/client-python",
-    "version": "3.1.0",
+    "version": "1.0.0",
     "description": "RocketRide Python Client - Python SDK for the RocketRide Engine",
     "private": true,
     "license": "MIT"

@@ -1,6 +1,6 @@
 {
     "name": "@rocketride/client-mcp",
-    "version": "3.1.0",
+    "version": "1.0.0",
     "description": "RocketRide MCP Client - Model Context Protocol integration",
     "private": true,
     "license": "MIT"
