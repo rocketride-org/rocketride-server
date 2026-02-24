@@ -1,5 +1,7 @@
 # RocketRide Data Processing Engine
 
+[![Build](https://github.com/rocketride-org/rocketride-server/actions/workflows/build.yaml/badge.svg)](https://github.com/rocketride-org/rocketride-server/actions/workflows/build.yaml)
+[![CodeQL](https://github.com/rocketride-org/rocketride-server/actions/workflows/codeql.yml/badge.svg)](https://github.com/rocketride-org/rocketride-server/actions/workflows/codeql.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org/)
