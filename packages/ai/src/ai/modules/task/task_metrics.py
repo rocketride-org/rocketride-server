@@ -462,12 +462,9 @@ class TaskMetrics:
         chargebee_coro = None
         if self._chargebee_subscription_id and self._chargebee_client.enabled and delta_tokens_total > 0:
             try:
-                from datetime import datetime, timezone
-                usage_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
                 chargebee_coro = self._chargebee_client.report_usage(
                     subscription_id=self._chargebee_subscription_id,
                     quantity=round(delta_tokens_total, 2),
-                    usage_date=usage_date,
                 )
             except Exception as e:
                 debug(f'[Chargebee] Error creating usage report: {e}')

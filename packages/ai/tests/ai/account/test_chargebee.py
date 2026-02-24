@@ -90,7 +90,7 @@ class TestChargebeeReportUsage:
         mock_client_cls.return_value = mock_client
 
         client = ChargebeeClient(site='test-site', api_key='test-key')
-        await client.report_usage('sub_123', 500, usage_date='2026-02-23')
+        await client.report_usage('sub_123', 500)
 
         mock_client.post.assert_called_once()
         call_args = mock_client.post.call_args

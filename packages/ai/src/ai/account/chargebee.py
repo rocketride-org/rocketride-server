@@ -29,6 +29,7 @@ subscriptions are billed accurately at the end of each billing cycle.
 
 import os
 import asyncio
+import time
 import httpx
 from rocketlib import debug
 
@@ -70,7 +71,7 @@ class ChargebeeClient:
         self.enabled = bool(self._site and self._api_key)
 
     async def report_usage(
-        self, subscription_id: str, quantity: float, usage_date: str = ''
+        self, subscription_id: str, quantity: float
     ) -> None:
         """
         Report metered usage for a subscription.
@@ -78,8 +79,6 @@ class ChargebeeClient:
         Args:
             subscription_id: The Chargebee subscription identifier.
             quantity: Number of compute tokens consumed.
-            usage_date: Optional ISO date string (``YYYY-MM-DD``). Chargebee
-                defaults to today when omitted.
         """
         # Noop when disabled or missing subscription
         if not self.enabled or not subscription_id:
@@ -93,9 +92,8 @@ class ChargebeeClient:
         data: dict[str, str] = {
             'item_price_id': self._item_price_id,
             'quantity': str(int(round(quantity))),
+            'usage_date': str(int(time.time())),
         }
-        if usage_date:
-            data['usage_date'] = usage_date
 
         auth = (self._api_key, '')
 
