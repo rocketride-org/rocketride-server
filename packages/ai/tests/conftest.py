@@ -17,3 +17,7 @@ from unittest.mock import MagicMock
 mock_rocketlib = MagicMock()
 mock_rocketlib.debug = MagicMock()
 sys.modules['rocketlib'] = mock_rocketlib
+
+# Mock depends module (used by ai/__init__.py to install requirements)
+mock_depends = MagicMock()
+sys.modules['depends'] = mock_depends
