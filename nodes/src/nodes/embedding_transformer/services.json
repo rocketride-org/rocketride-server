@@ -177,23 +177,38 @@
 				"embedding.profile"
 			]
 		}
-	]//,
-	// "test": {
-	// 	"profiles": ["miniLM"],
-	// 	"outputs": ["documents"],
-	// 	"cases": [
-	// 		{
-	// 			"name": "Embed text chunks",
-	// 			"documents": [
-	// 				{"page_content": "Hello world, this is a test document."},
-	// 				{"page_content": "Second chunk for embedding."}
-	// 			],
-	// 			"expect": {
-	// 				"documents": {
-	// 					"notEmpty": true
-	// 				}
-	// 			}
-	// 		}
-	// 	]
-	// }
+	],
+	"test": {
+		"profiles": ["miniLM"],
+		"outputs": ["documents", "questions"],
+		"cases": [
+			{
+				"name": "Embed text chunks",
+				"documents": [
+					{"page_content": "Hello world, this is a test document."},
+					{"page_content": "Second chunk for embedding."}
+				],
+				"expect": {
+					"documents": {
+						"notEmpty": true
+					}
+				}
+			},
+			{
+				"name": "Embed single question (flat vector for Qdrant)",
+				"questions": "What is the capital of France?",
+				"expect": {
+					"questions": {
+						"notEmpty": true,
+						"property": [
+							{
+								"path": "[0].questions[0].embedding",
+								"minLength": 384
+							}
+						]
+					}
+				}
+			}
+		]
+	}
 }
