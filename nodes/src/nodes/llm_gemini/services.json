@@ -103,7 +103,7 @@
 	//		itself
 	//
 		"preconfig": {
-			"default": "gemini-2_5-flash",
+			"default": "gemini-3-pro",
 			"profiles": {
 				"custom": {
 					"model": "",
@@ -268,7 +268,7 @@
 			"title": "Model",
 			"description": "Gemini LLM model",
 			"type": "string",
-			"default": "gemini-2_5-flash",
+			"default": "gemini-3-pro",
 			"enum": [
 				"*>preconfig.profiles.*.title"
 			],
