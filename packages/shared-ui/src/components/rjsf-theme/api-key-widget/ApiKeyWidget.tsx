@@ -75,6 +75,15 @@ const ApiKeyWidget: FC<WidgetProps> = ({
 
 	const inputRef = useRef<HTMLInputElement>(null);
 
+	// Sync when an external update provides a value while the widget is showing empty
+	// (e.g., credential carry-over during a profile/model switch)
+	useEffect(() => {
+		if (value && !tempValue) {
+			setTempValue(getMaskedValue(value));
+			setMaskApiKey(true);
+		}
+	}, [value, tempValue]);
+
 	// When in masked mode, scroll the input to the end so the visible trailing characters are shown
 	useEffect(() => {
 		if (inputRef.current && maskApiKey) {

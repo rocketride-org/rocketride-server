@@ -97,6 +97,82 @@ export function persistTokensFromFormData(
 }
 
 /**
+ * Ref that stores credentials from the previous profile so they survive
+ * multiple RJSF onChange cycles during a single profile switch.
+ */
+export type ProfileCredentialsRef = {
+	current: Record<string, unknown>;
+};
+
+/**
+ * Carries over credential fields (e.g. apikey) when the user switches between
+ * model profiles within the same provider.
+ *
+ * Each model profile stores its credentials in a separate conditional branch
+ * (e.g. "openai-4o": { "apikey": "..." }). When RJSF switches branches it
+ * drops the old profile object and may fire onChange multiple times. On the
+ * first call we detect the switch and stash the old credentials in a ref;
+ * on subsequent calls we restore from the ref so RJSF defaults can't
+ * overwrite the carried-over values.
+ */
+export function carryOverProfileCredentials(
+	formData: FormDataWithParameters,
+	previousFormData: FormDataWithParameters,
+	currentFormValues: FormDataWithParameters,
+	credentialsRef: ProfileCredentialsRef
+): FormDataWithParameters {
+	const newProfile = formData?.profile;
+	if (!newProfile) return formData;
+
+	const stateProfile = currentFormValues?.profile;
+	const savedProfile = previousFormData?.profile;
+
+	// Detect a fresh profile switch: the incoming profile differs from what
+	// React state currently holds (first onChange of the switch).
+	if (stateProfile && stateProfile !== newProfile) {
+		// Stash the old profile's credentials in the ref so they survive
+		// subsequent onChange calls where formValues has already been updated.
+		const oldData =
+			(currentFormValues?.[stateProfile] as Record<string, unknown>) ??
+			(previousFormData?.[stateProfile] as Record<string, unknown>);
+		if (oldData && typeof oldData === 'object') {
+			credentialsRef.current = { ...oldData };
+		}
+	} else if (savedProfile && savedProfile !== newProfile && !Object.keys(credentialsRef.current).length) {
+		// formValues already updated but ref is empty — seed from saved data
+		const oldData = previousFormData?.[savedProfile] as Record<string, unknown>;
+		if (oldData && typeof oldData === 'object') {
+			credentialsRef.current = { ...oldData };
+		}
+	}
+
+	// Nothing stashed → nothing to carry over
+	if (!Object.keys(credentialsRef.current).length) return formData;
+
+	const newProfileData = formData?.[newProfile] as Record<string, unknown> | undefined;
+	const newProfileObj = (newProfileData ?? {}) as Record<string, unknown>;
+	const updatedProfile = { ...newProfileObj };
+	let changed = false;
+
+	for (const key of Object.keys(credentialsRef.current)) {
+		if (!updatedProfile[key] && credentialsRef.current[key]) {
+			updatedProfile[key] = credentialsRef.current[key];
+			changed = true;
+		}
+	}
+
+	if (!changed) return formData;
+
+	// Clear the ref once the new profile has accepted the credentials,
+	// so we don't keep overwriting on every subsequent onChange.
+	if (newProfile === stateProfile) {
+		credentialsRef.current = {};
+	}
+
+	return { ...formData, [newProfile]: updatedProfile };
+}
+
+/**
  * Merges preserved authentication tokens back into formData
  * RJSF drops hidden fields, so we must merge tokens from previous state and ref
  */

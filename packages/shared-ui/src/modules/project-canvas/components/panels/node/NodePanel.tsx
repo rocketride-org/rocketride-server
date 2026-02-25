@@ -52,7 +52,9 @@ import UnsavedFormPrompt from '../../UnsavedFormPrompt';
 import { useTranslation } from 'react-i18next';
 import {
 	AuthTokensRef,
+	ProfileCredentialsRef,
 	persistTokensFromFormData,
+	carryOverProfileCredentials,
 	mergeAuthTokensIntoFormData,
 	persistOAuthTokensAndSave,
 } from './authTokenHelpers';
@@ -88,6 +90,9 @@ export default function NodePanel({ onClose }: IBasePanelProps): ReactNode {
 	// CRITICAL: Use refs to persist authentication tokens across re-renders
 	// This prevents tokens from being lost when RJSF drops hidden fields
 	const persistedAuthTokens = useRef<AuthTokensRef>({});
+	// Stores credentials from the previous profile during a model switch so they
+	// survive multiple RJSF onChange cycles within the same switch operation
+	const profileCredentials = useRef<ProfileCredentialsRef['current']>({});
 
 	const [searchParams] = useSearchParams();
 
@@ -202,8 +207,14 @@ export default function NodePanel({ onClose }: IBasePanelProps): ReactNode {
 		// CRITICAL: Preserve hidden authentication tokens during form updates
 		// RJSF drops hidden fields, so we must merge them back from previous state
 		const previousFormData = (selectedNode?.data as INodeData)?.formData || {};
-		const mergedFormData = mergeAuthTokensIntoFormData(
+		const withCarriedCreds = carryOverProfileCredentials(
 			formData ?? {},
+			previousFormData,
+			formValues,
+			profileCredentials
+		);
+		const mergedFormData = mergeAuthTokensIntoFormData(
+			withCarriedCreds,
 			previousFormData,
 			persistedAuthTokens
 		);
@@ -253,8 +264,14 @@ export default function NodePanel({ onClose }: IBasePanelProps): ReactNode {
 			// CRITICAL: Preserve hidden parameters (like userToken) that RJSF drops
 			// These are authentication credentials that must persist across form updates
 			const previousFormData = (selectedNode?.data as INodeData)?.formData || {};
-			const mergedFormData = mergeAuthTokensIntoFormData(
+			const withCarriedCreds = carryOverProfileCredentials(
 				formData ?? {},
+				previousFormData,
+				formValues,
+				profileCredentials
+			);
+			const mergedFormData = mergeAuthTokensIntoFormData(
+				withCarriedCreds,
 				previousFormData,
 				persistedAuthTokens
 			);
