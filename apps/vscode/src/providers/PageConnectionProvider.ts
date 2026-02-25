@@ -113,9 +113,6 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 				vscode.commands.executeCommand('rocketride.page.deploy.open');
 				break;
 
-			case 'openSystemPerformance':
-				vscode.commands.executeCommand('rocketride.page.system.open');
-				break;
 		}
 		} catch (error) {
 			console.error('[PageConnectionProvider] Message handling error:', error);

@@ -258,12 +258,6 @@
 				"category": "RocketRide Pipeline"
 			},
 			{
-				"command": "rocketride.page.system.open",
-				"title": "Open System Performance",
-				"category": "RocketRide",
-				"icon": "$(pulse)"
-			},
-			{
 				"command": "rocketride.page.deploy.open",
 				"title": "Open Deploy",
 				"category": "RocketRide",
