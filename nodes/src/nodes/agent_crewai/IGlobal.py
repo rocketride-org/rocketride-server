@@ -70,8 +70,8 @@ class IGlobal(IGlobalBase):
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         self.instructions = self.normalize_and_validate_instructions(config)
 
-        # Build driver instance (framework-specific logic lives in crew.py).
-        from .crew import CrewDriver
+        # Build driver instance (framework-specific logic lives in crewai.py).
+        from .crewai import CrewDriver
 
         self.agent = CrewDriver(instructions=self.instructions, process=self.process)
 
@@ -95,4 +95,3 @@ class IGlobal(IGlobalBase):
         self.agent = None
         self.process = None
         self.instructions = ''
-

@@ -33,4 +33,3 @@ from .IGlobal import IGlobal as IGlobal
 from .IInstance import IInstance as IInstance
 
 __all__ = ['IGlobal', 'IInstance']
-

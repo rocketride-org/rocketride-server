@@ -104,4 +104,3 @@ def failed_envelope(
     if task_id:
         envelope['meta']['task_id'] = task_id
     return envelope
-

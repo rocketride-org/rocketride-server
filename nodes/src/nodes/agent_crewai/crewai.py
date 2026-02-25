@@ -1,8 +1,28 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2024 RocketRide Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
 """
 CrewAI driver implementing the shared `ai.common.agent.AGENT` interface.
-
-This module contains CrewAI-specific logic and is intended to be usable without
-engine runtime objects (it receives config via __init__ and host services via calls).
 """
 
 from __future__ import annotations
@@ -14,13 +34,6 @@ from rocketlib import debug
 
 from ai.common.agent import Agent
 from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
-
-
-def _safe_str(v: Any) -> str:
-    try:
-        return '' if v is None else str(v)
-    except Exception:
-        return ''
 
 
 class CrewDriver(Agent):
@@ -40,19 +53,12 @@ class CrewDriver(Agent):
         call_llm_text: Callable[..., str],
         ctx: Dict[str, Any],
     ) -> Any:
-        # Lazy import to avoid CrewAI import at module import time.
-        from crewai import BaseLLM  # type: ignore
+
+        from crewai import BaseLLM
 
         class HostInvokeLLM(BaseLLM):
             def __init__(self):
                 super().__init__(model='aparavi-host-llm', temperature=None)
-
-            def supports_function_calling(self) -> bool:
-                return False
-
-            def supports_stop_words(self) -> bool:
-                # CrewAI may still provide `self.stop`; we truncate manually.
-                return False
 
             def call(
                 self,
@@ -76,9 +82,9 @@ class CrewDriver(Agent):
         log_tool_call: Callable[..., None],
         ctx: Dict[str, Any],
     ) -> List[Any]:
-        # Lazy import to avoid CrewAI import at module import time.
-        from crewai.tools import BaseTool  # type: ignore
-        from pydantic import BaseModel, ConfigDict, Field  # type: ignore
+
+        from crewai.tools import BaseTool
+        from pydantic import BaseModel, ConfigDict, Field
 
         class _ToolInput(BaseModel):
             input: Any = Field(default=None, description='Tool input payload')
@@ -122,7 +128,7 @@ class CrewDriver(Agent):
         tool_names = self._discover_tool_names(host=host)
 
         def _call_llm_text(messages: Any, stop_words: Any = None) -> str:
-            return self._call_host_llm_text(
+            return self._call_host_llm(
                 host=host,
                 messages=messages,
                 question_role='You are a helpful assistant.',
@@ -187,3 +193,9 @@ class CrewDriver(Agent):
 
         return {'status': 'completed', 'result': {'type': 'agent_output', 'data': final_text}}
 
+
+def _safe_str(v: Any) -> str:
+    try:
+        return '' if v is None else str(v)
+    except Exception:
+        return ''
