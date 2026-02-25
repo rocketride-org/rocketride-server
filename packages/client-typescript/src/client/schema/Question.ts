@@ -386,8 +386,14 @@ export class Question {
 		if (this.instructions.length === 0) {
 			addPromptInstruction({
 				subtitle: 'Answer the following questions',
-				instructions: 'I will provide the questions listed in order and then documents as context. Use the given context to provide an answer to the questions.'
+				instructions: 'Answer the following questions.'
 			});
+			if (this.documents.length > 0) {
+				addPromptInstruction({
+					subtitle: 'Documents',
+					instructions: 'Use the provided documents as context for your answer.'
+				});
+			}
 		}
 
 		// Add all instructions
@@ -441,10 +447,12 @@ export class Question {
 
 		// Add questions
 		if (this.questions.length > 0) {
-			let questionNum = 1;
-			for (const question of this.questions) {
-				prompt += `Question ${questionNum}: ${question.text}` + crlf;
-				questionNum++;
+			if (this.questions.length === 1) {
+				prompt += this.questions[0].text + crlf;
+			} else {
+				this.questions.forEach((question, index) => {
+					prompt += `Question ${index + 1}: ${question.text}${crlf}`;
+				});
 			}
 		}
 
