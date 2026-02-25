@@ -66,4 +66,3 @@ def attach_tool_calls_artifact(envelope: AgentEnvelope, tool_calls: List[Dict[st
             artifacts.append({'kind': AGENT_TOOL_CALLS_TYPE, 'name': 'host.tools', 'payload': tool_calls})
     except Exception:
         return
-

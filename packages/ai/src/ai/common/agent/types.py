@@ -1,8 +1,5 @@
 """
 Agent boundary contracts (framework-agnostic).
-
-This module intentionally contains only type/shape declarations and constants.
-It should not import engine runtime modules so it can be reused by framework drivers.
 """
 
 from __future__ import annotations
@@ -93,4 +90,3 @@ class AgentRunResult(TypedDict, total=False):
     result: AgentResult
     artifacts: List[AgentArtifact]
     meta: Dict[str, Any]
-

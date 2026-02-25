@@ -48,4 +48,3 @@ class AgentHostServices:
         """Create host service wrappers bound to an engine invoker."""
         self.llm = AgentHostServices.LLM(invoker)
         self.tools = AgentHostServices.Tools(invoker)
-

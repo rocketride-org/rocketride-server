@@ -22,10 +22,7 @@
 # =============================================================================
 
 """
-CrewAI agent framework node for Aparavi Engine.
-
-Node glue only: delegates to a CrewAI driver (`crew.py`) that implements the shared
-`ai.common.agent.AGENT` interface.
+CrewAI agent framework node instance.
 """
 
 from __future__ import annotations
@@ -50,4 +47,3 @@ class IInstance(IInstanceBase):
         if isinstance(op, str) and op.startswith('tool.'):
             return self.IGlobal.agent.handle_invoke(self, param)
         return super().invoke(param)
-

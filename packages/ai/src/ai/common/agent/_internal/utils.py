@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from ..types import CONTINUATION_TYPE
 
@@ -23,7 +23,7 @@ def extract_prompt(question: Any) -> str:
 
 
 def extract_continuation(context: Any) -> Optional[Dict[str, Any]]:
-    """Extract a continuation record from Question.context (best-effort)."""
+    """Extract a continuation record from Question.context."""
     if not context or not isinstance(context, list):
         return None
 
@@ -53,7 +53,7 @@ def now_iso() -> str:
 
 
 def safe_str(value: Any) -> str:
-    """Best-effort string conversion (never raises)."""
+    """Convert `value` to a string (never raises an exception)."""
     if value is None:
         return ''
     try:
@@ -63,25 +63,12 @@ def safe_str(value: Any) -> str:
 
 
 def get_field(obj: Any, name: str) -> Any:
-    """Get `name` from a dict-like or attribute-like object (best-effort)."""
+    """Get `name` from a dict-like or attribute-like object."""
     if obj is None:
         return None
     if isinstance(obj, dict):
         return obj.get(name)
     return getattr(obj, name, None)
-
-
-def set_field(obj: Any, name: str, value: Any) -> None:
-    """Set `name` on a dict-like or attribute-like object (best-effort)."""
-    if obj is None:
-        return
-    if isinstance(obj, dict):
-        obj[name] = value
-        return
-    try:
-        setattr(obj, name, value)
-    except Exception:
-        pass
 
 
 def split_namespaced_tool_name(tool_name: Any) -> tuple[str, str]:
@@ -115,7 +102,7 @@ def is_agent_run_tool_name(tool_name: Any) -> bool:
 
 
 def extract_tool_names(tool_catalog: Any) -> List[str]:
-    """Extract tool names from a host tool catalog response (best-effort)."""
+    """Extract tool names from a host tool catalog response."""
     try:
         tools_obj = None
         if isinstance(tool_catalog, list):
@@ -153,3 +140,121 @@ def extract_tool_names(tool_catalog: Any) -> List[str]:
     except Exception:
         return []
 
+
+# ---------------------------------------------------------------------------
+# Tool invocation payload normalization
+# ---------------------------------------------------------------------------
+def _best_effort_pydantic_dump(value: Any) -> Any:
+    """
+    Unwrap pydantic-ish models to dict.
+
+    - Pydantic v2: model_dump()
+    - Pydantic v1: dict()
+    """
+    if value is None:
+        return None
+    if isinstance(value, (dict, list, tuple, str, int, float, bool)):
+        return value
+
+    if hasattr(value, 'model_dump') and callable(getattr(value, 'model_dump')):
+        try:
+            return value.model_dump()
+        except Exception:
+            return value
+
+    if hasattr(value, 'dict') and callable(getattr(value, 'dict')):
+        try:
+            return value.dict()
+        except Exception:
+            return value
+
+    return value
+
+
+def normalize_invocation_payload(*, input: Any = None, kwargs: Optional[Dict[str, Any]] = None) -> Any:
+    """
+    Normalize tool invocation payload shapes across frameworks.
+
+    Supported input forms:
+    - Direct dict payload
+    - Pydantic-ish model payloads (best-effort to dict)
+    - `{ "input": X }` wrapper (unwrapped)
+    - `{ "input": { ... }, ...extras }` wrapper (extras merged into inner dict; extras override)
+    - `input=<payload>, **kwargs` (kwargs merged into payload dict when possible)
+    - kwargs-only invocations (payload becomes kwargs)
+    """
+    kw = kwargs or {}
+
+    payload: Any
+    if input is not None:
+        payload = _best_effort_pydantic_dump(input)
+        if kw:
+            if isinstance(payload, dict):
+                payload = {**payload, **kw}
+            else:
+                payload = {'input': payload, **kw}
+    elif kw:
+        payload = kw
+    else:
+        payload = {}
+
+    payload = _best_effort_pydantic_dump(payload)
+
+    if isinstance(payload, dict) and 'input' in payload:
+        if len(payload) == 1:
+            return _best_effort_pydantic_dump(payload.get('input'))
+
+        inner = _best_effort_pydantic_dump(payload.get('input'))
+        if isinstance(inner, dict):
+            extras = {k: v for k, v in payload.items() if k != 'input'}
+            return {**inner, **extras}
+
+    return payload
+
+# ---------------------------------------------------------------------------
+# LLM transcript/text normalization
+# ---------------------------------------------------------------------------
+def messages_to_transcript(messages: Union[str, List[Dict[str, str]]]) -> str:
+    """Normalize CrewAI-style messages into a single transcript string."""
+    if isinstance(messages, str):
+        return messages
+
+    parts: List[str] = []
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        role = safe_str(m.get('role') or 'user') or 'user'
+        content = safe_str(m.get('content') or '')
+        if content:
+            parts.append(f'{role}: {content}')
+    return '\n'.join(parts)
+
+
+def extract_text(result: Any) -> str:
+    """Text extraction from engine response shapes."""
+    try:
+        if hasattr(result, 'getText') and callable(getattr(result, 'getText')):
+            return (safe_str(result.getText()) or '').strip()
+        if hasattr(result, 'getJson') and callable(getattr(result, 'getJson')):
+            data = result.getJson()
+            if isinstance(data, dict):
+                for k in ('answer', 'content', 'text'):
+                    if k in data and data[k] is not None:
+                        return safe_str(data[k]).strip()
+            return safe_str(data).strip()
+        return safe_str(result).strip()
+    except Exception:
+        return safe_str(result).strip()
+
+
+def truncate_at_stop_words(text: str, stop_words: Any) -> str:
+    """Truncate `text` at the first occurrence of any stop word."""
+    if not text:
+        return ''
+    if not isinstance(stop_words, list):
+        return text
+    for sw in stop_words:
+        ssw = safe_str(sw)
+        if ssw and ssw in text:
+            return text.split(ssw)[0]
+    return text
