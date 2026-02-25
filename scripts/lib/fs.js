@@ -536,7 +536,7 @@ async function fingerprint(dirPath, options = {}) {
  * @returns {Promise<string|null>} Hex hash string, or null if directory doesn't exist
  */
 async function contentHash(dirPath, options = {}) {
-    const { exclude = ['node_modules', '.git', '__pycache__', '.pyc'] } = options;
+    const { exclude = ['node_modules', '.git', '__pycache__', '.pyc', 'version.h'] } = options;
     const files = [];
 
     try {
