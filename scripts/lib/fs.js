@@ -568,24 +568,15 @@ async function contentHash(dirPath, options = {}) {
     files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
 
     const hash = crypto.createHash('sha256');
-    const debugLines = [];
-    for (let i = 0; i < files.length; i++) {
-        const f = files[i];
+    for (const f of files) {
         const content = await fsp.readFile(f.full);
         hash.update(f.rel);
         hash.update(content);
-        if (i < 10) {
-            const fileHash = crypto.createHash('sha256').update(content).digest('hex').slice(0, 12);
-            debugLines.push(`  ${f.rel} ${fileHash}`);
-        }
+        const fileHash = crypto.createHash('sha256').update(content).digest('hex').slice(0, 12);
+        console.log(`  ${f.rel} ${fileHash}`);
     }
     const digest = hash.digest('hex');
-    if (debugLines.length > 0) {
-        const total = files.length;
-        console.log(`contentHash: ${path.basename(dirPath)} (${total} files) -> ${digest.slice(0, 16)}...`);
-        debugLines.forEach(line => console.log(line));
-        if (total > 10) console.log(`  ... and ${total - 10} more`);
-    }
+    console.log(`contentHash: ${path.basename(dirPath)} (${files.length} files) -> ${digest}`);
     return digest;
 }
 
