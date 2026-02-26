@@ -1,0 +1,317 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Video - Object Detection Filter",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "object_detection_filter://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"video"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"gpu"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most node
+	//
+	"path": "nodes.object_detection_filter",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "object_detection_filter",
+	//
+	//	Optional:
+	//		Description of this driver
+	//
+	"description": [
+		"A video processing component that detects objects in video frames using a ",
+		"HuggingFace object-detection model, optionally matches them against a CLIP-embedded ",
+		"reference image, groups temporally adjacent detections into segments, and extracts ",
+		"trimmed video clips for each segment. Useful for finding specific objects (e.g. race ",
+		"cars, people, animals) in long-form video and producing short highlight clips."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "object-detection.svg",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"video": [
+			"video", "table"
+		]
+	},
+	"input": [
+		{
+			"lane": "video",
+			"description": "Video to scan for objects.",
+			"output": [
+				{
+					"lane": "video",
+					"description": "Extracted video clips containing detected objects."
+				},
+				{
+					"lane": "table",
+					"description": "Detection metadata with timestamps, confidence, and similarity scores."
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "detr",
+		"profiles": {
+			"detr": {
+				"title": "DETR ResNet-50 - General object detection",
+				"detection_model": "facebook/detr-resnet-50",
+				"min_confidence": 0.7,
+				"similarity_threshold": 0.75,
+				"frame_sample_fps": 1.0,
+				"max_gap_sec": 2.0,
+				"pre_roll_sec": 2.0,
+				"post_roll_sec": 2.0,
+				"min_clip_sec": 3.0,
+				"max_clip_sec": 60.0
+			},
+			"yolos-tiny": {
+				"title": "YOLOS Tiny - Fast lightweight detection",
+				"detection_model": "hustvl/yolos-tiny",
+				"min_confidence": 0.5,
+				"similarity_threshold": 0.70,
+				"frame_sample_fps": 2.0,
+				"max_gap_sec": 2.0,
+				"pre_roll_sec": 2.0,
+				"post_roll_sec": 2.0,
+				"min_clip_sec": 3.0,
+				"max_clip_sec": 60.0
+			},
+			"custom": {
+				"title": "Custom model configuration",
+				"detection_model": "",
+				"min_confidence": 0.5,
+				"similarity_threshold": 0.70,
+				"frame_sample_fps": 1.0,
+				"max_gap_sec": 2.0,
+				"pre_roll_sec": 2.0,
+				"post_roll_sec": 2.0,
+				"min_clip_sec": 3.0,
+				"max_clip_sec": 60.0
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service
+	//
+	"fields": {
+		"objdet.detection_model": {
+			"type": "string",
+			"title": "Detection model",
+			"description": "HuggingFace model name for object detection",
+			"minLength": 2,
+			"maxLength": 128
+		},
+		"objdet.class_allowlist": {
+			"type": "string",
+			"title": "Class allowlist",
+			"description": "Comma-separated object classes to keep (e.g. 'car,truck'). Leave empty to keep all classes.",
+			"default": ""
+		},
+		"objdet.reference_image": {
+			"type": "string",
+			"title": "Reference image (base64)",
+			"description": "Base64-encoded reference image for CLIP similarity matching. Leave empty to skip reference matching.",
+			"default": ""
+		},
+		"objdet.min_confidence": {
+			"type": "number",
+			"title": "Minimum detection confidence",
+			"description": "Detection confidence threshold (0.0–1.0)",
+			"default": 0.7,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"objdet.similarity_threshold": {
+			"type": "number",
+			"title": "Reference similarity threshold",
+			"description": "Minimum CLIP cosine similarity to reference image (0.0–1.0). Only used when a reference image is provided.",
+			"default": 0.75,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"objdet.frame_sample_fps": {
+			"type": "number",
+			"title": "Frame sample rate (fps)",
+			"description": "How many frames per second to extract for detection",
+			"default": 1.0,
+			"enum": [
+				[0.5, "1 frame every 2 seconds"],
+				[1.0, "1 frame per second"],
+				[2.0, "2 frames per second"],
+				[5.0, "5 frames per second"]
+			]
+		},
+		"objdet.max_gap_sec": {
+			"type": "number",
+			"title": "Max gap between detections (seconds)",
+			"description": "Adjacent detections within this gap are merged into one segment",
+			"default": 2.0,
+			"enum": [
+				[1.0, "1 second"],
+				[2.0, "2 seconds"],
+				[3.0, "3 seconds"],
+				[5.0, "5 seconds"],
+				[10.0, "10 seconds"]
+			]
+		},
+		"objdet.pre_roll_sec": {
+			"type": "number",
+			"title": "Pre-roll (seconds)",
+			"description": "Seconds to include before the first detection in a clip",
+			"default": 2.0
+		},
+		"objdet.post_roll_sec": {
+			"type": "number",
+			"title": "Post-roll (seconds)",
+			"description": "Seconds to include after the last detection in a clip",
+			"default": 2.0
+		},
+		"objdet.min_clip_sec": {
+			"type": "number",
+			"title": "Minimum clip duration (seconds)",
+			"description": "Clips shorter than this are padded symmetrically",
+			"default": 3.0
+		},
+		"objdet.max_clip_sec": {
+			"type": "number",
+			"title": "Maximum clip duration (seconds)",
+			"description": "Clips are capped at this length (0 = unlimited)",
+			"default": 60.0
+		},
+		"objdet.detr": {
+			"object": "detr",
+			"properties": [
+				"objdet.class_allowlist",
+				"objdet.reference_image",
+				"objdet.min_confidence",
+				"objdet.similarity_threshold",
+				"objdet.frame_sample_fps",
+				"objdet.max_gap_sec",
+				"objdet.pre_roll_sec",
+				"objdet.post_roll_sec",
+				"objdet.min_clip_sec",
+				"objdet.max_clip_sec"
+			]
+		},
+		"objdet.yolos-tiny": {
+			"object": "yolos-tiny",
+			"properties": [
+				"objdet.class_allowlist",
+				"objdet.reference_image",
+				"objdet.min_confidence",
+				"objdet.similarity_threshold",
+				"objdet.frame_sample_fps",
+				"objdet.max_gap_sec",
+				"objdet.pre_roll_sec",
+				"objdet.post_roll_sec",
+				"objdet.min_clip_sec",
+				"objdet.max_clip_sec"
+			]
+		},
+		"objdet.custom": {
+			"object": "custom",
+			"properties": [
+				"objdet.detection_model",
+				"objdet.class_allowlist",
+				"objdet.reference_image",
+				"objdet.min_confidence",
+				"objdet.similarity_threshold",
+				"objdet.frame_sample_fps",
+				"objdet.max_gap_sec",
+				"objdet.pre_roll_sec",
+				"objdet.post_roll_sec",
+				"objdet.min_clip_sec",
+				"objdet.max_clip_sec"
+			]
+		},
+		"objdet.profile": {
+			"title": "Detection model",
+			"description": "Object detection model and configuration",
+			"type": "string",
+			"default": "detr",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "detr",
+					"properties": [
+						"objdet.detr"
+					]
+				},
+				{
+					"value": "yolos-tiny",
+					"properties": [
+						"objdet.yolos-tiny"
+					]
+				},
+				{
+					"value": "custom",
+					"properties": [
+						"objdet.custom"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Object Detection Filter",
+			"properties": [
+				"objdet.profile"
+			]
+		}
+	]
+}
