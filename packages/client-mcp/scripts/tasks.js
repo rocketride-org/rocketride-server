@@ -55,9 +55,23 @@ const SRC_HASH_KEY = 'client-mcp.srcHash';
 // Directories to skip when copying to build
 const SKIP_DIRS = ['node_modules', '__pycache__', '.pytest_cache', 'tests', '.git', 'scripts'];
 
+// Canonical README lives in docs/; copy it into the build dir for wheel packaging
+const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
+const README_SRC = path.join(DOCS_DIR, 'README-mcp-client.md');
+const README_DEST = path.join(BUILD_DIR, 'README.md');
+
 // ============================================================================
 // Action Factories
 // ============================================================================
+
+function makeCopyReadmeAction() {
+    return {
+        run: async (ctx, task) => {
+            await copyFile(README_SRC, README_DEST);
+            task.output = 'Copied README into build dir';
+        }
+    };
+}
 
 function makeSyncSourceAction() {
     return {
@@ -214,6 +228,7 @@ module.exports = {
 
     actions: [
         // Internal actions
+        { name: 'client-mcp:copy-readme', action: makeCopyReadmeAction },
         { name: 'client-mcp:sync-source', action: makeSyncSourceAction },
         { name: 'client-mcp:run-pytest', action: makeRunPytestAction },
 
@@ -223,6 +238,7 @@ module.exports = {
             steps: [
                 'server:build',
                 'client-mcp:sync-source',
+                'client-mcp:copy-readme',
                 'client-mcp:build-wheel',
             ]
         })},
