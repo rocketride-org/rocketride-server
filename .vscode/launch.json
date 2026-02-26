@@ -63,7 +63,7 @@
 		// Debug C++ code
 		//
 		// NOTE: These templates are setup for Windows debugging. To
-		// use Linux debugging, change the types in all launch 
+		// use Linux debugging, change the types in all launch
 		// configurations from "cppvsdbg" to "cppdbg"
 		//-----------------------------------------------------------
 		{

@@ -4,8 +4,9 @@
 		{
 			"label": "build all",
 			"type": "shell",
-			"command": "./builder",
+			"command": "node",
 			"args": [
+				"scripts/build.js",
 				"vscode:clean",
 				"vscode:build"
 			],

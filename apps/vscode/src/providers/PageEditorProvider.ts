@@ -37,7 +37,7 @@
  */
 
 import * as vscode from 'vscode';
-import { TaskStatus, GenericEvent, GenericResponse } from '../shared/types';
+import { TaskStatus, GenericEvent, GenericResponse, ConnectionState } from '../shared/types';
 import { ConnectionManager } from '../connection/connection';
 import { ConfigManager } from '../config';
 import { getLogger } from '../shared/util/output';
@@ -101,7 +101,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 		// Listen for connection state changes to start monitoring when connected
 		const connectionStateListener = this.connectionManager.on('connectionStateChanged', async (connectionStatus) => {
 			try {
-				if (connectionStatus.state === 2) { // ConnectionState.CONNECTED
+				if (connectionStatus.state === ConnectionState.CONNECTED) {
 					await this.startMonitoringForAllEditors();
 				} else {
 					await this.stopMonitoringForAllEditors();

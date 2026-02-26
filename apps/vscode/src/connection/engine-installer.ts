@@ -178,6 +178,9 @@ export class EngineInstaller {
 			progress?.report({ message: 'Extracting server...' });
 			await this.extractArchive(tmpPath, this.engineDir);
 
+			// Patch legacy apaext_ command prefixes to rrext_ in downloaded engine
+			this.patchEngineCommandNames(this.engineDir);
+
 			// Set executable permissions on Unix
 			await this.setExecutablePermission();
 
@@ -502,6 +505,29 @@ export class EngineInstaller {
 
 		// Fallback to the browser download URL
 		return asset.browser_download_url;
+	}
+
+	private patchEngineCommandNames(dir: string): void {
+		const walkAndPatch = (currentDir: string) => {
+			if (!fs.existsSync(currentDir)) {
+				return;
+			}
+			for (const entry of fs.readdirSync(currentDir)) {
+				const fullPath = path.join(currentDir, entry);
+				const stat = fs.statSync(fullPath);
+				if (stat.isDirectory()) {
+					walkAndPatch(fullPath);
+				} else if (entry.endsWith('.py')) {
+					const original = fs.readFileSync(fullPath, 'utf8');
+					const patched = original.replace(/apaext_/g, 'rrext_');
+					if (patched !== original) {
+						fs.writeFileSync(fullPath, patched, 'utf8');
+						this.logger.output(`${icons.info} Patched command prefixes in ${entry}`);
+					}
+				}
+			}
+		};
+		walkAndPatch(dir);
 	}
 
 	private async extractArchive(archivePath: string, destDir: string): Promise<void> {
