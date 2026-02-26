@@ -69,26 +69,10 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"video": [
+		"_source": [
 			"video", "table"
 		]
 	},
-	"input": [
-		{
-			"lane": "video",
-			"description": "Video to scan for objects.",
-			"output": [
-				{
-					"lane": "video",
-					"description": "Extracted video clips containing detected objects."
-				},
-				{
-					"lane": "table",
-					"description": "Detection metadata with timestamps, confidence, and similarity scores."
-				}
-			]
-		}
-	],
 	//
 	//	Optional:
 	//		Profile section are configuration options used by the driver
@@ -150,15 +134,23 @@
 		},
 		"objdet.class_allowlist": {
 			"type": "string",
-			"title": "Class allowlist",
-			"description": "Comma-separated object classes to keep (e.g. 'car,truck'). Leave empty to keep all classes.",
+			"title": "Object types to detect",
+			"description": "Comma-separated labels to keep (e.g. 'car,truck'). Leave empty to keep all detected objects.",
 			"default": ""
 		},
 		"objdet.reference_image": {
 			"type": "string",
-			"title": "Reference image (base64)",
-			"description": "Base64-encoded reference image for CLIP similarity matching. Leave empty to skip reference matching.",
-			"default": ""
+			"format": "data-url",
+			"title": "Reference image",
+			"description": "Upload a reference image to match against detected objects using CLIP similarity. Leave empty to skip reference matching.",
+			"ui:options:accept": "image/*"
+		},
+		"objdet.source_video": {
+			"type": "string",
+			"format": "data-url",
+			"title": "Source video",
+			"description": "Upload a video file to process. Used when no upstream video lane is connected.",
+			"ui:options:accept": "video/*"
 		},
 		"objdet.min_confidence": {
 			"type": "number",
@@ -228,8 +220,9 @@
 		"objdet.detr": {
 			"object": "detr",
 			"properties": [
-				"objdet.class_allowlist",
+				"objdet.source_video",
 				"objdet.reference_image",
+				"objdet.class_allowlist",
 				"objdet.min_confidence",
 				"objdet.similarity_threshold",
 				"objdet.frame_sample_fps",
@@ -243,8 +236,9 @@
 		"objdet.yolos-tiny": {
 			"object": "yolos-tiny",
 			"properties": [
-				"objdet.class_allowlist",
+				"objdet.source_video",
 				"objdet.reference_image",
+				"objdet.class_allowlist",
 				"objdet.min_confidence",
 				"objdet.similarity_threshold",
 				"objdet.frame_sample_fps",
@@ -259,8 +253,9 @@
 			"object": "custom",
 			"properties": [
 				"objdet.detection_model",
-				"objdet.class_allowlist",
+				"objdet.source_video",
 				"objdet.reference_image",
+				"objdet.class_allowlist",
 				"objdet.min_confidence",
 				"objdet.similarity_threshold",
 				"objdet.frame_sample_fps",
