@@ -78,7 +78,8 @@ export const useChatMessages = () => {
 			question.addQuestion(userMessage);
 
 			// Include last 6 messages for context - helps AI maintain conversation flow
-			messages.slice(-6).forEach(msg => {
+			// Filter out system messages (UI-only greetings/notifications) to avoid priming the LLM
+			messages.filter(msg => msg.sender !== 'system').slice(-6).forEach(msg => {
 				question.addHistory({
 					role: msg.sender === 'user' ? 'user' : 'assistant',
 					content: msg.text
@@ -167,7 +168,7 @@ export const useChatMessages = () => {
 		const systemMessage: Message = {
 			id: Date.now(),
 			text,
-			sender: 'bot',
+			sender: 'system',
 			timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 		};
 		setMessages(prev => [...prev, systemMessage]);
@@ -181,7 +182,7 @@ export const useChatMessages = () => {
 			{
 				id: Date.now(),
 				text: "Chat cleared! I'm your RocketRide assistant. How can I help you today?",
-				sender: 'bot',
+				sender: 'system',
 				timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 			}
 		]);

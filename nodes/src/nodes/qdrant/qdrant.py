@@ -37,8 +37,6 @@ from typing import List, Callable, cast, Dict, Any
 from uuid import uuid4
 import sys
 import numpy as np
-import re
-
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct, Filter, FieldCondition, Record, MatchValue, Range, SearchParams, TextIndexParams, TokenizerType, PayloadSchemaType, TextIndexType, ScoredPoint
 from qdrant_client.http import models
@@ -93,11 +91,9 @@ class Store(DocumentStoreBase):
         # Save our parameters
         self.collection = config.get('collection')
 
-        # Remove leading and trailing spaces, leading http/https and :// and trailing slashes
-        self.host = re.sub(r'^https?://', '', config.get('host', '').strip()).rstrip('/')
+        self.host = (config.get('host', '') or '').strip().rstrip('/')
         self.port = config.get('port')
 
-        # Strip API key also
         self.apikey = config.get('apikey', None)
         if self.apikey is not None:
             self.apikey = self.apikey.strip()
@@ -106,15 +102,17 @@ class Store(DocumentStoreBase):
         self.payload_limit = config.get('payloadLimit', self.payload_limit)
         self.threshold_search = config.get('score', 0.5)
 
-        # check if the similarity matches qdrant configuration options
         similarity = config.get('similarity', 'Cosine')
         if similarity in ['Cosine', 'Euclid', 'Dot', 'Manhattan']:
             self.similarity = similarity
         else:
             raise Exception('The metric you provided in the config.json does not match required qdrant configurations')
 
-        # Init the store
-        self.client = QdrantClient(host=self.host, port=self.port, api_key=self.apikey, prefer_grpc=False, timeout=60)
+        if '://' in self.host:
+            url = f"{self.host}:{self.port}"
+        else:
+            url = f"http://{self.host}:{self.port}"
+        self.client = QdrantClient(url=url, api_key=self.apikey, prefer_grpc=False, timeout=60)
         return
 
     def __del__(self):

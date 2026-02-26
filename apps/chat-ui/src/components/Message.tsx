@@ -40,7 +40,7 @@ interface MessageProps {
  * @param message - Message data to display
  */
 export const Message: React.FC<MessageProps> = ({ message }) => {
-	if (message.sender === 'bot') {
+	if (message.sender === 'bot' || message.sender === 'system') {
 		return (
 			<div className="message-wrapper bot">
 				<div className="message-bubble bot">
