@@ -178,9 +178,8 @@ module.exports = {
         { name: 'java:setup-maven', action: makeSetupMavenAction },
         { name: 'java:setup-jre', action: makeSetupJreAction },
         
-        // Public actions (have descriptions)
-        { name: 'java:build', action: () => ({
-            description: 'Build Java tools',
+        // Submodule actions (called by server:build-core / server:clean-all)
+        { name: 'java:submodule-build', action: () => ({
             steps: [
                 parallel([
                     'java:setup-jdk',
@@ -189,8 +188,7 @@ module.exports = {
                 ], 'Setup Java tools')
             ]
         })},
-        { name: 'java:clean', action: () => ({
-            description: 'Clean Java tools',
+        { name: 'java:submodule-clean', action: () => ({
             run: async (ctx, task) => {
                 await withLock('java-setup', async () => {
                     await removeDir(BUILD_DIR);
