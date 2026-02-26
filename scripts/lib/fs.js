@@ -533,10 +533,11 @@ async function fingerprint(dirPath, options = {}) {
  * @param {string} dirPath - Directory to hash
  * @param {Object} [options] - Options
  * @param {string[]} [options.exclude] - Patterns to exclude
+ * @param {function} [options.log] - Optional callback for status messages (e.g., task.output assignment)
  * @returns {Promise<string|null>} Hex hash string, or null if directory doesn't exist
  */
 async function contentHash(dirPath, options = {}) {
-    const { exclude = ['node_modules', '.git', '__pycache__', '.pyc', 'version.h'] } = options;
+    const { exclude = ['node_modules', '.git', '__pycache__', '.pyc', 'version.h'], log } = options;
     const files = [];
 
     try {
@@ -572,11 +573,9 @@ async function contentHash(dirPath, options = {}) {
         const content = await fsp.readFile(f.full);
         hash.update(f.rel);
         hash.update(content);
-        const fileHash = crypto.createHash('sha256').update(content).digest('hex').slice(0, 12);
-        console.log(`  ${f.rel} ${fileHash}`);
     }
     const digest = hash.digest('hex');
-    console.log(`contentHash: ${path.basename(dirPath)} (${files.length} files) -> ${digest}`);
+    if (log) log(`contentHash: ${path.basename(dirPath)} (${files.length} files) -> ${digest}`);
     return digest;
 }
 

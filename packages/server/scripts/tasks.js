@@ -442,7 +442,7 @@ function makeCheckPrebuiltAction(options = {}) {
         run: async (ctx, task) => {
             // Compute content hash of local source (always, ~110ms)
             task.output = 'Computing source hash...';
-            const localHash = await contentHash(SERVER_DIR);
+            const localHash = await contentHash(SERVER_DIR, { log: (msg) => { task.output = msg; } });
             ctx.contentHash = localHash;
 
             if (options.force) {
@@ -1093,6 +1093,7 @@ function makePackageAction(options = {}) {
                     syncRocketlibPythonLib(options),
                     // copyJavaJre(options),
                     syncDir(path.join(DIST_DIR, 'java'), path.join(options.destDir, 'java')),
+                    syncDir(path.join(DIST_DIR, 'static'), path.join(options.destDir, 'static')),
                     syncDir(path.join(PROJECT_ROOT, 'nodes', 'src', 'nodes'), path.join(options.destDir, 'nodes')),
                     syncDir(path.join(PACKAGES_DIR, 'ai', 'src', 'ai'), path.join(options.destDir, 'ai')),
                     syncDir(path.join(PACKAGES_DIR, 'client-python', 'src', 'rocketride'), path.join(options.destDir, 'rocketride')),
