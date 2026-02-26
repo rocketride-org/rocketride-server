@@ -53,6 +53,15 @@ body:
         - label: macOS
         - label: Linux
 
+  - type: input
+    id: version
+    attributes:
+      label: Version / Environment
+      description: Which version of RocketRide are you using? Include OS and relevant environment details.
+      placeholder: "e.g., v1.2.3 on Ubuntu 22.04, Node 20.x"
+    validations:
+      required: false
+
   - type: textarea
     id: screenshots-logs
     attributes:
