@@ -1,6 +1,8 @@
-# @rocketride/engine
+# RocketRide Engine
 
-RocketRide Engine - The main engine executable.
+RocketRide Engine -- The main engine executable.
+
+---
 
 ## Overview
 
@@ -11,6 +13,8 @@ The engine executable is the main entry point for the RocketRide data processing
 - Data source scanning
 - AI/ML processing
 - Network communication
+
+---
 
 ## Building
 
@@ -26,6 +30,8 @@ This downloads a pre-built engine when available (preferred), or compiles from s
 ./builder build
 ```
 
+---
+
 ## Usage
 
 ```bash
@@ -39,10 +45,12 @@ This downloads a pre-built engine when available (preferred), or compiles from s
 ./Engine --service --port 8080
 ```
 
+---
+
 ## Command-Line Options
 
 | Option | Description |
-|--------|-------------|
+| ------ | ----------- |
 | `--pipeline <path>` | Pipeline file to execute |
 | `--interactive` | Run in interactive mode |
 | `--service` | Run as a service |
@@ -50,6 +58,8 @@ This downloads a pre-built engine when available (preferred), or compiles from s
 | `--config <path>` | Configuration file |
 | `--log-level <level>` | Log level (debug, info, warn, error) |
 | `--verify` | Verify installation and exit |
+
+---
 
 ## Configuration
 
@@ -64,9 +74,11 @@ Create a `config.json` file:
 }
 ```
 
+---
+
 ## Directory Structure
 
-```
+```text
 apps/engine/
 ├── src/               # Source files
 │   ├── main.cpp       # Entry point
@@ -75,7 +87,8 @@ apps/engine/
 └── README.md          # This file
 ```
 
+---
+
 ## License
 
-MIT License - see [LICENSE](../../LICENSE)
-
+MIT License -- see [LICENSE](../LICENSE).

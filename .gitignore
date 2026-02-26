@@ -203,6 +203,9 @@ user.json
 # Build version info (generated)
 version.json
 
+# TypeScript client README (copied from docs/ by build; npm pack requires it here)
+packages/client-typescript/README.md
+
 downloads/jdk-17.zip
 downloads/jre-17.zip
 downloads/jdk-17.tar.gz

@@ -71,9 +71,24 @@ async function saveCompileHash() {
     }
 }
 
+// Canonical README lives in docs/; npm pack runs against the package root,
+// so we must copy the README here (npm doesn't support files outside the package).
+const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
+const README_SRC = path.join(DOCS_DIR, 'README-typescript-client.md');
+const README_DEST = path.join(PACKAGE_DIR, 'README.md');
+
 // ============================================================================
 // Action Factories
 // ============================================================================
+
+function makeCopyReadmeAction() {
+    return {
+        run: async (ctx, task) => {
+            await copyFile(README_SRC, README_DEST);
+            task.output = 'Copied README from docs/';
+        }
+    };
+}
 
 function makeCompileCjsAction() {
     return {
@@ -286,6 +301,7 @@ module.exports = {
 
     actions: [
         // Internal actions
+        { name: 'client-typescript:copy-readme', action: makeCopyReadmeAction },
         { name: 'client-typescript:compile-cjs', action: makeCompileCjsAction },
         { name: 'client-typescript:compile-esm', action: makeCompileEsmAction },
         { name: 'client-typescript:generate-types', action: makeGenerateTypesAction },
@@ -299,6 +315,7 @@ module.exports = {
         { name: 'client-typescript:build', action: () => ({
             description: 'Build TypeScript client',
             steps: [
+                'client-typescript:copy-readme',
                 parallel([
                     'client-typescript:compile-cjs',
                     'client-typescript:compile-esm',

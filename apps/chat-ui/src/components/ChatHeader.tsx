@@ -23,7 +23,7 @@
  */
 
 import React from 'react';
-import { Bot, Settings, Trash2, Palette } from 'lucide-react';
+import { Bot, Trash2, Palette } from 'lucide-react';
 import { useTheme, ThemeName } from '../hooks/useTheme';
 
 interface ChatHeaderProps {
@@ -39,8 +39,7 @@ interface ChatHeaderProps {
  * - Connection status (connected/connecting)
  * - Theme selector (standalone mode only)
  * - Clear chat button
- * - Settings button (placeholder)
- * 
+ *
  * @param isConnected - Whether WebSocket is connected
  * @param onClearChat - Callback to clear chat history
  */
@@ -89,14 +88,6 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ isConnected, onClearChat
 						aria-label="Clear chat"
 					>
 						<Trash2 className="w-5 h-5" />
-					</button>
-					<button
-						className="header-btn"
-						title="Settings"
-						type="button"
-						aria-label="Settings"
-					>
-						<Settings className="w-5 h-5" />
 					</button>
 				</div>
 			</div>
