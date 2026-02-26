@@ -68,14 +68,14 @@
 					"description": "Connection mode for RocketRide debugging",
 					"enumDescriptions": [
 						"Cloud (RocketRide.ai cloud) – needs a RocketRide account",
-						"On-prem (your own hosted server) – needs host address and API key",
-						"Local (your local machine) – just needs a port to connect to"
+						"On-prem (your own hosted server, including localhost) – connects to an already running server using host URL and API key",
+						"Local (managed by extension) – extension downloads/starts a local engine automatically"
 					]
 				},
 				"rocketride.hostUrl": {
 					"type": "string",
 					"default": "http://localhost:5565",
-					"description": "Host URL for RocketRide service (used by both cloud and local modes). Host and port will be parsed from this URL.",
+					"description": "Host URL for RocketRide service. Used for cloud/on-prem connections and local mode port parsing.",
 					"format": "uri"
 				},
 				"rocketride.deployUrl": {

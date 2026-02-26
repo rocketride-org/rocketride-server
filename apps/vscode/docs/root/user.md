@@ -482,12 +482,19 @@ Connect to RocketRide cloud services:
 - **Auto-reconnect**: Automatically reconnects on disconnect
 
 #### Local Mode
-Run a local RocketRide engine:
-- **Engine Path**: Path to local engine executable
-- **Engine Arguments**: Additional command-line arguments
+Run a managed local RocketRide engine:
+- **Managed Binary**: Extension installs/updates the engine automatically
 - **Auto-start**: Extension starts the engine for you
-- **Port Detection**: Automatically finds the engine's port
+- **Version Control**: Uses `rocketride.local.engineVersion`
+- **Engine Arguments**: Uses `rocketride.local.engineArgs`
 - **Process Management**: Stops engine when extension deactivates
+
+#### On-Prem Mode
+Connect to an already running RocketRide server (including localhost):
+- **Host URL**: Your running server address (for example `http://localhost:5565`)
+- **No Auto-Download**: Extension does not install or start the engine
+- **Use Case**: You started the engine yourself (terminal, service manager, container)
+- **API Key**: Required by the extension for on-prem authentication flow
 
 #### Connection Status
 Monitor connection health:
@@ -508,7 +515,7 @@ Monitor connection health:
 Comprehensive settings interface:
 
 #### Connection Settings
-- **Connection Mode**: Cloud or Local
+- **Connection Mode**: Cloud, On-Prem, or Local
 - **Host URL**: Server address and port
 - **API Key**: Secure authentication (encrypted storage)
 - **Auto Connect**: Connect automatically on startup
@@ -518,9 +525,9 @@ Comprehensive settings interface:
 - **Pipeline Restart Behavior**: What happens when pipelines change while running
 
 #### Local Engine Settings (Local Mode Only)
-- **Engine Path**: Path to engine executable
-- **Engine Arguments**: Command-line arguments for engine
-- **Validation**: Checks if engine exists
+- **Engine Version**: Version to auto-download (`latest`, `prerelease`, or explicit tag)
+- **Engine Arguments**: Command-line arguments for managed local startup
+- **Validation**: Confirms managed engine startup
 
 #### Debugging Settings
 - **Threads**: Number of processing threads (1-64)
@@ -596,7 +603,16 @@ Comprehensive settings interface:
 - Test connection with `Test Connection` button
 - Try connecting from terminal: `curl http://host:port/health`
 - Check firewall settings
-- For local mode, verify engine path is correct
+- If using **Local** mode, check Output → RocketRide for engine download/startup errors
+- If you are already running the engine manually, switch to **On-Prem** mode and set `Host URL` to your server (for example `http://localhost:5565`)
+
+#### "Stuck on Connecting... Downloading ..."
+**Cause**:
+- You are in **Local** mode, which downloads/starts a managed engine binary before connecting
+
+**Solution**:
+- If you want the extension to use your already running local server, use **On-Prem** mode instead of Local
+- Set Host URL to your running server (for example `http://localhost:5565`) and reconnect
 
 #### "API key authentication failed"
 **Causes**:
