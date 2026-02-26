@@ -39,6 +39,15 @@ from PIL import Image
 from ai.common.models.transformers import pipeline
 
 
+def _decode_data_url(value: str) -> bytes:
+    """Decode a data-url string (``data:...;base64,XXXX``) or plain base64."""
+    if value.startswith('data:'):
+        # Strip the "data:<mime>;base64," prefix
+        _, encoded = value.split(',', 1)
+        return base64.b64decode(encoded)
+    return base64.b64decode(value)
+
+
 @dataclass
 class Detection:
     """A single object detection result with optional reference similarity."""
@@ -85,10 +94,10 @@ class ObjectDetector:
         self._clip_processor = None
         self._reference_embedding: Optional[np.ndarray] = None
 
-        ref_image_b64: str = config.get('reference_image', '')
-        if ref_image_b64:
+        ref_image_raw: str = config.get('reference_image', '')
+        if ref_image_raw:
             self._init_clip()
-            ref_bytes = base64.b64decode(ref_image_b64)
+            ref_bytes = _decode_data_url(ref_image_raw)
             self._reference_embedding = self._embed_image(ref_bytes)
 
         print(f'[ObjectDetector] Model: {det_model}')
