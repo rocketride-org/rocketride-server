@@ -1,0 +1,21 @@
+{
+  "pipeline": {
+    "project_id": "53c3122b-9ace-4b66-80d7-064a7a1315ae",
+    "source": "mcp_client_1",
+    "components": [
+      {
+        "id": "mcp_client_1",
+        "provider": "mcp_client",
+        "config": {
+          "mcp_client.serverName": "echo",
+          "mcp_client.transport": "streamable-http",
+          "mcp_client.endpoint": "https://echo.mcp.inevitable.fyi/mcp"
+        },
+        "ui": {
+          "position": { "x": 100, "y": 100 }
+        },
+        "input": []
+      }
+    ]
+  }
+}

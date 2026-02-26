@@ -46,6 +46,17 @@ from .mcp_streamable_http_client import McpStreamableHttpClient
 from .mcp_driver import McpDriver
 
 
+def _strip_prefix(connConfig: dict, prefix: str = 'mcp_client.') -> dict:
+    """Strip a node-specific prefix from connConfig keys.
+
+    The canvas stores form data with keys like ``mcp_client.commandLine`` but
+    ``Config.getNodeConfig`` merges against preconfig profiles that use
+    unprefixed keys (``commandLine``).  Stripping the prefix before the merge
+    lets user-provided values properly override the profile defaults.
+    """
+    return {(k[len(prefix):] if k.startswith(prefix) else k): v for k, v in connConfig.items()}
+
+
 class IGlobal(IGlobalBase):
     """Global state for mcp_client."""
 
@@ -56,7 +67,7 @@ class IGlobal(IGlobalBase):
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        cfg = Config.getNodeConfig(self.glb.logicalType, _strip_prefix(self.glb.connConfig))
 
         self.serverName = str((cfg.get('serverName') or 'mcp')).strip()
         self.transport = str((cfg.get('transport') or 'stdio')).strip().lower()
@@ -150,7 +161,7 @@ class IGlobal(IGlobalBase):
         Matches other nodes: surface issues via warning().
         """
         try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+            cfg = Config.getNodeConfig(self.glb.logicalType, _strip_prefix(self.glb.connConfig))
             transport = str((cfg.get('transport') or 'stdio')).strip().lower()
             if transport not in ('stdio', 'sse', 'streamable-http'):
                 warning('transport must be stdio, streamable-http, or sse')

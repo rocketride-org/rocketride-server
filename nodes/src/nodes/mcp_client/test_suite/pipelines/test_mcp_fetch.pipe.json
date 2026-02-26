@@ -1,0 +1,21 @@
+{
+  "pipeline": {
+    "project_id": "25c61c5d-a5b3-48f7-96c9-bdda01cb19bd",
+    "source": "mcp_client_1",
+    "components": [
+      {
+        "id": "mcp_client_1",
+        "provider": "mcp_client",
+        "config": {
+          "mcp_client.serverName": "fetch",
+          "mcp_client.transport": "stdio",
+          "mcp_client.commandLine": "uvx mcp-server-fetch"
+        },
+        "ui": {
+          "position": { "x": 100, "y": 100 }
+        },
+        "input": []
+      }
+    ]
+  }
+}

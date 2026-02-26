@@ -1,0 +1,21 @@
+{
+  "pipeline": {
+    "project_id": "bc460a73-c49e-4d4b-850c-408c48e42dee",
+    "source": "mcp_client_1",
+    "components": [
+      {
+        "id": "mcp_client_1",
+        "provider": "mcp_client",
+        "config": {
+          "mcp_client.serverName": "mock",
+          "mcp_client.transport": "stdio",
+          "mcp_client.commandLine": "python mock_mcp_server.py"
+        },
+        "ui": {
+          "position": { "x": 100, "y": 100 }
+        },
+        "input": []
+      }
+    ]
+  }
+}
