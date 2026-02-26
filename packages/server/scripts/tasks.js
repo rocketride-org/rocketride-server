@@ -442,7 +442,7 @@ function makeCheckPrebuiltAction(options = {}) {
         run: async (ctx, task) => {
             // Compute content hash of local source (always, ~110ms)
             task.output = 'Computing source hash...';
-            const localHash = await contentHash(SERVER_DIR);
+            const localHash = await contentHash(SERVER_DIR, { log: (msg) => { task.output = msg; } });
             ctx.contentHash = localHash;
 
             if (options.force) {
