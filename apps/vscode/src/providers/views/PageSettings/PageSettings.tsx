@@ -21,7 +21,7 @@
 // SOFTWARE.
 // =============================================================================
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useMessaging } from '../../../shared/util/useMessaging';
 import { ConnectionSettings } from './ConnectionSettings';
 import { PipelineSettings } from './PipelineSettings';
@@ -146,6 +146,9 @@ export const PageSettings: React.FC = () => {
 	const [deployTestMessage, setDeployTestMessage] = useState<MessageData | null>(null);
 	const [engineVersions, setEngineVersions] = useState<EngineVersionItem[]>([]);
 	const [engineVersionsLoading, setEngineVersionsLoading] = useState(false);
+	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+	const hasLoadedInitialSettingsRef = useRef(false);
+	const allowNextServerSettingsRef = useRef(false);
 
 	// ========================================================================
 	// WEBVIEW MESSAGING
@@ -157,10 +160,18 @@ export const PageSettings: React.FC = () => {
 				// Handle all incoming messages from your discriminated union
 				switch (message.type) {
 					case 'settingsLoaded':
-						setSettings(message.settings);
-						if (message.settings.connectionMode === 'local') {
-							setEngineVersionsLoading(true);
-							sendMessage({ type: 'fetchEngineVersions' });
+						// Avoid clobbering in-progress user edits when external updates arrive.
+						// Accept server settings on first load, or after explicit save/clear actions.
+						if (!hasLoadedInitialSettingsRef.current || !hasUnsavedChanges || allowNextServerSettingsRef.current) {
+							setSettings(message.settings);
+							hasLoadedInitialSettingsRef.current = true;
+							allowNextServerSettingsRef.current = false;
+							setHasUnsavedChanges(false);
+
+							if (message.settings.connectionMode === 'local') {
+								setEngineVersionsLoading(true);
+								sendMessage({ type: 'fetchEngineVersions' });
+							}
 						}
 						break;
 
@@ -196,6 +207,7 @@ export const PageSettings: React.FC = () => {
 	 * Save all settings to extension storage
 	 */
 	const handleSaveSettings = (): void => {
+		allowNextServerSettingsRef.current = true;
 		sendMessage({ type: 'saveSettings', settings });
 	};
 
@@ -219,6 +231,8 @@ export const PageSettings: React.FC = () => {
 	const handleClearCredentials = (): void => {
 		// Clear the API key from local state and send clear message
 		setSettings(prev => ({ ...prev, apiKey: '', hasApiKey: false }));
+		setHasUnsavedChanges(true);
+		allowNextServerSettingsRef.current = true;
 		sendMessage({ type: 'clearCredentials' });
 	};
 
@@ -226,6 +240,7 @@ export const PageSettings: React.FC = () => {
 	 * Update settings with partial changes
 	 */
 	const handleSettingsChange = (newSettings: Partial<SettingsData>): void => {
+		setHasUnsavedChanges(true);
 		setSettings(prev => {
 			// If switching to local mode, fetch engine versions
 			if (newSettings.connectionMode === 'local' && prev.connectionMode !== 'local') {
@@ -240,6 +255,7 @@ export const PageSettings: React.FC = () => {
 	 * Add or update an environment variable (local state only, not saved until "Save All Settings")
 	 */
 	const handleEnvVarAdd = (key: string, value: string): void => {
+		setHasUnsavedChanges(true);
 		setSettings(prev => ({
 			...prev,
 			envVars: {
@@ -253,6 +269,7 @@ export const PageSettings: React.FC = () => {
 	 * Update an existing environment variable (local state only, not saved until "Save All Settings")
 	 */
 	const handleEnvVarUpdate = (key: string, value: string): void => {
+		setHasUnsavedChanges(true);
 		setSettings(prev => ({
 			...prev,
 			envVars: {
@@ -266,6 +283,7 @@ export const PageSettings: React.FC = () => {
 	 * Delete an environment variable (local state only, not saved until "Save All Settings")
 	 */
 	const handleEnvVarDelete = (key: string): void => {
+		setHasUnsavedChanges(true);
 		setSettings(prev => {
 			const newEnvVars = { ...prev.envVars };
 			delete newEnvVars[key];
@@ -288,7 +306,9 @@ export const PageSettings: React.FC = () => {
 			</div>
 
 			<div className="action-buttons">
-				<button onClick={handleSaveSettings}>Save All Settings</button>
+				<button onClick={handleSaveSettings}>
+					{hasUnsavedChanges ? 'Save All Settings*' : 'Save All Settings'}
+				</button>
 			</div>
 
 			<MessageDisplay message={message} />
