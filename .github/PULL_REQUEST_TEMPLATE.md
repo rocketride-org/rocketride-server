@@ -12,7 +12,7 @@
 
 - [ ] Tests added or updated
 - [ ] Tested locally
-- [ ] `./builder test` passes (or `pnpm test` for JS-only changes)
+- [ ] `./builder test` passes
 
 ## Checklist
 
