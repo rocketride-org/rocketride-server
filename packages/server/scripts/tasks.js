@@ -458,18 +458,11 @@ function makeCheckPrebuiltAction(options = {}) {
                 return;
             }
 
-            // Already attempted download — nothing more to do
-            const downloadAttempted = await getState('server.downloadAttempted');
-            if (downloadAttempted) {
-                task.output = 'Download already attempted';
-                return;
-            }
-
             const {
                 releaseTag, manifestFilename, distFilename, symDistFilename
             } = await getDistInfo(options);
 
-            let hashMatches = false;
+            let serverHash = null;
 
             try {
                 // Fetch release manifest and compare content hash
@@ -477,17 +470,23 @@ function makeCheckPrebuiltAction(options = {}) {
                 if (manifestPath) {
                     const manifest = await readJson(manifestPath);
                     await setState('server.releaseManifest', manifest);
-                    hashMatches = manifest?.server?.contentHash === localHash;
+                    serverHash = manifest?.server?.contentHash;
                 }
             } catch {
                 // Manifest not available — cannot verify, must compile
             }
 
-            if (!hashMatches) {
+            if (localHash !== serverHash) {
                 task.output = 'Source differs from release — will compile';
                 await setState('server.contentHash', null);
-                await setState('server.downloadAttempted', true);
+                await setState('server.downloaded', false);
                 ctx.downloaded = false;
+                return;
+            }
+
+            if (await getState('server.downloaded')) {
+                ctx.downloaded = true;
+                task.output = 'Server already downloaded';
                 return;
             }
 
@@ -519,13 +518,13 @@ function makeCheckPrebuiltAction(options = {}) {
                 }
 
                 await setState('server.contentHash', localHash);
-                await setState('server.downloadAttempted', true);
-                task.output = `Downloaded server ${releaseTag}`;
+                await setState('server.downloaded', true);
                 ctx.downloaded = true;
+                task.output = `Downloaded server ${releaseTag}`;
 
             } catch {
                 await setState('server.contentHash', null);
-                await setState('server.downloadAttempted', true);
+                await setState('server.downloaded', false);
                 ctx.downloaded = false;
                 task.output = `Release ${releaseTag} download failed: Will compile from source`;
             }
