@@ -12,12 +12,28 @@ const path = require('path');
 const https = require('https');
 const AdmZip = require('adm-zip');
 const tar = require('tar');
-const { exists, rm, mkdir, unlink, isFile, isDirectory, createWriteStream, writeFile } = require('./fs');
+const { execCommand } = require('./exec');
+const { exists, rm, mkdir, unlink, isFile, isDirectory, createWriteStream, writeFile, readJson } = require('./fs');
 const { getState, setState } = require('./state');
 
 // Persistent downloads directory (survives clean)
 const PROJECT_ROOT = path.join(__dirname, '..', '..');
 const DOWNLOADS_DIR = path.join(PROJECT_ROOT, 'downloads');
+
+// Get package info (loaded async)
+let VERSION = '0.0.0';
+let REPO = 'rocketride-org/rocketride-server';
+let packageJsonLoaded = false;
+
+async function loadPackageJson() {
+    if (!packageJsonLoaded) {
+        const packageJson = await readJson(path.join(PROJECT_ROOT, 'package.json'));
+        VERSION = packageJson.version;
+        REPO = packageJson.repository?.url?.match(/github\.com[/:](.+?)(?:\.git)?$/)?.[1] || 'rocketride-org/rocketride-server';
+        packageJsonLoaded = true;
+    }
+    return { version: VERSION, repo: REPO };
+}
 
 /**
  * Download a file (with caching)
@@ -51,6 +67,32 @@ async function downloadFile(url, filename, task) {
     await setState(stateKey, true);
     
     return destPath;
+}
+
+async function downloadGitHubFile(releaseTag, filename, task) {
+    const { repo } = await loadPackageJson();
+
+    try {
+        await execCommand('gh', [
+            'release', 'download', releaseTag,
+            '--repo', repo,
+            '--pattern', filename,
+            '--dir', DOWNLOADS_DIR,
+            '--clobber'
+        ], { task });
+        return path.join(DOWNLOADS_DIR, filename);
+    } catch (err) {
+        task.output = `GitHub CLI download failed ${releaseTag}/${filename}: ${err.message.trim().replace(/\n/g, ' ')}`;
+    }
+
+    const fileurl = `https://github.com/${repo}/releases/download/${releaseTag}/${filename}`;
+    try {
+        return await downloadFile(fileurl, filename, task);
+    } catch (err) {
+        task.output = `GitHub API download failed ${fileurl}: ${err.message.trim().replace(/\n/g, ' ')}`;
+    }
+
+    return null;
 }
 
 /**
@@ -243,7 +285,9 @@ async function extractArchive(archivePath, destDir, options = {}) {
 
 module.exports = {
     DOWNLOADS_DIR,
+    loadPackageJson,
     downloadFile,
+    downloadGitHubFile,
     createArchive,
     extractArchive
 };

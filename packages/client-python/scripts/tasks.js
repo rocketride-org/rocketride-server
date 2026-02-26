@@ -53,9 +53,23 @@ const SKIP_DIRS = ['node_modules', '__pycache__', '.pytest_cache', 'tests', '.gi
 // Engine (built by server:build; execCommand resolves extension on Windows)
 const ENGINE = path.join(PROJECT_ROOT, 'dist', 'server', 'engine');
 
+// Canonical README lives in docs/; copy it into the build dir for wheel packaging
+const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
+const README_SRC = path.join(DOCS_DIR, 'README-python-client.md');
+const README_DEST = path.join(BUILD_DIR, 'README.md');
+
 // ============================================================================
 // Action Factories
 // ============================================================================
+
+function makeCopyReadmeAction() {
+    return {
+        run: async (ctx, task) => {
+            await copyFile(README_SRC, README_DEST);
+            task.output = 'Copied README into build dir';
+        }
+    };
+}
 
 function makeSyncClientPythonAction() {
     return {
@@ -232,6 +246,7 @@ module.exports = {
     
     actions: [
         // Internal actions
+        { name: 'client-python:copy-readme', action: makeCopyReadmeAction },
         { name: 'client-python:sync-source', action: makeSyncClientPythonAction },
         { name: 'client-python:wheel-source', action: makeWheelSourceAction },
         { name: 'client-python:wheel-build', action: makeWheelBuildAction },
@@ -247,6 +262,7 @@ module.exports = {
                 'server:build',
                 'client-python:sync-source',
                 'client-python:wheel-source',
+                'client-python:copy-readme',
                 'client-python:wheel-build',
                 'client-python:sync'
             ]

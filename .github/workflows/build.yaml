@@ -170,7 +170,7 @@ jobs:
         with:
           version: 10
       - name: Set up vcpkg
-        run: ${{ matrix.builder_cmd }} vcpkg:build
+        run: ${{ matrix.builder_cmd }} vcpkg:submodule-build
       - name: Set up vcpkg nuget / Linux/macOS
         if: matrix.platform != 'windows'
         run: |
@@ -217,6 +217,7 @@ jobs:
           path: |
             ${{ github.workspace }}/dist/artifacts/*.zip
             ${{ github.workspace }}/dist/artifacts/*.tar.gz
+            ${{ github.workspace }}/dist/artifacts/*.json
           if-no-files-found: error
 
       - name: Upload VC Code extension artifacts

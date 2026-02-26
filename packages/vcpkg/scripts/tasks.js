@@ -147,13 +147,11 @@ module.exports = {
         { name: 'vcpkg:clone', action: makeCloneVcpkgAction },
         { name: 'vcpkg:bootstrap', action: makeBootstrapVcpkgAction },
         
-        // Public actions (have descriptions)
-        { name: 'vcpkg:build', action: () => ({
-            description: 'Build vcpkg',
+        // Submodule actions (called by server:build-core / server:clean-all)
+        { name: 'vcpkg:submodule-build', action: () => ({
             steps: ['vcpkg:clone', 'vcpkg:bootstrap']
         })},
-        { name: 'vcpkg:clean', action: () => ({
-            description: 'Clean vcpkg',
+        { name: 'vcpkg:submodule-clean', action: () => ({
             run: async (ctx, task) => {
                 const { withLock, removeDir, setState } = require('../../../scripts/lib');
                 await withLock('vcpkg-setup', async () => {
