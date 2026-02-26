@@ -35,28 +35,37 @@ This downloads a pre-built engine when available (preferred), or compiles from s
 ## Usage
 
 ```bash
-# Run a pipeline
-./Engine --pipeline /path/to/pipeline.json
+# From repo root, run the local EAAS service on port 5565
+./dist/server/Engine ./dist/server/ai/eaas.py --port=5565
 
-# Interactive mode
-./Engine --interactive
+# Equivalent from dist/server/
+cd dist/server
+./Engine ./ai/eaas.py --port=5565
 
-# Service mode
-./Engine --service --port 8080
+# Execute a task file directly
+./Engine /path/to/task.json
 ```
 
 ---
 
-## Command-Line Options
+## How CLI Arguments Work
+
+The engine processes non-option positional arguments as files/scripts to execute.
+Options by themselves do not start a long-running service.
+
+For example:
+
+- `./Engine --service --port=5565` may exit immediately without doing work
+- `./Engine ./ai/eaas.py --port=5565` starts the EAAS server
+- `./Engine /path/to/task.json` executes a task config
+
+## Commonly Used Options
 
 | Option | Description |
 | ------ | ----------- |
-| `--pipeline <path>` | Pipeline file to execute |
-| `--interactive` | Run in interactive mode |
-| `--service` | Run as a service |
-| `--port <port>` | Service port (default: 8080) |
-| `--config <path>` | Configuration file |
-| `--log-level <level>` | Log level (debug, info, warn, error) |
+| `--port=<port>` | Port passed to scripts that accept `--port` (for example `ai/eaas.py`) |
+| `--base_port=<port>` | Base port range used by task services (for example `ai/eaas.py`) |
+| `--verbose` / `-v` | Enable verbose logging (script-dependent) |
 | `--verify` | Verify installation and exit |
 
 ---

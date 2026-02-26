@@ -49,11 +49,26 @@ Everything else -- pnpm, C++ toolchains, Python, Java/Maven -- is downloaded and
 
 ```bash
 git clone https://github.com/rocketride-org/rocketride-server.git
-cd engine-new
+cd rocketride-server
 ./builder build
 ```
 
 The `builder` script configures the environment, downloads a pre-built engine when available (or compiles from source), and builds all modules. See the [build system documentation](docs/README-builder.md) for per-module builds, commands, and options.
+
+## Run the Local Engine Service
+
+After building, start the local RocketRide service with:
+
+```bash
+./dist/server/Engine ./dist/server/ai/eaas.py --port=5565
+```
+
+Then connect clients to `http://localhost:5565`.
+
+### Common newcomer gotcha
+
+`./dist/server/Engine --service --port=5565` can exit immediately with no output in this build.  
+The engine executable runs tasks/scripts, so start a service by passing a script (for example `ai/eaas.py`) as shown above.
 
 ## Project Structure
 
