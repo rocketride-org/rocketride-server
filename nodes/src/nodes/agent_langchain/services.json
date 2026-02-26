@@ -1,17 +1,17 @@
 {
-	"title": "Agent - CrewAI",
-	"protocol": "agent_crewai://",
+	"title": "Agent - LangChain",
+	"protocol": "agent_langchain://",
 	"classType": ["agent", "tool"],
 	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
-	"path": "nodes.agent_crewai",
+	"path": "nodes.agent_langchain",
 	"prefix": "agent",
 	"description": [
-		"Single-agent execution using CrewAI.",
+		"Single-agent execution using LangChain.",
 		"Can be invoked as a tool (`<nodeId>.run_agent`) for hierarchical agent orchestration."
 	],
-	"icon": "agent_crewai.svg",
+	"icon": "agent_langchain.svg",
 	"invoke": {
 		"llm": {
 			"description": "LLM used by the agent",
@@ -46,20 +46,21 @@
 			"description": "Optional additional prompting for this agent node. Keep it short and specific.",
 			"format": "textarea"
 		},
-		"agent_crewai.default": { "object": "default", "properties": ["instructions"] },
-		"agent_crewai.profile": {
+		"agent_langchain.default": { "object": "default", "properties": ["instructions"] },
+		"agent_langchain.profile": {
 			"title": "Profile",
 			"type": "string",
 			"default": "default",
 			"enum": [["default", "Default"]],
-			"conditional": [{ "value": "default", "properties": ["agent_crewai.default"] }]
+			"conditional": [{ "value": "default", "properties": ["agent_langchain.default"] }]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Agent - CrewAI",
+			"title": "Agent - LangChain",
 			"properties": ["instructions"]
 		}
 	]
 }
+
