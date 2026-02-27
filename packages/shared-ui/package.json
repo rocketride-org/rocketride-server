@@ -57,7 +57,7 @@
 	"devDependencies": {
 		"@types/react-syntax-highlighter": "^15.5.13",
 		"@chromatic-com/storybook": "^1.7.0",
-		"@rollup/plugin-commonjs": "~28.0.6",
+		"@rollup/plugin-commonjs": "~29.0.0",
 		"@rollup/plugin-node-resolve": "~16.0.1",
 		"@rollup/plugin-replace": "~6.0.2",
 		"@rollup/plugin-terser": "~0.4.4",
