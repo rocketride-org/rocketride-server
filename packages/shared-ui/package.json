@@ -67,7 +67,7 @@
 		"@rsbuild/plugin-sass": "1.1.0",
 		"@rslib/core": "~0.13.3",
 		"@storybook/addon-essentials": "~8.6.15",
-		"@storybook/addon-interactions": "~8.6.15",
+		"@storybook/addon-interactions": "~8.6.17",
 		"@storybook/addon-links": "~8.6.15",
 		"@storybook/addon-onboarding": "~8.6.15",
 		"@storybook/blocks": "~8.6.15",
