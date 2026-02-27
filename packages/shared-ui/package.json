@@ -87,7 +87,7 @@
 		"@rspack/binding-darwin-arm64": "1.1.8",
 		"@rspack/binding-darwin-x64": "1.1.8",
 		"@rspack/binding-win32-arm64-msvc": "1.1.8",
-		"@rspack/binding-win32-x64-msvc": "1.1.8"
+		"@rspack/binding-win32-x64-msvc": "1.7.6"
 	},
 	"exports": {
 		".": "./index.tsx",
