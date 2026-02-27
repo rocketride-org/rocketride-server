@@ -37,12 +37,9 @@ export const styles = {
 		width: '100%',
 		height: '100%',
 		borderRadius: '5px',
-		// Match regular node styling: subtle outline, no border, soft shadow
 		border: 'none',
-		outline: inVSCode ? '1px solid' : '1px solid #DCDCDC',
-		...(inVSCode ? { outlineColor: 'divider' } : {}),
-		boxShadow:
-			'0px 2px 1px -1px rgba(0, 0, 0, 0.15), 0px 1px 1px 0px rgba(0, 0, 0, 0.1), 0px 1px 3px 0px rgba(0, 0, 0, 0.08)',
+		outline: 'none',
+		boxShadow: 'none',
 		overflow: 'hidden',
 		display: 'flex',
 		flexDirection: 'column',

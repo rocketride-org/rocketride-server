@@ -50,12 +50,12 @@ export const DebuggingSettings: React.FC<DebuggingSettingsProps> = ({
 						value={settings.pipelineRestartBehavior}
 						onChange={handleRestartBehaviorChange}
 					>
-						<option value="auto">Automatically restart when pipe.json changes</option>
+						<option value="auto">Automatically restart when .pipe changes</option>
 						<option value="manual">Do not automatically restart</option>
-						<option value="prompt">Prompt to restart when pipe.json changes</option>
+						<option value="prompt">Prompt to restart when .pipe changes</option>
 					</select>
 					<div className="help-text">
-						Choose what happens when a pipe.json file changes while the pipeline is running
+						Choose what happens when a .pipe file changes while the pipeline is running
 					</div>
 				</div>
 			</div>

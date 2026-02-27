@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide Inc.
+// Copyright (c) 2026 RocketRide, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,62 +21,10 @@
 // SOFTWARE.
 // =============================================================================
 
-/**
- * Style definitions for the NodeHeader component.
- *
- * Provides layout, sizing, and theming for the header container, node icon,
- * title text, label/image/edit button boxes, and the settings gear icon.
- * These styles ensure the header renders consistently across all node types
- * on the project canvas.
- */
-const styles = {
-	header: {
-		display: 'flex',
-		alignItems: 'center',
-		borderRadius: 0,
-		justifyContent: 'space-between',
-		padding: '0.15rem 0.25rem 0.4rem 0.6rem',
-		width: '100%',
-		backgroundColor: 'background.paper',
-	},
-	nodeIcon: {
-		width: 'auto',
-		height: '1rem',
-		marginRight: '0.5rem',
-		fill: 'text.secondary',
-	},
-	title: {
-		fontWeight: 500,
-		fontSize: '0.6rem',
-	},
-	subtitle: {
-		fontSize: '0.4rem',
-		color: 'text.secondary',
-		lineHeight: 1.2,
-		textTransform: 'uppercase',
-		marginTop: '0.15rem',
-		textAlign: 'left',
-	},
-	boxImage: {
-		display: 'flex',
-		alignItems: 'center',
-		minWidth: '1rem',
-	},
-	boxLabel: {
-		overflow: 'hidden',
-		flex: 4,
-	},
-	boxEdit: {
-		display: 'flex',
-	},
-	editButton: {
-		padding: 0,
-	},
-	editIcon: {
-		height: '1rem',
-		width: 'auto',
-		fill: 'text.secondary',
-	},
-};
+import { PageWelcome } from './PageWelcome';
+import { mountComponent } from '../../../shared/util/mount';
 
-export default styles;
+// Mount the Welcome component
+mountComponent(PageWelcome, 'Welcome');
+
+export default PageWelcome;

@@ -26,7 +26,7 @@ import { TransportWebSocket } from './core/TransportWebSocket';
 import { DAPClient } from './core/DAPClient';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback } from './types';
 import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig } from './types';
-import { CONST_DEFAULT_SERVICE } from './constants';
+import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants';
 import { Question } from './schema/Question';
 import { AuthenticationException } from './exceptions';
 
@@ -353,7 +353,7 @@ export class RocketRideClient extends DAPClient {
 
 		const {
 			auth = config.auth || clientEnv.ROCKETRIDE_APIKEY,
-			uri = config.uri || clientEnv.ROCKETRIDE_URI || CONST_DEFAULT_SERVICE,
+			uri = config.uri || clientEnv.ROCKETRIDE_URI || CONST_DEFAULT_WEB_CLOUD,
 			onEvent,
 			onConnected,
 			onDisconnected,
@@ -386,16 +386,54 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Update the server URI (internal). Accepts HTTP/HTTPS/WS/WSS; converts to WebSocket and appends /task/service.
+	 * Normalize a user-provided URI into a fully-formed HTTP/HTTPS URL.
+	 *
+	 * - Bare hostnames (e.g. "localhost", "my-server:5565") get `http://` prepended.
+	 * - Non-cloud URIs without a port default to 5565.
+	 *
+	 * Use this when you need a parseable URL from free-form user input before
+	 * passing it to the client or doing your own validation.
+	 */
+	public static normalizeUri(uri: string): string {
+		let normalized = uri.trim();
+		if (normalized && !/^[a-zA-Z]+:\/\//.test(normalized)) {
+			normalized = `${CONST_DEFAULT_WEB_PROTOCOL}${normalized}`;
+		}
+
+		try {
+			const url = new URL(normalized);
+
+			if (!url.port && !url.hostname.includes('rocketride.ai')) {
+				url.port = CONST_DEFAULT_WEB_PORT;
+			}
+
+			return `${url.protocol}//${url.host}`;
+		} catch {
+			return normalized;
+		}
+	}
+
+	/**
+	 * Normalize a user-provided URI into a fully-formed WebSocket address.
+	 * Builds on normalizeUri, then converts to ws/wss and appends /task/service.
+	 */
+	private _getWebsocketUri(uri: string): string {
+		const httpUrl = RocketRideClient.normalizeUri(uri);
+
+		try {
+			const url = new URL(httpUrl);
+			const wsScheme = url.protocol === 'https:' ? 'wss:' : 'ws:';
+			return `${wsScheme}//${url.host}/task/service`;
+		} catch {
+			return `${httpUrl}/task/service`;
+		}
+	}
+
+	/**
+	 * Update the server URI (internal).
 	 */
 	private _setUri(uri: string): void {
-		try {
-			const url = new URL(uri);
-			const wsScheme = url.protocol === 'https:' ? 'wss:' : 'ws:';
-			this._uri = `${wsScheme}//${url.host}/task/service`;
-		} catch {
-			this._uri = `${uri}/task/service`;
-		}
+		this._uri = this._getWebsocketUri(uri);
 	}
 
 	/**

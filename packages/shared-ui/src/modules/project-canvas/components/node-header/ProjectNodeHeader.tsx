@@ -57,6 +57,8 @@ interface IProps {
 	parentId?: string;
 	/** Optional click handler for the header row. */
 	handleClick?: () => void;
+	/** Class type tags for the node (e.g. ["llm"]), shown as a subtitle. */
+	classType?: string[];
 }
 
 /**
@@ -84,6 +86,7 @@ export default function ProjectNodeHeader({
 	formDataValid,
 	parentId,
 	handleClick,
+	classType,
 }: IProps): ReactElement {
 	// Pull canvas-level state and action dispatchers from FlowContext
 	const {
@@ -186,6 +189,7 @@ export default function ProjectNodeHeader({
 			handleEdit={() => onEditNode()}
 			formDataValid={formDataValid}
 			options={options}
+			classType={classType}
 		/>
 	);
 }

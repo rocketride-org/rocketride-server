@@ -33,6 +33,7 @@
  */
 
 import * as vscode from 'vscode';
+import { RocketRideClient } from 'rocketride';
 import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
 
@@ -90,23 +91,7 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 					break;
 
 			case 'openDocs':
-				try {
-					// Get extension root path
-					const extension = vscode.extensions.getExtension('rocketride.rocketride');
-					if (!extension) {
-						vscode.window.showErrorMessage('Failed to locate extension');
-						break;
-					}
-
-					const docsPath = vscode.Uri.file(
-						extension.extensionPath + '/docs/root/user.md'
-					);
-
-					// Open markdown preview only (formatted view)
-					await vscode.commands.executeCommand('markdown.showPreview', docsPath);
-				} catch (error) {
-					vscode.window.showErrorMessage(`Failed to open documentation: ${error}`);
-				}
+				vscode.env.openExternal(vscode.Uri.parse('https://docs.rocketride.ai'));
 				break;
 
 			case 'openDeploy':
@@ -172,7 +157,7 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 				data: {
 					connectionState,
 					config: {
-						hostUrl: config.hostUrl,
+						hostUrl: RocketRideClient.normalizeUri(config.hostUrl),
 						connectionMode: config.connectionMode,
 						autoConnect: config.autoConnect
 					},

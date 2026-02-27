@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Text - Classification",
+	"title": "Classification",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol

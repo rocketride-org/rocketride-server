@@ -1,5 +1,5 @@
 {
-    "title": "Image - Mistral Vision",
+    "title": "Mistral Vision",
     "protocol": "image_vision_mistral://",
     "classType": ["image"],
     "capabilities": ["invoke"],
@@ -227,7 +227,7 @@
     "shape": [
         {
             "section": "Pipe",
-            "title": "Image - Mistral Vision",
+            "title": "Mistral Vision",
             "properties": [
                 "image_vision_mistral.profile"
             ]
