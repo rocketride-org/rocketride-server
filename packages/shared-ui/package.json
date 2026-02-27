@@ -63,7 +63,7 @@
 		"@rollup/plugin-terser": "~0.4.4",
 		"@rollup/plugin-typescript": "~12.1.4",
 		"@rsbuild/core": "1.1.0",
-		"@rsbuild/plugin-react": "1.0.7",
+		"@rsbuild/plugin-react": "1.4.5",
 		"@rsbuild/plugin-sass": "1.1.0",
 		"@rslib/core": "~0.13.3",
 		"@storybook/addon-essentials": "~8.6.15",

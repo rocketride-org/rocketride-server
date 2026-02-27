@@ -22,7 +22,7 @@
 	},
 	"devDependencies": {
 		"@rsbuild/core": "^0.4.0",
-		"@rsbuild/plugin-react": "^0.4.0",
+		"@rsbuild/plugin-react": "^1.4.5",
 		"@rsbuild/plugin-type-check": "^0.4.0",
 		"@tailwindcss/aspect-ratio": "^0.4.2",
 		"@tailwindcss/forms": "^0.5.10",
