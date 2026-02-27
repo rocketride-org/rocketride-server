@@ -92,6 +92,7 @@
 	"exports": {
 		".": "./index.tsx",
 		"./api/*": "./src/api/*",
+		"./components/icons/rocketride-mark": "./src/components/icons/rocketride-mark/index.ts",
 		"./components/*": "./src/components/*",
 		"./services/*": "./src/services/*",
 		"./utils/*": "./src/utils/*",
