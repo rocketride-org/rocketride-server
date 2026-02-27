@@ -108,9 +108,6 @@ importers:
       rocketride:
         specifier: workspace:*
         version: link:../../packages/client-typescript
-      shared:
-        specifier: workspace:*
-        version: link:../../packages/shared-ui
       web-vitals:
         specifier: ^5.1.0
         version: 5.1.0

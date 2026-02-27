@@ -8,7 +8,6 @@
 	},
 	"dependencies": {
 		"rocketride": "workspace:*",
-		"shared": "workspace:*",
 		"@types/ws": "^8.18.1",
 		"lucide-react": "^0.540.0",
 		"react": "^18.2.0",

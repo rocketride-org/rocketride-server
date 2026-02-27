@@ -25,7 +25,7 @@
 import React from 'react';
 import { Trash2, Palette } from 'lucide-react';
 import { useTheme, ThemeName } from '../hooks/useTheme';
-import { RocketRideMark } from 'shared/components/icons/rocketride-mark';
+import { RocketRideMark } from './icons/RocketRideMark';
 
 interface ChatHeaderProps {
 	isConnected: boolean;
