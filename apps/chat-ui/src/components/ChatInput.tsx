@@ -23,7 +23,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Mic, MicOff, Send } from 'lucide-react';
+import { Send } from 'lucide-react';
 
 interface ChatInputProps {
 	onSend: (message: string) => Promise<void>;
@@ -31,12 +31,12 @@ interface ChatInputProps {
 }
 
 /**
- * Chat input component with voice control and send button
- * 
+ * Chat input component with send button
+ *
  * Features:
- * - Multi-line text input
+ * - Auto-expanding multi-line text input
  * - Enter to send, Shift+Enter for new line
- * - Voice input button (placeholder for future implementation)
+ * - Clipboard paste support in VSCode webview
  * - Disabled state when not connected
  * - Auto-focus on mount
  * 
@@ -45,14 +45,35 @@ interface ChatInputProps {
  */
 export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 	const [inputText, setInputText] = useState('');
-	const [isListening, setIsListening] = useState(false);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 
 	/**
-	 * Focus input on mount for better UX
+	 * Focus input on mount and listen for paste messages from VSCode parent
 	 */
 	useEffect(() => {
 		inputRef.current?.focus();
+
+		const handleMessage = (event: MessageEvent) => {
+			if (event.data?.type === 'paste' && event.data.text) {
+				setInputText(prev => {
+					const textarea = inputRef.current;
+					if (textarea) {
+						const start = textarea.selectionStart;
+						const end = textarea.selectionEnd;
+						const newValue = prev.slice(0, start) + event.data.text + prev.slice(end);
+						// Restore cursor position after React re-render
+						requestAnimationFrame(() => {
+							textarea.selectionStart = textarea.selectionEnd = start + event.data.text.length;
+						});
+						return newValue;
+					}
+					return prev + event.data.text;
+				});
+			}
+		};
+
+		window.addEventListener('message', handleMessage);
+		return () => window.removeEventListener('message', handleMessage);
 	}, []);
 
 	/**
@@ -61,8 +82,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 	const handleSend = async () => {
 		if (!inputText.trim() || disabled) return;
 
-		await onSend(inputText);
+		const message = inputText;
 		setInputText('');
+		if (inputRef.current) {
+			inputRef.current.style.height = 'auto';
+		}
+		await onSend(message);
 	};
 
 	/**
@@ -76,18 +101,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 			e.preventDefault();
 			handleSend();
 		}
-	};
-
-	/**
-	 * Toggles voice input mode (placeholder for future implementation)
-	 * 
-	 * Currently simulates listening for 3 seconds. Future implementation
-	 * would integrate with Web Speech API for actual voice recognition.
-	 */
-	const toggleVoice = () => {
-		setIsListening(!isListening);
-		if (!isListening) {
-			setTimeout(() => setIsListening(false), 3000);
+		if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+			// In VSCode webview iframes, native paste is blocked.
+			// Request clipboard from the parent webview via postMessage.
+			if (window.parent !== window) {
+				e.preventDefault();
+				window.parent.postMessage({ type: 'requestPaste' }, '*');
+			}
 		}
 	};
 
@@ -95,24 +115,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 		<div className="input-container">
 			<div className="input-content">
 				<div className="input-wrapper">
-					<button
-						onClick={toggleVoice}
-						className={`voice-btn ${isListening ? 'active' : 'inactive'}`}
-						title={isListening ? 'Stop listening' : 'Start voice input'}
-						type="button"
-					>
-						{isListening ? (
-							<MicOff className="w-5 h-5" />
-						) : (
-							<Mic className="w-5 h-5" />
-						)}
-					</button>
-
 					<div className="input-field-wrapper">
 						<textarea
 							ref={inputRef}
 							value={inputText}
-							onChange={(e) => setInputText(e.target.value)}
+							onChange={(e) => {
+								setInputText(e.target.value);
+								// Auto-resize textarea
+								e.target.style.height = 'auto';
+								e.target.style.height = `${e.target.scrollHeight}px`;
+							}}
 							onKeyDown={handleKeyDown}
 							placeholder={disabled ? "Connecting..." : "Type your message here..."}
 							className="input-field"
@@ -131,12 +143,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 						<Send className="w-5 h-5" />
 					</button>
 				</div>
-
-				{isListening && (
-					<div className="voice-status">
-						<p>🎤 Listening...</p>
-					</div>
-				)}
 			</div>
 		</div>
 	);
