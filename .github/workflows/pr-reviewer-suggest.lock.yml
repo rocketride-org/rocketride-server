@@ -23,7 +23,7 @@
 #
 # Suggest reviewers for pull requests based on changed files and module ownership
 #
-# gh-aw-metadata: {"schema_version":"v1","frontmatter_hash":"23185b0e3a74db8aae8533a0bbe0b6a29b3e380a88082d13db152d8afc241289","compiler_version":"v0.50.5"}
+# gh-aw-metadata: {"schema_version":"v1","frontmatter_hash":"2eb44ce0dfbfc618b880fca9f738f2a728c56ac809ee4a8c4ffc969c0ba2db4f","compiler_version":"v0.50.5"}
 
 name: "PR Reviewer Suggestion"
 "on":
@@ -31,6 +31,7 @@ name: "PR Reviewer Suggestion"
     types:
     - opened
     - ready_for_review
+  workflow_dispatch:
 
 permissions: {}
 

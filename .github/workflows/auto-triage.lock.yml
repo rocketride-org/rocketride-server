@@ -23,7 +23,7 @@
 #
 # Automatically triage new issues with type, priority, and module labels
 #
-# gh-aw-metadata: {"schema_version":"v1","frontmatter_hash":"3ac750c91d843ccc8b762c07fe1a997e2f7005ff040bacca4beef48c8c2e8ec6","compiler_version":"v0.50.5"}
+# gh-aw-metadata: {"schema_version":"v1","frontmatter_hash":"30ee2fa954621664342aceec8684e87316e39eda15f65bb34222b75d09a5d527","compiler_version":"v0.50.5"}
 
 name: "Auto-Triage"
 "on":
@@ -31,6 +31,7 @@ name: "Auto-Triage"
     types:
     - opened
     - reopened
+  workflow_dispatch:
 
 permissions: {}
 

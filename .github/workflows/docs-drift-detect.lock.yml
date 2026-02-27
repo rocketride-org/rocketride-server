@@ -23,13 +23,14 @@
 #
 # Detect documentation drift when code changes are pushed to develop
 #
-# gh-aw-metadata: {"schema_version":"v1","frontmatter_hash":"5ba6cc2727999a4f52e3cb08fd1e8112aeb3f1a610b2d9f9bf1c7f666d2163f7","compiler_version":"v0.50.5"}
+# gh-aw-metadata: {"schema_version":"v1","frontmatter_hash":"cc05bd4721d1442e31fc960d3b70151459bcc9ec78dd174aa7d381b9661b4fe1","compiler_version":"v0.50.5"}
 
 name: "Docs Drift Detection"
 "on":
   push:
     branches:
     - develop
+  workflow_dispatch:
 
 permissions: {}
 

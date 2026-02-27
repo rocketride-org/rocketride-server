@@ -3,6 +3,7 @@ description: Automatically triage new issues with type, priority, and module lab
 on:
   issues:
     types: [opened, reopened]
+  workflow_dispatch:
 
 engine: claude
 

@@ -3,6 +3,7 @@ description: Suggest reviewers for pull requests based on changed files and modu
 on:
   pull_request:
     types: [opened, ready_for_review]
+  workflow_dispatch:
 
 engine: claude
 

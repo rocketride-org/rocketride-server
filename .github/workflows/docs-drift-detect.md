@@ -3,6 +3,7 @@ description: Detect documentation drift when code changes are pushed to develop
 on:
   push:
     branches: [develop]
+  workflow_dispatch:
 
 engine: claude
 
