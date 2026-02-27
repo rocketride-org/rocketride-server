@@ -454,7 +454,7 @@
 		"@types/vscode": "^1.99.0",
 		"@types/vscode-webview": "^1.57.5",
 		"@vscode/debugprotocol": "^1.68.0",
-		"@vscode/test-cli": "^0.0.10",
+		"@vscode/test-cli": "^0.0.12",
 		"@vscode/test-electron": "^2.5.2",
 		"@vscode/vsce": "^3.6.0",
 		"esbuild": "^0.25.9",
