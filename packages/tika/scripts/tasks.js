@@ -262,11 +262,10 @@ module.exports = {
         { name: 'tika:build-jar', action: makeBuildTikaJarAction },
         { name: 'tika:sync', action: makeCopyTikaOutputsAction },
         
-        // Public actions (have descriptions)
-        { name: 'tika:build', action: () => ({
-            description: 'Build Tika modules',
+        // Submodule actions (called by server:build-core / server:clean-all)
+        { name: 'tika:submodule-build', action: () => ({
             steps: [
-                'java:build',
+                'java:submodule-build',
                 'tika:sync-source',
                 parallel([
                     'tika:build-dbgconn',
@@ -275,8 +274,7 @@ module.exports = {
                 'tika:sync'
             ]
         })},
-        { name: 'tika:clean', action: () => ({
-            description: 'Clean Tika modules',
+        { name: 'tika:submodule-clean', action: () => ({
             run: async (ctx, task) => {
                 await removeDirs([
                     BUILD_DIR,

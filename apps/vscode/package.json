@@ -455,7 +455,7 @@
 		"adm-zip": "^0.5.16",
 		"chart.js": "^4.4.0",
 		"shared": "workspace:*",
-		"tar": "^7.4.3"
+		"tar": "^7.5.8"
 	},
 	"files": [
 		"rocketride-icon.*",

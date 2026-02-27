@@ -1,4 +1,6 @@
-# LlamaParse node
+# LlamaParse Node
+
+## Overview
 
 This node uses LlamaParse to extract text and structured data from various document formats including PDFs, images, and other document types.
 
@@ -11,15 +13,20 @@ This node uses LlamaParse to extract text and structured data from various docum
 - **Tag-based Processing**: Uses the RocketRide tag system for document processing
 - **Multiple Input Types**: Supports both tag-based document streams and document objects
 
+## Pipeline Integration
+
+- **Lanes**: `tags` (OMET, SBGN, SDAT, SEND) and `documents` -> `text`
+- **Class type**: Parser (invoke). Use in pipelines that need document-to-text extraction via LlamaParse.
+
 ## Configuration
 
 The node supports the following configuration options:
 
-### Required Configuration
+### Required configuration
 
 - `api_key` (string, optional): Your LlamaParse API key. If not provided, some features may be limited.
 
-### Optional Configuration
+### Optional configuration
 
 - `parse_mode` (string, default: "cost_effective"): The parsing mode to use for document processing:
   - **cost_effective** (3 cred./page): Best for text-heavy documents without diagrams and images
@@ -33,7 +40,7 @@ The node supports the following configuration options:
 - `system_prompt_append` (string, optional): Additional instructions to append to the system prompt when use_system_prompt_append is enabled.
 - `spreadsheet_extract_sub_tables` (boolean, default: false): Extract sub-tables from spreadsheets for better table parsing.
 
-### Example Configuration
+### Example configuration
 
 ```json
 {
@@ -44,7 +51,7 @@ The node supports the following configuration options:
 }
 ```
 
-### Parse Mode Selection Guide
+### Parse mode selection guide
 
 - **Use cost_effective** for:
   - Text-heavy documents (reports, articles, books)
@@ -69,17 +76,17 @@ The node processes documents through two main methods:
 1. **Tag-based Processing**: Uses `writeTag` method to handle document tags (OMET, SBGN, SDAT, SEND)
 2. **Document Object Processing**: Uses `writeDocuments` method to handle document objects
 
-### Tag Processing Flow
+### Tag processing flow
 
 The node follows the standard RocketRide tag processing pattern:
 
-- **OMET**: Metadata tag - stores document metadata
-- **SBGN**: Begin tag - resets document data buffer
-- **SDAT**: Data tag - accumulates document data chunks
-- **SEND**: End tag - signals document completion
+- **OMET**: Metadata tag -- stores document metadata
+- **SBGN**: Begin tag -- resets document data buffer
+- **SDAT**: Data tag -- accumulates document data chunks
+- **SEND**: End tag -- signals document completion
 - **close()**: Processes the complete document using LlamaParse
 
-### Supported Document Types
+### Supported document types
 
 - PDF documents
 - Image files (PNG, JPEG, etc.)
@@ -89,16 +96,16 @@ The node follows the standard RocketRide tag processing pattern:
 
 The node outputs parsed text content to the text lane and can also output structured document objects to the documents lane.
 
+## Error Handling
+
+- If parsing fails, the node returns an empty string and logs the error
+- Temporary files are automatically cleaned up after processing
+- Thread-safe operations prevent concurrent access issues
+- Proper object failure handling with completion codes
+
 ## Dependencies
 
 - `llama-parse`: Core parsing library
 - `llama-index`: Document processing framework
 - `llama-index-readers-file`: File reading capabilities
 - `llama-index-core`: Core functionality
-
-## Error Handling
-
-- If parsing fails, the node returns an empty string and logs the error
-- Temporary files are automatically cleaned up after processing
-- Thread-safe operations prevent concurrent access issues
-- Proper object failure handling with completion codes 

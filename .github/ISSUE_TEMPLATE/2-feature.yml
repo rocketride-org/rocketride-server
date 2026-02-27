@@ -1,0 +1,44 @@
+name: Feature Request
+description: Suggest a new feature or improvement for RocketRide
+labels: ["feature"]
+body:
+  - type: textarea
+    id: problem-statement
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve? Why is it needed?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: Describe your proposed solution or feature in detail.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives-considered
+    attributes:
+      label: Alternatives Considered
+      description: What alternative solutions or features have you considered?
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: affected-modules
+    attributes:
+      label: Affected Modules
+      description: Which module(s) does this feature relate to?
+      options:
+        - label: server (C++ engine)
+        - label: client-typescript
+        - label: client-python
+        - label: client-mcp
+        - label: nodes (pipeline)
+        - label: ai
+        - label: chat-ui
+        - label: dropper-ui
+        - label: vscode
+        - label: tika

@@ -76,7 +76,7 @@
 		"@storybook/test": "~8.6.15",
 		"@types/react": "~18.2.21",
 		"@types/react-dom": "~18.2.7",
-		"rollup": "~4.50.2",
+		"rollup": "~4.59.0",
 		"rollup-plugin-dts": "~6.2.3",
 		"rollup-plugin-peer-deps-external": "~2.2.4",
 		"rollup-plugin-postcss": "~4.0.2",
