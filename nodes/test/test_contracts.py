@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2024 RocketRide Inc.
+# Copyright (c) 2026 RocketRide, Inc.
 # =============================================================================
 
 """
@@ -21,7 +21,7 @@ This does NOT test node behavior - for functional tests, see test_functional.py.
 
 Usage:
     # Run contract tests only (no server needed)
-    builder test:nodes:contracts
+    builder nodes:test-contracts
     
     # Or directly with pytest
     pytest nodes/test/test_contracts.py -v
@@ -627,4 +627,4 @@ class TestNodeLanes:
 
 # Note: Functional tests (actual node input/output testing via pipelines)
 # are in test_functional.py, which requires a running server.
-# Run with: builder test:nodes
+# Run with: builder nodes:test

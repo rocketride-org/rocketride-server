@@ -1,6 +1,6 @@
 {
 	"name": "rocketride",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"author": "RocketRide, Inc.",
 	"license": "MIT",
 	"description": "TypeScript client for RocketRide data processing and AI services",
@@ -23,6 +23,15 @@
 		"README.md"
 	],
 	"scripts": {},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/rocketride-org/rocketride-server.git",
+		"directory": "packages/client-typescript"
+	},
+	"homepage": "https://rocketride.ai/",
+	"bugs": {
+		"url": "https://github.com/rocketride-org/rocketride-server/issues/"
+	},
 	"keywords": [
 		"rocketride",
 		"data-processing",

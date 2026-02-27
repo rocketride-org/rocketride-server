@@ -33,7 +33,6 @@ import _Canvas from '../project-canvas';
 import {
 	IProject,
 	IValidateResponse,
-	StartPipelineRequest,
 	TaskStatus,
 } from '../project-canvas/types';
 import { ActionsType } from '../project-canvas/constants';
@@ -58,9 +57,9 @@ interface ICanvasProps {
 	componentPipeCounts?: Record<string, number>;
 	totalPipes?: number;
 	handleSaveProject: (project: IProject) => void;
-	handleRunPipeline: (pipeline: StartPipelineRequest) => void;
+	handleRunPipeline: (pipeline: IProject) => void;
 	handleStopPipeline?: (componentId: string) => void;
-	handleValidatePipeline: (pipeline: StartPipelineRequest) => Promise<IValidateResponse>;
+	handleValidatePipeline: (pipeline: IProject) => Promise<IValidateResponse>;
 	isAutosaveEnabled?: boolean;
 	onAutosaveEnabledChange?: (enabled: boolean) => void;
 	onOpenLink?: (url: string) => void;
@@ -141,7 +140,7 @@ export default function Canvas({
 	};
 
 	/** Delegates pipeline execution to the host-provided run handler. */
-	const runPipeline = async (pipeline: StartPipelineRequest) => {
+	const runPipeline = async (pipeline: IProject) => {
 		handleRunPipeline(pipeline);
 	};
 
@@ -157,13 +156,14 @@ export default function Canvas({
 		<ThemeProvider theme={currentTheme}>
 			<SnackbarProvider>
 				<CssBaseline />
-				{/* Full-viewport flex container so the canvas fills the entire host window */}
+				{/* Fixed-position container bypasses any body padding/margin the host injects */}
 				<div
 					style={{
-						width: '100vw',
-						height: '100vh',
+						position: 'fixed',
+						inset: 0,
 						display: 'flex',
 						flexDirection: 'column',
+						overflow: 'hidden',
 					}}
 				>
 					<_Canvas.Container

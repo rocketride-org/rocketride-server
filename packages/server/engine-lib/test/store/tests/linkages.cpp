@@ -52,27 +52,52 @@ TEST_CASE("store::linkages") {
     // do all of them since the linkages are maintained by the
     // pipe and the base class, but instantiate some things anyway
     //-----------------------------------------------------------------
+#ifdef ENABLE_CLASSIFY
     auto task = R"(
-		{
-			"config": {
-				"service": {
-					"filters": [
-						"pipe",
-						"hash",
-						"null",
-						"bottom"
-					],
-					"key": "null://Null",
-					"name": "Null endpoint",
-					"type": "null",
-					"mode": "source",
-					"parameters": {}
-				}
-			},
+        {
+            "config": {
+                "service": {
+                    "filters": [
+                        "pipe",
+                        "hash",
+                        "classify",
+                        "null",
+                        "bottom"
+                    ],
+                    "key": "null://Null",
+                    "name": "Null endpoint",
+                    "type": "null",
+                    "mode": "source",
+                    "parameters": {}
+                }
+            },
             "taskId": "2ebe800f-fe38-466b-99df-342fae761d77",
             "nodeId": "2e0ecc69-d129-4aa1-a3fe-b85843fec2e6"
-		}
-	)"_json;
+        }
+    )"_json;
+#else
+    auto task = R"(
+        {
+            "config": {
+                "service": {
+                    "filters": [
+                        "pipe",
+                        "hash",
+                        "null",
+                        "bottom"
+                    ],
+                    "key": "null://Null",
+                    "name": "Null endpoint",
+                    "type": "null",
+                    "mode": "source",
+                    "parameters": {}
+                }
+            },
+            "taskId": "2ebe800f-fe38-466b-99df-342fae761d77",
+            "nodeId": "2e0ecc69-d129-4aa1-a3fe-b85843fec2e6"
+        }
+    )"_json;
+#endif
 
     //-----------------------------------------------------------------
     // Check the linkages to make sure endpoints points where it should,

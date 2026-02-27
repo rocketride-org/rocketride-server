@@ -1,3 +1,26 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 RocketRide, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
 """
 Client wrapper for OpenSearch 2.x.
 
@@ -11,6 +34,17 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from rocketlib import debug
 from opensearchpy import OpenSearch, helpers  # type: ignore
+
+from .constants import (
+    CONTENT_FIELD,
+    DEFAULT_HIGHLIGHT_FRAGMENT_SIZE,
+    DEFAULT_SCROLL,
+    DEFAULT_TEXT_BATCH_SIZE,
+    VECTOR_FIELD,
+)
+
+# OpenSearch-specific default (config overrides at runtime)
+DEFAULT_HOST = "http://localhost:9200"
 
 
 def _build_highlight_config(field: str, fragment_size: int) -> Dict[str, Any]:
@@ -28,6 +62,12 @@ def _build_highlight_config(field: str, fragment_size: int) -> Dict[str, Any]:
     }
 
 
+def _get_index_properties(mapping: Dict[str, Any], index: str) -> Dict[str, Any]:
+    """Extract properties dict from index get_mapping() response."""
+    index_mappings = (mapping.get(index) or {}).get('mappings') or {}
+    return index_mappings.get('properties') or {}
+
+
 class OpenSearchClient:
     """
     High-level client facade for OpenSearch index and search workloads.
@@ -37,17 +77,21 @@ class OpenSearchClient:
 
     def __init__(
         self,
-        host: str = 'http://localhost:9200',
+        host: str = DEFAULT_HOST,
         username: Optional[str] = None,
         password: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the OpenSearch client with optional basic auth."""
-        http_auth = None
-        if username:
-            http_auth = (username, password or '')
-
+        http_auth = (username, password or '') if username else None
         self.client: Optional[OpenSearch] = OpenSearch(hosts=[host], http_auth=http_auth, **kwargs)
+
+    def _require_client(self) -> Optional[OpenSearch]:
+        """Return the client if initialized; otherwise log and return None."""
+        if self.client is None:
+            debug('OpenSearch client is not initialized')
+            return None
+        return self.client
 
     def close(self) -> None:
         """Close the OpenSearch client."""
@@ -66,9 +110,10 @@ class OpenSearchClient:
 
         SDK: client.ping()
         """
-        if self.client is None:
+        client = self._require_client()
+        if client is None:
             return False
-        ok = bool(self.client.ping())
+        ok = bool(client.ping())
         debug(f'Ping OpenSearch -> {ok}')
         return ok
 
@@ -80,18 +125,17 @@ class OpenSearchClient:
         SDK: client.indices.exists(index), client.indices.create(index, body=...).
         Mapping example: {"properties": {"content": {"type": "text"}}}
         """
-        if self.client is None:
-            debug('ensure_index_text called without client')
+        client = self._require_client()
+        if client is None:
             return
-
-        if not self.client.indices.exists(index=index):
+        if not client.indices.exists(index=index):
             debug(f'Creating index {index}')
             body: Dict[str, Any] = {}
             if mappings:
                 body['mappings'] = mappings
             else:
-                body['mappings'] = {'properties': {'content': {'type': 'text'}}}
-            self.client.indices.create(index=index, body=body, ignore=[400])
+                body['mappings'] = {'properties': {CONTENT_FIELD: {'type': 'text'}}}
+            client.indices.create(index=index, body=body, ignore=[400])
         else:
             debug(f'Index {index} already exists')
 
@@ -102,67 +146,57 @@ class OpenSearchClient:
         method: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Create a vector index if missing (knn_vector)."""
-        if self.client is None:
-            debug('ensure_index_vector called without client')
+        client = self._require_client()
+        if client is None:
             return
-
         if not method:
             method = {
                 'name': 'hnsw',
                 'engine': 'faiss',
                 'space_type': 'cosinesimil',
             }
-
         recreate = False
-        if self.client.indices.exists(index=index):
-            mapping = self.client.indices.get_mapping(index=index)
+        if client.indices.exists(index=index):
+            mapping = client.indices.get_mapping(index=index)
             debug(f'Mapping: {mapping}')
-            props = ((mapping.get(index, {}) or {}).get('mappings', {}) or {}).get('properties', {}) or {}
-            vec = props.get('vector')
+            props = _get_index_properties(mapping, index)
+            vec = props.get(VECTOR_FIELD)
             if not vec or vec.get('type') != 'knn_vector' or int(vec.get('dimension', 0)) != dimension:
-                debug(f'Existing index {index} missing knn_vector "vector" or dim mismatch; recreating')
+                debug(f'Existing index {index} missing knn_vector or dim mismatch; recreating')
                 recreate = True
             else:
                 debug(f'Vector index {index} already exists with correct mapping')
                 return
-
         if recreate:
             try:
-                self.client.indices.delete(index=index, ignore=[400, 404])
+                client.indices.delete(index=index, ignore=[400, 404])
             except Exception as e:
                 debug(f'Failed to delete index {index} before recreate: {e}')
                 raise
-
         body: Dict[str, Any] = {
-            'settings': {
-                'index': {
-                    'knn': True,
-                }
-            },
+            'settings': {'index': {'knn': True}},
             'mappings': {
                 'properties': {
-                    'vector': {
+                    VECTOR_FIELD: {
                         'type': 'knn_vector',
                         'dimension': dimension,
                         'method': method,
                     },
-                    'content': {'type': 'text'},
+                    CONTENT_FIELD: {'type': 'text'},
                     'metadata': {'type': 'object', 'enabled': True},
                 }
             },
         }
         debug(f'Creating vector index {index} dim={dimension}')
         try:
-            self.client.indices.create(index=index, body=body)
+            client.indices.create(index=index, body=body)
         except Exception as e:
             debug(f'Create vector index failed: {e}')
             raise
-
-        # Verify mapping to avoid silent fallback to incorrect types
         try:
-            mapping = self.client.indices.get_mapping(index=index)
-            props = ((mapping.get(index, {}) or {}).get('mappings', {}) or {}).get('properties', {}) or {}
-            vec = props.get('vector')
+            mapping = client.indices.get_mapping(index=index)
+            props = _get_index_properties(mapping, index)
+            vec = props.get(VECTOR_FIELD)
             if not vec or vec.get('type') != 'knn_vector':
                 debug(f'Post-create mapping check failed for index {index}; vector mapping={vec}')
                 raise Exception(f'Index {index} vector field not created as knn_vector')
@@ -172,16 +206,19 @@ class OpenSearchClient:
 
     # ------------------------- Ingestion -------------------------
 
-    def upsert_document(self, index: str, doc_id: str, body: Dict[str, Any], refresh: bool = False) -> None:
-        """Index or update a single document (text and/or vector).
-
-        SDK: client.index(index=index, id=doc_id, body=body, refresh=refresh)
-        """
-        if self.client is None:
-            debug('upsert_document called without client')
+    def upsert_document(
+        self,
+        index: str,
+        doc_id: Optional[str],
+        body: Dict[str, Any],
+        refresh: bool = False,
+    ) -> None:
+        """Index or update a single document (text and/or vector). If doc_id is None, an id is auto-generated."""
+        client = self._require_client()
+        if client is None:
             return
         debug(f'Upserting document id={doc_id} index={index} body_keys={list(body.keys())}')
-        self.client.index(index=index, id=doc_id, body=body, refresh=refresh)
+        client.index(index=index, id=doc_id, body=body, refresh=refresh)
 
     def upsert_vector_document(
         self,
@@ -193,16 +230,16 @@ class OpenSearchClient:
         refresh: bool = False,
     ) -> None:
         """Index or update a single vector document."""
-        if self.client is None:
-            debug('upsert_vector_document called without client')
+        client = self._require_client()
+        if client is None:
             return
-        body: Dict[str, Any] = {'vector': vector}
+        body: Dict[str, Any] = {VECTOR_FIELD: vector}
         if content:
-            body['content'] = content
+            body[CONTENT_FIELD] = content
         if metadata:
             body['metadata'] = metadata
         debug(f'Upserting vector doc id={doc_id} index={index} vector_dim={len(vector)}')
-        self.client.index(index=index, id=doc_id, body=body, refresh=refresh)
+        client.index(index=index, id=doc_id, body=body, refresh=refresh)
 
     # ------------------------- Search -------------------------
 
@@ -215,21 +252,19 @@ class OpenSearchClient:
         num_candidates: Optional[int] = None,
     ) -> Dict[str, Any]:
         """k-NN search on vector field."""
-        if self.client is None:
+        client = self._require_client()
+        if client is None:
             return {}
-
         try:
             vector_list = [float(x) for x in vector]
         except Exception:
             debug('search_vector: vector not convertible to float list; aborting')
             return {}
-
-        # Use the OpenSearch k-NN shape: field name -> {vector, k, num_candidates}
         body: Dict[str, Any] = {
             'size': k,
             'query': {
                 'knn': {
-                    'vector': {
+                    VECTOR_FIELD: {
                         'vector': vector_list,
                         'k': k,
                     }
@@ -237,18 +272,18 @@ class OpenSearchClient:
             },
         }
         if num_candidates:
-            body['query']['knn']['vector']['num_candidates'] = num_candidates
+            body['query']['knn'][VECTOR_FIELD]['num_candidates'] = num_candidates
         if source is not None:
             body['_source'] = source
-        debug(f'Executing vector search index={index} k={k} body={body}')
-        return self.client.search(index=index, body=body)
+        debug(f'Executing vector search index={index} k={k}')
+        return client.search(index=index, body=body)
 
     def search_text_all(
         self,
         index: str,
         query: str,
-        batch_size: int = 500,
-        scroll: str = '1m',
+        batch_size: int = DEFAULT_TEXT_BATCH_SIZE,
+        scroll: str = DEFAULT_SCROLL,
         filters: Optional[Dict[str, Any]] = None,
         source: Optional[List[str]] = None,
         match_operator: str = 'or',
@@ -262,9 +297,9 @@ class OpenSearchClient:
 
         Uses opensearchpy.helpers.scan under the hood.
         """
-        if self.client is None:
+        client = self._require_client()
+        if client is None:
             return []
-
         if body is None:
             body = self._build_search_body(
                 query=query,
@@ -273,16 +308,14 @@ class OpenSearchClient:
                 match_operator=match_operator,
                 match_operator_slop=match_operator_slop,
                 size=batch_size,
-                include_source=False,  # handled via scan arguments
+                include_source=False,
                 highlight=highlight,
                 highlight_fragment_size=highlight_fragment_size,
             )
-
-        debug(f'Executing scan index={index} batch_size={batch_size} scroll={scroll} body_query={body.get("query")} highlight={highlight} fragment_size={highlight_fragment_size}')
-
+        debug(f'Executing scan index={index} batch_size={batch_size} scroll={scroll} highlight={highlight}')
         hits: List[Dict[str, Any]] = []
         for hit in helpers.scan(
-            self.client,
+            client,
             index=index,
             query=body,
             scroll=scroll,
@@ -290,7 +323,6 @@ class OpenSearchClient:
             _source=source,
         ):
             hits.append(hit)
-
         debug(f'Scan completed hits={len(hits)}')
         return hits
 
@@ -307,47 +339,32 @@ class OpenSearchClient:
         highlight_fragment_size: int = 0,
     ) -> Dict[str, Any]:
         """Construct a search body for the configured flags."""
-        base_query: Dict[str, Any]
-
         op = (match_operator or 'or').strip().lower()
         if op not in ('and', 'or', 'exact'):
             op = 'or'
-
+        slop = max(int(match_operator_slop or 0), 0)
         if op == 'exact':
-            base_query = {
-                'match_phrase': {
-                    'content': {
-                        'query': query,
-                        'slop': max(int(match_operator_slop or 0), 0),
-                    }
-                }
+            base_query: Dict[str, Any] = {
+                'match_phrase': {CONTENT_FIELD: {'query': query, 'slop': slop}}
             }
         elif op == 'and':
-            base_query = {'match': {'content': {'query': query, 'operator': 'and'}}}
+            base_query = {'match': {CONTENT_FIELD: {'query': query, 'operator': 'and'}}}
         elif op == 'or':
-            base_query = {'match': {'content': {'query': query, 'operator': 'or'}}}
+            base_query = {'match': {CONTENT_FIELD: {'query': query, 'operator': 'or'}}}
         else:
-            base_query = {'match': {'content': query}}
+            base_query = {'match': {CONTENT_FIELD: query}}
 
         if filters:
             body: Dict[str, Any] = {
-                'query': {
-                    'bool': {
-                        'must': base_query,
-                        'filter': filters,
-                    }
-                },
+                'query': {'bool': {'must': base_query, 'filter': filters}},
                 'size': size,
             }
         else:
             body = {'query': base_query, 'size': size}
-
         if include_source and source is not None:
             body['_source'] = source
-
         if highlight:
-            frag_size = max(int(highlight_fragment_size or 0), 0) or 250
-            body['highlight'] = _build_highlight_config('content', frag_size)
-
+            frag_size = max(int(highlight_fragment_size or 0), 0) or DEFAULT_HIGHLIGHT_FRAGMENT_SIZE
+            body['highlight'] = _build_highlight_config(CONTENT_FIELD, frag_size)
         return body
 

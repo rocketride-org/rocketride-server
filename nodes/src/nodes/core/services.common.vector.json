@@ -43,7 +43,7 @@
 			"type": "string",
 			"title": "Collection",
 			"description": "Enter the name of the collection",
-			"default": "APARAVI"
+			"default": "ROCKETRIDE"
 		},
 		"vector.score": {
 			"type": "number",

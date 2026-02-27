@@ -24,9 +24,8 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useMessaging } from '../../../shared/util/useMessaging';
 import { TaskStatus } from '../../../shared/types';
-
-// @ts-expect-error - shared package exports Canvas component
 import { Canvas } from 'shared';
+import type { IDynamicForms, IProject, IValidateResponse } from 'shared';
 
 // Import the styles
 import '../../styles/vscode.css'
@@ -49,8 +48,7 @@ export type PageEditorIncomingMessage
 	}
 	| {
 		type: 'servicesUpdate';
-		services: Record<string, unknown>;
-		servicesError?: string;
+		services: IDynamicForms;
 	}
 	| {
 		type: 'oauth2Config';
@@ -59,6 +57,11 @@ export type PageEditorIncomingMessage
 	| {
 		type: 'preferences';
 		preferences: Record<string, unknown>;
+	}
+	| {
+		type: 'validateResponse';
+		result: unknown;
+		error?: string;
 	};
 
 export type PageEditorOutgoingMessage
@@ -75,7 +78,7 @@ export type PageEditorOutgoingMessage
 	}
 	| {
 		type: 'run';
-		pipeline: Record<string, unknown>;
+		pipeline: IProject;
 	}
 	| {
 		type: 'stop';
@@ -91,7 +94,11 @@ export type PageEditorOutgoingMessage
 		value: unknown;
 	}
 	| { type: 'requestUndo' }
-	| { type: 'requestRedo' };
+	| { type: 'requestRedo' }
+	| {
+		type: 'validate';
+		pipeline: IProject;
+	};
 
 // ============================================================================
 // MAIN EDITOR VIEW COMPONENT
@@ -122,8 +129,7 @@ export const PageEditor: React.FC = () => {
 	// Total pipes in the pipeline (for progress calculation)
 	const [totalPipes, setTotalPipes] = useState<number>(0);
 	// Services list from extension (cached on connect, updated in background when editor opens)
-	const [servicesJson, setServicesJson] = useState<Record<string, unknown>>({});
-	const [servicesJsonError, setServicesJsonError] = useState<string | undefined>(undefined);
+	const [servicesJson, setServicesJson] = useState<IDynamicForms>({});
 	// OAuth2 root URL for refresh path (from extension settings, default used until message received)
 	const [oauth2RootUrl, setOauth2RootUrl] = useState<string>('https://oauth2.rocketride.ai');
 	// Canvas preferences (synced from extension on ready, persisted via setPreference)
@@ -131,6 +137,7 @@ export const PageEditor: React.FC = () => {
 
 	const contentChangedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const pendingContentRef = useRef<string | null>(null);
+	const pendingValidate = useRef<{ resolve: (value: IValidateResponse) => void; reject: (reason: unknown) => void } | null>(null);
 	const CONTENT_CHANGED_DEBOUNCE_MS = 350;
 
 	// ========================================================================
@@ -201,7 +208,6 @@ export const PageEditor: React.FC = () => {
 			}
 			case 'servicesUpdate':
 				setServicesJson(message.services ?? {});
-				setServicesJsonError(message.servicesError);
 				break;
 			case 'oauth2Config':
 				if (message.oauth2RootUrl) {
@@ -212,6 +218,14 @@ export const PageEditor: React.FC = () => {
 				if (message.preferences && typeof message.preferences === 'object') {
 					setPreferences(message.preferences);
 				}
+				break;
+			case 'validateResponse':
+				if (message.error) {
+					pendingValidate.current?.reject(new Error(message.error));
+				} else {
+					pendingValidate.current?.resolve(message.result as IValidateResponse);
+				}
+				pendingValidate.current = null;
 				break;
 			}
 		}
@@ -239,7 +253,7 @@ export const PageEditor: React.FC = () => {
 	 *
 	 * @param pipeline The pipeline to run
 	 */
-	const handleRun = (pipeline: Record<string, unknown>): void => {
+	const handleRun = (pipeline: IProject): void => {
 		sendMessage({
 			type: 'run',
 			pipeline: pipeline
@@ -259,18 +273,16 @@ export const PageEditor: React.FC = () => {
 	};
 
 	/**
-	 * Validates the pipeline before running or saving
-	 *
-	 * @param pipeline The pipeline to validate
-	 * @returns Promise resolving to validation response
+	 * Validates the pipeline before running or saving.
+	 * Sends a validate message to the extension host, which forwards it
+	 * to the server via the typed client SDK. The response arrives as a
+	 * 'validateResponse' message handled in the onMessage switch above.
 	 */
-	const handleValidatePipeline = async (_pipeline: unknown): Promise<{ valid: boolean }> => {
-		// For now, always return valid
-		// TODO: Implement real validation via extension
-		return {
-			valid: true,
-			errors: []
-		};
+	const handleValidatePipeline = (pipeline: IProject): Promise<IValidateResponse> => {
+		return new Promise((resolve, reject) => {
+			pendingValidate.current = { resolve, reject };
+			sendMessage({ type: 'validate', pipeline });
+		});
 	};
 
 	const onOpenLink = useCallback((url: string) => {
@@ -318,13 +330,28 @@ export const PageEditor: React.FC = () => {
 	// ========================================================================
 	// RENDER
 	// ========================================================================
+
+	const hasServices = Object.keys(servicesJson).length > 0;
+
+	if (!hasServices) {
+		return (
+			<div className="pipeline-editor-container">
+				<div className="connection-status">
+					<div className="connecting-message">
+						<div className="spinner"></div>
+						<p>Establishing connection to server...</p>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
 	return (
 		<div className="pipeline-editor-container">
 			<Canvas
 				oauth2RootUrl={oauth2RootUrl}
 				project={content}
 				servicesJson={servicesJson}
-				servicesJsonError={servicesJsonError}
 				handleRunPipeline={handleRun}
 				handleStopPipeline={handleStop}
 				handleSaveProject={handleSave}

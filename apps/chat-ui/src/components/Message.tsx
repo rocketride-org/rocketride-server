@@ -23,7 +23,6 @@
  */
 
 import React from 'react';
-import { User } from 'lucide-react';
 import { Message as MessageType } from '../types/chat.types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
@@ -40,7 +39,7 @@ interface MessageProps {
  * @param message - Message data to display
  */
 export const Message: React.FC<MessageProps> = ({ message }) => {
-	if (message.sender === 'bot') {
+	if (message.sender === 'bot' || message.sender === 'system') {
 		return (
 			<div className="message-wrapper bot">
 				<div className="message-bubble bot">
@@ -60,12 +59,7 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 		<div className="message-wrapper user">
 			<div className="message-bubble user">
 				<div className="user-bubble-content">
-					<div className="user-avatar-inline">
-						<User className="w-4 h-4" />
-					</div>
-					<div className="user-text">
-						<p>{message.text}</p>
-					</div>
+					<p>{message.text}</p>
 				</div>
 				<div className="message-timestamp">
 					{message.timestamp}

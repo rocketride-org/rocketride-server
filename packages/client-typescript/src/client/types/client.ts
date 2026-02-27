@@ -47,7 +47,7 @@ export interface DAPMessage {
 	/** Unique sequence number for message correlation and ordering */
 	seq: number;
 
-	/** Command name for requests (e.g., 'execute', 'terminate', 'apaext_ping') */
+	/** Command name for requests (e.g., 'execute', 'terminate', 'rrext_ping') */
 	command?: string;
 
 	/** Command arguments and parameters */

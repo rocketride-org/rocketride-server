@@ -82,7 +82,7 @@ class DAPMessage(TypedDict, total=False):
     seq: int  # REQUIRED
 
     # Optional fields
-    command: str  # Command name for requests (e.g., 'execute', 'terminate', 'apaext_ping')
+    command: str  # Command name for requests (e.g., 'execute', 'terminate', 'rrext_ping')
     arguments: dict[str, Any]  # Command arguments and parameters
     body: dict[str, Any]  # Response body containing results and data
     success: bool  # Success flag for responses - true if operation succeeded

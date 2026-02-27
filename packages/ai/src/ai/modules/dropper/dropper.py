@@ -6,13 +6,16 @@ with proper authentication handling via cookies and query parameters.
 """
 
 import os
+import sys
 from pathlib import Path
 from fastapi.responses import FileResponse
 from ai.web import Request
 
-# Compute the root directory for dropper static files
-# This points to the 'dropper' subdirectory relative to this module's location
-dropper_root = os.path.dirname(os.path.realpath(__file__)) + '/dropperUI/dist'
+# Directory containing engine.exe
+root_dir = os.path.dirname(sys.executable)
+
+# Dropper static files: ./static/dropper (server cwd is dist/server)
+dropper_root = os.path.join(root_dir, 'static', 'dropper')
 
 next_dropper_id = 1
 

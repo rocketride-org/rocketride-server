@@ -41,6 +41,7 @@ Usage:
 from typing import Dict, Any, Optional
 
 from ..core import DAPClient
+from ..types.pipeline import PipelineConfig
 
 
 class ServicesMixin(DAPClient):
@@ -48,7 +49,7 @@ class ServicesMixin(DAPClient):
     Provides service definition retrieval for the RocketRide client.
 
     This mixin adds get_services() and get_service() to fetch connector
-    definitions from the server via the DAP apaext_services command.
+    definitions from the server via the DAP rrext_services command.
     Definitions include schemas, UI schemas, and metadata.
 
     This is automatically included when you use RocketRideClient.
@@ -72,7 +73,7 @@ class ServicesMixin(DAPClient):
         Raises:
             RuntimeError: If the server returns an error.
         """
-        request = self.build_request(command='apaext_services', arguments={})
+        request = self.build_request(command='rrext_services', arguments={})
         response = await self.request(request)
 
         if self.did_fail(response):
@@ -99,7 +100,7 @@ class ServicesMixin(DAPClient):
             raise ValueError('Service name is required')
 
         request = self.build_request(
-            command='apaext_services',
+            command='rrext_services',
             arguments={'service': service},
         )
         response = await self.request(request)
@@ -113,3 +114,54 @@ class ServicesMixin(DAPClient):
             )
 
         return response.get('body')
+
+    async def validate(
+        self,
+        pipeline: PipelineConfig,
+        *,
+        source: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Validate a pipeline configuration.
+
+        Sends the pipeline to the server for structural validation, checking
+        component compatibility, connection integrity, and the resolved
+        execution chain.
+
+        Source resolution follows the same logic as :meth:`use`:
+        1. Explicit ``source`` parameter (if provided)
+        2. ``source`` field inside the pipeline config
+        3. Implied source: the single component whose config.mode is 'Source'
+
+        Args:
+            pipeline: Pipeline configuration to validate.
+            source: Optional override for the source component ID.
+
+        Returns:
+            Validation result containing errors, warnings, resolved component,
+            and the execution chain.
+
+        Raises:
+            RuntimeError: If the server returns a validation error.
+
+        Example:
+            result = await client.validate(
+                pipeline={'components': [...], 'project_id': '123'},
+                source='webhook_1',
+            )
+        """
+        arguments: Dict[str, Any] = {'pipeline': pipeline}
+        if source is not None:
+            arguments['source'] = source
+
+        request = self.build_request(
+            command='rrext_validate',
+            arguments=arguments,
+        )
+        response = await self.request(request)
+
+        if self.did_fail(response):
+            error_msg = response.get('message', 'Validation failed')
+            raise RuntimeError(f'Pipeline validation failed: {error_msg}')
+
+        return response.get('body') or {}

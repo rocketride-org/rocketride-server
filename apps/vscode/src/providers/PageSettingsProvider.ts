@@ -37,11 +37,14 @@ import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
 import { ConfigManager } from '../config';
 import { getConnectionTreeProvider, getConnectionManager } from '../extension';
+import { EngineInstaller } from '../connection/engine-installer';
 
 export class PageSettingsProvider {
 	private disposables: vscode.Disposable[] = [];
 	private configManager: ConfigManager;
+	private engineInstaller: EngineInstaller;
 	private activeWebviews: Set<vscode.Webview> = new Set();
+	private panel: vscode.WebviewPanel | undefined;
 
 	/**
 	 * Creates a new PageSettingsProvider
@@ -50,6 +53,7 @@ export class PageSettingsProvider {
 	 */
 	constructor(private readonly extensionUri: vscode.Uri) {
 		this.configManager = ConfigManager.getInstance();
+		this.engineInstaller = new EngineInstaller(extensionUri.fsPath);
 		this.registerCommands();
 		this.setupEnvChangeListener();
 	}
@@ -110,10 +114,14 @@ export class PageSettingsProvider {
 	}
 
 	/**
-	 * Opens the settings page in a new webview panel
+	 * Opens the settings page, or reveals it if already open
 	 */
 	public async openSettings(): Promise<void> {
-		// Create and show a new webview panel
+		if (this.panel) {
+			this.panel.reveal(vscode.ViewColumn.One);
+			return;
+		}
+
 		const panel = vscode.window.createWebviewPanel(
 			'rocketride.page.settings',
 			'RocketRide Settings',
@@ -125,6 +133,7 @@ export class PageSettingsProvider {
 			}
 		);
 
+		this.panel = panel;
 		panel.webview.html = this.getHtmlForWebview(panel.webview);
 
 		// Track this webview for updates
@@ -153,6 +162,10 @@ export class PageSettingsProvider {
 					case 'clearCredentials':
 						await this.clearCredentials(panel.webview);
 						break;
+
+					case 'fetchEngineVersions':
+						await this.fetchEngineVersions(panel.webview);
+						break;
 				}
 			} catch (error) {
 				console.error('[PageSettingsProvider] Message handling error:', error);
@@ -164,7 +177,7 @@ export class PageSettingsProvider {
 
 		// Clean up when panel is disposed
 		panel.onDidDispose(() => {
-			// Remove from active webviews
+			this.panel = undefined;
 			this.activeWebviews.delete(panel.webview);
 
 			const index = this.disposables.indexOf(messageDisposable);
@@ -197,8 +210,8 @@ export class PageSettingsProvider {
 
 		const allSettings = {
 			// Connection settings from package.json
-			hostUrl: workspaceConfig.get('hostUrl', 'https://cloud.rocketride.ai'),
-			connectionMode: workspaceConfig.get('connectionMode', 'cloud'),
+			hostUrl: workspaceConfig.get('hostUrl', 'http://localhost:5565'),
+			connectionMode: workspaceConfig.get('connectionMode', 'local'),
 			hasApiKey: hasApiKey,
 			apiKey: apiKey, // Include the actual API key for form editing
 			autoConnect: workspaceConfig.get('autoConnect', true),
@@ -208,6 +221,7 @@ export class PageSettingsProvider {
 			defaultPipelinePath: workspaceConfig.get('defaultPipelinePath', 'pipelines'),
 
 			// Local engine settings
+			localEngineVersion: workspaceConfig.get('local.engineVersion', 'latest'),
 			localEngineArgs: workspaceConfig.get('local.engineArgs', []),
 
 			// Debugging settings
@@ -257,6 +271,9 @@ export class PageSettingsProvider {
 			}
 
 			// Save local engine settings
+			if (settings.localEngineVersion !== undefined) {
+				await workspaceConfig.update('local.engineVersion', settings.localEngineVersion, vscode.ConfigurationTarget.Global);
+			}
 			if (settings.localEngineArgs !== undefined) {
 				await workspaceConfig.update('local.engineArgs', settings.localEngineArgs, vscode.ConfigurationTarget.Global);
 			}
@@ -315,6 +332,9 @@ export class PageSettingsProvider {
 			let hostUrl = (formSettings.hostUrl as string) || '';
 			if (connectionMode === 'cloud' && !hostUrl) hostUrl = 'https://cloud.rocketride.ai';
 			if (connectionMode === 'local' && !hostUrl) hostUrl = 'http://localhost:5565';
+
+			// Normalize bare hostnames into parseable URLs (protocol, default port)
+			hostUrl = RocketRideClient.normalizeUri(hostUrl);
 
 			// Validate URL format
 			let parsedUrl: URL;
@@ -387,7 +407,7 @@ export class PageSettingsProvider {
 
 			let response;
 			try {
-				response = await testClient.rawRequest('initialize', testArgs, '', 5000);
+				response = await testClient.dapRequest('initialize', testArgs, '', 5000);
 			} catch (requestError) {
 				await testClient.disconnect();
 				const errorMessage = requestError instanceof Error ? requestError.message : String(requestError);
@@ -486,7 +506,7 @@ export class PageSettingsProvider {
 
 			let response;
 			try {
-				response = await testClient.rawRequest('initialize', testArgs, '', 5000);
+				response = await testClient.dapRequest('initialize', testArgs, '', 5000);
 			} catch (requestError) {
 				await testClient.disconnect();
 				const errorMessage = requestError instanceof Error ? requestError.message : String(requestError);
@@ -538,6 +558,34 @@ export class PageSettingsProvider {
 		}
 	}
 
+
+	/**
+	 * Fetches available engine versions from GitHub and sends them to the webview
+	 */
+	private async fetchEngineVersions(webview: vscode.Webview): Promise<void> {
+		try {
+			let githubToken: string | undefined;
+			try {
+				const session = await vscode.authentication.getSession('github', [], { createIfNone: false });
+				githubToken = session?.accessToken;
+			} catch {
+				// Proceed without token
+			}
+
+			const versions = await this.engineInstaller.fetchAllReleases(undefined, githubToken);
+			webview.postMessage({
+				type: 'engineVersionsLoaded',
+				versions
+			});
+		} catch (error) {
+			console.error('[PageSettingsProvider] Failed to fetch engine versions:', error);
+			webview.postMessage({
+				type: 'engineVersionsLoaded',
+				versions: []
+			});
+			this.showMessage(webview, 'warning', `Could not fetch engine versions: ${error}`);
+		}
+	}
 
 	/**
 	 * Sends a message to the webview.

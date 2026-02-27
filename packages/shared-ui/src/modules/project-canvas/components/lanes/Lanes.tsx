@@ -21,14 +21,12 @@
 // SOFTWARE.
 // =============================================================================
 
-import React, { ReactElement, useCallback, useMemo, useRef } from 'react';
+import React, { ReactElement, useCallback, useMemo, useRef, useState } from 'react';
 import { Box, Typography } from '@mui/material';
 import { Connection, Edge, Position } from '@xyflow/react';
 
 import {
 	IDynamicForms,
-	DynamicFormsCapabilities,
-	IDynamicForm,
 } from '../../../../services/dynamic-forms/types';
 
 import styles from './index.style';
@@ -38,7 +36,6 @@ import { sortOutputLanes, getOutputLaneDisplayValues, Lane, renameLanes } from '
 import { INodeData, NodeLayout } from '../../types';
 import theme from '../../../../theme';
 import InsideLines from './InsideLines';
-import InvokeHandle from '../handles/invoke/InvokeHandle';
 
 /**
  * Props for the Lanes component.
@@ -88,51 +85,18 @@ const RedAsterisk = (
  */
 export default function Lanes({ nodeId, lanes, layout, data }: IProps): ReactElement {
 	// Destructure node data fields needed for lane rendering and invoke logic
-	const { title, classType, tile, provider, invoke, capabilities } = data;
+	const { title, tile } = data;
 
 	const { onHandleClick, selectedHandle, edges, nodeMap, servicesJson: _servicesJson } = useFlow();
 	// Default to empty object to avoid null checks throughout invoke map logic
 	const servicesJson = useMemo(() => (_servicesJson ?? {}) as IDynamicForms, [_servicesJson]);
-	// Ref to the lanes container DOM element, used by InsideLines for coordinate measurement
-	const boxRef = useRef(null);
+	// Callback ref that triggers a re-render once the lanes container mounts,
+	// ensuring InsideLines can measure handle positions on the initial paint.
+	const [boxEl, setBoxEl] = useState<HTMLElement | null>(null);
+	const boxRef = useCallback((node: HTMLElement | null) => {
+		setBoxEl(node);
+	}, []);
 
-	/**
-	 * Map of provider keys to their invoke configuration, extracted from the
-	 * services JSON. Used to determine which invoke source connections a node can emit.
-	 */
-	const invokeMap = useMemo(
-		() =>
-			Object.fromEntries(
-				Object.entries(servicesJson)
-					.filter(
-						([_key, value]: [key: string, value: IDynamicForm]) => value.invoke != null
-					)
-					.map(([key, value]: [key: string, value: IDynamicForm]) => [key, value.invoke])
-			),
-		[servicesJson]
-	);
-
-	/** Set of all class types that any service in the project can invoke. */
-	// Flatten all invokable class types across all services into a single set
-	// so we can determine which class types are valid invoke targets globally
-	const invokeSources = new Set(
-		Object.values(servicesJson)
-			.filter((s: IDynamicForm) => s.invoke)
-			.map((s: IDynamicForm) => Object.keys(s.invoke ?? {}))
-			.flat()
-	);
-
-	// Normalize classType to a Set so we can intersect with global invoke sources
-	/** Set of this node's class types that are valid invoke targets. */
-	const _invokeTargets = new Set(Array.isArray(classType) ? classType : [classType]);
-	// Only render invoke target handles for class types that some other service can invoke
-	/** Intersection of global invoke sources and this node's class types -- the invoke handles to render as targets. */
-	const invokeTargets = invokeSources.intersection(_invokeTargets);
-	// Look up invoke config for this node's provider to determine which class types it can call
-	/** Invoke configuration for this node's provider, if any. */
-	const invokeConfig = provider ? invokeMap[provider] : undefined;
-	/** Keys of the invoke configuration -- the class types this node can invoke as a source. */
-	const invokeSourceKeys = Object.keys(invokeConfig ?? {});
 
 	/**
 	 * Sorted list of input lane descriptors derived from the `lanes` prop keys.
@@ -226,11 +190,6 @@ export default function Lanes({ nodeId, lanes, layout, data }: IProps): ReactEle
 			edges.some((edge) => edge.sourceHandle === sourceId && edge.source === nodeId),
 		[edges, nodeId]
 	);
-
-	// Bitwise check: only render invoke handles if the Invoke capability bit is set
-	/** Whether this node has the Invoke capability flag set, enabling invoke handle rendering. */
-	const isInvoke =
-		(DynamicFormsCapabilities.Invoke & (capabilities ?? 0)) === DynamicFormsCapabilities.Invoke;
 
 	/**
 	 * Validates whether a proposed edge connection is allowed.
@@ -342,9 +301,9 @@ export default function Lanes({ nodeId, lanes, layout, data }: IProps): ReactEle
 				}}
 			>
 				{/* Render inside lines when inputs and outputs are connected */}
-				{boxRef.current && anyInputConnected && (
+				{boxEl && anyInputConnected && (
 					<InsideLines
-						parentEl={boxRef.current}
+						parentEl={boxEl}
 						inputConnected={anyInputConnected}
 						inputLanes={inputLanesWithConnections}
 						outputLanes={outputLanesWithConnections}
@@ -490,66 +449,7 @@ export default function Lanes({ nodeId, lanes, layout, data }: IProps): ReactEle
 					)}
 				</Box>
 			</Box>
-			<Box
-				sx={{
-					position: 'absolute',
-					top: '0',
-					display: 'flex',
-					width: '100%',
-					justifyContent: 'center',
-				}}
-			>
-				{isInvoke &&
-					Array.from(invokeTargets).map((value: string) => (
-						<InvokeHandle
-							key={value}
-							id={`invoke-target-${value}`}
-							type="target"
-							invokeType={value}
-							position={Position.Top}
-							style={{ left: `` }}
-							/* TODO: This is O(n^2) every render, make hash lookup */
-							isConnected={edges.some(
-								(edge: Edge) =>
-									edge.targetHandle === `invoke-target-${value}` &&
-									edge.target === nodeId
-							)}
-							isValidConnection={validateConnection}
-							selected={
-								selectedHandle
-									? selectedHandle[0] === nodeId &&
-										selectedHandle[1] === `invoke-target-${value}`
-									: false
-							}
-							onClick={(event) =>
-								_onHandleClick(event, nodeId, `invoke-target-${value}`, [value])
-							}
-						/>
-					))}
-			</Box>
-
-			{/* Render the invoke source handle at the bottom if this node has invoke targets defined */}
-		{Object.keys(invoke ?? {}).length ? (
-				<InvokeHandle
-					id={`invoke-source`}
-					type="source"
-					position={Position.Bottom}
-					/* TODO: This is O(n^2) every render, make hash lookup */
-					isConnected={edges.some(
-						(edge: Edge) =>
-							edge.sourceHandle === `invoke-source` && edge.source === nodeId
-					)}
-					isValidConnection={validateConnection}
-					selected={
-						selectedHandle
-							? selectedHandle[0] === nodeId && selectedHandle[1] === 'invoke-source'
-							: false
-					}
-					onClick={(event) =>
-						_onHandleClick(event, nodeId, 'invoke-source', invokeSourceKeys)
-					}
-				/>
-			) : null}
+			{/* Invoke handles are now rendered in Node.tsx on the corner caps */}
 		</>
 	);
 }

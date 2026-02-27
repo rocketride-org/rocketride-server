@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Text - Data Extractor",
+	"title": "Data Extractor",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol

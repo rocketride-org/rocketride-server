@@ -1,3 +1,26 @@
+// =============================================================================
+// MIT License
+// Copyright (c) 2026 RocketRide, Inc.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+// =============================================================================
+
 /**
  * Chat UI Build Module
  * 
@@ -66,22 +89,22 @@ module.exports = {
         
         // Public actions (have descriptions)
         { name: 'chat-ui:build', action: () => ({
-            description: 'Build production bundle',
+            description: 'Build chat UI',
             steps: [
-                'client-typescript:compile',
+                'client-typescript:build',
                 'chat-ui:bundle',
                 'chat-ui:copy'
             ]
         })},
         { name: 'chat-ui:dev', action: () => ({
-            description: 'Start development server',
+            description: 'Dev chat UI',
             run: async (ctx, task) => {
                 task.output = 'Starting development server on http://localhost:3000';
                 await execCommand('npx', ['rsbuild', 'dev'], { task, cwd: APP_ROOT });
             }
         })},
         { name: 'chat-ui:clean', action: () => ({
-            description: 'Remove chat-ui build artifacts',
+            description: 'Clean chat UI',
             run: async (ctx, task) => {
                 await removeDir(BUILD_DIR);
                 await removeDir(SERVER_STATIC_DIR);

@@ -1,5 +1,5 @@
 {
-    "title": "LLM - Perplexity",
+    "title": "Perplexity",
     "protocol": "llm_perplexity://",
     "classType": [
         "llm"
@@ -159,10 +159,25 @@
     "shape": [
         {
             "section": "Pipe",
-            "title": "LLM - Perplexity",
+            "title": "Perplexity",
             "properties": [
                 "perplexity.profile"
             ]
         }
-    ]
+    ],
+    "test": {
+        "profiles": ["sonar"],
+        "outputs": ["answers"],
+        "cases": [
+            {
+                "name": "LLM returns mock response",
+                "text": "What is 2+2?",
+                "expect": {
+                    "answers": {
+                        "contains": "Mock LLM response"
+                    }
+                }
+            }
+        ]
+    }
 } 

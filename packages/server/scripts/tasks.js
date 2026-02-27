@@ -1,3 +1,26 @@
+// =============================================================================
+// MIT License
+// Copyright (c) 2026 RocketRide, Inc.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+// =============================================================================
+
 /**
  * Server Build Module
  * 
@@ -10,11 +33,11 @@ const {
     removeDirs, resetDir, syncDir, removeFiles,
     overlayDir, formatSyncStats,
     execCommand, PROJECT_ROOT, BUILD_DIR, isWindows, isMac, isLinux,
-    exists, readFile, readJson, readDir, mkdir, copyFile, removeFile, stat, chmod, realpath, 
-    downloadFile, createArchive, extractArchive,
-    parallel, sequence, whenNot, fingerprint,
+    exists, readFile, readJson, readDir, mkdir, copyFile, removeFile, chmod,
+    loadPackageJson, downloadGitHubFile, createArchive, extractArchive,
+    parallel, whenNot, fingerprint, contentHash,
     taskDebug,
-    DOWNLOADS_DIR
+    STATE_FILE
 } = require('../../../scripts/lib');
 const { runCompilerSetup } = require('../../../scripts/compiler');
 
@@ -25,21 +48,6 @@ const DIST_DIR = path.join(PROJECT_ROOT, 'dist', 'server');
 const VCPKG_DIR = path.join(BUILD_DIR, 'vcpkg');
 const BUILD_ARTIFACTS_DIR = path.join(BUILD_DIR, 'artifacts');
 const DIST_ARTIFACTS_DIR = path.join(PROJECT_ROOT, 'dist', 'artifacts');
-
-// Get package info (loaded async)
-let VERSION = '0.0.0';
-let REPO = 'rocketride/rocketride-engine';
-let packageJsonLoaded = false;
-
-async function loadPackageJson() {
-    if (!packageJsonLoaded) {
-        const packageJson = await readJson(path.join(PROJECT_ROOT, 'package.json'));
-        VERSION = packageJson.version;
-        REPO = packageJson.repository?.url?.match(/github\.com[/:](.+?)(?:\.git)?$/)?.[1] || 'rocketride/rocketride-engine';
-        packageJsonLoaded = true;
-    }
-    return { version: VERSION, repo: REPO };
-}
 
 // =============================================================================
 // Platform Detection
@@ -63,6 +71,24 @@ function getPlatformInfo(options = {}) {
         return { name: 'linux-x64', os: 'linux', ext: 'tar.gz' };
     }
     throw new Error(`Unsupported platform: ${platform}-${arch}`);
+}
+
+async function getDistInfo(options = {}) {
+    const { version } = await loadPackageJson();
+    const platform = getPlatformInfo(options);
+    const releaseTag = `server-v${version}`;
+    const baseName = `rocketride-${releaseTag}-${platform.name}`;
+    const manifestFilename = `${baseName}.manifest.json`;
+    const distFilename = `${baseName}.${platform.ext}`;
+    const symDistFilename = isWindows() ? `${baseName}.symbols.${platform.ext}` : null;
+
+    return {
+        releaseTag: releaseTag,
+        baseName: baseName,
+        manifestFilename: manifestFilename,
+        distFilename: distFilename,
+        symDistFilename: symDistFilename
+    };
 }
 
 // =============================================================================
@@ -196,29 +222,6 @@ async function getCachedGeneratorArgs(buildDir) {
         return args;
     } catch {
         return null;
-    }
-}
-
-async function copyDirDereferenceSymlinks(srcDir, destDir) {
-    await mkdir(destDir);
-    const entries = await readDir(srcDir, { withFileTypes: true });
-
-    for (const entry of entries) {
-        const srcPath = path.join(srcDir, entry.name);
-        const destPath = path.join(destDir, entry.name);
-
-        if (entry.isSymbolicLink()) {
-            const realPath = await realpath(srcPath);
-            await copyFile(realPath, destPath);
-            const srcStats = await stat(realPath);
-            await chmod(destPath, srcStats.mode);
-        } else if (entry.isDirectory()) {
-            await copyDirDereferenceSymlinks(srcPath, destPath);
-        } else {
-            await copyFile(srcPath, destPath);
-            const srcStats = await stat(srcPath);
-            await chmod(destPath, srcStats.mode);
-        }
     }
 }
 
@@ -437,109 +440,93 @@ async function copyClangRuntimeLibs(options = {}) {
 function makeCheckPrebuiltAction(options = {}) {
     return {
         run: async (ctx, task) => {
+            // Compute content hash of local source (always, ~110ms)
+            task.output = 'Computing source hash...';
+            const localHash = await contentHash(SERVER_DIR, { log: (msg) => { task.output = msg; } });
+            ctx.contentHash = localHash;
+
             if (options.force) {
                 task.output = 'Force rebuild requested';
+                await setState('server.contentHash', null);
                 ctx.downloaded = false;
                 return;
             }
 
-            const compiledVersion = await getState('server.compiledVersion');
-            if (compiledVersion) {
-                task.output = 'Using compiled version';
+            if (ctx.options?.nodownload) {
+                task.output = 'Download skipped (--nodownload)';
                 ctx.downloaded = false;
                 return;
             }
 
-            const downloadFailed = await getState('server.downloadFailed');
-            if (downloadFailed) {
-                task.output = 'No prebuilt binary available';
-                ctx.downloaded = false;
-                return;
-            }
+            const {
+                releaseTag, manifestFilename, distFilename, symDistFilename
+            } = await getDistInfo(options);
 
-            const { version, repo } = await loadPackageJson();
-            const downloadedVersion = await getState('server.downloadedVersion');
-
-            if (downloadedVersion === version && await exists(DIST_DIR)) {
-                task.output = `Server v${version} (downloaded)`;
-                ctx.downloaded = true;
-                return;
-            }
-
-            const platform = getPlatformInfo(options);
-            const releaseTag = `v${version}`;
-            const distFilename = `engine-${releaseTag}-${platform.name}.${platform.ext}`;
-            const symDistFilename = `engine-${releaseTag}-${platform.name}.symbols.${platform.ext}`;
-            var distPath = path.join(DOWNLOADS_DIR, distFilename);
-            var symDistPath = path.join(DOWNLOADS_DIR, symDistFilename);
+            let serverHash = null;
 
             try {
-                task.output = `Downloading GitHub Release ${releaseTag}...`;
-                await execCommand('gh', [
-                    'release', 'download', releaseTag,
-                    '--repo', repo,
-                    '--pattern', distFilename,
-                    '--dir', DOWNLOADS_DIR,
-                    '--clobber'
-                ], { task });
-                task.output = `Downloaded GitHub Release ${releaseTag}`;
-
-                if (isWindows()) {
-                    task.output = `Downloading GitHub Release ${releaseTag} symbols...`;
-                    await execCommand('gh', [
-                        'release', 'download', releaseTag,
-                        '--repo', repo,
-                        '--pattern', symDistFilename,
-                        '--dir', DOWNLOADS_DIR,
-                        '--clobber'
-                    ], { task });
-                    task.output = `Downloaded GitHub Release ${releaseTag} symbols`;
+                // Fetch release manifest and compare content hash
+                const manifestPath = await downloadGitHubFile(releaseTag, manifestFilename, task);
+                if (manifestPath) {
+                    const manifest = await readJson(manifestPath);
+                    await setState('server.releaseManifest', manifest);
+                    serverHash = manifest?.server?.contentHash;
                 }
-            } catch (e) {
-                task.output = `GitHub Release ${releaseTag} not available by CLI:\n${e.message.trim()}\nWill try downloading from GitHub Releases API`;
-                removeFile(distPath);
-                removeFile(symDistPath);
+            } catch {
+                // Manifest not available — cannot verify, must compile
+            }
+
+            if (localHash !== serverHash) {
+                task.output = 'Source differs from release — will compile';
+                await setState('server.contentHash', null);
+                await setState('server.downloaded', false);
+                ctx.downloaded = false;
+                return;
+            }
+
+            if (await getState('server.downloaded')) {
+                ctx.downloaded = true;
+                task.output = 'Server already downloaded';
+                return;
             }
 
             try {
-                if (!await exists(distPath)) {
-                    task.output = `Downloading ${distFilename}...`;
-                    const distUrl = `https://github.com/${repo}/releases/download/${releaseTag}/${distFilename}`;
-                    distPath = await downloadFile(distUrl, distFilename, task);
-                    task.output = `Downloaded ${distFilename}`;
+                task.output = `Downloading ${distFilename}...`;
+                const distPath = await downloadGitHubFile(releaseTag, distFilename, task);
+                if (!distPath)
+                    throw new Error(`Dist file ${distFilename} cannot be downloaded`);
+                task.output = `Downloaded ${distFilename}`;
 
-                    if (isWindows()) {
-                        task.output = `Downloading ${symDistFilename}...`;
-                        const symDistUrl = `https://github.com/${repo}/releases/download/${releaseTag}/${symDistFilename}`;
-                        symDistPath = await downloadFile(symDistUrl, symDistFilename, task);
+                let symDistPath = null;
+                if (symDistFilename) {
+                    task.output = `Downloading ${symDistFilename}...`;
+                    symDistPath = await downloadGitHubFile(releaseTag, symDistFilename, task);
+                    if (symDistPath)
                         task.output = `Downloaded ${symDistFilename}`;
-                    }
+                    else
+                        task.output = `Symbol dist file ${symDistFilename} not available, skipping`;
                 }
 
                 task.output = `Extracting ${distFilename}...`;
                 await extractArchive(distPath, DIST_DIR);
                 task.output = `Extracted ${distFilename}`;
 
-                if (isWindows()) {
+                if (symDistPath) {
                     task.output = `Extracting ${symDistFilename}...`;
                     await extractArchive(symDistPath, DIST_DIR);
                     task.output = `Extracted ${symDistFilename}`;
                 }
 
-                await updateServerState({
-                    downloaded: true,
-                    downloadedAt: new Date().toISOString(),
-                    downloadedVersion: version,
-                    downloadFailed: false,
-                    source: 'github-release'
-                });
-
-                task.output = `Downloaded server ${releaseTag}`;
+                await setState('server.contentHash', localHash);
+                await setState('server.downloaded', true);
                 ctx.downloaded = true;
-            } catch (e) {
-                await updateServerState({ downloadFailed: true });
+                task.output = `Downloaded server ${releaseTag}`;
+
+            } catch {
+                await setState('server.contentHash', null);
+                await setState('server.downloaded', false);
                 ctx.downloaded = false;
-                task.output = `GitHub Release ${releaseTag} not available by URL:\n${e.message.trim()}\nWill compile from source`;
+                task.output = `Release ${releaseTag} download failed: Will compile from source`;
             }
         }
     };
@@ -685,33 +672,19 @@ function makeCompileEngineAction(options = {}) {
         locks: ['cmake'],
         run: async (ctx, task) => {
             const { version } = await loadPackageJson();
-            
-            // Check source hash to skip cmake if nothing changed
+
+            // Check content hash — skip if source matches last successful build
             if (!options.force) {
-                task.output = 'Checking for source changes...';
-                const [coreHash, libHash, cmakeHash] = await Promise.all([
-                    fingerprint(path.join(SERVER_DIR, 'engine-core')),
-                    fingerprint(path.join(SERVER_DIR, 'engine-lib')),
-                    fingerprint(path.join(SERVER_DIR, 'cmake'))
-                ]);
-                const combinedHash = require('crypto')
-                    .createHash('md5')
-                    .update(`${coreHash}:${libHash}:${cmakeHash}`)
-                    .digest('hex');
-                
-                const savedHash = await getState('server.srcHash');
+                const savedHash = await getState('server.contentHash');
                 const exeExt = isWindows() ? '.exe' : '';
                 const engineExists = await exists(path.join(DIST_DIR, 'engine' + exeExt));
-                
-                if (combinedHash === savedHash && engineExists) {
+
+                if (savedHash && savedHash === ctx.contentHash && engineExists) {
                     task.output = 'No source changes detected';
                     return;
                 }
-                
-                // Save hash after we decide to build (will be saved again after success)
-                ctx._serverSrcHash = combinedHash;
             }
-            
+
             task.output = `Compiling v${version}...`;
 
             const baseEnv = isWindows() ? await getVsEnvironment() : process.env;
@@ -762,18 +735,8 @@ function makeCompileEngineAction(options = {}) {
                 }
             }
 
-            await updateServerState({
-                compiled: true,
-                compiledAt: new Date().toISOString(),
-                compiledVersion: version,
-                downloadFailed: false,
-                source: 'compiled'
-            });
-            
-            // Save source hash after successful build
-            if (ctx._serverSrcHash) {
-                await setState('server.srcHash', ctx._serverSrcHash);
-            }
+            // Save content hash after successful compilation
+            await setState('server.contentHash', ctx.contentHash);
 
             task.output = `Compiled v${version}`;
         }
@@ -945,9 +908,8 @@ function makeRunEngtestAction(options = {}) {
     };
 }
 
-function makeBuildAction() {
+function makeBuildCoreAction() {
     return {
-        description: 'Install server (download prebuilt or build from source)',
         steps: [
             'server:download',
             whenNot({
@@ -956,46 +918,47 @@ function makeBuildAction() {
                 then: [
                     parallel([
                         'server:setup-tools',
-                        sequence(['vcpkg:clone', 'vcpkg:bootstrap']),
+                        'vcpkg:submodule-build',
                         'java:setup-jdk'
                     ], 'Setup build tools'),
                     'server:configure',
-                    parallel([
-                        'server:compile-engine',
-                        'java:setup-maven',
-                        'java:setup-jre'
-                    ], 'server:compile'),
-                    // Sync nodes, ai, and clients into dist/server before any engine invocation
-                    // (engine startup requires nodes dir; setup-python runs engine for pip)
-                    parallel([
-                        'nodes:sync',
-                        'ai:sync',
-                        'client-python:sync'
-                    ], 'Sync modules to server dist'),
+                    'server:compile-engine',
                     parallel([
                         'server:setup-python',
                         'server:setup-jre'
-                    ], 'server:setup-dependencies'),
+                    ], 'Setup dependencies'),
                     parallel([
                         'server:setup-runtime-libs',
                         'server:setup-samba'
-                    ], 'server:finalize'),
-                    'tika:sync-source',
-                    parallel([
-                        'tika:build-dbgconn',
-                        'tika:build-jar'
-                    ], 'tika:build'),
-                    'tika:copy-outputs'
+                    ], 'Setup runtime'),
+                    'tika:submodule-build'
                 ]
             }),
-            'server:install-pip'
+        ]
+    };
+}
+
+function makeBuildAction() {
+    return {
+        description: 'Build server',
+        steps: [
+            'server:build-core',
+            'server:setup-pip',
+            // Sync nodes, ai, and clients into dist/server regardless of whether
+            // the engine was downloaded or compiled — the prebuilt binary doesn't
+            // include these modules, and they must match the current repo checkout.
+            parallel([
+                'nodes:sync',
+                'ai:sync',
+                'client-python:sync-source'
+            ], 'Sync modules')
         ]
     };
 }
 
 function makeCleanServerAction() {
     return {
-        description: 'Remove server build artifacts',
+        description: 'Clean server',
         run: async (ctx, task) => {
             await setState('server', {});
 
@@ -1035,7 +998,7 @@ function makeCleanServerAction() {
 
 function makeBuildAllAction() {
     return {
-        description: 'Build server and all modules',
+        description: 'Build server and modules',
         steps: [
             'server:build',
             // Build external modules
@@ -1050,7 +1013,7 @@ function makeBuildAllAction() {
 
 function makeCompileAction() {
     return {
-        description: 'Compile server from source',
+        description: 'Compile server',
         steps: [
             'server:configure',
             'server:setup-python',
@@ -1061,7 +1024,7 @@ function makeCompileAction() {
 
 function makeConfigureAction() {
     return {
-        description: 'Configure CMake only',
+        description: 'Configure server',
         steps: [
             'server:setup-tools',
             'server:configure'
@@ -1071,7 +1034,7 @@ function makeConfigureAction() {
 
 function makeTestAction() {
     return {
-        description: 'Build and run C++ tests',
+        description: 'Test server',
         steps: [
             'server:build',
             whenNot({
@@ -1083,7 +1046,7 @@ function makeTestAction() {
                         'nodes:build',
                         'ai:build',
                         'client-python:build'
-                    ], 'Build modules'),
+                    ], 'Build dependencies'),
                     'server:compile-tests',
                     'server:copy-test-data',
                     parallel([
@@ -1098,33 +1061,31 @@ function makeTestAction() {
 
 function makePackageAction(options = {}) {
     return {
-        description: 'Package server',
+        description: 'Package server distribution',
         run: async (_ctx, _task) => {
-            const { version } = await loadPackageJson();
-            const platform = getPlatformInfo(options);
-            const baseName = `rocketride-v${version}-${platform.name}`;
-            const distFilename = `${baseName}.${platform.ext}`;
+            const {
+                baseName, manifestFilename, distFilename, symDistFilename
+            } = await getDistInfo(options);
             const distPath = path.join(DIST_ARTIFACTS_DIR, distFilename);
-            const symDistPath = isWindows() ? path.join(DIST_ARTIFACTS_DIR, `${baseName}.symbols.${platform.ext}`) : null;
+            const symDistPath = symDistFilename ? path.join(DIST_ARTIFACTS_DIR, symDistFilename) : null;
             const symFilename = isWindows() ? 'engine.pdb' : null;
 
             // temp dir for packaging
             options.destDir = path.join(BUILD_ARTIFACTS_DIR, baseName);
 
-            const sourceHash = await getState('server.srcHash');
+            const sourceHash = await getState('server.contentHash');
             const packageHash = await getState('server.pkgHash');
             if (!sourceHash) {
-                throw new Error('Source hash not found');
+                throw new Error('Content hash not found — build server first');
             } else if (!_ctx.force && sourceHash === packageHash && await exists(distPath)) {
                 _task.output = `Server package ${distFilename} is up to date`;
                 return;
             }
 
             try {
-
                 _task.output = `Preparing files for packaging ${distFilename}...`;
                 await resetDir(options.destDir);
-                // TODO: refactoring is needed here
+                // TODO: refactor this
                 await Promise.all([
                     copyClangRuntimeLibs(options),
                     copySambaLibs(options),
@@ -1132,6 +1093,7 @@ function makePackageAction(options = {}) {
                     syncRocketlibPythonLib(options),
                     // copyJavaJre(options),
                     syncDir(path.join(DIST_DIR, 'java'), path.join(options.destDir, 'java')),
+                    syncDir(path.join(DIST_DIR, 'static'), path.join(options.destDir, 'static')),
                     syncDir(path.join(PROJECT_ROOT, 'nodes', 'src', 'nodes'), path.join(options.destDir, 'nodes')),
                     syncDir(path.join(PACKAGES_DIR, 'ai', 'src', 'ai'), path.join(options.destDir, 'ai')),
                     syncDir(path.join(PACKAGES_DIR, 'client-python', 'src', 'rocketride'), path.join(options.destDir, 'rocketride')),
@@ -1164,8 +1126,10 @@ function makePackageAction(options = {}) {
                     _task.output = `Packaged ${path.basename(symDistPath)}`;
                 }
 
-
                 await setState('server.pkgHash', sourceHash);
+
+                // Copy state.json as build manifest for download validation
+                await copyFile(STATE_FILE, path.join(DIST_ARTIFACTS_DIR, manifestFilename));
 
             } catch (err) {
                 await removeFile(distPath);
@@ -1184,9 +1148,12 @@ function makePackageAction(options = {}) {
 
 function makeCleanAction() {
     return {
-        description: 'Clean build artifacts',
+        description: 'Clean all',
         steps: [
-            'server:clean'
+            'server:clean',
+            'vcpkg:submodule-clean',
+            'java:submodule-clean',
+            'tika:submodule-clean'
         ]
     };
 }
@@ -1202,6 +1169,7 @@ module.exports = {
     actions: [
         // Internal actions (no description in help)
         { name: 'server:download', action: makeCheckPrebuiltAction },
+        { name: 'server:build-core', action: makeBuildCoreAction },
         { name: 'server:setup-tools', action: makeSetupToolsAction },
         { name: 'server:configure', action: makeConfigureServerAction },
         { name: 'server:setup-python', action: makeSetupPythonAction },
@@ -1210,12 +1178,12 @@ module.exports = {
         { name: 'server:setup-samba', action: makeSetupSambaAction },
         { name: 'server:compile-engine', action: makeCompileEngineAction },
         { name: 'server:compile-tests', action: makeCompileTestsAction },
-        { name: 'server:install-pip', action: makeInstallPipAction },
+        { name: 'server:setup-pip', action: makeInstallPipAction },
         { name: 'server:copy-test-data', action: makeCopyTestDataAction },
         { name: 'server:run-aptest', action: makeRunAptestAction },
         { name: 'server:run-engtest', action: makeRunEngtestAction },
         { name: 'server:clean', action: makeCleanServerAction },
-        
+
         // Public actions (have descriptions, shown in help)
         { name: 'server:build', action: makeBuildAction },
         { name: 'server:build-all', action: makeBuildAllAction },

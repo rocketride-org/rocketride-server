@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Image - Thumbnail",
+	"title": "Thumbnail",
 	//
 	// Required:
 	//     The protocol is the endpoint protocol
@@ -103,5 +103,19 @@
 			"properties": [
 			]
 		}
-	]
+	],
+	"test": {
+		"outputs": ["image", "documents"],
+		"cases": [
+			{
+				"name": "Create thumbnail from image",
+				"image": "images/ocr_test_text.png",
+				"expect": {
+					"image": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	}
 }

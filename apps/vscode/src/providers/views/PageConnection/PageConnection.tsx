@@ -30,7 +30,7 @@ import '../../styles/app.css';
 import './styles.css';
 
 interface ConnectionState {
-	state: 'connected' | 'connecting' | 'downloading-engine' | 'starting-engine' | 'stopping-engine' | 'disconnected';
+	state: 'connected' | 'connecting' | 'downloading-engine' | 'starting-engine' | 'stopping-engine' | 'disconnected' | 'engine-startup-failed';
 	connectionMode: 'cloud' | 'onprem' | 'local';
 	retryAttempt: number;
 	maxRetryAttempts: number;
@@ -63,8 +63,7 @@ type PageConnectionOutgoingMessage =
 	| { type: 'reconnect' }
 	| { type: 'openSettings' }
 	| { type: 'openDocs' }
-	| { type: 'openDeploy' }
-	| { type: 'openSystemPerformance' };
+	| { type: 'openDeploy' };
 
 export const PageConnection: React.FC = () => {
 	const [connectionData, setConnectionData] = useState<ConnectionData | null>(null);
@@ -82,7 +81,8 @@ export const PageConnection: React.FC = () => {
 	useEffect(() => {
 		const isConnecting = connectionData?.connectionState.state === 'connecting' ||
 			connectionData?.connectionState.state === 'downloading-engine' ||
-			connectionData?.connectionState.state === 'starting-engine';
+			connectionData?.connectionState.state === 'starting-engine' ||
+			connectionData?.connectionState.state === 'stopping-engine';
 
 		if (isConnecting) {
 			const interval = setInterval(() => {
@@ -114,6 +114,7 @@ export const PageConnection: React.FC = () => {
 			case 'stopping-engine':
 				return `Connecting${getAnimatedDots()}`;
 			case 'disconnected':
+			case 'engine-startup-failed':
 			default:
 				return 'Disconnected';
 		}
@@ -131,6 +132,7 @@ export const PageConnection: React.FC = () => {
 			case 'stopping-engine':
 				return 'status-connecting';
 			case 'disconnected':
+			case 'engine-startup-failed':
 			default:
 				return 'status-disconnected';
 		}
@@ -148,6 +150,7 @@ export const PageConnection: React.FC = () => {
 			case 'stopping-engine':
 				return '◷';
 			case 'disconnected':
+			case 'engine-startup-failed':
 			default:
 				return '○';
 		}
@@ -183,6 +186,11 @@ export const PageConnection: React.FC = () => {
 			if (lower.includes('rate limit') || lower.includes('github')) return 'No release info.';
 			return lastError.length > 40 ? lastError.slice(0, 37) + '...' : lastError;
 		}
+
+		// Show error when disconnected or engine-startup-failed
+		if ((state === 'disconnected' || state === 'engine-startup-failed') && lastError) {
+			return lastError.length > 40 ? lastError.slice(0, 37) + '...' : lastError;
+		}
 		return '';
 	};
 
@@ -200,10 +208,6 @@ export const PageConnection: React.FC = () => {
 
 	const handleOpenDocs = () => {
 		sendMessage({ type: 'openDocs' });
-	};
-
-	const handleOpenSystemPerformance = () => {
-		sendMessage({ type: 'openSystemPerformance' });
 	};
 
 	const isConnecting = connectionData?.connectionState.state === 'connecting' ||
@@ -233,9 +237,11 @@ export const PageConnection: React.FC = () => {
 					</div>
 					<div className="status-text">
 						<div className="status-label">{getStatusLabel()}</div>
-						<div className="status-detail" title={connectionData?.connectionState.lastError || undefined}>
-							{getStatusDetailLine()}
-						</div>
+						{getStatusDetailLine() && (
+							<div className="status-detail" title={connectionData?.connectionState.lastError || undefined}>
+								{getStatusDetailLine()}
+							</div>
+						)}
 					</div>
 				</div>
 
@@ -276,14 +282,6 @@ export const PageConnection: React.FC = () => {
 				title="Deploy to RocketRide.ai cloud or on-prem"
 			>
 				Deploy
-			</button>
-			<button
-				className="btn btn-secondary"
-				onClick={handleOpenSystemPerformance}
-				disabled={!isConnected}
-				title="View system performance metrics and resource utilization"
-			>
-				System Performance
 			</button>
 			<button
 				className="btn btn-secondary"

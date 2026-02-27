@@ -1,9 +1,9 @@
 #!/bin/bash
 # =============================================================================
-# Aparavi Engine - Build Environment Setup (Unix)
+# RocketRide Engine - Build Environment Setup (Unix)
 # =============================================================================
 # MIT License
-# Copyright (c) 2024 Aparavi Inc.
+# Copyright (c) 2026 RocketRide, Inc.
 #
 # This script checks build prerequisites for compiling the server from source.
 # Called automatically by server.js on first compile.
@@ -123,7 +123,7 @@ select_linux_triplet() {
         echo "✓ Compiler: Using clang-$CLANG_VERSION (found and supported)"
         
         # Use generic triplet and set CC/CXX to point to the installed version
-        TRIPLET_NAME="x64-linux-clang-aparavi.cmake"
+        TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
         
         # Check if generic clang/clang++ exist, otherwise use versioned ones
         if command_exists "clang" && command_exists "clang++"; then
@@ -147,7 +147,7 @@ select_linux_triplet() {
         
         CLANG_VERSION="$DEFAULT_CLANG"
         REQUIRES+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
-        TRIPLET_NAME="x64-linux-clang-aparavi.cmake"
+        TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
         export CC=clang-${CLANG_VERSION}
         export CXX=clang++-${CLANG_VERSION}
         
@@ -158,7 +158,7 @@ select_linux_triplet() {
         
         CLANG_VERSION="$DEFAULT_CLANG"
         REQUIRES+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
-        TRIPLET_NAME="x64-linux-clang-aparavi.cmake"
+        TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
         export CC=clang-${CLANG_VERSION}
         export CXX=clang++-${CLANG_VERSION}
     fi
@@ -176,9 +176,9 @@ select_macos_triplet() {
     echo "Target Architecture: ${ARCH}"
     
     if [[ "$ARCH" == "arm64" ]]; then
-        TRIPLET_NAME="arm64-osx-appleclang-aparavi.cmake"
+        TRIPLET_NAME="arm64-osx-appleclang-rocketride.cmake"
     elif [[ "$ARCH" == "x86_64" ]] || [[ "$ARCH" == "i386" ]]; then
-        TRIPLET_NAME="x64-osx-appleclang-aparavi.cmake"
+        TRIPLET_NAME="x64-osx-appleclang-rocketride.cmake"
     else
         echo "=========================================="
         echo "ERROR: Unknown architecture: $ARCH"

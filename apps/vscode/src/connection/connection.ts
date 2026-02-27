@@ -30,7 +30,7 @@
 
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
-import { RocketRideClient, DAPMessage } from 'rocketride';
+import { RocketRideClient, DAPMessage, AuthenticationException } from 'rocketride';
 import { ConfigManager } from '../config';
 import { EngineServer } from './engine';
 import { EngineInstaller } from './engine-installer';
@@ -172,7 +172,8 @@ export class ConnectionManager extends EventEmitter {
 
 	private canAttemptConnection(): boolean {
 		return this.connectionStatus.hasCredentials &&
-			this.connectionStatus.state === 'disconnected';
+			(this.connectionStatus.state === ConnectionState.DISCONNECTED ||
+				this.connectionStatus.state === ConnectionState.ENGINE_STARTUP_FAILED);
 	}
 
 	public getHttpUrl(): string {
@@ -184,8 +185,8 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	public async connect(): Promise<void> {
-		// Don't connect during disposal
-		if (this.isDisposing || this.connectionStatus.state !== 'disconnected') {
+		// Don't connect during disposal; allow connect when disconnected or engine-startup-failed
+		if (this.isDisposing || !this.canAttemptConnection()) {
 			return;
 		}
 
@@ -240,8 +241,20 @@ export class ConnectionManager extends EventEmitter {
 			throw new Error('Engine installer not initialized. Extension path not set.');
 		}
 
+		const config = this.configManager.getConfig();
+		const versionSpec = config.local.engineVersion || 'latest';
+
+		// Check if we already have the right version installed
 		if (this.engineInstaller.isInstalled()) {
-			return;
+			if (versionSpec !== 'latest' && versionSpec !== 'prerelease') {
+				const installed = this.engineInstaller.getInstalledVersion();
+				if (installed === versionSpec) {
+					return;
+				}
+				// Different version requested — need to re-download
+			} else {
+				return;
+			}
 		}
 
 		this.updateConnectionStatus({ state: ConnectionState.DOWNLOADING_ENGINE });
@@ -264,7 +277,28 @@ export class ConnectionManager extends EventEmitter {
 			}
 		};
 
-		await this.engineInstaller.ensureEngine(progress, undefined, githubToken);
+		try {
+			await this.engineInstaller.ensureEngine(versionSpec, progress, undefined, githubToken);
+		} catch (error: unknown) {
+			const msg = error instanceof Error ? error.message : String(error);
+			if (!githubToken && msg.toLowerCase().includes('rate limit')) {
+				// Prompt user to sign into GitHub to get a higher rate limit
+				this.logger.output(`${icons.info} Requesting GitHub sign-in to avoid rate limits...`);
+				try {
+					const session = await vscode.authentication.getSession('github', [], { createIfNone: true });
+					if (session?.accessToken) {
+						githubToken = session.accessToken;
+						await this.engineInstaller.ensureEngine(versionSpec, progress, undefined, githubToken);
+						this.updateConnectionStatus({ progressMessage: undefined });
+						return;
+					}
+				} catch {
+					// User declined sign-in
+				}
+				throw new Error('GitHub API rate limit exceeded. Sign into GitHub (via Accounts menu) to increase the limit, then reconnect.');
+			}
+			throw error;
+		}
 		this.updateConnectionStatus({ progressMessage: undefined });
 	}
 
@@ -283,6 +317,10 @@ export class ConnectionManager extends EventEmitter {
 			module: 'CONN-EXT',
 			onEvent: async (message: DAPMessage) => {
 				this.emit('event', message);
+			},
+			onDisconnected: async (reason?: string, hasError?: boolean) => {
+				this.logger.output(`${icons.warning} WebSocket disconnected (reason: ${reason ?? 'unknown'}, error: ${hasError ?? false})`);
+				this.handleConnectionLoss();
 			},
 		});
 
@@ -388,7 +426,10 @@ export class ConnectionManager extends EventEmitter {
 
 			this.logger.output(`${icons.success} Local server started`);
 		} catch (error) {
-			this.updateConnectionStatus({ state: ConnectionState.DISCONNECTED });
+			this.updateConnectionStatus({
+				state: ConnectionState.ENGINE_STARTUP_FAILED,
+				lastError: 'Error starting local engine'
+			});
 			throw error;
 		}
 	}
@@ -445,9 +486,20 @@ export class ConnectionManager extends EventEmitter {
 		const errorMessage = error instanceof Error ? error.message : String(error);
 		this.logger.output(`${icons.error} ${errorMessage}`);
 
+		// Engine startup failure: status already set in startEngine() catch; do not retry
+		if (this.connectionStatus.state === ConnectionState.ENGINE_STARTUP_FAILED) {
+			this.cleanup();
+			this.emit('error', error);
+			return;
+		}
+
+		// Do not retry on auth failure or rate limit (user action required)
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		const isRateLimit = errorMsg.toLowerCase().includes('rate limit');
 		const shouldReconnect = !this.isManualDisconnect &&
 			this.connectionStatus.hasCredentials &&
-			!this.isCredentialError(errorMessage) &&
+			!(error instanceof AuthenticationException) &&
+			!isRateLimit &&
 			this.connectionStatus.retryAttempt < this.connectionStatus.maxRetryAttempts;
 
 		if (!shouldReconnect) {
@@ -468,14 +520,6 @@ export class ConnectionManager extends EventEmitter {
 		if (shouldReconnect) {
 			this.scheduleReconnect();
 		}
-	}
-
-	private isCredentialError(message: string): boolean {
-		const lowerMessage = message.toLowerCase();
-		return lowerMessage.includes('api key') ||
-			lowerMessage.includes('unauthorized') ||
-			lowerMessage.includes('authentication') ||
-			lowerMessage.includes('credentials');
 	}
 
 	private scheduleReconnect(): void {
@@ -526,7 +570,8 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	public isDisconnected(): boolean {
-		return this.connectionStatus.state === 'disconnected';
+		return this.connectionStatus.state === ConnectionState.DISCONNECTED ||
+			this.connectionStatus.state === ConnectionState.ENGINE_STARTUP_FAILED;
 	}
 
 	public hasCredentials(): boolean {
@@ -542,7 +587,7 @@ export class ConnectionManager extends EventEmitter {
 			return undefined;
 		}
 		try {
-			const response = await this.client.rawRequest(command, args, token);
+			const response = await this.client.dapRequest(command, args, token);
 			return response as unknown as GenericResponse;
 		} catch {
 			return undefined;
@@ -582,7 +627,7 @@ export class ConnectionManager extends EventEmitter {
 
 		this.servicesRefreshPromise = (async () => {
 			try {
-				const response = await this.client!.rawRequest('apaext_services', {});
+				const response = await this.client!.dapRequest('rrext_services', {});
 				if (response?.success === false) {
 					const msg = response?.message ?? 'Failed to load services';
 					this.cachedServices = null;

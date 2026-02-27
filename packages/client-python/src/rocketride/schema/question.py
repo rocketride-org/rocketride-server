@@ -399,7 +399,7 @@ class Question(BaseModel):
         questions: List of questions to ask
     """
 
-    type: QuestionType = Field(QuestionType.SEMANTIC, description='Type of question - semantic uses AI understanding, keyword uses text matching.')
+    type: QuestionType = Field(QuestionType.QUESTION, description='Type of question - question uses basic Q&A, semantic uses AI understanding, keyword uses text matching.')
     filter: Optional[DocFilter] = Field(default_factory=DocFilter, description='Controls which documents to search and how to process results.')
     expectJson: Optional[bool] = Field(False, description='Set to True to get structured JSON responses instead of text.')
     role: Optional[str] = Field('', description='AI role or persona for the conversation (e.g., "You are a financial analyst").')
@@ -595,7 +595,9 @@ class Question(BaseModel):
 
         # Add default instruction if none provided
         if not len(self.instructions):
-            addPromptInstruction(QuestionInstruction(subtitle='Answer the following questions', instructions='I will provide the questions listed in order and then documents as context. Use the given context to provide an answer to the questions.'))
+            addPromptInstruction(QuestionInstruction(subtitle='Answer the following questions', instructions='Answer the following questions.'))
+            if len(self.documents):
+                addPromptInstruction(QuestionInstruction(subtitle='Documents', instructions='Use the provided documents as context for your answer.'))
 
         # Add all instructions
         for instruction in self.instructions:
@@ -642,10 +644,11 @@ class Question(BaseModel):
 
         # Add questions
         if len(self.questions):
-            questionNum = 1
-            for question in self.questions:
-                prompt += f'Question {questionNum}: ' + question.text + crlf
-                questionNum += 1
+            if len(self.questions) == 1:
+                prompt += self.questions[0].text + crlf
+            else:
+                for i, question in enumerate(self.questions, start=1):
+                    prompt += f"Question {i}: {question.text}{crlf}"
 
         # Add context
         for context in self.context:

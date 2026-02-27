@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Image - Cleanup",
+	"title": "Cleanup",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -109,5 +109,19 @@
 			"properties": [
 			]
 		}
-	]
+	],
+	"test": {
+		"outputs": ["image"],
+		"cases": [
+			{
+				"name": "Clean image for OCR",
+				"image": "images/ocr_test_text.png",
+				"expect": {
+					"image": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	}
 }

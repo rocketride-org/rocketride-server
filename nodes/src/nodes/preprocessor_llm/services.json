@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Preprocessor - LLM",
+	"title": "LLM",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -158,7 +158,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Preprocessor - LLM",
+			"title": "LLM",
 			"properties": [
 				"preprocessor_llm.profile"
 			]

@@ -23,7 +23,7 @@
  */
 
 /**
- * Build tasks for @rocketride/client-typescript
+ * Build tasks for rocketride (TypeScript client)
  * 
  * Commands:
  *   build - Compile TypeScript and create package
@@ -71,9 +71,24 @@ async function saveCompileHash() {
     }
 }
 
+// Canonical README lives in docs/; npm pack runs against the package root,
+// so we must copy the README here (npm doesn't support files outside the package).
+const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
+const README_SRC = path.join(DOCS_DIR, 'README-typescript-client.md');
+const README_DEST = path.join(PACKAGE_DIR, 'README.md');
+
 // ============================================================================
 // Action Factories
 // ============================================================================
+
+function makeCopyReadmeAction() {
+    return {
+        run: async (ctx, task) => {
+            await copyFile(README_SRC, README_DEST);
+            task.output = 'Copied README from docs/';
+        }
+    };
+}
 
 function makeCompileCjsAction() {
     return {
@@ -128,20 +143,6 @@ function makeCompileCliAction() {
             }
             await execCommand('npx', ['tsc', '-p', 'tsconfig.cli.json'], { task, cwd: PACKAGE_DIR });
         }
-    };
-}
-
-function makeCompileAction() {
-    return {
-        steps: [
-            parallel([
-                'client-typescript:compile-cjs',
-                'client-typescript:compile-esm',
-                'client-typescript:generate-types'
-            ], 'Compile sources'),
-            'client-typescript:compile-cli',
-            'client-typescript:post-build'
-        ]
     };
 }
 
@@ -300,22 +301,21 @@ module.exports = {
 
     actions: [
         // Internal actions
+        { name: 'client-typescript:copy-readme', action: makeCopyReadmeAction },
         { name: 'client-typescript:compile-cjs', action: makeCompileCjsAction },
         { name: 'client-typescript:compile-esm', action: makeCompileEsmAction },
         { name: 'client-typescript:generate-types', action: makeGenerateTypesAction },
         { name: 'client-typescript:compile-cli', action: makeCompileCliAction },
         { name: 'client-typescript:post-build', action: makePostBuildAction },
         { name: 'client-typescript:create-package', action: makeCreateNpmPackageAction },
-        { name: 'client-typescript:copy-to-static', action: makeCopyToServerStaticAction },
-        { name: 'client-typescript:start-server', action: makeStartTestServerAction },
-        { name: 'client-typescript:stop-server', action: makeStopTestServerAction },
+        { name: 'client-typescript:sync', action: makeCopyToServerStaticAction },
         { name: 'client-typescript:run-jest', action: makeRunJestAction },
-        { name: 'client-typescript:compile', action: makeCompileAction },
-        
+
         // Public actions (have descriptions)
         { name: 'client-typescript:build', action: () => ({
-            description: 'Compile TypeScript and create package',
+            description: 'Build TypeScript client',
             steps: [
+                'client-typescript:copy-readme',
                 parallel([
                     'client-typescript:compile-cjs',
                     'client-typescript:compile-esm',
@@ -324,19 +324,19 @@ module.exports = {
                 'client-typescript:compile-cli',
                 'client-typescript:post-build',
                 'client-typescript:create-package',
-                'client-typescript:copy-to-static'
+                'client-typescript:sync'
             ]
         })},
         { name: 'client-typescript:test', action: () => ({
-            description: 'Run unit tests',
+            description: 'Test TypeScript client',
             steps: [
                 'server:build',
                 parallel([
-                    'nodes:build',
                     'ai:build',
-                    'client-python:build'
-                ], 'Build modules'),
-                'client-typescript:compile',
+                    'nodes:build',
+                    'client-python:build',
+                    'client-typescript:build'
+                ], 'Build dependencies'),
                 bracket({
                     name: 'ts-test-server',
                     setup: makeStartTestServerAction(),
@@ -346,7 +346,7 @@ module.exports = {
             ]
         })},
         { name: 'client-typescript:clean', action: () => ({
-            description: 'Remove client-typescript build artifacts',
+            description: 'Clean TypeScript client',
             run: async (ctx, task) => {
                 await removeDirs([LOCAL_DIST]);
                 await removeDirAndParents(PROJECT_ROOT, [

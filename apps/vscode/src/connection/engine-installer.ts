@@ -49,6 +49,11 @@ interface ReleaseInfo {
 	assets: ReleaseAsset[];
 }
 
+export interface ReleaseListItem {
+	tag_name: string;
+	prerelease: boolean;
+}
+
 interface PlatformInfo {
 	name: string;
 	ext: string;
@@ -76,17 +81,37 @@ export class EngineInstaller {
 	}
 
 	/**
-	 * Ensures the engine is installed. Downloads if needed.
+	 * Ensures the engine is installed at the requested version. Downloads if needed.
 	 * Returns the path to the engine executable.
 	 * Uses a concurrency guard to prevent parallel downloads.
 	 */
 	public async ensureEngine(
+		versionSpec: string = 'latest',
 		progress?: vscode.Progress<{ message?: string; increment?: number }>,
 		token?: vscode.CancellationToken,
 		githubToken?: string
 	): Promise<string> {
+		const displaySpec = versionSpec.replace(/^server-/, '');
+		this.logger.output(`${icons.info} Engine version requested: ${displaySpec}`);
+
 		if (this.isInstalled()) {
-			return this.getExecutablePath();
+			const installed = this.getInstalledVersion();
+			const displayInstalled = installed?.replace(/^server-/, '') ?? 'unknown';
+			this.logger.output(`${icons.info} Engine installed: ${displayInstalled}`);
+			if (versionSpec !== 'latest' && versionSpec !== 'prerelease') {
+				// Specific version: only reuse if it matches
+				if (installed === versionSpec) {
+					this.logger.output(`${icons.success} Installed version matches, skipping download`);
+					return this.getExecutablePath();
+				}
+				this.logger.output(`${icons.info} Version mismatch, downloading ${displaySpec}...`);
+				// Different version requested — fall through to download
+			} else {
+				// For latest/prerelease, trust the installed version
+				return this.getExecutablePath();
+			}
+		} else {
+			this.logger.output(`${icons.info} No engine installed, downloading ${displaySpec}...`);
 		}
 
 		// Concurrency guard: reuse in-flight install
@@ -94,11 +119,23 @@ export class EngineInstaller {
 			return this.installPromise;
 		}
 
-		this.installPromise = this.downloadAndInstall(progress, token, githubToken).finally(() => {
+		this.installPromise = this.downloadAndInstall(versionSpec, progress, token, githubToken).finally(() => {
 			this.installPromise = null;
 		});
 
 		return this.installPromise;
+	}
+
+	public getInstalledVersion(): string | null {
+		const versionFile = path.join(this.engineDir, '.version');
+		if (fs.existsSync(versionFile)) {
+			return fs.readFileSync(versionFile, 'utf8').trim();
+		}
+		return null;
+	}
+
+	private writeInstalledVersion(tagName: string): void {
+		fs.writeFileSync(path.join(this.engineDir, '.version'), tagName, 'utf8');
 	}
 
 	private async createOctokit(githubToken?: string) {
@@ -110,26 +147,26 @@ export class EngineInstaller {
 	}
 
 	private async downloadAndInstall(
+		versionSpec: string,
 		progress?: vscode.Progress<{ message?: string; increment?: number }>,
 		token?: vscode.CancellationToken,
 		githubToken?: string
 	): Promise<string> {
-		this.logger.output(`${icons.info} Server not found locally, downloading...`);
-
-		// Fetch latest release info from GitHub
-		progress?.report({ message: 'Fetching latest release info...' });
-		const release = await this.fetchLatestRelease(token, githubToken);
+		// Fetch release info from GitHub
+		progress?.report({ message: 'Fetching release info...' });
+		const release = await this.fetchRelease(versionSpec, token, githubToken);
+		const displayVersion = release.tag_name.replace(/^server-/, '');
 
 		// Find the correct asset for this platform
 		const asset = this.findPlatformAsset(release);
-		this.logger.output(`${icons.info} Found release ${release.tag_name}: ${asset.name} (${(asset.size / 1024 / 1024).toFixed(1)} MB)`);
+		this.logger.output(`${icons.info} Found release ${displayVersion}: ${asset.name} (${(asset.size / 1024 / 1024).toFixed(1)} MB)`);
 
 		// Download to a temp file
 		const tmpPath = path.join(os.tmpdir(), `rocketride-engine-${Date.now()}${asset.name.endsWith('.zip') ? '.zip' : '.tar.gz'}`);
 
 		try {
-			progress?.report({ message: `Downloading ${asset.name}...` });
-			await this.downloadAsset(asset, tmpPath, progress, token, githubToken);
+			progress?.report({ message: `Downloading ${displayVersion}...` });
+			await this.downloadAsset(asset, tmpPath, displayVersion, progress, token, githubToken);
 
 			// Clean up existing engine dir if partial install exists
 			if (fs.existsSync(this.engineDir)) {
@@ -151,7 +188,8 @@ export class EngineInstaller {
 				);
 			}
 
-			this.logger.output(`${icons.success} Server installed at ${this.engineDir}`);
+			this.writeInstalledVersion(release.tag_name);
+			this.logger.output(`${icons.success} Server ${release.tag_name} installed at ${this.engineDir}`);
 			progress?.report({ message: 'Server ready!' });
 
 			return this.getExecutablePath();
@@ -167,25 +205,81 @@ export class EngineInstaller {
 		}
 	}
 
-	private async fetchLatestRelease(token?: vscode.CancellationToken, githubToken?: string): Promise<ReleaseInfo> {
+	/**
+	 * Fetches all available releases for the version dropdown.
+	 * Returns releases that have assets, sorted newest first.
+	 */
+	public async fetchAllReleases(
+		token?: vscode.CancellationToken,
+		githubToken?: string
+	): Promise<ReleaseListItem[]> {
 		this.throwIfCancelled(token);
-
 		const octokit = await this.createOctokit(githubToken);
 		const { data } = await octokit.repos.listReleases({
 			owner: EngineInstaller.GITHUB_OWNER,
 			repo: EngineInstaller.GITHUB_REPO,
-			per_page: 1
+			per_page: 100
 		});
+		return data
+			.filter(r => r.tag_name && r.assets && r.assets.length > 0)
+			.map(r => ({
+				tag_name: r.tag_name,
+				prerelease: r.prerelease
+			}));
+	}
 
-		if (data.length === 0) {
-			throw new Error('No releases found on GitHub');
+	/**
+	 * Fetches a specific release based on version spec.
+	 * - 'latest': newest non-prerelease with assets
+	 * - 'prerelease': newest release (including prereleases)
+	 * - specific tag (e.g. 'server-v3.1.1'): exact release by tag
+	 */
+	private async fetchRelease(
+		versionSpec: string,
+		token?: vscode.CancellationToken,
+		githubToken?: string
+	): Promise<ReleaseInfo> {
+		this.throwIfCancelled(token);
+		const octokit = await this.createOctokit(githubToken);
+
+		if (versionSpec === 'latest') {
+			const { data } = await octokit.repos.listReleases({
+				owner: EngineInstaller.GITHUB_OWNER,
+				repo: EngineInstaller.GITHUB_REPO,
+				per_page: 20
+			});
+			const stable = data.find(r => !r.prerelease && r.assets && r.assets.length > 0);
+			if (!stable) {
+				throw new Error('No stable releases found on GitHub');
+			}
+			return this.toReleaseInfo(stable);
 		}
 
-		const release = data[0];
+		if (versionSpec === 'prerelease') {
+			const { data } = await octokit.repos.listReleases({
+				owner: EngineInstaller.GITHUB_OWNER,
+				repo: EngineInstaller.GITHUB_REPO,
+				per_page: 1
+			});
+			if (data.length === 0) {
+				throw new Error('No releases found on GitHub');
+			}
+			return this.toReleaseInfo(data[0]);
+		}
+
+		// Specific tag
+		const { data } = await octokit.repos.getReleaseByTag({
+			owner: EngineInstaller.GITHUB_OWNER,
+			repo: EngineInstaller.GITHUB_REPO,
+			tag: versionSpec
+		});
+		return this.toReleaseInfo(data);
+	}
+
+	private toReleaseInfo(release: { tag_name: string; assets: Array<{ id: number; name: string; browser_download_url: string; size: number }> }): ReleaseInfo {
 		if (!release.tag_name || !release.assets || release.assets.length === 0) {
 			throw new Error(`Release ${release.tag_name} has no assets`);
 		}
-
 		return {
 			tag_name: release.tag_name,
 			assets: release.assets.map(a => ({
@@ -213,19 +307,19 @@ export class EngineInstaller {
 		throw new Error(`Unsupported platform: ${platform} ${arch}. Supported: Windows (x64), macOS (x64/ARM64), Linux (x64).`);
 	}
 
-	private getPlatformAssetName(tagName: string): string {
-		const info = this.getPlatformInfo();
-		return `rocketride-${tagName}-${info.name}.${info.ext}`;
-	}
-
 	private findPlatformAsset(release: ReleaseInfo): ReleaseAsset {
-		const expectedName = this.getPlatformAssetName(release.tag_name);
-		const asset = release.assets.find(a => a.name === expectedName);
+		const info = this.getPlatformInfo();
+		// Match by platform suffix (e.g. "-win64.zip", "-darwin-arm64.tar.gz")
+		// to handle cases where the asset version doesn't match the tag exactly.
+		const suffix = `-${info.name}.${info.ext}`;
+		const asset = release.assets.find(a =>
+			a.name.startsWith('rocketride-') && a.name.endsWith(suffix)
+		);
 
 		if (!asset) {
 			const available = release.assets.map(a => a.name).join(', ');
 			throw new Error(
-				`No release asset found for this platform (expected: ${expectedName}). Available: ${available}`
+				`No release asset found for this platform (expected: *${suffix}). Available: ${available}`
 			);
 		}
 
@@ -239,6 +333,7 @@ export class EngineInstaller {
 	private async downloadAsset(
 		asset: ReleaseAsset,
 		destPath: string,
+		displayVersion: string,
 		progress?: vscode.Progress<{ message?: string; increment?: number }>,
 		token?: vscode.CancellationToken,
 		githubToken?: string
@@ -323,7 +418,7 @@ export class EngineInstaller {
 							lastPercent = percent;
 							const mb = (downloadedBytes / 1024 / 1024).toFixed(1);
 							const totalMb = (totalBytes / 1024 / 1024).toFixed(1);
-							progress?.report({ message: `Downloading: ${percent}% (${mb}/${totalMb} MB)` });
+							progress?.report({ message: `Downloading ${displayVersion}: ${percent}% (${mb}/${totalMb} MB)` });
 						}
 					}
 				});

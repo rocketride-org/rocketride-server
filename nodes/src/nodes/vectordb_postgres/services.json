@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Vector Store - PostgreSQL",
+	"title": "PostgreSQL",
 	//
 	// Required:
 	//     The protocol is the endpoint protocol
@@ -159,8 +159,8 @@
 				"port": 5432,
 				"user": "postgres",
 				"password": "",
-				"database": "aparavi",
-				"collection": "aparavi",
+				"database": "rocketride",
+				"collection": "rocketride",
 				"score": 0.5,
 				"similarity": "cosine"
 			}
@@ -177,7 +177,7 @@
 			"title": "Table",
 			"description": "Name of the table to store vectors.",
 			"type": "string",
-			"default": "aparavi"
+			"default": "rocketride"
 		},
 		"vector.local.host": {
 			"title": "Host",

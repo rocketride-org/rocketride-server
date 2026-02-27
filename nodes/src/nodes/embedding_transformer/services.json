@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Embedding - Transformer",
+	"title": "Transformer",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -26,13 +26,13 @@
 	],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -172,10 +172,43 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Embedding - Sentence Transformer",
+			"title": "Sentence Transformer",
 			"properties": [
 				"embedding.profile"
 			]
 		}
-	]
+	],
+	"test": {
+		"profiles": ["miniLM"],
+		"outputs": ["documents", "questions"],
+		"cases": [
+			{
+				"name": "Embed text chunks",
+				"documents": [
+					{"page_content": "Hello world, this is a test document."},
+					{"page_content": "Second chunk for embedding."}
+				],
+				"expect": {
+					"documents": {
+						"notEmpty": true
+					}
+				}
+			},
+			{
+				"name": "Embed single question (flat vector for Qdrant)",
+				"questions": "What is the capital of France?",
+				"expect": {
+					"questions": {
+						"notEmpty": true,
+						"property": [
+							{
+								"path": "[0].questions[0].embedding",
+								"minLength": 384
+							}
+						]
+					}
+				}
+			}
+		]
+	}
 }

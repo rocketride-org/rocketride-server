@@ -1,3 +1,26 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 RocketRide, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
 """
 Mock astrapy Module for Testing
 ===============================
@@ -32,7 +55,7 @@ The mock is automatically loaded when running tests via:
     builder nodes:test --pytest="-k astra_db"
 
 Or manually:
-    set ROCKETRIDE_MOCK=C:\\Projects\\engine-new\\nodes\\test\\mocks
+    set ROCKETRIDE_MOCK=C:\\Projects\\rocketride-server\\nodes\\test\\mocks
     python -m pytest nodes/test/test_dynamic.py -k astra_db -s -v
 """
 
@@ -60,14 +83,14 @@ from .info import CollectionDefinition, CollectionVectorOptions, CollectionLexic
 def _serialize_value(value: Any, exclude_none: bool = False) -> Any:
     """
     Serialize a value, converting Pydantic models and dataclasses to dicts.
-    
+
     Args:
         value: The value to serialize
         exclude_none: If True, exclude None values from dicts (important for Pydantic validation)
     """
     if value is None:
         return None
-    
+
     if hasattr(value, 'model_dump'):
         # Pydantic v2 model - always exclude None to avoid validation errors
         return value.model_dump(exclude_none=True)
@@ -91,20 +114,20 @@ def _serialize_value(value: Any, exclude_none: bool = False) -> Any:
 def _evaluate_filter(filter_dict: Dict[str, Any], document: Dict[str, Any]) -> bool:
     """
     Evaluate a MongoDB-style filter against a document.
-    
+
     Supports operators: $in, $gte, $lte, $gt, $lt, $regex, $eq, $ne, $exists
     Supports dot notation for nested fields: 'meta.objectId'
-    
+
     Args:
         filter_dict: MongoDB-style filter (e.g., {'meta.objectId': {'$in': ['doc-1']}})
         document: The document to evaluate
-        
+
     Returns:
         True if the document matches the filter, False otherwise
     """
     if not filter_dict:
         return True
-    
+
     for field_path, condition in filter_dict.items():
         # Get the value from the document using dot notation
         value = document
@@ -118,7 +141,7 @@ def _evaluate_filter(filter_dict: Dict[str, Any], document: Dict[str, Any]) -> b
             else:
                 value = None
                 break
-        
+
         # Evaluate the condition
         if isinstance(condition, dict):
             # Complex condition with operators
@@ -159,7 +182,7 @@ def _evaluate_filter(filter_dict: Dict[str, Any], document: Dict[str, Any]) -> b
             # Simple equality
             if value != condition:
                 return False
-    
+
     return True
 
 
@@ -170,26 +193,26 @@ def _evaluate_filter(filter_dict: Dict[str, Any], document: Dict[str, Any]) -> b
 class Collection:
     """
     Mock implementation of an Astra DB collection.
-    
+
     Provides methods for CRUD operations on documents within the collection.
     Data is stored in the parent Database's class-level storage.
     """
-    
+
     def __init__(self, name: str, database: 'Database'):
         """
         Initialize a collection reference.
-        
+
         Args:
             name: Collection name
             database: Parent database instance
         """
         self.name = name
         self._database = database
-    
+
     def _get_data(self) -> List[Dict[str, Any]]:
         """Get the data list for this collection."""
         return Database._data.get(self.name, [])
-    
+
     def find(
         self,
         filter: Dict[str, Any] = None,
@@ -203,7 +226,7 @@ class Collection:
     ) -> 'Cursor':
         """
         Find documents matching the filter.
-        
+
         Args:
             filter: MongoDB-style filter conditions
             sort: Sort specification (e.g., {'$vector': [0.1, ...]})
@@ -212,16 +235,16 @@ class Collection:
             projection: Fields to include/exclude
             include_similarity: Whether to include similarity scores
             include_sort_vector: Whether to include sort vector
-            
+
         Returns:
             Cursor over matching documents
         """
         data = self._get_data()
-        
+
         # Apply filter
         if filter:
             data = [doc for doc in data if _evaluate_filter(filter, doc)]
-        
+
         # Handle vector sort (semantic search)
         if sort and '$vector' in sort:
             # For mock, we just return documents with a fixed similarity score
@@ -229,15 +252,15 @@ class Collection:
             for doc in data:
                 if include_similarity:
                     doc['$similarity'] = 0.925  # Fixed mock score
-        
+
         # Apply skip
         if skip:
             data = data[skip:]
-        
+
         # Apply limit
         if limit:
             data = data[:limit]
-        
+
         # Apply projection (remove excluded fields)
         if projection:
             filtered_data = []
@@ -253,22 +276,22 @@ class Collection:
                             new_doc[key] = value
                 filtered_data.append(new_doc if new_doc else doc)
             data = filtered_data
-        
+
         return Cursor(data)
-    
+
     def insert_many(self, documents: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Insert multiple documents.
-        
+
         Args:
             documents: List of documents to insert
-            
+
         Returns:
             Insert result with inserted IDs
         """
         if self.name not in Database._data:
             Database._data[self.name] = []
-        
+
         inserted_ids = []
         for doc in documents:
             # Serialize any complex objects in the document
@@ -282,33 +305,33 @@ class Collection:
                     serialized[key] = _serialize_value(value, exclude_none=True)
                 else:
                     serialized[key] = _serialize_value(value)
-            
+
             Database._data[self.name].append(serialized)
             inserted_ids.append(doc.get('_id'))
-        
+
         return {'inserted_ids': inserted_ids}
-    
+
     def delete_many(self, filter: Dict[str, Any]) -> Dict[str, Any]:
         """
         Delete documents matching the filter.
-        
+
         Args:
             filter: MongoDB-style filter
-            
+
         Returns:
             Delete result with count
         """
         if self.name not in Database._data:
             return {'deleted_count': 0}
-        
+
         original_count = len(Database._data[self.name])
         Database._data[self.name] = [
             doc for doc in Database._data[self.name]
             if not _evaluate_filter(filter, doc)
         ]
-        
+
         return {'deleted_count': original_count - len(Database._data[self.name])}
-    
+
     def update_many(
         self,
         filter: Dict[str, Any],
@@ -316,24 +339,24 @@ class Collection:
     ) -> Dict[str, Any]:
         """
         Update documents matching the filter.
-        
+
         Args:
             filter: MongoDB-style filter
             update: Update operations (e.g., {'$set': {'field': value}})
-            
+
         Returns:
             Update result with counts
         """
         if self.name not in Database._data:
             return {'matched_count': 0, 'modified_count': 0}
-        
+
         matched = 0
         modified = 0
-        
+
         for doc in Database._data[self.name]:
             if _evaluate_filter(filter, doc):
                 matched += 1
-                
+
                 # Apply $set operator
                 if '$set' in update:
                     for field_path, value in update['$set'].items():
@@ -345,24 +368,24 @@ class Collection:
                             target = target[part]
                         target[parts[-1]] = value
                         modified += 1
-        
+
         return {'matched_count': matched, 'modified_count': modified}
-    
+
     def count_documents(self, filter: Dict[str, Any] = None) -> int:
         """
         Count documents matching the filter.
-        
+
         Args:
             filter: Optional filter conditions
-            
+
         Returns:
             Count of matching documents
         """
         data = self._get_data()
-        
+
         if filter:
             data = [doc for doc in data if _evaluate_filter(filter, doc)]
-        
+
         return len(data)
 
 
@@ -374,21 +397,21 @@ class Cursor:
     """
     Mock cursor for iterating over query results.
     """
-    
+
     def __init__(self, data: List[Dict[str, Any]]):
         self._data = data
         self._index = 0
-    
+
     def __iter__(self) -> Iterator[Dict[str, Any]]:
         return iter(self._data)
-    
+
     def __next__(self) -> Dict[str, Any]:
         if self._index >= len(self._data):
             raise StopIteration
         result = self._data[self._index]
         self._index += 1
         return result
-    
+
     def __len__(self) -> int:
         return len(self._data)
 
@@ -400,34 +423,34 @@ class Cursor:
 class Database:
     """
     Mock implementation of an Astra DB database.
-    
+
     Uses class-level storage to persist data across instances.
     """
-    
+
     # Class-level storage
     _collections: Dict[str, Dict[str, Any]] = {}  # Collection metadata
     _data: Dict[str, List[Dict[str, Any]]] = {}    # Collection name -> documents
-    
+
     def __init__(self, api_endpoint: str, token: str = None):
         """
         Initialize a database connection.
-        
+
         Args:
             api_endpoint: Astra DB API endpoint
             token: Application token
         """
         self.api_endpoint = api_endpoint
         self.token = token
-    
+
     def list_collection_names(self) -> List[str]:
         """
         List all collection names in the database.
-        
+
         Returns:
             List of collection names
         """
         return list(Database._collections.keys())
-    
+
     def create_collection(
         self,
         name: str,
@@ -436,11 +459,11 @@ class Database:
     ) -> Collection:
         """
         Create a new collection.
-        
+
         Args:
             name: Collection name
             definition: Collection definition with vector options
-            
+
         Returns:
             The created collection
         """
@@ -448,26 +471,26 @@ class Database:
             'definition': definition,
         }
         Database._data[name] = []
-        
+
         return Collection(name, self)
-    
+
     def get_collection(self, name: str) -> Collection:
         """
         Get a collection by name.
-        
+
         Args:
             name: Collection name
-            
+
         Returns:
             Collection instance
         """
         return Collection(name, self)
-    
+
     @classmethod
     def reset(cls) -> None:
         """
         Reset all mock data.
-        
+
         Call this between test runs to ensure a clean state.
         """
         cls._collections = {}
@@ -481,18 +504,18 @@ class Database:
 class DataAPIClient:
     """
     Mock implementation of the Astra DB Data API client.
-    
+
     Entry point for connecting to Astra DB.
     """
-    
+
     def __init__(self, **kwargs):
         """
         Initialize the Data API client.
-        
+
         All parameters are accepted for API compatibility but ignored.
         """
         pass
-    
+
     def get_database(
         self,
         api_endpoint: str,
@@ -501,21 +524,21 @@ class DataAPIClient:
     ) -> Database:
         """
         Get a database connection.
-        
+
         Args:
             api_endpoint: Astra DB API endpoint
             token: Application token
-            
+
         Returns:
             Database instance
         """
         return Database(api_endpoint, token)
-    
+
     @classmethod
     def reset(cls) -> None:
         """
         Reset all mock data.
-        
+
         Call this between test runs.
         """
         Database.reset()
@@ -531,11 +554,11 @@ __all__ = [
     'Database',
     'Collection',
     'Cursor',
-    
+
     # Submodules
     'data_types',
     'info',
-    
+
     # Re-exported types
     'DataAPIVector',
     'CollectionDefinition',

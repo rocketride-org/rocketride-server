@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "NER - Named Entity Recognition",
+	"title": "Named Entity Recognition",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol

@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Preprocessor - General Text",
+	"title": "General Text",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -488,10 +488,25 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Preprocessor - General Text",
+			"title": "General Text",
 			"properties": [
 				"langchain.splitter.profile"
 			]
 		}
-	]
+	],
+	"test": {
+		"profiles": ["default"],
+		"outputs": ["documents"],
+		"cases": [
+			{
+				"name": "Split text into chunks",
+				"text": "First paragraph with some content.\n\nSecond paragraph separated by newlines.\n\nThird paragraph for chunking.",
+				"expect": {
+					"documents": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	}
 }

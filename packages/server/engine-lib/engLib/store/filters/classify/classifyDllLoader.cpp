@@ -60,11 +60,11 @@ Error ClassifyDllLoader::init() noexcept {
     // Determine DLL path
     auto execDir = application::execDir();
 #if ROCKETRIDE_PLAT_WIN
-    file::Path dllPath = execDir / "rocketride_classify.dll";
+    file::Path dllPath = execDir / "classify.dll";
 #elif ROCKETRIDE_PLAT_MAC
-    file::Path dllPath = execDir / "librocketride_classify.dylib";
+    file::Path dllPath = execDir / "libclassify.dylib";
 #else
-    file::Path dllPath = execDir / "librocketride_classify.so";
+    file::Path dllPath = execDir / "libclassify.so";
 #endif
 
     m_dllPath = dllPath.str();

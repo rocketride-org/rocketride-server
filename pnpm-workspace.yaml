@@ -1,4 +1,4 @@
-# Aparavi Engine Monorepo Workspace Configuration
+# Rocketride Engine Monorepo Workspace Configuration
 # This file defines which directories contain packages in the monorepo
 
 # Allow all dependency postinstall/preinstall scripts to run (disables the
@@ -40,10 +40,8 @@ packages:
   - 'packages/tika'
   
   # Applications
-  - 'apps/engine'
   - 'apps/chat-ui'
   - 'apps/dropper-ui'
-  - 'apps/rocket-ui'
   - 'apps/vscode'
   
   # Examples

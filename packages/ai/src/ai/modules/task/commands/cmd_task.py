@@ -173,9 +173,9 @@ class TaskCommands(DAPConn):
             self.debug_message(f'Failed to restart task: {str(e)}')
             raise
 
-    async def on_apaext_get_task_status(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_get_task_status(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle DAP 'apaext_get_task_status' command to retrieve the current status of a task.
+        Handle DAP 'rrext_get_task_status' command to retrieve the current status of a task.
 
         Retrieves and returns the current status information for the specified task,
         including execution state, progress metrics, errors, and other diagnostic data.
@@ -224,9 +224,9 @@ class TaskCommands(DAPConn):
             # Re-raise to let DAP error handling create proper error response
             raise
 
-    async def on_apaext_get_token(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_get_token(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle DAP 'apaext_status' command to retrieve the current status of a task.
+        Handle DAP 'rrext_status' command to retrieve the current status of a task.
 
         Retrieves and returns the current status information for the specified task,
         including execution state, progress metrics, errors, and other diagnostic data.
@@ -266,9 +266,9 @@ class TaskCommands(DAPConn):
             # Re-raise to let DAP error handling create proper error response
             raise
 
-    async def on_apaext_get_tasks(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_get_tasks(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle DAP 'apaext_get_tasks' command to retrieve list of all active tasks.
+        Handle DAP 'rrext_get_tasks' command to retrieve list of all active tasks.
 
         Retrieves and returns the current tasks information for the authenticated user.
         This is a read-only operation that does not affect the running tasks.
@@ -297,12 +297,10 @@ class TaskCommands(DAPConn):
                 # Get current status for name and status string
                 status = control.task.get_status()
 
-                # Parse the pipeline configuration to get the name and description
-                pipeline_wrapper = control.pipeline or {}
-                pipeline_inner = pipeline_wrapper.get('pipeline') if isinstance(pipeline_wrapper, dict) else {}
-                if isinstance(pipeline_inner, dict):
-                    pipeline_name = pipeline_inner.get('name')
-                    pipeline_desc = pipeline_inner.get('description') if isinstance(pipeline_inner.get('description'), str) else None
+                # Read name and description from the flat project
+                project = control.pipeline or {}
+                pipeline_name = project.get('name') if isinstance(project, dict) else None
+                pipeline_desc = project.get('description') if isinstance(project, dict) and isinstance(project.get('description'), str) else None
 
                 # Build the name and description
                 name = pipeline_name or control.source
@@ -327,9 +325,9 @@ class TaskCommands(DAPConn):
             self.debug_message(f'Failed to list tasks: {str(e)}')
             raise
 
-    async def on_apaext_store(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_store(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle DAP 'apaext_store' command - unified project and template storage operations.
+        Handle DAP 'rrext_store' command - unified project and template storage operations.
 
         Central dispatcher for all storage subcommands. Verifies permissions once
         and routes to appropriate subcommand handler.

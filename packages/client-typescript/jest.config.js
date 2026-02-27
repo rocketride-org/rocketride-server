@@ -41,17 +41,17 @@ module.exports = {
 	},
 	setupFilesAfterEnv: ['../../scripts/lib/jestreport.js'],
 	collectCoverageFrom: [
-		'rocketride-client/src/**/*.{ts,tsx}',
-		'!rocketride-client/src/**/*.d.ts',
-		'!rocketride-client/src/**/*.test.{ts,tsx}',
+		'src/**/*.{ts,tsx}',
+		'!src/**/*.d.ts',
+		'!src/**/*.test.{ts,tsx}',
 	],
 	coverageDirectory: 'coverage',
 	coverageReporters: ['text', 'lcov', 'html'],
-	testTimeout: 60000, // 60 seconds for integration tests
+	testTimeout: 120000, // 120 seconds for integration tests (CI runners can be slow)
 	verbose: true,
 
 	// Module name mapping for cleaner imports
 	moduleNameMapper: {
-		'^@/(.*)$': '<rootDir>/rocketride-client/src/$1',
+		'^@/(.*)$': '<rootDir>/src/$1',
 	}
 };

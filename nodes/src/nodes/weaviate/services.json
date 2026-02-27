@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Vector Store - Weaviate",
+	"title": "Weaviate",
 	//
 	// Required:
 	//     The protocol is the endpoint protocol
@@ -158,7 +158,7 @@
 				"title": "Your own Weaviate server",
 				"host": "localhost",
 				"port": 8080,
-				"collection": "APARAVI"
+				"collection": "ROCKETRIDE"
 			},
 			"cloud": {
 				"mode": "cloud",
@@ -166,7 +166,7 @@
 				"host": "",
 				"port": 433,
 				"apikey": "",
-				"collection": "APARAVI"
+				"collection": "ROCKETRIDE"
 			}
 		}
 	},

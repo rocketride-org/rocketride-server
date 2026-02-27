@@ -26,7 +26,7 @@ import { TransportWebSocket } from './core/TransportWebSocket';
 import { DAPClient } from './core/DAPClient';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback } from './types';
 import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig } from './types';
-import { CONST_DEFAULT_SERVICE } from './constants';
+import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants';
 import { Question } from './schema/Question';
 import { AuthenticationException } from './exceptions';
 
@@ -123,7 +123,7 @@ export class DataPipe {
 			throw new Error('Pipe already opened');
 		}
 
-		const request = this._client.buildRequest('apaext_process', {
+		const request = this._client.buildRequest('rrext_process', {
 			arguments: {
 				subcommand: 'open',
 				object: this._objinfo,
@@ -162,7 +162,7 @@ export class DataPipe {
 			throw new Error('Buffer must be Uint8Array');
 		}
 
-		const request = this._client.buildRequest('apaext_process', {
+		const request = this._client.buildRequest('rrext_process', {
 			arguments: {
 				subcommand: 'write',
 				pipe_id: this._pipeId,
@@ -194,7 +194,7 @@ export class DataPipe {
 		}
 
 		try {
-			const request = this._client.buildRequest('apaext_process', {
+			const request = this._client.buildRequest('rrext_process', {
 				arguments: {
 					subcommand: 'close',
 					pipe_id: this._pipeId,
@@ -353,7 +353,7 @@ export class RocketRideClient extends DAPClient {
 
 		const {
 			auth = config.auth || clientEnv.ROCKETRIDE_APIKEY,
-			uri = config.uri || clientEnv.ROCKETRIDE_URI || CONST_DEFAULT_SERVICE,
+			uri = config.uri || clientEnv.ROCKETRIDE_URI || CONST_DEFAULT_WEB_CLOUD,
 			onEvent,
 			onConnected,
 			onDisconnected,
@@ -386,16 +386,54 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Update the server URI (internal). Accepts HTTP/HTTPS/WS/WSS; converts to WebSocket and appends /task/service.
+	 * Normalize a user-provided URI into a fully-formed HTTP/HTTPS URL.
+	 *
+	 * - Bare hostnames (e.g. "localhost", "my-server:5565") get `http://` prepended.
+	 * - Non-cloud URIs without a port default to 5565.
+	 *
+	 * Use this when you need a parseable URL from free-form user input before
+	 * passing it to the client or doing your own validation.
+	 */
+	public static normalizeUri(uri: string): string {
+		let normalized = uri.trim();
+		if (normalized && !/^[a-zA-Z]+:\/\//.test(normalized)) {
+			normalized = `${CONST_DEFAULT_WEB_PROTOCOL}${normalized}`;
+		}
+
+		try {
+			const url = new URL(normalized);
+
+			if (!url.port && !url.hostname.includes('rocketride.ai')) {
+				url.port = CONST_DEFAULT_WEB_PORT;
+			}
+
+			return `${url.protocol}//${url.host}`;
+		} catch {
+			return normalized;
+		}
+	}
+
+	/**
+	 * Normalize a user-provided URI into a fully-formed WebSocket address.
+	 * Builds on normalizeUri, then converts to ws/wss and appends /task/service.
+	 */
+	private _getWebsocketUri(uri: string): string {
+		const httpUrl = RocketRideClient.normalizeUri(uri);
+
+		try {
+			const url = new URL(httpUrl);
+			const wsScheme = url.protocol === 'https:' ? 'wss:' : 'ws:';
+			return `${wsScheme}//${url.host}/task/service`;
+		} catch {
+			return `${httpUrl}/task/service`;
+		}
+	}
+
+	/**
+	 * Update the server URI (internal).
 	 */
 	private _setUri(uri: string): void {
-		try {
-			const url = new URL(uri);
-			const wsScheme = url.protocol === 'https:' ? 'wss:' : 'ws:';
-			this._uri = `${wsScheme}//${url.host}/task/service`;
-		} catch {
-			this._uri = `${uri}/task/service`;
-		}
+		this._uri = this._getWebsocketUri(uri);
 	}
 
 	/**
@@ -595,7 +633,7 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async ping(token?: string): Promise<void> {
 		// Build ping request
-		const request = this.buildRequest('apaext_ping', { token });
+		const request = this.buildRequest('rrext_ping', { token });
 
 		// Send to server and wait for response
 		const response = await this.request(request);
@@ -651,9 +689,66 @@ export class RocketRideClient extends DAPClient {
 		return obj;
 	}
 
+	// ============================================================================
+	// VALIDATION METHODS
+	// ============================================================================
+
+	/**
+	 * Validate a pipeline configuration.
+	 *
+	 * Sends the pipeline to the server for structural validation, checking
+	 * component compatibility, connection integrity, and the resolved
+	 * execution chain.
+	 *
+	 * Source resolution follows the same logic as {@link use}:
+	 * 1. Explicit `source` option (if provided)
+	 * 2. `source` field inside the pipeline config
+	 * 3. Implied source: the single component whose config.mode is 'Source'
+	 *
+	 * @param options.pipeline - Pipeline configuration to validate
+	 * @param options.source - Optional override for the source component ID
+	 * @returns Promise resolving to validation result with errors, warnings,
+	 *          resolved component, and execution chain
+	 * @throws Error if the server returns a validation error
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await client.validate({
+	 *   pipeline: { components: [...], project_id: '123' },
+	 *   source: 'webhook_1'
+	 * });
+	 * if (result.errors?.length) {
+	 *   console.log('Validation errors:', result.errors);
+	 * }
+	 * ```
+	 */
+	async validate(options: {
+		pipeline: PipelineConfig | Record<string, unknown>;
+		source?: string;
+	}): Promise<Record<string, unknown>> {
+		const { pipeline, source } = options;
+		const arguments_: Record<string, unknown> = { pipeline };
+		if (source !== undefined) {
+			arguments_.source = source;
+		}
+		const request = this.buildRequest('rrext_validate', {
+			arguments: arguments_
+		});
+		const response = await this.request(request);
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Validation failed';
+			throw new Error(`Pipeline validation failed: ${errorMsg}`);
+		}
+		return response.body || {};
+	}
+
+	// ============================================================================
+	// PIPELINE EXECUTION METHODS
+	// ============================================================================
+
 	/**
 	 * Start an RocketRide pipeline for processing data.
-	 * 
+	 *
 	 * This method loads and executes a pipeline configuration. It automatically performs
 	 * environment variable substitution on the pipeline config, replacing ${ROCKETRIDE_*}
 	 * placeholders with values from the .env file.
@@ -678,7 +773,7 @@ export class RocketRideClient extends DAPClient {
 	 * 
 	 * // Using pipeline object
 	 * const result = await client.use({
-	 *   pipeline: { components: [...], source: 'local', project_id: '123' }
+	 *   pipeline: { name: 'My Pipeline', components: [...], source: 'local', project_id: '123' }
 	 * });
 	 * 
 	 * // With environment variable substitution
@@ -737,7 +832,7 @@ export class RocketRideClient extends DAPClient {
 
 		// Override source if specified (after substitution)
 		if (source !== undefined) {
-			processedConfig.pipeline.source = source;
+			processedConfig.source = source;
 		}
 
 		// Build execution request with all parameters
@@ -808,7 +903,7 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async getTaskStatus(token: string): Promise<TASK_STATUS> {
 		// Send status request
-		const request = this.buildRequest('apaext_get_task_status', { token });
+		const request = this.buildRequest('rrext_get_task_status', { token });
 		const response = await this.request(request);
 
 		// Check for status retrieval errors
@@ -825,6 +920,11 @@ export class RocketRideClient extends DAPClient {
 	// ============================================================================
 	// DATA METHODS
 	// ============================================================================
+
+	/** Return objinfo with size set; never 0 (parse filter skips "empty"). */
+	private _objinfoWithSize(objinfo: Record<string, unknown>, size: number): Record<string, unknown> {
+		return { ...objinfo, size: size || 1 };
+	}
 
 	/**
 	 * Create a data pipe for streaming operations.
@@ -858,7 +958,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Create and use a temporary pipe for the data
-		const pipe = await this.pipe(token, objinfo, mimetype);
+		const pipe = await this.pipe(token, this._objinfoWithSize(objinfo, buffer.length), mimetype);
 
 		try {
 			await pipe.open();
@@ -953,18 +1053,22 @@ export class RocketRideClient extends DAPClient {
 			let error: string | undefined;
 			let result: PIPELINE_RESULT | undefined;
 
-			const fullObjinfo = {
-				name: file.name,
-				size: file.size,
-				...objinfo,
-			};
+			// Get file size: from filesystem when filepath in objinfo (Node.js), else file.size (same as Python os.path.getsize)
+			let fileSize = file.size;
+			if (typeof window === 'undefined' && objinfo?.filepath && typeof objinfo.filepath === 'string') {
+				try {
+					const fs = require('fs');
+					fileSize = fs.statSync(objinfo.filepath as string).size;
+				} catch {
+					// fallback to file.size
+				}
+			}
 
 			const finalMimetype = mimetype || file.type || 'application/octet-stream';
-			const fileSize = file.size;
 
 			try {
 				// Step 1: Create and open pipe (waits for server to allocate)
-				pipe = await this.pipe(token, fullObjinfo, finalMimetype);
+				pipe = await this.pipe(token, this._objinfoWithSize({ name: file.name, ...objinfo }, fileSize), finalMimetype);
 				await pipe.open();
 
 				// Step 2: Send status update AFTER we have the pipe
@@ -1243,7 +1347,7 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async setEvents(token: string, eventTypes: string[]): Promise<void> {
 		// Build event subscription request
-		const request = this.buildRequest('apaext_monitor', {
+		const request = this.buildRequest('rrext_monitor', {
 			arguments: { types: eventTypes },
 			token,
 		});
@@ -1291,10 +1395,10 @@ export class RocketRideClient extends DAPClient {
 	 * 
 	 * // Update existing project with version check
 	 * const existing = await client.getProject({ projectId: 'proj-123' });
-	 * existing.pipeline.name = 'Updated Name';
+	 * existing.name = 'Updated Name';
 	 * const updated = await client.saveProject({
 	 *   projectId: 'proj-123',
-	 *   pipeline: existing.pipeline,
+	 *   pipeline: existing,
 	 *   expectedVersion: existing.version
 	 * });
 	 * ```
@@ -1331,7 +1435,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1363,7 +1467,7 @@ export class RocketRideClient extends DAPClient {
 	 * // Get a project
 	 * try {
 	 *   const project = await client.getProject({ projectId: 'proj-123' });
-	 *   console.log(`Project: ${project.pipeline.name}`);
+	 *   console.log(`Project: ${project.name}`);
 	 *   console.log(`Version: ${project.version}`);
 	 * } catch (error) {
 	 *   if (error.message.includes('NOT_FOUND')) {
@@ -1373,10 +1477,10 @@ export class RocketRideClient extends DAPClient {
 	 * 
 	 * // Before updating - get current version
 	 * const project = await client.getProject({ projectId: 'proj-123' });
-	 * project.pipeline.name = 'Updated';
+	 * project.name = 'Updated';
 	 * await client.saveProject({
 	 *   projectId: 'proj-123',
-	 *   pipeline: project.pipeline,
+	 *   pipeline: project,
 	 *   expectedVersion: project.version
 	 * });
 	 * ```
@@ -1402,7 +1506,7 @@ export class RocketRideClient extends DAPClient {
 		};
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1473,7 +1577,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1534,7 +1638,7 @@ export class RocketRideClient extends DAPClient {
 		};
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1600,7 +1704,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1639,7 +1743,7 @@ export class RocketRideClient extends DAPClient {
 		};
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1683,7 +1787,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1721,7 +1825,7 @@ export class RocketRideClient extends DAPClient {
 		};
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1774,7 +1878,7 @@ export class RocketRideClient extends DAPClient {
 		};
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1822,7 +1926,7 @@ export class RocketRideClient extends DAPClient {
 		};
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1874,7 +1978,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Send request to server
-		const request = this.buildRequest('apaext_store', { arguments: args });
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 
 		// Check for errors
@@ -1901,13 +2005,13 @@ export class RocketRideClient extends DAPClient {
 	 * full DAPMessage objects. It builds the request internally and delegates
 	 * to the underlying request() method.
 	 *
-	 * @param command - The DAP command name (e.g., 'apaext_services', 'apaext_monitor')
+	 * @param command - The DAP command name (e.g., 'rrext_services', 'rrext_monitor')
 	 * @param args - Optional arguments for the command
 	 * @param token - Optional task/session token
 	 * @param timeout - Optional per-request timeout in ms
 	 * @returns The response DAPMessage from the server
 	 */
-	async rawRequest(
+	async dapRequest(
 		command: string,
 		args?: Record<string, unknown>,
 		token?: string,
@@ -1981,7 +2085,7 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async getServices(): Promise<Record<string, unknown>> {
 		// Build services request (no service argument = get all)
-		const request = this.buildRequest('apaext_services', {});
+		const request = this.buildRequest('rrext_services', {});
 
 		// Send to server and wait for response
 		const response = await this.request(request);
@@ -2024,7 +2128,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Build services request with specific service name
-		const request = this.buildRequest('apaext_services', {
+		const request = this.buildRequest('rrext_services', {
 			arguments: { service }
 		});
 

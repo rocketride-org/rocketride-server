@@ -57,9 +57,10 @@ import {
 	persistOAuthTokensAndSave,
 } from './authTokenHelpers';
 import { getSecuredFormData, removeRequired, setUiSchemaProperty } from '../../../../../utils/rjsf';
-import { INodeData, IValidateResponse, StartPipelineRequest } from '../../../types';
+import { INodeData, IProject, IValidateResponse } from '../../../types';
 import { transformNodeToComponent } from '../../../helpers';
 import { ActionsType, NodeType, STORAGE_KEY } from '../../../constants';
+import { isInVSCode } from '../../../../../utils/vscode';
 
 /**
  * Well-known RJSF form field IDs used to detect specific authentication
@@ -273,12 +274,12 @@ export default function NodePanel({ onClose }: IBasePanelProps): ReactNode {
 			const componentProperty = transformNodeToComponent(flowObject, updatedNode!);
 
 			const payload: Record<string, unknown> = {
-				version: currentProject.pipeline?.version,
+				version: currentProject?.version,
 				component: componentProperty,
 			};
 
 			// Send the component to the server for validation (e.g. credential check, schema check)
-			const resp: IValidateResponse = await handleValidatePipeline!(payload as StartPipelineRequest);
+			const resp: IValidateResponse = await handleValidatePipeline!(payload as IProject);
 
 			// Handle top-level server errors
 			if (resp?.error) {
@@ -685,7 +686,6 @@ export default function NodePanel({ onClose }: IBasePanelProps): ReactNode {
 					<Button
 						fullWidth
 						variant="contained"
-						color="primary"
 						disabled={disableSave}
 						onClick={() => {
 							if (schema) {
@@ -694,7 +694,17 @@ export default function NodePanel({ onClose }: IBasePanelProps): ReactNode {
 								handleSaveDetailsOnly();
 							}
 						}}
-						sx={{ mt: 1, flexShrink: 0 }}
+						sx={{
+							mt: 1,
+							flexShrink: 0,
+							...(isInVSCode() && {
+								backgroundColor: 'var(--vscode-button-background)',
+								color: 'var(--vscode-button-foreground)',
+								'&:hover': {
+									backgroundColor: 'var(--vscode-button-hoverBackground)',
+								},
+							}),
+						}}
 					>
 						{isSubmitting
 							? t('flow.panels.node.validating')

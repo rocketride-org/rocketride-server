@@ -25,40 +25,16 @@ Only one can be active at a time. This module ensures opencv-contrib-python is t
 one installed, uninstalling any conflicting variants.
 """
 
-import importlib.metadata
-from rocketlib import debug
-from depends import pip
+import os
+from depends import depends
 
-# Ensure opencv-contrib-python is installed (the most complete variant,
-# includes GUI + all contrib modules like ximgproc).
-# Other opencv packages (opencv-python, opencv-python-headless, etc.)
-# conflict by overwriting cv2 modules, so we uninstall them first.
-_DESIRED_PACKAGE = 'opencv-contrib-python'
-_CONFLICTING_PACKAGES = [
-    'opencv-python',
-    'opencv-python-headless',
-    'opencv-contrib-python-headless',
-]
+# Install the modules that are subsets
+requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements_1.txt'
+depends(requirements)
 
-_MIN_VERSION = '4.13'
-_needs_install = False
-
-try:
-    _installed_version = importlib.metadata.version(_DESIRED_PACKAGE)
-    if tuple(int(x) for x in _installed_version.split('.')[:2]) >= tuple(int(x) for x in _MIN_VERSION.split('.')):
-        debug(f'{_DESIRED_PACKAGE}=={_installed_version} is already installed')
-    else:
-        debug(f'{_DESIRED_PACKAGE}=={_installed_version} is too old (need >={_MIN_VERSION})')
-        _needs_install = True
-except importlib.metadata.PackageNotFoundError:
-    debug(f'{_DESIRED_PACKAGE} not found')
-    _needs_install = True
-
-if _needs_install:
-    debug(f'Installing {_DESIRED_PACKAGE}>={_MIN_VERSION}...')
-    # Install conflicting opencv packages first
-    for pkg in _CONFLICTING_PACKAGES + [_DESIRED_PACKAGE]:
-        pip('install', f'{pkg}>={_MIN_VERSION}')
+# Now, install the full module which contains everything
+requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements_2.txt'
+depends(requirements)
 
 # Import cv2
 import cv2

@@ -183,7 +183,7 @@ class StoreMixin(DAPClient):
             arguments['expectedVersion'] = expected_version
 
         # Send request to server
-        request = self.build_request(command='apaext_store', arguments=arguments)
+        request = self.build_request(command='rrext_store', arguments=arguments)
         response = await self.request(request)
 
         # Check for errors
@@ -263,7 +263,7 @@ class StoreMixin(DAPClient):
         }
 
         # Send request to server
-        request = self.build_request(command='apaext_store', arguments=arguments)
+        request = self.build_request(command='rrext_store', arguments=arguments)
         response = await self.request(request)
 
         # Check for errors
@@ -353,7 +353,7 @@ class StoreMixin(DAPClient):
             arguments['expectedVersion'] = expected_version
 
         # Send request to server
-        request = self.build_request(command='apaext_store', arguments=arguments)
+        request = self.build_request(command='rrext_store', arguments=arguments)
         response = await self.request(request)
 
         # Check for errors
@@ -440,7 +440,7 @@ class StoreMixin(DAPClient):
         }
 
         # Send request to server
-        request = self.build_request(command='apaext_store', arguments=arguments)
+        request = self.build_request(command='rrext_store', arguments=arguments)
         response = await self.request(request)
 
         # Check for errors
@@ -515,7 +515,7 @@ class StoreMixin(DAPClient):
             arguments['expectedVersion'] = expected_version
 
         # Send request to server
-        request = self.build_request(command='apaext_store', arguments=arguments)
+        request = self.build_request(command='rrext_store', arguments=arguments)
         response = await self.request(request)
 
         # Check for errors
@@ -561,7 +561,7 @@ class StoreMixin(DAPClient):
         }
 
         # Send request to server
-        request = self.build_request(command='apaext_store', arguments=arguments)
+        request = self.build_request(command='rrext_store', arguments=arguments)
         response = await self.request(request)
 
         # Check for errors
@@ -618,7 +618,7 @@ class StoreMixin(DAPClient):
             arguments['expectedVersion'] = expected_version
 
         # Send request to server
-        request = self.build_request(command='apaext_store', arguments=arguments)
+        request = self.build_request(command='rrext_store', arguments=arguments)
         response = await self.request(request)
 
         # Check for errors
@@ -664,7 +664,7 @@ class StoreMixin(DAPClient):
         }
 
         # Send request to server
-        request = self.build_request(command='apaext_store', arguments=arguments)
+        request = self.build_request(command='rrext_store', arguments=arguments)
         response = await self.request(request)
 
         # Check for errors
@@ -742,7 +742,7 @@ class StoreMixin(DAPClient):
         }
 
         # Send request to server
-        request = self.build_request(command='apaext_store', arguments=arguments)
+        request = self.build_request(command='rrext_store', arguments=arguments)
         response = await self.request(request)
 
         # Check for errors
@@ -800,7 +800,7 @@ class StoreMixin(DAPClient):
         }
 
         # Send request to server
-        request = self.build_request(command='apaext_store', arguments=arguments)
+        request = self.build_request(command='rrext_store', arguments=arguments)
         response = await self.request(request)
 
         # Check for errors
@@ -872,7 +872,7 @@ class StoreMixin(DAPClient):
             arguments['page'] = page
 
         # Send request to server
-        request = self.build_request(command='apaext_store', arguments=arguments)
+        request = self.build_request(command='rrext_store', arguments=arguments)
         response = await self.request(request)
 
         # Check for errors

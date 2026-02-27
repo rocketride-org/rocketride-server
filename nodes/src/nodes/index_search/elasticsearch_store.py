@@ -1,31 +1,56 @@
-# ------------------------------------------------------------------------------
-# Interface implementation for the Elasticsearch store
-# ------------------------------------------------------------------------------
-# We now have real requirements, so load them before we start
-# loading our driver
-import os
-from depends import depends
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 RocketRide, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
 
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-depends(requirements)
-
-# Load what we need
-from typing import List, Callable, Dict, Any, Optional, cast
-from uuid import uuid4
-import sys
-import numpy as np
+# ------------------------------------------------------------------------------
+# Elasticsearch store: DocumentStoreBase implementation for index_search.
+#
+# Loads requirements.txt before importing so node dependencies are available.
+# ------------------------------------------------------------------------------
 import re
+import sys
+from typing import Any, Callable, Dict, List, Optional, cast
+from uuid import uuid4
 
+import numpy as np
 from elasticsearch import Elasticsearch
-from elasticsearch.helpers import bulk, scan
+from elasticsearch.helpers import bulk, scan, BulkIndexError
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
 
+from .constants import (
+    CONTENT_FIELD,
+    DEFAULT_HIGHLIGHT_FRAGMENT_SIZE,
+    DEFAULT_INDEX_NAME,
+    DEFAULT_SCROLL,
+    DEFAULT_TEXT_BATCH_SIZE,
+    ELASTICSEARCH_DEFAULT_PORT,
+)
+
 
 def _build_highlight_config(field: str, fragment_size: int) -> Dict[str, Any]:
-    """Shared highlight configuration for text searches (Elasticsearch/OpenSearch DSL)."""
+    """Highlight configuration for text search (Elasticsearch/OpenSearch DSL)."""
     return {
         'fields': {
             field: {
@@ -40,8 +65,15 @@ def _build_highlight_config(field: str, fragment_size: int) -> Dict[str, Any]:
 
 
 class Store(DocumentStoreBase):
+    """
+    Elasticsearch document store: vector and text index, search, and lifecycle.
+
+    Implements DocumentStoreBase for the index_search node. Supports
+    self-managed, cloud-hosted, and cloud-serverless Elasticsearch.
+    """
+
     apikey: str | None = None
-    connector: str = 'elasticsearch'
+    node: str = 'elasticsearch'
     index: str = ''
     host: str = ''
     port: int = 0
@@ -51,56 +83,44 @@ class Store(DocumentStoreBase):
     similarity: str = 'cosine'
     threshold_search: float = 0.0
     client: Elasticsearch | None = None
-    mode: str = 'self-managed'  # self-managed, cloud-hosted, cloud-serverless
+    mode: str = 'self-managed'
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
-        """
-        Initialize the Elasticsearch vector store.
-        """
-        # Init the base
+    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> None:
+        """Initialize the Elasticsearch store from node config."""
         super().__init__(provider, connConfig, bag)
+        config = Config.getNodeConfig(provider, connConfig)
 
-        # Get the connectors configuration
-        config = Config.getConnectorConfig(provider, connConfig)
-
-        # Save our parameters
-        self.index = config.get('index', 'rocketlib')
+        self.index = config.get('index', DEFAULT_INDEX_NAME)
         self.mode = config.get('mode', 'self-managed')
+        raw_host = (config.get('host') or '').strip()
+        self.host = re.sub(r'^https?://', '', raw_host).rstrip('/')
+        self.port = config.get('port', ELASTICSEARCH_DEFAULT_PORT)
 
-        # Remove leading and trailing spaces, leading http/https and :// and trailing slashes
-        self.host = re.sub(r'^https?://', '', config.get('host', '').strip()).rstrip('/')
-        self.port = config.get('port', 9200)
-
-        # Strip API key also
-        self.apikey = config.get('apikey', None)
-        if self.apikey is not None:
-            self.apikey = self.apikey.strip()
-
+        self.apikey = (config.get('apikey') or '').strip() or None
         self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
         self.payload_limit = config.get('payloadLimit', self.payload_limit)
         self.threshold_search = config.get('score', 0.5)
 
-        # check if the similarity matches Elasticsearch configuration options
         similarity = config.get('similarity', 'cosine')
-        if similarity in ['cosine', 'l2_norm', 'dot_product']:
-            self.similarity = similarity
-        else:
-            raise Exception('The metric you provided in the config.json does not match required Elasticsearch configurations')
+        if similarity not in ('cosine', 'l2_norm', 'dot_product'):
+            raise Exception(
+                'Similarity must be one of: cosine, l2_norm, dot_product'
+            )
+        self.similarity = similarity
 
-        # Build the Elasticsearch URL
-        if self.mode == 'self-managed':
-            # For self-managed, use http by default
-            url = f'http://{self.host}:{self.port}'
+        # Use explicit scheme from host if present; else derive from mode (self-managed -> http)
+        if raw_host.lower().startswith('http://'):
+            scheme = 'http'
+        elif raw_host.lower().startswith('https://'):
+            scheme = 'https'
         else:
-            # For cloud deployments, use https
-            url = f'https://{self.host}:{self.port}'
-
-        # Init the store
-        if self.apikey:
-            self.client = Elasticsearch([url], api_key=self.apikey, request_timeout=60)
-        else:
-            self.client = Elasticsearch([url], request_timeout=60)
-        return
+            scheme = 'http' if self.mode == 'self-managed' else 'https'
+        url = f'{scheme}://{self.host}:{self.port}'
+        self.client = Elasticsearch(
+            [url],
+            api_key=self.apikey,
+            request_timeout=60,
+        )
 
     def __del__(self):
         """
@@ -136,12 +156,16 @@ class Store(DocumentStoreBase):
             # and needs to be recreated. Delete it.
             self.client.indices.delete(index=self.index)
 
-        # Define the mapping with vector field
         mapping = {
             'mappings': {
                 'properties': {
-                    'embedding': {'type': 'dense_vector', 'dims': vectorSize, 'index': True, 'similarity': self.similarity},
-                    'content': {'type': 'text', 'analyzer': 'standard'},
+                    'embedding': {
+                        'type': 'dense_vector',
+                        'dims': vectorSize,
+                        'index': True,
+                        'similarity': self.similarity,
+                    },
+                    CONTENT_FIELD: {'type': 'text', 'analyzer': 'standard'},
                     'meta': {
                         'type': 'object',
                         'properties': {
@@ -168,6 +192,25 @@ class Store(DocumentStoreBase):
         if not self.client.indices.exists(index=self.index):
             return False
 
+        return True
+
+    def _checkCollectionExists(self) -> bool:
+        """
+        Check if the collection exists and has the control (schema) document.
+        If the index exists but is empty, treat as missing so createCollection can initialize it.
+        """
+        if not self._doesCollectionExist():
+            return False
+        doc_filter = DocFilter()
+        doc_filter.objectIds = ['schema']
+        doc_filter.isDeleted = True
+        doc = self.get(doc_filter, checkCollection=False)
+        if len(doc) != 1:
+            if self.count_documents() == 0:
+                return False
+            raise Exception(f'Collection does not have control document, found {len(doc)}')
+        self.vectorSize = doc[0].metadata.vectorSize
+        self.modelName = doc[0].metadata.modelName
         return True
 
     def _convertFilter(self, docFilter: DocFilter) -> Dict[str, Any]:
@@ -231,9 +274,8 @@ class Store(DocumentStoreBase):
             if not source:
                 continue
 
-            # Get the content and metadata
             metadata_dict = source.get('meta', {})
-            content = source.get('content', '')
+            content = source.get(CONTENT_FIELD, '')
 
             # Create metadata object
             metadata = DocMetadata(**metadata_dict)
@@ -297,8 +339,13 @@ class Store(DocumentStoreBase):
         # Build up the filter
         filter_query = self._convertFilter(docFilter)
 
-        # Build the search query with text search
-        search_body = {'query': {'bool': {'must': [{'match': {'content': query.text}}, filter_query]}}, 'size': docFilter.limit if docFilter.limit is not None else 25, 'from': docFilter.offset if docFilter.offset is not None else 0}
+        limit = docFilter.limit if docFilter.limit is not None else 25
+        from_ = docFilter.offset if docFilter.offset is not None else 0
+        search_body = {
+            'query': {'bool': {'must': [{'match': {CONTENT_FIELD: query.text}}, filter_query]}},
+            'size': limit,
+            'from': from_,
+        }
 
         # Perform the search (Elasticsearch 8.x uses body parameter)
         response = self.client.search(index=self.index, body=search_body)
@@ -455,34 +502,69 @@ class Store(DocumentStoreBase):
         actions = []
         sum_size = 0
 
+        def _meta_for_es(md: DocMetadata) -> Dict[str, Any]:
+            """Build meta dict for ES: only non-None fields, correct types (ES rejects null for int/bool in strict mapping)."""
+            meta: Dict[str, Any] = {
+                'objectId': md.objectId,
+                'chunkId': md.chunkId,
+            }
+            if md.nodeId is not None:
+                meta['nodeId'] = md.nodeId
+            if md.parent is not None:
+                meta['parent'] = md.parent
+            if md.permissionId is not None:
+                meta['permissionId'] = md.permissionId
+            if md.isDeleted is not None:
+                meta['isDeleted'] = md.isDeleted
+            if md.isTable is not None:
+                meta['isTable'] = md.isTable
+            if md.tableId is not None:
+                meta['tableId'] = md.tableId
+            if getattr(md, 'vectorSize', None) is not None:
+                meta['vectorSize'] = md.vectorSize
+            if getattr(md, 'modelName', None) is not None:
+                meta['modelName'] = md.modelName
+            return meta
+
+        def _run_bulk(actions_batch: List[Dict[str, Any]]) -> None:
+            try:
+                bulk(self.client, actions_batch)
+            except BulkIndexError as e:
+                errors = getattr(e, 'errors', []) or []
+                for item in errors:
+                    if not isinstance(item, dict):
+                        continue
+                    # Bulk item can be under 'index' or 'create'
+                    op = item.get('index') or item.get('create') or {}
+                    err = op.get('error', {})
+                    reason = err.get('reason') or err.get('type') or str(err) or str(e)
+                    doc_id = op.get('_id', '?')
+                    raise Exception(
+                        f'Elasticsearch index failed (id={doc_id}): {reason}'
+                    ) from e
+                raise
+
         # For each document
         for chunk in chunks:
-            # Get the embedding
+            # Get the embedding (ensure list for ES; numpy arrays must be converted)
             embedding = chunk.embedding
-
-            # If we do not have an embedding
             if embedding is None:
                 raise Exception('No embedding in document')
+            if hasattr(embedding, 'tolist'):
+                embedding = embedding.tolist()
+            elif not isinstance(embedding, list):
+                embedding = list(embedding)
+            # Control/schema document uses zero vector; ES cosine similarity rejects zero magnitude
+            if getattr(chunk.metadata, 'objectId', None) == 'schema' and all(x == 0 for x in embedding):
+                embedding = [1.0] + [0.0] * (len(embedding) - 1) if len(embedding) else [1.0]
 
-            # Build the document
             doc = {
                 '_index': self.index,
                 '_id': str(uuid4()),
                 '_source': {
                     'embedding': embedding,
-                    'content': chunk.page_content,
-                    'meta': {
-                        'nodeId': chunk.metadata.nodeId,
-                        'objectId': chunk.metadata.objectId,
-                        'parent': chunk.metadata.parent,
-                        'permissionId': chunk.metadata.permissionId,
-                        'isDeleted': chunk.metadata.isDeleted,
-                        'isTable': chunk.metadata.isTable,
-                        'chunkId': chunk.metadata.chunkId,
-                        'tableId': chunk.metadata.tableId,
-                        'vectorSize': chunk.metadata.vectorSize,
-                        'modelName': chunk.metadata.modelName,
-                    },
+                    CONTENT_FIELD: chunk.page_content or '',
+                    'meta': _meta_for_es(chunk.metadata),
                 },
             }
 
@@ -492,13 +574,13 @@ class Store(DocumentStoreBase):
 
             # Flush if we hit batch size or payload limit
             if (len(actions) >= 500) or (sum_size > self.payload_limit):
-                bulk(self.client, actions)
+                _run_bulk(actions)
                 actions = []
                 sum_size = 0
 
         # Flush any stragglers
         if actions:
-            bulk(self.client, actions)
+            _run_bulk(actions)
 
     def remove(self, objectIds: List[str]) -> None:
         """
@@ -574,7 +656,7 @@ class Store(DocumentStoreBase):
                 'query': {'bool': {'must': [{'term': {'meta.objectId': objectId}}, {'range': {'meta.chunkId': {'gte': offset, 'lt': offset + self.renderChunkSize}}}]}},
                 'size': self.renderChunkSize,
                 'sort': [{'meta.chunkId': {'order': 'asc'}}],
-                '_source': ['content', 'meta.chunkId'],
+                '_source': [CONTENT_FIELD, 'meta.chunkId'],
             }
 
             # Perform the query (Elasticsearch 8.x uses body parameter)
@@ -595,7 +677,7 @@ class Store(DocumentStoreBase):
                     continue
 
                 # Get the info
-                content = source.get('content', '')
+                content = source.get(CONTENT_FIELD, '')
                 meta = source.get('meta', {})
                 chunk = meta.get('chunkId', 0)
 
@@ -637,32 +719,23 @@ class Store(DocumentStoreBase):
             offset += self.renderChunkSize
 
     # -------------------------------------------------------------------------
-    # Text/Index Mode Methods (for RPN-based searches)
+    # Text/Index mode (BM25, no embeddings)
     # -------------------------------------------------------------------------
 
     def ensure_index_text(self, mappings: Optional[Dict[str, Any]] = None) -> None:
-        """
-        Create a text/BM25 index if missing.
-
-        Used for index mode (text-only, no embeddings).
-        """
+        """Create a text/BM25 index if missing. Used for index mode."""
         if self.client is None:
             return
-
         if not self.client.indices.exists(index=self.index):
             body: Dict[str, Any] = {}
             if mappings:
                 body['mappings'] = mappings
             else:
-                body['mappings'] = {'properties': {'content': {'type': 'text'}}}
+                body['mappings'] = {'properties': {CONTENT_FIELD: {'type': 'text'}}}
             self.client.indices.create(index=self.index, body=body, ignore=[400])
 
     def upsert_text_document(self, doc_id: Optional[str], body: Dict[str, Any], refresh: bool = False) -> None:
-        """
-        Index or update a single text document (no embedding required).
-
-        Used for index mode ingestion.
-        """
+        """Index or update a single text document (index mode ingestion)."""
         if self.client is None:
             return
         self.client.index(index=self.index, id=doc_id, body=body, refresh=refresh)
@@ -670,8 +743,8 @@ class Store(DocumentStoreBase):
     def search_text_all(
         self,
         query: str,
-        batch_size: int = 500,
-        scroll: str = '1m',
+        batch_size: int = DEFAULT_TEXT_BATCH_SIZE,
+        scroll: str = DEFAULT_SCROLL,
         filters: Optional[Dict[str, Any]] = None,
         source: Optional[List[str]] = None,
         match_operator: str = 'or',
@@ -680,14 +753,9 @@ class Store(DocumentStoreBase):
         highlight_fragment_size: int = 0,
         body: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
-        """
-        Scroll/scan all matching documents and return every hit.
-
-        Uses elasticsearch.helpers.scan under the hood.
-        """
+        """Scroll/scan all matching documents and return every hit (elasticsearch.helpers.scan)."""
         if self.client is None:
             return []
-
         if body is None:
             body = self._build_text_search_body(
                 query=query,
@@ -696,11 +764,10 @@ class Store(DocumentStoreBase):
                 match_operator=match_operator,
                 match_operator_slop=match_operator_slop,
                 size=batch_size,
-                include_source=False,  # handled via scan arguments
+                include_source=False,
                 highlight=highlight,
                 highlight_fragment_size=highlight_fragment_size,
             )
-
         hits: List[Dict[str, Any]] = []
         for hit in scan(
             self.client,
@@ -711,7 +778,6 @@ class Store(DocumentStoreBase):
             _source=source,
         ):
             hits.append(hit)
-
         return hits
 
     def _build_text_search_body(
@@ -726,48 +792,30 @@ class Store(DocumentStoreBase):
         highlight: bool = False,
         highlight_fragment_size: int = 0,
     ) -> Dict[str, Any]:
-        """Construct a search body for the configured flags."""
-        base_query: Dict[str, Any]
-
+        """Build Elasticsearch search body for text query (match / match_phrase)."""
         op = (match_operator or 'or').strip().lower()
         if op not in ('and', 'or', 'exact', ''):
             op = 'or'
-
+        slop = max(int(match_operator_slop or 0), 0)
         if op == 'exact':
-            base_query = {
-                'match_phrase': {
-                    'content': {
-                        'query': query,
-                        'slop': max(int(match_operator_slop or 0), 0),
-                    }
-                }
+            base_query: Dict[str, Any] = {
+                'match_phrase': {CONTENT_FIELD: {'query': query, 'slop': slop}}
             }
         elif op == 'and':
-            base_query = {'match': {'content': {'query': query, 'operator': 'and'}}}
+            base_query = {'match': {CONTENT_FIELD: {'query': query, 'operator': 'and'}}}
         elif op == 'or':
-            base_query = {'match': {'content': {'query': query, 'operator': 'or'}}}
+            base_query = {'match': {CONTENT_FIELD: {'query': query, 'operator': 'or'}}}
         else:
-            base_query = {'match': {'content': query}}
+            base_query = {'match': {CONTENT_FIELD: query}}
 
         if filters:
-            body: Dict[str, Any] = {
-                'query': {
-                    'bool': {
-                        'must': base_query,
-                        'filter': filters,
-                    }
-                },
-                'size': size,
-            }
+            body = {'query': {'bool': {'must': base_query, 'filter': filters}}, 'size': size}
         else:
             body = {'query': base_query, 'size': size}
-
         if include_source and source is not None:
             body['_source'] = source
-
         if highlight:
-            frag_size = max(int(highlight_fragment_size or 0), 0) or 250
-            body['highlight'] = _build_highlight_config('content', frag_size)
-
+            frag_size = max(int(highlight_fragment_size or 0), 0) or DEFAULT_HIGHLIGHT_FRAGMENT_SIZE
+            body['highlight'] = _build_highlight_config(CONTENT_FIELD, frag_size)
         return body
 

@@ -1,72 +1,70 @@
 {
-	"pipeline": {
-		"source": "source_1",
-		"debug": true,
-		"breakpoints": [
-			{
-				"from": "chat_1",
-				"to": "question_1",
-				"lane": "text"
-			}
-		],
-		"components": [
-			{
-				"id": "source_1",
-				"provider": "webhook",
-				"config": {
-					"key": "webhook://*",
-					"mode": "Source",
-					"name": "Web Hook",
-					"include": [
-						{
-							"path": "*"
-						}
-					],
-					"parameters": {
-						"endpoint": "/pipe/process",
-						"port": 5565
-					},
-					"sync": false,
-					"type": "webhook"
-				},
-				"ui": {}
-			},
-			{
-				"id": "parser_1",
-				"provider": "parse",
-				"config": {},
-				"ui": {},
-				"input": [
-					{
-						"lane": "tags",
-						"from": "source_1"
-					}
-				]
-			},
-			{
-				"id": "response_1",
-				"provider": "response",
-				"ui": {},
-				"config": {},
-				"input": [
-					{
-						"lane": "text",
-						"from": "source_1"
-					},
-					{
-						"lane": "table",
-						"from": "source_1"
-					},
-					{
-						"lane": "text",
-						"from": "parser_1"
-					},
-					{
-						"lane": "table",
-						"from": "parser_1"
-					}
-				]
-			}
-		]
-	}
+  "source": "source_1",
+  "debug": true,
+  "breakpoints": [
+    {
+      "from": "chat_1",
+      "to": "question_1",
+      "lane": "text"
+    }
+  ],
+  "components": [
+    {
+      "id": "source_1",
+      "provider": "webhook",
+      "config": {
+        "key": "webhook://*",
+        "mode": "Source",
+        "name": "Web Hook",
+        "include": [
+          {
+            "path": "*"
+          }
+        ],
+        "parameters": {
+          "endpoint": "/pipe/process",
+          "port": 5565
+        },
+        "sync": false,
+        "type": "webhook"
+      },
+      "ui": {}
+    },
+    {
+      "id": "parser_1",
+      "provider": "parse",
+      "config": {},
+      "ui": {},
+      "input": [
+        {
+          "lane": "tags",
+          "from": "source_1"
+        }
+      ]
+    },
+    {
+      "id": "response_1",
+      "provider": "response",
+      "ui": {},
+      "config": {},
+      "input": [
+        {
+          "lane": "text",
+          "from": "source_1"
+        },
+        {
+          "lane": "table",
+          "from": "source_1"
+        },
+        {
+          "lane": "text",
+          "from": "parser_1"
+        },
+        {
+          "lane": "table",
+          "from": "parser_1"
+        }
+      ]
+    }
+  ]
 }

@@ -24,7 +24,7 @@
 //-----------------------------------------------------------------------------
 //
 //	The classify filter encapsulates the functionality of
-//	the external classification engine DLL (rocketride_classify.dll)
+//	the external classification engine DLL (classify.dll)
 //
 //	This version uses the C ABI to communicate with the classification
 //	engine, which is loaded as a separate DLL at runtime.

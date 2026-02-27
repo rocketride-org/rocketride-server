@@ -99,7 +99,6 @@ import {
 	IProject,
 	IToolchainExport,
 	IValidateResponse,
-	StartPipelineRequest,
 	IControl,
 	IInputLane,
 	INodeData,
@@ -215,7 +214,7 @@ export interface IFlowContext {
 	servicesJson?: Record<string, unknown>;
 	servicesJsonError?: string;
 	inventoryConnectorTitleMap?: Record<string, string>;
-	handleValidatePipeline?: (pipeline: StartPipelineRequest) => Promise<IValidateResponse>;
+	handleValidatePipeline?: (pipeline: IProject) => Promise<IValidateResponse>;
 	oauth2RootUrl: string;
 
 	// Optional host callbacks
@@ -254,10 +253,10 @@ interface IProps {
 	servicesJson?: Record<string, unknown>;
 	servicesJsonError?: string;
 	inventoryConnectorTitleMap?: Record<string, string>;
-	runPipeline: (pipeline: StartPipelineRequest) => Promise<void>;
+	runPipeline: (pipeline: IProject) => Promise<void>;
 	stopPipeline: (projectId: string, source: string) => void;
 	saveProject?: (project: IProject) => Promise<void>;
-	handleValidatePipeline?: (pipeline: StartPipelineRequest) => Promise<IValidateResponse>;
+	handleValidatePipeline?: (pipeline: IProject) => Promise<IValidateResponse>;
 	onAddNodeSuccess?: (data: { nodeData: { provider: string } }) => void;
 	// Optional: when provided, AutosaveButton is shown and uses these
 	isAutosaveEnabled?: boolean;
@@ -478,20 +477,20 @@ export const FlowProvider = ({
 		if (onContentChanged && contentChangeEnabledRef.current) {
 			setTimeout(() => {
 				const flowObject = toObject();
-				const name = currentProject?.pipeline?.name;
-				const description = currentProject?.pipeline?.description;
-				const version = currentProject?.pipeline?.version;
+				const name = currentProject?.name;
+				const description = currentProject?.description;
+				const version = currentProject?.version;
 				// Serialise the current canvas state into the IProject format for the host
 				const project = objectToProperty(flowObject, name, description, version);
 				// Preserve project_id so the host (and echoed 'update') keep it; otherwise Save would generate a new uuid
-				if (currentProject?.pipeline?.project_id && project.pipeline) {
-					project.pipeline = { ...project.pipeline, project_id: currentProject.pipeline.project_id };
+				if (currentProject?.project_id) {
+					project.project_id = currentProject.project_id;
 				}
 				onContentChanged(project);
 			}, 50);
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [currentProject?.pipeline?.name, currentProject?.pipeline?.description, currentProject?.pipeline?.version, onContentChanged]);
+	}, [currentProject?.name, currentProject?.description, currentProject?.version, onContentChanged]);
 
 	const detectChange = useCallback((changes: NodeChange[]) => {
 		// Ignore cosmetic changes (select/deselect, dimensions) and only fire for structural ones
@@ -1139,10 +1138,7 @@ export const FlowProvider = ({
 						// Merge any caller-provided overrides (e.g. new name) into the project
 						const updatedProject = { ...currentProject, ...data };
 
-						if (!updatedProject.pipeline)
-							throw new Error('Project is missing pipeline');
-
-						const { version, name, description } = updatedProject.pipeline;
+						const { version, name, description } = updatedProject;
 
 						// Convert the ReactFlow object into the serialisable IProject format
 						const property = objectToProperty(flowObject, name, description, version);
@@ -1152,15 +1148,11 @@ export const FlowProvider = ({
 							...property,
 						};
 
-						// Single project identity: pipeline.project_id only (no top-level id).
-						// Preserve across saves so running tasks stay matched.
-						const canonicalProjectId =
-							_project.pipeline?.project_id ??
-							updatedProject.pipeline?.project_id ??
+						// Preserve project_id across saves so running tasks stay matched.
+						_project.project_id =
+							_project.project_id ??
+							updatedProject.project_id ??
 							uuid();
-						if (_project.pipeline) {
-							_project.pipeline = { ..._project.pipeline, project_id: canonicalProjectId };
-						}
 
 						// Delegate to the host-provided persistence callback
 						if (saveProject) await saveProject(_project);
@@ -1189,21 +1181,17 @@ export const FlowProvider = ({
 
 			try {
 				// Build the pipeline execution request starting from the given source node
-				// Project identity is pipeline.project_id only.
-				const projectId = currentProject.pipeline?.project_id;
-				const pipelineWithSource: StartPipelineRequest = {
-					pipeline: {
-						version: currentProject.pipeline?.version,
-						name: currentProject.pipeline?.name,
-						description: currentProject.pipeline?.description,
-						components: currentProject?.pipeline?.components,
-						source: nodeId,
-						project_id: projectId,
-					},
+				const projectForRun: IProject = {
+					version: currentProject?.version,
+					name: currentProject?.name,
+					description: currentProject?.description,
+					components: currentProject?.components,
+					source: nodeId,
+					project_id: currentProject?.project_id,
 				};
 
 				// Ask the backend which nodes are in the execution chain for pre-run validation
-				const validationResult = await handleValidatePipeline?.(pipelineWithSource);
+				const validationResult = await handleValidatePipeline?.(projectForRun);
 
 				// May be empty when the validation service is unavailable or returns no chain
 				const nodesInPipeline = validationResult?.data?.pipeline?.chain || [];
@@ -1231,7 +1219,7 @@ export const FlowProvider = ({
 					isRunning: true,
 				}));
 
-				await _runPipeline(pipelineWithSource);
+				await _runPipeline(projectForRun);
 				setToolchainState((prev) => ({
 					...prev,
 					isRunning: false,
@@ -1260,7 +1248,7 @@ export const FlowProvider = ({
 	const abortPipeline = useCallback(
 		async (nodeId: string) => {
 			try {
-				await _stopPipeline(currentProject?.pipeline?.project_id ?? '', nodeId);
+				await _stopPipeline(currentProject?.project_id ?? '', nodeId);
 				openSnackbar(t('flow.notification.abortSuccess'), 'success');
 				setToolchainState((prev) => ({
 					...prev,
@@ -1273,7 +1261,7 @@ export const FlowProvider = ({
 			}
 		},
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[currentProject?.pipeline?.project_id, _stopPipeline]
+		[currentProject?.project_id, _stopPipeline]
 	);
 
 	const loadData = useCallback(async () => {
@@ -1312,7 +1300,7 @@ export const FlowProvider = ({
 		}
 
 		// Auto-open the create-node panel when starting a brand-new project (no project_id yet)
-		if (!currentProject.pipeline?.project_id) toggleActionsPanel(ActionsType.CreateNode);
+		if (!currentProject.project_id) toggleActionsPanel(ActionsType.CreateNode);
 
 		// After an OAuth redirect, auto-select the node and open its config panel
 		if (!oAuthPanelInit && authType && clientId && clientSecret && nodeId) {

@@ -379,7 +379,7 @@ class DataConn(DAPConn):
             except Exception as e:
                 self.debug_message(f'Error in zombie pipe cleanup: {e}')
 
-    async def on_apaext_process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_process(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle extended data process commands for data operations.
 

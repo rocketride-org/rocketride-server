@@ -67,7 +67,7 @@ import asyncio
 import time
 import urllib.parse
 from typing import Any, Dict, Optional
-from ..core import DAPClient, TransportWebSocket
+from ..core import DAPClient, TransportWebSocket, CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_PROTOCOL
 from ..core.exceptions import AuthenticationException
 
 
@@ -307,16 +307,19 @@ class ConnectionMixin(DAPClient):
         if self._transport is not None and self.is_connected():
             await self._internal_disconnect()
 
-    def get_connection_info(self) -> Optional[str]:
+    def get_connection_info(self) -> dict:
         """
-        Return current connection info from the transport (e.g. URI or peer details).
+        Return current connection state and URI.
 
-        Returns None if not connected or no transport. Useful for debugging or
-        displaying "Connected to …" in the UI.
+        Returns a dict with ``connected`` (bool), ``transport`` (str),
+        and ``uri`` (str).  Useful for debugging or displaying
+        "Connected to …" in the UI.
         """
-        if self._transport is None:
-            return None
-        return self._transport.get_connection_info()
+        return {
+            'connected': self.is_connected(),
+            'transport': 'WebSocket',
+            'uri': getattr(self, '_uri', ''),
+        }
 
     def get_apikey(self) -> Optional[str]:
         """
@@ -326,12 +329,42 @@ class ConnectionMixin(DAPClient):
         """
         return getattr(self, '_apikey', None)
 
-    def _set_uri(self, uri: str) -> None:
-        """Update the server URI (internal). Accepts HTTP/HTTPS/WS/WSS; converts to WebSocket and appends /task/service."""
+    @staticmethod
+    def normalize_uri(uri: str) -> str:
+        """Normalize a user-provided URI into a fully-formed HTTP/HTTPS URL.
+
+        - Bare hostnames (e.g. "localhost", "my-server:5565") get ``http://`` prepended.
+        - Non-cloud URIs without a port default to 5565.
+
+        Use this when you need a parseable URL from free-form user input before
+        passing it to the client or doing your own validation.
+        """
+        if uri and '://' not in uri:
+            uri = f'{CONST_DEFAULT_WEB_PROTOCOL}{uri}'
+
         parsed = urllib.parse.urlparse(uri)
+
+        if not parsed.port and 'rocketride.ai' not in (parsed.hostname or ''):
+            parsed = parsed._replace(netloc=f'{parsed.hostname}:{CONST_DEFAULT_WEB_PORT}')
+
+        return parsed.geturl()
+
+    @staticmethod
+    def _get_websocket_uri(uri: str) -> str:
+        """Normalize a user-provided URI into a fully-formed WebSocket address.
+
+        Builds on normalize_uri, then converts to ws/wss and appends /task/service.
+        """
+        normalized = ConnectionMixin.normalize_uri(uri)
+        parsed = urllib.parse.urlparse(normalized)
+
         ws_scheme = 'wss' if parsed.scheme == 'https' else 'ws'
         ws_uri = parsed._replace(scheme=ws_scheme)
-        self._uri = f'{ws_uri.geturl()}/task/service'
+        return f'{ws_uri.geturl()}/task/service'
+
+    def _set_uri(self, uri: str) -> None:
+        """Update the server URI (internal)."""
+        self._uri = self._get_websocket_uri(uri)
 
     def _set_auth(self, auth: str) -> None:
         """Update the authentication credential (internal)."""

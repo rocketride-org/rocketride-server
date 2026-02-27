@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "LLM - xAI",
+	"title": "xAI",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -310,10 +310,25 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "LLM - xAI",
+			"title": "xAI",
 			"properties": [
 				"xai.profile"
 			]
 		}
-	]
+	],
+	"test": {
+		"profiles": ["grok-4-1-fast-reasoning"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
 }

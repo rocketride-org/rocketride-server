@@ -20,7 +20,7 @@
 		"debugger",
 		"toolchain"
 	],
-	"icon": "rocketride-icon.png",
+	"icon": "rocketride-dark-icon.png",
 	"engines": {
 		"vscode": "^1.99.3"
 	},
@@ -48,12 +48,20 @@
 				"displayName": "Pipeline Grid Editor",
 				"selector": [
 					{
+						"filenamePattern": "*.pipe"
+					},
+					{
 						"filenamePattern": "*.pipe.json"
 					}
 				],
 				"priority": "default"
 			}
 		],
+		"configurationDefaults": {
+			"files.associations": {
+				"*.pipe": "json"
+			}
+		},
 		"configuration": {
 			"title": "RocketRide",
 			"properties": {
@@ -64,7 +72,7 @@
 						"onprem",
 						"local"
 					],
-					"default": "cloud",
+					"default": "local",
 					"description": "Connection mode for RocketRide debugging",
 					"enumDescriptions": [
 						"Cloud (RocketRide.ai cloud) – needs a RocketRide account",
@@ -74,7 +82,7 @@
 				},
 				"rocketride.hostUrl": {
 					"type": "string",
-					"default": "https://cloud.rocketride.ai",
+					"default": "http://localhost:5565",
 					"description": "Host URL for RocketRide service (used by both cloud and local modes). Host and port will be parsed from this URL.",
 					"format": "uri"
 				},
@@ -93,6 +101,11 @@
 						"src/pipelines",
 						"workflows"
 					]
+				},
+				"rocketride.local.engineVersion": {
+					"type": "string",
+					"default": "latest",
+					"description": "Engine version to download. 'latest' for newest stable, 'prerelease' for newest prerelease, or a specific tag like 'server-v3.1.1'."
 				},
 				"rocketride.local.engineArgs": {
 					"type": "array",
@@ -115,7 +128,7 @@
 						"prompt"
 					],
 					"default": "prompt",
-					"description": "Behavior when a pipe.json file changes while the pipeline is running",
+					"description": "Behavior when a .pipe file changes while the pipeline is running",
 					"enumDescriptions": [
 						"Automatically restart the pipeline",
 						"Do not automatically restart the pipeline",
@@ -145,7 +158,7 @@
 				{
 					"id": "rocketride",
 					"title": "RocketRide",
-					"icon": "./rocketride-icon.svg"
+					"icon": "./rocketride-light-icon.png"
 				}
 			]
 		},
@@ -253,16 +266,15 @@
 				"category": "RocketRide Pipeline"
 			},
 			{
-				"command": "rocketride.page.system.open",
-				"title": "Open System Performance",
-				"category": "RocketRide",
-				"icon": "$(pulse)"
-			},
-			{
 				"command": "rocketride.page.deploy.open",
 				"title": "Open Deploy",
 				"category": "RocketRide",
-				"icon": "./rocketride-icon.svg"
+				"icon": { "dark": "./rocketride-light-icon.png", "light": "./rocketride-dark-icon.png" }
+			},
+			{
+				"command": "rocketride.page.welcome.open",
+				"title": "Welcome",
+				"category": "RocketRide"
 			}
 		],
 		"menus": {
@@ -429,7 +441,6 @@
 		]
 	},
 	"main": "./dist/rocketride.js",
-	"scripts": {},
 	"devDependencies": {
 		"@rsbuild/core": "^1.4.10",
 		"@rsbuild/plugin-react": "^1.3.4",
@@ -457,10 +468,11 @@
 		"adm-zip": "^0.5.16",
 		"chart.js": "^4.4.0",
 		"shared": "workspace:*",
-		"tar": "^7.4.3"
+		"tar": "^7.5.8"
 	},
 	"files": [
-		"rocketride-icon.*",
+		"rocketride-dark-icon.png",
+		"rocketride-light-icon.png",
 		"rocketride.js",
 		"package.json",
 		"LICENSE",

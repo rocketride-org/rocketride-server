@@ -54,7 +54,7 @@ Quick Start:
 For more information, see the documentation at https://docs.rocketride.ai
 """
 
-__version__ = '1.1.0'
+__version__ = '1.0.0'
 __author__ = 'RocketRide, Inc.'
 __email__ = 'dev@rocketride.ai'
 
@@ -101,6 +101,11 @@ from .core.exceptions import AuthenticationException
 
 from .core.constants import (
     CONST_DEFAULT_SERVICE,
+    CONST_DEFAULT_WEB_CLOUD,
+    CONST_DEFAULT_WEB_HOST,
+    CONST_DEFAULT_WEB_LOCAL,
+    CONST_DEFAULT_WEB_PORT,
+    CONST_DEFAULT_WEB_PROTOCOL,
     CONST_SOCKET_TIMEOUT,
     CONST_WS_PING_INTERVAL,
     CONST_WS_PING_TIMEOUT,
@@ -113,6 +118,11 @@ __all__ = [
     'RocketRideException',
     'AuthenticationException',
     'CONST_DEFAULT_SERVICE',
+    'CONST_DEFAULT_WEB_CLOUD',
+    'CONST_DEFAULT_WEB_HOST',
+    'CONST_DEFAULT_WEB_LOCAL',
+    'CONST_DEFAULT_WEB_PORT',
+    'CONST_DEFAULT_WEB_PROTOCOL',
     'CONST_SOCKET_TIMEOUT',
     'CONST_WS_PING_INTERVAL',
     'CONST_WS_PING_TIMEOUT',

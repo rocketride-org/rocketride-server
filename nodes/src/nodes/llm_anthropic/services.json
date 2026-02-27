@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "LLM - Anthropic",
+	"title": "Anthropic",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -26,13 +26,13 @@
 	],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -52,11 +52,11 @@
 	//		Description to of this driver
 	//
 	"description": [
-		"A component that integrates with Anthropic’s Claude models for natural ",
+		"A component that integrates with Anthropic's Claude models for natural ",
 		"language understanding and generation. It enables tasks such as ",
 		"summarization, question answering, content generation, and conversational ",
 		"AI. Configurable with model selection and prompt settings, the component ",
-		"provides access to Claude’s advanced language capabilities with a strong focus ",
+		"provides access to Claude's advanced language capabilities with a strong focus ",
 		"on safety, alignment, and reliability. Ideal for enterprise-grade workflows requiring ",
 		"trustworthy AI outputs."
 	],
@@ -107,11 +107,23 @@
 	"preconfig": {
 		// Define the values that will be merged into any profile configuration
 		// specified, unless the profile is 'absolute'
-		"default": "claude-3_5-haiku",
+		"default": "claude-sonnet-4-6",
 		// Defines profiles used with the "profile": key
 		"profiles": {
 			"custom": {
 				"model": "",
+				"modelTotalTokens": 200000,
+				"apikey": ""
+			},
+			"claude-sonnet-4-6": {
+				"title": "Claude Sonnet 4.6",
+				"model": "claude-sonnet-4-6",
+				"modelTotalTokens": 200000,
+				"apikey": ""
+			},
+			"claude-opus-4-6": {
+				"title": "Claude Opus 4.6",
+				"model": "claude-opus-4-6",
 				"modelTotalTokens": 200000,
 				"apikey": ""
 			},
@@ -130,24 +142,6 @@
 			"claude-opus-4-5": {
 				"title": "Claude Opus 4.5",
 				"model": "claude-opus-4-5",
-				"modelTotalTokens": 200000,
-				"apikey": ""
-			},
-			"claude-3_5-haiku": {
-				"title": "Claude Haiku 3.5",
-				"model": "claude-3-5-haiku-latest",
-				"modelTotalTokens": 200000,
-				"apikey": ""
-			},
-			"claude-3_7-sonnet": {
-				"title": "Claude Sonnet 3.7", 
-				"model": "claude-3-7-sonnet-latest",
-				"modelTotalTokens": 200000,
-				"apikey": ""
-			},
-			"claude-opus-4-1": {
-				"title": "Claude Opus 4.1",
-				"model": "claude-opus-4-1",
 				"modelTotalTokens": 200000,
 				"apikey": ""
 			}
@@ -177,8 +171,14 @@
 				"llm.cloud.apikey"
 			]
 		},
-		"anthropic.claude-sonnet-4-5": {
-			"object": "claude-sonnet-4-5",
+		"anthropic.claude-sonnet-4-6": {
+			"object": "claude-sonnet-4-6",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"anthropic.claude-opus-4-6": {
+			"object": "claude-opus-4-6",
 			"properties": [
 				"llm.cloud.apikey"
 			]
@@ -189,26 +189,14 @@
 				"llm.cloud.apikey"
 			]
 		},
+		"anthropic.claude-sonnet-4-5": {
+			"object": "claude-sonnet-4-5",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
 		"anthropic.claude-opus-4-5": {
 			"object": "claude-opus-4-5",
-			"properties": [
-				"llm.cloud.apikey"
-			]
-		},
-		"anthropic.claude-opus-4-1": {
-			"object": "claude-opus-4-1",
-			"properties": [
-				"llm.cloud.apikey"
-			]
-		},
-		"anthropic.claude-3_5-haiku": {
-			"object": "claude-3_5-haiku",
-			"properties": [
-				"llm.cloud.apikey"
-			]
-		},
-		"anthropic.claude-3_7-sonnet": {
-			"object": "claude-3_7-sonnet",
 			"properties": [
 				"llm.cloud.apikey"
 			]
@@ -217,7 +205,7 @@
 			"title": "Model",
 			"description": "LLM model",
 			"type": "string",
-			"default": "claude-3_5-haiku",
+			"default": "claude-sonnet-4-6",
 			"enum": [
 				"*>preconfig.profiles.*.title"
 			],
@@ -226,6 +214,18 @@
 					"value": "custom",
 					"properties": [
 						"anthropic.custom"
+					]
+				},
+				{
+					"value": "claude-sonnet-4-6",
+					"properties": [
+						"anthropic.claude-sonnet-4-6"
+					]
+				},
+				{
+					"value": "claude-opus-4-6",
+					"properties": [
+						"anthropic.claude-opus-4-6"
 					]
 				},
 				{
@@ -245,24 +245,6 @@
 					"properties": [
 						"anthropic.claude-opus-4-5"
 					]
-				},
-				{
-					"value": "claude-3_5-haiku",
-					"properties": [
-						"anthropic.claude-3_5-haiku"
-					]
-				},
-				{
-					"value": "claude-3_7-sonnet",
-					"properties": [
-						"anthropic.claude-3_7-sonnet"
-					]
-				},
-				{
-					"value": "claude-opus-4-1",
-					"properties": [
-						"anthropic.claude-opus-4-1"
-					]
 				}
 			]
 		}
@@ -275,10 +257,25 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "LLM - Anthropic",
+			"title": "Anthropic",
 			"properties": [
 				"anthropic.profile"
 			]
 		}
-	]
+	],
+	"test": {
+	"profiles": ["claude-opus-4-5"],
+	"outputs": ["answers"],
+	 	"cases": [
+	 		{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
 }

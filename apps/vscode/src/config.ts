@@ -27,6 +27,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { RocketRideClient } from 'rocketride';
 
 export type ConnectionMode = 'cloud' | 'onprem' | 'local';
 
@@ -54,12 +55,14 @@ export interface ConfigManagerInfo {
 		port: number;
 		/** Additional engine arguments */
 		engineArgs: string[];
+		/** Engine version to download: 'latest', 'prerelease', or a specific tag */
+		engineVersion: string;
 	};
 
 	/** General settings */
 	autoConnect: boolean;
 
-	/** Pipeline restart behavior when pipe.json files change */
+	/** Pipeline restart behavior when .pipe files change */
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
 
 	/** Environment variables loaded from .env file */
@@ -82,20 +85,22 @@ export class ConfigManager {
 	private isDisposing: boolean = false;
 	private envFileWatcher?: vscode.FileSystemWatcher;
 	private disposables: vscode.Disposable[] = [];
+	private envRawText: string = '';
 	private envChangeEmitter = new vscode.EventEmitter<Record<string, string>>();
 	public readonly onEnvVarsChanged = this.envChangeEmitter.event;
 
 	// Cached configuration
 	private config: ConfigManagerInfo = {
-		connectionMode: 'cloud',
+		connectionMode: 'local',
 		apiKey: '',
-		hostUrl: '',
+		hostUrl: 'http://localhost:5565',
 		deployUrl: '',
 		defaultPipelinePath: '',
 		local: {
 			host: '',
 			port: 5565,
 			engineArgs: [],
+			engineVersion: 'latest',
 		},
 		autoConnect: true,
 		pipelineRestartBehavior: 'prompt',
@@ -170,7 +175,7 @@ export class ConfigManager {
 	 */
 	private async refreshConfig(): Promise<void> {
 		const config = vscode.workspace.getConfiguration(this.configSection);
-		const hostUrl = config.get('hostUrl', 'https://cloud.rocketride.ai');
+		const hostUrl = config.get('hostUrl', 'http://localhost:5565');
 		const deployUrl = config.get('deployUrl', 'https://cloud.rocketride.ai');
 
 		// Parse host and port from the hostUrl - host will always be localhost
@@ -194,7 +199,7 @@ export class ConfigManager {
 		}
 
 		this.config = {
-			connectionMode: config.get('connectionMode', 'cloud') as ConnectionMode,
+			connectionMode: config.get('connectionMode', 'local') as ConnectionMode,
 			apiKey: apiKey,
 			hostUrl: hostUrl,
 			deployUrl: deployUrl,
@@ -202,7 +207,8 @@ export class ConfigManager {
 			local: {
 				host: parsedHost,
 				port: parsedPort,
-				engineArgs: config.get('local.engineArgs', [])
+				engineArgs: config.get('local.engineArgs', []),
+				engineVersion: config.get('local.engineVersion', 'latest')
 			},
 			autoConnect: config.get('autoConnect', true),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
@@ -253,6 +259,7 @@ export class ConfigManager {
 
 		// Watch for deletion
 		this.envFileWatcher.onDidDelete(() => {
+			this.envRawText = '';
 			if (this.config) {
 				this.config.env = {};
 			}
@@ -276,6 +283,7 @@ export class ConfigManager {
 		try {
 			const workspaceFolders = vscode.workspace.workspaceFolders;
 			if (!workspaceFolders || workspaceFolders.length === 0) {
+				this.envRawText = '';
 				if (this.config) {
 					this.config.env = {};
 				}
@@ -289,19 +297,22 @@ export class ConfigManager {
 				// Parse the .env file
 				const envContent = await vscode.workspace.fs.readFile(envPath);
 				const envText = Buffer.from(envContent).toString('utf8');
+				this.envRawText = envText;
 				const parsedEnv = this.parseEnvFile(envText);
-				
+
 				if (this.config) {
 					this.config.env = parsedEnv;
 				}
 			} catch {
 				// .env file doesn't exist or can't be read
+				this.envRawText = '';
 				if (this.config) {
 					this.config.env = {};
 				}
 			}
 		} catch (error) {
 			console.error('Error loading .env file:', error);
+			this.envRawText = '';
 			if (this.config) {
 				this.config.env = {};
 			}
@@ -460,7 +471,7 @@ export class ConfigManager {
 	 * Gets the WebSocket URL based on current configuration (SYNC)
 	 */
 	public getWebSocketUrl(): string {
-		const url = new URL(this.config.hostUrl);
+		const url = new URL(RocketRideClient.normalizeUri(this.config.hostUrl));
 		const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
 		const wsPort = url.port || (url.protocol === 'https:' ? '443' : '80');
 
@@ -471,7 +482,7 @@ export class ConfigManager {
 	 * Gets the HTTP/HTTPS URL based on current configuration (SYNC)
 	 */
 	public getHttpUrl(): string {
-		const url = new URL(this.config.hostUrl);
+		const url = new URL(RocketRideClient.normalizeUri(this.config.hostUrl));
 		const httpProtocol = url.protocol;
 		const httpPort = url.port || (url.protocol === 'https:' ? '443' : '80');
 
@@ -504,7 +515,7 @@ export class ConfigManager {
 				errors.push('Cloud URL is required when using cloud mode');
 			} else {
 				try {
-					new URL(config.hostUrl);
+					new URL(RocketRideClient.normalizeUri(config.hostUrl));
 				} catch {
 					errors.push('Cloud URL must be a valid URL (e.g., https://cloud.rocketride.ai)');
 				}
@@ -517,7 +528,7 @@ export class ConfigManager {
 				errors.push('Host URL is required when using on-prem mode');
 			} else {
 				try {
-					new URL(config.hostUrl);
+					new URL(RocketRideClient.normalizeUri(config.hostUrl));
 				} catch {
 					errors.push('Host URL must be a valid URL');
 				}
@@ -652,11 +663,13 @@ export class ConfigManager {
 	}
 
 	/**
-	 * Replaces all environment variables with the provided object (ASYNC)
-	 * Completely replaces config.env and saves to .env file
-	 * Ensures ROCKETRIDE_URI and ROCKETRIDE_APIKEY are always present (uses settings as defaults if missing)
-	 * 
-	 * @param envVars Complete set of environment variables to save
+	 * Saves environment variables from the Settings UI.
+	 * Merges with existing raw text to preserve comments and formatting.
+	 * Keys present in the previous config.env but absent from envVars are treated
+	 * as user-deleted and removed from the file.
+	 * Ensures ROCKETRIDE_URI and ROCKETRIDE_APIKEY are always present.
+	 *
+	 * @param envVars Complete set of environment variables from the UI
 	 */
 	public async saveAllEnvVars(envVars: Record<string, string>): Promise<void> {
 		try {
@@ -665,28 +678,31 @@ export class ConfigManager {
 				throw new Error('No workspace folder open');
 			}
 
-			// Copy the provided env vars
-			const envToSave = { ...envVars };
+			const updates = { ...envVars };
 
-			// Ensure ROCKETRIDE_URI is always present (use settings as default if missing)
-			if (!envToSave['ROCKETRIDE_URI']) {
-				envToSave['ROCKETRIDE_URI'] = this.getApiHost();
+			// Ensure ROCKETRIDE_URI is always present
+			if (!('ROCKETRIDE_URI' in updates)) {
+				updates['ROCKETRIDE_URI'] = this.getApiHost();
 			}
 
-			// Ensure ROCKETRIDE_APIKEY is always present (use settings as default if missing)
-			if (!envToSave['ROCKETRIDE_APIKEY']) {
-				envToSave['ROCKETRIDE_APIKEY'] = this.getApiKey();
+			// Ensure ROCKETRIDE_APIKEY is always present
+			if (!('ROCKETRIDE_APIKEY' in updates)) {
+				updates['ROCKETRIDE_APIKEY'] = this.getApiKey();
 			}
 
-			// Replace config.env completely
-			this.config.env = envToSave;
+			// Keys in the old config but absent from the incoming set were deleted in the UI
+			const keysToRemove = new Set<string>();
+			for (const key of Object.keys(this.config.env)) {
+				if (!(key in updates)) {
+					keysToRemove.add(key);
+				}
+			}
 
-			// Save to disk
+			this.config.env = updates;
+			this.envRawText = this.updateEnvRawText(updates, keysToRemove);
 			await this.saveEnvFile();
 
-			// Notify listeners
 			this.envChangeEmitter.fire(this.getEnvVars());
-
 			console.log('[ConfigManager] Saved all environment variables');
 		} catch (error) {
 			console.error('[ConfigManager] Failed to save environment variables:', error);
@@ -695,8 +711,8 @@ export class ConfigManager {
 	}
 
 	/**
-	 * Saves the current environment variables to the .env file (ASYNC)
-	 * Creates the file if it doesn't exist
+	 * Flushes envRawText to the .env file on disk.
+	 * If no raw text exists yet (new file), generates from config.env.
 	 */
 	private async saveEnvFile(): Promise<void> {
 		try {
@@ -708,23 +724,88 @@ export class ConfigManager {
 			const workspaceRoot = workspaceFolders[0].uri.fsPath;
 			const envPath = vscode.Uri.file(path.join(workspaceRoot, '.env'));
 
-			// Build .env file content
-			const lines: string[] = [];
-			for (const [key, value] of Object.entries(this.config.env)) {
-				// Quote values that contain spaces or special characters
-				const needsQuotes = /[\s#=]/.test(value);
-				const quotedValue = needsQuotes ? `"${value}"` : value;
-				lines.push(`${key}=${quotedValue}`);
+			// New file — generate from scratch
+			if (!this.envRawText && Object.keys(this.config.env).length > 0) {
+				const lines: string[] = [];
+				for (const [key, value] of Object.entries(this.config.env)) {
+					const needsQuotes = /[\s#=]/.test(value);
+					const quotedValue = needsQuotes ? `"${value}"` : value;
+					lines.push(`${key}=${quotedValue}`);
+				}
+				this.envRawText = lines.join('\n');
 			}
 
-			// Write to file
-			const content = lines.join('\n');
-			await vscode.workspace.fs.writeFile(envPath, Buffer.from(content, 'utf8'));
+			await vscode.workspace.fs.writeFile(envPath, Buffer.from(this.envRawText || '', 'utf8'));
 
 		} catch (error) {
 			console.error('Error saving .env file:', error);
 			throw new Error(`Failed to save .env file: ${error}`);
 		}
+	}
+
+	/**
+	 * Patches envRawText by updating, adding, or removing keys while preserving
+	 * comments, blank lines, and formatting.
+	 */
+	private updateEnvRawText(
+		updates: Record<string, string>,
+		keysToRemove?: Set<string>
+	): string {
+		const lines = this.envRawText.split('\n');
+		const consumedKeys = new Set<string>();
+		const resultLines: string[] = [];
+
+		for (const line of lines) {
+			const trimmed = line.trim();
+
+			// Preserve blank lines and comments as-is
+			if (!trimmed || trimmed.startsWith('#')) {
+				resultLines.push(line);
+				continue;
+			}
+
+			// Try to parse KEY=VALUE
+			const match = trimmed.match(/^([^=]+)=(.*)$/);
+			if (!match) {
+				resultLines.push(line);
+				continue;
+			}
+
+			const key = match[1].trim();
+
+			// Should this key be removed?
+			if (keysToRemove && keysToRemove.has(key)) {
+				continue;
+			}
+
+			// Should this key be updated?
+			if (key in updates) {
+				const value = updates[key];
+				const needsQuotes = /[\s#=]/.test(value);
+				const quotedValue = needsQuotes ? `"${value}"` : value;
+				resultLines.push(`${key}=${quotedValue}`);
+				consumedKeys.add(key);
+			} else {
+				resultLines.push(line);
+			}
+		}
+
+		// Append any new keys that weren't found in existing lines
+		const newKeys = Object.keys(updates).filter(k => !consumedKeys.has(k));
+		if (newKeys.length > 0) {
+			const lastLine = resultLines[resultLines.length - 1];
+			if (lastLine !== undefined && lastLine.trim() !== '') {
+				resultLines.push('');
+			}
+			for (const key of newKeys) {
+				const value = updates[key];
+				const needsQuotes = /[\s#=]/.test(value);
+				const quotedValue = needsQuotes ? `"${value}"` : value;
+				resultLines.push(`${key}=${quotedValue}`);
+			}
+		}
+
+		return resultLines.join('\n');
 	}
 
 	/**
@@ -736,7 +817,6 @@ export class ConfigManager {
 		try {
 			const workspaceFolders = vscode.workspace.workspaceFolders;
 			if (!workspaceFolders || workspaceFolders.length === 0) {
-				// No workspace open - this is OK, just return
 				return;
 			}
 
@@ -752,35 +832,32 @@ export class ConfigManager {
 				fileExists = false;
 			}
 
-			let needsSave = false;
+			// Build updates for truly missing keys (use `in` — empty string is valid)
+			const updates: Record<string, string> = {};
 
-			// Create file or ensure required vars are present
 			if (!fileExists) {
 				console.log('[ConfigManager] Creating initial .env file');
-				this.config.env['ROCKETRIDE_URI'] = this.getApiHost();
-				this.config.env['ROCKETRIDE_APIKEY'] = this.getApiKey();
-				needsSave = true;
+				updates['ROCKETRIDE_URI'] = this.getApiHost();
+				updates['ROCKETRIDE_APIKEY'] = this.getApiKey();
 			} else {
-				// File exists, ensure ROCKETRIDE_URI and ROCKETRIDE_APIKEY are present
-				if (!this.config.env['ROCKETRIDE_URI']) {
+				if (!('ROCKETRIDE_URI' in this.config.env)) {
 					console.log('[ConfigManager] Adding missing ROCKETRIDE_URI to .env file');
-					this.config.env['ROCKETRIDE_URI'] = this.getApiHost();
-					needsSave = true;
+					updates['ROCKETRIDE_URI'] = this.getApiHost();
 				}
-				if (!this.config.env['ROCKETRIDE_APIKEY']) {
+				if (!('ROCKETRIDE_APIKEY' in this.config.env)) {
 					console.log('[ConfigManager] Adding missing ROCKETRIDE_APIKEY to .env file');
-					this.config.env['ROCKETRIDE_APIKEY'] = this.getApiKey();
-					needsSave = true;
+					updates['ROCKETRIDE_APIKEY'] = this.getApiKey();
 				}
 			}
 
-			if (needsSave) {
+			if (Object.keys(updates).length > 0) {
+				Object.assign(this.config.env, updates);
+				this.envRawText = this.updateEnvRawText(updates);
 				await this.saveEnvFile();
 				console.log('[ConfigManager] Ensured .env file has ROCKETRIDE_URI and ROCKETRIDE_APIKEY');
 			}
 		} catch (error) {
 			console.error('[ConfigManager] Failed to ensure .env file sync:', error);
-			// Don't throw - this shouldn't block other operations
 		}
 	}
 
@@ -799,21 +876,18 @@ export class ConfigManager {
 			const uri = this.getApiHost();
 			const apiKey = this.getApiKey();
 
-			let needsUpdate = false;
+			const updates: Record<string, string> = {};
 
-			// Update ROCKETRIDE_URI if different
 			if (this.config.env['ROCKETRIDE_URI'] !== uri) {
-				this.config.env['ROCKETRIDE_URI'] = uri;
-				needsUpdate = true;
+				updates['ROCKETRIDE_URI'] = uri;
 			}
-
-			// Update ROCKETRIDE_APIKEY if different
 			if (this.config.env['ROCKETRIDE_APIKEY'] !== apiKey) {
-				this.config.env['ROCKETRIDE_APIKEY'] = apiKey;
-				needsUpdate = true;
+				updates['ROCKETRIDE_APIKEY'] = apiKey;
 			}
 
-			if (needsUpdate) {
+			if (Object.keys(updates).length > 0) {
+				Object.assign(this.config.env, updates);
+				this.envRawText = this.updateEnvRawText(updates);
 				await this.saveEnvFile();
 				this.envChangeEmitter.fire(this.getEnvVars());
 				console.log('[ConfigManager] Synced ROCKETRIDE_URI/APIKEY to .env file');

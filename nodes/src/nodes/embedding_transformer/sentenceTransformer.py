@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2024 RocketRide Inc.
+# Copyright (c) 2026 RocketRide, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,7 @@ monitorStatus('Loading transformers')
 
 # Load all the heavy weight stuff
 from numpy import ndarray
-from ai.common.models.sentence_transformers import SentenceTransformer
+from ai.common.models import SentenceTransformer
 from ai.common.config import Config
 from ai.common.embedding import EmbeddingBase
 from ai.common.schema import Doc, Question
@@ -110,18 +110,19 @@ class Embedding(EmbeddingBase):
 
         Return the vector as an array of floats.
         """
-        # For each question
-        for question in question.questions:
-            # Get the vectors
-            vectors = self._embedding.encode(question.text, show_progress_bar=False)
-
-            # Check the return type
-            if not isinstance(vectors, ndarray):
-                raise Exception('Embedding is not an ndarray')
-
-            # Save it
-            question.embedding = vectors.tolist()
-            question.embedding_model = self._model
+        # Encode all questions in one batch; encode(list) returns (N, dim), assign vectors[i] per question
+        if not question.questions:
+            return
+        texts = [q.text for q in question.questions]
+        # Get the vectors
+        vectors = self._embedding.encode(texts, show_progress_bar=False)
+        # Check the return type
+        if not isinstance(vectors, ndarray):
+            raise Exception('Embedding is not an ndarray')
+        # Save it
+        for i, q in enumerate(question.questions):
+            q.embedding = vectors[i].tolist()
+            q.embedding_model = self._model
 
     def encodeChunks(self, chunks: List[Doc]) -> None:
         """Given a list of documents, encode the document into a vector.

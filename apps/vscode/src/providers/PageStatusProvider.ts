@@ -232,7 +232,7 @@ export class PageStatusProvider {
 
 		try {
 			// Send DAP command to start monitoring
-			await this.connectionManager.request('apaext_monitor', {
+			await this.connectionManager.request('rrext_monitor', {
 				projectId: projectId,
 				source: sourceId,
 				types: ['summary']
@@ -279,7 +279,7 @@ export class PageStatusProvider {
 		if (this.connectionManager.isConnected()) {
 			try {
 				// Send DAP command to stop monitoring
-				await this.connectionManager.request('apaext_monitor', {
+				await this.connectionManager.request('rrext_monitor', {
 					projectId: projectId,
 					source: sourceId,
 				});
@@ -591,9 +591,10 @@ export class PageStatusProvider {
 					</style>
 				</head>
 				<body>
-					<iframe id="app-iframe" src="${message.url}${message.url.includes('?') ? '&' : '?'}_t=${Date.now()}"></iframe>
+					<iframe id="app-iframe" src="${message.url}${message.url.includes('?') ? '&' : '?'}_t=${Date.now()}" allow="clipboard-read; clipboard-write"></iframe>
 					<script>
 						(function() {
+							const vscode = acquireVsCodeApi();
 							const iframe = document.getElementById('app-iframe');
 							const envVars = ${JSON.stringify(env)};
 							
@@ -654,10 +655,13 @@ export class PageStatusProvider {
 									if (event.data.type === 'ready') {
 										sendDataToIframe();
 									}
+									if (event.data.type === 'requestPaste') {
+										vscode.postMessage({ type: 'requestPaste' });
+									}
 								}
 							});
-							
-							// Listen for theme changes from extension host
+
+							// Listen for messages from extension host
 							window.addEventListener('message', (event) => {
 								const msg = event.data;
 								if (msg.type === 'themeChanged') {
@@ -665,12 +669,28 @@ export class PageStatusProvider {
 										sendDataToIframe();
 									}, 50);
 								}
+								if (msg.type === 'pasteContent' && msg.text && iframe.contentWindow) {
+									iframe.contentWindow.postMessage({
+										type: 'paste',
+										text: msg.text
+									}, '*');
+								}
 							});
 						})();
 					</script>
 				</body>
 				</html>
 			`;
+
+			// Handle messages from the webview
+			const messageDisposable = panel.webview.onDidReceiveMessage(async (msg: { type: string }) => {
+				if (msg.type === 'requestPaste') {
+					const text = await vscode.env.clipboard.readText();
+					if (text) {
+						panel.webview.postMessage({ type: 'pasteContent', text });
+					}
+				}
+			});
 
 			// Listen for theme changes in VSCode
 			const themeChangeDisposable = vscode.window.onDidChangeActiveColorTheme(() => {
@@ -680,6 +700,7 @@ export class PageStatusProvider {
 			});
 
 			panel.onDidDispose(() => {
+				messageDisposable.dispose();
 				themeChangeDisposable.dispose();
 			});
 		}
@@ -733,7 +754,7 @@ export class PageStatusProvider {
 					// Use DAP command to stop the running pipeline process
 					try {
 						// We need the token to attach...
-						const response = await this.connectionManager.request('apaext_get_token', {
+						const response = await this.connectionManager.request('rrext_get_token', {
 							projectId: viewState.projectId,
 							source: viewState.sourceId
 						}) as GenericResponse | undefined;
@@ -801,7 +822,7 @@ export class PageStatusProvider {
 					// Use DAP command to execute pipeline without debugging
 					try {
 						// We need the token to attach...
-						const response = await this.connectionManager.request('apaext_get_token', {
+						const response = await this.connectionManager.request('rrext_get_token', {
 							projectId: viewState.projectId,
 							source: viewState.sourceId
 						}) as GenericResponse | undefined;

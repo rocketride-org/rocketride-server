@@ -11,8 +11,8 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/YOUR-USERNAME/engine-new.git
-   cd engine-new
+   git clone https://github.com/YOUR-USERNAME/rocketride-server.git
+   cd rocketride-server
    ```
 3. **Set up your development environment** following the [Setup Guide](docs/setup/README.md)
 

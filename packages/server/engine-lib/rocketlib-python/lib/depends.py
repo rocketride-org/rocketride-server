@@ -452,6 +452,7 @@ def _compile_constraints(combined_path: str, constraints_path: str):
         '--python', sys.executable,  # Explicitly specify Python version to avoid mismatch
         '--index-strategy', 'unsafe-best-match',  # Check all indexes for best version
         '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
+        '--emit-index-url',  # Preserve --extra-index-url etc. so install/dry-run can find packages (e.g. torch+cu128)
     ], capture_output=True, text=True, check=False, stdin=subprocess.PIPE, encoding='utf-8', errors='replace')
 
     if result.returncode != 0:

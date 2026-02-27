@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "LLM - Ollama",
+	"title": "Ollama",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -26,13 +26,13 @@
 	],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -563,10 +563,25 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "LLM - Ollama",
+			"title": "Ollama",
 			"properties": [
 				"ollama.profile"
 			]
 		}
-	]
+	],
+	"test": {
+		"profiles": ["llama4-latest"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
 }

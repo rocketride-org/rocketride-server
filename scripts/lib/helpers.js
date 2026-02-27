@@ -39,7 +39,7 @@ function parallel(actions, title = 'Parallel tasks') {
  *   sequence([
  *     'tika:sync-source',
  *     'tika:build-jar',
- *     'tika:copy-outputs'
+ *     'tika:sync'
  *   ], 'tika:pipeline')
  * ])
  */

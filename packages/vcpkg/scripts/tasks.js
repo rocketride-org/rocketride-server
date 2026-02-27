@@ -1,3 +1,26 @@
+// =============================================================================
+// MIT License
+// Copyright (c) 2026 RocketRide, Inc.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+// =============================================================================
+
 /**
  * vcpkg Build Module
  * 
@@ -124,13 +147,11 @@ module.exports = {
         { name: 'vcpkg:clone', action: makeCloneVcpkgAction },
         { name: 'vcpkg:bootstrap', action: makeBootstrapVcpkgAction },
         
-        // Public actions (have descriptions)
-        { name: 'vcpkg:build', action: () => ({
-            description: 'Install and bootstrap vcpkg',
+        // Submodule actions (called by server:build-core / server:clean-all)
+        { name: 'vcpkg:submodule-build', action: () => ({
             steps: ['vcpkg:clone', 'vcpkg:bootstrap']
         })},
-        { name: 'vcpkg:clean', action: () => ({
-            description: 'Remove vcpkg installation',
+        { name: 'vcpkg:submodule-clean', action: () => ({
             run: async (ctx, task) => {
                 const { withLock, removeDir, setState } = require('../../../scripts/lib');
                 await withLock('vcpkg-setup', async () => {

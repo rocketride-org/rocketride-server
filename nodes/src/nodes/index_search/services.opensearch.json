@@ -6,8 +6,8 @@
 	],
 	"capabilities": [],
 	"register": "filter",
-	"connector": "python",
-	"path": "connectors.index_search",
+	"node": "python",
+	"path": "nodes.index_search",
 	"preconfig": {
 		"default": "local",
 		"profiles": {
@@ -20,7 +20,7 @@
 	},
 	"prefix": "OpenSearch Index",
 	"description": [
-		"An OpenSearch connector that supports classic BM25 search and vector search ",
+		"An OpenSearch node that supports classic BM25 search and vector search ",
 		"for ingestion and retrieval workflows. Works with self-managed OpenSearch."
 	],
 	"icon": "opensearch.svg",
@@ -35,6 +35,57 @@
 			"text",
 			"answers",
 			"documents"
+		]
+	},
+	"test": {
+		"profiles": ["local"],
+		"cases": [
+			{
+				"name": "Add document to store",
+				"documents": [
+					{
+						"page_content": "The capital of France is Paris.",
+						"metadata": {
+							"objectId": "test-doc-1",
+							"nodeId": "test-node",
+							"parent": "/test",
+							"chunkId": 0,
+							"isDeleted": false
+						},
+						"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+						"embedding_model": "test-model"
+					}
+				],
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "capital of France"
+					}
+				}
+			},
+			{
+				"name": "Search with question",
+				"questions": {
+					"type": "semantic",
+					"questions": [
+						{
+							"text": "What is the capital of France?",
+							"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+							"embedding_model": "test-model"
+						}
+					]
+				},
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "Paris",
+						"property": [
+							{"path": "[0].score", "greaterThan": 0.5},
+							{"path": "[0].metadata.objectId", "equals": "test-doc-1"}
+						]
+					}
+				}
+			}
 		]
 	},
 	"input": [
@@ -120,8 +171,8 @@
 			"title": "Collection",
 			"type": "string",
 			"description": "The name of the collection to use for the OpenSearch index. Only lowercase letters, numbers, and underscores are allowed.",
-			"default": "aparavi"
-		},		
+			"default": "rocketride"
+		},
 		"opensearch.mode": {
 			"title": "Store Mode",
 			"type": "boolean",

@@ -58,6 +58,8 @@ import asyncio
 import time
 from typing import Dict, Any, List, Optional
 
+from ..core.constants import CONST_DEFAULT_WEB_CLOUD
+
 from .commands.start import StartCommand
 from .commands.upload import UploadCommand
 from .commands.status import StatusCommand
@@ -345,7 +347,7 @@ class RocketRideCLI:
             # Server connection argument
             subparser.add_argument(
                 '--uri',
-                default=os.getenv('ROCKETRIDE_URI', 'https://cloud.rocketride.ai'),
+                default=os.getenv('ROCKETRIDE_URI', CONST_DEFAULT_WEB_CLOUD),
                 help='RocketRide server URI (default: %(default)s)',
             )
 
@@ -466,7 +468,7 @@ class RocketRideCLI:
         store_common_parser = argparse.ArgumentParser(add_help=False)
         add_common_args(store_common_parser)
 
-        store_parser = subparsers.add_parser('apaext_store', help='Manage project storage', parents=[store_common_parser])
+        store_parser = subparsers.add_parser('rrext_store', help='Manage project storage', parents=[store_common_parser])
 
         # Create subparser for store subcommands
         store_subparsers = store_parser.add_subparsers(
@@ -718,7 +720,7 @@ class RocketRideCLI:
             # List command doesn't require token (lists all user's tasks)
             pass
 
-        elif self.args.command == 'apaext_store':
+        elif self.args.command == 'rrext_store':
             # Store command requires store_subcommand
             if not hasattr(self.args, 'store_subcommand') or not self.args.store_subcommand:
                 print('Error: Store subcommand is required (save_project, get_project, delete_project, get_all_projects, save_template, get_template, delete_template, get_all_templates, save_log, get_log, list_logs)')
@@ -766,7 +768,7 @@ class RocketRideCLI:
                 'stop': StopCommand,
                 'events': EventsCommand,
                 'list': ListCommand,
-                'apaext_store': StoreCommand,
+                'rrext_store': StoreCommand,
             }
 
             if self.args.command in command_map:

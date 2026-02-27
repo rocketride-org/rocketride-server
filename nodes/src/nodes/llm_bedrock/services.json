@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "LLM - Amazon Bedrock",
+	"title": "Amazon Bedrock",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -636,10 +636,25 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "LLM - Amazon Bedrock",
+			"title": "Amazon Bedrock",
 			"properties": [
 				"bedrock.profile"
 			]
 		}
-	]
+	],
+	"test": {
+		"profiles": ["meta_llama4-maverick-17b"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
 }

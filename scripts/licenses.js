@@ -329,10 +329,10 @@ function collectProjectLicenses() {
     const mainLicense = path.join(PROJECT_ROOT, 'LICENSE');
     if (fs.existsSync(mainLicense)) {
         licenses.push({
-            name: 'Aparavi Engine',
+            name: 'RocketRide Engine',
             version: readJsonSafe(path.join(PROJECT_ROOT, 'package.json'))?.version || '',
             license: 'MIT',
-            homepage: 'https://github.com/aparavi/aparavi-engine',
+            homepage: 'https://github.com/rocketride-org/rocketride-server',
             licenseText: fs.readFileSync(mainLicense, 'utf8')
         });
     }
@@ -620,7 +620,7 @@ function generateLicenseFile(allLicenses) {
     lines.push('');
     lines.push(`> Generated: ${new Date().toISOString().split('T')[0]}`);
     lines.push('');
-    lines.push('This document contains license information for all third-party dependencies used by Aparavi Engine.');
+    lines.push('This document contains license information for all third-party dependencies used by rocketRide Engine.');
     lines.push('');
     
     // Summary stats

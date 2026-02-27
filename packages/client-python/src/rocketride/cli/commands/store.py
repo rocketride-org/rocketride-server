@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2025 RocketRide Corporation
+# Copyright (c) 2026 RocketRide Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -39,14 +39,14 @@ Key Features:
     - Server-side storage with proper authentication
 
 Usage:
-    rocketlib apaext_store save_project --project-id <id> --project-file <file> --apikey <key>
-    rocketlib apaext_store get_project --project-id <id> --apikey <key>
-    rocketlib apaext_store delete_project --project-id <id> --apikey <key>
-    rocketlib apaext_store get_all_projects --apikey <key>
-    rocketlib apaext_store save_template --template-id <id> --template-file <file> --apikey <key>
-    rocketlib apaext_store get_template --template-id <id> --apikey <key>
-    rocketlib apaext_store delete_template --template-id <id> --apikey <key>
-    rocketlib apaext_store get_all_templates --apikey <key>
+    rocketride rrext_store save_project --project-id <id> --project-file <file> --apikey <key>
+    rocketride rrext_store get_project --project-id <id> --apikey <key>
+    rocketride rrext_store delete_project --project-id <id> --apikey <key>
+    rocketride rrext_store get_all_projects --apikey <key>
+    rocketride rrext_store save_template --template-id <id> --template-file <file> --apikey <key>
+    rocketride rrext_store get_template --template-id <id> --apikey <key>
+    rocketride rrext_store delete_template --template-id <id> --apikey <key>
+    rocketride rrext_store get_all_templates --apikey <key>
 
 Components:
     StoreCommand: Main command implementation for project and template storage operations

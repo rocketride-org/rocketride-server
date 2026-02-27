@@ -23,8 +23,9 @@
  */
 
 import React from 'react';
-import { Bot, Settings, Trash2, Palette } from 'lucide-react';
+import { Trash2, Palette } from 'lucide-react';
 import { useTheme, ThemeName } from '../hooks/useTheme';
+import { RocketRideMark } from './icons/RocketRideMark';
 
 interface ChatHeaderProps {
 	isConnected: boolean;
@@ -39,8 +40,7 @@ interface ChatHeaderProps {
  * - Connection status (connected/connecting)
  * - Theme selector (standalone mode only)
  * - Clear chat button
- * - Settings button (placeholder)
- * 
+ *
  * @param isConnected - Whether WebSocket is connected
  * @param onClearChat - Callback to clear chat history
  */
@@ -52,10 +52,10 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ isConnected, onClearChat
 			<div className="header-content">
 				<div className="header-info">
 					<div className="bot-avatar">
-						<Bot className="w-4 h-4" />
+						<RocketRideMark />
 					</div>
 					<div className="header-text">
-						<h1>RocketRide Assistant</h1>
+						<h1>RocketRide Chat</h1>
 						<p>
 							{isConnected ? 'Connected' : 'Connecting...'}
 						</p>
@@ -89,14 +89,6 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ isConnected, onClearChat
 						aria-label="Clear chat"
 					>
 						<Trash2 className="w-5 h-5" />
-					</button>
-					<button
-						className="header-btn"
-						title="Settings"
-						type="button"
-						aria-label="Settings"
-					>
-						<Settings className="w-5 h-5" />
 					</button>
 				</div>
 			</div>

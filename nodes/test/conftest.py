@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2024 RocketRide Inc.
+# Copyright (c) 2026 RocketRide, Inc.
 # =============================================================================
 
 """
@@ -17,7 +17,7 @@ Configuration via environment variables:
 
 Running tests:
     # Run all tests (requires server)
-    builder test:nodes
+    builder nodes:test
     
     # Run contract tests only (no server needed)
     pytest nodes/test/test_contracts.py -v
@@ -106,7 +106,7 @@ async def server_available():
     if not available:
         pytest.skip(
             f"Server not available at {TEST_CONFIG.uri}. "
-            "Run 'builder test:nodes' to start server automatically."
+            "Run 'builder nodes:test' to start server automatically."
         )
     return True
 
@@ -215,7 +215,18 @@ def pytest_generate_tests(metafunc):
         available_configs = []
         ids = []
         
+        # Skip in dynamic node tests only (contract/other tests unchanged). These nodes are
+        # excluded because they pull large libraries, use heavy models, or depend on local
+        # services, which would cause CI timeouts or OOM. To run them locally:
+        #   pytest nodes/test/test_dynamic.py -v -k <node_name>
+        skip_nodes = {
+            'anonymize', 'llm_anthropic', 'llm_ollama',
+            'ocr', 'ner', 'image_cleanup', 'frame_grabber',
+        }
+
         for config in configs:
+            if config.node_name in skip_nodes:
+                continue
             if config.has_required_env_vars():
                 # If no profiles, add once with None profile
                 if not config.profiles:
