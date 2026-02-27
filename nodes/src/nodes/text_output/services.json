@@ -82,10 +82,6 @@
 		"text_output.target.parameters": {
 			"object": "parameters",
 			"properties": [
-				"smb.storePath",
-				"smb.server",
-				"smb.username",
-				"smb.password",
 				"anonymize"
 			]
 		}
