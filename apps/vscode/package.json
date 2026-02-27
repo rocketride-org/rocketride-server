@@ -450,7 +450,7 @@
 		"@types/mocha": "^10.0.10",
 		"@types/node": "20.x",
 		"@types/react": "^18.0.0",
-		"@types/react-dom": "^18.0.0",
+		"@types/react-dom": "^19.2.3",
 		"@types/vscode": "^1.99.0",
 		"@types/vscode-webview": "^1.57.5",
 		"@vscode/debugprotocol": "^1.68.0",
@@ -459,7 +459,7 @@
 		"@vscode/vsce": "^3.6.0",
 		"esbuild": "^0.25.9",
 		"react": "^18.3.1",
-		"react-dom": "^18.3.1",
+		"react-dom": "^19.2.4",
 		"typescript": "^5.8.3"
 	},
 	"dependencies": {
