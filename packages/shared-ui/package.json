@@ -84,7 +84,7 @@
 		"storybook": "~8.6.15",
 		"storybook-react-rsbuild": "~1.0.3",
 		"typescript": "^5.6.3",
-		"@rspack/binding-darwin-arm64": "1.1.8",
+		"@rspack/binding-darwin-arm64": "1.7.6",
 		"@rspack/binding-darwin-x64": "1.1.8",
 		"@rspack/binding-win32-arm64-msvc": "1.1.8",
 		"@rspack/binding-win32-x64-msvc": "1.1.8"
