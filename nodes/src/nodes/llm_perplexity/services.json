@@ -1,5 +1,5 @@
 {
-    "title": "LLM - Perplexity",
+    "title": "Perplexity",
     "protocol": "llm_perplexity://",
     "classType": [
         "llm"
@@ -159,7 +159,7 @@
     "shape": [
         {
             "section": "Pipe",
-            "title": "LLM - Perplexity",
+            "title": "Perplexity",
             "properties": [
                 "perplexity.profile"
             ]

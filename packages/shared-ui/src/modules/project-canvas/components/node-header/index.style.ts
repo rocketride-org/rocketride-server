@@ -49,6 +49,14 @@ const styles = {
 		fontWeight: 500,
 		fontSize: '0.6rem',
 	},
+	subtitle: {
+		fontSize: '0.4rem',
+		color: 'text.secondary',
+		lineHeight: 1.2,
+		textTransform: 'uppercase',
+		marginTop: '0.15rem',
+		textAlign: 'left',
+	},
 	boxImage: {
 		display: 'flex',
 		alignItems: 'center',

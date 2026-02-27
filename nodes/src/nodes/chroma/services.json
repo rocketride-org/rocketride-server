@@ -3,7 +3,7 @@
 	// Required:
 	//      The displayable name of this node
 	//
-	"title": "Vector Store - Chroma",
+	"title": "Chroma",
 	//
 	// Required:
 	//      The protocol is the endpoint protocol

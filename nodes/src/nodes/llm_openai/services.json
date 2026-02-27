@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "LLM - OpenAI",
+	"title": "OpenAI",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -294,7 +294,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "LLM - OpenAI",
+			"title": "OpenAI",
 			"properties": [
 				"openai.profile"
 			]

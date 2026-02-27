@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Text - Anonymize",
+	"title": "Anonymize",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol

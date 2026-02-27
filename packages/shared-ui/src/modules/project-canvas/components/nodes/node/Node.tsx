@@ -224,6 +224,7 @@ export default function Node({
 						description={displayDescription}
 						documentation={documentation}
 						parentId={mostRecentParentId}
+					classType={classType}
 					/>
 					{children}
 				</Box>
