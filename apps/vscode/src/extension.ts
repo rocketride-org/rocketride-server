@@ -190,7 +190,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			pageConnection,
 			sidebarFiles,
 			pageStatus,
-			pageSystem,
 			pageWelcome!
 		);
 
