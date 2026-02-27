@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "LLM - Deepseek",
+	"title": "Deepseek",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -325,7 +325,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "LLM - Deepseek",
+			"title": "Deepseek",
 			"properties": [
 				"deepseek.profile"
 			]

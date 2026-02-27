@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Text - Prompt",
+	"title": "Prompt",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol

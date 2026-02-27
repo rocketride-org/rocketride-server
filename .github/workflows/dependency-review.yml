@@ -1,0 +1,24 @@
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [develop, main, 'release/**']
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    name: Review dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          deny-licenses: AGPL-3.0-only, AGPL-3.0-or-later
+          comment-summary-in-pr: always

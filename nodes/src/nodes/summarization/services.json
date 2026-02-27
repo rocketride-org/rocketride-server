@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Text - Summarization: LLM",
+	"title": "Summarization: LLM",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol

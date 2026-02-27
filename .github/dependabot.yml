@@ -1,0 +1,6 @@
+version: 2
+
+# TEMPORARILY DISABLED — Dependabot is in its initial scan and flooding
+# the CI queue. Re-enable by replacing `updates: []` with the grouped
+# config from commit c7d0179.
+updates: []

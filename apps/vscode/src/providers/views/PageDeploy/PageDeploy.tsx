@@ -29,19 +29,21 @@ import '../../styles/app.css';
 import './styles.css';
 
 type PageDeployIncomingMessage =
-	| { type: 'init'; rocketrideLogoUri?: string; dockerIconUri?: string; onpremIconUri?: string };
+	| { type: 'init'; rocketrideLogoDarkUri?: string; rocketrideLogoLightUri?: string; dockerIconUri?: string; onpremIconUri?: string };
 
 type PageDeployOutgoingMessage = { type: 'ready' } | { type: 'copyToClipboard'; text: string };
 
 export const PageDeploy: React.FC = () => {
-	const [logoUri, setLogoUri] = useState<string | undefined>();
+	const [logoDarkUri, setLogoDarkUri] = useState<string | undefined>();
+	const [logoLightUri, setLogoLightUri] = useState<string | undefined>();
 	const [dockerUri, setDockerUri] = useState<string | undefined>();
 	const [onpremUri, setOnpremUri] = useState<string | undefined>();
 
 	const { sendMessage } = useMessaging<PageDeployOutgoingMessage, PageDeployIncomingMessage>({
 		onMessage: (message) => {
 			if (message.type === 'init') {
-				if (message.rocketrideLogoUri) setLogoUri(message.rocketrideLogoUri);
+				if (message.rocketrideLogoDarkUri) setLogoDarkUri(message.rocketrideLogoDarkUri);
+				if (message.rocketrideLogoLightUri) setLogoLightUri(message.rocketrideLogoLightUri);
 				if (message.dockerIconUri) setDockerUri(message.dockerIconUri);
 				if (message.onpremIconUri) setOnpremUri(message.onpremIconUri);
 			}
@@ -56,9 +58,8 @@ export const PageDeploy: React.FC = () => {
 		<div className="deploy-app">
 			<div className="deploy-panels">
 				<div className="deploy-panel deploy-panel-rocketride">
-					{logoUri && (
-						<img src={logoUri} alt="RocketRide" className="deploy-panel-logo" />
-					)}
+					{logoDarkUri && <img src={logoDarkUri} alt="RocketRide" className="deploy-panel-logo logo-dark" />}
+					{logoLightUri && <img src={logoLightUri} alt="RocketRide" className="deploy-panel-logo logo-light" />}
 					<div className="deploy-panel-content">
 						<h1 className="deploy-panel-title">RocketRide.ai</h1>
 						<p className="deploy-panel-description">

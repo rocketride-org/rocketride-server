@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Vector Store - Qdrant",
+	"title": "Qdrant",
 	//
 	// Required:
 	//     The protocol is the endpoint protocol

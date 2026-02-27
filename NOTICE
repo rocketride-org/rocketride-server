@@ -1,0 +1,50 @@
+RocketRide Data Processing Engine
+Copyright 2024-2026 RocketRide, Inc.
+
+This product includes software developed by third parties.
+
+================================================================================
+
+Third-party software used by this project is listed in the generated file
+dist/THIRD_PARTY_LICENSES.md (created by: node scripts/licenses.js).
+
+Key dependencies and their licenses:
+
+  C++ (vcpkg):
+    - Boost (BSL-1.0)
+    - OpenSSL (Apache-2.0)
+    - zlib (Zlib)
+    - bzip2 (BSD-style)
+    - liblzma / XZ Utils (public domain)
+    - libxml2 (MIT)
+    - lz4 (BSD-2-Clause)
+    - zstd (BSD-3-Clause)
+    - ICU (Unicode License)
+    - cpprestsdk (MIT)
+    - tinyxml2 (Zlib)
+    - replxx (BSD-2-Clause)
+    - range-v3 (BSL-1.0)
+    - date (MIT)
+    - FastPFor (Apache-2.0)
+    - minizip-ng (Zlib)
+    - expat (MIT)
+    - libffi (MIT)
+    - pybind11 (BSD-3-Clause)
+    - Catch2 (BSL-1.0)
+    - breakpad (BSD-3-Clause)
+    - AWS SDK for C++ (Apache-2.0)
+    - Azure SDK for C++ (MIT)
+
+  Java:
+    - Apache Tika (Apache-2.0) -- https://tika.apache.org/
+
+  JavaScript/TypeScript (npm):
+    - See package.json and pnpm-lock.yaml for the full list
+
+  Python (pip):
+    - See requirements.txt files in nodes/src/nodes/ and packages/ai/
+
+For the complete license text of each dependency, run:
+    node scripts/licenses.js
+
+================================================================================

@@ -1,0 +1,50 @@
+name: Container Scan
+
+on:
+  push:
+    branches: [develop, main, 'release/**']
+    paths:
+      - 'docker/**'
+  pull_request:
+    branches: [develop, main, 'release/**']
+    paths:
+      - 'docker/**'
+  schedule:
+    - cron: '42 3 * * 1'  # Weekly Monday 3:42 UTC
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  trivy:
+    name: Trivy (${{ matrix.dockerfile }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        dockerfile:
+          - Dockerfile.engine
+          - Dockerfile.eaas
+          - Dockerfile.overlay
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy (filesystem scan)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: 'docker/${{ matrix.dockerfile }}'
+          format: 'sarif'
+          output: 'trivy-${{ matrix.dockerfile }}.sarif'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-${{ matrix.dockerfile }}.sarif'
+          category: 'trivy-${{ matrix.dockerfile }}'

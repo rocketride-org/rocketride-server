@@ -23,10 +23,36 @@
  */
 
 /**
- * Default RocketRide service endpoint URL.
+ * Default protocol for connections when none is specified.
+ */
+export const CONST_DEFAULT_WEB_PROTOCOL = 'http://';
+
+/**
+ * Default hostname for local RocketRide instances.
+ */
+export const CONST_DEFAULT_WEB_HOST = 'localhost';
+
+/**
+ * Default server port for self-hosted / local RocketRide instances.
+ * Applied when no port is specified in the URI.
+ */
+export const CONST_DEFAULT_WEB_PORT = '5565';
+
+/**
+ * Default local RocketRide service endpoint URL.
+ */
+export const CONST_DEFAULT_WEB_LOCAL = `${CONST_DEFAULT_WEB_PROTOCOL}${CONST_DEFAULT_WEB_HOST}:${CONST_DEFAULT_WEB_PORT}`;
+
+/**
+ * Default cloud RocketRide service endpoint URL.
  * Used when no custom URI is provided in the client configuration.
  */
-export const CONST_DEFAULT_SERVICE = 'https://cloud.rocketride.ai';
+export const CONST_DEFAULT_WEB_CLOUD = 'https://cloud.rocketride.ai:80';
+
+/**
+ * @deprecated Use CONST_DEFAULT_WEB_CLOUD instead.
+ */
+export const CONST_DEFAULT_SERVICE = CONST_DEFAULT_WEB_CLOUD;
 
 /**
  * WebSocket connection timeout in seconds.

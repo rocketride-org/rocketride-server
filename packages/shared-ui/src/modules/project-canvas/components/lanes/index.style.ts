@@ -42,7 +42,7 @@ const styles = {
 		...(inVSCode
 			? {
 					backgroundColor: 'background.default',
-					borderRadius: '0.2rem',
+					borderTop: '1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12))',
 				}
 			: {}),
 		...(!inVSCode
@@ -73,7 +73,7 @@ const styles = {
 		...nodeStyles.label,
 		width: 'fit-content',
 		backgroundColor: 'background.default',
-		padding: '0.3rem 0.4rem',
+		padding: '0.3rem 0.6rem',
 	},
 };
 

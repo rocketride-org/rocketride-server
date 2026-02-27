@@ -24,6 +24,7 @@
 import { ReactElement, useMemo, useEffect, useCallback } from 'react';
 import { Node as RFNode, ReactFlow, Background } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import './reactflow-overrides.css';
 import { useTheme } from '@mui/material/styles';
 import { isMacOs } from 'react-device-detect';
 

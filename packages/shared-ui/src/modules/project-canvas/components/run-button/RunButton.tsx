@@ -27,6 +27,7 @@ import { Box, IconButton, Typography } from '@mui/material';
 import { PlayArrow, StopCircle, Autorenew } from '@mui/icons-material';
 
 import { styles } from './index.style';
+import { isInVSCode } from '../../../../utils/vscode';
 import { useFlow } from '../../FlowContext';
 import { TASK_STATE } from '../../types';
 import usePrevious from '../../../../hooks/usePrevious';
@@ -202,7 +203,7 @@ export default function RunButton({ nodeId }: IProps): ReactElement {
 				{isPending ? (
 					<Autorenew color="warning" sx={styles.icon} className="rotate" />
 				) : (
-					<PlayArrow color="primary" sx={styles.icon} />
+					<PlayArrow sx={{ ...styles.icon, color: isInVSCode() ? 'var(--vscode-button-background)' : 'primary.main' }} />
 				)}
 			</IconButton>
 			<Typography sx={styles.label} className="run-btn-label">
