@@ -71,7 +71,7 @@
 		"@storybook/addon-links": "~8.6.15",
 		"@storybook/addon-onboarding": "~8.6.15",
 		"@storybook/blocks": "~8.6.15",
-		"@storybook/react": "~8.6.15",
+		"@storybook/react": "~10.2.13",
 		"@storybook/react-vite": "~8.6.15",
 		"@storybook/test": "~8.6.15",
 		"@types/react": "~18.2.21",
