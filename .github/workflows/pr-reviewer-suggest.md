@@ -27,20 +27,20 @@ When a pull request is opened or marked ready for review, analyze the changed fi
 
 ## Instructions
 
-1. Skip if the PR author is a bot (login ending in `[bot]`) or the PR is a draft. If so, call `noop` and stop.
+1. Skip if the PR author is a bot (login ending in `[bot]`), the PR is a draft, or the PR already has reviewers assigned. If so, call `noop` and stop.
 
-2. Get the list of changed files in the pull request.
+2. Get the list of changed files in the pull request. If there are no changed files, call `noop` and stop.
 
 3. Map each changed file to a module using these path patterns:
 
    | Module | Paths |
    |--------|-------|
-   | `engine` | `packages/server/**`, `apps/engine/**` |
+   | `engine` | `packages/server/**`, `apps/engine/**`, `packages/tika/**`, `packages/vcpkg/**` |
    | `sdk-typescript` | `packages/client-typescript/**` |
    | `sdk-python` | `packages/client-python/**`, `packages/client-mcp/**` |
    | `nodes` | `nodes/**` |
    | `ai` | `packages/ai/**` |
-   | `chat-ui` | `apps/chat-ui/**`, `packages/shared-ui/**` |
+   | `chat-ui` | `apps/chat-ui/**`, `apps/dropper-ui/**`, `packages/shared-ui/**` |
    | `vscode` | `apps/vscode/**` |
    | `infra` | `.github/**`, `scripts/**`, `builder`, `builder.js`, `package.json`, `pnpm-lock.yaml`, `CMakeLists.txt` |
    | `docs` | `docs/**`, `*.md`, `apps/vscode/docs/**` |
@@ -60,6 +60,7 @@ When a pull request is opened or marked ready for review, analyze the changed fi
    | `docs` | `Rod-Christensen` | `stepmikhaylov` |
 
    If no module matches, use the fallback reviewer: `Rod-Christensen`.
+   If the only eligible reviewer is the PR author (both primary, secondary, and fallback are the author), call `noop` and post a comment asking the author to manually select a reviewer.
 
 5. Select 1-2 reviewers following these rules:
    - **Never suggest the PR author as a reviewer.** If the primary reviewer is the PR author, use the secondary reviewer instead.

@@ -13,11 +13,10 @@ permissions:
 tools:
   github:
     toolsets: [issues, labels, projects]
-    github-token: ${{ secrets.GH_AW_PROJECT_GITHUB_TOKEN }}
 
 safe-outputs:
   add-labels:
-    max: 5
+    max: 6
   add-comment:
     max: 1
   update-project:
@@ -34,7 +33,7 @@ When a new issue is opened or reopened, analyze it and apply the correct labels.
 
 1. Read the issue title, body, and any template fields (severity dropdown, module checkboxes, etc.).
 
-2. Skip issues created by bots (author login ending in `[bot]`). If the author is a bot, call `noop` and stop.
+2. Skip issues created by bots (author login ending in `[bot]`), or issues that already have the `auto-triage` label (already triaged). If skipping, call `noop` and stop.
 
 3. Apply exactly **one type label** based on the issue content:
    - `bug` — something is broken or behaving incorrectly
@@ -61,12 +60,12 @@ When a new issue is opened or reopened, analyze it and apply the correct labels.
 
    | Label | Paths / Keywords |
    |-------|-----------------|
-   | `engine` | `packages/server/**`, `apps/engine/**`, C++ engine, core server |
+   | `engine` | `packages/server/**`, `apps/engine/**`, `packages/tika/**`, `packages/vcpkg/**`, C++ engine, core server, Tika, document extraction |
    | `sdk-typescript` | `packages/client-typescript/**`, TypeScript SDK, JS client |
    | `sdk-python` | `packages/client-python/**`, `packages/client-mcp/**`, Python SDK, MCP |
    | `nodes` | `nodes/**`, pipeline nodes, data processing nodes |
    | `ai` | `packages/ai/**`, AI modules, embeddings, LLM |
-   | `chat-ui` | `apps/chat-ui/**`, `packages/shared-ui/**`, chat interface, UI |
+   | `chat-ui` | `apps/chat-ui/**`, `apps/dropper-ui/**`, `packages/shared-ui/**`, chat interface, UI |
    | `vscode` | `apps/vscode/**`, VS Code extension, editor |
 
    Map the "Affected Modules" checkboxes from the Feature Request template:
@@ -77,6 +76,7 @@ When a new issue is opened or reopened, analyze it and apply the correct labels.
    - "ai" → `ai`
    - "chat-ui" or "dropper-ui" → `chat-ui`
    - "vscode" → `vscode`
+   - "tika" → `engine`
 
    If no module can be determined, do not apply a module label.
 
