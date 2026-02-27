@@ -60,6 +60,7 @@ import { getSecuredFormData, removeRequired, setUiSchemaProperty } from '../../.
 import { INodeData, IProject, IValidateResponse } from '../../../types';
 import { transformNodeToComponent } from '../../../helpers';
 import { ActionsType, NodeType, STORAGE_KEY } from '../../../constants';
+import { isInVSCode } from '../../../../../utils/vscode';
 
 /**
  * Well-known RJSF form field IDs used to detect specific authentication
@@ -685,7 +686,6 @@ export default function NodePanel({ onClose }: IBasePanelProps): ReactNode {
 					<Button
 						fullWidth
 						variant="contained"
-						color="primary"
 						disabled={disableSave}
 						onClick={() => {
 							if (schema) {
@@ -694,7 +694,17 @@ export default function NodePanel({ onClose }: IBasePanelProps): ReactNode {
 								handleSaveDetailsOnly();
 							}
 						}}
-						sx={{ mt: 1, flexShrink: 0 }}
+						sx={{
+							mt: 1,
+							flexShrink: 0,
+							...(isInVSCode() && {
+								backgroundColor: 'var(--vscode-button-background)',
+								color: 'var(--vscode-button-foreground)',
+								'&:hover': {
+									backgroundColor: 'var(--vscode-button-hoverBackground)',
+								},
+							}),
+						}}
 					>
 						{isSubmitting
 							? t('flow.panels.node.validating')

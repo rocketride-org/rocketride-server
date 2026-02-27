@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Embedding - Image",
+	"title": "Image",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -179,7 +179,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Embedding - Image",
+			"title": "Image",
 			"properties": [
 				"embedding.profile"
 			]

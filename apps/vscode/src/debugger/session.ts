@@ -177,8 +177,9 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 		let fileUri: vscode.Uri;
 
 		const ensurePipelineFile = (fsPath: string): void => {
-			if (!fsPath.toLowerCase().endsWith('.pipe.json')) {
-				this.logger.throwError(`File "${fsPath}" is not a .pipeline file`);
+			const lower = fsPath.toLowerCase();
+			if (!lower.endsWith('.pipe') && !lower.endsWith('.pipe.json')) {
+				this.logger.throwError(`File "${fsPath}" is not a .pipe file`);
 			}
 		};
 

@@ -27,6 +27,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { RocketRideClient } from 'rocketride';
 
 export type ConnectionMode = 'cloud' | 'onprem' | 'local';
 
@@ -61,7 +62,7 @@ export interface ConfigManagerInfo {
 	/** General settings */
 	autoConnect: boolean;
 
-	/** Pipeline restart behavior when pipe.json files change */
+	/** Pipeline restart behavior when .pipe files change */
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
 
 	/** Environment variables loaded from .env file */
@@ -470,7 +471,7 @@ export class ConfigManager {
 	 * Gets the WebSocket URL based on current configuration (SYNC)
 	 */
 	public getWebSocketUrl(): string {
-		const url = new URL(this.config.hostUrl);
+		const url = new URL(RocketRideClient.normalizeUri(this.config.hostUrl));
 		const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
 		const wsPort = url.port || (url.protocol === 'https:' ? '443' : '80');
 
@@ -481,7 +482,7 @@ export class ConfigManager {
 	 * Gets the HTTP/HTTPS URL based on current configuration (SYNC)
 	 */
 	public getHttpUrl(): string {
-		const url = new URL(this.config.hostUrl);
+		const url = new URL(RocketRideClient.normalizeUri(this.config.hostUrl));
 		const httpProtocol = url.protocol;
 		const httpPort = url.port || (url.protocol === 'https:' ? '443' : '80');
 
@@ -514,7 +515,7 @@ export class ConfigManager {
 				errors.push('Cloud URL is required when using cloud mode');
 			} else {
 				try {
-					new URL(config.hostUrl);
+					new URL(RocketRideClient.normalizeUri(config.hostUrl));
 				} catch {
 					errors.push('Cloud URL must be a valid URL (e.g., https://cloud.rocketride.ai)');
 				}
@@ -527,7 +528,7 @@ export class ConfigManager {
 				errors.push('Host URL is required when using on-prem mode');
 			} else {
 				try {
-					new URL(config.hostUrl);
+					new URL(RocketRideClient.normalizeUri(config.hostUrl));
 				} catch {
 					errors.push('Host URL must be a valid URL');
 				}

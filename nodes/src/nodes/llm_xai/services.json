@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "LLM - xAI",
+	"title": "xAI",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -310,7 +310,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "LLM - xAI",
+			"title": "xAI",
 			"properties": [
 				"xai.profile"
 			]

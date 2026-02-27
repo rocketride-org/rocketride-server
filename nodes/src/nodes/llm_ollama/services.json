@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "LLM - Ollama",
+	"title": "Ollama",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -563,7 +563,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "LLM - Ollama",
+			"title": "Ollama",
 			"properties": [
 				"ollama.profile"
 			]

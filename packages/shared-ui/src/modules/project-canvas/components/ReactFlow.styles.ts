@@ -33,50 +33,58 @@ import { isInVSCode } from '../../../utils/vscode';
  *
  * @returns An object containing a `@global` key with CSS class overrides for ReactFlow.
  */
-export const reactFlowStyles = () => ({
-	'@global': {
-		// Target selected and focus state of the react flow nodes (pipelines)
-		'.react-flow__node.selected:not(.react-flow__node-operator):not(.react-flow__node-annotation)': {
-			outline: `1px solid ${brandOrange} !important`,
+export const reactFlowStyles = () => {
+	const accent = isInVSCode() ? 'var(--vscode-button-background)' : brandOrange;
+	const accentFaded = isInVSCode() ? 'var(--vscode-button-background)' : 'rgba(247, 144, 31, 0.5)';
+
+	return {
+		'@global': {
+			// Target selected and focus state of the react flow nodes (pipelines)
+			'.react-flow__node.selected:not(.react-flow__node-operator):not(.react-flow__node-annotation)': {
+				outline: `1px solid ${accent} !important`,
+			},
+			'.react-flow__node:focus:not(.react-flow__node-operator):not(.react-flow__node-annotation)': {
+				outline: `1px solid ${accent} !important`,
+			},
+			'.react-flow__node': {
+				borderRadius: '4px',
+			},
+			'.react-flow__node-resizer': {
+				border: 'none',
+			},
+			'.react-flow__node-remote-group': {
+				zIndex: '-1 !important',
+			},
+			'.react-flow__resize-control.handle': {
+				background: accent,
+				border: `3px solid ${accentFaded}`,
+				width: '8px',
+				height: '8px',
+			},
+			'.react-flow__resize-control.line': {
+				background: accent,
+				borderColor: accent,
+				zIndex: 10,
+			},
+			'.react-flow__resize-control.top.line': {
+				borderTopWidth: '3px',
+			},
+			'.react-flow__resize-control.bottom.line': {
+				borderBottomWidth: '3px',
+			},
+			'.react-flow__resize-control.right.line': {
+				borderRightWidth: '3px',
+			},
+			'.react-flow__resize-control.left.line': {
+				borderLeftWidth: '3px',
+			},
+			'.react-flow__controls-button': {
+				width: isInVSCode() ? '28px' : '42px',
+				height: isInVSCode() ? '28px' : '42px',
+			},
+			'.react-flow__panel': {
+				margin: `${pxToRem(15)}rem`,
+			},
 		},
-		'.react-flow__node:focus:not(.react-flow__node-operator):not(.react-flow__node-annotation)': {
-			outline: `1px solid ${brandOrange} !important`,
-		},
-		'.react-flow__node-resizer': {
-			border: 'none',
-		},
-		'.react-flow__node-remote-group': {
-			zIndex: '-1 !important',
-		},
-		'.react-flow__resize-control.handle': {
-			background: brandOrange,
-			border: '3px solid rgba(247, 144, 31, 0.5)',
-			width: '8px',
-			height: '8px',
-		},
-		'.react-flow__resize-control.line': {
-			background: brandOrange,
-			borderColor: brandOrange,
-			zIndex: 10,
-		},
-		'.react-flow__resize-control.top.line': {
-			borderTopWidth: '3px',
-		},
-		'.react-flow__resize-control.bottom.line': {
-			borderBottomWidth: '3px',
-		},
-		'.react-flow__resize-control.right.line': {
-			borderRightWidth: '3px',
-		},
-		'.react-flow__resize-control.left.line': {
-			borderLeftWidth: '3px',
-		},
-		'.react-flow__controls-button': {
-			width: isInVSCode() ? '28px' : '42px',
-			height: isInVSCode() ? '28px' : '42px',
-		},
-		'.react-flow__panel': {
-			margin: `${pxToRem(15)}rem`,
-		},
-	},
-});
+	};
+};
