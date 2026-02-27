@@ -40,7 +40,7 @@
 		"typescript"
 	],
 	"dependencies": {
-		"commander": "^12.0.0",
+		"commander": "^14.0.3",
 		"glob": "^10.5.0"
 	},
 	"optionalDependencies": {
