@@ -46,6 +46,13 @@ import { ConnectionManager } from '../connection/connection';
 import { ConnectionStatus, ConnectionState } from '../shared/types';
 import type { PageStatusIncomingMessage, PageStatusOutgoingMessage } from '../shared/types/pageStatus';
 
+const READ_STATE_KEY = 'rocketride.errorsWarningsReadState';
+
+interface ReadStateEntry {
+	errorsRead: boolean;
+	warningsRead: boolean;
+}
+
 /**
  * Interface for tracking monitoring state per view
  */
@@ -65,19 +72,150 @@ interface ViewMonitoringState {
 export class PageStatusProvider {
 	private webviewPanels: Map<string, ViewMonitoringState> = new Map();
 	private taskStatusData: Map<string, TaskStatus | undefined> = new Map();
+	/** Cached errors/warnings per task so they persist when server sends empty "not running" status after pipeline ends */
+	private lastKnownErrorsPerTask: Map<string, { errors: string[]; warnings: string[] }> = new Map();
 	private disposables: vscode.Disposable[] = [];
 	private logger = getLogger();               // Handles output logging to VS Code channels
 
 	private connectionManager = ConnectionManager.getInstance();
+	private onRefreshSidebar: (() => void) | undefined;
 
 	/**
 	 * Creates a new PageStatusProvider
-	 * 
+	 *
 	 * @param context VS Code extension context for command registration
+	 * @param onRefreshSidebar Optional callback to refresh the pipeline files tree (avoids circular dependency)
 	 */
-	constructor(private context: vscode.ExtensionContext) {
+	constructor(private context: vscode.ExtensionContext, onRefreshSidebar?: () => void) {
+		this.onRefreshSidebar = onRefreshSidebar;
 		this.setupEventListeners();
 		this.registerCommands();
+	}
+
+	private refreshSidebar(): void {
+		this.onRefreshSidebar?.();
+	}
+
+	private getReadStateMap(): Record<string, ReadStateEntry> {
+		return this.context.workspaceState.get<Record<string, ReadStateEntry>>(READ_STATE_KEY) ?? {};
+	}
+
+	private async setReadStateMap(map: Record<string, ReadStateEntry>): Promise<void> {
+		await this.context.workspaceState.update(READ_STATE_KEY, map);
+	}
+
+	/**
+	 * Returns task status for a given project/source, if any.
+	 */
+	public getTaskStatus(projectId: string, sourceId: string): TaskStatus | undefined {
+		return this.taskStatusData.get(`${projectId}.${sourceId}`);
+	}
+
+	/**
+	 * Returns whether errors have been marked as read for this task.
+	 */
+	public areErrorsRead(projectId: string, sourceId: string): boolean {
+		const key = `${projectId}.${sourceId}`;
+		return this.getReadStateMap()[key]?.errorsRead ?? false;
+	}
+
+	/**
+	 * Returns whether warnings have been marked as read for this task.
+	 */
+	public areWarningsRead(projectId: string, sourceId: string): boolean {
+		const key = `${projectId}.${sourceId}`;
+		return this.getReadStateMap()[key]?.warningsRead ?? false;
+	}
+
+	/**
+	 * Marks errors or warnings as read for this task and clears that section's content (so the corresponding button clears that section).
+	 */
+	public async markAsRead(projectId: string, sourceId: string, section: 'errors' | 'warnings'): Promise<void> {
+		if (section === 'errors') {
+			await this.clearErrorsForTask(projectId, sourceId);
+		} else {
+			await this.clearWarningsForTask(projectId, sourceId);
+		}
+		const key = `${projectId}.${sourceId}`;
+		const map = this.getReadStateMap();
+		const entry = map[key] ?? { errorsRead: false, warningsRead: false };
+		if (section === 'errors') {
+			entry.errorsRead = true;
+		} else {
+			entry.warningsRead = true;
+		}
+		map[key] = entry;
+		await this.setReadStateMap(map);
+		this.refreshSidebar();
+		await this.updateWebview(projectId, sourceId);
+	}
+
+	/**
+	 * Clears only errors for this task. Use when the user dismisses/clears the errors section (e.g. "Mark as read" on errors).
+	 */
+	public async clearErrorsForTask(projectId: string, sourceId: string): Promise<void> {
+		const key = `${projectId}.${sourceId}`;
+		const taskStatus = this.taskStatusData.get(key);
+		if (taskStatus) {
+			const cached = this.lastKnownErrorsPerTask.get(key);
+			this.taskStatusData.set(key, { ...taskStatus, errors: [] });
+			if (cached) {
+				this.lastKnownErrorsPerTask.set(key, { ...cached, errors: [] });
+			}
+		} else {
+			this.lastKnownErrorsPerTask.delete(key);
+		}
+		this.refreshSidebar();
+		await this.updateWebview(projectId, sourceId);
+	}
+
+	/**
+	 * Clears only warnings for this task. Use when the user dismisses/clears the warnings section (e.g. "Mark as read" on warnings).
+	 */
+	public async clearWarningsForTask(projectId: string, sourceId: string): Promise<void> {
+		const key = `${projectId}.${sourceId}`;
+		const taskStatus = this.taskStatusData.get(key);
+		if (taskStatus) {
+			const cached = this.lastKnownErrorsPerTask.get(key);
+			this.taskStatusData.set(key, { ...taskStatus, warnings: [] });
+			if (cached) {
+				this.lastKnownErrorsPerTask.set(key, { ...cached, warnings: [] });
+			}
+		} else {
+			this.lastKnownErrorsPerTask.delete(key);
+		}
+		this.refreshSidebar();
+		await this.updateWebview(projectId, sourceId);
+	}
+
+	/**
+	 * Clears both errors and warnings and read state for this task. Use when starting a new run (Run/Restart) so the slate is clean.
+	 */
+	public async clearErrorsWarningsForTask(projectId: string, sourceId: string): Promise<void> {
+		const key = `${projectId}.${sourceId}`;
+		this.lastKnownErrorsPerTask.delete(key);
+		const taskStatus = this.taskStatusData.get(key);
+		if (taskStatus) {
+			this.taskStatusData.set(key, { ...taskStatus, errors: [], warnings: [] });
+		}
+		const map = this.getReadStateMap();
+		if (map[key]) {
+			delete map[key];
+			await this.setReadStateMap(map);
+		}
+		this.refreshSidebar();
+		await this.updateWebview(projectId, sourceId);
+	}
+
+	/**
+	 * Posts scrollToSection to the webview for this task (e.g. when user clicks tree icon).
+	 */
+	public postScrollToSection(projectId: string, sourceId: string, section: 'errors' | 'warnings'): void {
+		const key = `${projectId}.${sourceId}`;
+		const viewState = this.webviewPanels.get(key);
+		if (viewState && !viewState.isDisposed) {
+			viewState.panel.webview.postMessage({ type: 'scrollToSection', section });
+		}
 	}
 
 	/**
@@ -197,19 +335,24 @@ export class PageStatusProvider {
 				const sourceId = event.body?.source || 'default';
 				const key = `${projectId}.${sourceId}`;
 
-				// Check if we have a webview for this project/source
-				const viewState = this.webviewPanels.get(key);
-				if (!viewState || viewState.isDisposed) {
-					return; // No webview interested in this event
+				const taskStatus = event.body as TaskStatus | undefined;
+				if (!taskStatus) {
+					break;
 				}
 
-				const taskStatus = event.body as TaskStatus | undefined;
-				if (taskStatus) {
-					// Handle async update without blocking the event handler
-					this.updateStatus(projectId, sourceId, taskStatus).catch(error => {
-						this.logger.error(`Updating status for ${projectId}.${sourceId}: ${error}`);
-					});
+				const viewState = this.webviewPanels.get(key);
+				const hasErrorsOrWarnings = (taskStatus.errors?.length ?? 0) > 0 || (taskStatus.warnings?.length ?? 0) > 0;
+
+				// Match develop: only apply updates when there is an active webview, EXCEPT always apply when status has errors/warnings so they are stored for when the panel is opened later
+				if (!viewState || viewState.isDisposed) {
+					if (!hasErrorsOrWarnings) {
+						return; // No webview and empty status: do not overwrite last known status (which may have errors)
+					}
 				}
+
+				this.updateStatus(projectId, sourceId, taskStatus).catch(error => {
+					this.logger.error(`Updating status for ${projectId}.${sourceId}: ${error}`);
+				});
 				break;
 			}
 		}
@@ -448,7 +591,9 @@ export class PageStatusProvider {
 				type: 'update',
 				taskStatus: taskStatus,
 				host: host,
-				state: connectionStatus.state
+				state: connectionStatus.state,
+				errorsRead: this.areErrorsRead(projectId, sourceId),
+				warningsRead: this.areWarningsRead(projectId, sourceId)
 			};
 
 			await viewState.panel.webview.postMessage(updateMessage);
@@ -470,9 +615,43 @@ export class PageStatusProvider {
 		sourceId: string,
 		taskStatus?: TaskStatus): Promise<void> {
 		const key = `${projectId}.${sourceId}`;
+		if (taskStatus === undefined) {
+			this.lastKnownErrorsPerTask.delete(key);
+		}
+
+		// Cache errors/warnings whenever we receive a status that has any, so we can restore them if a later "not running" update wipes them
+		if (taskStatus && (taskStatus.errors?.length || taskStatus.warnings?.length)) {
+			this.lastKnownErrorsPerTask.set(key, {
+				errors: taskStatus.errors ?? [],
+				warnings: taskStatus.warnings ?? []
+			});
+		}
+
+		// When server sends "not running" or completed status with empty/missing errors, restore from cache so they stay visible after pipeline ends
+		const incomingErrorsEmpty = taskStatus && (taskStatus.errors == null || taskStatus.errors.length === 0);
+		const incomingWarningsEmpty = taskStatus && (taskStatus.warnings == null || taskStatus.warnings.length === 0);
+		if (taskStatus && incomingErrorsEmpty && incomingWarningsEmpty) {
+			const stateNum = Number(taskStatus.state);
+			const isEndState = stateNum === 0 || stateNum === 5 || stateNum === 6 || taskStatus.status === 'Not running';
+			if (isEndState) {
+				const cached = this.lastKnownErrorsPerTask.get(key);
+				const prev = this.taskStatusData.get(key);
+				const errorsToKeep = cached?.errors?.length ? cached.errors : (prev?.errors?.length ? prev.errors : (taskStatus.errors ?? []));
+				const warningsToKeep = cached?.warnings?.length ? cached.warnings : (prev?.warnings?.length ? prev.warnings : (taskStatus.warnings ?? []));
+				if (errorsToKeep.length || warningsToKeep.length) {
+					taskStatus = {
+						...taskStatus,
+						errors: errorsToKeep,
+						warnings: warningsToKeep
+					};
+				}
+			}
+		}
 
 		// Update the status data - may be undefined if no status
 		this.taskStatusData.set(key, taskStatus);
+
+		this.refreshSidebar();
 
 		// Update webview if it's active
 		try {
@@ -712,6 +891,11 @@ export class PageStatusProvider {
 					await this.handlePipelineAction(message.action, viewState);
 					break;
 				}
+
+				case 'markAsRead': {
+					await this.markAsRead(viewState.projectId, viewState.sourceId, message.section);
+					break;
+				}
 			}
 		} catch (error) {
 			this.logger.error(`Handling webview message of type ${message.type}: ${error}`);
@@ -767,6 +951,8 @@ export class PageStatusProvider {
 
 					// Use DAP command to execute pipeline without debugging
 					try {
+						// Clear previous run's errors/warnings when user starts a new run (not when run finishes)
+						await this.clearErrorsWarningsForTask(viewState.projectId, viewState.sourceId);
 						const info = await this.connectionManager.request('execute', {
 							projectId: viewState.projectId,
 							source: viewState.sourceId,
@@ -777,7 +963,6 @@ export class PageStatusProvider {
 						}, '*');
 
 						console.log(info);
-
 					} catch (error: unknown) {
 						this.logger.error(`Unable to execute pipeline: ${error}`);
 						vscode.window.showErrorMessage(String(error));
@@ -800,6 +985,8 @@ export class PageStatusProvider {
 
 					// Use DAP command to execute pipeline without debugging
 					try {
+						// Clear previous run's errors/warnings when user starts a restart (not when restart finishes)
+						await this.clearErrorsWarningsForTask(viewState.projectId, viewState.sourceId);
 						// We need the token to attach...
 						const response = await this.connectionManager.request('rrext_get_token', {
 							projectId: viewState.projectId,

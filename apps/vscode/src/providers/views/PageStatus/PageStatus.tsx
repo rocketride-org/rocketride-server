@@ -45,10 +45,16 @@ export type PageStatusIncomingMessage
 		taskStatus: TaskStatus | undefined;
 		state: ConnectionState;
 		host: string;
+		errorsRead?: boolean;
+		warningsRead?: boolean;
 	}
 	| {
 		type: 'connectionState';
 		state: ConnectionState;
+	}
+	| {
+		type: 'scrollToSection';
+		section: 'errors' | 'warnings';
 	};
 
 export type PageStatusOutgoingMessage
@@ -62,6 +68,10 @@ export type PageStatusOutgoingMessage
 	| {
 		type: 'pipelineAction';
 		action: 'stop' | 'run' | 'restart';
+	}
+	| {
+		type: 'markAsRead';
+		section: 'errors' | 'warnings';
 	};
 
 /**
@@ -86,6 +96,8 @@ export const PageStatus: React.FC = () => {
 	const [connectionState, setConnectionState] = useState<ConnectionState | null>(null);
 	const [host, setHost] = useState<string>('<unknown>');
 	const [isEndpointModalOpen, setIsEndpointModalOpen] = useState(false);
+	const [errorsRead, setErrorsRead] = useState(false);
+	const [warningsRead, setWarningsRead] = useState(false);
 
 	// ========================================================================
 	// WEBVIEW MESSAGING
@@ -99,10 +111,17 @@ export const PageStatus: React.FC = () => {
 						setTaskStatus(message.taskStatus);
 						setConnectionState(message.state);
 						setHost(message.host);
+						if (message.errorsRead !== undefined) setErrorsRead(message.errorsRead);
+						if (message.warningsRead !== undefined) setWarningsRead(message.warningsRead);
 						break;
 					}
 					case 'connectionState': {
 						setConnectionState(message.state);
+						break;
+					}
+					case 'scrollToSection': {
+						const el = document.getElementById(message.section === 'errors' ? 'errors-section' : 'warnings-section');
+						el?.scrollIntoView({ behavior: 'smooth' });
 						break;
 					}
 				}
@@ -270,6 +289,8 @@ export const PageStatus: React.FC = () => {
 				onStop={() => handlePipelineAction('stop')}
 				onRun={() => handlePipelineAction('run')}
 				host={host}
+				errorsRead={errorsRead}
+				warningsRead={warningsRead}
 			/>
 
 			{/* Row 1.5: Token Usage */}
@@ -284,20 +305,26 @@ export const PageStatus: React.FC = () => {
 
 		{/* Row 3: Full-width Errors */}
 		{taskStatus && taskStatus.errors.length > 0 && (
-				<ErrWarnSection
-					title="Errors"
-					items={taskStatus.errors}
-					type="error"
-				/>
+				<div id="errors-section">
+					<ErrWarnSection
+						title="Errors"
+						items={taskStatus.errors}
+						type="error"
+						onMarkAsRead={() => sendMessage({ type: 'markAsRead', section: 'errors' })}
+					/>
+				</div>
 			)}
 
 		{/* Row 4: Full-width Warnings */}
 		{taskStatus && taskStatus.warnings.length > 0 && (
-				<ErrWarnSection
-					title="Warnings"
-					items={taskStatus.warnings}
-					type="warning"
-				/>
+				<div id="warnings-section">
+					<ErrWarnSection
+						title="Warnings"
+						items={taskStatus.warnings}
+						type="warning"
+						onMarkAsRead={() => sendMessage({ type: 'markAsRead', section: 'warnings' })}
+					/>
+				</div>
 			)}
 
 			{/* Endpoint Info Modal */}

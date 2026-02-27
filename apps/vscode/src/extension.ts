@@ -144,7 +144,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			progress.report({ increment: 60, message: "Creating webview providers..." });
 
 		pageSettings = new PageSettingsProvider(context.extensionUri);
-		pageStatus = new PageStatusProvider(context);
+		pageStatus = new PageStatusProvider(context, () => sidebarFiles?.refresh());
 		pageDeploy = new PageDeployProvider(context);
 		pageWelcome = new PageWelcomeProvider(context, context.extensionUri);
 

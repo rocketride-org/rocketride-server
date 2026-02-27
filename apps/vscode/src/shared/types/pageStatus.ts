@@ -29,10 +29,16 @@ export type PageStatusIncomingMessage
 		taskStatus: TaskStatus | undefined;
 		state: ConnectionState;
 		host: string;
+		errorsRead?: boolean;
+		warningsRead?: boolean;
 	}
 	| {
 		type: 'connectionState';
 		state: ConnectionState;
+	}
+	| {
+		type: 'scrollToSection';
+		section: 'errors' | 'warnings';
 	};
 
 export type PageStatusOutgoingMessage
@@ -46,5 +52,9 @@ export type PageStatusOutgoingMessage
 	| {
 		type: 'pipelineAction';
 		action: 'stop' | 'run' | 'restart';
+	}
+	| {
+		type: 'markAsRead';
+		section: 'errors' | 'warnings';
 	};
 

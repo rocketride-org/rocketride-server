@@ -51,6 +51,10 @@ interface StatusSectionProps {
 	onRun?: () => void;
 	onStop?: () => void;
 	host?: string;
+	/** When true, hide the errors exclamation (marked as read) */
+	errorsRead?: boolean;
+	/** When true, hide the warnings exclamation (marked as read) */
+	warningsRead?: boolean;
 }
 
 export const StatusSection: React.FC<StatusSectionProps> = ({
@@ -60,7 +64,9 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
 	onOpenExternal,
 	onRun,
 	onStop,
-	host = ''
+	host = '',
+	errorsRead = false,
+	warningsRead = false
 }) => {
 	// State
 	const [dataPoints, setDataPoints] = useState<StatusDataPoint[]>([]);
@@ -349,6 +355,29 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
 							disabled={controlButton.disabled}
 						>
 							{controlButton.label}
+						</button>
+					)}
+					{/* Error/Warning indicators (right of Run) - compact, filled; error = octagon */}
+					{taskStatus?.errors?.length > 0 && !errorsRead && (
+						<button
+							type="button"
+							className="action-btn error-indicator"
+							title="Scroll to Errors"
+							onClick={() => document.getElementById('errors-section')?.scrollIntoView({ behavior: 'smooth' })}
+							aria-label="Scroll to Errors"
+						>
+							!
+						</button>
+					)}
+					{taskStatus?.warnings?.length > 0 && !warningsRead && (
+						<button
+							type="button"
+							className="action-btn warning-indicator"
+							title="Scroll to Warnings"
+							onClick={() => document.getElementById('warnings-section')?.scrollIntoView({ behavior: 'smooth' })}
+							aria-label="Scroll to Warnings"
+						>
+							!
 						</button>
 					)}
 				</div>

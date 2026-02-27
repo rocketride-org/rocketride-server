@@ -102,6 +102,9 @@ interface ErrWarnSectionProps {
 
 	/** Type of messages for appropriate styling */
 	type: 'error' | 'warning';
+
+	/** Optional callback when user clicks "Mark as read" */
+	onMarkAsRead?: () => void;
 }
 
 /**
@@ -139,7 +142,7 @@ interface ParsedErrWarn {
  * 
  * Provides enhanced error display with structured parsing and formatting.
  */
-export const ErrWarnSection: React.FC<ErrWarnSectionProps> = ({ title, items, type }) => {
+export const ErrWarnSection: React.FC<ErrWarnSectionProps> = ({ title, items, type, onMarkAsRead }) => {
 
 	// ========================================================================
 	// ERROR PARSING LOGIC
@@ -387,6 +390,11 @@ export const ErrWarnSection: React.FC<ErrWarnSectionProps> = ({ title, items, ty
 			<header className="section-header">
 				{title}
 				<span className="component-count active">{items.length}</span>
+				{onMarkAsRead && (
+					<button type="button" className="mark-as-read-btn" onClick={onMarkAsRead}>
+						Mark as read
+					</button>
+				)}
 			</header>
 
 			{/* ================================================================ */}

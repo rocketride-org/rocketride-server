@@ -54,6 +54,8 @@ export interface PipelineFileItem {
 	parsedFile?: ParsedPipelineFile;
 	sourceComponent?: ParsedSourceComponent;
 	unknownTask?: UnknownTask;
+	/** Set on synthetic 'Errors' / 'Warnings' child items for scroll-to-section commands */
+	scrollToSection?: 'errors' | 'warnings';
 }
 
 export interface UnknownTask {
@@ -178,6 +180,14 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 				}
 			}),
 
+			vscode.commands.registerCommand('rocketride.sidebar.files.openStatusAndScrollToErrors', async (item?: PipelineFileItem) => {
+				await this.openStatusAndScroll(item, 'errors');
+			}),
+
+			vscode.commands.registerCommand('rocketride.sidebar.files.openStatusAndScrollToWarnings', async (item?: PipelineFileItem) => {
+				await this.openStatusAndScroll(item, 'warnings');
+			}),
+
 			vscode.commands.registerCommand('rocketride.sidebar.files.refresh', async () => {
 				await this.forceRefresh();
 				this.updateContextBasedOnData();
@@ -193,17 +203,41 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 				vscode.window.showErrorMessage('No pipeline selected');
 				return;
 			}
-			const sourceId = item.sourceComponent?.id || '';
-			const config: vscode.DebugConfiguration = {
-				type: 'rocketride',
-				request: 'launch',
-				name: `Run ${item.label}`,
-				file: item.resourceUri.fsPath,
-				source: sourceId,
-				noDebug: true
-			};
+			const parsedFile = item.parsedFile ?? this.getParsedPipeline(item.resourceUri);
+			if (!parsedFile?.isValid || !parsedFile.projectId) {
+				vscode.window.showErrorMessage('Invalid pipeline file or missing project_id');
+				return;
+			}
+			let sourceId = item.sourceComponent?.id;
+			if (!sourceId) {
+				if (parsedFile.sourceComponents.length === 0) {
+					vscode.window.showErrorMessage('Pipeline file has no sources');
+					return;
+				}
+				if (parsedFile.sourceComponents.length === 1) {
+					sourceId = parsedFile.sourceComponents[0].id;
+				} else {
+					const selected = await vscode.window.showQuickPick(
+						parsedFile.sourceComponents.map(s => ({ label: s.name || s.id, sourceId: s.id })),
+						{ placeHolder: 'Select a source to run' }
+					);
+					if (!selected) return;
+					sourceId = selected.sourceId;
+				}
+			}
 			try {
-				await vscode.debug.startDebugging(undefined, config);
+				getStatusPageProvider()?.clearErrorsWarningsForTask(parsedFile.projectId, sourceId);
+				const fileContent = await vscode.workspace.fs.readFile(item.resourceUri);
+				const pipelineText = Buffer.from(fileContent).toString('utf8');
+				const pipelineJson = JSON.parse(pipelineText);
+				const pipelineTransformed = this.configManager.substituteEnvVariables(pipelineJson);
+				await this.connectionManager.request('execute', {
+					projectId: parsedFile.projectId,
+					source: sourceId,
+					pipeline: pipelineTransformed,
+					args: ['--trace=servicePython,debugOut,debugProtocol']
+				}, '*');
+				this.refresh();
 			} catch (error) {
 				vscode.window.showErrorMessage(`Failed to run pipeline: ${error}`);
 			}
@@ -229,6 +263,10 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			};
 
 			try {
+				const parsedFile = item.parsedFile ?? this.getParsedPipeline(item.resourceUri);
+				if (parsedFile?.projectId && sourceId) {
+					getStatusPageProvider()?.clearErrorsWarningsForTask(parsedFile.projectId, sourceId);
+				}
 				await vscode.debug.startDebugging(undefined, config);
 			} catch (error) {
 				vscode.window.showErrorMessage(`Failed to start debugging: ${error}`);
@@ -315,6 +353,51 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	this.disposables.push(...commands);
 	commands.forEach(command => this.context.subscriptions.push(command));
 }
+
+	/**
+	 * Opens the status page for the given item and scrolls to the Errors or Warnings section.
+	 */
+	private async openStatusAndScroll(item: PipelineFileItem | undefined, section: 'errors' | 'warnings'): Promise<void> {
+		if (!item?.resourceUri) {
+			return;
+		}
+		const resourceUri = item.resourceUri as vscode.Uri;
+		const componentId = item.sourceComponent?.id as string;
+		const sourceComponent = item.sourceComponent as ParsedSourceComponent | undefined;
+		const unknownTask = item.unknownTask as UnknownTask | undefined;
+
+		let projectId: string;
+		let source: string;
+		let displayName: string;
+
+		if (unknownTask) {
+			projectId = unknownTask.projectId;
+			source = unknownTask.sourceId;
+			displayName = unknownTask.displayName || `${projectId.substring(0, 8)}.../${source}`;
+		} else {
+			const parsedPipeline = this.getParsedPipeline(resourceUri);
+			if (!parsedPipeline?.isValid || !parsedPipeline.projectId) {
+				vscode.window.showErrorMessage(`Invalid pipeline file or missing project_id: ${path.basename(resourceUri.fsPath)}`);
+				return;
+			}
+			projectId = parsedPipeline.projectId;
+			source = componentId;
+			const services = this.connectionManager.getCachedServices()?.services ?? {};
+			const providerDef = sourceComponent?.provider ? (services[sourceComponent.provider] as { title?: string } | undefined) : undefined;
+			displayName = sourceComponent?.name || providerDef?.title || componentId;
+		}
+
+		const statusPageProvider = getStatusPageProvider();
+		if (!statusPageProvider) {
+			vscode.window.showErrorMessage('Status page provider not available');
+			return;
+		}
+		await statusPageProvider.show(displayName, resourceUri, projectId, source);
+		// Brief delay so webview can render before we post scroll
+		setTimeout(() => {
+			statusPageProvider.postScrollToSection(projectId, source, section);
+		}, 150);
+	}
 
 	/**
 	 * Sets up event listeners for connection and DAP events
@@ -673,11 +756,34 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 		// Set icon based on context and active state
 		if (element.contextValue === 'pipelineFile') {
 			// Pipeline files get a standard file icon, or error icon if invalid
-			if (element.parsedFile?.isValid) {
-				item.iconPath = new vscode.ThemeIcon('file-code');
-				
-				// Check if any source component in this pipeline is running
+			if (!element.parsedFile?.isValid || (element.parsedFile.errors && element.parsedFile.errors.length > 0)) {
+				item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground'));
+				item.description = '(Parse Error)';
+			} else {
 				const parsedFile = element.parsedFile;
+				const statusProvider = getStatusPageProvider();
+				let hasUnreadErrors = false;
+				let hasUnreadWarnings = false;
+				if (parsedFile.projectId && statusProvider) {
+					for (const comp of parsedFile.sourceComponents) {
+						const taskStatus = statusProvider.getTaskStatus(parsedFile.projectId!, comp.id);
+						if (taskStatus?.errors?.length && !statusProvider.areErrorsRead(parsedFile.projectId!, comp.id)) {
+							hasUnreadErrors = true;
+						}
+						if ((taskStatus?.warnings?.length || comp.warnings?.length) && !statusProvider.areWarningsRead(parsedFile.projectId!, comp.id)) {
+							hasUnreadWarnings = true;
+						}
+					}
+				}
+				if (hasUnreadErrors) {
+					item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground'));
+					item.description = item.description ? `${item.description} • 1+ error(s)` : '1+ error(s)';
+				} else if (hasUnreadWarnings) {
+					item.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('editorWarning.foreground'));
+					item.description = item.description ? `${item.description} • 1+ warning(s)` : '1+ warning(s)';
+				} else {
+					item.iconPath = new vscode.ThemeIcon('file-code');
+				}
 				if (parsedFile.projectId) {
 					const hasRunningComponents = parsedFile.sourceComponents.some(comp => {
 						const key = this.getActiveKey(parsedFile.projectId!, comp.id);
@@ -685,9 +791,6 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					});
 					contextValue = hasRunningComponents ? 'pipelineFile:running' : 'pipelineFile:stopped';
 				}
-			} else {
-				item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground'));
-				item.description = '(Parse Error)';
 			}
 		} else if (element.contextValue === 'otherTasksRoot') {
 			// "Other" root item gets a server process icon
@@ -709,6 +812,20 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 				tooltip.appendMarkdown(html);
 				item.tooltip = tooltip;
 			}
+		} else if (element.contextValue === 'scrollToErrors') {
+			item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground'));
+			item.command = {
+				command: 'rocketride.sidebar.files.openStatusAndScrollToErrors',
+				title: 'Scroll to Errors',
+				arguments: [element]
+			};
+		} else if (element.contextValue === 'scrollToWarnings') {
+			item.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('editorWarning.foreground'));
+			item.command = {
+				command: 'rocketride.sidebar.files.openStatusAndScrollToWarnings',
+				title: 'Scroll to Warnings',
+				arguments: [element]
+			};
 		} else if (element.contextValue === 'pipelineSource') {
 			const comp = element.sourceComponent!;
 			const parsedFile = this.getParsedPipeline(element.resourceUri);
@@ -723,19 +840,44 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			if (parsedFile?.isValid && parsedFile.projectId && comp.id) {
 				const componentKey = this.getActiveKey(parsedFile.projectId, comp.id);
 				const isActive = this.activePipelines.has(componentKey);
+				const statusProvider = getStatusPageProvider();
+				const taskStatus = statusProvider?.getTaskStatus(parsedFile.projectId, comp.id);
+				const errorsRead = statusProvider?.areErrorsRead(parsedFile.projectId, comp.id) ?? false;
+				const warningsRead = statusProvider?.areWarningsRead(parsedFile.projectId, comp.id) ?? false;
+				const hasUnreadErrors = (taskStatus?.errors?.length ?? 0) > 0 && !errorsRead;
+				const hasUnreadWarnings = ((taskStatus?.warnings?.length ?? 0) > 0 || (comp.warnings?.length ?? 0) > 0) && !warningsRead;
 
-				// Set icon based on active state - light gray circle when stopped, pulse when running
-				item.iconPath = new vscode.ThemeIcon(
-					isActive ? 'pulse' : 'circle-filled',
-					new vscode.ThemeColor(isActive ? 'charts.red' : 'descriptionForeground')
-				);
+				const hasErrors = (taskStatus?.errors?.length ?? 0) > 0;
+				const hasWarnings = (taskStatus?.warnings?.length ?? 0) > 0 || (comp.warnings?.length ?? 0) > 0;
 
-				// Description: warnings only. The label already shows the name or id.
-				const warnText = comp.warnings.length > 0 ? `${comp.warnings.length} warning(s)` : '';
-				item.description = warnText;
+				// Icon priority: error (unread) > warning (unread) > run state
+				if (hasUnreadErrors) {
+					item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground'));
+					item.description = hasErrors ? `${taskStatus!.errors!.length} error(s)` : '';
+				} else if (hasUnreadWarnings) {
+					item.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('editorWarning.foreground'));
+					item.description = hasWarnings ? (comp.warnings.length > 0 ? `${comp.warnings.length} warning(s)` : `${taskStatus!.warnings!.length} warning(s)`) : '';
+				} else {
+					item.iconPath = new vscode.ThemeIcon(
+						isActive ? 'pulse' : 'circle-filled',
+						new vscode.ThemeColor(isActive ? 'charts.red' : 'descriptionForeground')
+					);
+					item.description = hasWarnings ? (comp.warnings.length > 0 ? `${comp.warnings.length} warning(s)` : '') : '';
+				}
 
-				// Update context value to include running state
+				// Show Errors/Warnings as expandable children when present
+				if (hasErrors || hasWarnings) {
+					item.collapsibleState = vscode.TreeItemCollapsibleState.Collapsed;
+				}
+
+				// Context value: running state + hasErrors/hasWarnings for inline scroll actions
 				contextValue = isActive ? 'pipelineSource:running' : 'pipelineSource:stopped';
+				if (hasUnreadErrors) {
+					contextValue += ':hasErrors';
+				}
+				if (hasUnreadWarnings) {
+					contextValue += ':hasWarnings';
+				}
 			} else {
 				// Show error state - invalid pipeline or missing IDs
 				item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground'));
@@ -857,6 +999,41 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			});
 
 			return Promise.resolve(children);
+		}
+
+		// Return Errors / Warnings link rows under a source when it has errors and/or warnings
+		if (element.contextValue === 'pipelineSource' && element.resourceUri && element.sourceComponent) {
+			const parsedFile = this.getParsedPipeline(element.resourceUri);
+			const statusProvider = getStatusPageProvider();
+			const taskStatus = parsedFile?.projectId && statusProvider
+				? statusProvider.getTaskStatus(parsedFile.projectId, element.sourceComponent.id)
+				: undefined;
+			const comp = element.sourceComponent;
+			const hasErrors = (taskStatus?.errors?.length ?? 0) > 0;
+			const hasWarnings = (taskStatus?.warnings?.length ?? 0) > 0 || (comp.warnings?.length ?? 0) > 0;
+
+			const childItems: PipelineFileItem[] = [];
+			if (hasErrors) {
+				childItems.push({
+					label: 'Errors',
+					resourceUri: element.resourceUri,
+					contextValue: 'scrollToErrors',
+					collapsibleState: vscode.TreeItemCollapsibleState.None,
+					sourceComponent: element.sourceComponent,
+					scrollToSection: 'errors'
+				} as PipelineFileItem);
+			}
+			if (hasWarnings) {
+				childItems.push({
+					label: 'Warnings',
+					resourceUri: element.resourceUri,
+					contextValue: 'scrollToWarnings',
+					collapsibleState: vscode.TreeItemCollapsibleState.None,
+					sourceComponent: element.sourceComponent,
+					scrollToSection: 'warnings'
+				} as PipelineFileItem);
+			}
+			return Promise.resolve(childItems);
 		}
 
 		// Return unknown tasks for expanded "Other" item

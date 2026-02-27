@@ -154,6 +154,42 @@
 	cursor: not-allowed;
 }
 
+/* Compact error/warning ! indicators (right of Run): small, filled; error = octagon */
+.action-btn.error-indicator,
+.action-btn.warning-indicator {
+	padding: 2px 6px;
+	min-width: 22px;
+	height: 22px;
+	font-size: 12px;
+	font-weight: bold;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	transform: none;
+	box-shadow: none;
+}
+.action-btn.error-indicator:hover,
+.action-btn.warning-indicator:hover {
+	transform: none;
+	box-shadow: none;
+}
+
+.action-btn.error-indicator {
+	color: #fff !important;
+	background: #be1100 !important;
+	border: none !important;
+	/* Octagon (stop-sign shape) */
+	clip-path: polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%);
+	-webkit-clip-path: polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%);
+}
+
+.action-btn.warning-indicator {
+	color: #1a1a1a !important;
+	background: #e6a800 !important;
+	border: 1px solid #b8860b !important;
+	border-radius: 3px;
+}
+
 /* ============================================================================ */
 /* COMPACT STATUS LINE */
 /* ============================================================================ */

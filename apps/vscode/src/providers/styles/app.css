@@ -103,6 +103,33 @@
 	gap: 8px;
 }
 
+.section-header .mark-as-read-btn {
+	margin-left: auto;
+	font-size: 12px;
+	padding: 4px 10px;
+	cursor: pointer;
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	border: 1px solid var(--vscode-button-border);
+	border-radius: 2px;
+}
+
+.section-header .mark-as-read-btn:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+/* Status panel: error/warning ! buttons (right of Run) - explicit red/yellow */
+.action-btn.error-indicator {
+	color: #fff !important;
+	background-color: var(--vscode-inputValidation-errorBackground, #be1100) !important;
+	border-color: var(--vscode-inputValidation-errorBorder, #be1100) !important;
+}
+.action-btn.warning-indicator {
+	color: #000 !important;
+	background-color: var(--vscode-inputValidation-warningBackground, #cca700) !important;
+	border-color: var(--vscode-inputValidation-warningBorder, #cca700) !important;
+}
+
 .section-content {
 	padding: 16px;
 	font-size: 13px;
