@@ -64,7 +64,7 @@
 		"adm-zip": "^0.5.16",
 		"@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
 		"@types/node": "^20.0.0",
-		"concurrently": "^8.2.2",
+		"concurrently": "^9.2.1",
 		"dotenv": "^16.4.5",
 		"eslint": "^9.15.0",
 		"eslint-config-prettier": "^9.1.0",
