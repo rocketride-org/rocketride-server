@@ -1,0 +1,101 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [develop, main, 'release/**']
+  pull_request:
+    branches: [develop, main, 'release/**']
+  schedule:
+    - cron: '17 4 * * 1'  # Weekly Monday 4:17 UTC
+
+permissions:
+  actions: read
+  contents: read
+  packages: write
+  security-events: write
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  VCPKG_NUGET_USER: ${{ github.repository_owner }}
+  NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-and-quality
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  analyze-cpp:
+    name: Analyze (cpp)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Bootstrap vcpkg
+        run: ./builder vcpkg:build
+
+      - name: Configure vcpkg NuGet cache
+        run: |
+          NUGET_EXE=$(./build/vcpkg/vcpkg fetch nuget | tail -n1)
+          mono $NUGET_EXE sources add \
+            -Source "${{ env.NUGET_FEED_URL }}" \
+            -StorePasswordInClearText \
+            -Name GitHubPackages \
+            -UserName "${{ env.VCPKG_NUGET_USER }}" \
+            -Password "${{ secrets.GITHUB_TOKEN }}" || true
+          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
+            -Source "${{ env.NUGET_FEED_URL }}"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: cpp
+          build-mode: manual
+          queries: security-and-quality
+
+      - name: Skip prebuilt download
+        run: |
+          mkdir -p build
+          echo '{"server":{"compiledVersion":"codeql"}}' > build/state.json
+
+      - name: Build C++
+        run: ./builder server:build --verbose --autoinstall
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:cpp"

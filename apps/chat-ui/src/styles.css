@@ -220,6 +220,10 @@ body {
 	justify-content: flex-start;
 }
 
+.message-wrapper.user {
+	justify-content: flex-end;
+}
+
 .message-bubble {
 	max-width: 80%;
 	padding: 0.75rem 1rem;
@@ -243,30 +247,8 @@ body {
 	padding: 0.75rem 0;
 }
 
-/* User bubble content with inline avatar */
-.user-bubble-content {
-	display: flex;
-	align-items: flex-start;
-	gap: 0.5rem;
-}
-
-.user-avatar-inline {
-	width: 1.5rem;
-	height: 1.5rem;
-	background: var(--accent-primary);
-	border-radius: 50%;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	color: white;
-	flex-shrink: 0;
-}
-
-.user-text {
-	flex: 1;
-}
-
-.user-text p {
+/* User bubble content */
+.user-bubble-content p {
 	margin: 0;
 }
 
@@ -277,6 +259,7 @@ body {
 
 .message-bubble.user .message-timestamp {
 	color: var(--text-secondary);
+	text-align: right;
 }
 
 .message-bubble.bot .message-timestamp {
@@ -356,43 +339,13 @@ body {
 	gap: 0.75rem;
 }
 
-.voice-btn {
-	padding: 0.75rem;
-	border-radius: 50%;
-	border: none;
-	cursor: pointer;
-	transition: all 0.2s ease;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-}
-
-.voice-btn.inactive {
-	background: var(--bg-tertiary);
-	color: var(--text-secondary);
-}
-
-.voice-btn.inactive:hover {
-	background: var(--bg-hover);
-	color: var(--accent-primary);
-}
-
-.voice-btn.active {
-	background: var(--error-color);
-	color: white;
-}
-
-.voice-btn.active:hover {
-	opacity: 0.9;
-}
-
 .input-field-wrapper {
 	flex: 1;
 }
 
 .input-field {
 	width: 100%;
-	padding: 0.75rem 1rem;
+	padding: 0.75rem 1rem 1rem;
 	border: 1px solid var(--input-border);
 	background: var(--input-bg);
 	color: var(--text-primary);
@@ -401,10 +354,11 @@ body {
 	font-family: inherit;
 	font-size: 0.875rem;
 	line-height: 1.5;
-	min-height: 3.125rem;
-	max-height: 7.5rem;
+	min-height: 2.8125rem;
+	max-height: 8.125rem;
+	overflow-y: auto;
 	outline: none;
-	transition: all 0.2s ease;
+	transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .input-field:focus {
@@ -440,29 +394,6 @@ body {
 	cursor: not-allowed;
 	transform: none;
 	box-shadow: none;
-}
-
-.voice-status {
-	margin-top: 0.5rem;
-	text-align: center;
-}
-
-.voice-status p {
-	font-size: 0.875rem;
-	color: var(--error-color);
-	animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-
-	0%,
-	100% {
-		opacity: 1;
-	}
-
-	50% {
-		opacity: 0.5;
-	}
 }
 
 /* Markdown Content Styling */
