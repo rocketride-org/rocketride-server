@@ -1,0 +1,60 @@
+name: Circleback Meeting Action Items
+
+on:
+  repository_dispatch:
+    types: [circleback-meeting]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  create-issues:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Process action items
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PAYLOAD: ${{ toJson(github.event.client_payload) }}
+        run: |
+          MEETING_DATE=$(echo "$PAYLOAD" | jq -r '.meeting_date // empty')
+          MEETING_LINK=$(echo "$PAYLOAD" | jq -r '.meeting_link // empty')
+          ACTION_ITEMS=$(echo "$PAYLOAD" | jq -c '.action_items // []')
+
+          if [ -z "$ACTION_ITEMS" ] || [ "$ACTION_ITEMS" = "[]" ]; then
+            echo "No action items found"
+            exit 0
+          fi
+
+          ISSUES_FILE=$(mktemp)
+
+          while read -r ITEM; do
+            TITLE=$(echo "$ITEM" | jq -r '.title')
+            ASSIGNEE=$(echo "$ITEM" | jq -r '.assignee // empty')
+            DEADLINE=$(echo "$ITEM" | jq -r '.deadline // empty')
+
+            BODY="**Meeting:** ${MEETING_DATE}
+          **Source:** [Circleback](${MEETING_LINK})
+
+          ${TITLE}"
+
+            if [ -n "$DEADLINE" ]; then
+              BODY="${BODY}
+
+          **Deadline:** ${DEADLINE}"
+            fi
+
+            ISSUE_URL=$(gh issue create \
+              --repo rocketride-org/rocketride-server \
+              --title "$TITLE" \
+              --body "$BODY" \
+              --label "meeting-action" \
+              ${ASSIGNEE:+--assignee "$ASSIGNEE"})
+
+            echo "Created: $ISSUE_URL"
+            echo "- ${TITLE} (${ISSUE_URL})" >> "$ISSUES_FILE"
+          done < <(echo "$ACTION_ITEMS" | jq -c '.[]')
+
+          CREATED_ISSUES=$(cat "$ISSUES_FILE")
+          rm -f "$ISSUES_FILE"
