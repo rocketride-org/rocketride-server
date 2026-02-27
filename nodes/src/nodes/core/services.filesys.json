@@ -105,6 +105,11 @@
 			"type": "boolean",
 			"default": true
 		},
+		"excludeSymlinks": {
+			"title": "Exclude symlinks",
+			"type": "boolean",
+			"default": true
+		},
 		"filesys.source.parameters": {
 			"section": "parameters",
 			"title": "Parameters",
