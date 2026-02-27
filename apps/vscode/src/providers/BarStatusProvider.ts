@@ -153,6 +153,16 @@ export class BarStatus {
 	}
 
 	/**
+	 * Sets status bar to "needs setup" state — shown before the welcome page is dismissed
+	 */
+	public setNeedsSetup(): void {
+		this.statusBarItem.text = '$(gear) RocketRide: Setup';
+		this.statusBarItem.command = 'rocketride.page.welcome.open';
+		this.statusBarItem.tooltip = 'Click to open the welcome page and configure your connection';
+		this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+	}
+
+	/**
 	 * Sets status bar to ready state
 	 */
 	public setReady(): void {

@@ -181,8 +181,11 @@ docker run -p 8080:8080 rocketride-engine
 		if (!this.webviewPanel) return;
 
 		const webview = this.webviewPanel.webview;
-		const logoUri = webview.asWebviewUri(
-			vscode.Uri.joinPath(this.context.extensionUri, 'rocketride-icon.png')
+		const logoDarkUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.context.extensionUri, 'rocketride-dark-icon.png')
+		);
+		const logoLightUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.context.extensionUri, 'rocketride-light-icon.png')
 		);
 		const dockerUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'static', 'docker.svg')
@@ -193,7 +196,8 @@ docker run -p 8080:8080 rocketride-engine
 
 		webview.postMessage({
 			type: 'init',
-			rocketrideLogoUri: logoUri.toString(),
+			rocketrideLogoDarkUri: logoDarkUri.toString(),
+			rocketrideLogoLightUri: logoLightUri.toString(),
 			dockerIconUri: dockerUri.toString(),
 			onpremIconUri: onpremUri.toString()
 		});

@@ -40,8 +40,7 @@ Basic Usage:
 """
 
 import os
-import urllib.parse
-from .core import DAPClient, TransportWebSocket, RocketRideException, CONST_DEFAULT_SERVICE
+from .core import DAPClient, TransportWebSocket, RocketRideException, CONST_DEFAULT_WEB_CLOUD
 from .mixins.connection import ConnectionMixin
 from .mixins.execution import ExecutionMixin
 from .mixins.data import DataMixin
@@ -179,18 +178,14 @@ class RocketRideClient(
         # If we didn't get the URI, look at the env. If not there,
         # use the default
         if not uri:
-            uri = self._env.get('ROCKETRIDE_URI', CONST_DEFAULT_SERVICE)
+            uri = self._env.get('ROCKETRIDE_URI', CONST_DEFAULT_WEB_CLOUD)
 
         if not auth:
             auth = self._env.get('ROCKETRIDE_APIKEY', None)
 
-        # Convert HTTP/HTTPS URI to WS/WSS for WebSocket connections
-        parsed_uri = urllib.parse.urlparse(uri)
-        ws_scheme = 'wss' if parsed_uri.scheme == 'https' else 'ws'
-        ws_uri = parsed_uri._replace(scheme=ws_scheme)
-
-        # Store configuration for connection
-        self._uri = f'{ws_uri.geturl()}/task/service'
+        # Normalize the URI into a fully-formed WebSocket address
+        from .mixins.connection import ConnectionMixin
+        self._uri = ConnectionMixin._get_websocket_uri(uri)
         self._apikey = auth
 
         # Initialize chat question counter

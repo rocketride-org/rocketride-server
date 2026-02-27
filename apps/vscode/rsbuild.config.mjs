@@ -47,7 +47,8 @@ export default defineConfig({
 			'page-editor': './src/providers/views/PageEditor/index.tsx',
 			'page-status': './src/providers/views/PageStatus/index.tsx',
 			'page-system': './src/providers/views/PageSystem/index.tsx',
-			'page-deploy': './src/providers/views/PageDeploy/index.tsx'
+			'page-deploy': './src/providers/views/PageDeploy/index.tsx',
+			'page-welcome': './src/providers/views/PageWelcome/index.tsx'
 		}
 	},
 

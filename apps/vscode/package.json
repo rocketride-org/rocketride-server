@@ -20,7 +20,7 @@
 		"debugger",
 		"toolchain"
 	],
-	"icon": "rocketride-icon.png",
+	"icon": "rocketride-dark-icon.png",
 	"engines": {
 		"vscode": "^1.99.3"
 	},
@@ -48,12 +48,20 @@
 				"displayName": "Pipeline Grid Editor",
 				"selector": [
 					{
+						"filenamePattern": "*.pipe"
+					},
+					{
 						"filenamePattern": "*.pipe.json"
 					}
 				],
 				"priority": "default"
 			}
 		],
+		"configurationDefaults": {
+			"files.associations": {
+				"*.pipe": "json"
+			}
+		},
 		"configuration": {
 			"title": "RocketRide",
 			"properties": {
@@ -120,7 +128,7 @@
 						"prompt"
 					],
 					"default": "prompt",
-					"description": "Behavior when a pipe.json file changes while the pipeline is running",
+					"description": "Behavior when a .pipe file changes while the pipeline is running",
 					"enumDescriptions": [
 						"Automatically restart the pipeline",
 						"Do not automatically restart the pipeline",
@@ -150,7 +158,7 @@
 				{
 					"id": "rocketride",
 					"title": "RocketRide",
-					"icon": "./rocketride-icon.svg"
+					"icon": "./rocketride-light-icon.png"
 				}
 			]
 		},
@@ -267,7 +275,12 @@
 				"command": "rocketride.page.deploy.open",
 				"title": "Open Deploy",
 				"category": "RocketRide",
-				"icon": "./rocketride-icon.svg"
+				"icon": { "dark": "./rocketride-light-icon.png", "light": "./rocketride-dark-icon.png" }
+			},
+			{
+				"command": "rocketride.page.welcome.open",
+				"title": "Welcome",
+				"category": "RocketRide"
 			}
 		],
 		"menus": {
@@ -464,7 +477,8 @@
 		"tar": "^7.5.8"
 	},
 	"files": [
-		"rocketride-icon.*",
+		"rocketride-dark-icon.png",
+		"rocketride-light-icon.png",
 		"rocketride.js",
 		"package.json",
 		"LICENSE",

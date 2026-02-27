@@ -171,7 +171,7 @@ You'll see the **RocketRide** icon in the Activity Bar (left sidebar).
 
 1. In the **RocketRide** sidebar, click the **"+"** button next to "Pipeline Files"
 2. Enter a name for your pipeline (e.g., `my-first-pipeline`)
-3. A new `.pipe.json` file will be created
+3. A new `.pipe` file will be created
 4. The visual editor opens automatically
 5. Drag components from the library to the canvas
 6. Connect components by clicking and dragging between connection points
@@ -198,10 +198,10 @@ When you click the **RocketRide** icon in the Activity Bar, you'll see:
 ├─────────────────────────────────┤
 │   [+] [Refresh]                 │
 │ > PIPELINE FILES                │
-│   pipeline1.pipe.json           │
+│   pipeline1.pipe           │
 │      └─ source1                 │
 │      └─ source2                 │
-│   pipeline2.pipe.json           │
+│   pipeline2.pipe           │
 │      └─ data_reader             │
 └─────────────────────────────────┘
 ```
@@ -240,7 +240,7 @@ Access RocketRide commands via Command Palette (Ctrl+Shift+P / Cmd+Shift+P):
 
 1. **Create the Pipeline**
    - Click **"+"** in Pipeline Files section
-   - Name it `csv-to-json.pipe.json`
+   - Name it `csv-to-json.pipe`
 
 2. **Add Components**
    - Drag a **"File Reader"** component to the canvas
@@ -347,11 +347,11 @@ Access RocketRide commands via Command Palette (Ctrl+Shift+P / Cmd+Shift+P):
      workspace/
      ├── pipelines/
      │   ├── ingestion/
-     │   │   ├── csv-import.pipe.json
-     │   │   └── api-import.pipe.json
+     │   │   ├── csv-import.pipe
+     │   │   └── api-import.pipe
      │   └── transformation/
-     │       ├── data-clean.pipe.json
-     │       └── data-merge.pipe.json
+     │       ├── data-clean.pipe
+     │       └── data-merge.pipe
      ```
 
 2. **Quick Navigation**
@@ -540,7 +540,7 @@ Comprehensive settings interface:
 2. **Name Components Clearly**: Use descriptive names for easier troubleshooting
 3. **Test Incrementally**: Test each component addition before moving on
 4. **Monitor Early**: Open status pages while developing to watch data flow
-5. **Document Configuration**: Add comments to your `.pipe.json` files
+5. **Document Configuration**: Add comments to your `.pipe` files
 
 ### Performance Optimization
 1. **Monitor Processing Rates**: Watch the rate graph to identify bottlenecks
@@ -564,7 +564,7 @@ Comprehensive settings interface:
 5. **Secure Sensitive Data**: Never commit `.env` files with credentials
 
 ### Team Collaboration
-1. **Version Control Pipelines**: Check `.pipe.json` files into Git
+1. **Version Control Pipelines**: Check `.pipe` files into Git
 2. **Share Launch Configurations**: Include `.vscode/launch.json` in repo
 3. **Document Workflows**: Add README files explaining pipeline purposes
 4. **Use Consistent Naming**: Agree on naming conventions for components
@@ -633,7 +633,7 @@ Comprehensive settings interface:
 - Invalid pipeline file
 
 **Solutions**:
-- Check if `.pipe.json` file is valid JSON
+- Check if `.pipe` file is valid JSON
 - Look for errors in VSCode Developer Tools (Help → Toggle Developer Tools)
 - Try closing and reopening the file
 - Switch to text view to verify file contents

@@ -44,6 +44,7 @@ import { PageStatusProvider } from './providers/PageStatusProvider';
 import { PageSystemProvider } from './providers/PageSystemProvider';
 import { PageDeployProvider } from './providers/PageDeployProvider';
 import { BarStatus } from './providers/BarStatusProvider';
+import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
 import { SidebarConnectionProvider } from './providers/SidebarConnectionProvider';
 
 
@@ -60,6 +61,7 @@ let pageStatus: PageStatusProvider | undefined;
 let pageSystem: PageSystemProvider | undefined;
 let pageDeploy: PageDeployProvider | undefined;
 let barStatus: BarStatus | undefined;
+let pageWelcome: PageWelcomeProvider | undefined;
 let sidebarConnection: SidebarConnectionProvider | undefined;
 
 /**
@@ -147,6 +149,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		pageStatus = new PageStatusProvider(context);
 		pageSystem = new PageSystemProvider(context);
 		pageDeploy = new PageDeployProvider(context);
+		pageWelcome = new PageWelcomeProvider(context, context.extensionUri);
 
 			// Register custom editor provider
 			pageEditor = new PageEditorProvider(context);
@@ -190,7 +193,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			pageConnection,
 			sidebarFiles,
 			pageStatus,
-			pageSystem
+			pageSystem,
+			pageWelcome!
 		);
 
 			//-------------------------------------
@@ -201,25 +205,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			await refreshAllProviders();
 
 			//-------------------------------------
-			// Initialize connection manager
+			// Initialize connection / welcome flow
 			//-------------------------------------
-			logger.output(`${icons.info} Initializing connections...`);
-			progress.report({ increment: 110, message: "Starting connections..." });
-			connectionManager.initialize().catch(error => {
-				console.error('[ROCKETRIDE] Connection initialization failed:', error);
-			});
-
 			vscode.commands.executeCommand('setContext', 'rocketride.loaded', true);
 			vscode.commands.executeCommand('setContext', 'rocketride.connected', false);
 
-			//-------------------------------------
-			// Initialize the status bar
-			//-------------------------------------
 			logger.output(`${icons.info} Initializing status bar...`);
 			progress.report({ increment: 120, message: "Setup status bar" });
 			barStatus.initializeConnectionManager();
-			barStatus.setReady();
 			context.subscriptions.push(barStatus);
+
+			const welcomeDismissed = pageWelcome?.isDismissed() ?? true;
+			if (!welcomeDismissed) {
+				// First run: show welcome page, don't auto-connect
+				logger.output(`${icons.info} First run detected — showing welcome page`);
+				progress.report({ increment: 110, message: "Showing welcome..." });
+				barStatus.setNeedsSetup();
+				pageWelcome!.show();
+			} else {
+				// Normal flow: auto-connect
+				logger.output(`${icons.info} Initializing connections...`);
+				progress.report({ increment: 110, message: "Starting connections..." });
+				barStatus.setReady();
+				connectionManager.initialize().catch(error => {
+					console.error('[ROCKETRIDE] Connection initialization failed:', error);
+				});
+			}
 
 		//-------------------------------------
 		// Sync integrations based on settings
@@ -385,3 +396,4 @@ export const getPipelineFilesTreeProvider = () => sidebarFiles;
 export const getConnectionTreeProvider = () => pageConnection;
 export const getPageEditorProvider = () => pageEditor;
 export const getBarStatus = () => barStatus;
+export const getPageWelcomeProvider = () => pageWelcome;
