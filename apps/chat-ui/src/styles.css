@@ -247,30 +247,8 @@ body {
 	padding: 0.75rem 0;
 }
 
-/* User bubble content with inline avatar */
-.user-bubble-content {
-	display: flex;
-	align-items: flex-start;
-	gap: 0.5rem;
-}
-
-.user-avatar-inline {
-	width: 1.5rem;
-	height: 1.5rem;
-	background: var(--accent-primary);
-	border-radius: 50%;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	color: white;
-	flex-shrink: 0;
-}
-
-.user-text {
-	flex: 1;
-}
-
-.user-text p {
+/* User bubble content */
+.user-bubble-content p {
 	margin: 0;
 }
 
@@ -281,6 +259,7 @@ body {
 
 .message-bubble.user .message-timestamp {
 	color: var(--text-secondary);
+	text-align: right;
 }
 
 .message-bubble.bot .message-timestamp {
@@ -366,7 +345,7 @@ body {
 
 .input-field {
 	width: 100%;
-	padding: 0.75rem 1rem;
+	padding: 0.75rem 1rem 1rem;
 	border: 1px solid var(--input-border);
 	background: var(--input-bg);
 	color: var(--text-primary);

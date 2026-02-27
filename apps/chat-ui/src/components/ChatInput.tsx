@@ -124,6 +124,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 								// Auto-resize textarea
 								e.target.style.height = 'auto';
 								e.target.style.height = `${e.target.scrollHeight}px`;
+								// When at max-height and scrolling, force scroll to
+								// bottom so the padding below the cursor is visible
+								if (e.target.scrollHeight > e.target.clientHeight) {
+									e.target.scrollTop = e.target.scrollHeight;
+								}
 							}}
 							onKeyDown={handleKeyDown}
 							placeholder={disabled ? "Connecting..." : "Type your message here..."}
