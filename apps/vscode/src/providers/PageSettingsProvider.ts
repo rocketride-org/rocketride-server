@@ -44,6 +44,7 @@ export class PageSettingsProvider {
 	private configManager: ConfigManager;
 	private engineInstaller: EngineInstaller;
 	private activeWebviews: Set<vscode.Webview> = new Set();
+	private panel: vscode.WebviewPanel | undefined;
 
 	/**
 	 * Creates a new PageSettingsProvider
@@ -113,10 +114,14 @@ export class PageSettingsProvider {
 	}
 
 	/**
-	 * Opens the settings page in a new webview panel
+	 * Opens the settings page, or reveals it if already open
 	 */
 	public async openSettings(): Promise<void> {
-		// Create and show a new webview panel
+		if (this.panel) {
+			this.panel.reveal(vscode.ViewColumn.One);
+			return;
+		}
+
 		const panel = vscode.window.createWebviewPanel(
 			'rocketride.page.settings',
 			'RocketRide Settings',
@@ -128,6 +133,7 @@ export class PageSettingsProvider {
 			}
 		);
 
+		this.panel = panel;
 		panel.webview.html = this.getHtmlForWebview(panel.webview);
 
 		// Track this webview for updates
@@ -171,7 +177,7 @@ export class PageSettingsProvider {
 
 		// Clean up when panel is disposed
 		panel.onDidDispose(() => {
-			// Remove from active webviews
+			this.panel = undefined;
 			this.activeWebviews.delete(panel.webview);
 
 			const index = this.disposables.indexOf(messageDisposable);
@@ -326,6 +332,9 @@ export class PageSettingsProvider {
 			let hostUrl = (formSettings.hostUrl as string) || '';
 			if (connectionMode === 'cloud' && !hostUrl) hostUrl = 'https://cloud.rocketride.ai';
 			if (connectionMode === 'local' && !hostUrl) hostUrl = 'http://localhost:5565';
+
+			// Normalize bare hostnames into parseable URLs (protocol, default port)
+			hostUrl = RocketRideClient.normalizeUri(hostUrl);
 
 			// Validate URL format
 			let parsedUrl: URL;

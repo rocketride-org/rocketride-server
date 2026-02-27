@@ -74,6 +74,7 @@ import * as process from 'process';
 import { Command } from 'commander';
 import { RocketRideClient } from '../client/client';
 import { DAPMessage, PipelineConfig, UPLOAD_RESULT } from '../client/types';
+import { CONST_DEFAULT_WEB_LOCAL } from '../client/constants';
 
 // ANSI Color and Control Codes for terminal formatting
 const ANSI_RESET = '\x1b[0m';
@@ -847,8 +848,7 @@ export class RocketRideCLI {
 		// Common options
 		const addCommonOptions = (cmd: Command) => {
 			return cmd
-				.option('--host <hostname>', 'RocketRide DAP server hostname', 'localhost')
-				.option('--port <port>', 'RocketRide DAP server port', '5565')
+				.option('--uri <uri>', 'RocketRide server URI (can use ROCKETRIDE_URI env var)', process.env.ROCKETRIDE_URI || CONST_DEFAULT_WEB_LOCAL)
 				.option('--apikey <key>', 'API key for RocketRide server authentication (can use ROCKETRIDE_APIKEY in .env or env var)', process.env.ROCKETRIDE_APIKEY);
 		};
 
@@ -871,10 +871,9 @@ export class RocketRideCLI {
 					command: 'start',
 					...options,
 					pipeline: options.pipeline,
-					port: parseInt(options.port),
 					threads: parseInt(options.threads)
 				};
-				this.uri = `ws://${this.args.host}:${this.args.port}`;
+				this.uri = options.uri;
 
 				try {
 					const exitCode = await this.cmdStart();
@@ -908,12 +907,11 @@ export class RocketRideCLI {
 					command: 'upload',
 					...options,
 					files,
-					port: parseInt(options.port),
 					threads: parseInt(options.threads),
 					max_concurrent: parseInt(options.maxConcurrent || '5'),
 					pipeline_args: options.args
 				};
-				this.uri = `ws://${this.args.host}:${this.args.port}`;
+				this.uri = options.uri;
 
 				try {
 					const exitCode = await this.cmdUpload();
@@ -941,9 +939,8 @@ export class RocketRideCLI {
 				this.args = {
 					command: 'status',
 					...options,
-					port: parseInt(options.port)
 				};
-				this.uri = `ws://${this.args.host}:${this.args.port}`;
+				this.uri = options.uri;
 
 				try {
 					const exitCode = await this.cmdStatus();
@@ -971,9 +968,8 @@ export class RocketRideCLI {
 				this.args = {
 					command: 'stop',
 					...options,
-					port: parseInt(options.port)
 				};
-				this.uri = `ws://${this.args.host}:${this.args.port}`;
+				this.uri = options.uri;
 
 				try {
 					const exitCode = await this.cmdStop();
@@ -999,10 +995,8 @@ export class RocketRideCLI {
 		onConnected?: (connectionInfo?: string) => Promise<void>,
 		onDisconnected?: (reason?: string, hasError?: boolean) => Promise<void>
 	): Promise<RocketRideClient> {
-		const uri = `${this.uri}/task/service`;
-
 		this.client = new RocketRideClient({
-			uri,
+			uri: this.uri,
 			auth: this.args.apikey,
 			onEvent: this.handleEvent.bind(this),
 			onConnected,

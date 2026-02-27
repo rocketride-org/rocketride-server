@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "LLM - Amazon Bedrock",
+	"title": "Amazon Bedrock",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -636,7 +636,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "LLM - Amazon Bedrock",
+			"title": "Amazon Bedrock",
 			"properties": [
 				"bedrock.profile"
 			]

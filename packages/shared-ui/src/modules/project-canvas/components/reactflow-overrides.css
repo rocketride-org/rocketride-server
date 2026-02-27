@@ -1,0 +1,30 @@
+/**
+ * Override ReactFlow's default node styling.
+ *
+ * ReactFlow ships with border-radius, border, and white background on
+ * node containers. These overrides replace them with our own styling
+ * so the canvas nodes have a consistent, theme-aware appearance.
+ */
+.react-flow__node,
+.react-flow__node-default,
+.react-flow__node-input,
+.react-flow__node-output,
+.react-flow__node-group {
+	border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12)) !important;
+	border-radius: 4px !important;
+	background-color: var(--vscode-editorWidget-background, #fff) !important;
+	box-shadow: none !important;
+	padding: 0 !important;
+}
+
+/* Annotation nodes: transparent border so they remain in the layout but aren't visually outlined */
+.react-flow__node-annotation {
+	border-color: transparent !important;
+	background-color: transparent !important;
+	box-shadow: none !important;
+}
+
+/* Remove inner borders from MUI-themed child elements inside nodes */
+.react-flow__node > div {
+	border: none !important;
+}

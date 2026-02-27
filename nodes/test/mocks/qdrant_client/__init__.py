@@ -68,7 +68,7 @@ The mock is automatically loaded when running tests via:
     builder nodes:test --pytest="-k <node_name>"
 
 Or manually:
-    set ROCKETRIDE_MOCK=C:\\Projects\\engine-new\\nodes\\test\\mocks
+    set ROCKETRIDE_MOCK=C:\\Projects\\rocketride-server\\nodes\\test\\mocks
     python -m pytest nodes/test/test_dynamic.py -k qdrant -s -v
 """
 
@@ -124,7 +124,7 @@ from .conversions.common_types import CollectionInfo, VectorParams
 class QueryResult:
     """
     Container for query_points() results.
-    
+
     The real Qdrant returns a QueryResponse object; we simplify to just the points list.
     """
     points: List[ScoredPoint] = field(default_factory=list)
@@ -137,28 +137,28 @@ class QueryResult:
 def _serialize_payload(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
     Serialize a payload dict containing Pydantic models or dataclasses to plain dicts.
-    
+
     This is CRITICAL for proper mock operation. The RocketRide store code does:
         metadata = DocMetadata(**point.payload['meta'])
-    
+
     If payload['meta'] is still a DocMetadata object (not a dict), this fails with:
         "argument after ** must be a mapping, not DocMetadata"
-    
+
     Additionally, we must use exclude_none=True because DocMetadata has fields like:
         nodeId: str = Field(None, ...)
-    
+
     The type annotation doesn't include Optional, so passing explicit None fails
     Pydantic validation. By excluding None values, we let the defaults apply.
-    
+
     Args:
         payload: The payload dict to serialize, may contain nested objects
-        
+
     Returns:
         A new dict with all nested objects converted to plain dicts
     """
     if payload is None:
         return None
-    
+
     result = {}
     for key, value in payload.items():
         if hasattr(value, 'model_dump'):
@@ -170,7 +170,7 @@ def _serialize_payload(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
         else:
             # Primitive type or already a dict/list - keep as-is
             result[key] = value
-    
+
     return result
 
 
@@ -181,13 +181,13 @@ def _serialize_payload(payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
 class QdrantClient:
     """
     Mock implementation of the Qdrant vector database client.
-    
+
     This mock stores all data in class-level dictionaries, simulating a database
     server that persists data across multiple client instances. This is important
     because the RocketRide store may create multiple QdrantClient instances during
     a single pipeline run (e.g., one for checking collection existence, another
     for actual operations).
-    
+
     Storage Structure:
         _collections: {
             "ROCKETRIDE": {
@@ -195,40 +195,40 @@ class QdrantClient:
                 "payload_schema": {"meta.nodeId": PayloadSchemaType.KEYWORD, ...}
             }
         }
-        
+
         _points: {
             "ROCKETRIDE": [
                 PointStruct(id="uuid1", vector=[0.1, ...], payload={...}),
                 PointStruct(id="uuid2", vector=[0.2, ...], payload={...}),
             ]
         }
-    
+
     Important Implementation Notes:
         1. The RocketRide store creates a "schema" document with isDeleted=True and
            objectId="schema" to track vector dimensions and embedding model.
            This must be returned by scroll() when filtered for, but excluded
            from query_points() search results.
-           
+
         2. All payload objects must be serialized before returning to avoid
            "argument after ** must be a mapping" errors in the store code.
-           
+
         3. Filter support is minimal - only the filters actually used by the
            RocketRide store are implemented (MatchAny for objectId filtering).
     """
-    
+
     # -------------------------------------------------------------------------
     # Class-Level Storage (Shared Across All Instances)
     # -------------------------------------------------------------------------
     # Using class variables ensures data persists when multiple QdrantClient
     # instances are created within the same process/pipeline run.
-    
+
     _collections: Dict[str, Dict[str, Any]] = {}  # Collection metadata
     _points: Dict[str, List[PointStruct]] = {}     # Collection name -> points list
-    
+
     # -------------------------------------------------------------------------
     # Constructor
     # -------------------------------------------------------------------------
-    
+
     def __init__(
         self,
         host: str = None,
@@ -241,10 +241,10 @@ class QdrantClient:
     ):
         """
         Initialize a mock Qdrant client connection.
-        
+
         All parameters are accepted for API compatibility but most are ignored
         since we're not connecting to a real server.
-        
+
         Args:
             host: Qdrant server hostname (logged but ignored)
             port: Qdrant server port (logged but ignored)
@@ -257,27 +257,27 @@ class QdrantClient:
         self.host = host
         self.port = port
         self.url = url
-    
+
     # -------------------------------------------------------------------------
     # Collection Management
     # -------------------------------------------------------------------------
-    
+
     def collection_exists(self, collection_name: str) -> bool:
         """
         Check if a collection exists.
-        
+
         Args:
             collection_name: Name of the collection to check
-            
+
         Returns:
             True if the collection exists, False otherwise
         """
         return collection_name in QdrantClient._collections
-    
+
     def create_collection(self, collection_name: str, vectors_config: Any = None) -> None:
         """
         Create a new collection.
-        
+
         Args:
             collection_name: Name for the new collection
             vectors_config: Vector configuration (VectorParams with size and distance metric)
@@ -287,28 +287,28 @@ class QdrantClient:
             'payload_schema': {}
         }
         QdrantClient._points[collection_name] = []
-    
+
     def get_collection(self, collection_name: str) -> CollectionInfo:
         """
         Get information about a collection.
-        
+
         Args:
             collection_name: Name of the collection
-            
+
         Returns:
             CollectionInfo with vectors_count and payload_schema
-            
+
         Raises:
             Exception: If collection doesn't exist
         """
         if collection_name not in QdrantClient._collections:
             raise Exception(f"Collection {collection_name} not found")
-        
+
         return CollectionInfo(
             vectors_count=len(QdrantClient._points.get(collection_name, [])),
             payload_schema=QdrantClient._collections[collection_name].get('payload_schema', {})
         )
-    
+
     def create_payload_index(
         self,
         collection_name: str,
@@ -318,9 +318,9 @@ class QdrantClient:
     ) -> None:
         """
         Create an index on a payload field for faster filtering.
-        
+
         In the mock, we just record the schema but don't actually build an index.
-        
+
         Args:
             collection_name: Name of the collection
             field_name: Dot-notation path to the field (e.g., "meta.nodeId")
@@ -331,11 +331,11 @@ class QdrantClient:
             QdrantClient._collections[collection_name]['payload_schema'][field_name] = (
                 field_type or field_schema
             )
-    
+
     # -------------------------------------------------------------------------
     # Data Retrieval: scroll()
     # -------------------------------------------------------------------------
-    
+
     def scroll(
         self,
         collection_name: str,
@@ -347,11 +347,11 @@ class QdrantClient:
     ) -> Tuple[List[Record], Optional[str]]:
         """
         Scroll through collection points with optional filtering.
-        
+
         Used by the RocketRide store to:
         1. Find the schema document (filter by objectId='schema', isDeleted=True)
         2. Retrieve documents by various criteria
-        
+
         Args:
             collection_name: Name of the collection to scroll
             scroll_filter: Filter conditions to apply
@@ -359,12 +359,12 @@ class QdrantClient:
             limit: Maximum number of records to return
             with_vectors: Whether to include vectors in results (ignored in mock)
             with_payload: Whether to include payload in results
-            
+
         Returns:
             Tuple of (list of Records, next_offset or None if no more results)
         """
         points = QdrantClient._points.get(collection_name, [])
-        
+
         # Apply filtering if specified
         filtered_points = points
         if scroll_filter and scroll_filter.must:
@@ -373,7 +373,7 @@ class QdrantClient:
                     # Parse the dot-notation key path (e.g., "meta.objectId")
                     key_parts = condition.key.split('.')
                     match = condition.match
-                    
+
                     def matches_condition(point: PointStruct) -> bool:
                         """Check if a point matches this filter condition."""
                         # Navigate through nested structure to find the value
@@ -389,7 +389,7 @@ class QdrantClient:
                                 value = getattr(value, part, None)
                             else:
                                 return False
-                        
+
                         # Check the match condition
                         if hasattr(match, 'any'):
                             # MatchAny: value must be in the list
@@ -397,15 +397,15 @@ class QdrantClient:
                         elif hasattr(match, 'value'):
                             # MatchValue: exact match
                             return value == match.value
-                        
+
                         # Unknown match type - include by default
                         return True
-                    
+
                     filtered_points = [p for p in filtered_points if matches_condition(p)]
-        
+
         # Apply pagination
         result = filtered_points[offset:offset + limit]
-        
+
         # Convert to Record objects with serialized payloads
         records = [
             Record(
@@ -414,15 +414,15 @@ class QdrantClient:
             )
             for p in result
         ]
-        
+
         # Return next offset for pagination, or None if we've reached the end
         next_offset = None if len(result) < limit else str(offset + limit)
         return records, next_offset
-    
+
     # -------------------------------------------------------------------------
     # Data Retrieval: query_points() - Semantic Search
     # -------------------------------------------------------------------------
-    
+
     def query_points(
         self,
         collection_name: str,
@@ -436,15 +436,15 @@ class QdrantClient:
     ) -> QueryResult:
         """
         Perform semantic similarity search.
-        
+
         In a real Qdrant, this computes vector similarity between the query
         and all stored vectors. Our mock simply returns all non-deleted points
         with a fixed score of 0.95.
-        
+
         IMPORTANT: We filter out the schema document (isDeleted=True) because
         it should never appear in search results - it's only used internally
         to track collection metadata.
-        
+
         Args:
             collection_name: Name of the collection to search
             query: Query vector for similarity comparison
@@ -454,12 +454,12 @@ class QdrantClient:
             limit: Maximum number of results to return
             score_threshold: Minimum similarity score (ignored in mock)
             search_params: Search algorithm parameters (ignored)
-            
+
         Returns:
             QueryResult containing list of ScoredPoint objects
         """
         points = QdrantClient._points.get(collection_name, [])
-        
+
         # Filter out the schema document (isDeleted=True)
         # This document is created by the RocketRide store to track metadata
         # and should never appear in search results
@@ -467,7 +467,7 @@ class QdrantClient:
         for p in points:
             meta = p.payload.get('meta') if p.payload else None
             is_deleted = False
-            
+
             if meta is not None:
                 if hasattr(meta, 'isDeleted'):
                     # meta is a DocMetadata object
@@ -475,10 +475,10 @@ class QdrantClient:
                 elif isinstance(meta, dict):
                     # meta is already serialized to dict
                     is_deleted = meta.get('isDeleted', False)
-            
+
             if not is_deleted:
                 filtered_points.append(p)
-        
+
         # Return mock scored points
         # In a real implementation, score would be computed from vector similarity
         scored = [
@@ -489,13 +489,13 @@ class QdrantClient:
             )
             for p in filtered_points[:limit]
         ]
-        
+
         return QueryResult(points=scored)
-    
+
     # -------------------------------------------------------------------------
     # Data Modification: batch_update_points()
     # -------------------------------------------------------------------------
-    
+
     def batch_update_points(
         self,
         collection_name: str,
@@ -503,11 +503,11 @@ class QdrantClient:
     ) -> None:
         """
         Perform batch update operations (upsert, delete, etc.).
-        
+
         The RocketRide store uses this to:
         1. Delete existing points with matching objectId (DeleteOperation)
         2. Insert new points (UpsertOperation)
-        
+
         Args:
             collection_name: Name of the collection to update
             update_operations: List of operation objects (UpsertOperation, DeleteOperation, etc.)
@@ -517,17 +517,17 @@ class QdrantClient:
                 # UpsertOperation: insert or update points
                 points_list = op.upsert.points
                 QdrantClient._points.setdefault(collection_name, []).extend(points_list)
-                
+
             elif hasattr(op, 'delete'):
                 # DeleteOperation: remove points matching a filter
                 # In the mock, we don't actually delete - the store handles
                 # deduplication by always deleting before inserting
                 pass
-    
+
     # -------------------------------------------------------------------------
     # Additional Operations (Minimal Implementation)
     # -------------------------------------------------------------------------
-    
+
     def delete(
         self,
         collection_name: str,
@@ -536,12 +536,12 @@ class QdrantClient:
     ) -> None:
         """
         Delete points from a collection.
-        
+
         Not fully implemented in mock - the RocketRide store uses batch_update_points
         for deletions instead.
         """
         pass
-    
+
     def set_payload(
         self,
         collection_name: str,
@@ -550,24 +550,24 @@ class QdrantClient:
     ) -> None:
         """
         Update payload on existing points.
-        
+
         Not fully implemented in mock - would need to find and update
         matching points by their selector.
         """
         pass
-    
+
     # -------------------------------------------------------------------------
     # Test Utilities
     # -------------------------------------------------------------------------
-    
+
     @classmethod
     def reset(cls) -> None:
         """
         Reset all mock data.
-        
+
         Call this between test runs to ensure a clean state. The test framework
         should call this in fixture setup/teardown.
-        
+
         Example:
             @pytest.fixture(autouse=True)
             def reset_mock():
@@ -589,13 +589,13 @@ class QdrantClient:
 __all__ = [
     # Main client class
     'QdrantClient',
-    
+
     # Submodules (for `from qdrant_client import models` style imports)
     'models',
     'http',
     'conversions',
     'common_types',
-    
+
     # Re-exported types (for direct import convenience)
     'PointStruct',
     'Filter',
@@ -613,7 +613,7 @@ __all__ = [
     'ScoredPoint',
     'CollectionInfo',
     'VectorParams',
-    
+
     # Query result container
     'QueryResult',
 ]

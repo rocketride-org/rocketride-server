@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "LLM - Gemini",
+	"title": "Gemini",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -103,7 +103,7 @@
 	//		itself
 	//
 		"preconfig": {
-			"default": "gemini-2_5-flash",
+			"default": "gemini-3-pro",
 			"profiles": {
 				"custom": {
 					"model": "",
@@ -268,7 +268,7 @@
 			"title": "Model",
 			"description": "Gemini LLM model",
 			"type": "string",
-			"default": "gemini-2_5-flash",
+			"default": "gemini-3-pro",
 			"enum": [
 				"*>preconfig.profiles.*.title"
 			],
@@ -344,7 +344,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "LLM - Gemini",
+			"title": "Gemini",
 			"properties": [
 				"gemini.profile"
 			]

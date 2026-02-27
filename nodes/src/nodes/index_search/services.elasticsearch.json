@@ -1,5 +1,5 @@
 {
-	"title": "Vector Store - Elasticsearch",
+	"title": "Elasticsearch",
 	"protocol": "elasticsearch://",
 	"classType": [
 		"store"

@@ -524,6 +524,62 @@ async function fingerprint(dirPath, options = {}) {
 }
 
 /**
+ * Compute a SHA-256 content hash of all files in a directory tree.
+ *
+ * Uses the same exclusion patterns as fingerprint() but hashes actual
+ * file contents rather than metadata, making it fully deterministic
+ * across machines and git clones.
+ *
+ * @param {string} dirPath - Directory to hash
+ * @param {Object} [options] - Options
+ * @param {string[]} [options.exclude] - Patterns to exclude
+ * @param {function} [options.log] - Optional callback for status messages (e.g., task.output assignment)
+ * @returns {Promise<string|null>} Hex hash string, or null if directory doesn't exist
+ */
+async function contentHash(dirPath, options = {}) {
+    const { exclude = ['node_modules', '.git', '__pycache__', '.pyc', 'version.h'], log } = options;
+    const files = [];
+
+    try {
+        await fsp.access(dirPath);
+    } catch {
+        return null;
+    }
+
+    async function walk(dir, relativePath = '') {
+        const items = await fsp.readdir(dir, { withFileTypes: true });
+
+        for (const item of items) {
+            if (exclude.some(pattern => item.name === pattern || item.name.endsWith(pattern))) {
+                continue;
+            }
+
+            const fullPath = path.join(dir, item.name);
+            const relPath = path.join(relativePath, item.name);
+
+            if (item.isDirectory()) {
+                await walk(fullPath, relPath);
+            } else if (item.isFile()) {
+                files.push({ rel: relPath.replace(/\\/g, '/'), full: fullPath });
+            }
+        }
+    }
+
+    await walk(dirPath);
+    files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
+
+    const hash = crypto.createHash('sha256');
+    for (const f of files) {
+        const content = await fsp.readFile(f.full);
+        hash.update(f.rel);
+        hash.update(content);
+    }
+    const digest = hash.digest('hex');
+    if (log) log(`contentHash: ${path.basename(dirPath)} (${files.length} files) -> ${digest}`);
+    return digest;
+}
+
+/**
  * Check if source has changed since last build.
  * Returns true if rebuild is needed, false if unchanged.
  * 
@@ -632,6 +688,7 @@ module.exports = {
     
     // Fingerprinting
     fingerprint,
+    contentHash,
     hasSourceChanged,
     saveSourceHash
 };
