@@ -44,6 +44,7 @@ export class PageSettingsProvider {
 	private configManager: ConfigManager;
 	private engineInstaller: EngineInstaller;
 	private activeWebviews: Set<vscode.Webview> = new Set();
+	private _isSaving = false;
 
 	/**
 	 * Creates a new PageSettingsProvider
@@ -62,6 +63,7 @@ export class PageSettingsProvider {
 	 */
 	private setupEnvChangeListener(): void {
 		const envChangeListener = this.configManager.onEnvVarsChanged(() => {
+			if (this._isSaving) return;
 			// Reload settings in all active webviews
 			this.activeWebviews.forEach(webview => {
 				this.loadAllSettings(webview);
@@ -239,6 +241,7 @@ export class PageSettingsProvider {
 	 * Saves all settings to workspace configuration and secure storage
 	 */
 	private async saveAllSettings(settings: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
+		this._isSaving = true;
 		try {
 			const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
 
@@ -305,10 +308,15 @@ export class PageSettingsProvider {
 			}
 
 			this.showMessage(webview, 'success', 'Settings saved successfully!');
-			await this.loadAllSettings(webview); // Reload to show updated values
+			// Reload all active webviews now that every setting has been persisted
+			for (const w of this.activeWebviews) {
+				await this.loadAllSettings(w);
+			}
 		} catch (error) {
 			console.error('[PageSettingsProvider] Failed to save settings:', error);
 			this.showMessage(webview, 'error', `Failed to save settings: ${error}`);
+		} finally {
+			this._isSaving = false;
 		}
 	}
 
