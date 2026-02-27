@@ -22,6 +22,9 @@
 // =============================================================================
 
 import { brandOrange } from '../../../../theme';
+import { isInVSCode } from '../../../../utils/vscode';
+
+const accentColor = isInVSCode() ? 'var(--vscode-button-background)' : brandOrange;
 
 /**
  * Style definitions for the FloatingGroupButton component.
@@ -48,7 +51,7 @@ const styles = {
 		display: 'flex',
 		paddingLeft: '0.75rem',
 		paddingRight: '0.75rem',
-		color: brandOrange,
+		color: accentColor,
 		borderColor: 'transparent',
 		backgroundColor: 'background.paper',
 		boxShadow:

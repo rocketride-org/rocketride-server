@@ -33,9 +33,9 @@ const styles = {
 	header: {
 		display: 'flex',
 		alignItems: 'center',
-		borderRadius: '0.2rem 0.2rem 0 0',
+		borderRadius: 0,
 		justifyContent: 'space-between',
-		padding: '0.4rem 0.25rem 0.4rem 0.6rem',
+		padding: '0.15rem 0.25rem 0.4rem 0.6rem',
 		width: '100%',
 		backgroundColor: 'background.paper',
 	},
@@ -52,7 +52,7 @@ const styles = {
 	boxImage: {
 		display: 'flex',
 		alignItems: 'center',
-		minWidth: '1.95rem',
+		minWidth: '1rem',
 	},
 	boxLabel: {
 		overflow: 'hidden',

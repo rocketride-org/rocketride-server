@@ -36,23 +36,32 @@ export const styles = {
 	flowRoot: {
 		width: '10rem',
 		backgroundColor: inVSCode ? 'background.paper' : '#fff',
-		boxShadow:
-			'0px 2px 1px -1px rgba(0, 0, 0, 0.15), 0px 1px 1px 0px rgba(0, 0, 0, 0.1), 0px 1px 3px 0px rgba(0, 0, 0, 0.08)',
-		border: 'none',
-		outline: inVSCode ? '1px solid' : '1px solid #DCDCDC',
-		...(inVSCode ? { outlineColor: 'divider' } : {}),
+		boxShadow: inVSCode
+			? 'none'
+			: '0px 2px 1px -1px rgba(0, 0, 0, 0.15), 0px 1px 1px 0px rgba(0, 0, 0, 0.1), 0px 1px 3px 0px rgba(0, 0, 0, 0.08)',
+		border: inVSCode ? 'none' : '1px solid #DCDCDC',
+		borderRadius: '4px',
+		outline: 'none',
 		padding: 0,
-		'&:focus': {
-			...(inVSCode ? { outlineColor: 'text.primary' } : { borderColor: '#000 !important' }),
-		},
 	},
 	...(inVSCode
 		? {
 				nodeContent: {
 					position: 'relative',
+					border: 'none',
 				},
 			}
 		: {}),
+	cornerCapTop: {
+		height: '4px',
+		backgroundColor: 'background.paper',
+		borderRadius: '3px 3px 0 0',
+	},
+	cornerCapBottom: {
+		height: '4px',
+		backgroundColor: 'background.default',
+		borderRadius: '0 0 3px 3px',
+	},
 	root: {
 		display: 'flex',
 		alignItems: 'center',
@@ -66,8 +75,6 @@ export const styles = {
 	},
 	headerWrapper: {
 		position: 'relative',
-		borderBottom: inVSCode ? '1px solid' : '1px solid #DCDCDC',
-		...(inVSCode ? { borderColor: 'divider' } : {}),
 		flex: 1,
 	},
 	header: {
@@ -76,7 +83,6 @@ export const styles = {
 		px: '0.6rem',
 		pt: '0.4rem',
 		pb: '0.4rem',
-		borderRadius: '0.2rem 0.2rem 0 0',
 	},
 	icon: {
 		width: 'auto',

@@ -35,7 +35,7 @@ export const styles = {
 		backgroundColor: 'background.paper',
 		padding: '0.4rem 0.6rem',
 		fontSize: '0.65rem',
-		borderRadius: '0px 0px 5px 5px',
+		borderRadius: 0,
 	},
 
 	// Source node footer styles

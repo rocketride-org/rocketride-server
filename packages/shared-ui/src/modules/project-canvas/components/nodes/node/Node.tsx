@@ -121,31 +121,35 @@ export default function Node({
 	const taskStatus = taskStatuses?.[id];
 
 	return (
-		<Box key={id} sx={styles.nodeContent}>
+		<>
 			{isSourceNode && <RunButton nodeId={id} />}
-			<Box sx={styles.headerWrapper}>
-				<ProjectNodeHeader
-					id={id}
-					icon={icon}
-					title={displayTitle}
-					handleClick={handleClick}
-					nodeType={type}
-					hideEdit={!showEditButton}
-					formDataValid={formDataValid}
-					description={displayDescription}
-					documentation={documentation}
-					parentId={mostRecentParentId}
+			<Box key={id} sx={styles.nodeContent}>
+				<Box sx={styles.cornerCapTop} />
+				<Box sx={styles.headerWrapper}>
+					<ProjectNodeHeader
+						id={id}
+						icon={icon}
+						title={displayTitle}
+						handleClick={handleClick}
+						nodeType={type}
+						hideEdit={!showEditButton}
+						formDataValid={formDataValid}
+						description={displayDescription}
+						documentation={documentation}
+						parentId={mostRecentParentId}
+					/>
+					{children}
+				</Box>
+				<Lanes nodeId={id} lanes={lanes as Record<string, Lane>} layout={layout} data={data} />
+				<NodeFooter
+					componentProvider={provider ?? ''}
+					isSourceNode={isSourceNode}
+					taskStatus={taskStatus}
+					componentPipeCounts={componentPipeCounts}
+					totalPipes={totalPipes}
 				/>
-				{children}
+				<Box sx={styles.cornerCapBottom} />
 			</Box>
-			<Lanes nodeId={id} lanes={lanes as Record<string, Lane>} layout={layout} data={data} />
-			<NodeFooter
-				componentProvider={provider ?? ''}
-				isSourceNode={isSourceNode}
-				taskStatus={taskStatus}
-				componentPipeCounts={componentPipeCounts}
-				totalPipes={totalPipes}
-			/>
-		</Box>
+		</>
 	);
 }
