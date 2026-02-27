@@ -97,7 +97,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Set up versions
         id: init
         run: |
@@ -162,7 +162,7 @@ jobs:
             vcpkg_cmd: ./build/vcpkg/vcpkg
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
       - name: Set up pnpm
@@ -316,7 +316,7 @@ jobs:
     steps:
       - name: Check out repository
         if: matrix.should_release == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
