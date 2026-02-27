@@ -1,7 +1,7 @@
 # Preprocessor: SpaCy
 spacy==3.8.4
 spacy-transformers==1.3.9
-spacy-curated-transformers==0.3.1
+spacy-curated-transformers==2.1.2
 
 # SpaCy deps
 catalogue==2.0.10
