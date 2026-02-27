@@ -41,7 +41,6 @@ import { SidebarFilesProvider } from './providers/SidebarFilesProvider';
 import { PageEditorProvider } from './providers/PageEditorProvider';
 import { PageSettingsProvider } from './providers/PageSettingsProvider';
 import { PageStatusProvider } from './providers/PageStatusProvider';
-import { PageSystemProvider } from './providers/PageSystemProvider';
 import { PageDeployProvider } from './providers/PageDeployProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
@@ -58,7 +57,6 @@ let sidebarFiles: SidebarFilesProvider | undefined;
 let pageEditor: PageEditorProvider | undefined;
 let pageSettings: PageSettingsProvider | undefined;
 let pageStatus: PageStatusProvider | undefined;
-let pageSystem: PageSystemProvider | undefined;
 let pageDeploy: PageDeployProvider | undefined;
 let barStatus: BarStatus | undefined;
 let pageWelcome: PageWelcomeProvider | undefined;
@@ -147,7 +145,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 		pageSettings = new PageSettingsProvider(context.extensionUri);
 		pageStatus = new PageStatusProvider(context);
-		pageSystem = new PageSystemProvider(context);
 		pageDeploy = new PageDeployProvider(context);
 		pageWelcome = new PageWelcomeProvider(context, context.extensionUri);
 
@@ -390,7 +387,6 @@ export function deactivate(): void {
 export const getConnectionManager = () => connectionManager;
 export const getSettingsProvider = () => pageSettings;
 export const getStatusPageProvider = () => pageStatus;
-export const getSystemPageProvider = () => pageSystem;
 export const getConfigManager = () => configManager;
 export const getPipelineFilesTreeProvider = () => sidebarFiles;
 export const getConnectionTreeProvider = () => pageConnection;
