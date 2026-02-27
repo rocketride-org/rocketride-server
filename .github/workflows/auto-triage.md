@@ -5,7 +5,7 @@ on:
     types: [opened, reopened]
   workflow_dispatch:
 
-engine: claude
+engine: copilot
 
 permissions:
   contents: read
