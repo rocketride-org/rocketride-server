@@ -6,8 +6,8 @@
 	],
 	"capabilities": [],
 	"register": "filter",
-	"connector": "python",
-	"path": "connectors.index_search",
+	"node": "python",
+	"path": "nodes.index_search",
 	"prefix": "Elasticsearch Vector Store",
 	"description": [
 		"A vector database component for Elasticsearch, enabling efficient storage and ", 
@@ -29,6 +29,57 @@
 			"documents",
 			"answers",
 			"questions"
+		]
+	},
+	"test": {
+		"profiles": ["self-managed"],
+		"cases": [
+			{
+				"name": "Add document to store",
+				"documents": [
+					{
+						"page_content": "The capital of France is Paris.",
+						"metadata": {
+							"objectId": "test-doc-1",
+							"nodeId": "test-node",
+							"parent": "/test",
+							"chunkId": 0,
+							"isDeleted": false
+						},
+						"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+						"embedding_model": "test-model"
+					}
+				],
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "capital of France"
+					}
+				}
+			},
+			{
+				"name": "Search with question",
+				"questions": {
+					"type": "semantic",
+					"questions": [
+						{
+							"text": "What is the capital of France?",
+							"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+							"embedding_model": "test-model"
+						}
+					]
+				},
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "Paris",
+						"property": [
+							{"path": "[0].score", "greaterThan": 0.5},
+							{"path": "[0].metadata.objectId", "equals": "test-doc-1"}
+						]
+					}
+				}
+			}
 		]
 	},
 	"input": [
