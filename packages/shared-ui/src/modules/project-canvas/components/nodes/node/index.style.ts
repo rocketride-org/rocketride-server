@@ -43,6 +43,7 @@ export const styles = {
 		borderRadius: '4px',
 		outline: 'none',
 		padding: 0,
+		overflow: 'visible',
 	},
 	...(inVSCode
 		? {
@@ -53,11 +54,13 @@ export const styles = {
 			}
 		: {}),
 	cornerCapTop: {
+		position: 'relative',
 		height: '4px',
 		backgroundColor: 'background.paper',
 		borderRadius: '3px 3px 0 0',
 	},
 	cornerCapBottom: {
+		position: 'relative',
 		height: '4px',
 		backgroundColor: 'background.default',
 		borderRadius: '0 0 3px 3px',

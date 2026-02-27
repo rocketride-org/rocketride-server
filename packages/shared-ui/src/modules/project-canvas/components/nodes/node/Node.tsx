@@ -21,19 +21,21 @@
 // SOFTWARE.
 // =============================================================================
 
-import { ReactElement, useMemo } from 'react';
+import React, { ReactElement, useCallback, useMemo } from 'react';
 import { Box } from '@mui/material';
-import { Node as NodeProps } from '@xyflow/react';
+import { Connection, Edge, Node as NodeProps, Position } from '@xyflow/react';
 
 import { styles } from './index.style';
 import { useFlow } from '../../../FlowContext';
 import { Lane } from '../../../helpers';
 import { INodeData, NodeLayout } from '../../../types';
 import { NodeType } from '../../../../../constants';
+import { DynamicFormsCapabilities, IDynamicForm } from '../../../../../services/dynamic-forms/types';
 import Lanes from '../../lanes/Lanes';
 import RunButton from '../../run-button/RunButton';
 import ProjectNodeHeader from '../../node-header/ProjectNodeHeader';
 import NodeFooter from '../../node-footer';
+import InvokeHandle from '../../handles/invoke/InvokeHandle';
 
 /**
  * Props for the generic canvas Node wrapper component.
@@ -87,7 +89,64 @@ export default function Node({
 		Pipe,
 	} = data;
 
-	const { nodes, taskStatuses, componentPipeCounts, totalPipes, servicesJson } = useFlow();
+	const { nodes, taskStatuses, componentPipeCounts, totalPipes, servicesJson, edges, selectedHandle, onHandleClick, nodeMap } = useFlow();
+
+	// --- Invoke handle logic (moved from Lanes so handles can be rendered on corner caps) ---
+	const { invoke, capabilities } = data;
+	const _servicesJson = useMemo(() => (servicesJson ?? {}) as Record<string, IDynamicForm>, [servicesJson]);
+
+	const isInvoke =
+		(DynamicFormsCapabilities.Invoke & (capabilities ?? 0)) === DynamicFormsCapabilities.Invoke;
+
+	const invokeSources = useMemo(() => new Set(
+		Object.values(_servicesJson)
+			.filter((s: IDynamicForm) => s.invoke)
+			.map((s: IDynamicForm) => Object.keys(s.invoke ?? {}))
+			.flat()
+	), [_servicesJson]);
+
+	const invokeTargets = useMemo(() => {
+		const targets = new Set(Array.isArray(classType) ? classType : [classType]);
+		return invokeSources.intersection(targets);
+	}, [classType, invokeSources]);
+
+	const invokeConfig = useMemo(() => {
+		if (!provider) return undefined;
+		const svc = _servicesJson[provider];
+		return svc?.invoke;
+	}, [provider, _servicesJson]);
+
+	const invokeSourceKeys = useMemo(() => Object.keys(invokeConfig ?? {}), [invokeConfig]);
+	const hasInvokeSource = invokeSourceKeys.length > 0;
+
+	const validateConnection = useCallback(
+		(edge: Edge | Connection) => {
+			if (edge.source === edge.target) return false;
+			if (edge.sourceHandle === 'invoke-source' && edge.targetHandle?.indexOf('invoke-target') !== -1) {
+				const invokeType = edge?.targetHandle?.split('-').at(-1);
+				const sourceNode = nodeMap?.[edge.source];
+				const targetNode = nodeMap?.[edge.target];
+				if (sourceNode?.parentId != targetNode?.parentId) return false;
+				const inv = (sourceNode?.data as INodeData)?.invoke?.[invokeType!] as { min?: number; max?: number } | undefined;
+				if (inv == null || (inv != null && inv.min == null && inv.max == null)) return true;
+				const existing = edges.filter(
+					(e: Edge) => e.sourceHandle === 'invoke-source' && e.source === edge.source && e.targetHandle === edge.targetHandle
+				);
+				if (existing.length >= inv.max!) return false;
+				return true;
+			}
+			return true;
+		},
+		[nodeMap, edges]
+	);
+
+	const handleInvokeClick = useCallback(
+		(event: React.MouseEvent<HTMLDivElement>, handleId: string, keys: string[]) => {
+			event.stopPropagation();
+			onHandleClick(id, handleId, keys);
+		},
+		[id, onHandleClick]
+	);
 
 	// Look up service catalog title and description from the provider
 	const serviceInfo = (servicesJson as Record<string, { title?: string; description?: string }> | undefined)?.[provider as string];
@@ -123,6 +182,34 @@ export default function Node({
 	return (
 		<>
 			{isSourceNode && <RunButton nodeId={id} />}
+			{/* Top invoke target handles — positioned above the node border */}
+			{isInvoke && invokeTargets.size > 0 && (
+				<Box sx={{ position: 'absolute', top: 0, left: 0, right: 0, display: 'flex', justifyContent: 'center', transform: 'translateY(-50%)', zIndex: 1 }}>
+					{Array.from(invokeTargets).map((value: string) => (
+						<InvokeHandle
+							key={value}
+							id={`invoke-target-${value}`}
+							type="target"
+							position={Position.Top}
+							isConnected={edges.some(
+								(edge: Edge) =>
+									edge.targetHandle === `invoke-target-${value}` &&
+									edge.target === id
+							)}
+							isValidConnection={validateConnection}
+							selected={
+								selectedHandle
+									? selectedHandle[0] === id &&
+										selectedHandle[1] === `invoke-target-${value}`
+									: false
+							}
+							onClick={(event) =>
+								handleInvokeClick(event, `invoke-target-${value}`, [value])
+							}
+						/>
+					))}
+				</Box>
+			)}
 			<Box key={id} sx={styles.nodeContent}>
 				<Box sx={styles.cornerCapTop} />
 				<Box sx={styles.headerWrapper}>
@@ -150,6 +237,29 @@ export default function Node({
 				/>
 				<Box sx={styles.cornerCapBottom} />
 			</Box>
+			{/* Bottom invoke source handle — positioned below the node border */}
+			{hasInvokeSource && (
+				<Box sx={{ position: 'absolute', bottom: 0, left: 0, right: 0, display: 'flex', justifyContent: 'center', transform: 'translateY(50%)', zIndex: 1 }}>
+					<InvokeHandle
+						id={`invoke-source`}
+						type="source"
+						position={Position.Bottom}
+						isConnected={edges.some(
+							(edge: Edge) =>
+								edge.sourceHandle === `invoke-source` && edge.source === id
+						)}
+						isValidConnection={validateConnection}
+						selected={
+							selectedHandle
+								? selectedHandle[0] === id && selectedHandle[1] === 'invoke-source'
+								: false
+						}
+						onClick={(event) =>
+							handleInvokeClick(event, 'invoke-source', invokeSourceKeys)
+						}
+					/>
+				</Box>
+			)}
 		</>
 	);
 }
