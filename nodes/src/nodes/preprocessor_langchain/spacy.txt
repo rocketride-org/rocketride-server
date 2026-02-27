@@ -6,7 +6,7 @@ spacy-curated-transformers==0.3.1
 # SpaCy deps
 catalogue==2.0.10
 cymem==2.0.11
-murmurhash==1.0.11
+murmurhash==1.0.15
 preshed==3.0.9
 srsly==2.5.0
 thinc==8.3.4
