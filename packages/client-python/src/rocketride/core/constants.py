@@ -48,9 +48,25 @@ Usage:
     custom_timeout = CONST_SOCKET_TIMEOUT * 2  # Double the default timeout
 """
 
-# Default RocketRide service endpoint
+# Default protocol for connections when none is specified
+CONST_DEFAULT_WEB_PROTOCOL = 'http://'
+
+# Default hostname for local RocketRide instances
+CONST_DEFAULT_WEB_HOST = 'localhost'
+
+# Default server port for self-hosted / local RocketRide instances.
+# Applied when no port is specified in the URI.
+CONST_DEFAULT_WEB_PORT = 5565
+
+# Default local RocketRide service endpoint URL
+CONST_DEFAULT_WEB_LOCAL = f'{CONST_DEFAULT_WEB_PROTOCOL}{CONST_DEFAULT_WEB_HOST}:{CONST_DEFAULT_WEB_PORT}'
+
+# Default cloud RocketRide service endpoint URL
 # This points to the production Enterprise as a Service (EaaS) instance
-CONST_DEFAULT_SERVICE = 'https://cloud.rocketride.ai'
+CONST_DEFAULT_WEB_CLOUD = 'https://cloud.rocketride.ai:80'
+
+# Deprecated: use CONST_DEFAULT_WEB_CLOUD instead
+CONST_DEFAULT_SERVICE = CONST_DEFAULT_WEB_CLOUD
 
 # WebSocket timeout in seconds
 # This controls how long to wait for server responses before timing out

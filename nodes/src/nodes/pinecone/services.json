@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Vector Store - Pinecone",
+	"title": "Pinecone",
 	//
 	// Required:
 	//     The protocol is the endpoint protocol

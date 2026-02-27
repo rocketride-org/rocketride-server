@@ -1,5 +1,5 @@
 {
-    "title": "LLM - Mistral AI",
+    "title": "Mistral AI",
     "protocol": "llm_mistral://",
     "classType": ["llm"],
     "capabilities": ["invoke"],
@@ -291,7 +291,7 @@
     "shape": [
         {
             "section": "Pipe",
-            "title": "LLM - Mistral AI",
+            "title": "Mistral AI",
             "properties": [
                 "mistral.profile"
             ]

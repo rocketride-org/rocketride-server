@@ -65,6 +65,8 @@ interface IProps {
 	handleClick?: () => void;
 	/** Click handler for the settings gear icon to open the node editor panel. */
 	handleEdit?: () => void;
+	/** Class type tags for the node (e.g. ["llm"]), shown as a subtitle below the title. */
+	classType?: string[];
 }
 
 /**
@@ -91,17 +93,26 @@ export default function NodeHeader({
 	formDataValid,
 	handleClick,
 	handleEdit,
+	classType,
 }: IProps): ReactElement {
 	const inVSCode = isInVSCode();
+	const subtitleText = classType?.length ? classType.join(' · ') : undefined;
 	const titleElement = (
-		<Typography
-			sx={{
-				...styles.title,
-				...nodeStyles.label,
-			}}
-		>
-			{title}
-		</Typography>
+		<Box>
+			<Typography
+				sx={{
+					...styles.title,
+					...nodeStyles.label,
+				}}
+			>
+				{title}
+			</Typography>
+			{subtitleText && (
+				<Typography sx={styles.subtitle}>
+					{subtitleText}
+				</Typography>
+			)}
+		</Box>
 	);
 
 	return (

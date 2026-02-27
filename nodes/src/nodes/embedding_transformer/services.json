@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Embedding - Transformer",
+	"title": "Transformer",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -172,7 +172,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Embedding - Sentence Transformer",
+			"title": "Sentence Transformer",
 			"properties": [
 				"embedding.profile"
 			]

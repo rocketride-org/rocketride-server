@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Data - Parser",
+	"title": "Parser",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol

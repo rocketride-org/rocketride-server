@@ -29,6 +29,9 @@ import pxToRem from '../../../utils/pxToRem';
 
 import { handleStyles } from './styles';
 import { brandOrange } from '../../../theme';
+import { isInVSCode } from '../../../utils/vscode';
+
+const inVSCode = isInVSCode();
 
 /**
  * Props for the Handle component, extending the base ReactFlow HandleProps.
@@ -80,29 +83,37 @@ export default function Handle({
 	);
 
 	// Background and border colors follow a priority: selected > connected > default
+	/** Accent color: VS Code button color or brand orange for standalone. */
+	const accentColor = inVSCode ? 'var(--vscode-button-background)' : brandOrange;
+
+	/** Connected fill: uses VS Code button background for a cohesive look. */
+	const connectedColor = inVSCode
+		? 'var(--vscode-button-background)'
+		: theme.palette.text.primary;
+
 	/** Computes the handle background color based on selection and connection state. */
 	const backgroundColor = useMemo(() => {
 		if (selected) {
-			return brandOrange; // Highlight color when selected
+			return accentColor;
 		}
 		if (isConnected) {
-			return theme.palette.text.primary; // Filled appearance when an edge is connected
+			return connectedColor;
 		}
 		// Hollow appearance: match the canvas background so the handle looks empty
 		return theme.palette.background.default;
-	}, [selected, isConnected, theme]);
+	}, [selected, isConnected, theme, accentColor, connectedColor]);
 
 	/** Computes the handle border color based on selection and connection state. */
 	const borderColor = useMemo(() => {
 		if (selected) {
-			return brandOrange; // Highlight color when selected
+			return accentColor;
 		}
 		if (isConnected) {
-			return theme.palette.text.primary; // Match the filled background when connected
+			return connectedColor;
 		}
 		// Fall back to the color prop (typically a neutral grey)
 		return color;
-	}, [selected, isConnected, color, theme]);
+	}, [selected, isConnected, color, theme, accentColor, connectedColor]);
 
 	return (
 		<RFHandle
@@ -117,12 +128,12 @@ export default function Handle({
 		>
 			<Box
 				style={{
-					width: `${pxToRem(8)}rem`,
-					height: `${pxToRem(8)}rem`,
+					width: `${pxToRem(12)}rem`,
+					height: `${pxToRem(12)}rem`,
 					border: `1px solid ${borderColor}`,
 					borderColor: borderColor,
 					background: backgroundColor,
-					borderRadius: '8px',
+					borderRadius: '2px',
 					pointerEvents: 'none',
 					...disabledStyles,
 					...style,

@@ -63,8 +63,7 @@ type PageConnectionOutgoingMessage =
 	| { type: 'reconnect' }
 	| { type: 'openSettings' }
 	| { type: 'openDocs' }
-	| { type: 'openDeploy' }
-	| { type: 'openSystemPerformance' };
+	| { type: 'openDeploy' };
 
 export const PageConnection: React.FC = () => {
 	const [connectionData, setConnectionData] = useState<ConnectionData | null>(null);
@@ -211,10 +210,6 @@ export const PageConnection: React.FC = () => {
 		sendMessage({ type: 'openDocs' });
 	};
 
-	const handleOpenSystemPerformance = () => {
-		sendMessage({ type: 'openSystemPerformance' });
-	};
-
 	const isConnecting = connectionData?.connectionState.state === 'connecting' ||
 		connectionData?.connectionState.state === 'downloading-engine' ||
 		connectionData?.connectionState.state === 'starting-engine' ||
@@ -287,14 +282,6 @@ export const PageConnection: React.FC = () => {
 				title="Deploy to RocketRide.ai cloud or on-prem"
 			>
 				Deploy
-			</button>
-			<button
-				className="btn btn-secondary"
-				onClick={handleOpenSystemPerformance}
-				disabled={!isConnected}
-				title="View system performance metrics and resource utilization"
-			>
-				System Performance
 			</button>
 			<button
 				className="btn btn-secondary"

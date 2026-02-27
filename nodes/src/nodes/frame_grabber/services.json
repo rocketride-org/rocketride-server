@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Video - Frame Grabber",
+	"title": "Frame Grabber",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol

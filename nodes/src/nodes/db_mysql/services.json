@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Database - MySQL",
+	"title": "MySQL",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
