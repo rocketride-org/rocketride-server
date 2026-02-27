@@ -4,7 +4,8 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -13,7 +14,8 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -22,7 +24,8 @@ updates:
   - package-ecosystem: "docker"
     directory: "/docker"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -31,7 +34,8 @@ updates:
   - package-ecosystem: "maven"
     directory: "/packages/tika/lib/dbgconn"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -40,7 +44,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -49,7 +54,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/astra_db"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -58,7 +64,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/atlas"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -67,7 +74,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/audio_player"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -76,7 +84,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/audio_transcribe"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -85,7 +94,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/chroma"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -94,7 +104,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/db_mysql"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -103,7 +114,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/dictionary"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -112,7 +124,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/embedding_image"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -121,7 +134,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/embedding_openai"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -130,7 +144,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/embedding_transformer"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -139,7 +154,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/extract_data"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -148,7 +164,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/frame_grabber"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -157,7 +174,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/image_cleanup"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -166,7 +184,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/index_search"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -175,7 +194,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/llamaparse"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -184,7 +204,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/llm_anthropic"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -193,7 +214,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/llm_bedrock"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -202,7 +224,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/llm_deepseek"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -211,7 +234,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/llm_gemini"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -220,7 +244,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/llm_mistral"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -229,7 +254,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/llm_ollama"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -238,7 +264,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/llm_openai"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -247,7 +274,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/llm_perplexity"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -256,7 +284,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/llm_vertex"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -265,7 +294,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/llm_vision_mistral"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -274,7 +304,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/llm_xai"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -283,7 +314,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/local_text_output"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -292,7 +324,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/milvus"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -301,7 +334,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/ner"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -310,7 +344,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/ocr"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -319,7 +354,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/pinecone"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -328,7 +364,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/preprocessor_code"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -337,7 +374,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/preprocessor_langchain"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -346,7 +384,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/preprocessor_llm"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -355,7 +394,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/qdrant"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -364,7 +404,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/question"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -373,7 +414,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/reducto"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -382,7 +424,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/remote"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -391,7 +434,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/response"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -400,7 +444,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/summarization"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -409,7 +454,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/text_output"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -418,7 +464,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/thumbnail"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -427,7 +474,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/vectordb_postgres"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -436,7 +484,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/vectorizer"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -445,7 +494,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/weaviate"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -454,7 +504,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/nodes/src/nodes/webhook"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -463,7 +514,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/packages/ai/src/ai"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -472,7 +524,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/packages/ai/src/ai/account"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -481,7 +534,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/packages/ai/src/ai/common"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -490,7 +544,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/packages/ai/src/ai/common/avi"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -499,7 +554,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/packages/ai/src/ai/common/image"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -508,7 +564,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/packages/ai/src/ai/common/torch"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -517,7 +574,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/packages/ai/src/ai/modules/task"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -526,7 +584,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/packages/ai/src/ai/web"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
@@ -535,7 +594,8 @@ updates:
   - package-ecosystem: "pip"
     directory: "/packages/ai/tests"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
