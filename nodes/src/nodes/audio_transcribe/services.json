@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Audio - Transcribe",
+	"title": "Transcribe",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -249,7 +249,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Audio - Transcribe",
+			"title": "Transcribe",
 			"properties": [
 				"transcribe.profile"
 			]

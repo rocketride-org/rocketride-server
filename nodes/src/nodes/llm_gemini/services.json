@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "LLM - Gemini",
+	"title": "Gemini",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -344,7 +344,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "LLM - Gemini",
+			"title": "Gemini",
 			"properties": [
 				"gemini.profile"
 			]

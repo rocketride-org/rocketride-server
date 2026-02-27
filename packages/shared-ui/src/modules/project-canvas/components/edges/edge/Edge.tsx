@@ -90,7 +90,7 @@ export default function CustomEdge({
 	return (
 		// Track hover state on the SVG group so the delete button can appear on hover
 		<g onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-			<BaseEdge path={edgePath} markerEnd={markerEnd} style={style} />
+			<BaseEdge path={edgePath} markerEnd={markerEnd} style={{ ...style, ...(invokeEdge ? { strokeDasharray: '2,4', strokeLinecap: 'round' as const } : {}) }} />
 			{/* Show the delete button at the midpoint of the edge when selected or hovered */}
 			{(selected || hovered) && (
 				<EdgeLabelRenderer>

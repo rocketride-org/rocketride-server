@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Audio - Player",
+	"title": "Player",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol

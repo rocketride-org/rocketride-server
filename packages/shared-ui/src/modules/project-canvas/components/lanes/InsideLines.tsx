@@ -125,8 +125,8 @@ export default function InsideLines({
 				return null;
 			}
 
-			// Walk up the DOM: Handle -> Typography <p> -> Box (connectionType container)
-			const typographyEl = handleEl.closest('p');
+			// Walk up the DOM: Handle -> Typography <span> -> Box (connectionType container)
+			const typographyEl = handleEl.closest('span');
 			if (!typographyEl) {
 				return null;
 			}

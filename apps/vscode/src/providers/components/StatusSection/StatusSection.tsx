@@ -328,7 +328,7 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
 										}
 									}}
 								>
-									🔑 Endpoint Info
+									Endpoint Info
 								</button>
 							)}
 						</>
