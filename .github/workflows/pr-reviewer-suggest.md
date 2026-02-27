@@ -5,7 +5,7 @@ on:
     types: [opened, ready_for_review]
   workflow_dispatch:
 
-engine: copilot
+engine: claude
 
 permissions:
   contents: read

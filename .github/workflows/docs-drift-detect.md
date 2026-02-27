@@ -5,7 +5,7 @@ on:
     branches: [develop]
   workflow_dispatch:
 
-engine: copilot
+engine: claude
 
 permissions:
   contents: read
