@@ -17,8 +17,9 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 ### How to Report
 
 1. **Do NOT** open a public GitHub issue for security vulnerabilities
-2. Email security concerns to: security@rocketride.ai
-3. Include as much detail as possible:
+2. **Preferred**: Use [GitHub Security Advisories](https://github.com/rocketride-org/rocketride-server/security/advisories/new) to report privately through GitHub
+3. **Alternative**: Email security concerns to: security@rocketride.ai
+4. Include as much detail as possible:
    - Description of the vulnerability
    - Steps to reproduce
    - Potential impact
