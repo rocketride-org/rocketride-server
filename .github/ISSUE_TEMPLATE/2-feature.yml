@@ -39,4 +39,6 @@ body:
         - label: nodes (pipeline)
         - label: ai
         - label: chat-ui
+        - label: dropper-ui
         - label: vscode
+        - label: tika
