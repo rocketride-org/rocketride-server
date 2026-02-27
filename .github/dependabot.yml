@@ -1,6 +1,7 @@
 version: 2
+
 updates:
-  # npm — root
+  # npm — all JS/TS packages
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
@@ -9,6 +10,14 @@ updates:
     target-branch: "develop"
     labels:
       - "dependencies"
+    groups:
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+      npm-major:
+        update-types:
+          - "major"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
@@ -19,6 +28,10 @@ updates:
     target-branch: "develop"
     labels:
       - "dependencies"
+    groups:
+      actions-all:
+        patterns:
+          - "*"
 
   # Docker
   - package-ecosystem: "docker"
@@ -39,563 +52,100 @@ updates:
     target-branch: "develop"
     labels:
       - "dependencies"
+    groups:
+      maven-all:
+        patterns:
+          - "*"
 
-  # pip — /nodes/src/nodes
+  # pip — pipeline nodes
   - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes"
+    directories:
+      - "/nodes/src/nodes"
+      - "/nodes/src/nodes/anonymize"
+      - "/nodes/src/nodes/astra_db"
+      - "/nodes/src/nodes/atlas"
+      - "/nodes/src/nodes/audio_player"
+      - "/nodes/src/nodes/audio_transcribe"
+      - "/nodes/src/nodes/chroma"
+      - "/nodes/src/nodes/db_mysql"
+      - "/nodes/src/nodes/dictionary"
+      - "/nodes/src/nodes/embedding_image"
+      - "/nodes/src/nodes/embedding_openai"
+      - "/nodes/src/nodes/embedding_transformer"
+      - "/nodes/src/nodes/extract_data"
+      - "/nodes/src/nodes/frame_grabber"
+      - "/nodes/src/nodes/image_cleanup"
+      - "/nodes/src/nodes/index_search"
+      - "/nodes/src/nodes/llamaparse"
+      - "/nodes/src/nodes/llm_anthropic"
+      - "/nodes/src/nodes/llm_bedrock"
+      - "/nodes/src/nodes/llm_deepseek"
+      - "/nodes/src/nodes/llm_gemini"
+      - "/nodes/src/nodes/llm_mistral"
+      - "/nodes/src/nodes/llm_ollama"
+      - "/nodes/src/nodes/llm_openai"
+      - "/nodes/src/nodes/llm_perplexity"
+      - "/nodes/src/nodes/llm_vertex"
+      - "/nodes/src/nodes/llm_vision_mistral"
+      - "/nodes/src/nodes/llm_xai"
+      - "/nodes/src/nodes/local_text_output"
+      - "/nodes/src/nodes/milvus"
+      - "/nodes/src/nodes/ner"
+      - "/nodes/src/nodes/ocr"
+      - "/nodes/src/nodes/pinecone"
+      - "/nodes/src/nodes/preprocessor_code"
+      - "/nodes/src/nodes/preprocessor_langchain"
+      - "/nodes/src/nodes/preprocessor_llm"
+      - "/nodes/src/nodes/qdrant"
+      - "/nodes/src/nodes/question"
+      - "/nodes/src/nodes/reducto"
+      - "/nodes/src/nodes/remote"
+      - "/nodes/src/nodes/response"
+      - "/nodes/src/nodes/summarization"
+      - "/nodes/src/nodes/text_output"
+      - "/nodes/src/nodes/thumbnail"
+      - "/nodes/src/nodes/vectordb_postgres"
+      - "/nodes/src/nodes/vectorizer"
+      - "/nodes/src/nodes/weaviate"
+      - "/nodes/src/nodes/webhook"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
+    groups:
+      nodes-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+      nodes-major:
+        update-types:
+          - "major"
 
-  # pip — /nodes/src/nodes/astra_db
+  # pip — AI modules
   - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/astra_db"
+    directories:
+      - "/packages/ai/src/ai"
+      - "/packages/ai/src/ai/account"
+      - "/packages/ai/src/ai/common"
+      - "/packages/ai/src/ai/common/avi"
+      - "/packages/ai/src/ai/common/image"
+      - "/packages/ai/src/ai/common/torch"
+      - "/packages/ai/src/ai/modules/task"
+      - "/packages/ai/src/ai/web"
+      - "/packages/ai/tests"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
     target-branch: "develop"
     labels:
       - "dependencies"
-
-  # pip — /nodes/src/nodes/atlas
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/atlas"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/audio_player
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/audio_player"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/audio_transcribe
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/audio_transcribe"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/chroma
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/chroma"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/db_mysql
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/db_mysql"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/dictionary
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/dictionary"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/embedding_image
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/embedding_image"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/embedding_openai
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/embedding_openai"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/embedding_transformer
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/embedding_transformer"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/extract_data
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/extract_data"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/frame_grabber
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/frame_grabber"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/image_cleanup
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/image_cleanup"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/index_search
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/index_search"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/llamaparse
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/llamaparse"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/llm_anthropic
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/llm_anthropic"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/llm_bedrock
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/llm_bedrock"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/llm_deepseek
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/llm_deepseek"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/llm_gemini
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/llm_gemini"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/llm_mistral
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/llm_mistral"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/llm_ollama
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/llm_ollama"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/llm_openai
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/llm_openai"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/llm_perplexity
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/llm_perplexity"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/llm_vertex
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/llm_vertex"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/llm_vision_mistral
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/llm_vision_mistral"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/llm_xai
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/llm_xai"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/local_text_output
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/local_text_output"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/milvus
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/milvus"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/ner
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/ner"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/ocr
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/ocr"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/pinecone
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/pinecone"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/preprocessor_code
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/preprocessor_code"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/preprocessor_langchain
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/preprocessor_langchain"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/preprocessor_llm
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/preprocessor_llm"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/qdrant
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/qdrant"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/question
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/question"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/reducto
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/reducto"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/remote
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/remote"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/response
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/response"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/summarization
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/summarization"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/text_output
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/text_output"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/thumbnail
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/thumbnail"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/vectordb_postgres
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/vectordb_postgres"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/vectorizer
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/vectorizer"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/weaviate
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/weaviate"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /nodes/src/nodes/webhook
-  - package-ecosystem: "pip"
-    directory: "/nodes/src/nodes/webhook"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /packages/ai/src/ai
-  - package-ecosystem: "pip"
-    directory: "/packages/ai/src/ai"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /packages/ai/src/ai/account
-  - package-ecosystem: "pip"
-    directory: "/packages/ai/src/ai/account"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /packages/ai/src/ai/common
-  - package-ecosystem: "pip"
-    directory: "/packages/ai/src/ai/common"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /packages/ai/src/ai/common/avi
-  - package-ecosystem: "pip"
-    directory: "/packages/ai/src/ai/common/avi"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /packages/ai/src/ai/common/image
-  - package-ecosystem: "pip"
-    directory: "/packages/ai/src/ai/common/image"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /packages/ai/src/ai/common/torch
-  - package-ecosystem: "pip"
-    directory: "/packages/ai/src/ai/common/torch"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /packages/ai/src/ai/modules/task
-  - package-ecosystem: "pip"
-    directory: "/packages/ai/src/ai/modules/task"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /packages/ai/src/ai/web
-  - package-ecosystem: "pip"
-    directory: "/packages/ai/src/ai/web"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
-
-  # pip — /packages/ai/tests
-  - package-ecosystem: "pip"
-    directory: "/packages/ai/tests"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    target-branch: "develop"
-    labels:
-      - "dependencies"
+    groups:
+      ai-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+      ai-major:
+        update-types:
+          - "major"
