@@ -65,7 +65,7 @@
 		"@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
 		"@types/node": "^20.0.0",
 		"concurrently": "^8.2.2",
-		"dotenv": "^16.4.5",
+		"dotenv": "^17.3.1",
 		"eslint": "^9.15.0",
 		"eslint-config-prettier": "^9.1.0",
 		"eslint-plugin-react": "^7.37.2",
