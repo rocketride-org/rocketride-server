@@ -29,13 +29,26 @@ class McpDriver(ToolsBase):
         self._get_tool = get_tool
         self._call_tool = call_tool
 
-    def _tool_query(self) -> List[Dict[str, Any]]:
+    def _tool_query(self) -> List[ToolsBase.ToolDescriptor]:
         return self._list_namespaced_tools()
 
-    def _tool_validate(self, *, server_name: str, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
-        tool = self._get_tool(server_name, tool_name)
+    @staticmethod
+    def _split_tool_name(tool_name: str) -> tuple[str, str]:
+        s = (tool_name or '').strip()
+        if '.' not in s:
+            raise ValueError(f'Tool name must be namespaced as `server.tool`; got {tool_name!r}')
+        server, bare = s.split('.', 1)
+        server = server.strip()
+        bare = bare.strip()
+        if not server or not bare:
+            raise ValueError(f'Tool name must be namespaced as `server.tool`; got {tool_name!r}')
+        return server, bare
+
+    def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
+        server_name, bare_tool = self._split_tool_name(tool_name)
+        tool = self._get_tool(server_name, bare_tool)
         if tool is None:
-            raise ValueError(f'Unknown tool {server_name}.{tool_name}')
+            raise ValueError(f'Unknown tool {tool_name}')
 
         schema = getattr(tool, 'inputSchema', None) or {}
         if not isinstance(schema, dict):
@@ -49,7 +62,8 @@ class McpDriver(ToolsBase):
         if missing:
             raise ValueError(f'Tool input missing required fields: {missing}')
 
-    def _tool_invoke(self, *, server_name: str, tool_name: str, input_obj: Any) -> Any:  # noqa: ANN401
+    def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:  # noqa: ANN401
+        server_name, bare_tool = self._split_tool_name(tool_name)
         if input_obj is None:
             arguments: Dict[str, Any] = {}
         elif isinstance(input_obj, dict):
@@ -57,5 +71,5 @@ class McpDriver(ToolsBase):
         else:
             raise ValueError('Tool input must be a JSON object (dict)')
 
-        return self._call_tool(server_name, tool_name, arguments)
+        return self._call_tool(server_name, bare_tool, arguments)
 

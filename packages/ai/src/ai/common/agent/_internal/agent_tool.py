@@ -1,3 +1,10 @@
+"""
+Agent-as-tool adapter.
+
+Exposes an `AgentBase` instance through the `ToolsBase` control-plane surface so
+other agents (or frameworks) can invoke an agent via `tool.invoke`.
+"""
+
 from __future__ import annotations
 
 import json
@@ -31,6 +38,13 @@ def handle_agent_tool_invoke(*, agent: Any, pSelf: Any, param: Any) -> Any:
 
 
 class _AgentAsToolProvider(ToolsBase):
+    """
+    `ToolsBase` implementation that routes tool calls into `agent.run_agent(...)`.
+
+    The tool name is namespaced by the pipeline component id so it remains unique
+    per connected agent node.
+    """
+
     def __init__(self, *, agent: Any, pSelf: Any):
         self._agent = agent
         self._pSelf = pSelf
@@ -38,12 +52,19 @@ class _AgentAsToolProvider(ToolsBase):
         self._tools_available: Optional[List[str]] = None
 
     def unique_agent_tool_name(self) -> str:
+        """Return the unique tool namespace for this agent node instance."""
         inst = self._pSelf.instance
         pipe_type = inst.pipeType
         pipe_id = pipe_type.get('id') if isinstance(pipe_type, dict) else pipe_type.id
         return str(pipe_id)
 
     def _connected_tools_available(self) -> List[str]:
+        """
+        Return a cached list of non-agent tools visible to this agent.
+
+        This is used for operator visibility in the tool description and is not
+        required for tool invocation.
+        """
         if self._tools_available is not None:
             return self._tools_available
         try:
@@ -61,6 +82,12 @@ class _AgentAsToolProvider(ToolsBase):
         return tools_available
 
     def _parse_input(self, input_obj: Any) -> tuple[str, Optional[Dict[str, Any]]]:  # noqa: ANN401
+        """
+        Parse and validate the tool input payload.
+
+        Supported payloads include direct objects as well as `{ "input": ... }`
+        wrappers (handled by `normalize_invocation_payload`).
+        """
         payload = normalize_invocation_payload(input=input_obj)
         if not isinstance(payload, dict):
             raise ValueError('agent tool: input must be an object')
@@ -75,6 +102,7 @@ class _AgentAsToolProvider(ToolsBase):
         return query, ctx
 
     def _validate_request(self, *, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
+        """Validate tool selection and required input fields."""
         if tool_name != self._full_name:
             raise ValueError(f'agent tool: unknown tool_name {tool_name!r}')
         query, _ = self._parse_input(input_obj)
@@ -82,7 +110,7 @@ class _AgentAsToolProvider(ToolsBase):
             raise ValueError('agent tool: input.query must be a non-empty string')
 
     def _tool_query(self) -> List[ToolsBase.ToolDescriptor]:
-
+        """Return the single tool descriptor that exposes this agent."""
         tools_available = self._connected_tools_available()
         desc = 'Invoke this agent as a tool. Input: {query: string, context?: object}. Output: {content, meta, stack}.'
         if tools_available:
@@ -127,9 +155,11 @@ class _AgentAsToolProvider(ToolsBase):
         return [descriptor]
 
     def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:
+        """Validate an invocation request without executing the agent."""
         self._validate_request(tool_name=tool_name, input_obj=input_obj)
 
     def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:
+        """Invoke the agent with a `Question` built from the provided query/context."""
         self._tool_validate(tool_name=tool_name, input_obj=input_obj)
 
         query, ctx = self._parse_input(input_obj)
@@ -137,7 +167,7 @@ class _AgentAsToolProvider(ToolsBase):
         q.addQuestion(query)
         if ctx is not None:
             try:
-                q.addContext(json.dumps({'type': 'aparavi.agent.tool_context.v1', 'context': ctx}, default=str))
+                q.addContext(json.dumps({'type': 'RocketRide.agent.tool_context.v1', 'context': ctx}, default=str))
             except Exception:
                 pass
 

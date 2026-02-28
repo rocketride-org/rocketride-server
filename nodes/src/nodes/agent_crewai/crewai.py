@@ -32,12 +32,12 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from rocketlib import debug
 
-from ai.common.agent import Agent
+from ai.common.agent import AgentBase
 from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
 from ai.common.tools import ToolsBase
 
 
-class CrewDriver(Agent):
+class CrewDriver(AgentBase):
     FRAMEWORK = 'crewai'
 
     def __init__(self, *, instructions: str = '', process: Any = None):
@@ -59,7 +59,7 @@ class CrewDriver(Agent):
 
         class HostInvokeLLM(BaseLLM):
             def __init__(self):
-                super().__init__(model='aparavi-host-llm', temperature=None)
+                super().__init__(model='RocketRide-host-llm', temperature=None)
 
             def call(
                 self,

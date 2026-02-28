@@ -22,7 +22,7 @@
 # =============================================================================
 
 """
-CrewAI agent framework node for Aparavi Engine.
+CrewAI agent framework node for RocketRide Engine.
 
 Exposes:
 - IGlobal: dependency bootstrap

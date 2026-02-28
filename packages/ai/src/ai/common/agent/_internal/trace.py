@@ -1,3 +1,10 @@
+"""
+Tracing utilities for agent runs.
+
+This module wraps the engine invoker function so `AgentBase` can record host tool
+calls and attach them to the agent answer stack.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -8,9 +15,17 @@ def make_tracing_invoker(
     base_invoker: Callable[[str, Any], Any],
 ) -> Tuple[Callable[[str, Any], Any], List[Dict[str, Any]]]:
     """
-    Wrap an engine invoker to record tool.* calls and their I/O.
+    Wrap an engine invoker to record `tool.*` calls and their I/O.
 
     Returns (wrapped_invoker, tool_calls_list).
+
+    Args:
+        base_invoker: The engine invoker (typically `pSelf.instance.invoke`).
+
+    Returns:
+        A tuple of `(wrapped_invoker, tool_calls)` where `tool_calls` is a mutable
+        list that accumulates entries for `tool.query`, `tool.validate`, and
+        `tool.invoke` calls executed through the wrapped invoker.
     """
     tool_calls: List[Dict[str, Any]] = []
 

@@ -1,8 +1,8 @@
 # =============================================================================
-# Aparavi Engine
+# RocketRide Engine
 # =============================================================================
 # MIT License
-# Copyright (c) 2024 Aparavi Inc.
+# Copyright (c) 2024 RocketRide Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -41,7 +41,7 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 
 class McpProtocolError(RuntimeError):
@@ -64,10 +64,11 @@ class McpStdioClient:
         env: Optional[Dict[str, str]] = None,
         cwd: Optional[str] = None,
         protocol_version: str = '2024-11-05',
-        client_name: str = 'AparaviToolsMcpClient',
+        client_name: str = 'RocketRideToolsMcpClient',
         client_version: str = '0.1.0',
         timeout_s: float = 20.0,
     ) -> None:
+        """Create an MCP stdio client."""
         self._command = command
         self._args = list(args)
         self._env = env

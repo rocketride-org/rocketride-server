@@ -1,3 +1,14 @@
+"""
+Internal helpers for agent framework drivers.
+
+This module contains small, framework-agnostic utilities used by `AgentBase` and
+the agent-as-tool adapter:
+- prompt extraction from `Question`
+- run id / timestamp helpers
+- tool invocation payload normalization across frameworks
+- transcript and text extraction helpers for host LLM responses
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -65,6 +76,13 @@ def normalize_invocation_payload(*, input: Any = None, kwargs: Optional[Dict[str
     - `{ "input": { ... }, ...extras }` wrapper (extras merged into inner dict; extras override)
     - `input=<payload>, **kwargs` (kwargs merged into payload dict when possible)
     - kwargs-only invocations (payload becomes kwargs)
+
+    Args:
+        input: Framework tool input value, often passed as a single `input=...` param.
+        kwargs: Extra keyword args captured by framework wrappers.
+
+    Returns:
+        A normalized payload object to pass to `host.tools.invoke(...)`.
     """
 
     def _best_effort_pydantic_dump(value: Any) -> Any:
@@ -125,7 +143,15 @@ def normalize_invocation_payload(*, input: Any = None, kwargs: Optional[Dict[str
 # LLM transcript/text normalization
 # ---------------------------------------------------------------------------
 def messages_to_transcript(messages: Union[str, List[Dict[str, str]]]) -> str:
-    """Normalize messages into a single transcript string."""
+    """
+    Normalize messages into a single transcript string.
+
+    Args:
+        messages: Either a raw string or a list of `{role, content}` dicts.
+
+    Returns:
+        A newline-separated transcript string.
+    """
     if isinstance(messages, str):
         return messages
 
@@ -141,7 +167,14 @@ def messages_to_transcript(messages: Union[str, List[Dict[str, str]]]) -> str:
 
 
 def extract_text(result: Any) -> str:
-    """Text extraction from engine response shapes."""
+    """
+    Extract response text from common engine return shapes.
+
+    Supports:
+    - objects with `getText()`
+    - objects with `getJson()` that include `answer`/`content`/`text`
+    - any other object via `str(...)`
+    """
     try:
         if hasattr(result, 'getText') and callable(getattr(result, 'getText')):
             return (safe_str(result.getText()) or '').strip()
@@ -158,7 +191,16 @@ def extract_text(result: Any) -> str:
 
 
 def truncate_at_stop_words(text: str, stop_words: Any) -> str:
-    """Truncate `text` at the first occurrence of any stop word."""
+    """
+    Truncate `text` at the first occurrence of any stop word.
+
+    Args:
+        text: Model output text.
+        stop_words: Optional list of stop word strings.
+
+    Returns:
+        Possibly truncated text.
+    """
     if not text:
         return ''
     if not isinstance(stop_words, list):

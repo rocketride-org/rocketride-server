@@ -21,21 +21,19 @@
 # SOFTWARE.
 # =============================================================================
 
-"""
-LangChain driver implementing the shared `ai.common.agent.Agent` interface.
-"""
+"""LangChain driver implementing the shared `ai.common.agent.AgentBase` interface."""
 
 from __future__ import annotations
 
 import json
 from typing import Any, Callable, Dict, List, Optional
 
-from ai.common.agent import Agent
+from ai.common.agent import AgentBase
 from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
 from ai.common.tools import ToolsBase
 
 
-class LangChainDriver(Agent):
+class LangChainDriver(AgentBase):
     FRAMEWORK = 'langchain'
 
     def __init__(self, *, instructions: str = ''):
@@ -88,10 +86,7 @@ class LangChainDriver(Agent):
                     if msg is not None:
                         return ChatResult(generations=[ChatGeneration(message=msg)])
                     if attempt < 2:
-                        prompt = (
-                            prompt
-                            + '\n\nsystem: Your last output was invalid. Output ONLY a single JSON object per the schema.'
-                        )
+                        prompt = prompt + '\n\nsystem: Your last output was invalid. Output ONLY a single JSON object per the schema.'
 
                 return ChatResult(generations=[ChatGeneration(message=AIMessage(content=raw))])
 
@@ -324,6 +319,7 @@ def _parse_tool_call_envelope(raw: str) -> Any:
         content = _safe_str(obj.get('content', ''))
         try:
             from langchain_core.messages import AIMessage
+
             return AIMessage(content=content)
         except Exception:
             return None

@@ -1,8 +1,8 @@
 # =============================================================================
-# Aparavi Engine
+# RocketRide Engine
 # =============================================================================
 # MIT License
-# Copyright (c) 2024 Aparavi Inc.
+# Copyright (c) 2024 RocketRide Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -60,6 +60,7 @@ class McpProtocolError(RuntimeError):
 
 class McpHttpStatusError(RuntimeError):
     def __init__(self, *, status: int, body: bytes | None = None, url: str | None = None) -> None:
+        """Create an HTTP status error with response context."""
         super().__init__(f'HTTP status={status} url={url!r} body={(body or b"")[:200]!r}')
         self.status = int(status)
         self.body = body
@@ -80,10 +81,11 @@ class McpStreamableHttpClient:
         endpoint: str,
         headers: Optional[Dict[str, str]] = None,
         protocol_version: str = '2025-11-25',
-        client_name: str = 'AparaviToolsMcpClient',
+        client_name: str = 'RocketRideToolsMcpClient',
         client_version: str = '0.1.0',
         timeout_s: float = 20.0,
     ) -> None:
+        """Create an MCP streamable HTTP client."""
         self._endpoint = str(endpoint).strip()
         if not self._endpoint:
             raise ValueError('endpoint is required')

@@ -62,7 +62,7 @@ class IGlobal(IGlobalBase):
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         self.instructions = self.normalize_and_validate_instructions(config)
 
-        from .langchain_agent import LangChainDriver
+        from .langchain import LangChainDriver
 
         self.agent = LangChainDriver(instructions=self.instructions)
 

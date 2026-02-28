@@ -17,13 +17,13 @@
 	],
 	"lanes": {},
 	"preconfig": {
-		"default": "aparavi",
+		"default": "RocketRide",
 		"profiles": {
-			"aparavi": {
-				"title": "Aparavi MCP server (stdio)",
-				"serverName": "aparavi",
+			"RocketRide": {
+				"title": "RocketRide MCP server (stdio)",
+				"serverName": "RocketRide",
 				"transport": "stdio",
-				"commandLine": "python -m aparavi_mcp"
+				"commandLine": "python -m RocketRide_mcp"
 			},
 			"streamable_http": {
 				"title": "Generic MCP server (Streamable HTTP)",
@@ -81,8 +81,8 @@
 		"mcp_client.commandLine": {
 			"type": "string",
 			"title": "Command line",
-			"description": "Command line to launch MCP server (stdio transport). Example: python -m aparavi_mcp",
-			"default": "python -m aparavi_mcp"
+			"description": "Command line to launch MCP server (stdio transport). Example: python -m RocketRide_mcp",
+			"default": "python -m RocketRide_mcp"
 		},
 		"mcp_client.env": {
 			"type": "object",

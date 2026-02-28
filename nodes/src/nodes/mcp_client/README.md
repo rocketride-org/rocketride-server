@@ -10,7 +10,7 @@
 ### UI configuration
 - **serverName**: namespace prefix for exposed tools (tools appear as `<serverName>.<toolName>`).
 - **transport**: `stdio | streamable-http | sse`
-- **stdio.commandLine**: a full command line such as `python -m aparavi_mcp`
+- **stdio.commandLine**: a full command line such as `python -m RocketRide_mcp`
 - **stdio.env**: optional env vars for the spawned subprocess (key/value map)
 - **streamable-http.endpoint**: e.g. `http://127.0.0.1:8002/mcp`
 - **sse.sse_endpoint**: e.g. `http://127.0.0.1:8003/sse`

@@ -22,7 +22,7 @@
 # =============================================================================
 
 """
-LangChain agent framework node for Aparavi Engine.
+LangChain agent framework node for RocketRide Engine.
 
 Exposes:
 - IGlobal: dependency bootstrap
