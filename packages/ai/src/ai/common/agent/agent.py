@@ -15,7 +15,7 @@ from .types import AgentHost, AgentInput
 from ._internal.host import AgentHostServices
 from ._internal.agent_tool import handle_agent_tool_invoke
 from ._internal.trace import make_tracing_invoker
-from ._internal.utils import extract_continuation, extract_prompt, extract_text, messages_to_transcript, now_iso, new_run_id, normalize_invocation_payload, safe_str, truncate_at_stop_words
+from ._internal.utils import extract_prompt, extract_text, messages_to_transcript, now_iso, new_run_id, normalize_invocation_payload, safe_str, truncate_at_stop_words
 from ai.common.tools import ToolsBase
 
 class Agent(ABC):
@@ -55,13 +55,11 @@ class Agent(ABC):
 
         try:
             prompt = extract_prompt(question)
-            continuation = extract_continuation(getattr(question, 'context', None))
             task_id = self._get_task_id(pSelf)
 
             agent_input = AgentInput(
                 prompt=prompt,
                 question=question,
-                continuation=continuation,
                 run_id=run_id,
                 task_id=task_id,
                 started_at=started_at,
