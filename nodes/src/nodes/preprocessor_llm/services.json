@@ -58,7 +58,7 @@
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
-	"icon": "preprocessor.svg",
+	"icon": "preprocessor-llm.svg",
 	//
 	// Optional:
 	//	  Documentation link for this driver
