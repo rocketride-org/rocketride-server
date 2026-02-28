@@ -15,7 +15,8 @@ from ._internal.envelope import failed_envelope, to_envelope
 from ._internal.host import AgentHostServices
 from ._internal.agent_tool import handle_agent_tool_invoke
 from ._internal.trace import attach_tool_calls_artifact, make_tracing_invoker
-from ._internal.utils import extract_continuation, extract_prompt, extract_text, extract_tool_names, messages_to_transcript, now_iso, new_run_id, normalize_invocation_payload, safe_str, truncate_at_stop_words
+from ._internal.utils import extract_continuation, extract_prompt, extract_text, messages_to_transcript, now_iso, new_run_id, normalize_invocation_payload, safe_str, truncate_at_stop_words
+from ai.common.tools import ToolsBase
 
 class Agent(ABC):
     """
@@ -113,13 +114,22 @@ class Agent(ABC):
     # ---------------------------------------------------------------------
     # Framework-facing host operations
     # ---------------------------------------------------------------------
-    def _discover_tool_names(self, *, host: AgentHost) -> List[str]:
-        """Best-effort connected tool discovery (names only)."""
+    def _discover_tools(self, *, host: AgentHost) -> List[ToolsBase.ToolDescriptor]:
+        """
+        Discover available tools for framework drivers to expose.
+        """
         try:
             catalog = host.tools.query()
         except Exception as e:
             catalog = {'error': str(e), 'type': type(e).__name__}
-        return extract_tool_names(catalog)
+        tools_attr = getattr(catalog, 'tools', None)
+        if isinstance(tools_attr, list):
+            return tools_attr
+        if isinstance(catalog, dict) and isinstance(catalog.get('tools'), list):
+            return catalog.get('tools')
+        if isinstance(catalog, list):
+            return catalog
+        return []
 
     def _invoke_host_tool(
         self,
@@ -169,7 +179,7 @@ class Agent(ABC):
         self,
         *,
         host: AgentHost,
-        tool_names: List[str],
+        tool_descriptors: List[ToolsBase.ToolDescriptor],
         invoke_tool: Callable[..., Any],
         log_tool_call: Callable[..., None],
         ctx: Dict[str, Any],

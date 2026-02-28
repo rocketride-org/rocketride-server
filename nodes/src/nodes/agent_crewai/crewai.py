@@ -34,6 +34,7 @@ from rocketlib import debug
 
 from ai.common.agent import Agent
 from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
+from ai.common.tools import ToolsBase
 
 
 class CrewDriver(Agent):
@@ -77,7 +78,7 @@ class CrewDriver(Agent):
         self,
         *,
         host: AgentHost,
-        tool_names: List[str],
+        tool_descriptors: List[ToolsBase.ToolDescriptor],
         invoke_tool: Callable[..., Any],
         log_tool_call: Callable[..., None],
         ctx: Dict[str, Any],
@@ -87,22 +88,30 @@ class CrewDriver(Agent):
         from pydantic import BaseModel, ConfigDict, Field
 
         class _ToolInput(BaseModel):
+            """
+            Accept arbitrary tool args through a stable `input` field.
+
+            This keeps CrewAI tool execution robust even when the framework
+            passes arguments via `input=...` or via extra kwargs.
+            """
+
             input: Any = Field(default=None, description='Tool input payload')
             model_config = ConfigDict(extra='allow')
 
-        class HostTool(BaseTool):
+        class HostTool(BaseTool):  # type: ignore[misc]
             name: str
             description: str
             args_schema: type[BaseModel] = _ToolInput
 
-            def _run(self, input: Any = None, **kwargs: Any) -> str:
+            def _run(self, input: Any = None, **kwargs: Any) -> str:  # noqa: ANN401, A002
+                tool_name = _safe_str(getattr(self, 'name', ''))
                 try:
-                    out = invoke_tool(self.name, input=input, kwargs=kwargs)
+                    out = invoke_tool(tool_name, input=input, kwargs=kwargs)
                 except Exception as e:
                     out = {'error': str(e), 'type': type(e).__name__}
 
                 try:
-                    log_tool_call(tool_name=self.name, input={'input': input, **kwargs}, output=out)
+                    log_tool_call(tool_name=tool_name, input={'input': input, **kwargs}, output=out)
                 except Exception:
                     pass
 
@@ -111,7 +120,29 @@ class CrewDriver(Agent):
                 except Exception:
                     return _safe_str(out)
 
-        return [HostTool(name=tool_name, description=f'Invoke host tool: {tool_name}') for tool_name in tool_names]
+        tools: List[Any] = []
+        for td in tool_descriptors:
+            name = td.get('name')
+            if not isinstance(name, str) or not name.strip():
+                continue
+            desc = td.get('description') if isinstance(td.get('description'), str) else f'Invoke host tool: {name}'
+            input_schema = td.get('input_schema')
+            if isinstance(input_schema, dict):
+                try:
+                    schema_text = json.dumps(input_schema, ensure_ascii=False)
+                except Exception:
+                    schema_text = ''
+                if schema_text:
+                    desc = f'{desc}\n\nTool input schema (JSON): {schema_text}'
+
+            tool = HostTool(name=name, description=desc)
+            # Keep the real input schema available for prompt/debug paths if needed.
+            try:
+                setattr(tool, '_rr_input_schema', input_schema)
+            except Exception:
+                pass
+            tools.append(tool)
+        return tools
 
     def _run(
         self,
@@ -125,7 +156,7 @@ class CrewDriver(Agent):
 
         from crewai import Agent, Crew, Task  # type: ignore
 
-        tool_names = self._discover_tool_names(host=host)
+        tool_descriptors = self._discover_tools(host=host)
 
         def _call_llm_text(messages: Any, stop_words: Any = None) -> str:
             return self._call_host_llm(
@@ -141,7 +172,7 @@ class CrewDriver(Agent):
         llm = self._bind_framework_llm(host=host, call_llm_text=_call_llm_text, ctx=ctx)
         tools_for_agent = self._bind_framework_tools(
             host=host,
-            tool_names=tool_names,
+            tool_descriptors=tool_descriptors,
             invoke_tool=_invoke_tool,
             log_tool_call=lambda **_: None,
             ctx=ctx,
