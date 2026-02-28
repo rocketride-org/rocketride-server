@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "LLM - Anthropic",
+	"title": "Anthropic",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -257,7 +257,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "LLM - Anthropic",
+			"title": "Anthropic",
 			"properties": [
 				"anthropic.profile"
 			]

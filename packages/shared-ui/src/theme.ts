@@ -380,7 +380,7 @@ export const createVSCodeTheme = () => {
 			MuiSnackbar: {
 				styleOverrides: {
 					root: {
-						background: '#ffffff',
+						background: 'transparent',
 					},
 					anchorOriginBottomRight: {
 						bottom: `${pxToRem(62)}rem !important`,
@@ -573,7 +573,7 @@ export const theme = createTheme({
 		MuiSnackbar: {
 			styleOverrides: {
 				root: {
-					background: '#ffffff',
+					background: 'transparent',
 				},
 				anchorOriginBottomRight: {
 					bottom: `${pxToRem(62)}rem !important`,

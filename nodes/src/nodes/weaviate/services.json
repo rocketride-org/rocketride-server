@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Vector Store - Weaviate",
+	"title": "Weaviate",
 	//
 	// Required:
 	//     The protocol is the endpoint protocol

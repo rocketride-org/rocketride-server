@@ -211,11 +211,11 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 							<input
 								type="text"
 								id="hostUrl"
-								placeholder="http://<your server>:5565"
+								placeholder="your-server:5565"
 								value={settings.hostUrl}
 								onChange={handleHostUrlChange}
 							/>
-							<div className="help-text">Base URL of your hosted RocketRide server (include the port, e.g. http://myserver:5565)</div>
+							<div className="help-text">Base URL of your hosted RocketRide server (e.g. myserver:5565)</div>
 						</div>
 					)}
 					{settings.connectionMode === 'local' && (

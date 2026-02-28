@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Image - Thumbnail",
+	"title": "Thumbnail",
 	//
 	// Required:
 	//     The protocol is the endpoint protocol

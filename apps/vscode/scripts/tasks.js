@@ -154,16 +154,16 @@ function makeStageFilesAction() {
             const pkgPath = path.join(APP_ROOT, 'package.json');
             const pkg = JSON.parse(await readFile(pkgPath));
             pkg.main = './rocketride.js';
-            pkg.icon = 'rocketride-icon.png';
-            pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'rocketride-icon.*', 'package.json', 'LICENSE', 'docs/**'];
+            pkg.icon = 'rocketride-dark-icon.png';
+            pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'package.json', 'LICENSE', 'docs/**'];
             await writeFile(path.join(BUILD_DIR, 'package.json'), JSON.stringify(pkg, null, 2));
-            const iconPng = path.join(APP_ROOT, 'rocketride-icon.png');
-            const iconSvg = path.join(APP_ROOT, 'rocketride-icon.svg');
-            if (await exists(iconPng)) {
-                await copyFile(iconPng, path.join(BUILD_DIR, 'rocketride-icon.png'));
+            const iconDark = path.join(APP_ROOT, 'rocketride-dark-icon.png');
+            const iconLight = path.join(APP_ROOT, 'rocketride-light-icon.png');
+            if (await exists(iconDark)) {
+                await copyFile(iconDark, path.join(BUILD_DIR, 'rocketride-dark-icon.png'));
             }
-            if (await exists(iconSvg)) {
-                await copyFile(iconSvg, path.join(BUILD_DIR, 'rocketride-icon.svg'));
+            if (await exists(iconLight)) {
+                await copyFile(iconLight, path.join(BUILD_DIR, 'rocketride-light-icon.png'));
             }
             await copyFile(path.join(PROJECT_ROOT, 'LICENSE'), path.join(BUILD_DIR, 'LICENSE'));
             const docsSrc = path.join(APP_ROOT, 'docs');

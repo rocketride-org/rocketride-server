@@ -1,0 +1,356 @@
+/**
+ * =============================================================================
+ * MIT License
+ * Copyright (c) 2026 RocketRide, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ * ============================================================================= */
+
+/**
+ * Welcome Page Styles
+ *
+ * Two-column layout: branding panel (left) and configuration form (right).
+ * Stacks vertically on narrow viewports.
+ */
+
+/* ============================================================================ */
+/* CONTAINER                                                                    */
+/* ============================================================================ */
+
+.welcome-container {
+	display: flex;
+	max-width: 860px;
+	width: 100%;
+	margin: 40px auto;
+	border: 1px solid var(--vscode-widget-border);
+	border-radius: 8px;
+	overflow: hidden;
+	background: var(--vscode-editor-background);
+}
+
+/* ============================================================================ */
+/* LEFT PANEL — Branding                                                        */
+/* ============================================================================ */
+
+.welcome-left {
+	width: 280px;
+	min-width: 280px;
+	background: linear-gradient(180deg, #1a1a3a 0%, #252545 100%);
+	padding: 40px 30px;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	border-right: 1px solid var(--vscode-widget-border);
+}
+
+.welcome-logo {
+	width: 100px;
+	height: 100px;
+	margin-bottom: 20px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 56px;
+}
+
+.welcome-logo img {
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+}
+
+/* Theme-based logo: dark logo for light themes, light logo for dark themes */
+body.vscode-dark .welcome-logo .logo-dark,
+body.vscode-light .welcome-logo .logo-light {
+	display: none;
+}
+body.vscode-high-contrast .welcome-logo .logo-dark {
+	display: none;
+}
+
+.welcome-brand-name {
+	font-size: 22px;
+	font-weight: 700;
+	color: #ffffff;
+	letter-spacing: 0.5px;
+	margin-bottom: 4px;
+}
+
+.welcome-brand-sub {
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	margin-bottom: 30px;
+	text-transform: uppercase;
+	letter-spacing: 1.5px;
+}
+
+.welcome-tagline {
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+	text-align: center;
+	margin-bottom: 30px;
+	line-height: 1.6;
+}
+
+/* Feature list */
+.welcome-features {
+	list-style: none;
+	width: 100%;
+	margin: 0 0 30px;
+	padding: 0;
+}
+
+.welcome-features li {
+	padding: 6px 0;
+	color: var(--vscode-foreground);
+	font-size: 12.5px;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.welcome-feature-icon {
+	color: #F25B32;
+	font-size: 14px;
+	width: 18px;
+	text-align: center;
+	flex-shrink: 0;
+}
+
+/* Divider */
+.welcome-divider {
+	width: 100%;
+	height: 1px;
+	background: var(--vscode-widget-border);
+	margin: 10px 0 20px;
+}
+
+/* Bottom links */
+.welcome-links {
+	display: flex;
+	gap: 20px;
+	margin-top: auto;
+}
+
+.welcome-links a {
+	color: var(--vscode-textLink-foreground);
+	text-decoration: none;
+	font-size: 12px;
+}
+
+.welcome-links a:hover {
+	text-decoration: underline;
+}
+
+/* ============================================================================ */
+/* RIGHT PANEL — Configuration                                                  */
+/* ============================================================================ */
+
+.welcome-right {
+	flex: 1;
+	padding: 40px 36px;
+	display: flex;
+	flex-direction: column;
+}
+
+.welcome-right h2 {
+	font-size: 18px;
+	font-weight: 600;
+	color: var(--vscode-foreground);
+	margin: 0 0 6px;
+}
+
+.welcome-subtitle {
+	font-size: 12.5px;
+	color: var(--vscode-descriptionForeground);
+	margin-bottom: 28px;
+}
+
+/* ============================================================================ */
+/* FORM ELEMENTS                                                                */
+/* ============================================================================ */
+
+.welcome-form-group {
+	margin-bottom: 20px;
+}
+
+.welcome-form-group label {
+	display: block;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--vscode-foreground);
+	margin-bottom: 6px;
+}
+
+.welcome-help {
+	font-size: 11.5px;
+	color: var(--vscode-descriptionForeground);
+	margin-top: 4px;
+}
+
+.welcome-help a {
+	color: var(--vscode-textLink-foreground);
+	text-decoration: none;
+}
+
+.welcome-help a:hover {
+	text-decoration: underline;
+}
+
+/* Password input row */
+.welcome-password-row {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+}
+
+.welcome-password-row input {
+	flex: 1;
+}
+
+/* Mode description box */
+.welcome-mode-desc {
+	font-size: 11.5px;
+	color: var(--vscode-descriptionForeground);
+	margin-top: 6px;
+	padding: 8px 10px;
+	background: rgba(255, 255, 255, 0.03);
+	border-radius: 4px;
+	border-left: 2px solid #F25B32;
+}
+
+/* Checkbox row */
+.welcome-checkbox-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.welcome-checkbox-row input[type="checkbox"] {
+	width: auto;
+	margin: 0;
+}
+
+.welcome-checkbox-row label {
+	font-weight: 400;
+	margin-bottom: 0;
+	font-size: 12.5px;
+}
+
+/* ============================================================================ */
+/* MESSAGE AREA                                                                 */
+/* ============================================================================ */
+
+.welcome-message {
+	margin-top: 12px;
+	padding: 8px 12px;
+	border-radius: 4px;
+	font-size: 12px;
+}
+
+.welcome-message.success {
+	background: rgba(76, 175, 80, 0.15);
+	border: 1px solid rgba(76, 175, 80, 0.3);
+	color: #4caf50;
+}
+
+.welcome-message.error {
+	background-color: var(--vscode-inputValidation-errorBackground);
+	color: var(--vscode-inputValidation-errorForeground);
+	border: 1px solid var(--vscode-inputValidation-errorBorder);
+}
+
+.welcome-message.info {
+	background-color: var(--vscode-inputValidation-infoBackground);
+	color: var(--vscode-inputValidation-infoForeground);
+	border: 1px solid var(--vscode-inputValidation-infoBorder);
+}
+
+.welcome-message.warning {
+	background-color: var(--vscode-inputValidation-warningBackground);
+	color: var(--vscode-inputValidation-warningForeground);
+	border: 1px solid var(--vscode-inputValidation-warningBorder);
+}
+
+/* ============================================================================ */
+/* BUTTONS                                                                      */
+/* ============================================================================ */
+
+.welcome-button-row {
+	display: flex;
+	gap: 10px;
+	margin-top: 24px;
+	align-items: center;
+}
+
+/* ============================================================================ */
+/* FOOTER LINKS                                                                 */
+/* ============================================================================ */
+
+.welcome-footer-links {
+	display: flex;
+	gap: 24px;
+	margin-top: 20px;
+}
+
+.welcome-footer-links a {
+	color: var(--vscode-textLink-foreground);
+	text-decoration: none;
+	font-size: 12px;
+}
+
+.welcome-footer-links a:hover {
+	text-decoration: underline;
+}
+
+.welcome-dismiss {
+	color: var(--vscode-descriptionForeground) !important;
+}
+
+/* Version badge */
+.welcome-version {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	margin-top: auto;
+	padding-top: 16px;
+	text-align: right;
+}
+
+/* ============================================================================ */
+/* RESPONSIVE — Stack on narrow viewports                                       */
+/* ============================================================================ */
+
+@media (max-width: 600px) {
+	.welcome-container {
+		flex-direction: column;
+		margin: 10px auto;
+	}
+
+	.welcome-left {
+		width: 100%;
+		min-width: 0;
+		border-right: none;
+		border-bottom: 1px solid var(--vscode-widget-border);
+		padding: 24px 20px;
+	}
+
+	.welcome-right {
+		padding: 24px 20px;
+	}
+}

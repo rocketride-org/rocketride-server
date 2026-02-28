@@ -58,6 +58,8 @@ import asyncio
 import time
 from typing import Dict, Any, List, Optional
 
+from ..core.constants import CONST_DEFAULT_WEB_CLOUD
+
 from .commands.start import StartCommand
 from .commands.upload import UploadCommand
 from .commands.status import StatusCommand
@@ -345,7 +347,7 @@ class RocketRideCLI:
             # Server connection argument
             subparser.add_argument(
                 '--uri',
-                default=os.getenv('ROCKETRIDE_URI', 'https://cloud.rocketride.ai'),
+                default=os.getenv('ROCKETRIDE_URI', CONST_DEFAULT_WEB_CLOUD),
                 help='RocketRide server URI (default: %(default)s)',
             )
 

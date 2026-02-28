@@ -1,0 +1,246 @@
+name: Nightly prerelease
+run-name: Nightly ${{ github.event_name == 'workflow_dispatch' && '(manual)' || '(scheduled)' }}
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  packages: write
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Check for changes
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for commits since last nightly
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "Manual trigger — always run"
+            exit 0
+          fi
+          LAST_TAG=$(git tag -l 'nightly-*' --sort=-creatordate | head -n1)
+          if [ -z "$LAST_TAG" ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "No previous nightly tag — run"
+            exit 0
+          fi
+          COMMITS=$(git rev-list "${LAST_TAG}..HEAD" --count)
+          if [ "$COMMITS" -gt 0 ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "${COMMITS} new commits since ${LAST_TAG}"
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+            echo "No new commits since ${LAST_TAG} — skipping"
+          fi
+
+  init:
+    name: Initialize versions
+    needs: check
+    if: needs.check.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      server_version: ${{ steps.init.outputs.server_version }}
+      vscode_version: ${{ steps.init.outputs.vscode_version }}
+      client_mcp_version: ${{ steps.init.outputs.client_mcp_version }}
+      client_python_version: ${{ steps.init.outputs.client_python_version }}
+      client_typescript_version: ${{ steps.init.outputs.client_typescript_version }}
+      nightly_tag: ${{ steps.init.outputs.nightly_tag }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Extract versions
+        id: init
+        run: |
+          echo "server_version=$(jq -r '.version' package.json)" >> $GITHUB_OUTPUT
+          echo "vscode_version=$(jq -r '.version' apps/vscode/package.json)" >> $GITHUB_OUTPUT
+          echo "client_mcp_version=$(yq -r '.project.version' packages/client-mcp/pyproject.toml)" >> $GITHUB_OUTPUT
+          echo "client_python_version=$(yq -r '.project.version' packages/client-python/pyproject.toml)" >> $GITHUB_OUTPUT
+          echo "client_typescript_version=$(jq -r '.version' packages/client-typescript/package.json)" >> $GITHUB_OUTPUT
+          echo "nightly_tag=nightly-$(date -u +%Y%m%d)" >> $GITHUB_OUTPUT
+
+          cat $GITHUB_OUTPUT
+
+  build:
+    name: Build / ${{ matrix.label }}
+    needs: init
+    timeout-minutes: 90
+    runs-on: ${{ matrix.runner }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VCPKG_NUGET_USER: ${{ github.repository_owner }}
+      NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu
+            label: Ubuntu 22.04
+            runner: ubuntu-22.04
+            builder_cmd: ./builder
+            vcpkg_cmd: ./build/vcpkg/vcpkg
+          - platform: windows
+            label: Windows Server 2022
+            runner: windows-2022
+            builder_cmd: ./builder.cmd
+            vcpkg_cmd: ./build/vcpkg/vcpkg.exe
+          - platform: macos
+            label: macOS (ARM64)
+            runner: macos-14
+            builder_cmd: ./builder
+            vcpkg_cmd: ./build/vcpkg/vcpkg
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Set up vcpkg
+        run: ${{ matrix.builder_cmd }} vcpkg:submodule-build
+      - name: Set up vcpkg nuget / Linux/macOS
+        if: matrix.platform != 'windows'
+        run: |
+          NUGET_EXE=$(${{ matrix.vcpkg_cmd }} fetch nuget | tail -n1)
+          mono $NUGET_EXE sources add \
+            -Source "${{ env.NUGET_FEED_URL }}" \
+            -StorePasswordInClearText \
+            -Name GitHubPackages \
+            -UserName "${{ env.VCPKG_NUGET_USER }}" \
+            -Password "${{ secrets.GITHUB_TOKEN }}" || true
+          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
+            -Source "${{ env.NUGET_FEED_URL }}"
+      - name: Set up vcpkg nuget / Windows
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $NUGET_EXE = $(${{ matrix.vcpkg_cmd }} fetch nuget | Select-Object -Last 1)
+          & $NUGET_EXE sources add `
+            -Source "${{ env.NUGET_FEED_URL }}" `
+            -StorePasswordInClearText `
+            -Name GitHubPackages `
+            -UserName "${{ env.VCPKG_NUGET_USER }}" `
+            -Password "${{ secrets.GITHUB_TOKEN }}"
+          & $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" `
+            -Source "${{ env.NUGET_FEED_URL }}"
+
+      - name: Build
+        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall
+
+      - name: Test
+        run: ${{ matrix.builder_cmd }} test --verbose
+
+      - name: Package
+        run: ${{ matrix.builder_cmd }} package --verbose
+
+      - name: Upload server artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-artifacts-${{ matrix.platform }}
+          path: |
+            ${{ github.workspace }}/dist/artifacts/*.zip
+            ${{ github.workspace }}/dist/artifacts/*.tar.gz
+            ${{ github.workspace }}/dist/artifacts/*.json
+          if-no-files-found: error
+
+      - name: Upload VS Code extension
+        if: matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-artifacts
+          path: ${{ github.workspace }}/dist/vscode/*.vsix
+          if-no-files-found: error
+
+      - name: Upload MCP client
+        if: matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-client-artifacts
+          path: |
+            ${{ github.workspace }}/dist/clients/mcp/*.whl
+            ${{ github.workspace }}/dist/clients/mcp/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload Python client
+        if: matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-client-artifacts
+          path: |
+            ${{ github.workspace }}/dist/clients/python/*.whl
+            ${{ github.workspace }}/dist/clients/python/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload TypeScript client
+        if: matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: typescript-client-artifacts
+          path: ${{ github.workspace }}/dist/clients/typescript/*.tgz
+          if-no-files-found: error
+
+  prerelease:
+    name: Create prerelease
+    needs: [init, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find release-assets -type f | sort
+
+      - name: Create or update nightly tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f "${{ needs.init.outputs.nightly_tag }}"
+          git push -f origin "${{ needs.init.outputs.nightly_tag }}"
+
+      - name: Create GitHub prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.init.outputs.nightly_tag }}
+          name: >-
+            Nightly — Server ${{ needs.init.outputs.server_version }},
+            TS Client ${{ needs.init.outputs.client_typescript_version }},
+            Python Client ${{ needs.init.outputs.client_python_version }},
+            MCP Client ${{ needs.init.outputs.client_mcp_version }},
+            VS Code ${{ needs.init.outputs.vscode_version }}
+          prerelease: true
+          generate_release_notes: false
+          body: |
+            Automated nightly prerelease from `develop`.
+
+            | Module | Version |
+            |--------|---------|
+            | Server | ${{ needs.init.outputs.server_version }} |
+            | TypeScript Client | ${{ needs.init.outputs.client_typescript_version }} |
+            | Python Client | ${{ needs.init.outputs.client_python_version }} |
+            | MCP Client | ${{ needs.init.outputs.client_mcp_version }} |
+            | VS Code Extension | ${{ needs.init.outputs.vscode_version }} |
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

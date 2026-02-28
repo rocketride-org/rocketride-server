@@ -21,10 +21,10 @@
 // SOFTWARE.
 // =============================================================================
 
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import { PageSystem } from './PageSystem';
+import { PageWelcome } from './PageWelcome';
+import { mountComponent } from '../../../shared/util/mount';
 
-const root = ReactDOM.createRoot(document.getElementById('root')!);
-root.render(<PageSystem />);
+// Mount the Welcome component
+mountComponent(PageWelcome, 'Welcome');
 
+export default PageWelcome;

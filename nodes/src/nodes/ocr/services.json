@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Image - OCR",
+	"title": "OCR",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol

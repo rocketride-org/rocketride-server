@@ -74,7 +74,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	private connectionManager = ConnectionManager.getInstance();
 
 	private activePipelines = new Set<string>();
-	private unknownTasks = new Map<string, UnknownTask>();  // Tracks tasks without local .pipe.json files
+	private unknownTasks = new Map<string, UnknownTask>();  // Tracks tasks without local .pipe files
 	private logger = getLogger();               // Handles output logging to VS Code channels
 
 	/**
@@ -90,18 +90,23 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	}
 
 	/**
-	 * Initialize file system watching for .pipeline files
+	 * Initialize file system watching for .pipe and .pipe.json files
 	 */
 	private setupFileWatching(): void {
-		// Watch for file system changes with proper disposal
-		const watcher = vscode.workspace.createFileSystemWatcher('**/*.pipe.json');
+		// Watch both .pipe (new default) and .pipe.json (backward compat)
+		const watcherPipe = vscode.workspace.createFileSystemWatcher('**/*.pipe');
+		const watcherPipeJson = vscode.workspace.createFileSystemWatcher('**/*.pipe.json');
 
 		// Store disposables for cleanup
 		this.disposables.push(
-			watcher,
-			watcher.onDidCreate((uri) => this.handleFileCreated(uri)),
-			watcher.onDidDelete((uri) => this.handleFileDeleted(uri)),
-			watcher.onDidChange((uri) => this.handleFileChanged(uri))
+			watcherPipe,
+			watcherPipe.onDidCreate((uri) => this.handleFileCreated(uri)),
+			watcherPipe.onDidDelete((uri) => this.handleFileDeleted(uri)),
+			watcherPipe.onDidChange((uri) => this.handleFileChanged(uri)),
+			watcherPipeJson,
+			watcherPipeJson.onDidCreate((uri) => this.handleFileCreated(uri)),
+			watcherPipeJson.onDidDelete((uri) => this.handleFileDeleted(uri)),
+			watcherPipeJson.onDidChange((uri) => this.handleFileChanged(uri))
 		);
 	}
 
@@ -180,14 +185,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			}),
 
 		vscode.commands.registerCommand('rocketride.sidebar.files.createFile', async () => {
-			const fileName = await vscode.window.showInputBox({
-				prompt: 'Enter pipeline file name or path',
-				value: 'new-pipeline.pipe.json'
-			});
-
-			if (fileName) {
-				await this.createNewPipelineFile(fileName);
-			}
+			await this.createNewPipelineFile();
 		}),
 
 		vscode.commands.registerCommand('rocketride.sidebar.files.runPipeline', async (item?: PipelineFileItem) => {
@@ -608,40 +606,32 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	/**
 	 * Creates a new pipeline file with template content
 	 */
-	private async createNewPipelineFile(fileName: string): Promise<void> {
+	private async createNewPipelineFile(): Promise<void> {
 		if (!vscode.workspace.workspaceFolders) {
 			vscode.window.showErrorMessage('No workspace folder open');
 			return;
 		}
 
 		const workspaceFolder = vscode.workspace.workspaceFolders[0];
-		let targetPath = fileName;
 
-		// Check if it's just a filename first (no path separators)
-		if (!fileName.includes('/') && !fileName.includes('\\')) {
-			// Just a filename - prepend defaultPipelinePath
-			const config = this.configManager.getConfig();
-			const defaultPath = config?.defaultPipelinePath || 'pipelines';
-			targetPath = `${defaultPath}/${fileName}`;
+		// Resolve the default directory for new pipelines, expanding ${workspaceFolder} if present
+		const config = this.configManager.getConfig();
+		const rawPath = config?.defaultPipelinePath || 'pipelines';
+		const relativePath = rawPath.replace(/^\$\{workspaceFolder\}[/\\]?/, '');
+		const defaultDir = vscode.Uri.joinPath(workspaceFolder.uri, relativePath);
+
+		const fileUri = await vscode.window.showSaveDialog({
+			defaultUri: vscode.Uri.joinPath(defaultDir, 'new-pipeline'),
+			filters: { 'RocketRide Pipeline': ['pipe'] },
+			title: 'Create New Pipeline'
+		});
+
+		if (!fileUri) {
+			return;
 		}
 
-		// Now do variable replacements
-		let expandedPath = targetPath
-			.replace(/\$\{workspaceFolder\}/g, workspaceFolder.uri.fsPath)
-			.replace(/\$\{workspaceFolderBasename\}/g, path.basename(workspaceFolder.uri.fsPath))
-			.replace(/\$\{userHome\}/g, require('os').homedir());
-
-		// Convert absolute path back to relative if it's within workspace
-		if (path.isAbsolute(expandedPath) && expandedPath.startsWith(workspaceFolder.uri.fsPath)) {
-			expandedPath = path.relative(workspaceFolder.uri.fsPath, expandedPath);
-		}
-
-		const filePath = path.isAbsolute(expandedPath)
-			? vscode.Uri.file(expandedPath)
-			: vscode.Uri.joinPath(workspaceFolder.uri, expandedPath);
-
-		// Create directory if it doesn't exist
-		await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(filePath, '..'));
+		// Ensure the parent directory exists
+		await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(fileUri, '..'));
 
 		// Create basic pipeline template
 		const template = {
@@ -653,12 +643,9 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 
 		try {
 			const content = JSON.stringify(template, null, 2);
-			await vscode.workspace.fs.writeFile(filePath, Buffer.from(content, 'utf8'));
+			await vscode.workspace.fs.writeFile(fileUri, Buffer.from(content, 'utf8'));
 
-			const document = await vscode.workspace.openTextDocument(filePath);
-			await vscode.window.showTextDocument(document);
-
-			vscode.window.showInformationMessage(`Pipeline created at ${vscode.workspace.asRelativePath(filePath)}`);
+			await vscode.commands.executeCommand('vscode.openWith', fileUri, 'rocketride.PageEditor');
 		} catch (error) {
 			vscode.window.showErrorMessage(`Failed to create pipeline: ${error}`);
 		}
@@ -717,7 +704,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 				html += `<strong>Project ID:</strong> ${element.unknownTask.projectId}<br/>`;
 				html += `<strong>Source ID:</strong> ${element.unknownTask.sourceId}<br/>`;
 				html += `<strong>Status:</strong> 🟢 Running<br/>`;
-				html += `<br/><em>This task is running on the server but has no local .pipe.json file.</em>`;
+				html += `<br/><em>This task is running on the server but has no local .pipe file.</em>`;
 				html += `</div>`;
 				tooltip.appendMarkdown(html);
 				item.tooltip = tooltip;
@@ -898,7 +885,11 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	 * Loads all .pipeline files from workspace
 	 */
 	private async loadPipelineFiles(): Promise<void> {
-		const files = await vscode.workspace.findFiles('**/*.pipe.json', '**/node_modules/**');
+		const [pipeFiles, pipeJsonFiles] = await Promise.all([
+			vscode.workspace.findFiles('**/*.pipe', '**/node_modules/**'),
+			vscode.workspace.findFiles('**/*.pipe.json', '**/node_modules/**')
+		]);
+		const files = [...pipeFiles, ...pipeJsonFiles];
 
 		this.pipelineFiles = [];
 		this.parsedFiles.clear();

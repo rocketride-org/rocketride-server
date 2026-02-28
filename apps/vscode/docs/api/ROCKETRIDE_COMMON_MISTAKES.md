@@ -115,14 +115,14 @@ my_pipeline.json  # ERROR: Wrong extension
 ```
 
 **Why This Happens:**
-RocketRide looks for `.pipe.json` files specifically.
+RocketRide looks for `.pipe` files specifically.
 
 **Solution:**
 ```bash
-my_pipeline.pipe.json  # CORRECT: Correct extension
+my_pipeline.pipe  # CORRECT: Correct extension
 ```
 
-**Rule:** Pipeline files MUST use `.pipe.json` extension, not just `.json`.
+**Rule:** Pipeline files MUST use `.pipe` extension, not just `.json`.
 
 ---
 
@@ -429,7 +429,7 @@ try {
 async def ask_question(question_text):
     client = RocketRideClient()  # Configuration from .env
     await client.connect()
-    result = await client.use(filepath='chat.pipe.json')  # ERROR: Slow! Pipeline starts every time
+    result = await client.use(filepath='chat.pipe')  # ERROR: Slow! Pipeline starts every time
     token = result['token']
     
     question = Question()
@@ -445,7 +445,7 @@ async def ask_question(question_text):
 async function askQuestion(questionText: string) {
   const client = new RocketRideClient();  // Configuration from .env
   await client.connect();
-  const result = await client.use({filepath: 'chat.pipe.json'});  // ERROR: Slow!
+  const result = await client.use({filepath: 'chat.pipe'});  // ERROR: Slow!
   const token = result.token;
   
   const question = new Question();
@@ -465,7 +465,7 @@ Starting a pipeline is time-consuming. Starting it for every request is ineffici
 # Start pipeline ONCE at application startup
 client = RocketRideClient()  # Configuration from .env
 await client.connect()
-result = await client.use(filepath='chat.pipe.json')  # CORRECT: Start once
+result = await client.use(filepath='chat.pipe')  # CORRECT: Start once
 token = result['token']
 
 async def ask_question(question_text):
@@ -488,7 +488,7 @@ await client.disconnect()
 // Start pipeline ONCE at application startup
 const client = new RocketRideClient();  // Configuration from .env
 await client.connect();
-const result = await client.use({filepath: 'chat.pipe.json'});  // CORRECT: Start once
+const result = await client.use({filepath: 'chat.pipe'});  // CORRECT: Start once
 const token = result.token;
 
 async function askQuestion(questionText: string) {
@@ -516,20 +516,20 @@ await client.disconnect();
 **Problem:**
 ```python
 # Python: Calling use() when pipeline already running
-result1 = await client.use(filepath='chat.pipe.json')
+result1 = await client.use(filepath='chat.pipe')
 token = result1['token']
 
 # Later, trying to start again...
-result2 = await client.use(filepath='chat.pipe.json')  # ERROR: Error: Pipeline already running!
+result2 = await client.use(filepath='chat.pipe')  # ERROR: Error: Pipeline already running!
 ```
 
 ```typescript
 // TypeScript: Calling use() when pipeline already running
-const result1 = await client.use({filepath: 'chat.pipe.json'});
+const result1 = await client.use({filepath: 'chat.pipe'});
 const token = result1.token;
 
 // Later, trying to start again...
-const result2 = await client.use({filepath: 'chat.pipe.json'});  // ERROR: Error: Pipeline already running!
+const result2 = await client.use({filepath: 'chat.pipe'});  // ERROR: Error: Pipeline already running!
 ```
 
 **Why This Happens:**
@@ -547,54 +547,54 @@ Each pipeline instance can only run once at a time. By default, `use()` will thr
 **Solution 1: Use `use_existing=True` (Recommended for most cases)**
 ```python
 # Python: Use use_existing parameter
-result = await client.use(filepath='chat.pipe.json', use_existing=True)
+result = await client.use(filepath='chat.pipe', use_existing=True)
 token = result['token']
 
 # If pipeline is running → reuses it, returns token, NO ERROR
 # If pipeline is NOT running → starts it, returns token, NO ERROR
-result2 = await client.use(filepath='chat.pipe.json', use_existing=True)  # CORRECT: Always works!
+result2 = await client.use(filepath='chat.pipe', use_existing=True)  # CORRECT: Always works!
 ```
 
 ```typescript
 // TypeScript: Use useExisting parameter
-const result = await client.use({filepath: 'chat.pipe.json', useExisting: true});
+const result = await client.use({filepath: 'chat.pipe', useExisting: true});
 const token = result.token;
 
 // If pipeline is running → reuses it, returns token, NO ERROR
 // If pipeline is NOT running → starts it, returns token, NO ERROR
-const result2 = await client.use({filepath: 'chat.pipe.json', useExisting: true});  // CORRECT: Always works!
+const result2 = await client.use({filepath: 'chat.pipe', useExisting: true});  // CORRECT: Always works!
 ```
 
 **Solution 2: Terminate before restarting (when you need fresh start)**
 ```python
 # Python: Stop the old pipeline first (use_existing=False is default)
-result1 = await client.use(filepath='chat.pipe.json')  # use_existing defaults to False
+result1 = await client.use(filepath='chat.pipe')  # use_existing defaults to False
 token1 = result1['token']
 
 # ... use pipeline ...
 
 # If you try to call use() again without terminating:
-# result2 = await client.use(filepath='chat.pipe.json')  # ERROR: ERROR: Pipeline already running!
+# result2 = await client.use(filepath='chat.pipe')  # ERROR: ERROR: Pipeline already running!
 
 # Instead, stop it before starting again:
 await client.terminate(token1)  # CORRECT: Stop the old one
-result2 = await client.use(filepath='chat.pipe.json')  # CORRECT: Now you can start fresh (not running anymore)
+result2 = await client.use(filepath='chat.pipe')  # CORRECT: Now you can start fresh (not running anymore)
 token2 = result2['token']
 ```
 
 ```typescript
 // TypeScript: Stop the old pipeline first (useExisting=false is default)
-const result1 = await client.use({filepath: 'chat.pipe.json'});  // useExisting defaults to false
+const result1 = await client.use({filepath: 'chat.pipe'});  // useExisting defaults to false
 const token1 = result1.token;
 
 // ... use pipeline ...
 
 // If you try to call use() again without terminating:
-// const result2 = await client.use({filepath: 'chat.pipe.json'});  // ERROR: ERROR: Pipeline already running!
+// const result2 = await client.use({filepath: 'chat.pipe'});  // ERROR: ERROR: Pipeline already running!
 
 // Instead, stop it before starting again:
 await client.terminate(token1);  // CORRECT: Stop the old one
-const result2 = await client.use({filepath: 'chat.pipe.json'});  // CORRECT: Now you can start fresh (not running anymore)
+const result2 = await client.use({filepath: 'chat.pipe'});  // CORRECT: Now you can start fresh (not running anymore)
 const token2 = result2.token;
 ```
 
@@ -633,7 +633,7 @@ async function getOrStartPipeline(client: RocketRideClient, filepath: string): P
 
 If you're using the **RocketRide VSCode extension** for development, you can configure it to handle pipeline restarts automatically:
 
-- **Auto-restart on file change**: When you save changes to a `.pipe.json` file, the extension can automatically terminate and restart the pipeline with your latest changes
+- **Auto-restart on file change**: When you save changes to a `.pipe` file, the extension can automatically terminate and restart the pipeline with your latest changes
 - **Prompt to restart**: Or configure it to prompt you to restart when changes are detected
 - **Manual restart**: Use the extension's UI to quickly restart pipelines during development
 
@@ -772,7 +772,7 @@ async def chat_loop():
     client = RocketRideClient()  # Configuration from .env
     await client.connect()
     
-    result = await client.use(filepath='chat.pipe.json')
+    result = await client.use(filepath='chat.pipe')
     token = result['token']
     
     while True:
@@ -805,7 +805,7 @@ async function chatLoop() {
   const client = new RocketRideClient();  // Configuration from .env
   await client.connect();
   
-  const result = await client.use({filepath: 'chat.pipe.json'});
+  const result = await client.use({filepath: 'chat.pipe'});
   const token = result.token;
   
   // Create readline interface with promises
@@ -1180,7 +1180,7 @@ Component exists but isn't connected to the data flow.
 
 ### Pipeline Checklist
 
-- [ ] File named `*.pipe.json` (not just `.json`)
+- [ ] File named `*.pipe` (not just `.json`)
 - [ ] `project_id` is a literal GUID (not a variable)
 - [ ] `source` matches an actual component ID
 - [ ] All component IDs are unique

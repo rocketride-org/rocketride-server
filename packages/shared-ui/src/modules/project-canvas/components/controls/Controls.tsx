@@ -32,6 +32,7 @@ import NoteIcon from '../../../../assets/icons/NoteIcon';
 import FitIcon from '../../../../assets/icons/FitIcon';
 import LockIcon from '../../../../assets/icons/LockIcon';
 import styles from './index.style';
+import { isInVSCode } from '../../../../utils/vscode';
 import UnockIcon from '../../../../assets/icons/UnlockIcon';
 import OpenLogsButton from '../OpenLogsButton';
 import ZoomOutIcon from '../../../../assets/icons/ZoomOutIcon';
@@ -140,7 +141,7 @@ export default function Controls({
 									...styles.shrinkMuiIconButton,
 								}}
 							>
-								<AddBox color={'primary'} fontSize="large" />
+								<AddBox fontSize="large" sx={{ color: isInVSCode() ? 'var(--vscode-button-background)' : 'primary.main' }} />
 							</IconButton>
 						</Tooltip>
 					)}

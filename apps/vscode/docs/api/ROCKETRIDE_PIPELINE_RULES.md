@@ -22,8 +22,8 @@ Complete reference for building RocketRide pipelines across any project.
 ## Pipeline File Format
 
 ### File Naming Convention
-- **Extension:** `.pipe.json` (required)
-- **Examples:** `chat.pipe.json`, `document_processor.pipe.json`, `ocr_workflow.pipe.json`
+- **Extension:** `.pipe` (required)
+- **Examples:** `chat.pipe`, `document_processor.pipe`, `ocr_workflow.pipe`
 - **NOT:** `.json` or `.pipeline.json`
 
 ### File Structure
@@ -78,7 +78,7 @@ Complete reference for building RocketRide pipelines across any project.
 - JavaScript: `crypto.randomUUID()`
 - Online: https://www.uuidgenerator.net/
 
-**Note:** Do NOT reuse GUIDs from other pipelines. Each `.pipe.json` file must have its own unique GUID.
+**Note:** Do NOT reuse GUIDs from other pipelines. Each `.pipe` file must have its own unique GUID.
 
 #### `source` (string)
 - ID of the entry point component where data enters the pipeline
@@ -397,8 +397,8 @@ Example:
 ### 1. Naming Conventions
 
 **Pipeline Files:**
-- Use descriptive names: `document_ingestion.pipe.json`
-- Include purpose: `rag_chat.pipe.json`, `ocr_processor.pipe.json`
+- Use descriptive names: `document_ingestion.pipe`
+- Include purpose: `rag_chat.pipe`, `ocr_processor.pipe`
 
 **Component IDs:**
 - Pattern: `{provider}_{number}` (e.g., `llm_1`, `parser_1`)
@@ -576,7 +576,7 @@ webhook → parse →
 
 Before deploying a pipeline:
 
-- [ ] File named with `.pipe.json` extension
+- [ ] File named with `.pipe` extension
 - [ ] `project_id` is a unique GUID (not a variable)
 - [ ] `source` field references a valid component ID
 - [ ] All component IDs are unique
@@ -642,5 +642,5 @@ Before deploying a pipeline:
 
 ---
 
-**Remember**: Every `.pipe.json` file is a complete, self-contained pipeline definition that can be executed by the RocketRide engine.
+**Remember**: Every `.pipe` file is a complete, self-contained pipeline definition that can be executed by the RocketRide engine.
 

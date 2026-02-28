@@ -351,9 +351,9 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 	): Promise<void> {
 		const webview = webviewPanel.webview;
 
-		// Show a clean pipeline name in the tab (strip the .pipe.json extension)
+		// Show a clean pipeline name in the tab (strip .pipe or .pipe.json extension)
 		const fileName = document.uri.fsPath.split(/[\\/]/).pop() ?? document.uri.fsPath;
-		webviewPanel.title = fileName.replace(/\.pipe\.json$/i, '');
+		webviewPanel.title = fileName.replace(/\.pipe(\.json)?$/i, '');
 
 		// Extract project_id and source from document
 		const { projectId, sourceId: _sourceId } = this.extractPipelineIds(document);

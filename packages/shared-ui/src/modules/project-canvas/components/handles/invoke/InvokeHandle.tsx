@@ -23,7 +23,13 @@
 
 import { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement, useMemo } from 'react';
 import { HandleProps, Handle as RFHandle } from '@xyflow/react';
-import { Box, Typography, useTheme } from '@mui/material';
+import { Box, useTheme } from '@mui/material';
+import pxToRem from '../../../../../utils/pxToRem';
+import { handleStyles } from '../../styles';
+import { brandOrange } from '../../../../../theme';
+import { isInVSCode } from '../../../../../utils/vscode';
+
+const inVSCode = isInVSCode();
 
 /**
  * Props for the InvokeHandle component.
@@ -63,68 +69,42 @@ export default function InvokeHandle({
 	type,
 	invokeType,
 	style,
+	selected,
 	...props
 }: IProps): ReactElement {
 	const theme = useTheme();
 
 	// When disabled, remove interactivity and reduce visual prominence
-	/** Conditional styles that grey out the handle when disabled. */
-	const disabledStyles = useMemo(() => (disabled ? {
+	const disabledStyles: CSSProperties = useMemo(() => (disabled ? {
 		pointerEvents: 'none' as const,
 		opacity: 0.4,
 	} : {}), [disabled]);
 
-	// Derive colors from the theme so the handle adapts to light/dark mode
-	const handleBorderColor = theme.palette.text.secondary;
-	// Fill the diamond when connected to give a clear visual indicator of active edges
-	const handleBgColor = isConnected
-		? theme.palette.text.secondary
-		: theme.palette.background.paper;
+	// Match the data handle color logic: selected > connected > default
+	const accentColor = inVSCode ? 'var(--vscode-button-background)' : brandOrange;
+	const connectedColor = inVSCode
+		? 'var(--vscode-button-background)'
+		: theme.palette.text.primary;
 
-	// Build the diamond shape: zero border-radius + 45-degree rotation on a small square
-	const _style = {
-		...style,
-		width: '6px',
-		height: '6px',
-		borderRadius: '0',
-		border: `1.5px solid ${handleBorderColor}`,
-		backgroundColor: handleBgColor,
-		transform: 'rotate(45deg)',
-	};
+	const backgroundColor = useMemo(() => {
+		if (selected) return accentColor;
+		if (isConnected) return connectedColor;
+		return theme.palette.background.default;
+	}, [selected, isConnected, theme, accentColor, connectedColor]);
+
+	const borderColor = useMemo(() => {
+		if (selected) return accentColor;
+		if (isConnected) return connectedColor;
+		return '#56565A';
+	}, [selected, isConnected, accentColor, connectedColor]);
 
 	return (
-		// Horizontal margin keeps adjacent invoke handles from touching each other
 		<div style={{ position: 'relative', margin: '0 20px' }}>
-			{/* Render the invocation type label below the diamond when provided */}
-			{invokeType && (
-				<Typography
-					component="span"
-					sx={{
-						pointerEvents: 'none',
-						position: 'absolute',
-						display: 'flex',
-						justifyContent: 'center',
-						fontSize: '0.5rem',
-						color: 'text.secondary',
-						bottom: '4px',
-						left: '-4px',
-						right: 0,
-					}}
-				>
-					{invokeType}
-				</Typography>
-			)}
-			{/* The RFHandle is transparent and oversized to provide a larger click target;
-			    the visible diamond is the inner Box which has pointerEvents disabled to
-			    let the parent handle capture all interactions. */}
 			<RFHandle
 				{...props}
 				type={type}
 				style={{
-					width: '8px',
-					height: '8px',
-					border: 'none',
-					background: 'transparent',
+					...handleStyles,
 					display: 'flex',
 					justifyContent: 'center',
 					alignItems: 'center',
@@ -132,9 +112,15 @@ export default function InvokeHandle({
 			>
 				<Box
 					style={{
-						..._style,
-						...disabledStyles,
+						width: `${pxToRem(12)}rem`,
+						height: `${pxToRem(12)}rem`,
+						border: `1px solid ${borderColor}`,
+						background: backgroundColor,
+						borderRadius: '2px',
+						transform: 'rotate(45deg)',
 						pointerEvents: 'none',
+						...disabledStyles,
+						...style,
 					}}
 				/>
 			</RFHandle>

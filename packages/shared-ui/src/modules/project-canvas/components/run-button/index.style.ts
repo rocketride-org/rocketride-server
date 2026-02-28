@@ -24,6 +24,9 @@
 import { alpha } from '@mui/material';
 
 import theme, { brandOrange } from '../../../../theme';
+import { isInVSCode } from '../../../../utils/vscode';
+
+const accentColor = isInVSCode() ? 'var(--vscode-button-background)' : brandOrange;
 
 /**
  * MUI `sx`-compatible style definitions for the RunButton component.
@@ -57,7 +60,7 @@ export const styles = {
 			left: 'calc(-3rem - 1px)', // Slide to the left on hover
 			width: '3rem',
 			'&': {
-				backgroundColor: brandOrange,
+				backgroundColor: accentColor,
 			},
 			'&.stop-button': {
 				backgroundColor: theme.palette.error.main,

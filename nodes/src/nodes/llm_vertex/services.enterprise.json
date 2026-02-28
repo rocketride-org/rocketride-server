@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "LLM - VertexAI - Enterprise",
+	"title": "VertexAI - Enterprise",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -613,7 +613,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "LLM - VertexAI",
+			"title": "VertexAI",
 			"properties": [
 				"Pipe.vertex.source.parameters",
 				"vertex.profile"

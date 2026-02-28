@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Embedding - OpenAI",
+	"title": "OpenAI",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -188,7 +188,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Embedding - OpenAI",
+			"title": "OpenAI",
 			"properties": [
 				"openai_embed.profile"
 			]

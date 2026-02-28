@@ -36,6 +36,15 @@
 	flex-shrink: 0;
 }
 
+/* Theme-based logo: dark logo for light themes, light logo for dark themes */
+body.vscode-dark .logo-dark,
+body.vscode-light .logo-light {
+	display: none;
+}
+body.vscode-high-contrast .logo-dark {
+	display: none;
+}
+
 .deploy-panel-content {
 	display: flex;
 	flex-direction: column;

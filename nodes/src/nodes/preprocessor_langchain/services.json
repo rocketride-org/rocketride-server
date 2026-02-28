@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Preprocessor - General Text",
+	"title": "General Text",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -488,7 +488,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Preprocessor - General Text",
+			"title": "General Text",
 			"properties": [
 				"langchain.splitter.profile"
 			]
