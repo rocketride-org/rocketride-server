@@ -92,7 +92,8 @@ public:
 
     static Error callMethods(
         Binder *pThis, const std::string &methodName,
-        std::function<Error(IServiceFilterInstance *)> fcn) noexcept;
+        std::function<Error(IServiceFilterInstance *)> fcn,
+        const json::Value &traceData = {}) noexcept;
 
     //-----------------------------------------------------------------
     ///	@details

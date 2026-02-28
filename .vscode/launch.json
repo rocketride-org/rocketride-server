@@ -24,8 +24,8 @@
 			"linux": {
 				"python": "${workspaceFolder}/dist/server/engine",
 			},
-			"justMyCode": true,
-			"subProcess": false,
+			"justMyCode": false,
+			"subProcess": true,
 			"program": "${workspaceFolder}/dist/server/ai/eaas.py",
 			"args": [
 				// "--trace=debugOut,debugProtocol,servicePython"

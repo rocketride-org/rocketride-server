@@ -275,6 +275,16 @@ Error IServiceEndpoint::setConfig(const json::Value &_jobConfig,
     else
         config.exportUpdateBehavior = EXPORT_UPDATE_BEHAVIOR::UNKNOWN;
 
+    // Lookup the pipeline trace level
+    Text traceLevelStr;
+    config.taskConfig.lookupAssign("pipelineTraceLevel", traceLevelStr);
+    if (traceLevelStr == "metadata"_tv)
+        config.pipelineTraceLevel = 1;
+    else if (traceLevelStr == "summary"_tv)
+        config.pipelineTraceLevel = 2;
+    else if (traceLevelStr == "full"_tv)
+        config.pipelineTraceLevel = 3;
+
     // Done
     return ccode;
 }

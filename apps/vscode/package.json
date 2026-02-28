@@ -266,6 +266,12 @@
 				"category": "RocketRide Pipeline"
 			},
 			{
+				"command": "rocketride.sidebar.files.stopPipeline",
+				"title": "Stop Pipeline",
+				"icon": "$(primitive-square)",
+				"category": "RocketRide Pipeline"
+			},
+			{
 				"command": "rocketride.page.deploy.open",
 				"title": "Open Deploy",
 				"category": "RocketRide",
@@ -307,7 +313,7 @@
 					"group": "inline@3"
 				},
 				{
-					"command": "rocketride.sidebar.files.attachPipeline",
+					"command": "rocketride.sidebar.files.stopPipeline",
 					"when": "view == rocketride.provider.files && viewItem =~ /^pipelineSource:running/ || view == rocketride.provider.files && viewItem == unknownTask",
 					"group": "inline@1"
 				}

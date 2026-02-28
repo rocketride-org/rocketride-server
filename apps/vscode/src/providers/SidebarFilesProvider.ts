@@ -193,17 +193,28 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 				vscode.window.showErrorMessage('No pipeline selected');
 				return;
 			}
-			const sourceId = item.sourceComponent?.id || '';
-			const config: vscode.DebugConfiguration = {
-				type: 'rocketride',
-				request: 'launch',
-				name: `Run ${item.label}`,
-				file: item.resourceUri.fsPath,
-				source: sourceId,
-				noDebug: true
-			};
+
 			try {
-				await vscode.debug.startDebugging(undefined, config);
+				// Read the pipeline file
+				const fileContent = await vscode.workspace.fs.readFile(item.resourceUri);
+				const pipelineText = Buffer.from(fileContent).toString('utf8');
+				const pipelineJson = JSON.parse(pipelineText);
+
+				// Substitute .env settings
+				const pipelineTransformed = ConfigManager.getInstance().substituteEnvVariables(pipelineJson);
+
+				// Get project and source identifiers
+				const parsedFile = item.parsedFile || this.getParsedPipeline(item.resourceUri);
+				const projectId = parsedFile?.projectId;
+				const sourceId = item.sourceComponent?.id || '';
+
+				// Use DAP command to execute pipeline without debugging
+				await this.connectionManager.request('execute', {
+					projectId: projectId,
+					source: sourceId,
+					pipeline: pipelineTransformed,
+					pipelineTraceLevel: 'full'
+				});
 			} catch (error) {
 				vscode.window.showErrorMessage(`Failed to run pipeline: ${error}`);
 			}
@@ -308,6 +319,44 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			} catch (error) {
 				vscode.window.showErrorMessage(`Failed to attach to pipeline: ${error}`);
 			}
+		}),
+
+		vscode.commands.registerCommand('rocketride.sidebar.files.stopPipeline', async (item?: PipelineFileItem) => {
+			if (!item) {
+				vscode.window.showErrorMessage('No pipeline selected');
+				return;
+			}
+
+			let projectId: string | undefined;
+			let sourceId: string | undefined;
+
+			if (item.contextValue?.startsWith('pipelineSource')) {
+				const parsedFile = item.parsedFile || this.getParsedPipeline(item.resourceUri);
+				projectId = parsedFile?.projectId;
+				sourceId = item.sourceComponent?.id;
+			} else if (item.contextValue === 'unknownTask' && item.unknownTask) {
+				projectId = item.unknownTask.projectId;
+				sourceId = item.unknownTask.sourceId;
+			}
+
+			if (!projectId || !sourceId) {
+				vscode.window.showErrorMessage('Could not determine pipeline to stop');
+				return;
+			}
+
+			try {
+				const response = await this.connectionManager.request('rrext_get_token', {
+					projectId: projectId,
+					source: sourceId
+				}) as GenericResponse | undefined;
+
+				const token = response?.body?.token as string | undefined;
+
+				await this.connectionManager.request('terminate', {}, token);
+			} catch (error: unknown) {
+				this.logger.error(`Unable to stop pipeline: ${error}`);
+				vscode.window.showErrorMessage(`Failed to stop pipeline: ${error}`);
+			}
 		})
 	];
 
@@ -327,10 +376,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 
 		// Listen for connected events
 		const connectedEventListener = this.connectionManager.addListener('connected', _e => {
-			// Turn on the task monitors
-			this.connectionManager.request('rrext_monitor', {
-				"types": ["task"]
-			}, '*');
+			// Global task/output monitors are now registered in ConnectionManager.onConnectionEstablished
 		});
 
 		// Listen for disconnected events

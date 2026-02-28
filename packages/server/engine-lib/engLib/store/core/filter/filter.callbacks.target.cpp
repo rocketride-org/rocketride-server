@@ -75,6 +75,9 @@ void IServiceFilterInstance::cb_control(std::string &classType,
         throw APERR(Ec::InvalidParam, "No control listeners registered for ",
                     classType);
 
+    // Get the trace level
+    auto traceLevel = endpoint->config.pipelineTraceLevel;
+
     // Walk the filters we need to call. We will call them in order, until
     // one doesn't throw. If we go through all of them and they all throw, we
     // will throw an invalid parameter error
@@ -83,17 +86,47 @@ void IServiceFilterInstance::cb_control(std::string &classType,
         ServiceInstance filter =
             this->endpoint->m_instanceStacks[this->pipeId][filterId];
 
+        // Build enter trace if tracing is enabled
+        json::Value enterTrace;
+        if (traceLevel > 0) {
+            enterTrace["lane"] = "invoke";
+            enterTrace["pipeId"] = filter->pipeId;
+            enterTrace["provider"] = filter->pipeType.logicalType;
+            if (traceLevel >= 2) enterTrace["data"]["classType"] = classType.c_str();
+        }
+        this->pipe->debugger.debugEnter(filter.get(), enterTrace);
+
         // Call the control function
         ccode = filter->control(control);
 
+        // Build leave trace
+        json::Value leaveTrace;
+        if (traceLevel > 0) {
+            leaveTrace["lane"] = "invoke";
+            leaveTrace["pipeId"] = filter->pipeId;
+        }
+
         // If we succeeded, we are done
-        if (!ccode) return;
+        if (!ccode) {
+            if (traceLevel > 0) leaveTrace["result"] = "continue";
+            this->pipe->debugger.debugLeave(filter.get(), leaveTrace);
+            return;
+        }
 
         // If it is preventDefault, continue on to the next driver
-        if (ccode.code() == Ec::PreventDefault) continue;
+        if (ccode.code() == Ec::PreventDefault) {
+            if (traceLevel > 0) leaveTrace["result"] = "skip";
+            this->pipe->debugger.debugLeave(filter.get(), leaveTrace);
+            continue;
+        }
 
         // Throw the error - it is not 0, and it is not prevent default
         // so it is a terminal error
+        if (traceLevel > 0) {
+            leaveTrace["result"] = "error";
+            leaveTrace["data"]["error"] = ccode.message();
+        }
+        this->pipe->debugger.debugLeave(filter.get(), leaveTrace);
         throw ccode;
     }
 
