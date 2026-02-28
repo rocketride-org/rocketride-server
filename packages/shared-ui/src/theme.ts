@@ -357,6 +357,9 @@ export const createVSCodeTheme = () => {
 			},
 			MuiCssBaseline: {
 				styleOverrides: {
+					':root': {
+						'--icon-filter': isDark ? 'brightness(0) invert(1)' : 'none',
+					},
 					'@global': inVSCode
 						? {
 								'.add-node-list-scroll': {
@@ -560,6 +563,13 @@ export const theme = createTheme({
 		},
 	},
 	components: {
+		MuiCssBaseline: {
+			styleOverrides: {
+				':root': {
+					'--icon-filter': 'none',
+				},
+			},
+		},
 		MuiPaper: {
 			styleOverrides: {
 				root: {

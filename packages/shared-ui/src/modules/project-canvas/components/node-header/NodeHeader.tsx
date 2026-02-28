@@ -119,7 +119,7 @@ export default function NodeHeader({
 		<Box sx={{ ...styles.header, ...rootSx }} onClick={handleClick}>
 			{icon && (
 				<Box sx={styles.boxImage}>
-					<img style={styles.nodeIcon} width="auto" src={icon} />
+					<img style={{ ...styles.nodeIcon, filter: icon?.includes('#td') ? 'var(--icon-filter)' : undefined }} width="auto" src={icon} />
 				</Box>
 			)}
 			<Box sx={styles.boxLabel}>

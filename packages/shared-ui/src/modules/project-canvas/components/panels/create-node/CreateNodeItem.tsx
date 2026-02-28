@@ -83,7 +83,7 @@ export default function CreateNodeItem({
 }: IProps): ReactNode {
 	const { t } = useTranslation();
 
-	const _icon = <img src={icon} style={{ width: '100%', objectFit: 'cover' }} />;
+	const _icon = <img src={icon} style={{ width: '100%', objectFit: 'cover', filter: icon?.includes('#td') ? 'var(--icon-filter)' : undefined }} />;
 
 	const inVSCode = isInVSCode();
 
