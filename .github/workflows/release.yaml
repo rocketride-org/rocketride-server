@@ -1,0 +1,341 @@
+name: Release
+run-name: Release from ${{ github.sha }}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  init:
+    name: Initialize versions
+    runs-on: ubuntu-latest
+    outputs:
+      server_version: ${{ steps.init.outputs.server_version }}
+      vscode_version: ${{ steps.init.outputs.vscode_version }}
+      client_mcp_version: ${{ steps.init.outputs.client_mcp_version }}
+      client_python_version: ${{ steps.init.outputs.client_python_version }}
+      client_typescript_version: ${{ steps.init.outputs.client_typescript_version }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Extract versions
+        id: init
+        run: |
+          echo "server_version=$(jq -r '.version' package.json)" >> $GITHUB_OUTPUT
+          echo "vscode_version=$(jq -r '.version' apps/vscode/package.json)" >> $GITHUB_OUTPUT
+          echo "client_mcp_version=$(yq -r '.project.version' packages/client-mcp/pyproject.toml)" >> $GITHUB_OUTPUT
+          echo "client_python_version=$(yq -r '.project.version' packages/client-python/pyproject.toml)" >> $GITHUB_OUTPUT
+          echo "client_typescript_version=$(jq -r '.version' packages/client-typescript/package.json)" >> $GITHUB_OUTPUT
+
+          cat $GITHUB_OUTPUT
+
+  build:
+    name: Build / ${{ matrix.label }}
+    needs: init
+    timeout-minutes: 90
+    runs-on: ${{ matrix.runner }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VCPKG_NUGET_USER: ${{ github.repository_owner }}
+      NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu
+            label: Ubuntu 22.04
+            runner: ubuntu-22.04
+            builder_cmd: ./builder
+            vcpkg_cmd: ./build/vcpkg/vcpkg
+          - platform: windows
+            label: Windows Server 2022
+            runner: windows-2022
+            builder_cmd: ./builder.cmd
+            vcpkg_cmd: ./build/vcpkg/vcpkg.exe
+          - platform: macos
+            label: macOS (ARM64)
+            runner: macos-14
+            builder_cmd: ./builder
+            vcpkg_cmd: ./build/vcpkg/vcpkg
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Set up vcpkg
+        run: ${{ matrix.builder_cmd }} vcpkg:submodule-build
+      - name: Set up vcpkg nuget / Linux/macOS
+        if: matrix.platform != 'windows'
+        run: |
+          NUGET_EXE=$(${{ matrix.vcpkg_cmd }} fetch nuget | tail -n1)
+          mono $NUGET_EXE sources add \
+            -Source "${{ env.NUGET_FEED_URL }}" \
+            -StorePasswordInClearText \
+            -Name GitHubPackages \
+            -UserName "${{ env.VCPKG_NUGET_USER }}" \
+            -Password "${{ secrets.GITHUB_TOKEN }}" || true
+          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
+            -Source "${{ env.NUGET_FEED_URL }}"
+      - name: Set up vcpkg nuget / Windows
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $NUGET_EXE = $(${{ matrix.vcpkg_cmd }} fetch nuget | Select-Object -Last 1)
+          & $NUGET_EXE sources add `
+            -Source "${{ env.NUGET_FEED_URL }}" `
+            -StorePasswordInClearText `
+            -Name GitHubPackages `
+            -UserName "${{ env.VCPKG_NUGET_USER }}" `
+            -Password "${{ secrets.GITHUB_TOKEN }}"
+          & $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" `
+            -Source "${{ env.NUGET_FEED_URL }}"
+
+      - name: Build
+        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall
+
+      - name: Test
+        run: ${{ matrix.builder_cmd }} test --verbose
+
+      - name: Package
+        run: ${{ matrix.builder_cmd }} package --verbose
+
+      - name: Upload server artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-artifacts-${{ matrix.platform }}
+          path: |
+            ${{ github.workspace }}/dist/artifacts/*.zip
+            ${{ github.workspace }}/dist/artifacts/*.tar.gz
+            ${{ github.workspace }}/dist/artifacts/*.json
+          if-no-files-found: error
+
+      - name: Upload VS Code extension
+        if: matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-artifacts
+          path: ${{ github.workspace }}/dist/vscode/*.vsix
+          if-no-files-found: error
+
+      - name: Upload MCP client
+        if: matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-client-artifacts
+          path: |
+            ${{ github.workspace }}/dist/clients/mcp/*.whl
+            ${{ github.workspace }}/dist/clients/mcp/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload Python client
+        if: matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-client-artifacts
+          path: |
+            ${{ github.workspace }}/dist/clients/python/*.whl
+            ${{ github.workspace }}/dist/clients/python/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload TypeScript client
+        if: matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: typescript-client-artifacts
+          path: ${{ github.workspace }}/dist/clients/typescript/*.tgz
+          if-no-files-found: error
+
+  publish:
+    name: Publish to registries
+    needs: [init, build]
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: List artifacts
+        run: find release-assets -type f | sort
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install publish tools
+        run: |
+          pip install twine
+          npm install -g @vscode/vsce ovsx
+
+      # --- npm: rocketride ---
+      - name: Publish to npm
+        run: |
+          VERSION="${{ needs.init.outputs.client_typescript_version }}"
+          if npm view "rocketride@${VERSION}" version 2>/dev/null; then
+            echo "rocketride@${VERSION} already exists on npm — skipping"
+          else
+            TARBALL=$(find release-assets/typescript-client-artifacts -name '*.tgz' | head -n1)
+            echo "Publishing ${TARBALL}"
+            npm publish "${TARBALL}" --access public
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # --- PyPI: rocketride ---
+      - name: Publish rocketride to PyPI
+        run: |
+          VERSION="${{ needs.init.outputs.client_python_version }}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/rocketride/${VERSION}/json")
+          if [ "$STATUS" = "200" ]; then
+            echo "rocketride==${VERSION} already exists on PyPI — skipping"
+          else
+            twine upload release-assets/python-client-artifacts/*.whl release-assets/python-client-artifacts/*.tar.gz
+          fi
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+
+      # --- PyPI: rocketride-mcp ---
+      - name: Publish rocketride-mcp to PyPI
+        run: |
+          VERSION="${{ needs.init.outputs.client_mcp_version }}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/rocketride-mcp/${VERSION}/json")
+          if [ "$STATUS" = "200" ]; then
+            echo "rocketride-mcp==${VERSION} already exists on PyPI — skipping"
+          else
+            twine upload release-assets/mcp-client-artifacts/*.whl release-assets/mcp-client-artifacts/*.tar.gz
+          fi
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+
+      # --- VS Code Marketplace ---
+      - name: Publish to VS Code Marketplace
+        run: |
+          VSIX=$(find release-assets/vscode-artifacts -name '*.vsix' | head -n1)
+          echo "Publishing ${VSIX}"
+          OUTPUT=$(vsce publish --packagePath "${VSIX}" 2>&1) && exit 0
+          if echo "$OUTPUT" | grep -qi "already exists"; then
+            echo "Version already exists on Marketplace — skipping"
+          else
+            echo "$OUTPUT"
+            exit 1
+          fi
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      # --- Open VSX ---
+      - name: Publish to Open VSX
+        run: |
+          VSIX=$(find release-assets/vscode-artifacts -name '*.vsix' | head -n1)
+          echo "Publishing ${VSIX}"
+          OUTPUT=$(ovsx publish "${VSIX}" -p "$OVSX_PAT" 2>&1) && exit 0
+          if echo "$OUTPUT" | grep -qi "already exists"; then
+            echo "Version already exists on Open VSX — skipping"
+          else
+            echo "$OUTPUT"
+            exit 1
+          fi
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
+  github-release:
+    name: GitHub Release / ${{ matrix.name }}
+    needs: [init, build, publish]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - type: server
+            name: Server
+            version: ${{ needs.init.outputs.server_version }}
+            tag_name: server-v${{ needs.init.outputs.server_version }}
+            download_pattern: server-artifacts-*
+          - type: vscode
+            name: VS Code Extension
+            version: ${{ needs.init.outputs.vscode_version }}
+            tag_name: vscode-v${{ needs.init.outputs.vscode_version }}
+            download_pattern: vscode-artifacts
+          - type: client-mcp
+            name: MCP Client
+            version: ${{ needs.init.outputs.client_mcp_version }}
+            tag_name: client-mcp-v${{ needs.init.outputs.client_mcp_version }}
+            download_pattern: mcp-client-artifacts
+          - type: client-python
+            name: Python Client
+            version: ${{ needs.init.outputs.client_python_version }}
+            tag_name: client-python-v${{ needs.init.outputs.client_python_version }}
+            download_pattern: python-client-artifacts
+          - type: client-typescript
+            name: TypeScript Client
+            version: ${{ needs.init.outputs.client_typescript_version }}
+            tag_name: client-typescript-v${{ needs.init.outputs.client_typescript_version }}
+            download_pattern: typescript-client-artifacts
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if tag exists
+        id: tag_check
+        run: |
+          if git rev-parse "${{ matrix.tag_name }}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag ${{ matrix.tag_name }} already exists — skipping"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download artifacts
+        if: steps.tag_check.outputs.exists == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ matrix.download_pattern }}
+          merge-multiple: true
+          path: release-assets
+
+      - name: List artifacts
+        if: steps.tag_check.outputs.exists == 'false'
+        run: find release-assets -type f | sort
+
+      - name: Create tag
+        if: steps.tag_check.outputs.exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ matrix.tag_name }}"
+          git push origin "${{ matrix.tag_name }}"
+
+      - name: Create GitHub Release
+        if: steps.tag_check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ matrix.tag_name }}
+          name: RocketRide ${{ matrix.name }} v${{ matrix.version }}
+          generate_release_notes: true
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
