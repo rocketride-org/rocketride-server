@@ -7,7 +7,7 @@ from ai.common.schema import Question
 from ai.common.tools import ToolsBase
 
 from .host import AgentHostServices
-from .utils import is_agent_run_tool_name, normalize_invocation_payload
+from .utils import normalize_invocation_payload
 
 
 def handle_agent_tool_invoke(*, agent: Any, pSelf: Any, param: Any) -> Any:
@@ -52,7 +52,11 @@ class _AgentAsToolProvider(ToolsBase):
             names = [t.get('name', '') for t in tools if t.get('name')]
         except Exception:
             names = []
-        tools_available = [t for t in names if not is_agent_run_tool_name(t)]
+        tools_available = [
+            t
+            for t in names
+            if isinstance(t, str) and not (t.strip() == 'run_agent' or t.strip().endswith('.run_agent'))
+        ]
         self._tools_available = tools_available
         return tools_available
 

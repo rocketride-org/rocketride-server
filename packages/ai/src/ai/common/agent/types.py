@@ -5,12 +5,11 @@ Agent boundary contracts (framework-agnostic).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Protocol, TypedDict
+from typing import Any, List, Optional, Protocol, TypedDict
 
 from ai.common.schema import Question
 
 
-CONTINUATION_TYPE = 'aparavi.agent.continuation.v1'
 AGENT_TOOL_CALLS_TYPE = 'aparavi.agent.tool_calls.v1'
 
 
@@ -59,7 +58,6 @@ class AgentAnswer(TypedDict, total=False):
 class AgentInput:
     prompt: str
     question: Question
-    continuation: Optional[Dict[str, Any]]
     run_id: str
     task_id: Optional[str]
     started_at: str

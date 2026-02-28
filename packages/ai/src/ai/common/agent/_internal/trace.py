@@ -3,8 +3,6 @@ from __future__ import annotations
 import uuid
 from typing import Any, Callable, Dict, List, Tuple
 
-from .utils import get_field
-
 
 def make_tracing_invoker(
     base_invoker: Callable[[str, Any], Any],
@@ -16,17 +14,24 @@ def make_tracing_invoker(
     """
     tool_calls: List[Dict[str, Any]] = []
 
+    def _get_field(obj: Any, name: str) -> Any:
+        if obj is None:
+            return None
+        if isinstance(obj, dict):
+            return obj.get(name)
+        return getattr(obj, name, None)
+
     def invoker(class_type: str, p: Any) -> Any:
         if class_type != 'tool':
             return base_invoker(class_type, p)
-        op = get_field(p, 'op')
+        op = _get_field(p, 'op')
         if not isinstance(op, str):
             return base_invoker(class_type, p)
         if op not in ('tool.query', 'tool.validate', 'tool.invoke'):
             return base_invoker(class_type, p)
 
-        tool_name = get_field(p, 'tool_name')
-        tool_input = get_field(p, 'input')
+        tool_name = _get_field(p, 'tool_name')
+        tool_input = _get_field(p, 'input')
         call_id = str(uuid.uuid4())
 
         result: Any = None
@@ -39,7 +44,7 @@ def make_tracing_invoker(
             raise
         finally:
             tool_output = (
-                get_field(result, 'output') if (op == 'tool.invoke' and result is not None) else None
+                _get_field(result, 'output') if (op == 'tool.invoke' and result is not None) else None
             )
             tool_calls.append(
                 {
