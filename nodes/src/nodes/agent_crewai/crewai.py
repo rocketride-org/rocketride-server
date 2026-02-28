@@ -222,7 +222,7 @@ class CrewDriver(Agent):
         if not final_text:
             final_text = _safe_str(result)
 
-        return {'status': 'completed', 'result': {'type': 'agent_output', 'data': final_text}}
+        return final_text, result
 
 
 def _safe_str(v: Any) -> str:

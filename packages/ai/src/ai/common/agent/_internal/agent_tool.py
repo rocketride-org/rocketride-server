@@ -80,7 +80,7 @@ class _AgentAsToolProvider(ToolsBase):
     def _tool_query(self) -> List[ToolsBase.ToolDescriptor]:
 
         tools_available = self._connected_tools_available()
-        desc = 'Invoke this agent as a tool. Input: {query: string, context?: object}. Output: AgentEnvelope.'
+        desc = 'Invoke this agent as a tool. Input: {query: string, context?: object}. Output: {content, meta, stack}.'
         if tools_available:
             desc = f'{desc} Tools available to this agent: {", ".join(tools_available)}.'
         else:
@@ -99,16 +99,25 @@ class _AgentAsToolProvider(ToolsBase):
             },
             'output_schema': {
                 'type': 'object',
-                'description': 'AgentEnvelope',
+                'description': 'Agent answer JSON payload',
                 'properties': {
-                    'status': {'type': 'string'},
-                    'error': {'type': ['object', 'null']},
-                    'control': {'type': 'object'},
-                    'result': {'type': 'object'},
-                    'artifacts': {'type': 'array'},
-                    'meta': {'type': 'object'},
+                    'content': {'type': 'string', 'description': 'Final user-facing answer text'},
+                    'meta': {
+                        'type': 'object',
+                        'description': 'Run metadata',
+                        'properties': {
+                            'framework': {'type': 'string'},
+                            'agent_id': {'type': 'string'},
+                            'run_id': {'type': 'string'},
+                            'task_id': {'type': 'string'},
+                            'started_at': {'type': 'string'},
+                            'ended_at': {'type': 'string'},
+                        },
+                        'required': ['framework', 'agent_id', 'run_id', 'started_at', 'ended_at'],
+                    },
+                    'stack': {'type': 'array', 'items': {'type': 'object'}, 'description': 'Run trace stack'},
                 },
-                'required': ['status', 'result', 'meta'],
+                'required': ['content', 'meta', 'stack'],
             }
         }
         return [descriptor]

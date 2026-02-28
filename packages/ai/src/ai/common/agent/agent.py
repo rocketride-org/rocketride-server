@@ -4,17 +4,17 @@ Agent base class (framework-agnostic pipeline boundary) implemented as a shared 
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional
 
 from rocketlib import debug, error
 from ai.common.schema import Answer, Question
 
-from .types import AgentEnvelope, AgentHost, AgentInput, AgentRunResult
-from ._internal.envelope import failed_envelope, to_envelope
+from .types import AgentHost, AgentInput
 from ._internal.host import AgentHostServices
 from ._internal.agent_tool import handle_agent_tool_invoke
-from ._internal.trace import attach_tool_calls_artifact, make_tracing_invoker
+from ._internal.trace import make_tracing_invoker
 from ._internal.utils import extract_continuation, extract_prompt, extract_text, messages_to_transcript, now_iso, new_run_id, normalize_invocation_payload, safe_str, truncate_at_stop_words
 from ai.common.tools import ToolsBase
 
@@ -37,12 +37,21 @@ class Agent(ABC):
         question: Question,
         *,
         emit_answers_lane: bool = True,
-    ) -> AgentEnvelope:
+    ) -> Any:
         started_at = now_iso()
         run_id = new_run_id()
         debug(f'agent base run_agent run_id={run_id} framework={self.FRAMEWORK}')
 
         invoker, tool_calls = make_tracing_invoker(pSelf.instance.invoke)
+
+        def _json_safe(value: Any) -> Any:
+            """
+            Convert `value` into JSON-safe primitives (best-effort).
+            """
+            try:
+                return json.loads(json.dumps(value, default=str))
+            except Exception:
+                return safe_str(value)
 
         try:
             prompt = extract_prompt(question)
@@ -61,54 +70,79 @@ class Agent(ABC):
             host = AgentHostServices(invoker)
             runtime_ctx = {'run_id': run_id, 'task_id': task_id, 'framework': self.FRAMEWORK}
 
-            raw_result = self._run(agent_input=agent_input, host=host, ctx=runtime_ctx)
+            content, raw = self._run(agent_input=agent_input, host=host, ctx=runtime_ctx)
+            if not isinstance(content, str):
+                content = safe_str(content)
 
-            envelope = to_envelope(
-                framework=self.FRAMEWORK,
-                agent_id=self._agent_id(pSelf),
-                run_id=run_id,
-                task_id=task_id,
-                started_at=started_at,
-                ended_at=now_iso(),
-                continuation=continuation,
-                raw_result=raw_result,
-            )
-            status = envelope.get('status', '')
-            debug(f'agent base _run completed run_id={run_id} status={status}')
+            ended_at = now_iso()
+            answer_payload: Dict[str, Any] = {
+                'content': content,
+                'meta': {
+                    'framework': self.FRAMEWORK,
+                    'agent_id': self._agent_id(pSelf),
+                    'run_id': run_id,
+                    'started_at': started_at,
+                    'ended_at': ended_at,
+                },
+                'stack': [],
+            }
+            if task_id:
+                answer_payload['meta']['task_id'] = task_id
+
+            stack: List[Dict[str, Any]] = []
+            if tool_calls:
+                stack.append(
+                    {
+                        'kind': 'aparavi.agent.tool_calls.v1',
+                        'name': 'host.tools',
+                        'payload': _json_safe(tool_calls),
+                    }
+                )
+            stack.append({'kind': 'aparavi.agent.raw.v1', 'name': 'framework.output', 'payload': _json_safe(raw)})
+            answer_payload['stack'] = stack
+
+            debug(f'agent base _run completed run_id={run_id} content_len={len(content or "")}')
 
         except Exception as e:
             error_type = type(e).__name__
             error_message = str(e)
             error(f'agent base _run failed run_id={run_id} type={error_type} message={error_message}')
-            envelope = failed_envelope(
-                framework=self.FRAMEWORK,
-                agent_id=self._agent_id(pSelf),
-                run_id=run_id,
-                task_id=safe_str(self._get_task_id(pSelf)) or None,
-                started_at=started_at,
-                ended_at=now_iso(),
-                error_type=error_type,
-                error_message=error_message,
-            )
-
-        attach_tool_calls_artifact(envelope, tool_calls)
+            ended_at = now_iso()
+            task_id = safe_str(self._get_task_id(pSelf)) or None
+            answer_payload = {
+                'content': error_message or f'{error_type} (no message)',
+                'meta': {
+                    'framework': self.FRAMEWORK,
+                    'agent_id': self._agent_id(pSelf),
+                    'run_id': run_id,
+                    'started_at': started_at,
+                    'ended_at': ended_at,
+                    **({'task_id': task_id} if task_id else {}),
+                },
+                'stack': [],
+            }
+            stack = []
+            if tool_calls:
+                stack.append({'kind': 'aparavi.agent.tool_calls.v1', 'name': 'host.tools', 'payload': _json_safe(tool_calls)})
+            stack.append({'kind': 'aparavi.agent.error.v1', 'name': 'exception', 'payload': {'type': error_type, 'message': error_message}})
+            answer_payload['stack'] = stack
 
         if emit_answers_lane:
             debug(
-                'agent base emitting envelope'
-                f'run_id={envelope.get("meta", {}).get("run_id")} status={envelope.get("status")}'
+                'agent base emitting answer'
+                f' run_id={answer_payload.get("meta", {}).get("run_id")} framework={answer_payload.get("meta", {}).get("framework")}'
             )
             answer = Answer(expectJson=True)
-            answer.setAnswer(envelope)
+            answer.setAnswer(answer_payload)
             pSelf.instance.writeAnswers(answer)
 
-        return envelope
+        return answer_payload
 
     # ---------------------------------------------------------------------
     # Abstract hook: framework run
     # ---------------------------------------------------------------------
     @abstractmethod
-    def _run(self, *, agent_input: AgentInput, host: AgentHost, ctx: Dict[str, Any]) -> AgentRunResult:
+    def _run(self, *, agent_input: AgentInput, host: AgentHost, ctx: Dict[str, Any]) -> tuple[str, Any]:
         raise NotImplementedError
 
     # ---------------------------------------------------------------------

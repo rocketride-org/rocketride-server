@@ -219,7 +219,7 @@ class LangChainDriver(Agent):
         except Exception:
             final_text = _safe_str(state)
 
-        return {'status': 'completed', 'result': {'type': 'agent_output', 'data': _safe_str(final_text)}}
+        return _safe_str(final_text), state
 
 
 # ------------------------------------------------------------------
