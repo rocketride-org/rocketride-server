@@ -31,29 +31,6 @@ class AgentHost(Protocol):
     tools: AgentHostTools
 
 
-class AgentControl(TypedDict, total=False):
-    signal: str  # continue|halt|request_input
-    reason: str
-    requested_input: Dict[str, Any]  # {kind, schema}
-
-
-class AgentError(TypedDict, total=False):
-    message: str
-    type: str
-    details: Dict[str, Any]
-
-
-class AgentResult(TypedDict, total=False):
-    type: str
-    data: Any
-
-
-class AgentArtifact(TypedDict, total=False):
-    kind: str
-    name: str
-    payload: Any
-
-
 class AgentMeta(TypedDict, total=False):
     framework: str
     agent_id: str
@@ -64,13 +41,18 @@ class AgentMeta(TypedDict, total=False):
     task_id: str
 
 
-class AgentEnvelope(TypedDict, total=False):
-    status: str  # completed|paused|failed
-    error: Optional[AgentError]
-    control: AgentControl
-    result: AgentResult
-    artifacts: List[AgentArtifact]
+class AgentStackEntry(TypedDict, total=False):
+    kind: str
+    name: str
+    payload: Any
+
+
+class AgentAnswer(TypedDict, total=False):
+    """Define the JSON payload written to the answers lane by agents."""
+
+    content: str
     meta: AgentMeta
+    stack: List[AgentStackEntry]
 
 
 @dataclass(frozen=True)
@@ -83,10 +65,4 @@ class AgentInput:
     started_at: str
 
 
-class AgentRunResult(TypedDict, total=False):
-    status: str
-    error: Optional[AgentError]
-    control: AgentControl
-    result: AgentResult
-    artifacts: List[AgentArtifact]
-    meta: Dict[str, Any]
+AgentRunResult = tuple[str, Any]

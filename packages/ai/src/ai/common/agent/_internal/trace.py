@@ -3,7 +3,6 @@ from __future__ import annotations
 import uuid
 from typing import Any, Callable, Dict, List, Tuple
 
-from ..types import AGENT_TOOL_CALLS_TYPE, AgentEnvelope
 from .utils import get_field
 
 
@@ -54,15 +53,3 @@ def make_tracing_invoker(
             )
 
     return invoker, tool_calls
-
-
-def attach_tool_calls_artifact(envelope: AgentEnvelope, tool_calls: List[Dict[str, Any]]) -> None:
-    """Append tool-call trace data to `envelope.artifacts` (best-effort)."""
-    try:
-        if not tool_calls:
-            return
-        artifacts = envelope.get('artifacts') if isinstance(envelope, dict) else None
-        if isinstance(artifacts, list):
-            artifacts.append({'kind': AGENT_TOOL_CALLS_TYPE, 'name': 'host.tools', 'payload': tool_calls})
-    except Exception:
-        return
