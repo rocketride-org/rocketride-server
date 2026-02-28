@@ -22,7 +22,15 @@ class AgentHostServices:
             self._invoker = invoker
 
         def invoke(self, param: IInvokeLLM) -> Any:
-            """Invoke the host LLM control-plane operation."""
+            """
+            Invoke the host LLM control-plane operation.
+
+            Args:
+                param: An `IInvokeLLM` request object (e.g. op="ask").
+
+            Returns:
+                The engine-native response object.
+            """
             return self._invoker('llm', param)
 
     class Tools:
@@ -33,15 +41,35 @@ class AgentHostServices:
             self._invoker = invoker
 
         def query(self) -> Any:
-            """Query the connected tool catalog (discovery)."""
+            """
+            Query the connected tool catalog (discovery).
+
+            Returns:
+                The engine-native tool catalog response.
+            """
             return self._invoker('tool', IInvokeTool.Query())
 
         def validate(self, tool_name: str, input: Any) -> Any:
-            """Validate tool input without executing the tool."""
+            """
+            Validate tool input without executing the tool.
+
+            Args:
+                tool_name: Tool name as published by discovery.
+                input: Tool input payload.
+            """
             return self._invoker('tool', IInvokeTool.Validate(tool_name=tool_name, input=input))
 
         def invoke(self, tool_name: str, input: Any) -> Any:
-            """Invoke a tool with the given input payload."""
+            """
+            Invoke a tool with the given input payload.
+
+            Args:
+                tool_name: Tool name as published by discovery.
+                input: Tool input payload.
+
+            Returns:
+                The engine-native tool invocation response.
+            """
             return self._invoker('tool', IInvokeTool.Invoke(tool_name=tool_name, input=input))
 
     def __init__(self, invoker):

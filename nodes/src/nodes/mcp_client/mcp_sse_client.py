@@ -1,8 +1,8 @@
 # =============================================================================
-# Aparavi Engine
+# RocketRide Engine
 # =============================================================================
 # MIT License
-# Copyright (c) 2024 Aparavi Inc.
+# Copyright (c) 2024 RocketRide Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -69,10 +69,11 @@ class McpSseClient:
         sse_endpoint: str,
         headers: Optional[Dict[str, str]] = None,
         protocol_version: str = '2025-11-25',
-        client_name: str = 'AparaviToolsMcpClient',
+        client_name: str = 'RocketRideToolsMcpClient',
         client_version: str = '0.1.0',
         timeout_s: float = 20.0,
     ) -> None:
+        """Create an MCP SSE client."""
         self._sse_endpoint = str(sse_endpoint).strip()
         if not self._sse_endpoint:
             raise ValueError('sse_endpoint is required')

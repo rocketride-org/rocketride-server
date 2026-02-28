@@ -2,11 +2,11 @@
 Agent framework base abstractions.
 
 Public surface:
-- Agent: the base class for agent framework drivers.
+- AgentBase: the base class for agent framework drivers.
 
-Schemas/types remain importable from `ai.common.agent.types`
+Schemas and contracts remain importable from `ai.common.agent.types`.
 """
 
-from .agent import Agent
+from .agent import AgentBase
 
-__all__ = ['Agent']
+__all__ = ['AgentBase']
