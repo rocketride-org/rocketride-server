@@ -28,13 +28,11 @@ LangChain driver implementing the shared `ai.common.agent.Agent` interface.
 from __future__ import annotations
 
 import json
-import traceback
 from typing import Any, Callable, Dict, List, Optional
-
-from rocketlib import debug
 
 from ai.common.agent import Agent
 from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
+from ai.common.tools import ToolsBase
 
 
 class LangChainDriver(Agent):
@@ -103,7 +101,7 @@ class LangChainDriver(Agent):
         self,
         *,
         host: AgentHost,
-        tool_names: List[str],
+        tool_descriptors: List[ToolsBase.ToolDescriptor],
         invoke_tool: Callable[..., Any],
         log_tool_call: Callable[..., None],
         ctx: Dict[str, Any],
@@ -112,22 +110,32 @@ class LangChainDriver(Agent):
         from pydantic import BaseModel, ConfigDict, Field
 
         class _ToolInput(BaseModel):
+            """
+            Accept arbitrary tool args through a stable `input` field.
+
+            LangChain tool execution paths vary across versions; this schema keeps
+            invocation robust when arguments are passed either via `input=...` or
+            as extra keyword args.
+            """
+
             input: Any = Field(default=None, description='Tool input payload')
             model_config = ConfigDict(extra='allow')
 
-        class HostTool(BaseTool):
+        class HostTool(BaseTool):  # type: ignore[misc]
             name: str
             description: str
             args_schema: type[BaseModel] = _ToolInput
 
-            def _run(self, input: Any = None, **kwargs: Any) -> str:
+            def _run(self, input: Any = None, **kwargs: Any) -> str:  # noqa: ANN401, A002
+                tool_name = _safe_str(getattr(self, 'name', ''))
+
                 try:
-                    out = invoke_tool(self.name, input=input, kwargs=kwargs)
+                    out = invoke_tool(tool_name, input=input, kwargs=kwargs)
                 except Exception as e:
                     out = {'error': str(e), 'type': type(e).__name__}
 
                 try:
-                    log_tool_call(tool_name=self.name, input={'input': input, **kwargs}, output=out)
+                    log_tool_call(tool_name=tool_name, input={'input': input, **kwargs}, output=out)
                 except Exception:
                     pass
 
@@ -136,19 +144,30 @@ class LangChainDriver(Agent):
                 except Exception:
                     return _safe_str(out)
 
-        return [HostTool(name=t, description=f'Invoke host tool: {t}') for t in tool_names]
+        tools: List[Any] = []
+        for td in tool_descriptors:
+            if not hasattr(td, 'get'):
+                continue
+            name = td.get('name')
+            if not isinstance(name, str) or not name.strip():
+                continue
+            desc = td.get('description') if isinstance(td.get('description'), str) else f'Invoke host tool: {name}'
+            tool = HostTool(name=name, description=desc)
+            try:
+                setattr(tool, '_rr_input_schema', td.get('input_schema'))
+            except Exception:
+                pass
+            tools.append(tool)
+        return tools
 
     # ------------------------------------------------------------------
     # Run
     # ------------------------------------------------------------------
     def _run(self, *, agent_input: AgentInput, host: AgentHost, ctx: Dict[str, Any]) -> AgentRunResult:
-        run_id = ctx.get('run_id', '')
-        debug('agent_langchain driver _run start run_id={} prompt_len={}'.format(run_id, len(agent_input.prompt or '')))
-
         from langchain.agents import create_agent
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-        tool_names = self._discover_tool_names(host=host)
+        tool_descriptors = self._discover_tools(host=host)
 
         def _call_llm(messages: Any, stop_words: Any = None) -> str:
             return self._call_host_llm(
@@ -164,13 +183,12 @@ class LangChainDriver(Agent):
         llm = self._bind_framework_llm(host=host, call_llm=_call_llm, ctx=ctx)
         tools_for_agent = self._bind_framework_tools(
             host=host,
-            tool_names=tool_names,
+            tool_descriptors=tool_descriptors,
             invoke_tool=_invoke_tool,
             log_tool_call=lambda **_: None,
             ctx=ctx,
         )
 
-        debug('agent_langchain using langchain.agents.create_agent run_id={}'.format(run_id))
         system_parts = [
             'You are an agent node in a tool-invocation hierarchy.',
             'Use the provided tools when needed.',
@@ -185,10 +203,6 @@ class LangChainDriver(Agent):
             stage = 'invoke'
             state = agent.invoke({'messages': [HumanMessage(content=_safe_str(agent_input.prompt or ''))]})
         except Exception as e:
-            debug(
-                'agent_langchain {} failed error_type={} error={}'.format(stage, type(e).__name__, _safe_str(e))
-            )
-            debug(traceback.format_exc(limit=60))
             raise RuntimeError('LangChain agent {} failed: {}: {}'.format(stage, type(e).__name__, _safe_str(e))) from e
 
         final_text = ''
