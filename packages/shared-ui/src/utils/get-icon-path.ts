@@ -91,6 +91,7 @@ import vertexIcon from '../assets/nodes/vertex.svg';
 import weaviateIcon from '../assets/nodes/weaviate.svg';
 import webhookIcon from '../assets/nodes/webhook.svg';
 import slackIcon from '../assets/nodes/slack.svg';
+import qwenIcon from '../assets/nodes/qwen.svg';
 import xaiIcon from '../assets/nodes/xai.svg';
 
 /**
@@ -151,6 +152,7 @@ const iconMap: Record<string, string> = {
 	'preprocessor-llm': preprocessorLlmIcon,
 	'preprocessor-text': preprocessorTextIcon,
 	prompt: promptIcon,
+	qwen: qwenIcon,
 	qdrant: qdrantIcon,
 	question: questionIcon,
 	reducto: reductoIcon,
