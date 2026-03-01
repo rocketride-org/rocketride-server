@@ -1,0 +1,233 @@
+# =============================================================================
+# RocketRide Engine
+# =============================================================================
+# MIT License
+# Copyright (c) 2024 RocketRide Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+"""
+MCP tool client node - global (shared) state.
+
+Step 3: STDIO transport (no external MCP SDK dependency).
+- Spawns MCP server process
+- Performs MCP initialize handshake
+- Discovers tools at startup via tools/list and caches them
+"""
+
+from __future__ import annotations
+
+import shlex
+from typing import Any, Dict, List, Optional
+
+from ai.common.config import Config
+from rocketlib import IGlobalBase, OPEN_MODE, warning
+
+from .mcp_stdio_client import McpStdioClient, McpToolDef
+from .mcp_sse_client import McpSseClient
+from .mcp_streamable_http_client import McpStreamableHttpClient
+from .mcp_driver import McpDriver
+
+
+class IGlobal(IGlobalBase):
+    """Global state for mcp_client."""
+
+    driver: McpDriver | None = None
+
+    def beginGlobal(self) -> None:
+        # Skip heavy initialization in CONFIG mode (matches other nodes).
+        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
+            return
+
+        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+
+        self.serverName = str((cfg.get('serverName') or 'mcp')).strip()
+        self.transport = str((cfg.get('transport') or 'stdio')).strip().lower()
+
+        try:
+            if self.transport == 'stdio':
+                # Preferred: parse a single command line string.
+                command_line = str((cfg.get('commandLine') or '')).strip()
+                if command_line:
+                    parts = shlex.split(command_line)
+                    if not parts:
+                        raise Exception('mcp_client commandLine must not be empty')
+                    command, args = parts[0], parts[1:]
+                else:
+                    # Back-compat: older configs used `command` + `args`.
+                    command = str((cfg.get('command') or 'python')).strip()
+                    args = cfg.get('args') or []
+                    if isinstance(args, str):
+                        args = [args]
+                    if not isinstance(args, list):
+                        raise Exception('mcp_client args must be a list of strings')
+                    args = [str(a) for a in args]
+
+                env = cfg.get('env')
+                if env is not None and not isinstance(env, dict):
+                    raise Exception('mcp_client env must be a dictionary of strings')
+                if isinstance(env, dict):
+                    env = {str(k): str(v) for k, v in env.items()}
+
+                self._client = McpStdioClient(command=command, args=args, env=env)
+
+            elif self.transport in ('sse', 'streamable-http'):
+                # Shared auth headers for HTTP transports
+                headers = cfg.get('headers') or None
+                if headers is not None and not isinstance(headers, dict):
+                    raise Exception('mcp_client headers must be a dictionary of strings')
+                if isinstance(headers, dict):
+                    headers = {str(k): str(v) for k, v in headers.items()}
+
+                bearer = cfg.get('bearer')
+                bearer = str(bearer).strip() if bearer is not None else None
+
+                if self.transport == 'sse':
+                    # Legacy HTTP+SSE transport
+                    sse_endpoint = str((cfg.get('sse_endpoint') or cfg.get('endpoint') or '')).strip()
+                    if not sse_endpoint:
+                        raise Exception('mcp_client sse_endpoint is required for sse transport')
+
+                    if bearer:
+                        headers = dict(headers or {})
+                        headers['Authorization'] = f'Bearer {bearer}'
+
+                    self._client = McpSseClient(sse_endpoint=sse_endpoint, headers=headers)
+
+                elif self.transport == 'streamable-http':
+                    endpoint = str((cfg.get('endpoint') or '')).strip()
+                    if not endpoint:
+                        raise Exception('mcp_client endpoint is required for streamable-http transport')
+
+                    if bearer:
+                        headers = dict(headers or {})
+                        headers['Authorization'] = f'Bearer {bearer}'
+
+                    self._client = McpStreamableHttpClient(endpoint=endpoint, headers=headers)
+
+            else:
+                raise Exception(
+                    f'mcp_client transport {self.transport!r} not supported '
+                    '(use stdio, streamable-http, or sse)'
+                )
+
+            self._client.start()
+            tools = self._client.list_tools()
+            self._cache_tools(tools)
+
+            # Build tool-provider driver after cache is ready.
+            self.driver = McpDriver(
+                server_name=self.serverName,
+                list_namespaced_tools=self.list_namespaced_tools,
+                get_tool=lambda server, name: self.get_tool(server_name=server, tool_name=name),
+                call_tool=lambda server, name, args: self.call_tool(server_name=server, tool_name=name, arguments=args),
+            )
+        except Exception as e:
+            warning(str(e))
+            raise
+
+    def validateConfig(self) -> None:
+        """
+        Validate config at save-time with quick local checks.
+
+        Matches other nodes: surface issues via warning().
+        """
+        try:
+            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+            transport = str((cfg.get('transport') or 'stdio')).strip().lower()
+            if transport not in ('stdio', 'sse', 'streamable-http'):
+                warning('transport must be stdio, streamable-http, or sse')
+                return
+
+            if transport == 'stdio':
+                command_line = str((cfg.get('commandLine') or '')).strip()
+                if command_line:
+                    try:
+                        parts = shlex.split(command_line)
+                    except Exception:
+                        warning('commandLine is invalid (unable to parse)')
+                        return
+                    if not parts:
+                        warning('commandLine must not be empty')
+                        return
+                else:
+                    # Back-compat: older configs used `command` + `args`.
+                    command = str((cfg.get('command') or '')).strip()
+                    if not command:
+                        warning('commandLine is required for stdio transport')
+                        return
+                    args = cfg.get('args') or []
+                    if not isinstance(args, list):
+                        warning('args must be a list for stdio transport')
+                        return
+            elif transport == 'sse':
+                endpoint = str((cfg.get('sse_endpoint') or '')).strip()
+                if not endpoint:
+                    warning('sse_endpoint is required for sse transport')
+                    return
+            else:
+                endpoint = str((cfg.get('endpoint') or '')).strip()
+                if not endpoint:
+                    warning('endpoint is required for streamable-http transport')
+                    return
+        except Exception as e:
+            warning(str(e))
+
+    def endGlobal(self) -> None:
+        try:
+            client = getattr(self, '_client', None)
+            if client is not None:
+                client.stop()
+        finally:
+            self.driver = None
+            self._client = None
+            self._tools_by_original = {}
+            self._tools_by_namespaced = {}
+
+    # ------------------------------------------------------------------
+    # Tool cache + accessors for IInstance hooks
+    # ------------------------------------------------------------------
+    def _cache_tools(self, tools: List[McpToolDef]) -> None:
+        self._tools_by_original: Dict[str, McpToolDef] = {}
+        self._tools_by_namespaced: Dict[str, McpToolDef] = {}
+        for t in tools:
+            self._tools_by_original[t.name] = t
+            self._tools_by_namespaced[f'{self.serverName}.{t.name}'] = t
+
+    def list_namespaced_tools(self) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for namespaced, tool in (self._tools_by_namespaced or {}).items():
+            out.append({'name': namespaced, 'description': tool.description, 'inputSchema': tool.inputSchema})
+        return out
+
+    def get_tool(self, *, server_name: str, tool_name: str) -> Optional[McpToolDef]:
+        if server_name != self.serverName:
+            return None
+        return (self._tools_by_original or {}).get(tool_name)
+
+    def call_tool(self, *, server_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        if server_name != self.serverName:
+            raise Exception(
+                f'Unknown MCP serverName {server_name!r} (this node configured as {self.serverName!r})'
+            )
+        if self._client is None:
+            raise Exception('MCP client is not connected')
+        return self._client.call_tool(name=tool_name, arguments=arguments or {})
+

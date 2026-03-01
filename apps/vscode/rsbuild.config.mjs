@@ -73,7 +73,10 @@ export default defineConfig({
 		externals: {
 			'vscode': 'commonjs vscode'
 		},
-		cleanDistPath: true
+		cleanDistPath: true,
+		// Inline all static assets as data URIs — VS Code webviews cannot
+		// resolve emitted file paths set dynamically from JavaScript.
+		dataUriLimit: Number.MAX_SAFE_INTEGER,
 	},
 
 	html: {

@@ -61,7 +61,7 @@
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
-	"icon": "embedding-text.svg",
+	"icon": "openai.svg",
 	//
 	// Optional:
 	//	  Documentation link for this driver

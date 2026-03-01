@@ -41,6 +41,10 @@ const styles = {
 	paper: {
 		backgroundColor: 'background.paper',
 		display: 'flex',
+		border: inVSCode
+			? '1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12))'
+			: '1px solid #DCDCDC',
+		borderRadius: '4px',
 	},
 	/** Base icon button styles with hover and disabled state handling. SVG sizing adapts to VS Code. */
 	iconButton: {

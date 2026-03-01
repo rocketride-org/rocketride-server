@@ -1,0 +1,201 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Qwen",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "llm_qwen://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"llm"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"invoke"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.llm_qwen",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "llm",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A component that connects to Alibaba Cloud's Qwen large language models via the ",
+		"DashScope API. It supports tasks such as text generation, summarization, question ",
+		"answering, and chat-based interactions. With access to models like Qwen Plus ",
+		"and Qwen Flash, this component enables high-quality, context-aware responses. Configurable ",
+		"with API keys, it allows seamless integration into AI-driven workflows with scalable ",
+		"performance."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "qwen.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": [
+		"Model: ${parameters.llm_qwen.model}"
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": [
+			"answers"
+		]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [
+				{
+					"lane": "answers"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "qwen-flash",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"qwen-plus": {
+				"title": "Qwen Plus",
+				"model": "qwen-plus",
+				"modelTotalTokens": 131072,
+				"region": "us",
+				"apikey": ""
+			},
+			"qwen-flash": {
+				"title": "Qwen Flash",
+				"model": "qwen-flash",
+				"modelTotalTokens": 131072,
+				"region": "us",
+				"apikey": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"qwen.model": {
+			"type": "string",
+			"title": "Model",
+			"description": "LLM model",
+			"default": "qwen-plus",
+			"enum": [
+				[
+					"qwen-plus",
+					"Qwen Plus"
+				],
+				[
+					"qwen-flash",
+					"Qwen Flash"
+				]
+			]
+		},
+		"qwen.region": {
+			"type": "string",
+			"title": "Region",
+			"description": "DashScope regional endpoint. API keys are not interchangeable between regions.",
+			"default": "us",
+			"enum": [
+				[
+					"us",
+					"US (Virginia)"
+				],
+				[
+					"intl",
+					"Singapore"
+				],
+				[
+					"cn",
+					"China (Beijing)"
+				]
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Qwen",
+			"properties": [
+				"qwen.model",
+				"qwen.region",
+				"llm.cloud.apikey"
+			]
+		}
+	],
+	"test": {
+		"profiles": ["qwen-flash"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
+}

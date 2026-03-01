@@ -518,6 +518,7 @@ export default function NodePanel({ onClose }: IBasePanelProps): ReactNode {
 								height: '70%',
 								objectFit: 'cover',
 								mr: '1rem',
+								filter: nodeData.icon?.includes('#td') ? 'var(--icon-filter)' : undefined,
 							}}
 							src={nodeData.icon}
 						/>
