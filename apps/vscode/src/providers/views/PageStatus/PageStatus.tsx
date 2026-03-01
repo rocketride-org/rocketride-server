@@ -382,7 +382,7 @@ export const PageStatus: React.FC = () => {
 	const tabs = [
 		{ id: 'status', label: 'Status' },
 		{ id: 'tokens', label: 'Tokens' },
-		{ id: 'flow', label: 'Pipeline Flow' },
+		{ id: 'flow', label: 'Flow' },
 		{ id: 'trace', label: 'Trace' },
 		{ id: 'errors', label: 'Errors', badge: errorCount > 0 ? <WarningIcon size={14} /> : undefined }
 	];
