@@ -115,12 +115,10 @@ Error Binder::callMethods(
     for (auto *pInstance : *(it->second)) {
         // Build enter trace if tracing is enabled
         json::Value enterTrace;
-        if (traceLevel > 0) {
+        if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA)
             enterTrace["lane"] = methodName.c_str();
-            enterTrace["pipeId"] = pInstance->pipeId;
-            enterTrace["provider"] = pInstance->pipeType.logicalType;
-            if (traceData) enterTrace["data"] = traceData;
-        }
+        if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL && !traceData.isNull())
+            enterTrace["data"] = traceData;
 
         // Signal to the debugger we are entering a level
         pThis->m_pInstance->pipe->debugger.debugEnter(pInstance, enterTrace);
@@ -137,14 +135,14 @@ Error Binder::callMethods(
 
             // Build leave trace with error result
             json::Value leaveTrace;
-            if (traceLevel > 0) {
+            if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
                 leaveTrace["lane"] = methodName.c_str();
-                leaveTrace["pipeId"] = pInstance->pipeId;
+
                 if (ccode.code() == Ec::PreventDefault) {
                     leaveTrace["result"] = "skip";
                 } else {
                     leaveTrace["result"] = "error";
-                    leaveTrace["data"]["error"] = ccode.message();
+                    leaveTrace["error"] = ccode.message();
                 }
             }
 
@@ -157,9 +155,8 @@ Error Binder::callMethods(
         } else {
             // Build leave trace with continue result
             json::Value leaveTrace;
-            if (traceLevel > 0) {
+            if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
                 leaveTrace["lane"] = methodName.c_str();
-                leaveTrace["pipeId"] = pInstance->pipeId;
                 leaveTrace["result"] = "continue";
             }
 
@@ -262,11 +259,14 @@ Error Binder::writeText(const Utf16View &text) noexcept {
         return pInstance->writeText(text);
     };
     json::Value data;
+
     auto traceLevel = m_pInstance->endpoint->config.pipelineTraceLevel;
-    if (traceLevel >= 2) {
+    
+    if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA)
         data["length"] = (int)text.length();
-        if (traceLevel >= 3) data["text"] = _tr<Text>(text).substr(0, 2000);
-    }
+    if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL) 
+        data["text"] = _tr<Text>(text).substr(0, 2000);
+
     return callMethods(this, "text", call, data);
 }
 
@@ -281,11 +281,13 @@ Error Binder::writeTable(const Utf16View &text) noexcept {
         return pInstance->writeTable(text);
     };
     json::Value data;
+
     auto traceLevel = m_pInstance->endpoint->config.pipelineTraceLevel;
-    if (traceLevel >= 2) {
+    if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA)
         data["length"] = (int)text.length();
-        if (traceLevel >= 3) data["table"] = _tr<Text>(text).substr(0, 2000);
-    }
+    if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL)
+        data["table"] = _tr<Text>(text).substr(0, 2000);
+
     return callMethods(this, "table", call, data);
 }
 
@@ -317,12 +319,15 @@ Error Binder::writeAudio(const AVI_ACTION action, Text &mimeType,
         return pInstance->writeAudio(action, mimeType, streamData);
     };
     json::Value data;
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= 2) {
+
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
         data["action"] = (int)action;
         data["mimeType"] = mimeType;
+
         engine::python::LockPython lock;
         data["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
     }
+
     return callMethods(this, "audio", call, data);
 }
 
@@ -340,12 +345,15 @@ Error Binder::writeVideo(const AVI_ACTION action, Text &mimeType,
         return pInstance->writeVideo(action, mimeType, streamData);
     };
     json::Value data;
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= 2) {
+
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
         data["action"] = (int)action;
         data["mimeType"] = mimeType;
+
         engine::python::LockPython lock;
         data["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
     }
+
     return callMethods(this, "video", call, data);
 }
 
@@ -363,12 +371,15 @@ Error Binder::writeImage(const AVI_ACTION action, Text &mimeType,
         return pInstance->writeImage(action, mimeType, streamData);
     };
     json::Value data;
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= 2) {
+
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
         data["action"] = (int)action;
         data["mimeType"] = mimeType;
+
         engine::python::LockPython lock;
         data["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
     }
+
     return callMethods(this, "image", call, data);
 }
 
@@ -383,10 +394,12 @@ Error Binder::writeQuestions(const pybind11::object &question) noexcept {
         return pInstance->writeQuestions(question);
     };
     json::Value data;
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= 2) {
+
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::FULL) {
         engine::python::LockPython lock;
-        data["type"] = std::string(py::str(question.get_type().attr("__name__"))).c_str();
+        data["questions"] = engine::python::pyjson::dictToJson(question);
     }
+    
     return callMethods(this, "questions", call, data);
 }
 
@@ -401,9 +414,10 @@ Error Binder::writeAnswers(const pybind11::object &answers) noexcept {
         return pInstance->writeAnswers(answers);
     };
     json::Value data;
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= 2) {
+
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::FULL) {
         engine::python::LockPython lock;
-        data["type"] = std::string(py::str(answers.get_type().attr("__name__"))).c_str();
+        data["answers"] = engine::python::pyjson::dictToJson(answers);
     }
     return callMethods(this, "answers", call, data);
 }
@@ -421,10 +435,12 @@ Error Binder::writeClassifications(
         return pInstance->writeClassifications(
             classifications, classificationPolicy, classificationRules);
     };
+
     json::Value data;
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= 2) {
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::SUMMARY) {
         data["count"] = (int)classifications.size();
     }
+
     return callMethods(this, "classifications", call, data);
 }
 
@@ -440,9 +456,11 @@ Error Binder::writeClassificationContext(
         return pInstance->writeClassificationContext(classifications);
     };
     json::Value data;
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= 2) {
+
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::SUMMARY) {
         data["count"] = (int)classifications.size();
     }
+
     return callMethods(this, "classificationContext", call, data);
 }
 
@@ -457,10 +475,20 @@ Error Binder::writeDocuments(const pybind11::object &documents) noexcept {
         return pInstance->writeDocuments(documents);
     };
     json::Value data;
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= 2) {
-        engine::python::LockPython lock;
-        data["count"] = (int)py::len(documents);
+
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
+        try {
+            engine::python::LockPython lock;
+            data["count"] = (int)py::len(documents);
+            if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::FULL) {
+                py::list docDicts;
+                for (auto doc : documents)
+                    docDicts.append(doc.attr("toDict")());
+                data["documents"] = engine::python::pyjson::dictToJson(docDicts);
+            }
+        } catch (...) {}
     }
+
     return callMethods(this, "documents", call, data);
 }
 

@@ -193,18 +193,46 @@ export const StatusSection: React.FC<StatusSectionProps> = ({
 	}, [MAX_DATA_POINTS]); // Only depends on MAX_DATA_POINTS, not taskStatus
 
 	return (
-		<>
-			{/* Rate Chart Component */}
-			<CompletionsChart
-				dataPoints={dataPoints}
-				timeRange={timeRange}
-				onTimeRangeChange={setTimeRange}
-				currentElapsed={currentElapsed}
-				onStatsCalculated={setChartStats}
-			/>
-
-			{/* Stats Row Component */}
-			<StatusFooter stats={chartStats} />
-		</>
+		<section className="status-section">
+			<header className="section-header">
+				<span>Performance Metrics</span>
+				<div className="time-range-buttons">
+					<button
+						className={`time-btn ${timeRange === '1min' ? 'active' : ''}`}
+						onClick={() => setTimeRange('1min')}
+					>
+						1 min
+					</button>
+					<button
+						className={`time-btn ${timeRange === '5min' ? 'active' : ''}`}
+						onClick={() => setTimeRange('5min')}
+					>
+						5 min
+					</button>
+					<button
+						className={`time-btn ${timeRange === '15min' ? 'active' : ''}`}
+						onClick={() => setTimeRange('15min')}
+					>
+						15 min
+					</button>
+					<button
+						className={`time-btn ${timeRange === 'all' ? 'active' : ''}`}
+						onClick={() => setTimeRange('all')}
+					>
+						All
+					</button>
+				</div>
+			</header>
+			<div className="section-content">
+				<CompletionsChart
+					dataPoints={dataPoints}
+					timeRange={timeRange}
+					onTimeRangeChange={setTimeRange}
+					currentElapsed={currentElapsed}
+					onStatsCalculated={setChartStats}
+				/>
+				<StatusFooter stats={chartStats} />
+			</div>
+		</section>
 	);
 };

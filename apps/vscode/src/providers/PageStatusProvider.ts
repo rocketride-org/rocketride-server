@@ -212,6 +212,31 @@ export class PageStatusProvider {
 				}
 				break;
 			}
+
+			case 'apaevt_flow': {
+				// Forward pipeline trace events to all open webviews
+				const body = event.body;
+				if (!body?.trace) break;
+
+				const traceMessage: PageStatusIncomingMessage = {
+					type: 'traceEvent',
+					pipelineId: body.id ?? 0,
+					op: body.op || 'enter',
+					pipes: body.pipes || [],
+					trace: body.trace || {}
+				};
+
+				// Broadcast to all webviews
+				for (const viewState of this.webviewPanels.values()) {
+					if (!viewState.isDisposed) {
+						viewState.panel.webview.postMessage(traceMessage).then(
+							undefined,
+							(error: unknown) => this.logger.error(`Posting trace event: ${error}`)
+						);
+					}
+				}
+				break;
+			}
 		}
 	}
 

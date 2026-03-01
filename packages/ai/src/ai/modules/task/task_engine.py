@@ -1019,12 +1019,13 @@ class Task(DAPBase):
             # Send out a status update when needed
             self._status_updated = True
 
-        # Handle pipeline flow events
-        elif event_type == 'apaevt_flow':
+        # Handle pipeline trace events to build summary and flow events
+        elif event_type == 'apaevt_trace':
             operation = body.get('op', '')
             total_pipes = body.get('total_pipes', 0)
             pipe_index = body.get('id', '')
             component_name = body.get('pipe_id', '')
+            trace = body.get('trace', {})
 
             self._status.pipeflow.totalPipes = total_pipes
 
@@ -1042,7 +1043,14 @@ class Task(DAPBase):
             elif operation == 'end':
                 self._status.pipeflow.byPipe[pipe_index] = []
 
-            message['body'] = self._status.pipeflow.model_dump()
+            # Build the flow event
+            body = {
+                'id': pipe_index,
+                'op': operation,
+                'pipes': self._status.pipeflow.byPipe[pipe_index],
+                'trace': trace or {},
+            }
+            flow = self.build_event('apaevt_flow', body=body)
 
             # Send out a status update when needed
             self._status_updated = True
@@ -1050,7 +1058,7 @@ class Task(DAPBase):
             # Forward the actual event
             await self._forward_task_event(
                 EVENT_TYPE.FLOW,
-                message,
+                flow
             )
 
         # Handle debug output

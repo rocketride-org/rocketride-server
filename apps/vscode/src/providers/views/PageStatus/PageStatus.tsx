@@ -29,6 +29,7 @@ import { ErrWarnSection } from '../../components/ErrWarnSection';
 import { StatusSection, StatusHeader, StatusElapsed } from '../../components/StatusSection';
 import { TokenSection } from '../../components/TokenSection';
 import { TabPanel } from '../../components/TabPanel';
+import { TraceSection, TraceLevel, TraceRow } from '../../components/TraceSection';
 import { EndpointInfoModal, EndpointInfo } from '../../components/EndpointInfoModal';
 import { WarningIcon } from '../../components/icons/WarningIcon';
 
@@ -51,6 +52,18 @@ export type PageStatusIncomingMessage
 	| {
 		type: 'connectionState';
 		state: ConnectionState;
+	}
+	| {
+		type: 'traceEvent';
+		pipelineId: number;
+		op: 'begin' | 'enter' | 'leave' | 'end';
+		pipes: string[];
+		trace: {
+			lane?: string;
+			data?: Record<string, unknown>;
+			result?: string;
+			error?: string;
+		};
 	};
 
 export type PageStatusOutgoingMessage
@@ -85,9 +98,34 @@ export const PageStatus: React.FC = () => {
 	const [host, setHost] = useState<string>('<unknown>');
 	const [isEndpointModalOpen, setIsEndpointModalOpen] = useState(false);
 	const [currentElapsed, setCurrentElapsed] = useState<number>(0);
+	const [traceLevel, setTraceLevel] = useState<TraceLevel>('none');
+	const [traceRows, setTraceRows] = useState<TraceRow[]>([]);
 
 	// Refs for elapsed timer
 	const intervalRef = useRef<number | null>(null);
+
+	// Document-based trace state: per-pipeline-slot routing with bounded archive
+	interface TraceDocument { objectName: string; completed: boolean; rows: TraceRow[] }
+	const traceIdRef = useRef<number>(0);
+	const nextDocIdRef = useRef<number>(0);
+	const MAX_DOCS = 64;
+	const documentsRef = useRef<Map<number, TraceDocument>>(new Map());
+	const docOrderRef = useRef<number[]>([]);
+	const slotBindingsRef = useRef<Map<number, number>>(new Map());
+	const pendingStacksRef = useRef<Map<number, TraceRow[]>>(new Map());
+
+	const flushTraceRows = () => {
+		const flatRows: TraceRow[] = [];
+		for (const docId of docOrderRef.current) {
+			const doc = documentsRef.current.get(docId);
+			if (doc) {
+				for (const row of doc.rows) {
+					flatRows.push(row.completed === doc.completed ? row : { ...row, completed: doc.completed });
+				}
+			}
+		}
+		setTraceRows(flatRows);
+	};
 
 	// ========================================================================
 	// WEBVIEW MESSAGING
@@ -105,6 +143,85 @@ export const PageStatus: React.FC = () => {
 					}
 					case 'connectionState': {
 						setConnectionState(message.state);
+						break;
+					}
+					case 'traceEvent': {
+						const { pipelineId, op, pipes, trace } = message;
+						const lane = trace.lane || op;
+
+						if (op === 'begin') {
+							// Create a new document and bind this pipeline slot to it
+							const docId = nextDocIdRef.current++;
+							const objectName = pipes[0] || '';
+							documentsRef.current.set(docId, { objectName, completed: false, rows: [] });
+							docOrderRef.current.push(docId);
+							slotBindingsRef.current.set(pipelineId, docId);
+							pendingStacksRef.current.set(pipelineId, []);
+
+							// Evict oldest completed documents if over cap
+							while (docOrderRef.current.length > MAX_DOCS) {
+								const oldId = docOrderRef.current[0];
+								const oldDoc = documentsRef.current.get(oldId);
+								if (oldDoc && !oldDoc.completed) break; // don't evict in-flight docs
+								docOrderRef.current.shift();
+								documentsRef.current.delete(oldId);
+							}
+
+							flushTraceRows();
+
+						} else if (op === 'enter') {
+							const docId = slotBindingsRef.current.get(pipelineId);
+							if (docId == null) break;
+							const doc = documentsRef.current.get(docId);
+							if (!doc) break;
+
+							const filterName = pipes[pipes.length - 1] || '';
+							const depth = Math.max(0, pipes.length - 2);
+							const row: TraceRow = {
+								id: traceIdRef.current++,
+								docId,
+								completed: false,
+								lane,
+								filterName,
+								depth,
+								data: trace.data,
+								timestamp: Date.now(),
+								objectName: doc.objectName
+							};
+							doc.rows.push(row);
+							pendingStacksRef.current.get(pipelineId)?.push(row);
+							flushTraceRows();
+
+						} else if (op === 'leave') {
+							const docId = slotBindingsRef.current.get(pipelineId);
+							if (docId == null) break;
+							const doc = documentsRef.current.get(docId);
+							if (!doc) break;
+
+							const pending = pendingStacksRef.current.get(pipelineId)?.pop();
+							if (pending) {
+								const idx = doc.rows.findIndex(r => r.id === pending.id);
+								if (idx !== -1) {
+									doc.rows[idx] = {
+										...doc.rows[idx],
+										result: trace.result,
+										error: trace.error,
+										endTimestamp: Date.now()
+									};
+								}
+							}
+							flushTraceRows();
+
+						} else if (op === 'end') {
+							const docId = slotBindingsRef.current.get(pipelineId);
+							if (docId != null) {
+								const doc = documentsRef.current.get(docId);
+								if (doc) doc.completed = true;
+							}
+							slotBindingsRef.current.delete(pipelineId);
+							pendingStacksRef.current.delete(pipelineId);
+							flushTraceRows();
+						}
 						break;
 					}
 				}
@@ -266,6 +383,7 @@ export const PageStatus: React.FC = () => {
 		{ id: 'status', label: 'Status' },
 		{ id: 'tokens', label: 'Tokens' },
 		{ id: 'flow', label: 'Pipeline Flow' },
+		{ id: 'trace', label: 'Trace' },
 		{ id: 'errors', label: 'Errors', badge: errorCount > 0 ? <WarningIcon size={14} /> : undefined }
 	];
 
@@ -326,6 +444,22 @@ export const PageStatus: React.FC = () => {
 						taskStatus={taskStatus}
 						viewMode={viewMode}
 						onViewModeChange={handleViewModeChange}
+					/>
+				)}
+				{activeTab === 'trace' && (
+					<TraceSection
+						traceLevel={traceLevel}
+						onTraceLevelChange={setTraceLevel}
+						rows={traceRows}
+						onClear={() => {
+							documentsRef.current.clear();
+							docOrderRef.current = [];
+							slotBindingsRef.current.clear();
+							pendingStacksRef.current.clear();
+							nextDocIdRef.current = 0;
+							traceIdRef.current = 0;
+							setTraceRows([]);
+						}}
 					/>
 				)}
 				{activeTab === 'errors' && (

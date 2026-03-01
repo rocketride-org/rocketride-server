@@ -175,8 +175,8 @@ struct IServiceConfig {
 
     //-----------------------------------------------------------------
     /// @details
-    ///		Pipeline trace level: 0=none, 1=metadata, 2=summary, 3=full
+    ///		Pipeline trace level
     //-----------------------------------------------------------------
-    int pipelineTraceLevel = 0;
+    PIPELINE_TRACE_LEVEL pipelineTraceLevel = PIPELINE_TRACE_LEVEL::NONE;
 };
 }  // namespace engine::store

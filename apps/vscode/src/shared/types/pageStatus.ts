@@ -33,6 +33,18 @@ export type PageStatusIncomingMessage
 	| {
 		type: 'connectionState';
 		state: ConnectionState;
+	}
+	| {
+		type: 'traceEvent';
+		pipelineId: number;
+		op: 'begin' | 'enter' | 'leave' | 'end';
+		pipes: string[];
+		trace: {
+			lane?: string;
+			data?: Record<string, unknown>;
+			result?: string;
+			error?: string;
+		};
 	};
 
 export type PageStatusOutgoingMessage

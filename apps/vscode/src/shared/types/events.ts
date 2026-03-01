@@ -49,6 +49,34 @@ export interface EventStatusUpdate extends DebugProtocol.Event {
 }
 
 //=====================================================================================
+// Pipeline flow/trace events
+//=====================================================================================
+/**
+ * Flow event message containing pipeline trace data.
+ *
+ * Sent when tracing is enabled to report enter/leave transitions
+ * through the pipeline filter chain.
+ */
+export interface EventFlowUpdate extends DebugProtocol.Event {
+	event: 'apaevt_flow';
+	body: {
+		/** Pipeline run identifier */
+		id: number;
+		/** Operation type */
+		op: 'begin' | 'enter' | 'leave' | 'end';
+		/** Call path: [objectName, filter1, filter2, ...] */
+		pipes: string[];
+		/** Trace data from the C++ engine */
+		trace: {
+			lane?: string;
+			data?: Record<string, unknown>;
+			result?: string;
+			error?: string;
+		};
+	};
+}
+
+//=====================================================================================
 // Union type of all RocketRide-specific debug events
 //=====================================================================================
-export type RocketRideEvent = EventStatusUpdate;
+export type RocketRideEvent = EventStatusUpdate | EventFlowUpdate;

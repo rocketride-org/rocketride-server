@@ -573,36 +573,6 @@ export const CompletionsChart: React.FC<CompletionsChartProps> = ({
 
 	return (
 		<div className="chart-section">
-			<div className="chart-header">
-				<div className="chart-title">Performance Metrics</div>
-				<div className="time-range-buttons">
-					<button
-						className={`time-btn ${timeRange === '1min' ? 'active' : ''}`}
-						onClick={() => onTimeRangeChange('1min')}
-					>
-						1 min
-					</button>
-					<button
-						className={`time-btn ${timeRange === '5min' ? 'active' : ''}`}
-						onClick={() => onTimeRangeChange('5min')}
-					>
-						5 min
-					</button>
-					<button
-						className={`time-btn ${timeRange === '15min' ? 'active' : ''}`}
-						onClick={() => onTimeRangeChange('15min')}
-					>
-						15 min
-					</button>
-					<button
-						className={`time-btn ${timeRange === 'all' ? 'active' : ''}`}
-						onClick={() => onTimeRangeChange('all')}
-					>
-						All
-					</button>
-				</div>
-			</div>
-
 			<div className="chart-container">
 				<canvas ref={chartRef} className="chart-canvas"></canvas>
 			</div>

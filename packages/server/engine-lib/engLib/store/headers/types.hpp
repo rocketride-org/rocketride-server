@@ -241,6 +241,17 @@ APUTIL_DEFINE_ENUM(EXPORT_UPDATE_BEHAVIOR, 0, 3, UNKNOWN = 0, SKIP = 1,
                    UPDATE = 2);
 
 //-------------------------------------------------------------------------
+/// @details
+///		Define the pipeline trace levels:
+///		NONE     = 0  No tracing
+///		METADATA = 1  Trace enter/leave with lane and class type
+///		SUMMARY  = 2  + data summaries (lengths, counts, types)
+///		FULL     = 3  + full payload data (text content, etc)
+//-------------------------------------------------------------------------
+APUTIL_DEFINE_ENUM(PIPELINE_TRACE_LEVEL, 0, 4, NONE = 0, METADATA = 1,
+                   SUMMARY = 2, FULL = 3);
+
+//-------------------------------------------------------------------------
 ///	@details
 ///		Define the state of sync scan tokens
 //-------------------------------------------------------------------------

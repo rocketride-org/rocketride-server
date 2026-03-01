@@ -84,6 +84,8 @@ const getIndicatorClass = (state: number): string => {
  * - Line 2: Job status message in accent color
  */
 export const StatusHeader: React.FC<StatusLineProps> = ({ taskStatus, currentElapsed }) => {
+	const hasSubtitle = !!taskStatus?.status;
+
 	return (
 		<div className="status-header-stack">
 			<div className="status-badge">
@@ -92,12 +94,10 @@ export const StatusHeader: React.FC<StatusLineProps> = ({ taskStatus, currentEla
 				</div>
 				<span className="status-state-label">{taskStatus ? getTaskStateDisplay(taskStatus.state) : 'Offline'}</span>
 			</div>
-			{taskStatus?.status && (
-				<div className="status-subtitle">
-					<div className="status-indicator-box" />
-					<span>{taskStatus.status}</span>
-				</div>
-			)}
+			<div className="status-subtitle" style={{ visibility: hasSubtitle ? 'visible' : 'hidden' }}>
+				<div className="status-indicator-box" />
+				<span>{taskStatus?.status || '\u00A0'}</span>
+			</div>
 		</div>
 	);
 };
@@ -108,12 +108,10 @@ export const StatusHeader: React.FC<StatusLineProps> = ({ taskStatus, currentEla
  * Renders "Started Xs ago" — placed in the right column by PageStatus.
  */
 export const StatusElapsed: React.FC<StatusLineProps> = ({ taskStatus, currentElapsed }) => {
-	if (!taskStatus || taskStatus.startTime <= 0 || taskStatus.completed) {
-		return null;
-	}
+	const isVisible = !!taskStatus && taskStatus.startTime > 0 && !taskStatus.completed;
 
 	return (
-		<div className="status-elapsed">
+		<div className="status-elapsed" style={{ visibility: isVisible ? 'visible' : 'hidden' }}>
 			Started <span className="status-elapsed-value">{formatElapsedTime(currentElapsed)}</span> ago
 		</div>
 	);
