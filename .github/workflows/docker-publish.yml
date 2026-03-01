@@ -39,15 +39,21 @@ jobs:
       - name: Download server artifact
         run: |
           gh release download "${{ steps.version.outputs.tag }}" \
-            --pattern "*linux*x64*" \
+            --pattern "rocketride-server-*-linux-x64.tar.gz" \
             --dir /tmp/release
+          ASSET_COUNT=$(ls /tmp/release/*.tar.gz 2>/dev/null | wc -l)
+          if [ "$ASSET_COUNT" -ne 1 ]; then
+            echo "::error::Expected exactly 1 matching asset, found ${ASSET_COUNT}"
+            ls -la /tmp/release/
+            exit 1
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
 
       - name: Extract server
         run: |
           mkdir -p dist/server
-          tar xf /tmp/release/*linux*x64* -C dist/server
+          tar xf /tmp/release/rocketride-server-*-linux-x64.tar.gz -C dist/server
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
