@@ -73,11 +73,6 @@ export const StatusFooter: React.FC<StatusFooterProps> = ({ stats }) => {
 				<span className="stat-label">Min:</span>
 				<span className="stat-value">{stats.minimum}/s</span>
 			</div>
-			<div className="stat-separator"></div>
-			<div className="stat-item">
-				<span className="stat-label">Duration:</span>
-				<span className="stat-value">{formatElapsedTime(stats.duration)}</span>
-			</div>
 		</div>
 	);
 };

@@ -66,6 +66,161 @@
 }
 
 /* ============================================================================ */
+/* PAGE HEADER (two-column grid, outside any box) */
+/* ============================================================================ */
+
+.page-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-start;
+	gap: 16px;
+	margin-bottom: 16px;
+}
+
+.page-header-left {
+	flex: 1;
+	min-width: 0;
+}
+
+.page-header-right {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 6px;
+	flex-shrink: 0;
+}
+
+/* Status header: stacked state + subtitle */
+.status-header-stack {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.status-state-label {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--vscode-foreground);
+}
+
+/* Fixed-width box for indicator dot alignment */
+.status-indicator-box {
+	width: 16px;
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.status-subtitle {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 13px;
+	color: var(--vscode-focusBorder);
+	font-weight: 500;
+}
+
+/* Elapsed time — right-aligned under actions */
+.status-elapsed {
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+	white-space: nowrap;
+}
+
+.status-elapsed-value {
+	color: var(--vscode-focusBorder);
+	font-weight: 600;
+}
+
+/* ============================================================================ */
+/* TAB BAR (MUI-style) */
+/* ============================================================================ */
+
+.tab-bar {
+	position: relative;
+	display: flex;
+	border-bottom: none;
+	background: none;
+	padding: 0 8px;
+	gap: 0;
+}
+
+.tab-item {
+	position: relative;
+	background: none;
+	border: none;
+	padding: 10px 16px;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	transition: color 0.25s ease;
+	white-space: nowrap;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.tab-item:hover {
+	color: var(--vscode-foreground);
+	background: var(--vscode-list-hoverBackground);
+}
+
+.tab-item.active {
+	color: var(--vscode-focusBorder);
+}
+
+.tab-indicator {
+	position: absolute;
+	bottom: 0;
+	height: 2px;
+	background: var(--vscode-focusBorder);
+	transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+	border-radius: 1px 1px 0 0;
+}
+
+.tab-badge {
+	background: none;
+	font-size: 14px;
+	line-height: 1;
+	letter-spacing: 0;
+	text-transform: none;
+	margin-left: -4px;
+}
+
+.tab-content {
+	padding: 16px 20px;
+	background: var(--vscode-editor-background);
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 8px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+	overflow: hidden;
+	margin-top: 30px;
+	margin-left: 20px;
+	margin-right: 20px;
+}
+
+/* Neutralize nested panel/section wrappers inside tabs */
+.tab-content .status-panel,
+.tab-content .status-section,
+.tab-content .pipeline {
+	margin-bottom: 0;
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+}
+
+.tab-content .status-panel:hover,
+.tab-content .status-section:hover,
+.tab-content .pipeline:hover {
+	border-color: transparent;
+	box-shadow: none;
+}
+
+/* ============================================================================ */
 /* STATUS PANEL (Processing Rate & Status) */
 /* ============================================================================ */
 
@@ -221,7 +376,7 @@
 /* ============================================================================ */
 
 .chart-section {
-	padding: 20px;
+	padding: 4px 0;
 }
 
 .chart-header {

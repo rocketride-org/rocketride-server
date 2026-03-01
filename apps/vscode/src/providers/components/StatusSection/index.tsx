@@ -23,5 +23,5 @@
 
 export { CompletionsChart } from './CompletionsChart';
 export { StatusFooter } from './StatusFooter';
-export { StatusHeader } from './StatusHeader';
+export { StatusHeader, StatusElapsed } from './StatusHeader';
 export { StatusSection } from './StatusSection';

@@ -77,45 +77,44 @@ const getIndicatorClass = (state: number): string => {
 };
 
 /**
- * Compact Status Line Component
- * 
- * Displays task status, state, elapsed time, and counts in a single compact line.
+ * Status Header Component
+ *
+ * Two-line stacked layout:
+ * - Line 1: State badge (● Running / ● Initializing / etc.)
+ * - Line 2: Job status message in accent color
  */
 export const StatusHeader: React.FC<StatusLineProps> = ({ taskStatus, currentElapsed }) => {
 	return (
-		<div className="status-line">
+		<div className="status-header-stack">
 			<div className="status-badge">
-				<div className={taskStatus ? getIndicatorClass(taskStatus.state) : 'status-indicator offline'}></div>
-				<span>{taskStatus ? getTaskStateDisplay(taskStatus.state) : 'Offline'}</span>
+				<div className="status-indicator-box">
+					<div className={taskStatus ? getIndicatorClass(taskStatus.state) : 'status-indicator offline'}></div>
+				</div>
+				<span className="status-state-label">{taskStatus ? getTaskStateDisplay(taskStatus.state) : 'Offline'}</span>
 			</div>
 			{taskStatus?.status && (
-				<>
-					<span className="status-separator">•</span>
-					<div className="status-item">
-						<span className="status-value">{taskStatus.status}</span>
-					</div>
-				</>
+				<div className="status-subtitle">
+					<div className="status-indicator-box" />
+					<span>{taskStatus.status}</span>
+				</div>
 			)}
-			{taskStatus && taskStatus.startTime > 0 && !taskStatus.completed && (
-				<>
-					<span className="status-separator">•</span>
-					<div className="status-item">
-						Started <span className="status-value">{formatElapsedTime(currentElapsed)} ago</span>
-					</div>
-				</>
-			)}
-			{taskStatus && taskStatus.totalCount > 0 && (
-				<>
-					<span className="status-separator">•</span>
-					<div className="status-item">
-						<span className="status-value">{taskStatus.totalCount.toLocaleString()}</span> total
-					</div>
-					<div className="status-item">
-						(<span className="status-value">{taskStatus.completedCount.toLocaleString()}</span> done,{' '}
-						<span className="status-value error-count">{taskStatus.failedCount.toLocaleString()}</span> failed)
-					</div>
-				</>
-			)}
+		</div>
+	);
+};
+
+/**
+ * Elapsed Time Component
+ *
+ * Renders "Started Xs ago" — placed in the right column by PageStatus.
+ */
+export const StatusElapsed: React.FC<StatusLineProps> = ({ taskStatus, currentElapsed }) => {
+	if (!taskStatus || taskStatus.startTime <= 0 || taskStatus.completed) {
+		return null;
+	}
+
+	return (
+		<div className="status-elapsed">
+			Started <span className="status-elapsed-value">{formatElapsedTime(currentElapsed)}</span> ago
 		</div>
 	);
 };
