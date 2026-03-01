@@ -1,0 +1,17 @@
+FROM ubuntu:jammy
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates \
+       libc++1 \
+       libc++abi1 \
+       libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY dist/server/ /opt/rocketride/
+
+WORKDIR /opt/rocketride
+
+EXPOSE 5565
+
+ENTRYPOINT ["./engine", "./ai/eaas.py"]

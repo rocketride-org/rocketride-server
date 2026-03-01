@@ -81,12 +81,8 @@ export class PageDeployProvider {
 				} else if (message.type === 'copyToClipboard' && typeof message.text === 'string') {
 					await vscode.env.clipboard.writeText(message.text);
 					vscode.window.showInformationMessage('Copied to clipboard.');
-				} else if (message.type === 'dockerBuild') {
-					await this.runDockerBuild();
-				} else if (message.type === 'dockerSave') {
-					await this.runDockerSave();
-				} else if (message.type === 'dockerExportScript') {
-					await this.exportRunScript();
+				} else if (message.type === 'dockerRun') {
+					await this.runDockerEngine();
 				}
 			},
 			undefined,
@@ -102,79 +98,15 @@ export class PageDeployProvider {
 		);
 	}
 
-	private getWorkspaceRoot(): string | null {
-		const folders = vscode.workspace.workspaceFolders;
-		if (!folders || folders.length === 0) return null;
-		return folders[0].uri.fsPath;
-	}
+	private static readonly ENGINE_IMAGE = 'ghcr.io/rocketride-org/rocketride-engine:latest';
 
-	private async runDockerBuild(): Promise<void> {
-		const root = this.getWorkspaceRoot();
-		if (!root) {
-			vscode.window.showErrorMessage('Open a workspace folder (your project root) to build the Docker image.');
-			return;
-		}
+	private async runDockerEngine(): Promise<void> {
 		const term = vscode.window.createTerminal({
-			name: 'RocketRide Docker Build',
-			cwd: root,
+			name: 'RocketRide Engine',
 			hideFromUser: false
 		});
 		term.show();
-		term.sendText('docker build -f docker/Dockerfile.engine -t rocketride-engine .');
-		vscode.window.showInformationMessage('Docker build started in terminal. When it finishes, use "Save image to file" or run the container locally.');
-	}
-
-	private async runDockerSave(): Promise<void> {
-		const root = this.getWorkspaceRoot();
-		if (!root) {
-			vscode.window.showErrorMessage('Open a workspace folder to save the image.');
-			return;
-		}
-		const tarPath = path.join(root, 'rocketride-engine.tar');
-		const term = vscode.window.createTerminal({
-			name: 'RocketRide Docker Save',
-			cwd: root,
-			hideFromUser: false
-		});
-		term.show();
-		term.sendText(`docker save rocketride-engine -o "${tarPath}"`);
-		vscode.window.showInformationMessage(
-			'Saving image in terminal. When done, copy rocketride-engine.tar to your server and run: docker load -i rocketride-engine.tar && docker run -p 8080:8080 rocketride-engine'
-		);
-	}
-
-	private async exportRunScript(): Promise<void> {
-		const folders = vscode.workspace.workspaceFolders;
-		if (!folders || folders.length === 0) {
-			vscode.window.showErrorMessage('Open a workspace folder to create the run script.');
-			return;
-		}
-		const rootUri = folders[0].uri;
-		const runSh = `#!/bin/sh
-# Build and run RocketRide engine on your server (copy this repo to the server first)
-set -e
-docker build -f docker/Dockerfile.engine -t rocketride-engine .
-docker run -p 8080:8080 rocketride-engine
-`;
-		const runPs1 = `# Build and run RocketRide engine on your server (copy this repo to the server first)
-docker build -f docker/Dockerfile.engine -t rocketride-engine .
-docker run -p 8080:8080 rocketride-engine
-`;
-		try {
-			await vscode.workspace.fs.writeFile(
-				vscode.Uri.joinPath(rootUri, 'run-rocketride.sh'),
-				Buffer.from(runSh, 'utf8')
-			);
-			await vscode.workspace.fs.writeFile(
-				vscode.Uri.joinPath(rootUri, 'run-rocketride.ps1'),
-				Buffer.from(runPs1, 'utf8')
-			);
-			vscode.window.showInformationMessage(
-				'Created run-rocketride.sh and run-rocketride.ps1 in your workspace. Copy the repo to your server and run one of them.'
-			);
-		} catch (e) {
-			vscode.window.showErrorMessage(`Failed to create run script: ${String(e)}`);
-		}
+		term.sendText(`docker run --rm -p 5565:5565 ${PageDeployProvider.ENGINE_IMAGE}`);
 	}
 
 	private async sendInit(): Promise<void> {
