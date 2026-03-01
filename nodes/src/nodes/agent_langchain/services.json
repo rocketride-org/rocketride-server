@@ -1,0 +1,66 @@
+{
+	"title": "Agent - LangChain",
+	"protocol": "agent_langchain://",
+	"classType": ["agent", "tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.agent_langchain",
+	"prefix": "agent",
+	"description": [
+		"Single-agent execution using LangChain.",
+		"Can be invoked as a tool (`<nodeId>.run_agent`) for hierarchical agent orchestration."
+	],
+	"icon": "agent_langchain.svg",
+	"invoke": {
+		"llm": {
+			"description": "LLM used by the agent",
+			"min": 1
+		},
+		"tool": {
+			"description": "Tools available to the agent (via control-plane invoke)",
+			"min": 0
+		}
+	},
+	"lanes": {
+		"questions": ["answers"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [{ "lane": "answers" }]
+		}
+	],
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"instructions": ""
+			}
+		}
+	},
+	"fields": {
+		"instructions": {
+			"type": "string",
+			"title": "Instructions",
+			"description": "Optional additional prompting for this agent node. Keep it short and specific.",
+			"format": "textarea"
+		},
+		"agent_langchain.default": { "object": "default", "properties": ["instructions"] },
+		"agent_langchain.profile": {
+			"title": "Profile",
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [{ "value": "default", "properties": ["agent_langchain.default"] }]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Agent - LangChain",
+			"properties": ["instructions"]
+		}
+	]
+}
+
