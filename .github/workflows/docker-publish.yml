@@ -26,14 +26,17 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
-            echo "tag=server-v${{ inputs.version }}" >> $GITHUB_OUTPUT
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "version=${INPUT_VERSION}" >> $GITHUB_OUTPUT
+            echo "tag=server-v${INPUT_VERSION}" >> $GITHUB_OUTPUT
           else
-            TAG="${{ github.event.release.tag_name }}"
-            echo "version=${TAG#server-v}" >> $GITHUB_OUTPUT
-            echo "tag=${TAG}" >> $GITHUB_OUTPUT
+            echo "version=${RELEASE_TAG#server-v}" >> $GITHUB_OUTPUT
+            echo "tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
           fi
 
       - name: Download server artifact
@@ -54,6 +57,11 @@ jobs:
         run: |
           mkdir -p dist/server
           tar xf /tmp/release/rocketride-server-*-linux-x64.tar.gz -C dist/server
+          if [ ! -f dist/server/engine ]; then
+            echo "::error::Engine binary not found after extraction"
+            ls -la dist/server/
+            exit 1
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

@@ -25,7 +25,7 @@
  * Deploy Page Provider
  *
  * Provides a webview panel for the Deploy page: deploy to RocketRide.ai cloud
- * or on-prem using Docker.
+ * or pull and run from GHCR.
  */
 
 import * as vscode from 'vscode';
@@ -76,13 +76,17 @@ export class PageDeployProvider {
 
 		this.webviewPanel.webview.onDidReceiveMessage(
 			async (message: { type: string; text?: string }) => {
-				if (message.type === 'ready') {
-					await this.sendInit();
-				} else if (message.type === 'copyToClipboard' && typeof message.text === 'string') {
-					await vscode.env.clipboard.writeText(message.text);
-					vscode.window.showInformationMessage('Copied to clipboard.');
-				} else if (message.type === 'dockerRun') {
-					await this.runDockerEngine();
+				try {
+					if (message.type === 'ready') {
+						await this.sendInit();
+					} else if (message.type === 'copyToClipboard' && typeof message.text === 'string') {
+						await vscode.env.clipboard.writeText(message.text);
+						vscode.window.showInformationMessage('Copied to clipboard.');
+					} else if (message.type === 'dockerRun') {
+						this.runDockerEngine();
+					}
+				} catch (err) {
+					vscode.window.showErrorMessage(`Deploy action failed: ${err instanceof Error ? err.message : String(err)}`);
 				}
 			},
 			undefined,
@@ -100,13 +104,17 @@ export class PageDeployProvider {
 
 	private static readonly ENGINE_IMAGE = 'ghcr.io/rocketride-org/rocketride-engine:latest';
 
-	private async runDockerEngine(): Promise<void> {
-		const term = vscode.window.createTerminal({
-			name: 'RocketRide Engine',
-			hideFromUser: false
-		});
-		term.show();
-		term.sendText(`docker run --rm -p 5565:5565 ${PageDeployProvider.ENGINE_IMAGE}`);
+	private runDockerEngine(): void {
+		try {
+			const term = vscode.window.createTerminal({
+				name: 'RocketRide Engine',
+				hideFromUser: false
+			});
+			term.show();
+			term.sendText(`docker run --rm -p 5565:5565 ${PageDeployProvider.ENGINE_IMAGE}`);
+		} catch (err) {
+			vscode.window.showErrorMessage(`Failed to start Docker engine: ${err instanceof Error ? err.message : String(err)}`);
+		}
 	}
 
 	private async sendInit(): Promise<void> {
@@ -131,7 +139,8 @@ export class PageDeployProvider {
 			rocketrideLogoDarkUri: logoDarkUri.toString(),
 			rocketrideLogoLightUri: logoLightUri.toString(),
 			dockerIconUri: dockerUri.toString(),
-			onpremIconUri: onpremUri.toString()
+			onpremIconUri: onpremUri.toString(),
+			engineImage: PageDeployProvider.ENGINE_IMAGE
 		});
 	}
 

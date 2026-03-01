@@ -29,7 +29,7 @@ import '../../styles/app.css';
 import './styles.css';
 
 type PageDeployIncomingMessage =
-	| { type: 'init'; rocketrideLogoDarkUri?: string; rocketrideLogoLightUri?: string; dockerIconUri?: string; onpremIconUri?: string };
+	| { type: 'init'; rocketrideLogoDarkUri?: string; rocketrideLogoLightUri?: string; dockerIconUri?: string; onpremIconUri?: string; engineImage?: string };
 
 type PageDeployOutgoingMessage = { type: 'ready' } | { type: 'copyToClipboard'; text: string } | { type: 'dockerRun' };
 
@@ -38,6 +38,8 @@ export const PageDeploy: React.FC = () => {
 	const [logoLightUri, setLogoLightUri] = useState<string | undefined>();
 	const [dockerUri, setDockerUri] = useState<string | undefined>();
 	const [onpremUri, setOnpremUri] = useState<string | undefined>();
+	const [engineImage, setEngineImage] = useState('ghcr.io/rocketride-org/rocketride-engine:latest');
+	const [dockerRunning, setDockerRunning] = useState(false);
 
 	const { sendMessage } = useMessaging<PageDeployOutgoingMessage, PageDeployIncomingMessage>({
 		onMessage: (message) => {
@@ -46,6 +48,7 @@ export const PageDeploy: React.FC = () => {
 				if (message.rocketrideLogoLightUri) setLogoLightUri(message.rocketrideLogoLightUri);
 				if (message.dockerIconUri) setDockerUri(message.dockerIconUri);
 				if (message.onpremIconUri) setOnpremUri(message.onpremIconUri);
+				if (message.engineImage) setEngineImage(message.engineImage);
 			}
 		}
 	});
@@ -82,19 +85,23 @@ export const PageDeploy: React.FC = () => {
 							<button
 								type="button"
 								className="deploy-panel-btn deploy-panel-btn-primary"
-								onClick={() => sendMessage({ type: 'dockerRun' })}
+								disabled={dockerRunning}
+								onClick={() => {
+									setDockerRunning(true);
+									sendMessage({ type: 'dockerRun' });
+								}}
 							>
-								Run engine
+								{dockerRunning ? 'Engine started' : 'Run engine'}
 							</button>
 						</div>
 						<details className="deploy-panel-details">
 							<summary>Show commands</summary>
 							<div className="deploy-panel-commands">
-								<pre className="deploy-panel-code"><code>{`docker run -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest`}</code></pre>
+								<pre className="deploy-panel-code"><code>{`docker run --rm -p 5565:5565 ${engineImage}`}</code></pre>
 								<button
 									type="button"
 									className="deploy-panel-copy"
-									onClick={() => sendMessage({ type: 'copyToClipboard', text: 'docker run -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest' })}
+									onClick={() => sendMessage({ type: 'copyToClipboard', text: `docker run --rm -p 5565:5565 ${engineImage}` })}
 								>
 									Copy run command
 								</button>
