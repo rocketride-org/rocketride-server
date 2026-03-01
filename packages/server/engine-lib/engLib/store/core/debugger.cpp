@@ -47,7 +47,8 @@ std::unordered_map<std::string, ServiceEndpointWeak>
  *
  * @param pInstance Pointer to the service instance being entered.
  */
-void Debugger::debugEnter(IServiceFilterInstance* pInstance) noexcept {
+void Debugger::debugEnter(IServiceFilterInstance* pInstance,
+                          const json::Value& trace) noexcept {
     m_recurseLevel++;  // Track depth of recursive calls
 
     if (::engine::config::monitor()->isAppMonitor()) {
@@ -55,7 +56,8 @@ void Debugger::debugEnter(IServiceFilterInstance* pInstance) noexcept {
         StackText msg;
         _tsbo(msg, {Format::HEX, {}, '*'}, "ENTER", pInstance->pipeId,
               pInstance->endpoint->getPipeCount(),
-              pInstance->pipeType.logicalType);
+              pInstance->pipeType.logicalType, 
+              trace.stringify());
 
         ::engine::config::monitor()->other("DBG", msg);
     }
@@ -68,7 +70,8 @@ void Debugger::debugEnter(IServiceFilterInstance* pInstance) noexcept {
  *
  * @param pInstance Pointer to the service instance being exited.
  */
-void Debugger::debugLeave(IServiceFilterInstance* pInstance) noexcept {
+void Debugger::debugLeave(IServiceFilterInstance* pInstance,
+                          const json::Value& trace) noexcept {
     m_recurseLevel--;
 
     if (::engine::config::monitor()->isAppMonitor()) {
@@ -76,7 +79,8 @@ void Debugger::debugLeave(IServiceFilterInstance* pInstance) noexcept {
         StackText msg;
         _tsbo(msg, {Format::HEX, {}, '*'}, "LEAVE", pInstance->pipeId,
               pInstance->endpoint->getPipeCount(),
-              pInstance->pipeType.logicalType);
+              pInstance->pipeType.logicalType, 
+              trace.stringify());
 
         ::engine::config::monitor()->other("DBG", msg);
     }

@@ -237,7 +237,7 @@ class Task(DAPBase):
 
         # Execution configuration
         self._threads = launch_args.get('threads', CONST_DEFAULT_MAX_THREADS)
-        self._trace = launch_args.get('trace', None)
+        self._pipelineTraceLevel = launch_args.get('pipelineTraceLevel', None)
         self._engine_process: Optional[asyncio.subprocess.Process] = None
 
         # Status tracking
@@ -371,19 +371,22 @@ class Task(DAPBase):
 
         os.makedirs(data_path, exist_ok=True)
 
-        return {
-            'config': {
-                'keystore': 'kvsfile://data/keystore.json',
-                'pipeline': {
-                    'version': self._pipeline.get('version', 1),
-                    'source': self._pipeline.get('source'),
-                    'project_id': self._pipeline.get('project_id'),
-                    'name': self._pipeline.get('name'),
-                    'description': self._pipeline.get('description'),
-                    'components': self._pipeline.get('components', []),
-                },
-                'threadCount': self._threads,
+        config = {
+            'keystore': 'kvsfile://data/keystore.json',
+            'pipeline': {
+                'version': self._pipeline.get('version', 1),
+                'source': self._pipeline.get('source'),
+                'project_id': self._pipeline.get('project_id'),
+                'name': self._pipeline.get('name'),
+                'description': self._pipeline.get('description'),
+                'components': self._pipeline.get('components', []),
             },
+            'threadCount': self._threads,
+            'pipelineTraceLevel': self._pipelineTraceLevel or None
+        }
+
+        return {
+            'config': config,
             'paths': {'base': data_path},
             'nodeId': '9a0b9f66-f693-4b3b-a85b-bb810261c26e',
             'taskId': self.token,
@@ -1434,9 +1437,6 @@ class Task(DAPBase):
             modelserver = self._server._config.get('modelserver')
             if modelserver:
                 child_args.append(f'--modelserver={modelserver}')
-
-            if self._trace:
-                child_args.append(f'--trace={self._trace}')
 
             user_args = self._launch_args.get('args', [])
             child_args.extend(user_args)

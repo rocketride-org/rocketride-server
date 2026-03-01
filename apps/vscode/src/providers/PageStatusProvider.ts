@@ -235,7 +235,7 @@ export class PageStatusProvider {
 			await this.connectionManager.request('rrext_monitor', {
 				projectId: projectId,
 				source: sourceId,
-				types: ['summary']
+				types: ['summary', 'flow']
 			});
 
 			// Mark as monitoring
@@ -412,6 +412,12 @@ export class PageStatusProvider {
 	 */
 	private async handlePanelDisposal(projectId: string, sourceId: string): Promise<void> {
 		const key = `${projectId}.${sourceId}`;
+
+		// Mark as disposed immediately to prevent events from reaching the webview
+		const viewState = this.webviewPanels.get(key);
+		if (viewState) {
+			viewState.isDisposed = true;
+		}
 
 		// Stop monitoring before cleanup
 		try {
@@ -777,28 +783,23 @@ export class PageStatusProvider {
 					// Read the pipeline file
 					const fileContent = await vscode.workspace.fs.readFile(viewState.fileUri);
 
-					// Get it into a a string
+					// Get it into a string
 					const pipelineText = Buffer.from(fileContent).toString('utf8');
 
 					// Convert to json
 					const pipelineJson = JSON.parse(pipelineText);
 
-					// Substitute and .env settings
+					// Substitute .env settings
 					const pipelineTransformed = ConfigManager.getInstance().substituteEnvVariables(pipelineJson);
 
 					// Use DAP command to execute pipeline without debugging
 					try {
-						const info = await this.connectionManager.request('execute', {
+						await this.connectionManager.request('execute', {
 							projectId: viewState.projectId,
 							source: viewState.sourceId,
 							pipeline: pipelineTransformed,
-							args: [
-								'--trace=servicePython,debugOut,debugProtocol'
-							]
-						}, '*');
-
-						console.log(info);
-
+							pipelineTraceLevel: 'full'
+						});
 					} catch (error: unknown) {
 						this.logger.error(`Unable to execute pipeline: ${error}`);
 						vscode.window.showErrorMessage(String(error));

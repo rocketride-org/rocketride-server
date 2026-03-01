@@ -91,8 +91,8 @@ class Embedding(EmbeddingBase):
         debug(f'    Embedding size    : {self._vectorSize}')
         debug(f'    Embedding tokens  : {self._tokenSize}')
 
-        # Output monitor status to show model loading finished
-        monitorStatus('Loading model complete', self._model)
+        # Clear the output, we are done loading
+        monitorStatus('')
 
     def getVectorSize(self) -> int:
         """Return the vector size of the embedding module."""

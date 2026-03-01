@@ -172,5 +172,11 @@ struct IServiceConfig {
     pipeline::PipelineConfig pipeline;
 
     bool flatten = false;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Pipeline trace level: 0=none, 1=metadata, 2=summary, 3=full
+    //-----------------------------------------------------------------
+    int pipelineTraceLevel = 0;
 };
 }  // namespace engine::store

@@ -22,7 +22,6 @@
 // =============================================================================
 
 #include <engLib/eng.h>
-
 #include <filesystem>
 #ifdef _WIN32
 #include <fcntl.h>  // for _O_RDONLY
@@ -112,7 +111,7 @@ Error setPaths() {
 
         for (auto devRoot : {"../..", "../../.."}) {
             auto pkgRoot = (root / devRoot / "packages").resolve();
-            for (auto pkgPath : {"server/engine-lib/rocketride-python/lib",
+            for (auto pkgPath : {"server/engine-lib/rocketlib-python/lib",
                                  "client-python/src", "ai/src"})
                 paths.push_back((pkgRoot / pkgPath).resolve().str());
 

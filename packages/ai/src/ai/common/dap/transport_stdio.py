@@ -701,7 +701,7 @@ class TransportStdio(TransportBase):
         # Parse debug command messages: '>DBG*operation*id*total_pipes*pipe_id'
         elif message.startswith('>DBG*'):
             try:
-                _, op, id, total_pipes, pipe_id = message.split('*', 4)
+                _, op, id, total_pipes, pipe_id, trace = message.split('*', 5)
                 await self._transport_receive(
                     {
                         'type': 'event',
@@ -711,6 +711,7 @@ class TransportStdio(TransportBase):
                             'id': int(id, 16),
                             'total_pipes': int(total_pipes, 16),
                             'pipe_id': pipe_id,
+                            'trace': trace
                         },
                     }
                 )

@@ -136,7 +136,7 @@ TEST_CASE("PipelineConfig") {
         SECTION("multiple") {
             pipeline["components"].append(R"({
                 "id": "source_2",
-                "provider": "smb",
+                "provider": "filesys",
                 "config": {}
             })"_json);
 
@@ -511,7 +511,7 @@ TEST_CASE("PipelineConfig") {
     SECTION("chain") {
         pipeline["components"].append(R"({
             "id": "source_2",
-            "provider": "smb",
+            "provider": "filesys",
             "config": {}
         })"_json);
 
