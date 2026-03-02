@@ -88,30 +88,22 @@ class CrewDriver(AgentBase):
         from pydantic import BaseModel, ConfigDict, Field
 
         class _ToolInput(BaseModel):
-            """
-            Accept arbitrary tool args through a stable `input` field.
-
-            This keeps CrewAI tool execution robust even when the framework
-            passes arguments via `input=...` or via extra kwargs.
-            """
-
             input: Any = Field(default=None, description='Tool input payload')
             model_config = ConfigDict(extra='allow')
 
-        class HostTool(BaseTool):  # type: ignore[misc]
+        class HostTool(BaseTool):
             name: str
             description: str
             args_schema: type[BaseModel] = _ToolInput
 
-            def _run(self, input: Any = None, **kwargs: Any) -> str:  # noqa: ANN401, A002
-                tool_name = _safe_str(getattr(self, 'name', ''))
+            def _run(self, input: Any = None, **kwargs: Any) -> str:
                 try:
-                    out = invoke_tool(tool_name, input=input, kwargs=kwargs)
+                    out = invoke_tool(self.name, input=input, kwargs=kwargs)
                 except Exception as e:
                     out = {'error': str(e), 'type': type(e).__name__}
 
                 try:
-                    log_tool_call(tool_name=tool_name, input={'input': input, **kwargs}, output=out)
+                    log_tool_call(tool_name=self.name, input={'input': input, **kwargs}, output=out)
                 except Exception:
                     pass
 
@@ -120,28 +112,12 @@ class CrewDriver(AgentBase):
                 except Exception:
                     return _safe_str(out)
 
-        tools: List[Any] = []
+        tools = []
         for td in tool_descriptors:
-            name = td.get('name')
-            if not isinstance(name, str) or not name.strip():
-                continue
-            desc = td.get('description') if isinstance(td.get('description'), str) else f'Invoke host tool: {name}'
-            input_schema = td.get('input_schema')
-            if isinstance(input_schema, dict):
-                try:
-                    schema_text = json.dumps(input_schema, ensure_ascii=False)
-                except Exception:
-                    schema_text = ''
-                if schema_text:
-                    desc = f'{desc}\n\nTool input schema (JSON): {schema_text}'
-
-            tool = HostTool(name=name, description=desc)
-            # Keep the real input schema available for prompt/debug paths if needed.
-            try:
-                setattr(tool, '_rr_input_schema', input_schema)
-            except Exception:
-                pass
-            tools.append(tool)
+            name = td.get('name', '') if isinstance(td, dict) else getattr(td, 'name', '')
+            desc = td.get('description', '') if isinstance(td, dict) else getattr(td, 'description', '')
+            if name:
+                tools.append(HostTool(name=name, description=desc or f'Invoke host tool: {name}'))
         return tools
 
     def _run(
@@ -203,6 +179,8 @@ class CrewDriver(AgentBase):
             desc_parts.extend(['', 'Additional instructions:', self._instructions])
         desc = '\n'.join(desc_parts).strip()
 
+        desc = desc.replace('{', '{{').replace('}', '}}')
+
         task_obj = Task(
             description=desc,
             expected_output='A helpful, accurate response.',
@@ -211,7 +189,7 @@ class CrewDriver(AgentBase):
         )
 
         crew = Crew(agents=[agent_obj], tasks=[task_obj], process=self._process)
-        result = crew.kickoff(inputs={'input': agent_input.prompt or ''})
+        result = crew.kickoff()
 
         final_text = ''
         if hasattr(result, 'raw'):
