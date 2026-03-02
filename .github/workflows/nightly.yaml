@@ -255,7 +255,9 @@ jobs:
           tag_name: ${{ matrix.tag_name }}
           name: RocketRide ${{ matrix.name }} v${{ matrix.version }} (prerelease)
           prerelease: true
-          generate_release_notes: true
+          generate_release_notes: false
+          body: |
+            Automated prerelease from `develop`.
           files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
