@@ -165,8 +165,8 @@ class AgentBase(ABC):
                 'agent base emitting answer'
                 f' run_id={answer_payload.get("meta", {}).get("run_id")} framework={answer_payload.get("meta", {}).get("framework")}'
             )
-            answer = Answer(expectJson=True)
-            answer.setAnswer(answer_payload)
+            answer = Answer(expectJson=False)
+            answer.setAnswer(answer_payload.get('content', ''))
             pSelf.instance.writeAnswers(answer)
 
         return answer_payload
