@@ -1,7 +1,0 @@
-{
-    "name": "@rocketride/tika",
-    "version": "3.1.0",
-    "description": "RocketRide Java/Tika - Apache Tika integration for document parsing",
-    "private": true,
-    "license": "MIT"
-}

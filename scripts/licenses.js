@@ -341,7 +341,6 @@ function collectProjectLicenses() {
     const packageDirs = [
         ...findFiles(path.join(PROJECT_ROOT, 'packages'), 'package.json'),
         ...findFiles(path.join(PROJECT_ROOT, 'apps'), 'package.json'),
-        path.join(PROJECT_ROOT, 'nodes', 'package.json'),
     ];
     
     for (const pkgJsonPath of packageDirs) {

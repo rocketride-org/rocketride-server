@@ -1,7 +1,0 @@
-{
-    "name": "@rocketride/nodes",
-    "version": "3.1.0",
-    "description": "RocketRide Node modules - Data source integrations",
-    "private": true,
-    "license": "MIT"
-}
