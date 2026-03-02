@@ -36,6 +36,15 @@ class IInstance(IInstanceBase):
     text: str = ''
     image = bytearray()
 
+    def _ensure_response(self) -> bool:
+        """Ensure currentObject and its response dict are available. Returns False if not."""
+        if self.instance.currentObject is None:
+            debug('response node: currentObject is None (object may have been closed); skipping write')
+            return False
+        if self.instance.currentObject.response is None:
+            self.instance.currentObject.response = {}
+        return True
+
     def _getkey(self, type: str):
         # Allow the key to be overriden by
         #   connConfig: {
@@ -84,6 +93,8 @@ class IInstance(IInstanceBase):
 
         This method is called when processing of the current object is complete.
         """
+        if not self._ensure_response():
+            return
 
         def deep_merge_dicts(src: dict, dest: dict):
             for key, value in src.items():
@@ -144,7 +155,9 @@ class IInstance(IInstanceBase):
         self.text += text + '\n\n'
 
     def writeTable(self, table: str):
-        # Get the key to write to (official lane name is "table")
+        if not self._ensure_response():
+            return
+
         key = self._getkey('table')
 
         # If it isn't there, create it
@@ -155,7 +168,9 @@ class IInstance(IInstanceBase):
         self.instance.currentObject.response[key].append(table)
 
     def writeDocuments(self, documents: List[Doc]):
-        # Get the key to write to
+        if not self._ensure_response():
+            return
+
         key = self._getkey('documents')
 
         # If it isn't there, create it
@@ -167,7 +182,9 @@ class IInstance(IInstanceBase):
             self.instance.currentObject.response[key].append(document.toDict())
 
     def writeQuestions(self, questions: Question):
-        # Get the key to write to
+        if not self._ensure_response():
+            return
+
         key = self._getkey('questions')
 
         # If it isn't there, create it
@@ -178,7 +195,9 @@ class IInstance(IInstanceBase):
         self.instance.currentObject.response[key].append(questions.model_dump())
 
     def writeAnswers(self, answer: Answer):
-        # Get the key to write to
+        if not self._ensure_response():
+            return
+
         key = self._getkey('answers')
 
         # If it isn't there, create it
@@ -192,7 +211,9 @@ class IInstance(IInstanceBase):
             self.instance.currentObject.response[key].append(answer.getText())
 
     def writeAudio(self, aviAction: int, mimeType: str, data: bytes):
-        # Get the key to write to
+        if not self._ensure_response():
+            return
+
         key = self._getkey('audio')
 
         # If it isn't there, create it
@@ -206,7 +227,9 @@ class IInstance(IInstanceBase):
         self.instance.currentObject.response[key].append(info)
 
     def writeVideo(self, aviAction: int, mimeType: str, data: bytes):
-        # Get the key to write to
+        if not self._ensure_response():
+            return
+
         key = self._getkey('video')
 
         # If it isn't there, create it

@@ -1,0 +1,184 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2024 RocketRide Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+"""
+HTTP request execution engine.
+
+Accepts a fully-specified request descriptor (URL, method, headers, auth, body,
+params) and returns a structured response dict.  Uses the ``requests`` library.
+"""
+
+from __future__ import annotations
+
+import re
+import time
+from typing import Any, Dict, Optional
+
+import requests
+from requests.auth import HTTPBasicAuth
+
+
+def execute_request(
+    *,
+    url: str,
+    method: str,
+    query_params: Optional[Dict[str, str]] = None,
+    path_params: Optional[Dict[str, str]] = None,
+    headers: Optional[Dict[str, str]] = None,
+    auth: Optional[Dict[str, Any]] = None,
+    body: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Execute an HTTP request and return a structured response.
+
+    Raises ``requests.RequestException`` on transport-level failures.
+    """
+
+    resolved_url = _resolve_path_params(url, path_params)
+
+    req_headers = dict(headers or {})
+    req_auth = None
+    extra_params: Dict[str, str] = {}
+
+    _apply_auth(auth, req_headers, extra_params, req_auth_out := [None])
+    req_auth = req_auth_out[0]
+
+    merged_params = dict(query_params or {})
+    merged_params.update(extra_params)
+
+    req_kwargs: Dict[str, Any] = {
+        'method': method.upper(),
+        'url': resolved_url,
+        'headers': req_headers,
+        'params': merged_params or None,
+        'auth': req_auth,
+    }
+
+    _apply_body(body, req_headers, req_kwargs)
+
+    start = time.monotonic()
+    resp = requests.request(**req_kwargs)
+    elapsed_ms = round((time.monotonic() - start) * 1000)
+
+    return _build_response(resp, elapsed_ms)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_path_params(url: str, path_params: Optional[Dict[str, str]]) -> str:
+    """Replace ``:name`` placeholders in the URL with values from *path_params*."""
+    if not path_params:
+        return url
+    resolved = url
+    for key, value in path_params.items():
+        resolved = re.sub(rf':{re.escape(key)}\b', str(value), resolved)
+    return resolved
+
+
+def _apply_auth(
+    auth: Optional[Dict[str, Any]],
+    headers: Dict[str, str],
+    extra_params: Dict[str, str],
+    req_auth_out: list,
+) -> None:
+    """Mutate *headers* / *extra_params* / *req_auth_out* based on auth config."""
+    if not auth:
+        return
+    auth_type = (auth.get('type') or 'none').strip().lower()
+    if auth_type == 'none':
+        return
+
+    if auth_type == 'basic':
+        basic = auth.get('basic') or {}
+        req_auth_out[0] = HTTPBasicAuth(
+            basic.get('username', ''),
+            basic.get('password', ''),
+        )
+
+    elif auth_type == 'bearer':
+        bearer = auth.get('bearer') or {}
+        token = bearer.get('token', '')
+        headers['Authorization'] = f'Bearer {token}'
+
+    elif auth_type == 'api_key':
+        api_key = auth.get('api_key') or {}
+        key = api_key.get('key', '')
+        value = api_key.get('value', '')
+        add_to = (api_key.get('add_to') or 'header').strip().lower()
+        if add_to == 'query_param':
+            extra_params[key] = value
+        else:
+            headers[key] = value
+
+
+def _apply_body(
+    body: Optional[Dict[str, Any]],
+    headers: Dict[str, str],
+    req_kwargs: Dict[str, Any],
+) -> None:
+    """Populate *req_kwargs* with the appropriate body payload."""
+    if not body:
+        return
+    body_type = (body.get('type') or 'none').strip().lower()
+    if body_type == 'none':
+        return
+
+    if body_type == 'raw':
+        raw = body.get('raw') or {}
+        content = raw.get('content', '')
+        content_type = raw.get('content_type', 'application/json')
+        headers.setdefault('Content-Type', content_type)
+        req_kwargs['data'] = content
+
+    elif body_type == 'form_data':
+        form_data = body.get('form_data') or {}
+        # multipart/form-data: pass each field as a tuple so ``requests``
+        # builds the multipart envelope automatically.
+        req_kwargs['files'] = {k: (None, v) for k, v in form_data.items()}
+
+    elif body_type == 'x_www_form_urlencoded':
+        urlencoded = body.get('urlencoded') or {}
+        req_kwargs['data'] = urlencoded
+
+
+def _build_response(resp: requests.Response, elapsed_ms: int) -> Dict[str, Any]:
+    """Convert a ``requests.Response`` into a structured dict for the agent."""
+    content_type = resp.headers.get('Content-Type', '')
+
+    parsed_json = None
+    if 'json' in content_type or 'javascript' in content_type:
+        try:
+            parsed_json = resp.json()
+        except Exception:
+            pass
+
+    return {
+        'status_code': resp.status_code,
+        'status_text': resp.reason or '',
+        'headers': dict(resp.headers),
+        'body': resp.text,
+        'json': parsed_json,
+        'elapsed_ms': elapsed_ms,
+        'content_type': content_type,
+    }
