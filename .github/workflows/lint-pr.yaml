@@ -4,6 +4,10 @@ on:
   pull_request_target:
     types: [opened, reopened, edited, synchronize]
 
+concurrency:
+  group: ${{ github.event.pull_request.head.ref || github.run_id }}-${{ github.workflow }}
+  cancel-in-progress: true
+
 jobs:
   validate-pr-title:
     name: Validate PR title

@@ -3,6 +3,17 @@ name: Dependency Review
 on:
   pull_request:
     branches: [develop, main, 'release/**']
+    paths:
+      - '**/package.json'
+      - '**/pnpm-lock.yaml'
+      - '**/pyproject.toml'
+      - '**/requirements*.txt'
+      - 'vcpkg.json'
+      - 'vcpkg-configuration.json'
+
+concurrency:
+  group: ${{ github.head_ref || github.run_id }}-${{ github.workflow }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

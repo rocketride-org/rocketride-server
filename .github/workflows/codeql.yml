@@ -3,10 +3,32 @@ name: CodeQL
 on:
   push:
     branches: [develop, main, 'release/**']
+    paths:
+      - '**.ts'
+      - '**.tsx'
+      - '**.js'
+      - '**.mjs'
+      - '**.py'
+      - 'packages/**'
+      - 'apps/**'
+      - 'nodes/**'
   pull_request:
     branches: [develop, main, 'release/**']
+    paths:
+      - '**.ts'
+      - '**.tsx'
+      - '**.js'
+      - '**.mjs'
+      - '**.py'
+      - 'packages/**'
+      - 'apps/**'
+      - 'nodes/**'
   schedule:
     - cron: '17 4 * * 1'  # Weekly Monday 4:17 UTC
+
+concurrency:
+  group: ${{ github.head_ref || github.run_id }}-${{ github.workflow }}
+  cancel-in-progress: true
 
 permissions:
   actions: read
