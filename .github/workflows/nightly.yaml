@@ -33,7 +33,7 @@ jobs:
             echo "Manual trigger — always run"
             exit 0
           fi
-          LAST_TAG=$(git tag -l 'nightly-*' --sort=-creatordate | head -n1)
+          LAST_TAG=$(git tag -l '*-prerelease' --sort=-creatordate | head -n1)
           if [ -z "$LAST_TAG" ]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
             echo "No previous nightly tag — run"
@@ -59,7 +59,6 @@ jobs:
       client_mcp_version: ${{ steps.init.outputs.client_mcp_version }}
       client_python_version: ${{ steps.init.outputs.client_python_version }}
       client_typescript_version: ${{ steps.init.outputs.client_typescript_version }}
-      nightly_tag: ${{ steps.init.outputs.nightly_tag }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -71,7 +70,6 @@ jobs:
           echo "client_mcp_version=$(yq -r '.project.version' packages/client-mcp/pyproject.toml)" >> $GITHUB_OUTPUT
           echo "client_python_version=$(yq -r '.project.version' packages/client-python/pyproject.toml)" >> $GITHUB_OUTPUT
           echo "client_typescript_version=$(jq -r '.version' packages/client-typescript/package.json)" >> $GITHUB_OUTPUT
-          echo "nightly_tag=nightly-$(date -u +%Y%m%d)" >> $GITHUB_OUTPUT
 
           cat $GITHUB_OUTPUT
 
@@ -196,51 +194,68 @@ jobs:
           if-no-files-found: error
 
   prerelease:
-    name: Create prerelease
+    name: Prerelease / ${{ matrix.name }}
     needs: [init, build]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - type: server
+            name: Server
+            version: ${{ needs.init.outputs.server_version }}
+            tag_name: server-v${{ needs.init.outputs.server_version }}-prerelease
+            download_pattern: server-artifacts-*
+          - type: vscode
+            name: VS Code Extension
+            version: ${{ needs.init.outputs.vscode_version }}
+            tag_name: vscode-v${{ needs.init.outputs.vscode_version }}-prerelease
+            download_pattern: vscode-artifacts
+          - type: client-mcp
+            name: MCP Client
+            version: ${{ needs.init.outputs.client_mcp_version }}
+            tag_name: client-mcp-v${{ needs.init.outputs.client_mcp_version }}-prerelease
+            download_pattern: mcp-client-artifacts
+          - type: client-python
+            name: Python Client
+            version: ${{ needs.init.outputs.client_python_version }}
+            tag_name: client-python-v${{ needs.init.outputs.client_python_version }}-prerelease
+            download_pattern: python-client-artifacts
+          - type: client-typescript
+            name: TypeScript Client
+            version: ${{ needs.init.outputs.client_typescript_version }}
+            tag_name: client-typescript-v${{ needs.init.outputs.client_typescript_version }}-prerelease
+            download_pattern: typescript-client-artifacts
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: release-assets
+          pattern: ${{ matrix.download_pattern }}
           merge-multiple: true
+          path: release-assets
 
       - name: List artifacts
         run: find release-assets -type f | sort
 
-      - name: Create or update nightly tag
+      - name: Create or update prerelease tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -f "${{ needs.init.outputs.nightly_tag }}"
-          git push -f origin "${{ needs.init.outputs.nightly_tag }}"
+          git tag -f "${{ matrix.tag_name }}"
+          git push -f origin "${{ matrix.tag_name }}"
 
       - name: Create GitHub prerelease
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.init.outputs.nightly_tag }}
-          name: >-
-            Nightly — Server ${{ needs.init.outputs.server_version }},
-            TS Client ${{ needs.init.outputs.client_typescript_version }},
-            Python Client ${{ needs.init.outputs.client_python_version }},
-            MCP Client ${{ needs.init.outputs.client_mcp_version }},
-            VS Code ${{ needs.init.outputs.vscode_version }}
+          tag_name: ${{ matrix.tag_name }}
+          name: RocketRide ${{ matrix.name }} v${{ matrix.version }} (prerelease)
           prerelease: true
-          generate_release_notes: false
-          body: |
-            Automated nightly prerelease from `develop`.
-
-            | Module | Version |
-            |--------|---------|
-            | Server | ${{ needs.init.outputs.server_version }} |
-            | TypeScript Client | ${{ needs.init.outputs.client_typescript_version }} |
-            | Python Client | ${{ needs.init.outputs.client_python_version }} |
-            | MCP Client | ${{ needs.init.outputs.client_mcp_version }} |
-            | VS Code Extension | ${{ needs.init.outputs.vscode_version }} |
+          generate_release_notes: true
           files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
