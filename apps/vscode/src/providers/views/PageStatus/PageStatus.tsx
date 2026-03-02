@@ -431,22 +431,38 @@ export const PageStatus: React.FC = () => {
 				</div>
 			</div>
 
-			{/* Tab bar — outside the box, content boxed by .tab-content CSS */}
+			{/* Tab bar — outside the box, content boxed by .tab-content CSS. All panels always mounted so Performance Metrics state is preserved on tab switch. */}
 			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab}>
-				{activeTab === 'status' && (
+				<div
+					className={activeTab === 'status' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
+					role="tabpanel"
+					aria-hidden={activeTab !== 'status'}
+				>
 					<StatusSection taskStatus={taskStatus} currentElapsed={currentElapsed} />
-				)}
-				{activeTab === 'tokens' && (
+				</div>
+				<div
+					className={activeTab === 'tokens' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
+					role="tabpanel"
+					aria-hidden={activeTab !== 'tokens'}
+				>
 					<TokenSection taskStatus={taskStatus} />
-				)}
-				{activeTab === 'flow' && (
+				</div>
+				<div
+					className={activeTab === 'flow' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
+					role="tabpanel"
+					aria-hidden={activeTab !== 'flow'}
+				>
 					<PipelineFlowSection
 						taskStatus={taskStatus}
 						viewMode={viewMode}
 						onViewModeChange={handleViewModeChange}
 					/>
-				)}
-				{activeTab === 'trace' && (
+				</div>
+				<div
+					className={activeTab === 'trace' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
+					role="tabpanel"
+					aria-hidden={activeTab !== 'trace'}
+				>
 					<TraceSection
 						traceLevel={traceLevel}
 						onTraceLevelChange={setTraceLevel}
@@ -461,25 +477,27 @@ export const PageStatus: React.FC = () => {
 							setTraceRows([]);
 						}}
 					/>
-				)}
-				{activeTab === 'errors' && (
-					<>
-						{taskStatus && taskStatus.errors.length > 0 && (
-							<ErrWarnSection title="Errors" items={taskStatus.errors} type="error" />
-						)}
-						{taskStatus && taskStatus.warnings.length > 0 && (
-							<ErrWarnSection title="Warnings" items={taskStatus.warnings} type="warning" />
-						)}
-						{(!taskStatus || (taskStatus.errors.length === 0 && taskStatus.warnings.length === 0)) && (
-							<section className="status-section">
-								<header className="section-header">Errors &amp; Warnings</header>
-								<div className="section-content">
-									<div className="no-data">No errors or warnings</div>
-								</div>
-							</section>
-						)}
-					</>
-				)}
+				</div>
+				<div
+					className={activeTab === 'errors' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
+					role="tabpanel"
+					aria-hidden={activeTab !== 'errors'}
+				>
+					{taskStatus && taskStatus.errors.length > 0 && (
+						<ErrWarnSection title="Errors" items={taskStatus.errors} type="error" />
+					)}
+					{taskStatus && taskStatus.warnings.length > 0 && (
+						<ErrWarnSection title="Warnings" items={taskStatus.warnings} type="warning" />
+					)}
+					{(!taskStatus || (taskStatus.errors.length === 0 && taskStatus.warnings.length === 0)) && (
+						<section className="status-section">
+							<header className="section-header">Errors &amp; Warnings</header>
+							<div className="section-content">
+								<div className="no-data">No errors or warnings</div>
+							</div>
+						</section>
+					)}
+				</div>
 			</TabPanel>
 
 			{/* Endpoint Info Modal */}
