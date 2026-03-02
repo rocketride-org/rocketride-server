@@ -46,11 +46,17 @@ class IGlobal(IGlobalBase):
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
-        from .detector import ObjectDetector
+        try:
+            print(f'[OBJDET] beginGlobal: loading detector, model={self.config.get("detection_model", "default")}', flush=True)
+            from .detector import ObjectDetector
 
-        debug(f'    Loading object detection model: {self.config.get("detection_model", "default")}')
-        self.detector = ObjectDetector(self.config)
-        debug('    Object detection model loaded successfully')
+            self.detector = ObjectDetector(self.config)
+            print('[OBJDET] beginGlobal: detector loaded OK', flush=True)
+        except Exception as e:
+            print(f'[OBJDET] beginGlobal FAILED: {e}', flush=True)
+            import traceback
+            traceback.print_exc()
+            raise
 
     def endGlobal(self):
         self.detector = None

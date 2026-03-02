@@ -31,11 +31,10 @@ individual video clips using stream-copy for speed.
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from typing import List
+from typing import List, TYPE_CHECKING
 
-import imageio_ffmpeg as ffmpeg
-
-from .segment_tracker import Segment
+if TYPE_CHECKING:
+    from .segment_tracker import Segment
 
 
 @dataclass
@@ -77,6 +76,9 @@ def extract_clips(
         List of :class:`ClipInfo` with paths to temp clip files.
         Caller is responsible for deleting the files after use.
     """
+    import imageio_ffmpeg as ffmpeg
+    from .segment_tracker import Segment  # noqa: F811
+
     ffexec = ffmpeg.get_ffmpeg_exe()
     clips: List[ClipInfo] = []
 

@@ -69,10 +69,26 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"_source": [
+		"video": [
 			"video", "table"
 		]
 	},
+	"input": [
+		{
+			"lane": "video",
+			"description": "Video to process for object detection.",
+			"output": [
+				{
+					"lane": "video",
+					"description": "Trimmed video clips containing detected objects."
+				},
+				{
+					"lane": "table",
+					"description": "Detection metadata for each extracted clip."
+				}
+			]
+		}
+	],
 	//
 	//	Optional:
 	//		Profile section are configuration options used by the driver
@@ -145,13 +161,6 @@
 			"description": "Upload a reference image to match against detected objects using CLIP similarity. Leave empty to skip reference matching.",
 			"ui:options:accept": "image/*"
 		},
-		"objdet.source_video": {
-			"type": "string",
-			"format": "data-url",
-			"title": "Source video",
-			"description": "Upload a video file to process. Used when no upstream video lane is connected.",
-			"ui:options:accept": "video/*"
-		},
 		"objdet.min_confidence": {
 			"type": "number",
 			"title": "Minimum detection confidence",
@@ -220,7 +229,6 @@
 		"objdet.detr": {
 			"object": "detr",
 			"properties": [
-				"objdet.source_video",
 				"objdet.reference_image",
 				"objdet.class_allowlist",
 				"objdet.min_confidence",
@@ -236,7 +244,6 @@
 		"objdet.yolos-tiny": {
 			"object": "yolos-tiny",
 			"properties": [
-				"objdet.source_video",
 				"objdet.reference_image",
 				"objdet.class_allowlist",
 				"objdet.min_confidence",
@@ -253,7 +260,6 @@
 			"object": "custom",
 			"properties": [
 				"objdet.detection_model",
-				"objdet.source_video",
 				"objdet.reference_image",
 				"objdet.class_allowlist",
 				"objdet.min_confidence",

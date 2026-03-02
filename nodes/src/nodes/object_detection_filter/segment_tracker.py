@@ -29,9 +29,17 @@ into contiguous segments that later become clip windows.
 """
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
-from .detector import Detection
+
+@dataclass
+class Detection:
+    """A single object detection result with optional reference similarity."""
+
+    label: str
+    score: float
+    box: Dict[str, float]
+    similarity: float = 0.0
 
 
 @dataclass
