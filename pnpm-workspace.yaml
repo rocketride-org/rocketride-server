@@ -18,32 +18,17 @@ allowedDeprecatedVersions:
   whatwg-encoding: "*"
 
 packages:
-  # Core library packages
-  - 'packages/server/engine-core'
-  - 'packages/server/engine-lib'
-  
-  # Node packages (data source integrations)
-  - 'nodes'
-  
-  # AI/ML modules
-  - 'packages/ai'
-  
   # Shared UI components
   - 'packages/shared-ui'
-  
+
   # Client libraries
-  - 'packages/client-python'
   - 'packages/client-typescript'
-  - 'packages/client-mcp'
-  
-  # Java/Tika integration
-  - 'packages/tika'
-  
+
   # Applications
   - 'apps/chat-ui'
   - 'apps/dropper-ui'
   - 'apps/vscode'
-  
+
   # Examples
   - 'examples/*'
 
