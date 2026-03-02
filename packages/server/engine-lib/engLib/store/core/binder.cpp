@@ -26,7 +26,7 @@
 namespace engine::store {
 
 /**
- * @brief Returns true if we are running a pipeling task
+ * @brief Returns true if we are running a pipeline task
  */
 bool Binder::isPipeline() noexcept {
     return m_pInstance->endpoint->isPipeline();
@@ -397,7 +397,7 @@ Error Binder::writeQuestions(const pybind11::object &question) noexcept {
 
     if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::FULL) {
         engine::python::LockPython lock;
-        data["questions"] = engine::python::pyjson::dictToJson(question);
+        data["questions"] = engine::python::pyjson::dictToJson(question.attr("model_dump")());
     }
     
     return callMethods(this, "questions", call, data);
@@ -417,7 +417,7 @@ Error Binder::writeAnswers(const pybind11::object &answers) noexcept {
 
     if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::FULL) {
         engine::python::LockPython lock;
-        data["answers"] = engine::python::pyjson::dictToJson(answers);
+        data["answers"] = engine::python::pyjson::dictToJson(answers.attr("model_dump")());
     }
     return callMethods(this, "answers", call, data);
 }

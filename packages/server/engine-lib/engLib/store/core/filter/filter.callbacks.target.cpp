@@ -92,7 +92,7 @@ void IServiceFilterInstance::cb_control(std::string& classType,
             enterTrace["lane"] = "invoke";
             enterTrace["invoke"] = classType.c_str();
             
-            if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL) enterTrace["data"] = engine::python::pyjson::dictToJson(control);
+            if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL) enterTrace["data"] = engine::python::pyjson::dictToJson(control.attr("model_dump")());
         }
 
         this->pipe->debugger.debugEnter(filter.get(), enterTrace);
@@ -109,7 +109,7 @@ void IServiceFilterInstance::cb_control(std::string& classType,
                 leaveTrace["invoke"] = classType.c_str();
                 leaveTrace["result"] = "continue";
 
-                if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL) leaveTrace["data"] = engine::python::pyjson::dictToJson(control);
+                if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL) leaveTrace["data"] = engine::python::pyjson::dictToJson(control.attr("model_dump")());
             }
 
             // And inform we are leaving
@@ -126,7 +126,7 @@ void IServiceFilterInstance::cb_control(std::string& classType,
                 leaveTrace["invoke"] = classType.c_str();
                 leaveTrace["result"] = "skip";
 
-                if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL) leaveTrace["data"] = engine::python::pyjson::dictToJson(control);
+                if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL) leaveTrace["data"] = engine::python::pyjson::dictToJson(control.attr("model_dump")());
             }
 
             // And inform we are leaving
