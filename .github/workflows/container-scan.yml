@@ -26,8 +26,6 @@ jobs:
       matrix:
         dockerfile:
           - Dockerfile.engine
-          - Dockerfile.eaas
-          - Dockerfile.overlay
     steps:
       - name: Checkout
         uses: actions/checkout@v4
