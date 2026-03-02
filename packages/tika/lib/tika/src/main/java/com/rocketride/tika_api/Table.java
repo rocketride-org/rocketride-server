@@ -80,7 +80,7 @@ public class Table {
 	}
 
 	public void tableRowEnd() {
-		// If we have no columns, skip this
+		// If we have no columns, skip adding (row can be null for empty <tr></tr>)
 		if (row != null && row.size() < 0)
 			return;
 
@@ -99,8 +99,9 @@ public class Table {
 		if (table[section] == null)
 			table[section] = new TableSection();
 
-		// Add the row and clear it
-		table[section].add(row);
+		// Add the row only if non-null (Tika may emit empty <tr> with no cells)
+		if (row != null)
+			table[section].add(row);
 		row = null;
 
 		// Say no headers in this row
@@ -172,11 +173,13 @@ public class Table {
 				continue;
 
 			for (ArrayList<String> row : section) {
+				if (row == null)
+					continue;
 				str.append("|");
 				for (String cell : row) {
 					// Replace all |, \n, " and ' with spaces so the LLM
 					// doesn't get confused and we can break rows
-					String cellText = cell
+					String cellText = (cell != null ? cell : "")
 						.replace("\n", " ")
 						.replace("\"", " ")
 						.replace("'", " ")
