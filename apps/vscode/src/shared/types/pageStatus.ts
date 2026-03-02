@@ -45,6 +45,10 @@ export type PageStatusIncomingMessage
 			result?: string;
 			error?: string;
 		};
+	}
+	| {
+		type: 'scrollToSection';
+		section: 'errors' | 'warnings';
 	};
 
 export type PageStatusOutgoingMessage
