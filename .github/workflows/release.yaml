@@ -159,111 +159,10 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Publish to registries
+    name: Publish / ${{ matrix.name }}
     needs: [init, build]
     runs-on: ubuntu-latest
     environment: release
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-assets
-
-      - name: List artifacts
-        run: find release-assets -type f | sort
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install publish tools
-        run: |
-          pip install twine
-          npm install -g @vscode/vsce ovsx
-
-      # --- npm: rocketride ---
-      - name: Publish to npm
-        run: |
-          VERSION="${{ needs.init.outputs.client_typescript_version }}"
-          if npm view "rocketride@${VERSION}" version 2>/dev/null; then
-            echo "rocketride@${VERSION} already exists on npm — skipping"
-          else
-            TARBALL=$(find release-assets/typescript-client-artifacts -name '*.tgz' | head -n1)
-            echo "Publishing ${TARBALL}"
-            npm publish "${TARBALL}" --access public
-          fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      # --- PyPI: rocketride ---
-      - name: Publish rocketride to PyPI
-        run: |
-          VERSION="${{ needs.init.outputs.client_python_version }}"
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/rocketride/${VERSION}/json")
-          if [ "$STATUS" = "200" ]; then
-            echo "rocketride==${VERSION} already exists on PyPI — skipping"
-          else
-            twine upload release-assets/python-client-artifacts/*.whl release-assets/python-client-artifacts/*.tar.gz
-          fi
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-
-      # --- PyPI: rocketride-mcp ---
-      - name: Publish rocketride-mcp to PyPI
-        run: |
-          VERSION="${{ needs.init.outputs.client_mcp_version }}"
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/rocketride-mcp/${VERSION}/json")
-          if [ "$STATUS" = "200" ]; then
-            echo "rocketride-mcp==${VERSION} already exists on PyPI — skipping"
-          else
-            twine upload release-assets/mcp-client-artifacts/*.whl release-assets/mcp-client-artifacts/*.tar.gz
-          fi
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-
-      # --- VS Code Marketplace ---
-      - name: Publish to VS Code Marketplace
-        run: |
-          VSIX=$(find release-assets/vscode-artifacts -name '*.vsix' | head -n1)
-          echo "Publishing ${VSIX}"
-          OUTPUT=$(vsce publish --packagePath "${VSIX}" 2>&1) && exit 0
-          if echo "$OUTPUT" | grep -qi "already exists"; then
-            echo "Version already exists on Marketplace — skipping"
-          else
-            echo "$OUTPUT"
-            exit 1
-          fi
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-
-      # --- Open VSX ---
-      - name: Publish to Open VSX
-        run: |
-          VSIX=$(find release-assets/vscode-artifacts -name '*.vsix' | head -n1)
-          echo "Publishing ${VSIX}"
-          OUTPUT=$(ovsx publish "${VSIX}" -p "$OVSX_PAT" 2>&1) && exit 0
-          if echo "$OUTPUT" | grep -qi "already exists"; then
-            echo "Version already exists on Open VSX — skipping"
-          else
-            echo "$OUTPUT"
-            exit 1
-          fi
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
-
-  github-release:
-    name: GitHub Release / ${{ matrix.name }}
-    needs: [init, build, publish]
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -273,26 +172,26 @@ jobs:
             version: ${{ needs.init.outputs.server_version }}
             tag_name: server-v${{ needs.init.outputs.server_version }}
             download_pattern: server-artifacts-*
-          - type: vscode
-            name: VS Code Extension
-            version: ${{ needs.init.outputs.vscode_version }}
-            tag_name: vscode-v${{ needs.init.outputs.vscode_version }}
-            download_pattern: vscode-artifacts
-          - type: client-mcp
-            name: MCP Client
-            version: ${{ needs.init.outputs.client_mcp_version }}
-            tag_name: client-mcp-v${{ needs.init.outputs.client_mcp_version }}
-            download_pattern: mcp-client-artifacts
-          - type: client-python
-            name: Python Client
-            version: ${{ needs.init.outputs.client_python_version }}
-            tag_name: client-python-v${{ needs.init.outputs.client_python_version }}
-            download_pattern: python-client-artifacts
           - type: client-typescript
             name: TypeScript Client
             version: ${{ needs.init.outputs.client_typescript_version }}
             tag_name: client-typescript-v${{ needs.init.outputs.client_typescript_version }}
             download_pattern: typescript-client-artifacts
+          - type: client-python
+            name: Python Client
+            version: ${{ needs.init.outputs.client_python_version }}
+            tag_name: client-python-v${{ needs.init.outputs.client_python_version }}
+            download_pattern: python-client-artifacts
+          - type: client-mcp
+            name: MCP Client
+            version: ${{ needs.init.outputs.client_mcp_version }}
+            tag_name: client-mcp-v${{ needs.init.outputs.client_mcp_version }}
+            download_pattern: mcp-client-artifacts
+          - type: vscode
+            name: VS Code Extension
+            version: ${{ needs.init.outputs.vscode_version }}
+            tag_name: vscode-v${{ needs.init.outputs.vscode_version }}
+            download_pattern: vscode-artifacts
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -321,6 +220,106 @@ jobs:
         if: steps.tag_check.outputs.exists == 'false'
         run: find release-assets -type f | sort
 
+      # --- npm: rocketride ---
+      - name: Set up Node.js
+        if: steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-typescript'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish to npm
+        if: steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-typescript'
+        run: |
+          VERSION="${{ matrix.version }}"
+          if npm view "rocketride@${VERSION}" version 2>/dev/null; then
+            echo "rocketride@${VERSION} already exists on npm — skipping"
+          else
+            TARBALL=$(find release-assets -name '*.tgz' | head -n1)
+            echo "Publishing ${TARBALL}"
+            npm publish "${TARBALL}" --access public
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # --- PyPI: rocketride ---
+      - name: Set up Python
+        if: steps.tag_check.outputs.exists == 'false' && (matrix.type == 'client-python' || matrix.type == 'client-mcp')
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Publish rocketride to PyPI
+        if: steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-python'
+        run: |
+          pip install twine
+          VERSION="${{ matrix.version }}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/rocketride/${VERSION}/json")
+          if [ "$STATUS" = "200" ]; then
+            echo "rocketride==${VERSION} already exists on PyPI — skipping"
+          else
+            twine upload release-assets/*.whl release-assets/*.tar.gz
+          fi
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+
+      # --- PyPI: rocketride-mcp ---
+      - name: Publish rocketride-mcp to PyPI
+        if: steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-mcp'
+        run: |
+          pip install twine
+          VERSION="${{ matrix.version }}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/rocketride-mcp/${VERSION}/json")
+          if [ "$STATUS" = "200" ]; then
+            echo "rocketride-mcp==${VERSION} already exists on PyPI — skipping"
+          else
+            twine upload release-assets/*.whl release-assets/*.tar.gz
+          fi
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+
+      # --- VS Code Marketplace + Open VSX ---
+      - name: Set up Node.js for vsce
+        if: steps.tag_check.outputs.exists == 'false' && matrix.type == 'vscode'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Publish to VS Code Marketplace
+        if: steps.tag_check.outputs.exists == 'false' && matrix.type == 'vscode'
+        run: |
+          npm install -g @vscode/vsce
+          VSIX=$(find release-assets -name '*.vsix' | head -n1)
+          echo "Publishing ${VSIX}"
+          OUTPUT=$(vsce publish --packagePath "${VSIX}" 2>&1) && exit 0
+          if echo "$OUTPUT" | grep -qi "already exists"; then
+            echo "Version already exists on Marketplace — skipping"
+          else
+            echo "$OUTPUT"
+            exit 1
+          fi
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish to Open VSX
+        if: steps.tag_check.outputs.exists == 'false' && matrix.type == 'vscode'
+        run: |
+          npm install -g ovsx
+          VSIX=$(find release-assets -name '*.vsix' | head -n1)
+          echo "Publishing ${VSIX}"
+          OUTPUT=$(ovsx publish "${VSIX}" -p "$OVSX_PAT" 2>&1) && exit 0
+          if echo "$OUTPUT" | grep -qi "already exists"; then
+            echo "Version already exists on Open VSX — skipping"
+          else
+            echo "$OUTPUT"
+            exit 1
+          fi
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
+      # --- Create tag and GitHub Release ---
       - name: Create tag
         if: steps.tag_check.outputs.exists == 'false'
         run: |
