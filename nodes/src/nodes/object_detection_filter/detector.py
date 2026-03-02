@@ -30,32 +30,17 @@ CLIP for visual similarity matching against an optional reference image.
 
 import io
 import base64
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
 
-import numpy as np
-from PIL import Image
-
-from ai.common.models.transformers import pipeline
+from .segment_tracker import Detection
 
 
 def _decode_data_url(value: str) -> bytes:
     """Decode a data-url string (``data:...;base64,XXXX``) or plain base64."""
     if value.startswith('data:'):
-        # Strip the "data:<mime>;base64," prefix
         _, encoded = value.split(',', 1)
         return base64.b64decode(encoded)
     return base64.b64decode(value)
-
-
-@dataclass
-class Detection:
-    """A single object detection result with optional reference similarity."""
-
-    label: str
-    score: float
-    box: Dict[str, float]
-    similarity: float = 0.0
 
 
 class ObjectDetector:
@@ -71,6 +56,9 @@ class ObjectDetector:
     """
 
     def __init__(self, config: Dict[str, Any]):
+        import numpy as np
+        from ai.common.models.transformers import pipeline
+
         det_model = config.get('detection_model', 'facebook/detr-resnet-50')
 
         raw_allowlist = config.get('class_allowlist', [])
@@ -92,7 +80,7 @@ class ObjectDetector:
 
         self._clip_model = None
         self._clip_processor = None
-        self._reference_embedding: Optional[np.ndarray] = None
+        self._reference_embedding: Optional[Any] = None
 
         ref_image_raw: str = config.get('reference_image', '')
         if ref_image_raw:
@@ -121,9 +109,11 @@ class ObjectDetector:
         self._clip_model.eval()
         print(f'[ObjectDetector] CLIP model loaded: {clip_name}')
 
-    def _embed_image(self, image_bytes: bytes) -> np.ndarray:
+    def _embed_image(self, image_bytes: bytes):
         """Compute a unit-normalised CLIP embedding for an image."""
         import torch
+        import numpy as np
+        from PIL import Image
 
         image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
         inputs = self._clip_processor(images=image, return_tensors='pt')
@@ -148,6 +138,9 @@ class ObjectDetector:
         Returns:
             Detections that pass confidence, class, and similarity filters.
         """
+        import numpy as np
+        from PIL import Image
+
         frame_image = Image.open(io.BytesIO(frame_bytes)).convert('RGB')
 
         try:
@@ -212,9 +205,7 @@ class ObjectDetector:
         return []
 
     @staticmethod
-    def _crop_detection(
-        image: Image.Image, box: Dict[str, float]
-    ) -> Optional[Image.Image]:
+    def _crop_detection(image, box: Dict[str, float]):
         """Crop a bounding box from the frame, or None if too small."""
         xmin = max(0, int(box.get('xmin', 0)))
         ymin = max(0, int(box.get('ymin', 0)))

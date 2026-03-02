@@ -21,15 +21,12 @@
 # SOFTWARE.
 # =============================================================================
 
-import base64
 import os
 import tempfile
 from rocketlib import IInstanceBase, AVI_ACTION, Entry
 from ai.common.table import Table
 
 from .IGlobal import IGlobal
-from .segment_tracker import SegmentTracker
-from .clip_extractor import extract_clips
 
 
 class IInstance(IInstanceBase):
@@ -37,8 +34,10 @@ class IInstance(IInstanceBase):
 
     def beginInstance(self):
         from ai.common.avi.frame import VideoFrameExtractor
+        from .segment_tracker import SegmentTracker
 
-        # Build a config for the frame extractor (always interval mode)
+        self._SegmentTracker = SegmentTracker
+
         fe_config = dict(self.IGlobal.config)
         fe_config['type'] = 'interval'
         fe_config['fps'] = fe_config.get('frame_sample_fps', 1.0)
@@ -49,10 +48,9 @@ class IInstance(IInstanceBase):
             config=fe_config,
         )
 
-        self._tracker: SegmentTracker = None
+        self._tracker = None
         self._temp_video_file = None
         self._temp_video_path: str = None
-        self._received_video = False
 
     def endInstance(self):
         self._frame_extractor = None
@@ -60,12 +58,9 @@ class IInstance(IInstanceBase):
 
     def open(self, obj: Entry):
         max_gap = self.IGlobal.config.get('max_gap_sec', 2.0)
-        self._tracker = SegmentTracker(max_gap_sec=max_gap)
-        self._received_video = False
+        self._tracker = self._SegmentTracker(max_gap_sec=max_gap)
 
     def close(self):
-        if not self._received_video:
-            self._process_settings_video()
         self._generate_output()
         self._cleanup_temp()
 
@@ -74,8 +69,6 @@ class IInstance(IInstanceBase):
     # ------------------------------------------------------------------
 
     def writeVideo(self, action: AVI_ACTION, mimeType: str, buffer: bytes):
-        self._received_video = True
-
         if action == AVI_ACTION.BEGIN:
             self._temp_video_file = tempfile.NamedTemporaryFile(
                 delete=False, suffix='.mp4', prefix='objdet_src_',
@@ -92,40 +85,6 @@ class IInstance(IInstanceBase):
             self._temp_video_file = None
             # stop() blocks until all frame callbacks have completed
             self._frame_extractor.writeAVI(action, mimeType, buffer)
-
-    # ------------------------------------------------------------------
-    # Settings-uploaded video (fallback when no upstream lane)
-    # ------------------------------------------------------------------
-
-    def _process_settings_video(self):
-        """Decode a video uploaded via node settings and process it."""
-        source_video: str = self.IGlobal.config.get('source_video', '')
-        if not source_video:
-            return
-
-        if source_video.startswith('data:'):
-            _, encoded = source_video.split(',', 1)
-            video_bytes = base64.b64decode(encoded)
-        else:
-            video_bytes = base64.b64decode(source_video)
-
-        # Write to a temp file so clip extraction can seek into it later
-        self._temp_video_file = tempfile.NamedTemporaryFile(
-            delete=False, suffix='.mp4', prefix='objdet_src_',
-        )
-        self._temp_video_path = self._temp_video_file.name
-        self._temp_video_file.write(video_bytes)
-        self._temp_video_file.close()
-        self._temp_video_file = None
-
-        # Feed through the frame extractor
-        self._frame_extractor.writeAVI(AVI_ACTION.BEGIN, 'video/mp4', b'')
-        chunk_size = 64 * 1024
-        for i in range(0, len(video_bytes), chunk_size):
-            self._frame_extractor.writeAVI(
-                AVI_ACTION.WRITE, 'video/mp4', video_bytes[i:i + chunk_size]
-            )
-        self._frame_extractor.writeAVI(AVI_ACTION.END, 'video/mp4', b'')
 
     # ------------------------------------------------------------------
     # Frame callback — runs once per extracted frame
@@ -149,6 +108,8 @@ class IInstance(IInstanceBase):
         segments = self._tracker.get_segments()
         if not segments:
             return
+
+        from .clip_extractor import extract_clips
 
         cfg = self.IGlobal.config
         clips = extract_clips(
