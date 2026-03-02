@@ -112,7 +112,7 @@ class MonitorCommands(DAPConn):
 
         async def _send_event(pref: EVENT_TYPE) -> None:
             # If this is not being listened for, skip the forwarding
-            if not (type & subscriber_preference):
+            if not (type & pref):
                 return
 
             # Extract event details for DAP-compliant forwarding
@@ -136,13 +136,7 @@ class MonitorCommands(DAPConn):
         if control.apikey != self._account_info.apikey:
             return
 
-        # Check if any monitor is subscribed to this specific task or project
-        task_key = f't.{token}'
-        if task_key in self._monitors:
-            # Get the subscriber's event type for this specific token
-            subscriber_preference = self._monitors[task_key]
-            await _send_event(subscriber_preference)
-
+        # Check if any monitor is subscribed to this project/source
         project_key = f'p.{control.project_id}.{control.source}'
         if project_key in self._monitors:
             # Get the subscriber's event type for this specific token
@@ -158,7 +152,7 @@ class MonitorCommands(DAPConn):
 
     async def _send_updates(
         self,
-        control: 'TASK_CONTROL',
+        control: 'TASK_CONTROL | None',
         prev: EVENT_TYPE,
         curr: EVENT_TYPE,
         project_id: str = None,
@@ -275,27 +269,19 @@ class MonitorCommands(DAPConn):
             event_id = None
             filter_name = '<all>'
 
-        # If a token is specified, add it
+        # If a token is specified, resolve it to project_id/source
         elif token:
             # Only token can be specified
             if project_id or source:
                 raise ValueError('You must specifiy either token or project_id/source, not both')
 
-            # Setup the key
-            event_key = f't.{token}'
+            # Resolve the token to a project key
+            control = self._server.get_task_control(token)
 
-            # If is ok if the task doesn't exist at this point in time...
-            try:
-                # Get the task
-                control = self._server.get_task_control(token)
-
-                # The task is running, we can fill it in
-                event_id = control.id
-                filter_name = control.id
-
-            except Exception:
-                event_id = None
-                filter_name = f'<Token:{token[:8]}>'
+            # Use the project key so subscribe/unsubscribe by token or project_id/source use the same key
+            event_key = f'p.{control.project_id}.{control.source}'
+            event_id = control.id
+            filter_name = control.id
 
         # If project/source we specified
         elif project_id and source:

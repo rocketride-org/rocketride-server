@@ -656,7 +656,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 				projectId: projectId,
 				source: source,
 				pipeline: projectTransformed
-			}, '*');
+			});
 
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : String(error);

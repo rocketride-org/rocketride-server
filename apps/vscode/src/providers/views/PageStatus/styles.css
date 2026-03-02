@@ -66,6 +66,164 @@
 }
 
 /* ============================================================================ */
+/* PAGE HEADER (two-column grid, outside any box) */
+/* ============================================================================ */
+
+.page-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-start;
+	gap: 16px;
+	margin-bottom: 16px;
+}
+
+.page-header-left {
+	flex: 1;
+	min-width: 0;
+}
+
+.page-header-right {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 6px;
+	flex-shrink: 0;
+}
+
+/* Status header: stacked state + subtitle */
+.status-header-stack {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.status-state-label {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--vscode-foreground);
+}
+
+/* Fixed-width box for indicator dot alignment */
+.status-indicator-box {
+	width: 16px;
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.status-subtitle {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 13px;
+	color: var(--vscode-focusBorder);
+	font-weight: 500;
+}
+
+/* Elapsed time — right-aligned under actions */
+.status-elapsed {
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
+	white-space: nowrap;
+}
+
+.status-elapsed-value {
+	color: var(--vscode-focusBorder);
+	font-weight: 600;
+}
+
+/* ============================================================================ */
+/* TAB BAR (MUI-style) */
+/* ============================================================================ */
+
+.tab-bar {
+	position: relative;
+	display: flex;
+	border-bottom: none;
+	background: none;
+	padding: 0 8px;
+	gap: 0;
+}
+
+.tab-item {
+	position: relative;
+	background: none;
+	border: none;
+	padding: 10px 16px;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	transition: color 0.25s ease;
+	white-space: nowrap;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.tab-item:hover {
+	color: var(--vscode-foreground);
+	background: var(--vscode-list-hoverBackground);
+}
+
+.tab-item.active {
+	color: var(--vscode-focusBorder);
+}
+
+.tab-indicator {
+	position: absolute;
+	bottom: 0;
+	height: 2px;
+	background: var(--vscode-focusBorder);
+	transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+	border-radius: 1px 1px 0 0;
+}
+
+.tab-badge {
+	background: none;
+	font-size: 14px;
+	line-height: 1;
+	letter-spacing: 0;
+	text-transform: none;
+	margin-left: -4px;
+}
+
+.tab-content {
+	padding: 0;
+	background: var(--vscode-editor-background);
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 8px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+	overflow: hidden;
+	margin-top: 30px;
+	margin-left: 20px;
+	margin-right: 20px;
+}
+
+/* Neutralize nested section wrappers inside tabs */
+.tab-content .status-section,
+.tab-content .pipeline {
+	margin-bottom: 0;
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+}
+
+.tab-content .status-section:hover,
+.tab-content .pipeline:hover {
+	border-color: transparent;
+	box-shadow: none;
+}
+
+/* Standardize section-content padding inside tabs */
+.tab-content .section-content {
+	padding: 16px 20px;
+}
+
+/* ============================================================================ */
 /* STATUS PANEL (Processing Rate & Status) */
 /* ============================================================================ */
 
@@ -221,7 +379,7 @@
 /* ============================================================================ */
 
 .chart-section {
-	padding: 20px;
+	padding: 4px 0;
 }
 
 .chart-header {
@@ -240,6 +398,7 @@
 .time-range-buttons {
 	display: flex;
 	gap: 4px;
+	margin-left: auto;
 }
 
 .time-btn {
@@ -345,6 +504,393 @@
 	background: var(--vscode-focusBorder);
 	color: var(--vscode-editor-background);
 	border-color: var(--vscode-focusBorder);
+}
+
+/* ============================================================================ */
+/* TRACE CONTROLS */
+/* ============================================================================ */
+
+.trace-controls {
+	display: flex;
+	gap: 8px;
+	margin-left: auto;
+}
+
+.trace-level-select {
+	background: var(--vscode-editor-background);
+	color: var(--vscode-foreground);
+	border: 1px solid var(--vscode-panel-border);
+	padding: 4px 8px;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 12px;
+	font-weight: 500;
+	transition: border-color 0.2s;
+	outline: none;
+}
+
+.trace-level-select:hover {
+	border-color: var(--vscode-focusBorder);
+}
+
+.trace-level-select:focus {
+	border-color: var(--vscode-focusBorder);
+}
+
+.trace-clear-btn {
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	border: none;
+	padding: 4px 10px;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 11px;
+	font-weight: 500;
+	transition: background-color 0.2s;
+}
+
+.trace-clear-btn:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+/* ============================================================================ */
+/* TRACE LAYOUT (waterfall call-tree)                                           */
+/* ============================================================================ */
+
+.trace-layout {
+	display: flex;
+	min-height: 200px;
+	max-height: 600px;
+}
+
+.trace-tree-scroll {
+	flex: 1;
+	overflow: auto;
+}
+
+/* Column headers */
+.trace-tree-hdr {
+	display: flex;
+	padding: 5px 12px;
+	font-size: 10px;
+	font-weight: 600;
+	color: var(--vscode-descriptionForeground);
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	border-bottom: 1px solid var(--vscode-panel-border);
+	background: var(--vscode-sideBarSectionHeader-background, rgba(128, 128, 128, 0.06));
+}
+
+.trace-col-call {
+	flex: 1;
+}
+
+.trace-col-lane {
+	width: 80px;
+	flex-shrink: 0;
+}
+
+.trace-col-time {
+	width: 56px;
+	flex-shrink: 0;
+	text-align: right;
+	font-size: 10px;
+	font-family: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, monospace);
+	color: var(--vscode-descriptionForeground);
+}
+
+/* ============================================================================ */
+/* TRACE ROWS                                                                   */
+/* ============================================================================ */
+
+.trace-row {
+	display: flex;
+	align-items: center;
+	height: 24px;
+	padding-right: 12px;
+	cursor: pointer;
+	border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.06));
+	font-size: 11px;
+	user-select: none;
+}
+
+.trace-row:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.trace-row.selected {
+	background: var(--vscode-list-activeSelectionBackground, rgba(25, 118, 210, 0.15));
+	border-left: 2px solid var(--vscode-focusBorder, #1976d2);
+}
+
+.trace-row.error {
+	background: var(--vscode-inputValidation-errorBackground, rgba(198, 40, 40, 0.1));
+}
+
+.trace-row.error:hover {
+	background: var(--vscode-inputValidation-errorBackground, rgba(198, 40, 40, 0.18));
+}
+
+/* Object (file) row — top-level group header */
+.trace-object-row {
+	padding-left: 8px;
+}
+
+/* In-flight document — italic title, lighter color */
+.trace-in-flight .trace-name {
+	font-style: italic;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* Chevron */
+.trace-chev {
+	width: 16px;
+	flex-shrink: 0;
+	text-align: center;
+	font-size: 9px;
+	color: var(--vscode-descriptionForeground);
+	user-select: none;
+}
+
+.trace-row:hover .trace-chev {
+	color: var(--vscode-foreground);
+}
+
+/* Color dot */
+.trace-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex-shrink: 0;
+	margin-right: 6px;
+}
+
+/* Node / file name */
+.trace-name {
+	flex: 1;
+	font-family: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, monospace);
+	font-weight: 500;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: var(--vscode-foreground);
+}
+
+.trace-name-file {
+	font-weight: 600;
+	font-family: var(--vscode-font-family, system-ui, sans-serif);
+	font-size: 12px;
+}
+
+.trace-name-error {
+	color: var(--vscode-errorForeground, #c62828);
+}
+
+/* Error icon */
+.trace-err-icon {
+	color: var(--vscode-errorForeground, #c62828);
+	font-size: 12px;
+	margin-right: 4px;
+	flex-shrink: 0;
+}
+
+/* Time column — error variant */
+.trace-time-error {
+	color: var(--vscode-errorForeground, #c62828) !important;
+	font-weight: 700;
+}
+
+/* ============================================================================ */
+/* LANE BADGES                                                                  */
+/* ============================================================================ */
+
+.trace-badge {
+	display: inline-block;
+	padding: 1px 5px;
+	border-radius: 3px;
+	font-size: 9px;
+	font-weight: 600;
+	font-family: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, monospace);
+}
+
+.trace-badge-open {
+	background: rgba(25, 118, 210, 0.15);
+	color: var(--vscode-charts-blue, #1976d2);
+}
+
+.trace-badge-tags {
+	background: rgba(46, 125, 50, 0.15);
+	color: var(--vscode-charts-green, #2e7d32);
+}
+
+.trace-badge-text {
+	background: rgba(249, 168, 37, 0.15);
+	color: var(--vscode-charts-yellow, #f9a825);
+}
+
+.trace-badge-documents {
+	background: rgba(156, 39, 176, 0.15);
+	color: var(--vscode-charts-purple, #9c27b0);
+}
+
+.trace-badge-closing {
+	background: rgba(230, 81, 0, 0.15);
+	color: var(--vscode-charts-orange, #e65100);
+}
+
+.trace-badge-close {
+	background: rgba(198, 40, 40, 0.15);
+	color: var(--vscode-charts-red, #c62828);
+}
+
+/* ============================================================================ */
+/* DETAIL PANEL                                                                 */
+/* ============================================================================ */
+
+.trace-detail-panel {
+	width: 260px;
+	flex-shrink: 0;
+	overflow-y: auto;
+	border-left: 1px solid var(--vscode-panel-border);
+	background: var(--vscode-sideBar-background, rgba(128, 128, 128, 0.04));
+}
+
+.trace-dp-empty {
+	padding: 24px 12px;
+	text-align: center;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	font-style: italic;
+}
+
+.trace-dp-hdr {
+	padding: 10px 12px;
+	border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.trace-dp-hdr h2 {
+	font-size: 12px;
+	color: var(--vscode-foreground);
+	margin: 0 0 2px;
+}
+
+.trace-dp-hint {
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.trace-dp-sect {
+	padding: 10px 12px;
+	border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.trace-dp-sect h3 {
+	font-size: 9px;
+	color: var(--vscode-descriptionForeground);
+	text-transform: uppercase;
+	letter-spacing: 1px;
+	margin: 0 0 6px;
+	font-weight: 700;
+}
+
+.trace-dp-kv {
+	display: flex;
+	justify-content: space-between;
+	margin-bottom: 3px;
+	font-size: 11px;
+}
+
+.trace-dp-k {
+	color: var(--vscode-descriptionForeground);
+}
+
+.trace-dp-v {
+	color: var(--vscode-foreground);
+	font-family: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, monospace);
+	font-size: 10px;
+}
+
+.trace-dp-time {
+	font-size: 10px;
+	color: var(--vscode-charts-blue, #1976d2);
+	font-family: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, monospace);
+}
+
+.trace-dp-bar {
+	height: 5px;
+	border-radius: 3px;
+	background: var(--vscode-panel-border);
+	margin-top: 4px;
+}
+
+.trace-dp-bar-fill {
+	height: 100%;
+	border-radius: 3px;
+	background: var(--vscode-charts-blue, #1976d2);
+}
+
+.trace-dp-bar-label {
+	font-size: 9px;
+	color: var(--vscode-descriptionForeground);
+	margin-top: 3px;
+}
+
+.trace-dp-toggle {
+	cursor: pointer;
+	font-size: 11px;
+	color: var(--vscode-foreground);
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-bottom: 6px;
+	user-select: none;
+}
+
+.trace-dp-arr {
+	color: var(--vscode-descriptionForeground);
+	font-size: 9px;
+}
+
+.trace-dp-code {
+	background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.08));
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 4px;
+	padding: 8px;
+	font-size: 10px;
+	font-family: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, monospace);
+	color: var(--vscode-foreground);
+	line-height: 1.5;
+	white-space: pre;
+	overflow-x: auto;
+	max-height: 160px;
+	overflow-y: auto;
+	margin: 0;
+}
+
+.trace-dp-expand-hint {
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+	font-style: italic;
+	margin-top: 4px;
+}
+
+/* ============================================================================ */
+/* "MORE..." ROW                                                                */
+/* ============================================================================ */
+
+.trace-more-row {
+	cursor: pointer;
+	opacity: 0.7;
+}
+
+.trace-more-row:hover {
+	opacity: 1;
+}
+
+.trace-more-label {
+	font-size: 11px;
+	font-style: italic;
+	color: var(--vscode-textLink-foreground, #1976d2);
 }
 
 /* ============================================================================ */
@@ -668,6 +1214,7 @@
 }
 
 .token-total-display {
+	margin-left: auto;
 	font-size: 12px;
 	color: var(--vscode-descriptionForeground);
 }
@@ -681,7 +1228,6 @@
 	display: flex;
 	flex-direction: column;
 	gap: 0;
-	padding: 16px 20px;
 }
 
 .token-bar-row {

@@ -1025,13 +1025,6 @@ class TaskServer(DAPBase):
             if current_count > self._tasks_peak:
                 self._tasks_peak = current_count
 
-            # Set up initial update summary monitoring if connection provided
-            if conn:
-                await conn.set_monitor(
-                    token=control.token,
-                    type=EVENT_TYPE.SUMMARY,
-                )
-
             # Start task execution
             await control.task.start_task()
 

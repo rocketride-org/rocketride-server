@@ -21,24 +21,4 @@
 // SOFTWARE.
 // =============================================================================
 
-#include "test.h"
-
-TEST_CASE("store::Services") {
-    auto _res = IServices::getServiceSchemas();
-    if (!_res) {
-        ASSERT_MSG(true, "getServiceSchemas Failed");
-    }
-
-    auto schema{_mv(*_res)};
-
-    SECTION("version") {
-        REQUIRE(schema.isMember("version"));
-        REQUIRE(schema["version"].isInt());
-        REQUIRE(schema["version"] == IServices::VERSION);
-    }
-
-    SECTION("services") {
-        REQUIRE(schema.isMember("services"));
-        REQUIRE(schema["services"].isObject());
-    }
-}
+export { TraceSection, TraceLevel, TraceRow } from './TraceSection';

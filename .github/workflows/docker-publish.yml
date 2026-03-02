@@ -1,0 +1,85 @@
+name: Docker Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Server version to package (e.g. 1.0.3)'
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build & push engine image
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'server-v')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "version=${INPUT_VERSION}" >> $GITHUB_OUTPUT
+            echo "tag=server-v${INPUT_VERSION}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${RELEASE_TAG#server-v}" >> $GITHUB_OUTPUT
+            echo "tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download server artifact
+        run: |
+          gh release download "${{ steps.version.outputs.tag }}" \
+            --pattern "rocketride-server-*-linux-x64.tar.gz" \
+            --dir /tmp/release
+          ASSET_COUNT=$(ls /tmp/release/*.tar.gz 2>/dev/null | wc -l)
+          if [ "$ASSET_COUNT" -ne 1 ]; then
+            echo "::error::Expected exactly 1 matching asset, found ${ASSET_COUNT}"
+            ls -la /tmp/release/
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Extract server
+        run: |
+          mkdir -p dist/server
+          tar xf /tmp/release/rocketride-server-*-linux-x64.tar.gz -C dist/server
+          if [ ! -f dist/server/engine ]; then
+            echo "::error::Engine binary not found after extraction"
+            ls -la dist/server/
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.engine
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/rocketride-engine:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/rocketride-engine:latest

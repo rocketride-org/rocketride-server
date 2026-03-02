@@ -316,6 +316,18 @@ export class ConnectionManager extends EventEmitter {
 			uri,
 			module: 'CONN-EXT',
 			onEvent: async (message: DAPMessage) => {
+				if (message.event === 'output') {
+					const body = message.body;
+					if (body?.output) {
+						const text = String(body.output).trimEnd();
+						if (text) {
+							const source = body.__id ? `[${body.__id}] ` : '';
+							this.logger.output(`${icons.receive} ${source}${text}`);
+						}
+					}
+				} else if (message.event?.startsWith('apaevt_')) {
+					this.logger.output(`${icons.info} ${message.event}: ${JSON.stringify(message.body)}`);
+				}
 				this.emit('event', message);
 			},
 			onDisconnected: async (reason?: string, hasError?: boolean) => {
@@ -446,6 +458,13 @@ export class ConnectionManager extends EventEmitter {
 		this.resetRetryState();
 		this.logger.output(`${icons.success} Connected to RocketRide server`);
 		this.emit('connected');
+
+		// Register global monitors for task lifecycle and output events
+		this.request('rrext_monitor', {
+			types: ['task', 'output']
+		}, '*').catch(err => {
+			this.logger.error(`Failed to register global monitors: ${err}`);
+		});
 
 		// Fetch and cache services list during connection phase
 		this.refreshServices().catch(err => {

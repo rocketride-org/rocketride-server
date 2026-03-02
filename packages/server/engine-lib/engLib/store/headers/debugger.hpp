@@ -137,19 +137,25 @@ public:
      * @brief Called when a service instance is entered.
      *
      * Increments internal recursion tracking and logs entry.
+     * If trace is non-null, appends it to the monitor message.
      *
      * @param pInstance Pointer to the service instance being entered.
+     * @param trace Optional JSON trace data to append to the monitor message.
      */
-    void debugEnter(IServiceFilterInstance* pInstance) noexcept;
+    void debugEnter(IServiceFilterInstance* pInstance,
+                    const json::Value& trace = {}) noexcept;
 
     /**
      * @brief Called when a service instance is exited.
      *
      * Decrements internal recursion tracking and logs exit.
+     * If trace is non-null, appends it to the monitor message.
      *
      * @param pInstance Pointer to the service instance being exited.
+     * @param trace Optional JSON trace data to append to the monitor message.
      */
-    void debugLeave(IServiceFilterInstance* pInstance) noexcept;
+    void debugLeave(IServiceFilterInstance* pInstance,
+                    const json::Value& trace = {}) noexcept;
 
     /**
      * @brief Called when a logical "break" is triggered between two service

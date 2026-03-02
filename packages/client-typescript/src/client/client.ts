@@ -790,6 +790,8 @@ export class RocketRideClient extends DAPClient {
 		useExisting?: boolean;
 		args?: string[];
 		ttl?: number;
+		/** Pipeline trace level. When set, captures every lane write and invoke call in the response under '_trace'. */
+		pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
 	} = {}): Promise<Record<string, unknown> & { token: string }> {
 		const {
 			token,
@@ -799,7 +801,8 @@ export class RocketRideClient extends DAPClient {
 			threads,
 			useExisting,
 			args,
-			ttl
+			ttl,
+			pipelineTraceLevel
 		} = options;
 
 		// Validate required parameters
@@ -855,6 +858,9 @@ export class RocketRideClient extends DAPClient {
 		}
 		if (useExisting !== undefined) {
 			arguments_.useExisting = useExisting;
+		}
+		if (pipelineTraceLevel !== undefined) {
+			arguments_.pipelineTraceLevel = pipelineTraceLevel;
 		}
 
 		// Send execution request to server

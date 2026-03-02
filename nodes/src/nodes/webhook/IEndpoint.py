@@ -102,6 +102,10 @@ class IEndpoint(IEndpointBase):
                     'usr',
                     json.dumps([info]),
                 )
+                # Chat is the source component, so when it's ready, all downstream
+                # components (embedding, LLM, etc.) have already been initialized
+                # This status message indicates the chat is ready to accept questions
+                monitorStatus('Dropper ready - system is ready to process files')
 
             elif self.endpoint.logicalType in ('webhook', 'adtoolchain'):
                 # These should NOT be replacable strings!!!

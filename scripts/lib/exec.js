@@ -102,7 +102,8 @@ async function execCommand(command, args, options = {}) {
         collect = false,
         logModule = null,
         verbose = false,
-        stdio = undefined
+        stdio = undefined,
+        silent = false
     } = options;
     const inherit = stdio === 'inherit';
     const ignoreStdio = stdio === 'ignore';
@@ -159,13 +160,15 @@ async function execCommand(command, args, options = {}) {
     }
 
     function logExecFailure(context, err, exitCode = null) {
-        console.error('[exec]', context, err instanceof Error ? err.message : String(err));
-        if (exitCode != null) console.error('[exec] exitCode:', exitCode);
-        console.error('[exec] command:', spawnCmd);
-        console.error('[exec] args:', spawnArgs);
-        console.error('[exec] cwd:', cwd);
-        if (env != null && typeof env === 'object') {
-            console.error('[exec] env:', env);
+        if (!silent) {
+            console.error('[exec]', context, err instanceof Error ? err.message : String(err));
+            if (exitCode != null) console.error('[exec] exitCode:', exitCode);
+            console.error('[exec] command:', spawnCmd);
+            console.error('[exec] args:', spawnArgs);
+            console.error('[exec] cwd:', cwd);
+            if (env != null && typeof env === 'object') {
+                console.error('[exec] env:', env);
+            }
         }
     }
 
