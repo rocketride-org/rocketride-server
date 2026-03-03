@@ -74,7 +74,7 @@ CONST_WEB_WS_MAX_SIZE = 250 * 1024 * 1024  # maximum WebSocket message size in b
 # =============================================================================
 # Data Connection Configuration
 # =============================================================================
-CONST_DATA_PIPE_TIMEOUT = 300.0  # seconds of inactivity before pipe is considered zombie (5 min for agent pipelines)
+CONST_DATA_PIPE_TIMEOUT = 60.0  # seconds of inactivity before pipe is considered zombie
 CONST_DATA_SHUTDOWN_TIMEOUT = 30.0  # seconds to wait for data connection shutdown
 
 # =============================================================================
