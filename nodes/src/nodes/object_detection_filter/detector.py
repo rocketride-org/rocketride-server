@@ -30,9 +30,18 @@ CLIP for visual similarity matching against an optional reference image.
 
 import io
 import base64
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
 
-from .segment_tracker import Detection
+
+@dataclass
+class Detection:
+    """A single object detection result with optional reference similarity."""
+
+    label: str
+    score: float
+    box: Dict[str, float]
+    similarity: float = 0.0
 
 
 def _is_columnar(d: dict) -> bool:

@@ -97,19 +97,19 @@ class IInstance(IInstanceBase):
             return
 
         self._matched += 1
-        best = max(detections, key=lambda d: d.similarity if d.similarity is not None else d.confidence)
+        best = max(detections, key=lambda d: d.similarity if d.similarity else d.score)
 
         self._match_rows.append([
             idx,
             self._fmt_time(timestamp),
             best.label,
-            f'{best.confidence:.3f}',
-            f'{best.similarity:.3f}' if best.similarity is not None else '-',
+            f'{best.score:.3f}',
+            f'{best.similarity:.3f}' if best.similarity else '-',
         ])
 
         self._log(
             f'frame {idx} t={timestamp:.2f}s MATCH '
-            f'label={best.label} conf={best.confidence:.3f} '
+            f'label={best.label} conf={best.score:.3f} '
             f'sim={best.similarity}'
         )
 
