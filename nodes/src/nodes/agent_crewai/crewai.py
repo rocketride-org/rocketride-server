@@ -73,6 +73,32 @@ class CrewDriver(AgentBase):
 
         return HostInvokeLLM()
 
+    _CREWAI_INTERNAL_KEYS = frozenset({'security_context'})
+
+    @staticmethod
+    def _schema_to_pydantic(tool_name: str, input_schema: Dict[str, Any]) -> type:
+        """Build a Pydantic model from a tool's ``inputSchema`` so that CrewAI
+        keeps the real field names when filtering arguments."""
+        from pydantic import BaseModel, ConfigDict, Field, create_model
+
+        props = input_schema.get('properties', {})
+        required = set(input_schema.get('required', []))
+
+        field_defs: Dict[str, Any] = {}
+        for fname, fspec in props.items():
+            desc = fspec.get('description', '') if isinstance(fspec, dict) else ''
+            if fname in required:
+                field_defs[fname] = (Any, Field(description=desc))
+            else:
+                field_defs[fname] = (Any, Field(default=None, description=desc))
+
+        safe = ''.join(c if c.isalnum() else '_' for c in tool_name).title()
+
+        class _ExtraBase(BaseModel):
+            model_config = ConfigDict(extra='allow')
+
+        return create_model(f'{safe}Schema', __base__=_ExtraBase, **field_defs)
+
     def _bind_framework_tools(
         self,
         *,
@@ -84,27 +110,38 @@ class CrewDriver(AgentBase):
     ) -> List[Any]:
 
         from crewai.tools import BaseTool
-        from pydantic import BaseModel, ConfigDict, Field
+        from pydantic import BaseModel, ConfigDict
 
-        class _ToolInput(BaseModel):
-            input: Any = Field(default=None, description='Tool input payload')
+        _internal = self._CREWAI_INTERNAL_KEYS
+
+        class _FallbackSchema(BaseModel):
             model_config = ConfigDict(extra='allow')
 
         class HostTool(BaseTool):
             name: str
             description: str
-            args_schema: type[BaseModel] = _ToolInput
+            args_schema: type[BaseModel] = _FallbackSchema
 
-            def _run(self, input: Any = None, **kwargs: Any) -> str:
+            def _run(self, **kwargs: Any) -> str:
+                payload = {k: v for k, v in kwargs.items() if k not in _internal}
+
                 try:
-                    out = invoke_tool(self.name, input=input, kwargs=kwargs)
+                    out = invoke_tool(self.name, input=payload, kwargs={})
                 except Exception as e:
-                    out = {'error': str(e), 'type': type(e).__name__}
+                    err_msg = str(e)
+                    try:
+                        log_tool_call(tool_name=self.name, input=payload, output={'error': err_msg})
+                    except Exception:
+                        pass
+                    return f'TOOL ERROR (do not retry this request): {err_msg}'
 
                 try:
-                    log_tool_call(tool_name=self.name, input={'input': input, **kwargs}, output=out)
+                    log_tool_call(tool_name=self.name, input=payload, output=out)
                 except Exception:
                     pass
+
+                if isinstance(out, dict) and 'error' in out:
+                    return f'TOOL ERROR (do not retry this request): {out["error"]}'
 
                 try:
                     return json.dumps(out, default=str) if isinstance(out, (dict, list)) else _safe_str(out)
@@ -115,8 +152,27 @@ class CrewDriver(AgentBase):
         for td in tool_descriptors:
             name = td.get('name', '') if isinstance(td, dict) else getattr(td, 'name', '')
             desc = td.get('description', '') if isinstance(td, dict) else getattr(td, 'description', '')
-            if name:
-                tools.append(HostTool(name=name, description=desc or f'Invoke host tool: {name}'))
+            schema = (
+                td.get('inputSchema') or td.get('input_schema') or {}
+            ) if isinstance(td, dict) else (
+                getattr(td, 'inputSchema', None) or getattr(td, 'input_schema', None) or {}
+            )
+
+            if not name:
+                continue
+
+            args_model = _FallbackSchema
+            if isinstance(schema, dict) and schema.get('properties'):
+                try:
+                    args_model = self._schema_to_pydantic(name, schema)
+                except Exception:
+                    pass
+
+            tools.append(HostTool(
+                name=name,
+                description=desc or f'Invoke host tool: {name}',
+                args_schema=args_model,
+            ))
         return tools
 
     def _run(
