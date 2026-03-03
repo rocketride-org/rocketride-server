@@ -43,6 +43,23 @@ public:
         }
         return {};
     }
+
+    /// Response filter puts table lane in response["table"] (array). Returns
+    /// concatenated table content so tests can assert table extraction.
+    Text getTable() const noexcept {
+        const auto &entry = getEntry();
+        if (entry.response && entry.response().isObject()) {
+            auto value = entry.response().lookup("table");
+            if (value.isArray() && !value.empty()) {
+                Text out;
+                for (const auto &item : value) {
+                    if (item.isString()) out += item.asString();
+                }
+                return out;
+            }
+        }
+        return {};
+    }
 };
 
 /**
@@ -181,7 +198,7 @@ TEST_CASE("store::parse") {
     }
 
     SECTION("parse minimal pdf") {
-        
+
         ParseFilterTest filter;
 
         REQUIRE_NO_ERROR(filter.sendFile("minimal.pdf"));
@@ -190,7 +207,9 @@ TEST_CASE("store::parse") {
     }
 
     //-----------------------------------------------------------------
-    // Parses Excel files (uses Tika default parser without Aspose)
+    // Parses Excel files (uses Tika table fallback when Aspose is not used)
+    // Regression: table content must be emitted (see Table.java fallback fix).
+    // Response filter puts table in response["table"], not response["text"].
     //-----------------------------------------------------------------
     SECTION("parse xlsx") {
         ParseFilterTest filter;
@@ -200,7 +219,12 @@ TEST_CASE("store::parse") {
         REQUIRE(!text.empty());
         REQUIRE(text.contains("Excel"));
         REQUIRE(text.contains("spreadsheet"));
+        // Table lane must have content (fails without Table.java fix)
+        auto table = filter.getTable();
+        REQUIRE(!table.empty());
+        REQUIRE(table.contains("TableFallbackTest"));
     }
+
 }
 
 /*------------------------------------------------------------------

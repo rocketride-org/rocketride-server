@@ -2,7 +2,7 @@
 
 A comprehensive guide to avoiding common pitfalls when building RocketRide pipelines and applications.
 
-**Last Updated:** October 19, 2025
+**Last Updated:** March 3, 2026
 
 ---
 
@@ -14,6 +14,7 @@ A comprehensive guide to avoiding common pitfalls when building RocketRide pipel
 - [Language-Specific SDK Mistakes](#language-specific-sdk-mistakes)
 - [Component Configuration Mistakes](#component-configuration-mistakes)
 - [Data Flow Mistakes](#data-flow-mistakes)
+- [Engine Extension (Python–C++ Interop)](#engine-extension-python-c-interop)
 - [Quick Reference](#quick-reference)
 
 ---
@@ -1173,6 +1174,35 @@ Component exists but isn't connected to the data flow.
 ```
 
 **Rule:** Every non-source component should be reachable from the source component.
+
+---
+
+## Engine Extension (Python–C++ Interop)
+
+### Mistake 19: Passing Raw Pydantic Models to C++ JSON Utilities
+
+**Applies to:** Code extending the engine (custom nodes, filter callbacks) that passes Python objects to C++ JSON helpers.
+
+**Problem:**
+```python
+# Custom node or filter callback - passing Pydantic BaseModel directly
+from rocketride.schema import Question
+
+question = Question()
+# ...
+dictToJson(question)  # ERROR: C++ engine crash (pyjson.hpp)
+```
+
+**Why This Happens:**
+The C++ engine's JSON utilities expect plain Python dicts. Pydantic `BaseModel` instances are not directly serializable by the engine's `dictToJson` and similar functions—passing them causes a crash.
+
+**Solution:**
+```python
+# Convert to plain dict before passing to C++ JSON utilities
+dictToJson(question.model_dump())  # CORRECT
+```
+
+**Rule:** When passing Pydantic models (`Question`, `Answer`, `IInvokeLLM`, `IInvokeTool`, etc.) to the engine's JSON serialization layer, always call `.model_dump()` first to convert them to plain dicts.
 
 ---
 

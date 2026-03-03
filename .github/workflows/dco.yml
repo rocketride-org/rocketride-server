@@ -1,0 +1,46 @@
+name: DCO
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check:
+    name: DCO check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Check DCO sign-off
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          FAILED=0
+
+          for SHA in $(git rev-list "$BASE_SHA".."$HEAD_SHA"); do
+            MSG=$(git log -1 --format='%B' "$SHA")
+            if ! echo "$MSG" | grep -qiE '^Signed-off-by: .+ <.+>'; then
+              AUTHOR=$(git log -1 --format='%an <%ae>' "$SHA")
+              SHORT=$(git log -1 --format='%h' "$SHA")
+              echo "::error::Commit ${SHORT} by ${AUTHOR} is missing Signed-off-by line"
+              FAILED=1
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "All commits must include a Signed-off-by line."
+            echo "Use: git commit -s -m 'your message'"
+            echo "To fix existing commits: git rebase --signoff HEAD~N"
+            exit 1
+          fi
+
+          echo "All commits have DCO sign-off."

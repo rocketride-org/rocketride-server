@@ -11,7 +11,7 @@ Use RocketRide when building AI pipelines, document processing workflows, or dat
 - **Question answering** with sources and citations from documents
 
 ### AI-Powered Data Processing
-- **LLM workflows**: Summarization, classification, extraction, translation using GPT-4, Claude, Gemini, Mistral, etc.
+- **LLM workflows**: Summarization, classification, extraction, translation using GPT-4, Claude, Gemini, Mistral, etc. Chat pipelines with `chat` source, LLM nodes, and Q&A flow (questions → answers) are stable and work end-to-end.
 - **Batch AI processing**: Run LLMs over datasets (summarize reports, extract structured data from invoices, classify support tickets, etc.)
 - **Multi-step AI pipelines**: Chain multiple LLM operations with transformations
 

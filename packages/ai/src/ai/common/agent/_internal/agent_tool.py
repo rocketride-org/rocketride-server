@@ -8,7 +8,7 @@ other agents (or frameworks) can invoke an agent via `tool.invoke`.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ai.common.schema import Question
 from ai.common.tools import ToolsBase
@@ -49,7 +49,7 @@ class _AgentAsToolProvider(ToolsBase):
         self._agent = agent
         self._pSelf = pSelf
         self._full_name = f'{self.unique_agent_tool_name()}.{getattr(self._agent, "_AGENT_TOOL_NAME", "run_agent")}'
-        self._tools_available: Optional[List[str]] = None
+        self._tools_available: Optional[List[Tuple[str, str]]] = None
 
     def unique_agent_tool_name(self) -> str:
         """Return the unique tool namespace for this agent node instance."""
@@ -58,9 +58,9 @@ class _AgentAsToolProvider(ToolsBase):
         pipe_id = pipe_type.get('id') if isinstance(pipe_type, dict) else pipe_type.id
         return str(pipe_id)
 
-    def _connected_tools_available(self) -> List[str]:
+    def _connected_tools_available(self) -> List[Tuple[str, str]]:
         """
-        Return a cached list of non-agent tools visible to this agent.
+        Return a cached list of (name, description) for non-agent tools visible to this agent.
 
         This is used for operator visibility in the tool description and is not
         required for tool invocation.
@@ -70,14 +70,17 @@ class _AgentAsToolProvider(ToolsBase):
         try:
             host = AgentHostServices(self._pSelf.instance.invoke)
             tools = self._agent._discover_tools(host=host)
-            names = [t.get('name', '') for t in tools if t.get('name')]
+            tools_available = []
+            for t in tools:
+                name = t.get('name', '')
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                if name.strip() == 'run_agent' or name.strip().endswith('.run_agent'):
+                    continue
+                desc = t.get('description', '')
+                tools_available.append((name, desc if isinstance(desc, str) else ''))
         except Exception:
-            names = []
-        tools_available = [
-            t
-            for t in names
-            if isinstance(t, str) and not (t.strip() == 'run_agent' or t.strip().endswith('.run_agent'))
-        ]
+            tools_available = []
         self._tools_available = tools_available
         return tools_available
 
@@ -114,7 +117,8 @@ class _AgentAsToolProvider(ToolsBase):
         tools_available = self._connected_tools_available()
         desc = 'Invoke this agent as a tool. Input: {query: string, context?: object}. Output: {content, meta, stack}.'
         if tools_available:
-            desc = f'{desc} Tools available to this agent: {", ".join(tools_available)}.'
+            parts = [f'{n}: {d}' if d else n for n, d in tools_available]
+            desc = f'{desc} Tools available to this agent: {"; ".join(parts)}.'
         else:
             desc = f'{desc} Tools available to this agent: (none).'
 

@@ -203,6 +203,11 @@
 	margin-right: 20px;
 }
 
+/* Hide inactive tab panels while keeping them mounted (preserves Performance Metrics state on tab switch) */
+.tab-panel-hidden {
+	display: none;
+}
+
 /* Neutralize nested section wrappers inside tabs */
 .tab-content .status-section,
 .tab-content .pipeline {

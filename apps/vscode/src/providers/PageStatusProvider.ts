@@ -45,6 +45,7 @@ import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
 import { ConnectionStatus, ConnectionState } from '../shared/types';
 import type { PageStatusIncomingMessage, PageStatusOutgoingMessage } from '../shared/types/pageStatus';
+import { getPipelineFilesTreeProvider } from '../extension';
 
 /**
  * Interface for tracking monitoring state per view
@@ -505,6 +506,13 @@ export class PageStatusProvider {
 		// Update the status data - may be undefined if no status
 		this.taskStatusData.set(key, taskStatus);
 
+		// Refresh sidebar Pipelines tree so error/warning counts and lines update
+		try {
+			getPipelineFilesTreeProvider()?.refresh();
+		} catch {
+			// Sidebar may not be ready yet; ignore
+		}
+
 		// Update webview if it's active
 		try {
 			await this.updateWebview(projectId, sourceId);
@@ -512,6 +520,25 @@ export class PageStatusProvider {
 			this.logger.error(`Updating webview for ${key}: ${error}`);
 			throw error;
 		}
+	}
+
+	/**
+	 * Returns task status for a given project and source (for use by sidebar tree).
+	 */
+	public getTaskStatus(projectId: string, sourceId: string): TaskStatus | undefined {
+		return this.taskStatusData.get(`${projectId}.${sourceId}`);
+	}
+
+	/**
+	 * Reveals the Errors tab and scrolls to the Warnings or Errors section in the status page webview.
+	 * Call after show() so the panel is open. No-op if the panel for this project/source is not open.
+	 */
+	public revealErrorsSection(projectId: string, sourceId: string, section: 'errors' | 'warnings'): void {
+		const key = `${projectId}.${sourceId}`;
+		const viewState = this.webviewPanels.get(key);
+		if (!viewState || viewState.isDisposed) return;
+		viewState.panel.reveal(vscode.ViewColumn.One);
+		viewState.panel.webview.postMessage({ type: 'scrollToSection', section });
 	}
 
 	/**

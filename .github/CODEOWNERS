@@ -1,0 +1,29 @@
+# Default owners for everything
+* @rocketride-org/maintainers
+
+# C++ engine
+/packages/server/ @rocketride-org/engine
+/apps/engine/ @rocketride-org/engine
+
+# Python pipeline nodes
+/nodes/ @rocketride-org/nodes
+
+# Client SDKs
+/packages/client-typescript/ @rocketride-org/sdk
+/packages/client-python/ @rocketride-org/sdk
+/packages/client-mcp/ @rocketride-org/sdk
+
+# AI modules
+/packages/ai/ @rocketride-org/ai
+
+# Applications
+/apps/chat-ui/ @rocketride-org/frontend
+/apps/dropper-ui/ @rocketride-org/frontend
+/apps/vscode/ @rocketride-org/vscode
+
+# CI/CD and DevOps
+/.github/ @rocketride-org/devops
+/scripts/ @rocketride-org/devops
+
+# Documentation
+/docs/ @rocketride-org/maintainers

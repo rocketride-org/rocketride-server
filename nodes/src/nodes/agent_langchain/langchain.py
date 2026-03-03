@@ -36,9 +36,8 @@ from ai.common.tools import ToolsBase
 class LangChainDriver(AgentBase):
     FRAMEWORK = 'langchain'
 
-    def __init__(self, *, instructions: str = ''):
+    def __init__(self) -> None:
         """Initialize the LangChain driver."""
-        self._instructions = _safe_str(instructions).strip()
 
     # ------------------------------------------------------------------
     # Bindings
@@ -188,8 +187,6 @@ class LangChainDriver(AgentBase):
             'You are an agent node in a tool-invocation hierarchy.',
             'Use the provided tools when needed.',
         ]
-        if self._instructions:
-            system_parts.extend(['', 'Additional instructions:', self._instructions])
         system_message = SystemMessage(content='\n'.join(system_parts).strip())
 
         stage = 'create_agent'

@@ -1,7 +1,0 @@
-{
-    "name": "@rocketride/engine-lib",
-    "version": "3.1.0",
-    "description": "RocketRide Engine Library - Engine-specific C++ functionality",
-    "private": true,
-    "license": "MIT"
-}

@@ -100,6 +100,7 @@ export const PageStatus: React.FC = () => {
 	const [currentElapsed, setCurrentElapsed] = useState<number>(0);
 	const [traceLevel, setTraceLevel] = useState<TraceLevel>('none');
 	const [traceRows, setTraceRows] = useState<TraceRow[]>([]);
+	const [scrollToSectionTarget, setScrollToSectionTarget] = useState<'errors' | 'warnings' | null>(null);
 
 	// Refs for elapsed timer
 	const intervalRef = useRef<number | null>(null);
@@ -143,6 +144,11 @@ export const PageStatus: React.FC = () => {
 					}
 					case 'connectionState': {
 						setConnectionState(message.state);
+						break;
+					}
+					case 'scrollToSection': {
+						setActiveTab('errors');
+						setScrollToSectionTarget(message.section);
 						break;
 					}
 					case 'traceEvent': {
@@ -280,6 +286,17 @@ export const PageStatus: React.FC = () => {
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only reset timer on completion state
 	}, [taskStatus?.completed, taskStatus?.startTime]);
+
+	/** Scroll to Errors or Warnings section when requested (e.g. from sidebar "Errors"/"Warnings" click) */
+	useEffect(() => {
+		if (activeTab !== 'errors' || !scrollToSectionTarget) return;
+		const id = `${scrollToSectionTarget}-section`;
+		const timer = requestAnimationFrame(() => {
+			document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			setScrollToSectionTarget(null);
+		});
+		return () => cancelAnimationFrame(timer);
+	}, [activeTab, scrollToSectionTarget]);
 
 	// ========================================================================
 	// UTILITY FUNCTIONS
@@ -431,22 +448,38 @@ export const PageStatus: React.FC = () => {
 				</div>
 			</div>
 
-			{/* Tab bar — outside the box, content boxed by .tab-content CSS */}
+			{/* Tab bar — outside the box, content boxed by .tab-content CSS. All panels always mounted so Performance Metrics state is preserved on tab switch. */}
 			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab}>
-				{activeTab === 'status' && (
+				<div
+					className={activeTab === 'status' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
+					role="tabpanel"
+					aria-hidden={activeTab !== 'status'}
+				>
 					<StatusSection taskStatus={taskStatus} currentElapsed={currentElapsed} />
-				)}
-				{activeTab === 'tokens' && (
+				</div>
+				<div
+					className={activeTab === 'tokens' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
+					role="tabpanel"
+					aria-hidden={activeTab !== 'tokens'}
+				>
 					<TokenSection taskStatus={taskStatus} />
-				)}
-				{activeTab === 'flow' && (
+				</div>
+				<div
+					className={activeTab === 'flow' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
+					role="tabpanel"
+					aria-hidden={activeTab !== 'flow'}
+				>
 					<PipelineFlowSection
 						taskStatus={taskStatus}
 						viewMode={viewMode}
 						onViewModeChange={handleViewModeChange}
 					/>
-				)}
-				{activeTab === 'trace' && (
+				</div>
+				<div
+					className={activeTab === 'trace' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
+					role="tabpanel"
+					aria-hidden={activeTab !== 'trace'}
+				>
 					<TraceSection
 						traceLevel={traceLevel}
 						onTraceLevelChange={setTraceLevel}
@@ -461,25 +494,31 @@ export const PageStatus: React.FC = () => {
 							setTraceRows([]);
 						}}
 					/>
-				)}
-				{activeTab === 'errors' && (
-					<>
-						{taskStatus && taskStatus.errors.length > 0 && (
+				</div>
+				<div
+					className={activeTab === 'errors' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
+					role="tabpanel"
+					aria-hidden={activeTab !== 'errors'}
+				>
+					{taskStatus && taskStatus.errors.length > 0 && (
+						<div id="errors-section">
 							<ErrWarnSection title="Errors" items={taskStatus.errors} type="error" />
-						)}
-						{taskStatus && taskStatus.warnings.length > 0 && (
+						</div>
+					)}
+					{taskStatus && taskStatus.warnings.length > 0 && (
+						<div id="warnings-section">
 							<ErrWarnSection title="Warnings" items={taskStatus.warnings} type="warning" />
-						)}
-						{(!taskStatus || (taskStatus.errors.length === 0 && taskStatus.warnings.length === 0)) && (
-							<section className="status-section">
-								<header className="section-header">Errors &amp; Warnings</header>
-								<div className="section-content">
-									<div className="no-data">No errors or warnings</div>
-								</div>
-							</section>
-						)}
-					</>
-				)}
+						</div>
+					)}
+					{(!taskStatus || (taskStatus.errors.length === 0 && taskStatus.warnings.length === 0)) && (
+						<section className="status-section">
+							<header className="section-header">Errors &amp; Warnings</header>
+							<div className="section-content">
+								<div className="no-data">No errors or warnings</div>
+							</div>
+						</section>
+					)}
+				</div>
 			</TabPanel>
 
 			{/* Endpoint Info Modal */}

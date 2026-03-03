@@ -258,6 +258,12 @@ packages/server/
 
 ---
 
+## Python Integration
+
+When extending the engine with Python (custom nodes, filter callbacks), Pydantic models (`Question`, `Answer`, `IInvokeLLM`, `IInvokeTool`, etc.) must be converted to plain dicts via `.model_dump()` before passing to C++ JSON utilities—passing raw `BaseModel` instances causes crashes. See `ROCKETRIDE_COMMON_MISTAKES.md` (Mistake 19) for details.
+
+---
+
 ## Dependencies
 
 - **Boost** -- filesystem, threading

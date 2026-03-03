@@ -22,10 +22,11 @@
 // =============================================================================
 
 /**
- * engine-installer.ts - Automatic Engine Download and Installation
+ * engine-installer.ts - Engine Download and Installation
  *
- * Downloads the latest engine release from GitHub, extracts it into the
- * extension directory, and manages the engine binary lifecycle.
+ * Manages what is installed on disk: downloads engine releases from GitHub,
+ * extracts them into the extension directory, and tracks installed versions.
+ * No process management or connection state — that belongs to EngineManager.
  */
 
 import * as vscode from 'vscode';
@@ -46,6 +47,7 @@ interface ReleaseAsset {
 
 interface ReleaseInfo {
 	tag_name: string;
+	published_at: string;
 	assets: ReleaseAsset[];
 }
 
@@ -65,7 +67,6 @@ export class EngineInstaller {
 
 	private readonly engineDir: string;
 	private readonly logger = getLogger();
-	private installPromise: Promise<string> | null = null;
 
 	constructor(extensionPath: string) {
 		this.engineDir = path.join(extensionPath, 'engine');
@@ -81,11 +82,22 @@ export class EngineInstaller {
 	}
 
 	/**
+	 * Removes the engine directory and all installed files.
+	 */
+	public uninstall(): void {
+		if (fs.existsSync(this.engineDir)) {
+			fs.rmSync(this.engineDir, { recursive: true, force: true });
+			this.logger.output(`${icons.info} Engine uninstalled from ${this.engineDir}`);
+		}
+	}
+
+	/**
 	 * Ensures the engine is installed at the requested version. Downloads if needed.
 	 * Returns the path to the engine executable.
-	 * Uses a concurrency guard to prevent parallel downloads.
+	 *
+	 * The caller is responsible for ensuring only one call is active at a time.
 	 */
-	public async ensureEngine(
+	public async install(
 		versionSpec: string = 'latest',
 		progress?: vscode.Progress<{ message?: string; increment?: number }>,
 		token?: vscode.CancellationToken,
@@ -98,7 +110,24 @@ export class EngineInstaller {
 			const installed = this.getInstalledVersion();
 			const displayInstalled = installed?.replace(/^server-/, '') ?? 'unknown';
 			this.logger.output(`${icons.info} Engine installed: ${displayInstalled}`);
-			if (versionSpec !== 'latest' && versionSpec !== 'prerelease') {
+			if (versionSpec === 'latest' || versionSpec === 'prerelease') {
+				// Check GitHub for a newer version
+				try {
+					const release = await this.fetchRelease(versionSpec, token, githubToken);
+					const installedPublishedAt = this.getInstalledPublishedAt();
+					if (installed === release.tag_name && installedPublishedAt === release.published_at) {
+						this.logger.output(`${icons.success} Installed version is up to date`);
+						return this.getExecutablePath();
+					}
+					const displayNew = release.tag_name.replace(/^server-/, '');
+					this.logger.output(`${icons.info} Update available: ${displayNew} (published ${release.published_at}), updating...`);
+					// Fall through to download
+				} catch {
+					// GitHub unreachable — use what we have
+					this.logger.output(`${icons.info} Could not check for updates, using installed version`);
+					return this.getExecutablePath();
+				}
+			} else {
 				// Specific version: only reuse if it matches
 				if (installed === versionSpec) {
 					this.logger.output(`${icons.success} Installed version matches, skipping download`);
@@ -106,24 +135,12 @@ export class EngineInstaller {
 				}
 				this.logger.output(`${icons.info} Version mismatch, downloading ${displaySpec}...`);
 				// Different version requested — fall through to download
-			} else {
-				// For latest/prerelease, trust the installed version
-				return this.getExecutablePath();
 			}
 		} else {
 			this.logger.output(`${icons.info} No engine installed, downloading ${displaySpec}...`);
 		}
 
-		// Concurrency guard: reuse in-flight install
-		if (this.installPromise) {
-			return this.installPromise;
-		}
-
-		this.installPromise = this.downloadAndInstall(versionSpec, progress, token, githubToken).finally(() => {
-			this.installPromise = null;
-		});
-
-		return this.installPromise;
+		return this.downloadAndInstall(versionSpec, progress, token, githubToken);
 	}
 
 	public getInstalledVersion(): string | null {
@@ -134,8 +151,17 @@ export class EngineInstaller {
 		return null;
 	}
 
-	private writeInstalledVersion(tagName: string): void {
+	public getInstalledPublishedAt(): string | null {
+		const file = path.join(this.engineDir, '.published_at');
+		if (fs.existsSync(file)) {
+			return fs.readFileSync(file, 'utf8').trim();
+		}
+		return null;
+	}
+
+	private writeInstalledVersion(tagName: string, publishedAt: string): void {
 		fs.writeFileSync(path.join(this.engineDir, '.version'), tagName, 'utf8');
+		fs.writeFileSync(path.join(this.engineDir, '.published_at'), publishedAt, 'utf8');
 	}
 
 	private async createOctokit(githubToken?: string) {
@@ -168,6 +194,9 @@ export class EngineInstaller {
 			progress?.report({ message: `Downloading ${displayVersion}...` });
 			await this.downloadAsset(asset, tmpPath, displayVersion, progress, token, githubToken);
 
+			// Check cancellation before wiping the existing engine
+			this.throwIfCancelled(token);
+
 			// Clean up existing engine dir if partial install exists
 			if (fs.existsSync(this.engineDir)) {
 				fs.rmSync(this.engineDir, { recursive: true, force: true });
@@ -191,7 +220,7 @@ export class EngineInstaller {
 				);
 			}
 
-			this.writeInstalledVersion(release.tag_name);
+			this.writeInstalledVersion(release.tag_name, release.published_at);
 			this.logger.output(`${icons.success} Server ${release.tag_name} installed at ${this.engineDir}`);
 			progress?.report({ message: 'Server ready!' });
 
@@ -212,7 +241,7 @@ export class EngineInstaller {
 	 * Fetches all available releases for the version dropdown.
 	 * Returns releases that have assets, sorted newest first.
 	 */
-	public async fetchAllReleases(
+	public async getReleases(
 		token?: vscode.CancellationToken,
 		githubToken?: string
 	): Promise<ReleaseListItem[]> {
@@ -224,7 +253,7 @@ export class EngineInstaller {
 			per_page: 100
 		});
 		return data
-			.filter(r => r.tag_name && r.assets && r.assets.length > 0)
+			.filter(r => r.tag_name?.startsWith('server-') && r.assets && r.assets.length > 0)
 			.map(r => ({
 				tag_name: r.tag_name,
 				prerelease: r.prerelease
@@ -251,9 +280,9 @@ export class EngineInstaller {
 				repo: EngineInstaller.GITHUB_REPO,
 				per_page: 20
 			});
-			const stable = data.find(r => !r.prerelease && r.assets && r.assets.length > 0);
+			const stable = data.find(r => r.tag_name.startsWith('server-') && !r.prerelease && r.assets && r.assets.length > 0);
 			if (!stable) {
-				throw new Error('No stable releases found on GitHub');
+				throw new Error('No stable server releases found on GitHub');
 			}
 			return this.toReleaseInfo(stable);
 		}
@@ -262,12 +291,13 @@ export class EngineInstaller {
 			const { data } = await octokit.repos.listReleases({
 				owner: EngineInstaller.GITHUB_OWNER,
 				repo: EngineInstaller.GITHUB_REPO,
-				per_page: 1
+				per_page: 20
 			});
-			if (data.length === 0) {
-				throw new Error('No releases found on GitHub');
+			const pre = data.find(r => r.tag_name.startsWith('server-') && r.assets && r.assets.length > 0);
+			if (!pre) {
+				throw new Error('No server releases found on GitHub');
 			}
-			return this.toReleaseInfo(data[0]);
+			return this.toReleaseInfo(pre);
 		}
 
 		// Specific tag
@@ -279,12 +309,13 @@ export class EngineInstaller {
 		return this.toReleaseInfo(data);
 	}
 
-	private toReleaseInfo(release: { tag_name: string; assets: Array<{ id: number; name: string; browser_download_url: string; size: number }> }): ReleaseInfo {
+	private toReleaseInfo(release: { tag_name: string; published_at?: string | null; assets: Array<{ id: number; name: string; browser_download_url: string; size: number }> }): ReleaseInfo {
 		if (!release.tag_name || !release.assets || release.assets.length === 0) {
 			throw new Error(`Release ${release.tag_name} has no assets`);
 		}
 		return {
 			tag_name: release.tag_name,
+			published_at: release.published_at ?? '',
 			assets: release.assets.map(a => ({
 				id: a.id,
 				name: a.name,
