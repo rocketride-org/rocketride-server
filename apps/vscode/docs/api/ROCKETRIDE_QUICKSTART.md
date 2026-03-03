@@ -196,6 +196,66 @@ npx tsx main.ts
 
 ---
 
+## Chat Pipeline (Q&A with LLM)
+
+Chat pipelines with `chat` source, LLM nodes, and Q&A flow (questions → answers) work end-to-end. Use this pattern for conversational interfaces.
+
+### Minimal Chat Pipeline (`chat.pipe`)
+```json
+{
+  "pipeline": {
+    "project_id": "e30fee74-0f71-4af2-8dab-5d89deee8f84",
+    "source": "chat_1",
+    "components": [
+      {"id": "chat_1", "provider": "chat", "config": {}},
+      {"id": "llm_1", "provider": "llm_openai", "config": {"profile": "openai-5", "openai-5": {"apikey": "${ROCKETRIDE_OPENAI_KEY}"}}, "input": [{"lane": "questions", "from": "chat_1"}]},
+      {"id": "response_1", "provider": "response", "config": {}, "input": [{"lane": "answers", "from": "llm_1"}]}
+    ]
+  }
+}
+```
+
+### Python: Chat with Question/Answer
+```python
+import asyncio
+from rocketride import RocketRideClient
+from rocketride.schema import Question
+
+async def main():
+    client = RocketRideClient()
+    await client.connect()
+    result = await client.use(filepath='chat.pipe')
+    token = result['token']
+
+    q = Question()
+    q.addQuestion("Hello, how are you?")
+    response = await client.chat(token, q)
+    print("Answer:", response.get('answers', [None])[0])
+
+    await client.disconnect()
+asyncio.run(main())
+```
+
+### TypeScript: Chat with Question/Answer
+```typescript
+import { RocketRideClient, Question } from 'rocketride';
+
+const client = new RocketRideClient();
+await client.connect();
+const { token } = await client.use({ filepath: 'chat.pipe' });
+
+const question = new Question();
+question.addQuestion('Hello, how are you?');
+const response = await client.chat(token, question);
+console.log('Answer:', response.answers?.[0]);
+
+await client.disconnect();
+```
+
+> **Note:** Use `client.chat()` for chat pipelines; use `client.send()` for webhook pipelines. See ROCKETRIDE_COMMON_MISTAKES.md for source/method matching.
+
+---
+
 ## Key Patterns to Remember
 
 ### Always Do This:
