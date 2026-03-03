@@ -183,6 +183,9 @@ function makeStageFilesAction() {
                 }
             }
 
+            // Write .vscodeignore so vsce excludes the engine directory (downloaded at runtime)
+            await writeFile(path.join(BUILD_DIR, '.vscodeignore'), 'engine/**\n');
+
             await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash);
             task.output = 'Manifest staged in build/vscode';
         }

@@ -109,7 +109,6 @@ export class ConnectionManager extends EventEmitter {
 			// before running a single disconnect/reconnect cycle.
 			if (this.configChangeTimeout) {
 				clearTimeout(this.configChangeTimeout);
-			} else {
 			}
 			this.configChangeTimeout = setTimeout(() => {
 				this.configChangeTimeout = undefined;
@@ -301,7 +300,6 @@ export class ConnectionManager extends EventEmitter {
 			this.manager.removeAllListeners();
 			await this.manager.stop();
 			this.manager = undefined;
-		} else {
 		}
 	}
 
@@ -321,7 +319,7 @@ export class ConnectionManager extends EventEmitter {
 						const text = String(body.output).trimEnd();
 						if (text) {
 							const source = body.__id ? `[${body.__id}] ` : '';
-							this.logger.output(`${icons.receive} ${source}${text}`);
+							this.logger.console(`    ${source}${text}`);
 						}
 					}
 				} else if (message.event?.startsWith('apaevt_')) {
@@ -529,7 +527,6 @@ export class ConnectionManager extends EventEmitter {
 				} catch {
 					// Error handled within _connect()
 				}
-			} else {
 			}
 		}, delayMs);
 	}
@@ -696,7 +693,6 @@ export class ConnectionManager extends EventEmitter {
 			// Fire-and-forget disconnect; don't await to avoid blocking disposal
 			this.client.disconnect().catch(() => { /* ignore */ });
 			this.client = undefined;
-		} else {
 		}
 	}
 

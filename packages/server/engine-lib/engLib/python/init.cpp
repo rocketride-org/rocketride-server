@@ -201,6 +201,10 @@ Error setConfig(int argc, wchar_t **argv) {
     // Parse the argv we set
     g_config.parse_argv = 1;
 
+    // Disable Python stdio buffering so print() output reaches piped
+    // stdout immediately (e.g. when spawned by VS Code with stdio: 'pipe')
+    g_config.buffered_stdio = 0;
+
     // Setup the arguments
     if (auto ccode = checkStatus(::PyConfig_SetArgv(&g_config, argc, argv)))
         return ccode;
