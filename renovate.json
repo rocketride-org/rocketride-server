@@ -4,7 +4,7 @@
     "config:recommended",
     "schedule:weekdays",
     ":semanticCommits",
-    ":automergeMinor",
+
     "group:allNonMajor"
   ],
   "labels": ["dependencies"],

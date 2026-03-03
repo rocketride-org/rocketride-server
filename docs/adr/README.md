@@ -10,7 +10,7 @@ We use [MADR](https://adr.github.io/madr/) (Markdown Any Decision Records) forma
 
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
-| [0001](0001-custom-build-system.md) | Custom declarative build system | Accepted | 2024-01-15 |
+| [0001](0001-custom-build-system.md) | Custom declarative build system | Accepted | 2026-03-02 |
 
 ## Creating a New ADR
 
