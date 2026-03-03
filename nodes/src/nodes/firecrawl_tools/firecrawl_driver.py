@@ -41,6 +41,14 @@ SCRAPE_URL_TOOL = {
         },
         'required': ['url'],
     },
+    'outputSchema': {
+        'type': 'object',
+        'properties': {
+            'success': {'type': 'boolean'},
+            'content': {'type': 'string'},
+            'metadata': {'type': 'object'},
+        },
+    },
 }
 
 MAP_URL_TOOL = {
@@ -55,6 +63,16 @@ MAP_URL_TOOL = {
             },
         },
         'required': ['url'],
+    },
+    'outputSchema': {
+        'type': 'object',
+        'properties': {
+            'success': {'type': 'boolean'},
+            'links': {
+                'type': 'array',
+                'items': {'type': 'string'},
+            },
+        },
     },
 }
 
@@ -78,16 +96,18 @@ class FirecrawlDriver(ToolsBase):
     def _tool_query(self) -> List[ToolsBase.ToolDescriptor]:
         out: List[ToolsBase.ToolDescriptor] = []
         for tool in _TOOLS_BY_BARE_NAME.values():
-            out.append({
-                'name': f'{self._server_name}.{tool["name"]}',
+            desc: ToolsBase.ToolDescriptor = {
+                'name': tool['name'],
                 'description': tool['description'],
                 'input_schema': tool['inputSchema'],
-            })
+            }
+            if 'outputSchema' in tool:
+                desc['output_schema'] = tool['outputSchema']
+            out.append(desc)
         return out
 
     def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
-        _server, bare = self._split_tool_name(tool_name)
-        tool = _TOOLS_BY_BARE_NAME.get(bare)
+        tool = _TOOLS_BY_BARE_NAME.get(tool_name)
         if tool is None:
             raise ValueError(f'Unknown tool {tool_name}')
 
@@ -102,12 +122,11 @@ class FirecrawlDriver(ToolsBase):
             raise ValueError(f'Tool input missing required fields: {missing}')
 
     def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:  # noqa: ANN401
-        _server, bare = self._split_tool_name(tool_name)
         args = _normalize_tool_input(input_obj)
 
-        if bare == 'scrape_url':
+        if tool_name == 'scrape_url':
             return self._invoke_scrape(args)
-        elif bare == 'map_url':
+        elif tool_name == 'map_url':
             return self._invoke_map(args)
         else:
             raise ValueError(f'Unknown tool {tool_name}')
@@ -165,24 +184,10 @@ class FirecrawlDriver(ToolsBase):
             'links': links,
         }
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
 
-    def _split_tool_name(self, tool_name: str) -> tuple[str, str]:
-        s = (tool_name or '').strip()
-        if '.' not in s:
-            raise ValueError(f'Tool name must be namespaced as `server.tool`; got {tool_name!r}')
-        server, bare = s.split('.', 1)
-        server = server.strip()
-        bare = bare.strip()
-        if not server or not bare:
-            raise ValueError(f'Tool name must be namespaced as `server.tool`; got {tool_name!r}')
-        if server != self._server_name:
-            raise ValueError(
-                f'Unknown server {server!r} (this node configured as {self._server_name!r})'
-            )
-        return server, bare
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 
 def _normalize_tool_input(input_obj: Any) -> Dict[str, Any]:

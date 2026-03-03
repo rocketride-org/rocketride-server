@@ -54,16 +54,8 @@ export const extractTextFromResult = (result: PIPELINE_RESULT): string[] => {
 			const fieldData = result[fieldName];
 
 			if (Array.isArray(fieldData)) {
-				// Add all non-empty text items from this field.
-				// Agent nodes emit JSON answer objects with a `content` key;
-				// plain text nodes emit raw strings.
-				for (const item of fieldData) {
-					if (typeof item === 'string' && item.trim()) {
-						textResponses.push(item);
-					} else if (item && typeof item === 'object' && typeof item.content === 'string' && item.content.trim()) {
-						textResponses.push(item.content);
-					}
-				}
+				// Add all non-empty text items from this field
+				textResponses.push(...fieldData.filter(item => typeof item === 'string' && item.trim()));
 			} else if (typeof fieldData === 'string' && fieldData.trim()) {
 				textResponses.push(fieldData);
 			}
