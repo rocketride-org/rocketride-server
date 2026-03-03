@@ -1,0 +1,38 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":automergeMinor",
+    "schedule:weekdays"
+  ],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "Group minor and patch updates",
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "minor-and-patch",
+      "automerge": true
+    },
+    {
+      "description": "Individual PRs for major updates",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    },
+    {
+      "description": "Group GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions",
+      "automerge": true
+    },
+    {
+      "description": "Python dependencies",
+      "matchManagers": ["pip_requirements", "pip_setup"],
+      "groupName": "python-dependencies"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security"]
+  }
+}
