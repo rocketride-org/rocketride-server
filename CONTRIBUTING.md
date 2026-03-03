@@ -59,6 +59,24 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 - `test:` - Test additions or modifications
 - `chore:` - Build process or auxiliary tool changes
 
+### Developer Certificate of Origin (DCO)
+
+All commits must be signed off to certify that you have the right to submit the code under the project's MIT license. This is a lightweight alternative to a Contributor License Agreement.
+
+To sign off your commits, add the `-s` flag:
+
+```bash
+git commit -s -m "feat: add new feature"
+```
+
+This adds a `Signed-off-by` line to your commit message. If you forget, you can amend:
+
+```bash
+git commit --amend -s --no-edit
+```
+
+By signing off, you certify the [Developer Certificate of Origin](https://developercertificate.org/).
+
 ### Pull Request Process
 
 1. Push your branch to GitHub:

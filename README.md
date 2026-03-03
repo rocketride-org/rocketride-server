@@ -2,6 +2,7 @@
 
 [![Build](https://github.com/rocketride-org/rocketride-server/actions/workflows/build.yaml/badge.svg)](https://github.com/rocketride-org/rocketride-server/actions/workflows/build.yaml)
 [![CodeQL](https://github.com/rocketride-org/rocketride-server/actions/workflows/codeql.yml/badge.svg)](https://github.com/rocketride-org/rocketride-server/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/rocketride-org/rocketride-server/badge)](https://securityscorecards.dev/viewer/?uri=github.com/rocketride-org/rocketride-server)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org/)
 
