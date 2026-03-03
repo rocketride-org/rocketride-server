@@ -37,6 +37,7 @@ import chatIcon from '../assets/nodes/chat.svg';
 import chromaIcon from '../assets/nodes/chroma.svg';
 import classificationIcon from '../assets/nodes/classification.svg';
 import confluenceIcon from '../assets/nodes/confluence.svg';
+import crewaiIcon from '../assets/nodes/crewai.svg';
 import deepseekIcon from '../assets/nodes/deepseek.svg';
 import dictionaryIcon from '../assets/nodes/dictionary.svg';
 import dropperIcon from '../assets/nodes/dropper.svg';
@@ -53,6 +54,7 @@ import googleDriveIcon from '../assets/nodes/google-drive.svg';
 import hashIcon from '../assets/nodes/hash.svg';
 import ibmIcon from '../assets/nodes/ibm_granite.svg';
 import imageCleanupIcon from '../assets/nodes/image_cleanup.svg';
+import langchainIcon from '../assets/nodes/langchain.svg';
 import llamaindexIcon from '../assets/nodes/llamaindex_icon.svg';
 import llamaparseIcon from '../assets/nodes/llamaparse.svg';
 import milvusIcon from '../assets/nodes/milvus.svg';
@@ -113,6 +115,7 @@ const iconMap: Record<string, string> = {
 	chroma: chromaIcon,
 	classification: classificationIcon,
 	confluence: confluenceIcon,
+	crewai: crewaiIcon,
 	deepseek: deepseekIcon,
 	dictionary: dictionaryIcon,
 	dropper: dropperIcon,
@@ -129,6 +132,7 @@ const iconMap: Record<string, string> = {
 	hash: hashIcon,
 	ibm_granite: ibmIcon,
 	image_cleanup: imageCleanupIcon,
+	langchain: langchainIcon,
 	llamaindex_icon: llamaindexIcon,
 	llamaparse: llamaparseIcon,
 	milvus: milvusIcon,

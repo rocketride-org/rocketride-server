@@ -11,7 +11,7 @@
 		"Single-agent execution using CrewAI.",
 		"Can be invoked as a tool (`<nodeId>.run_agent`) for hierarchical agent orchestration."
 	],
-	"icon": "agent_crewai.svg",
+	"icon": "crewai.svg",
 	"invoke": {
 		"llm": {
 			"description": "LLM used by the agent",

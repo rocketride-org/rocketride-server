@@ -11,7 +11,7 @@
 		"Single-agent execution using LangChain.",
 		"Can be invoked as a tool (`<nodeId>.run_agent`) for hierarchical agent orchestration."
 	],
-	"icon": "agent_langchain.svg",
+	"icon": "langchain.svg",
 	"invoke": {
 		"llm": {
 			"description": "LLM used by the agent",
