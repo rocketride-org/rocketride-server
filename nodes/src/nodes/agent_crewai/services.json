@@ -35,16 +35,19 @@
 		"default": "default",
 		"profiles": {
 			"default": {
-				"instructions": ""
+				"instructions": []
 			}
 		}
 	},
 	"fields": {
 		"instructions": {
-			"type": "string",
+			"type": "array",
 			"title": "Instructions",
-			"description": "Optional additional prompting for this agent node. Keep it short and specific.",
-			"format": "textarea"
+			"description": "Additional instructions to guide the agent.",
+			"items": {
+				"type": "string",
+				"format": "textarea"
+			}
 		},
 		"agent_crewai.default": { "object": "default", "properties": ["instructions"] },
 		"agent_crewai.profile": {

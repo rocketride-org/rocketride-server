@@ -580,7 +580,7 @@ export class PageSettingsProvider {
 				// Proceed without token
 			}
 
-			const versions = await this.engineInstaller.fetchAllReleases(undefined, githubToken);
+			const versions = await this.engineInstaller.getReleases(undefined, githubToken);
 			webview.postMessage({
 				type: 'engineVersionsLoaded',
 				versions

@@ -45,10 +45,16 @@ interface Config {
 	autoConnect: boolean;
 }
 
+interface EngineInfo {
+	version: string | null;
+	publishedAt: string | null;
+}
+
 interface ConnectionData {
 	connectionState: ConnectionState;
 	config: Config;
 	hasApiKey: boolean;
+	engineInfo?: EngineInfo;
 }
 
 type PageConnectionIncomingMessage = {
@@ -248,8 +254,17 @@ export const PageConnection: React.FC = () => {
 				<div className="connection-info">
 					<div className="info-row">
 						<span className="info-label">Server:</span>
-						<span className="info-value">{connectionData?.config.hostUrl || 'N/A'}</span>
+						<span className="info-value">{connectionData?.config.connectionMode === 'local' ? 'Local' : (connectionData?.config.hostUrl || 'N/A')}</span>
 					</div>
+					{connectionData?.config.connectionMode === 'local' && connectionData?.engineInfo?.version && (
+						<div className="info-row">
+							<span className="info-label">Engine:</span>
+							<span className="info-value">
+								{connectionData.engineInfo.version.replace(/^server-/, '')}
+								{connectionData.engineInfo.publishedAt && ` (${new Date(connectionData.engineInfo.publishedAt).toLocaleDateString()})`}
+							</span>
+						</div>
+					)}
 				</div>
 
 				<div className="action-buttons">

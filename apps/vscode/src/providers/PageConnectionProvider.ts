@@ -79,7 +79,7 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 						break;
 
 					case 'disconnect':
-						this.connectionManager.disconnect();
+						await this.connectionManager.disconnect();
 						break;
 
 					case 'reconnect':
@@ -151,6 +151,7 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 			const connectionState = this.connectionManager.getConnectionStatus();
 			const config = this.configManager.getConfig();
 			const hasApiKey = this.configManager.hasApiKey();
+			const engineInfo = this.connectionManager.getEngineInfo();
 
 			this._view.webview.postMessage({
 				type: 'connectionUpdate',
@@ -161,7 +162,8 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 						connectionMode: config.connectionMode,
 						autoConnect: config.autoConnect
 					},
-					hasApiKey
+					hasApiKey,
+					engineInfo
 				}
 			});
 		} catch (error) {

@@ -100,6 +100,7 @@ export const PageStatus: React.FC = () => {
 	const [currentElapsed, setCurrentElapsed] = useState<number>(0);
 	const [traceLevel, setTraceLevel] = useState<TraceLevel>('none');
 	const [traceRows, setTraceRows] = useState<TraceRow[]>([]);
+	const [scrollToSectionTarget, setScrollToSectionTarget] = useState<'errors' | 'warnings' | null>(null);
 
 	// Refs for elapsed timer
 	const intervalRef = useRef<number | null>(null);
@@ -143,6 +144,11 @@ export const PageStatus: React.FC = () => {
 					}
 					case 'connectionState': {
 						setConnectionState(message.state);
+						break;
+					}
+					case 'scrollToSection': {
+						setActiveTab('errors');
+						setScrollToSectionTarget(message.section);
 						break;
 					}
 					case 'traceEvent': {
@@ -280,6 +286,17 @@ export const PageStatus: React.FC = () => {
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only reset timer on completion state
 	}, [taskStatus?.completed, taskStatus?.startTime]);
+
+	/** Scroll to Errors or Warnings section when requested (e.g. from sidebar "Errors"/"Warnings" click) */
+	useEffect(() => {
+		if (activeTab !== 'errors' || !scrollToSectionTarget) return;
+		const id = `${scrollToSectionTarget}-section`;
+		const timer = requestAnimationFrame(() => {
+			document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			setScrollToSectionTarget(null);
+		});
+		return () => cancelAnimationFrame(timer);
+	}, [activeTab, scrollToSectionTarget]);
 
 	// ========================================================================
 	// UTILITY FUNCTIONS
@@ -484,10 +501,14 @@ export const PageStatus: React.FC = () => {
 					aria-hidden={activeTab !== 'errors'}
 				>
 					{taskStatus && taskStatus.errors.length > 0 && (
-						<ErrWarnSection title="Errors" items={taskStatus.errors} type="error" />
+						<div id="errors-section">
+							<ErrWarnSection title="Errors" items={taskStatus.errors} type="error" />
+						</div>
 					)}
 					{taskStatus && taskStatus.warnings.length > 0 && (
-						<ErrWarnSection title="Warnings" items={taskStatus.warnings} type="warning" />
+						<div id="warnings-section">
+							<ErrWarnSection title="Warnings" items={taskStatus.warnings} type="warning" />
+						</div>
 					)}
 					{(!taskStatus || (taskStatus.errors.length === 0 && taskStatus.warnings.length === 0)) && (
 						<section className="status-section">

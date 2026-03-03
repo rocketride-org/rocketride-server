@@ -24,31 +24,47 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from rocketlib import IGlobalBase, IJson, OPEN_MODE
 from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
-    instructions: str = ''
+    instructions: List[str] = []
     agent: Any = None
 
+    _MAX_INSTRUCTION_LEN = 1000
+
     @staticmethod
-    def normalize_and_validate_instructions(cfg: Dict[str, Any]) -> str:
+    def normalize_and_validate_instructions(cfg: Dict[str, Any]) -> List[str]:
+        """
+        Normalize and validate the LangChain node config instructions.
+
+        Expects an array of instruction strings. Each instruction should be a couple
+        of sentences (max 1000 chars).
+        """
         cfg = IJson.toDict(cfg)
         if not isinstance(cfg, dict):
             raise ValueError('Config must be an object')
 
         raw = cfg.get('instructions')
-        try:
-            instructions = '' if raw is None else str(raw)
-        except Exception:
-            instructions = ''
-        instructions = instructions.strip()
-        if len(instructions) > 8000:
-            raise ValueError('instructions is too long (max 8000 characters)')
-        return instructions
+        if not isinstance(raw, list):
+            return []
+
+        result: List[str] = []
+        for item in raw:
+            if not isinstance(item, str):
+                continue
+            s = item.strip()
+            if not s:
+                continue
+            if len(s) > IGlobal._MAX_INSTRUCTION_LEN:
+                raise ValueError(
+                    f'Instruction too long (max {IGlobal._MAX_INSTRUCTION_LEN} chars): {s[:50]}...'
+                )
+            result.append(s)
+        return result
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -59,27 +75,28 @@ class IGlobal(IGlobalBase):
         requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
         depends(requirements)
 
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        conn_config = IJson.toDict(self.glb.connConfig) if self.glb.connConfig else {}
+        conn_config = conn_config if isinstance(conn_config, dict) else {}
+        config = Config.getNodeConfig(self.glb.logicalType, conn_config)
         self.instructions = self.normalize_and_validate_instructions(config)
 
         from .langchain import LangChainDriver
 
-        self.agent = LangChainDriver(instructions=self.instructions)
+        self.agent = LangChainDriver()
 
     def validateConfig(self):
         raw_conn = getattr(getattr(self, 'glb', None), 'connConfig', None)
+        conn_config = IJson.toDict(raw_conn) if raw_conn else {}
+        conn_config = conn_config if isinstance(conn_config, dict) else {}
         try:
-            effective = Config.getNodeConfig(self.glb.logicalType, raw_conn)
+            effective = Config.getNodeConfig(self.glb.logicalType, conn_config)
         except Exception:
-            try:
-                effective = IJson.toDict(raw_conn)
-            except Exception:
-                effective = raw_conn if isinstance(raw_conn, dict) else {}
+            effective = {}
 
         self.normalize_and_validate_instructions(effective)
         return None
 
     def endGlobal(self) -> None:
         self.agent = None
-        self.instructions = ''
+        self.instructions = []
 

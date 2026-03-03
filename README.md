@@ -6,38 +6,6 @@
 
 A high-performance, modular data processing engine with extensible pipeline nodes, AI/ML capabilities, and cross-platform client libraries.
 
-## Architecture
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'background': '#1A1A3A', 'primaryColor': '#28284A', 'primaryBorderColor': '#4FC3F7', 'primaryTextColor': '#E0E0E0', 'lineColor': '#6B6B8A', 'secondaryColor': '#3E3E6E', 'tertiaryColor': '#28284A', 'mainBkg': '#3E3E6E', 'nodeBorder': '#4FC3F7', 'clusterBkg': '#28284A', 'clusterBorder': '#4FC3F7', 'titleColor': '#F25B32', 'edgeLabelBackground': '#28284A', 'nodeTextColor': '#E0E0E0', 'textColor': '#E0E0E0', 'fontSize': '22px', 'fontFamily': 'system-ui, -apple-system, sans-serif'}, 'flowchart': {'useMaxWidth': false, 'padding': 50, 'nodeSpacing': 50, 'rankSpacing': 45, 'wrappingWidth': 280, 'htmlLabels': true}}}%%
-flowchart TB
-    subgraph Wrapper[" "]
-        direction TB
-        subgraph Applications["Applications&nbsp;"]
-            direction LR
-            A1["Chat UI"] ~~~ A2["Dropper<br/>UI"] ~~~ A3["VSCode<br/>Extension"] ~~~ A4["Engine&nbsp;"]
-        end
-
-        subgraph ClientLibraries["Client Libraries&nbsp;"]
-            direction LR
-            C1["TypeScript<br/>SDK"] ~~~ C2["Python<br/>SDK"] ~~~ C3["MCP<br/>Protocol<br/>Client"]
-        end
-
-        subgraph EngineLayer["Engine Layer&nbsp;"]
-            direction LR
-            E1["Pipeline<br/>Orchestrator"] ~~~ E2["AI/ML<br/>Modules"] ~~~ E3["Nodes<br/>50+"] ~~~ E4["Java/Tika<br/>Integration"]
-        end
-
-        subgraph CoreLibrary["Core Library (C++)&nbsp;"]
-            direction LR
-            X1["async"] ~~~ X2["crypto"] ~~~ X3["file"] ~~~ X4["json"]
-            X5["memory"] ~~~ X6["network"] ~~~ X7["string"] ~~~ X8["threading"]
-        end
-
-        Applications ~~~ ClientLibraries ~~~ EngineLayer ~~~ CoreLibrary
-    end
-```
-
 ## Prerequisites
 
 | Component   | Version | Purpose                        |

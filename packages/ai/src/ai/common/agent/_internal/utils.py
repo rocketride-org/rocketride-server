@@ -3,7 +3,7 @@ Internal helpers for agent framework drivers.
 
 This module contains small, framework-agnostic utilities used by `AgentBase` and
 the agent-as-tool adapter:
-- prompt extraction from `Question`
+- Question preparation (node instructions) and prompt extraction
 - run id / timestamp helpers
 - tool invocation payload normalization across frameworks
 - transcript and text extraction helpers for host LLM responses
@@ -41,6 +41,24 @@ def extract_prompt(question: Any) -> str:
     if not text:
         raise ValueError('No prompt provided in Question.questions[0].text')
     return text
+
+
+def apply_node_instructions(question: Any, pSelf: Any) -> None:
+    """
+    Add node config instructions to the question so they flow through getPrompt().
+
+    Supports both pipeline and agent-as-tool invocation paths. Instructions are
+    read from pSelf.IGlobal.instructions (list of strings).
+    """
+    instructions = getattr(getattr(pSelf, 'IGlobal', None), 'instructions', None)
+    if not isinstance(instructions, list):
+        return
+    add_inst = getattr(question, 'addInstruction', None)
+    if not callable(add_inst):
+        return
+    for inst in instructions:
+        if isinstance(inst, str) and inst.strip():
+            add_inst('Instruction', inst.strip())
 
 
 def new_run_id() -> str:
