@@ -1,5 +1,7 @@
 FROM ubuntu:jammy
 
+ARG TARGETARCH
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates \
@@ -10,7 +12,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -r rocketride && useradd -r -g rocketride -d /opt/rocketride rocketride
 
-COPY --chown=rocketride:rocketride dist/server/ /opt/rocketride/
+COPY --chown=rocketride:rocketride dist/server/${TARGETARCH}/ /opt/rocketride/
 
 WORKDIR /opt/rocketride
 

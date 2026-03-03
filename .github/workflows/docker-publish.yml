@@ -39,29 +39,36 @@ jobs:
             echo "tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Download server artifact
+      - name: Download server artifacts
         run: |
           gh release download "${{ steps.version.outputs.tag }}" \
             --pattern "rocketride-server-*-linux-x64.tar.gz" \
             --dir /tmp/release
-          ASSET_COUNT=$(ls /tmp/release/*.tar.gz 2>/dev/null | wc -l)
-          if [ "$ASSET_COUNT" -ne 1 ]; then
-            echo "::error::Expected exactly 1 matching asset, found ${ASSET_COUNT}"
-            ls -la /tmp/release/
-            exit 1
-          fi
+
+          gh release download "${{ steps.version.outputs.tag }}" \
+            --pattern "rocketride-server-*-linux-arm64.tar.gz" \
+            --dir /tmp/release
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Extract server
+      - name: Extract server binaries
         run: |
-          mkdir -p dist/server
-          tar xf /tmp/release/rocketride-server-*-linux-x64.tar.gz -C dist/server
-          if [ ! -f dist/server/engine ]; then
-            echo "::error::Engine binary not found after extraction"
-            ls -la dist/server/
+          mkdir -p dist/server/amd64 dist/server/arm64
+          tar xf /tmp/release/rocketride-server-*-linux-x64.tar.gz -C dist/server/amd64
+          tar xf /tmp/release/rocketride-server-*-linux-arm64.tar.gz -C dist/server/arm64
+          if [ ! -f dist/server/amd64/engine ]; then
+            echo "::error::amd64 engine binary not found"
+            ls -la dist/server/amd64/
             exit 1
           fi
+          if [ ! -f dist/server/arm64/engine ]; then
+            echo "::error::arm64 engine binary not found"
+            ls -la dist/server/arm64/
+            exit 1
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -79,7 +86,7 @@ jobs:
           context: .
           file: docker/Dockerfile.engine
           push: true
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository_owner }}/rocketride-engine:${{ steps.version.outputs.version }}
             ghcr.io/${{ github.repository_owner }}/rocketride-engine:latest

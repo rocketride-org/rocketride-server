@@ -56,6 +56,11 @@ jobs:
             runner: windows-2022
             builder_cmd: ./builder.cmd
             vcpkg_cmd: ./build/vcpkg/vcpkg.exe
+          - platform: ubuntu-arm
+            label: Ubuntu 22.04 (ARM64)
+            runner: ubuntu-22.04-arm
+            builder_cmd: ./builder
+            vcpkg_cmd: ./build/vcpkg/vcpkg
           - platform: macos
             label: macOS (ARM64)
             runner: macos-14

@@ -332,10 +332,11 @@ export class EngineInstaller {
 			const darwinArch = arch === 'arm64' ? 'arm64' : 'x64';
 			return { name: `darwin-${darwinArch}`, ext: 'tar.gz' };
 		} else if (platform === 'linux') {
-			return { name: 'linux-x64', ext: 'tar.gz' };
+			const linuxArch = arch === 'arm64' ? 'arm64' : 'x64';
+			return { name: `linux-${linuxArch}`, ext: 'tar.gz' };
 		}
 
-		throw new Error(`Unsupported platform: ${platform} ${arch}. Supported: Windows (x64), macOS (x64/ARM64), Linux (x64).`);
+		throw new Error(`Unsupported platform: ${platform} ${arch}. Supported: Windows (x64), macOS (x64/ARM64), Linux (x64/ARM64).`);
 	}
 
 	private findPlatformAsset(release: ReleaseInfo): ReleaseAsset {

@@ -68,7 +68,8 @@ function getPlatformInfo(options = {}) {
             ext: 'tar.gz'
         };
     } else if (platform === 'linux') {
-        return { name: 'linux-x64', os: 'linux', ext: 'tar.gz' };
+        const linuxArch = arch === 'arm64' ? 'arm64' : 'x64';
+        return { name: `linux-${linuxArch}`, os: 'linux', arch: linuxArch, ext: 'tar.gz' };
     }
     throw new Error(`Unsupported platform: ${platform}-${arch}`);
 }
@@ -174,7 +175,7 @@ function getVcpkgTriplet(options = {}) {
 
     if (platform === 'win32') return 'x64-windows-vc-rocketride';
     if (platform === 'darwin') return arch === 'arm64' ? 'arm64-osx-appleclang-rocketride' : 'x64-osx-appleclang-rocketride';
-    return 'x64-linux-clang-rocketride';
+    return arch === 'arm64' ? 'arm64-linux-clang-rocketride' : 'x64-linux-clang-rocketride';
 }
 
 function getParallelJobs() {

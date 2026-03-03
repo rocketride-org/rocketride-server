@@ -123,8 +123,13 @@ select_linux_triplet() {
         echo "✓ Compiler: Using clang-$CLANG_VERSION (found and supported)"
         
         # Use generic triplet and set CC/CXX to point to the installed version
-        TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
-        
+        ARCH=$(uname -m)
+        if [[ "$ARCH" == "aarch64" ]] || [[ "$ARCH" == "arm64" ]]; then
+            TRIPLET_NAME="arm64-linux-clang-rocketride.cmake"
+        else
+            TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
+        fi
+
         # Check if generic clang/clang++ exist, otherwise use versioned ones
         if command_exists "clang" && command_exists "clang++"; then
             export CC=clang
@@ -147,18 +152,28 @@ select_linux_triplet() {
         
         CLANG_VERSION="$DEFAULT_CLANG"
         REQUIRES+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
-        TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
+        ARCH=$(uname -m)
+        if [[ "$ARCH" == "aarch64" ]] || [[ "$ARCH" == "arm64" ]]; then
+            TRIPLET_NAME="arm64-linux-clang-rocketride.cmake"
+        else
+            TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
+        fi
         export CC=clang-${CLANG_VERSION}
         export CXX=clang++-${CLANG_VERSION}
-        
+
     else
         # No clang found - install recommended version
         echo "✗ Compiler: clang not found (requires clang 12+)"
         echo "→ Will install clang-$DEFAULT_CLANG (recommended for $DISTRO $VERSION_ID)"
-        
+
         CLANG_VERSION="$DEFAULT_CLANG"
         REQUIRES+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
-        TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
+        ARCH=$(uname -m)
+        if [[ "$ARCH" == "aarch64" ]] || [[ "$ARCH" == "arm64" ]]; then
+            TRIPLET_NAME="arm64-linux-clang-rocketride.cmake"
+        else
+            TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
+        fi
         export CC=clang-${CLANG_VERSION}
         export CXX=clang++-${CLANG_VERSION}
     fi
