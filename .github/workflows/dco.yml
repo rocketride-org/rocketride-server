@@ -1,0 +1,17 @@
+name: DCO
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  pull-requests: write
+  statuses: write
+
+jobs:
+  check:
+    name: DCO check
+    runs-on: ubuntu-latest
+    steps:
+      - name: DCO check
+        uses: dcoapp/app@v1
