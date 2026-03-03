@@ -27,7 +27,6 @@ import { ConnectionSettings } from './ConnectionSettings';
 import { PipelineSettings } from './PipelineSettings';
 import { DebuggingSettings } from './DebuggingSettings';
 import { EnvVariablesSettings } from './EnvVariablesSettings';
-import { IntegrationSettings } from './IntegrationSettings';
 import { MessageDisplay } from './MessageDisplay';
 
 // Import the styles
@@ -45,14 +44,11 @@ export interface SettingsData {
 	hasApiKey: boolean;
 	apiKey: string;
 	autoConnect: boolean;
-	deployUrl?: string;
 	defaultPipelinePath: string;
 	localEngineVersion: string;
 	localEngineArgs: string[];
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
 	envVars?: Record<string, string>;
-	copilotIntegration?: boolean;
-	cursorIntegration?: boolean;
 }
 
 export interface EngineVersionItem {
@@ -74,7 +70,7 @@ export type PageSettingsIncomingMessage
 		type: 'showMessage';
 		level: 'success' | 'error' | 'info' | 'warning';
 		message: string;
-		context?: 'development' | 'deploy';
+		context?: 'development';
 	}
 	| {
 		type: 'engineVersionsLoaded';
@@ -91,10 +87,6 @@ export type PageSettingsOutgoingMessage
 	}
 	| {
 		type: 'testConnection';
-		settings: SettingsData;
-	}
-	| {
-		type: 'testDeployEndpoint';
 		settings: SettingsData;
 	}
 	| {
@@ -132,18 +124,14 @@ export const PageSettings: React.FC = () => {
 		hasApiKey: false,
 		apiKey: '', // Initialize empty - will be loaded from secure storage
 		autoConnect: true,
-		deployUrl: '',
 		defaultPipelinePath: 'pipelines', // Initialize with default value
 		localEngineVersion: 'latest',
 		localEngineArgs: [],
 		pipelineRestartBehavior: 'prompt',
-		envVars: {},
-		copilotIntegration: false,
-		cursorIntegration: false
+		envVars: {}
 	});
 	const [message, setMessage] = useState<MessageData | null>(null);
 	const [developmentTestMessage, setDevelopmentTestMessage] = useState<MessageData | null>(null);
-	const [deployTestMessage, setDeployTestMessage] = useState<MessageData | null>(null);
 	const [engineVersions, setEngineVersions] = useState<EngineVersionItem[]>([]);
 	const [engineVersionsLoading, setEngineVersionsLoading] = useState(false);
 
@@ -175,9 +163,6 @@ export const PageSettings: React.FC = () => {
 						if (message.context === 'development') {
 							setDevelopmentTestMessage(msg);
 							if (clearAfter) setTimeout(() => setDevelopmentTestMessage(null), clearAfter);
-						} else if (message.context === 'deploy') {
-							setDeployTestMessage(msg);
-							if (clearAfter) setTimeout(() => setDeployTestMessage(null), clearAfter);
 						} else {
 							setMessage(msg);
 							if (clearAfter) setTimeout(() => setMessage(null), clearAfter);
@@ -204,13 +189,6 @@ export const PageSettings: React.FC = () => {
 	 */
 	const handleTestDevelopmentConnection = (): void => {
 		sendMessage({ type: 'testConnection', settings });
-	};
-
-	/**
-	 * Test deploy endpoint
-	 */
-	const handleTestDeployEndpoint = (): void => {
-		sendMessage({ type: 'testDeployEndpoint', settings });
 	};
 
 	/**
@@ -299,19 +277,12 @@ export const PageSettings: React.FC = () => {
 					onSettingsChange={handleSettingsChange}
 					onClearCredentials={handleClearCredentials}
 					onTestDevelopmentConnection={handleTestDevelopmentConnection}
-					onTestDeployEndpoint={handleTestDeployEndpoint}
 					developmentTestMessage={developmentTestMessage}
-					deployTestMessage={deployTestMessage}
 					engineVersions={engineVersions}
 					engineVersionsLoading={engineVersionsLoading}
 				/>
 
 				<PipelineSettings
-					settings={settings}
-					onSettingsChange={handleSettingsChange}
-				/>
-
-				<IntegrationSettings
 					settings={settings}
 					onSettingsChange={handleSettingsChange}
 				/>

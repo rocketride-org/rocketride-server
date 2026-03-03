@@ -86,12 +86,6 @@
 					"description": "Host URL for RocketRide service (used by both cloud and local modes). Host and port will be parsed from this URL.",
 					"format": "uri"
 				},
-				"rocketride.deployUrl": {
-					"type": "string",
-					"default": "https://cloud.rocketride.ai",
-					"description": "Base URL for the deploy API when using Deploy to RocketRide.ai. Can differ from the development server URL.",
-					"format": "uri"
-				},
 				"rocketride.defaultPipelinePath": {
 					"type": "string",
 					"default": "${workspaceFolder}/pipelines",
@@ -134,16 +128,6 @@
 						"Do not automatically restart the pipeline",
 						"Prompt the user to restart the pipeline"
 					]
-				},
-				"rocketride.copilotIntegration": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable GitHub Copilot integration"
-				},
-				"rocketride.cursorIntegration": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable Cursor integration"
 				},
 				"rocketride.oauth2RootUrl": {
 					"type": "string",
@@ -254,18 +238,6 @@
 				"category": "RocketRide Pipeline"
 			},
 			{
-				"command": "rocketride.sidebar.files.launchPipeline",
-				"title": "Debug Pipeline",
-				"icon": "$(debug-alt)",
-				"category": "RocketRide Pipeline"
-			},
-			{
-				"command": "rocketride.sidebar.files.attachPipeline",
-				"title": "Attach to Pipeline",
-				"icon": "$(debug-disconnect)",
-				"category": "RocketRide Pipeline"
-			},
-			{
 				"command": "rocketride.sidebar.files.stopPipeline",
 				"title": "Stop Pipeline",
 				"icon": "$(primitive-square)",
@@ -301,16 +273,6 @@
 					"command": "rocketride.sidebar.files.runPipeline",
 					"when": "view == rocketride.provider.files && viewItem =~ /^pipelineSource:stopped/",
 					"group": "inline@1"
-				},
-				{
-					"command": "rocketride.sidebar.files.launchPipeline",
-					"when": "view == rocketride.provider.files && viewItem =~ /^pipelineSource:stopped/",
-					"group": "inline@2"
-				},
-				{
-					"command": "rocketride.page.deploy.open",
-					"when": "view == rocketride.provider.files && viewItem =~ /^pipelineSource/",
-					"group": "inline@3"
 				},
 				{
 					"command": "rocketride.sidebar.files.stopPipeline",

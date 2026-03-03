@@ -98,9 +98,6 @@
 	align-items: center;
 	gap: 10px;
 	padding: 8px;
-	background: var(--vscode-sideBarSectionHeader-background);
-	border: 1px solid var(--vscode-widget-border);
-	border-radius: 3px;
 }
 
 /* ============================================================================ */
@@ -198,9 +195,6 @@
 	flex-direction: column;
 	gap: 6px;
 	padding: 8px;
-	background: var(--vscode-sideBarSectionHeader-background);
-	border: 1px solid var(--vscode-widget-border);
-	border-radius: 3px;
 }
 
 .info-row {
@@ -235,6 +229,7 @@
 	align-items: center;
 	gap: 6px;
 	padding: 0 12px;
+	margin-top: 8px;
 }
 
 .connection-view .btn {
