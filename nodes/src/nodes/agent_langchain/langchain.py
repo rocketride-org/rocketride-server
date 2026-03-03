@@ -101,7 +101,7 @@ class LangChainDriver(AgentBase):
         ctx: Dict[str, Any],
     ) -> List[Any]:
         from langchain_core.tools import BaseTool
-        from pydantic import BaseModel, ConfigDict, Field
+        from pydantic import BaseModel, ConfigDict, Field, create_model
 
         class _ToolInput(BaseModel):
             """
@@ -114,6 +114,45 @@ class LangChainDriver(AgentBase):
 
             input: Any = Field(default=None, description='Tool input payload')
             model_config = ConfigDict(extra='allow')
+
+        def _make_args_schema(input_schema: Optional[Dict[str, Any]]) -> type[BaseModel]:
+            """
+            Build a Pydantic model from a JSON Schema object.
+
+            LangChain tool execution can filter kwargs based on `args_schema`. Using
+            the real tool schema helps preserve tool parameters end-to-end.
+            """
+            if not isinstance(input_schema, dict):
+                return _ToolInput
+            props = input_schema.get('properties', {})
+            if not isinstance(props, dict) or not props:
+                return _ToolInput
+            required_keys = set(input_schema.get('required', []) or [])
+
+            field_defs: Dict[str, Any] = {}
+            for key, prop in props.items():
+                if not isinstance(key, str) or not key:
+                    continue
+                if not isinstance(prop, dict):
+                    prop = {}
+                desc = prop.get('description', '')
+                if key in required_keys:
+                    field_defs[key] = (Any, Field(..., description=desc))
+                else:
+                    default = prop.get('default', None)
+                    field_defs[key] = (Any, Field(default=default, description=desc))
+
+            if not field_defs:
+                return _ToolInput
+
+            try:
+                return create_model(
+                    '_DynToolInput',
+                    __config__=ConfigDict(extra='allow'),
+                    **field_defs,
+                )
+            except Exception:
+                return _ToolInput
 
         class HostTool(BaseTool):  # type: ignore[misc]
             name: str
@@ -146,9 +185,19 @@ class LangChainDriver(AgentBase):
             if not isinstance(name, str) or not name.strip():
                 continue
             desc = td.get('description') if isinstance(td.get('description'), str) else f'Invoke host tool: {name}'
-            tool = HostTool(name=name, description=desc)
+            input_schema = td.get('input_schema')
+            if isinstance(input_schema, dict):
+                try:
+                    schema_text = json.dumps(input_schema, ensure_ascii=False)
+                except Exception:
+                    schema_text = ''
+                if schema_text:
+                    desc = f'{desc}\n\nTool input schema (JSON): {schema_text}'
+
+            schema_cls = _make_args_schema(input_schema if isinstance(input_schema, dict) else None)
+            tool = HostTool(name=name, description=desc, args_schema=schema_cls)
             try:
-                setattr(tool, '_rr_input_schema', td.get('input_schema'))
+                setattr(tool, '_rr_input_schema', input_schema)
             except Exception:
                 pass
             tools.append(tool)
@@ -248,11 +297,20 @@ def _normalize_bound_tools(tools: Any) -> List[Dict[str, Any]]:
         name = _safe_str(getattr(t, 'name', ''))
         desc = _safe_str(getattr(t, 'description', ''))
         schema: Any = None
+        input_schema: Any = None
         try:
             schema = getattr(t, 'args_schema', None)
         except Exception:
             schema = None
-        out.append({'name': name, 'description': desc, 'args_schema': _safe_str(schema)})
+        try:
+            input_schema = getattr(t, '_rr_input_schema', None)
+        except Exception:
+            input_schema = None
+
+        entry: Dict[str, Any] = {'name': name, 'description': desc, 'args_schema': _safe_str(schema)}
+        if isinstance(input_schema, dict):
+            entry['input_schema'] = input_schema
+        out.append(entry)
     return out
 
 
