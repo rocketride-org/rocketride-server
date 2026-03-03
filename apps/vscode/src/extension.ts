@@ -334,7 +334,7 @@ async function refreshAllProviders(): Promise<void> {
 /**
  * Extension deactivation cleanup
  */
-export function deactivate(): void {
+export async function deactivate(): Promise<void> {
 	// Close all status pages first
 	if (pageStatus) {
 		try {
@@ -357,10 +357,10 @@ export function deactivate(): void {
 		}
 	}
 
-	// Dispose connection manager
+	// Dispose connection manager (async — awaits engine process shutdown)
 	if (connectionManager) {
 		try {
-			connectionManager.dispose();
+			await connectionManager.dispose();
 		} catch (error: unknown) {
 			// Silently ignore cancellation errors during shutdown
 			if (!(error instanceof Error) || error.name !== 'Canceled') {

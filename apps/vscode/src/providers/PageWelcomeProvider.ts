@@ -340,7 +340,7 @@ export class PageWelcomeProvider {
 				githubToken = session?.accessToken;
 			} catch { /* ignore */ }
 
-			const versions = await this.engineInstaller.fetchAllReleases(undefined, githubToken);
+			const versions = await this.engineInstaller.getReleases(undefined, githubToken);
 			this.panel.webview.postMessage({ type: 'engineVersionsLoaded', versions });
 		} catch (error) {
 			console.error('[PageWelcomeProvider] Failed to fetch engine versions:', error);
