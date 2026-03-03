@@ -8,12 +8,11 @@
 	"path": "nodes.http_request",
 	"prefix": "http",
 	"description": [
-		"Makes HTTP requests to any API endpoint, similar to Postman.",
-		"Supports GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS with auth, headers, query/path params, and body.",
-		"The user can pre-configure defaults in the node panel; the agent can override any field at runtime."
+		"Makes HTTP requests to any API endpoint — like curl for agents.",
+		"The agent provides the full request (method, URL, headers, body, auth).",
+		"The node enforces security guardrails: only whitelisted URLs and enabled HTTP methods are permitted."
 	],
 	"tile": [
-		"${parameters.http_request.method} ${parameters.http_request.url}",
 		"Tool: ${parameters.http_request.serverName}.http_request"
 	],
 	"lanes": {},
@@ -21,31 +20,8 @@
 		"default": "default",
 		"profiles": {
 			"default": {
-				"title": "GET Request (no auth)",
-				"serverName": "http",
-				"method": "GET",
-				"url": "",
-				"authType": "none",
-				"bodyType": "none"
-			},
-			"post_json": {
-				"title": "POST JSON",
-				"serverName": "http",
-				"method": "POST",
-				"url": "",
-				"authType": "none",
-				"bodyType": "raw",
-				"rawContentType": "application/json",
-				"rawContent": ""
-			},
-			"bearer_get": {
-				"title": "GET with Bearer Token",
-				"serverName": "http",
-				"method": "GET",
-				"url": "",
-				"authType": "bearer",
-				"bearerToken": "",
-				"bodyType": "none"
+				"title": "Default",
+				"serverName": "http"
 			}
 		}
 	},
@@ -57,332 +33,64 @@
 			"description": "Namespace prefix for the tool: <serverName>.http_request",
 			"default": "http"
 		},
-		"http_request.method": {
-			"type": "string",
-			"title": "Method",
-			"description": "HTTP method to use for the request",
-			"default": "GET",
-			"enum": [
-				"GET",
-				"POST",
-				"PUT",
-				"PATCH",
-				"DELETE",
-				"HEAD",
-				"OPTIONS"
-			]
+
+		"http_request.allowGET": {
+			"type": "boolean",
+			"title": "GET",
+			"default": true,
+			"enum": [[true, "Yes"], [false, "No"]]
 		},
-		"http_request.url": {
+		"http_request.allowPOST": {
+			"type": "boolean",
+			"title": "POST",
+			"default": true,
+			"enum": [[true, "Yes"], [false, "No"]]
+		},
+		"http_request.allowPUT": {
+			"type": "boolean",
+			"title": "PUT",
+			"default": true,
+			"enum": [[true, "Yes"], [false, "No"]]
+		},
+		"http_request.allowPATCH": {
+			"type": "boolean",
+			"title": "PATCH",
+			"default": true,
+			"enum": [[true, "Yes"], [false, "No"]]
+		},
+		"http_request.allowDELETE": {
+			"type": "boolean",
+			"title": "DELETE",
+			"default": true,
+			"enum": [[true, "Yes"], [false, "No"]]
+		},
+		"http_request.allowHEAD": {
+			"type": "boolean",
+			"title": "HEAD",
+			"default": false,
+			"enum": [[true, "Yes"], [false, "No"]]
+		},
+		"http_request.allowOPTIONS": {
+			"type": "boolean",
+			"title": "OPTIONS",
+			"default": false,
+			"enum": [[true, "Yes"], [false, "No"]]
+		},
+
+		"http_request.whitelistPattern": {
 			"type": "string",
-			"title": "URL",
-			"description": "Full request URL (supports :param path placeholders, e.g. https://api.example.com/users/:id)",
+			"title": "URL Pattern (regex)",
 			"default": ""
 		},
-
-		"http_request.authType": {
-			"type": "string",
-			"title": "Authorization",
-			"description": "Authentication type for the request",
-			"default": "none",
-			"enum": [
-				"none",
-				"basic",
-				"bearer",
-				"api_key"
-			],
-			"conditional": [
-				{
-					"value": "basic",
-					"properties": [
-						"http_request.authBasic"
-					]
-				},
-				{
-					"value": "bearer",
-					"properties": [
-						"http_request.authBearer"
-					]
-				},
-				{
-					"value": "api_key",
-					"properties": [
-						"http_request.authApiKey"
-					]
-				}
-			]
-		},
-
-		"http_request.username": {
-			"type": "string",
-			"title": "Username",
-			"description": "Username for Basic authentication",
-			"default": ""
-		},
-		"http_request.password": {
-			"type": "string",
-			"title": "Password",
-			"description": "Password for Basic authentication",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "password"
-			}
-		},
-		"http_request.authBasic": {
-			"object": "authBasic",
-			"title": "Basic Auth",
-			"properties": [
-				"http_request.username",
-				"http_request.password"
-			]
-		},
-
-		"http_request.bearerToken": {
-			"type": "string",
-			"title": "Token",
-			"description": "Bearer token for authentication",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
-		},
-		"http_request.authBearer": {
-			"object": "authBearer",
-			"title": "Bearer Token",
-			"properties": [
-				"http_request.bearerToken"
-			]
-		},
-
-		"http_request.apiKeyName": {
-			"type": "string",
-			"title": "Key name",
-			"description": "Header or query parameter name (e.g. X-API-Key)",
-			"default": "X-API-Key"
-		},
-		"http_request.apiKeyValue": {
-			"type": "string",
-			"title": "Key value",
-			"description": "The API key value",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
-		},
-		"http_request.apiKeyAddTo": {
-			"type": "string",
-			"title": "Add to",
-			"description": "Where to attach the API key",
-			"default": "header",
-			"enum": [
-				"header",
-				"query_param"
-			]
-		},
-		"http_request.authApiKey": {
-			"object": "authApiKey",
-			"title": "API Key",
-			"properties": [
-				"http_request.apiKeyName",
-				"http_request.apiKeyValue",
-				"http_request.apiKeyAddTo"
-			]
-		},
-
-		"http_request.bodyType": {
-			"type": "string",
-			"title": "Body",
-			"description": "Request body type",
-			"default": "none",
-			"enum": [
-				"none",
-				"raw",
-				"form_data",
-				"x_www_form_urlencoded"
-			],
-			"conditional": [
-				{
-					"value": "raw",
-					"properties": [
-						"http_request.bodyRaw"
-					]
-				},
-				{
-					"value": "form_data",
-					"properties": [
-						"http_request.bodyFormData"
-					]
-				},
-				{
-					"value": "x_www_form_urlencoded",
-					"properties": [
-						"http_request.bodyUrlencoded"
-					]
-				}
-			]
-		},
-
-		"http_request.rawContentType": {
-			"type": "string",
-			"title": "Content type",
-			"description": "Content-Type of the raw body",
-			"default": "application/json",
-			"enum": [
-				"application/json",
-				"text/plain",
-				"text/html",
-				"text/javascript",
-				"application/xml"
-			]
-		},
-		"http_request.rawContent": {
-			"type": "string",
-			"title": "Content",
-			"description": "Raw body content",
-			"default": "",
-			"format": "textarea",
-			"ui": {
-				"ui:widget": "textarea",
-				"ui:options": {
-					"rows": 10
-				}
-			}
-		},
-		"http_request.bodyRaw": {
-			"object": "bodyRaw",
-			"title": "Raw Body",
-			"properties": [
-				"http_request.rawContentType",
-				"http_request.rawContent"
-			]
-		},
-
-		"http_request.formDataKey": {
-			"type": "string",
-			"title": "Key",
-			"default": "",
-			"minLength": 1
-		},
-		"http_request.formDataValue": {
-			"type": "string",
-			"title": "Value",
-			"default": ""
-		},
-		"http_request.bodyFormData": {
-			"title": "Form Data",
-			"description": "Key-value pairs sent as multipart/form-data",
+		"http_request.urlWhitelist": {
+			"title": "URL Whitelist",
+			"description": "Regex patterns for allowed URLs. A request URL must match at least one pattern. If empty, all requests are blocked.",
 			"type": "array",
 			"minItems": 0,
 			"items": {
 				"type": "object",
 				"properties": [
-					"http_request.formDataKey",
-					"http_request.formDataValue"
-				]
-			}
-		},
-		"http_request.urlencodedKey": {
-			"type": "string",
-			"title": "Key",
-			"default": "",
-			"minLength": 1
-		},
-		"http_request.urlencodedValue": {
-			"type": "string",
-			"title": "Value",
-			"default": ""
-		},
-		"http_request.bodyUrlencoded": {
-			"title": "URL Encoded",
-			"description": "Key-value pairs sent as application/x-www-form-urlencoded",
-			"type": "array",
-			"minItems": 0,
-			"items": {
-				"type": "object",
-				"properties": [
-					"http_request.urlencodedKey",
-					"http_request.urlencodedValue"
-				]
-			}
-		},
-
-		"http_request.headerKey": {
-			"type": "string",
-			"title": "Key",
-			"default": "",
-			"minLength": 1
-		},
-		"http_request.headerValue": {
-			"type": "string",
-			"title": "Value",
-			"default": ""
-		},
-		"http_request.headers": {
-			"title": "Headers",
-			"description": "Custom HTTP headers as key-value pairs",
-			"type": "array",
-			"minItems": 0,
-			"items": {
-				"type": "object",
-				"properties": [
-					"http_request.headerKey",
-					"http_request.headerValue"
-				]
-			}
-		},
-		"http_request.queryKey": {
-			"type": "string",
-			"title": "Key",
-			"default": "",
-			"minLength": 1
-		},
-		"http_request.queryValue": {
-			"type": "string",
-			"title": "Value",
-			"default": ""
-		},
-		"http_request.queryDesc": {
-			"type": "string",
-			"title": "Description",
-			"default": ""
-		},
-		"http_request.queryParams": {
-			"title": "Query Params",
-			"description": "Query parameters appended to the URL as key-value pairs",
-			"type": "array",
-			"minItems": 0,
-			"items": {
-				"type": "object",
-				"properties": [
-					"http_request.queryKey",
-					"http_request.queryValue",
-					"http_request.queryDesc"
-				]
-			}
-		},
-		"http_request.pathKey": {
-			"type": "string",
-			"title": "Param",
-			"default": "",
-			"minLength": 1
-		},
-		"http_request.pathValue": {
-			"type": "string",
-			"title": "Value",
-			"default": ""
-		},
-		"http_request.pathParams": {
-			"title": "Path Params",
-			"description": "Path parameter replacements (e.g. :id in the URL)",
-			"type": "array",
-			"minItems": 0,
-			"items": {
-				"type": "object",
-				"properties": [
-					"http_request.pathKey",
-					"http_request.pathValue"
+					"http_request.whitelistPattern"
 				]
 			}
 		}
@@ -394,13 +102,14 @@
 			"properties": [
 				"type",
 				"name",
-				"http_request.method",
-				"http_request.url",
-				"http_request.authType",
-				"http_request.bodyType",
-				"http_request.headers",
-				"http_request.queryParams",
-				"http_request.pathParams"
+				"http_request.allowGET",
+				"http_request.allowPOST",
+				"http_request.allowPUT",
+				"http_request.allowPATCH",
+				"http_request.allowDELETE",
+				"http_request.allowHEAD",
+				"http_request.allowOPTIONS",
+				"http_request.urlWhitelist"
 			]
 		}
 	]

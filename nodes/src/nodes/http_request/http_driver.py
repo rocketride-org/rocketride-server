@@ -17,7 +17,7 @@
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF OTHER DEALINGS IN THE
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
 
@@ -25,12 +25,15 @@
 http_request tool-provider driver.
 
 Implements ``tool.query``, ``tool.validate``, and ``tool.invoke`` by exposing a
-single ``http_request`` tool that can call any HTTP API endpoint.
+single ``http_request`` tool that can call any HTTP API endpoint.  Security
+guardrails (allowed methods + URL whitelist) are enforced before every request.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import json
+import re
+from typing import Any, Dict, List, Set
 
 from ai.common.tools import ToolsBase
 
@@ -53,21 +56,19 @@ INPUT_SCHEMA: Dict[str, Any] = {
     'properties': {
         'url': {
             'type': 'string',
-            'description': 'Full URL (supports :param path parameters, e.g. https://api.example.com/users/:id)',
+            'description': 'Full URL, e.g. https://api.example.com/users/1',
         },
         'method': {
             'type': 'string',
             'enum': sorted(VALID_METHODS),
             'description': 'HTTP method',
         },
+        'body_json': {
+            'description': 'JSON body for POST/PUT/PATCH. Pass a JSON object directly (e.g. {"name": "foo"}) — it will be serialized automatically. This is the easiest way to send JSON.',
+        },
         'query_params': {
             'type': 'object',
             'description': 'Key-value query parameters appended to the URL',
-            'additionalProperties': {'type': 'string'},
-        },
-        'path_params': {
-            'type': 'object',
-            'description': 'Path parameter replacements (e.g. {"id": "123"} replaces :id in the URL)',
             'additionalProperties': {'type': 'string'},
         },
         'headers': {
@@ -75,14 +76,30 @@ INPUT_SCHEMA: Dict[str, Any] = {
             'description': 'Custom HTTP headers',
             'additionalProperties': {'type': 'string'},
         },
+        'bearer_token': {
+            'type': 'string',
+            'description': 'Bearer token for Authorization header. Just pass the token string.',
+        },
+        'basic_auth': {
+            'type': 'object',
+            'description': 'Basic auth credentials',
+            'properties': {
+                'username': {'type': 'string'},
+                'password': {'type': 'string'},
+            },
+        },
+        'path_params': {
+            'type': 'object',
+            'description': 'Path parameter replacements (e.g. {"id": "123"} replaces :id in the URL)',
+            'additionalProperties': {'type': 'string'},
+        },
         'auth': {
             'type': 'object',
-            'description': 'Authentication configuration',
+            'description': 'Advanced auth config. Prefer bearer_token or basic_auth shortcuts instead.',
             'properties': {
                 'type': {
                     'type': 'string',
                     'enum': sorted(VALID_AUTH_TYPES),
-                    'description': 'Auth type (none, basic, bearer, api_key)',
                 },
                 'basic': {
                     'type': 'object',
@@ -100,12 +117,11 @@ INPUT_SCHEMA: Dict[str, Any] = {
                 'api_key': {
                     'type': 'object',
                     'properties': {
-                        'key': {'type': 'string', 'description': 'Header or query-param name'},
-                        'value': {'type': 'string', 'description': 'The API key value'},
+                        'key': {'type': 'string'},
+                        'value': {'type': 'string'},
                         'add_to': {
                             'type': 'string',
                             'enum': ['header', 'query_param'],
-                            'description': 'Where to attach the key (default: header)',
                         },
                     },
                 },
@@ -113,32 +129,28 @@ INPUT_SCHEMA: Dict[str, Any] = {
         },
         'body': {
             'type': 'object',
-            'description': 'Request body configuration',
+            'description': 'Advanced body config. Prefer body_json shortcut for JSON payloads.',
             'properties': {
                 'type': {
                     'type': 'string',
                     'enum': sorted(VALID_BODY_TYPES),
-                    'description': 'Body type (none, raw, form_data, x_www_form_urlencoded)',
                 },
                 'raw': {
                     'type': 'object',
                     'properties': {
-                        'content': {'type': 'string', 'description': 'Raw body content'},
+                        'content': {'type': 'string'},
                         'content_type': {
                             'type': 'string',
                             'enum': sorted(VALID_RAW_CONTENT_TYPES),
-                            'description': 'Content-Type header value (default: application/json)',
                         },
                     },
                 },
                 'form_data': {
                     'type': 'object',
-                    'description': 'Key-value pairs sent as multipart/form-data',
                     'additionalProperties': {'type': 'string'},
                 },
                 'urlencoded': {
                     'type': 'object',
-                    'description': 'Key-value pairs sent as application/x-www-form-urlencoded',
                     'additionalProperties': {'type': 'string'},
                 },
             },
@@ -148,11 +160,18 @@ INPUT_SCHEMA: Dict[str, Any] = {
 
 
 class HttpDriver(ToolsBase):
-    def __init__(self, *, server_name: str, defaults: Dict[str, Any] | None = None):
+    def __init__(
+        self,
+        *,
+        server_name: str,
+        enabled_methods: Set[str],
+        url_patterns: List[re.Pattern],
+    ):
         self._server_name = (server_name or '').strip() or 'http'
         self._tool_name = 'http_request'
         self._namespaced = f'{self._server_name}.{self._tool_name}'
-        self._defaults: Dict[str, Any] = defaults or {}
+        self._enabled_methods = enabled_methods
+        self._url_patterns = url_patterns
 
     # ------------------------------------------------------------------
     # ToolsBase hooks
@@ -163,16 +182,55 @@ class HttpDriver(ToolsBase):
             {
                 'name': self._namespaced,
                 'description': (
-                    'Make an HTTP request to any API endpoint. '
-                    'You MUST always specify both "url" and "method" (GET, POST, PUT, PATCH, DELETE, HEAD, or OPTIONS). '
-                    'For POST/PUT/PATCH requests, include a "body" object with "type" set to "raw" and a nested "raw" '
-                    'object containing "content" (the JSON string) and "content_type" (e.g. "application/json"). '
-                    'You can also pass "headers" (object of key-value pairs), "query_params" (object of key-value pairs), '
-                    'and "auth" (with "type": "bearer"/"basic"/"api_key" and corresponding credentials).'
+                    'Make an HTTP request. Required: "url" and "method". '
+                    'For JSON bodies, pass "body_json" as a JSON object (e.g. {"name": "foo"}) — it is serialized automatically. '
+                    'For bearer auth, pass "bearer_token" as a string. '
+                    'For basic auth, pass "basic_auth": {"username": "...", "password": "..."}. '
+                    'Optional: "headers", "query_params", "path_params".'
                 ),
                 'inputSchema': INPUT_SCHEMA,
             }
         ]
+
+    @staticmethod
+    def _normalize_shortcuts(input_obj: Dict[str, Any]) -> Dict[str, Any]:
+        """Expand convenience shortcuts into the canonical nested format.
+
+        Mutates and returns *input_obj* so that downstream validate/invoke
+        only need to understand the canonical ``body`` and ``auth`` shapes.
+        """
+        # --- body_json  ->  body ---
+        body_json = input_obj.pop('body_json', None)
+        if body_json is not None and not input_obj.get('body'):
+            if isinstance(body_json, (dict, list)):
+                content_str = json.dumps(body_json)
+            else:
+                content_str = str(body_json)
+            input_obj['body'] = {
+                'type': 'raw',
+                'raw': {
+                    'content': content_str,
+                    'content_type': 'application/json',
+                },
+            }
+
+        # --- bearer_token  ->  auth ---
+        bearer_token = input_obj.pop('bearer_token', None)
+        if bearer_token is not None and not input_obj.get('auth'):
+            input_obj['auth'] = {
+                'type': 'bearer',
+                'bearer': {'token': str(bearer_token)},
+            }
+
+        # --- basic_auth  ->  auth ---
+        basic_auth = input_obj.pop('basic_auth', None)
+        if isinstance(basic_auth, dict) and not input_obj.get('auth'):
+            input_obj['auth'] = {
+                'type': 'basic',
+                'basic': basic_auth,
+            }
+
+        return input_obj
 
     def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
         if tool_name != self._tool_name and tool_name != self._namespaced:
@@ -181,16 +239,32 @@ class HttpDriver(ToolsBase):
         if not isinstance(input_obj, dict):
             raise ValueError('Tool input must be a JSON object')
 
-        url = input_obj.get('url')
-        if not url or not isinstance(url, str):
-            raise ValueError('url is required and must be a non-empty string')
-
+        # --- Guardrail: allowed methods ---
         method = input_obj.get('method')
         if not method or not isinstance(method, str):
             raise ValueError('method is required and must be a non-empty string')
         if method.upper() not in VALID_METHODS:
             raise ValueError(f'method must be one of {sorted(VALID_METHODS)}; got {method!r}')
+        if method.upper() not in self._enabled_methods:
+            raise ValueError(
+                f'HTTP method "{method.upper()}" is not allowed. '
+                f'Enabled methods: {", ".join(sorted(self._enabled_methods))}'
+            )
 
+        # --- Guardrail: URL whitelist ---
+        url = input_obj.get('url')
+        if not url or not isinstance(url, str):
+            raise ValueError('url is required and must be a non-empty string')
+        if not self._url_patterns:
+            raise ValueError(
+                f'URL "{url}" blocked — no URL whitelist patterns are configured.'
+            )
+        if not any(p.search(url) for p in self._url_patterns):
+            raise ValueError(
+                f'URL "{url}" does not match any allowed URL pattern.'
+            )
+
+        # --- Standard field validation ---
         auth = input_obj.get('auth')
         if isinstance(auth, dict):
             auth_type = (auth.get('type') or 'none').strip().lower()
@@ -214,47 +288,15 @@ class HttpDriver(ToolsBase):
         if not isinstance(input_obj, dict):
             raise ValueError('Tool input must be a JSON object (dict)')
 
-        merged = self._merge_with_defaults(input_obj)
+        self._normalize_shortcuts(input_obj)
+        self._tool_validate(tool_name=tool_name, input_obj=input_obj)
 
         return execute_request(
-            url=merged.get('url', ''),
-            method=merged.get('method', 'GET'),
-            query_params=merged.get('query_params'),
-            path_params=merged.get('path_params'),
-            headers=merged.get('headers'),
-            auth=merged.get('auth'),
-            body=merged.get('body'),
+            url=input_obj.get('url', ''),
+            method=input_obj.get('method', 'GET'),
+            query_params=input_obj.get('query_params'),
+            path_params=input_obj.get('path_params'),
+            headers=input_obj.get('headers'),
+            auth=input_obj.get('auth'),
+            body=input_obj.get('body'),
         )
-
-    def _merge_with_defaults(self, agent_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Merge user-configured defaults with agent runtime input.
-
-        Priority: agent input > user config > field defaults.
-        For dict-type fields (headers, query_params, path_params), config
-        values serve as the base and agent values are overlaid on top.
-        """
-        if not self._defaults:
-            return agent_input
-
-        merged: Dict[str, Any] = {}
-
-        for key in ('url', 'method', 'auth', 'body'):
-            agent_val = agent_input.get(key)
-            default_val = self._defaults.get(key)
-            if agent_val is not None:
-                merged[key] = agent_val
-            elif default_val is not None:
-                merged[key] = default_val
-
-        for key in ('headers', 'query_params', 'path_params'):
-            default_val = self._defaults.get(key)
-            agent_val = agent_input.get(key)
-            if isinstance(default_val, dict) and isinstance(agent_val, dict):
-                combined = {**default_val, **agent_val}
-                merged[key] = combined
-            elif agent_val is not None:
-                merged[key] = agent_val
-            elif default_val is not None:
-                merged[key] = default_val
-
-        return merged
