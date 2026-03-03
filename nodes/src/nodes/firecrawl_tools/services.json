@@ -1,0 +1,49 @@
+{
+	"title": "Firecrawl",
+	"protocol": "firecrawl_tools://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.firecrawl_tools",
+	"prefix": "firecrawl",
+	"icon": "firecrawl.svg",
+	"description": [
+		"Exposes Firecrawl web-scraping operations as agent tools.",
+		"Provides scrape_url (single page) and map_url (site structure discovery)."
+	],
+	"tile": [],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Firecrawl",
+				"apikey": ""
+			}
+		}
+	},
+	"fields": {
+		"firecrawl_tools.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Firecrawl API key",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Firecrawl",
+			"properties": [
+				"type",
+				"name",
+				"firecrawl_tools.apikey"
+			]
+		}
+	]
+}
