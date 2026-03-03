@@ -1,0 +1,52 @@
+module:server:
+  - changed-files:
+      - any-glob-to-any-file:
+          - packages/server/**
+          - apps/engine/**
+          - packages/tika/**
+          - packages/vcpkg/**
+
+module:nodes:
+  - changed-files:
+      - any-glob-to-any-file:
+          - nodes/**
+
+module:client-ts:
+  - changed-files:
+      - any-glob-to-any-file:
+          - packages/client-typescript/**
+
+module:client-python:
+  - changed-files:
+      - any-glob-to-any-file:
+          - packages/client-python/**
+          - packages/client-mcp/**
+
+module:ai:
+  - changed-files:
+      - any-glob-to-any-file:
+          - packages/ai/**
+
+module:vscode:
+  - changed-files:
+      - any-glob-to-any-file:
+          - apps/vscode/**
+
+module:ui:
+  - changed-files:
+      - any-glob-to-any-file:
+          - apps/chat-ui/**
+          - apps/dropper-ui/**
+          - packages/shared-ui/**
+
+ci/cd:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
+          - scripts/**
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - docs/**
+          - "*.md"
