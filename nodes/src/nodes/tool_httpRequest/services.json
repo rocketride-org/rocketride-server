@@ -1,11 +1,11 @@
 {
 	"title": "HTTP Request",
-	"protocol": "http_request://",
+	"protocol": "tool_httpRequest://",
 	"classType": ["tool"],
 	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
-	"path": "nodes.http_request",
+	"path": "nodes.tool_httpRequest",
 	"prefix": "http",
 	"description": [
 		"Makes HTTP requests to any API endpoint — like curl for agents.",
