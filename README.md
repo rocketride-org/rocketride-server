@@ -1,84 +1,41 @@
-# RocketRide Data Processing Engine
+![Header](./images/header.jpeg)
 
 [![CI](https://github.com/rocketride-org/rocketride-server/actions/workflows/ci.yml/badge.svg)](https://github.com/rocketride-org/rocketride-server/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/rocketride-org/rocketride-server/badge)](https://scorecard.dev/viewer/?uri=github.com/rocketride-org/rocketride-server)
 [![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org/)
 
-A high-performance, modular data processing engine with extensible pipeline nodes, AI/ML capabilities, and cross-platform client libraries.
+RocketRide is a high-performance data processing engine built on a C++ core with a Python-extensible node system. With 50+ pipeline nodes, native Al/ML support, and SDKs for TypeScript, Python, and MCP, it lets you process, transform, and analyze data at scale — entirely on your own infrastructure.
 
-## Prerequisites
-
-| Component   | Version | Purpose                        |
-| ----------- | ------- | ------------------------------ |
-| **Node.js** | 18+     | Build system, client libraries |
-
-Everything else -- pnpm, C++ toolchains, Python, Java/Maven -- is downloaded and configured automatically by the build system.
+## Key Capabilities
+- **Stay in your IDE** — Build, debug, test, and scale heavy AI and data workloads with an intuitive visual builder in the environment you're used to. Stop using your browser.
+- **High-performance C++ engine** — Native multithreading. No GIL. No bottleneck. Purpose-built for throughput, not prototypes.
+- **Multi-agent workflows** — Orchestrate and scale agents with built-in support for CrewAI and LangChain.
+- **50+ pipeline nodes** — Python-extensible, with 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more.
+- **TypeScript, Python & MCP SDKs** — Integrate pipelines into native applications or expose them as tools for AI assistants.
+- **One-click deploy** — Run on Docker, on-prem, or RocketRide Cloud (👀*coming soon*). Our architecture is made for production, not demos.
 
 ## Quick Start
 
+Install the extension for your IDE:
 ```bash
-git clone https://github.com/rocketride-org/rocketride-server.git
-cd engine-new
-./builder build
+code --install-extension RocketRide.rocketride        # VS Code
+cursor --install-extension RocketRide.rocketride      # Cursor
+windsurf --install-extension RocketRide.rocketride    # Windsurf
 ```
+<sub>[Not seeing your IDE? Open an issue](https://github.com/rocketride-org/rocketride-server/issues/new) · · · [Download directly](https://open-vsx.org/extension/RocketRide/rocketride)</sub>
 
-The `builder` script configures the environment, downloads a pre-built engine when available (or compiles from source), and builds all modules. See the [build system documentation](docs/README-builder.md) for per-module builds, commands, and options.
 
-## Project Structure
+## Building your first pipe(?) or usage section?
 
-```text
-engine-new/
-├── apps/                       # Runnable applications
-│   ├── engine/                 # Main engine executable (C++)
-│   ├── chat-ui/                # Chat web interface (React)
-│   ├── dropper-ui/             # File dropper interface (React)
-│   └── vscode/                 # VSCode extension
-├── packages/                   # Reusable libraries
-│   ├── server/                 # C++ server components
-│   │   ├── engine-core/        # Core library (apLib)
-│   │   └── engine-lib/         # Engine library (engLib)
-│   ├── client-typescript/      # TypeScript SDK
-│   ├── client-python/          # Python SDK
-│   ├── client-mcp/             # MCP Protocol client
-│   ├── ai/                     # AI/ML modules
-│   ├── tika/                   # Java/Tika integration
-│   ├── java/                   # JDK & Maven tooling
-│   ├── vcpkg/                  # C++ package manager
-│   └── shared-ui/              # Shared UI components
-├── nodes/                      # Pipeline nodes (Python)
-│   └── src/                    # Node implementations
-├── scripts/                    # Build system
-├── docs/                       # Documentation
-├── test/                       # Integration tests
-├── testdata/                   # Test fixtures and data
-├── examples/                   # Example projects
-├── dist/                       # Build outputs
-└── build/                      # Build intermediates
-```
 
-## Documentation
 
-- [Build system](docs/README-builder.md)
-- [Engine](docs/README-engine.md)
-- [Client libraries](docs/README-clients.md) -- [TypeScript](docs/README-typescript-client.md), [Python](docs/README-python-client.md), [MCP](docs/README-mcp-client.md)
-- [Pipeline nodes](docs/README-nodes.md)
-- [Node test framework](docs/README-node-testing.md)
+## Deploy
 
-## Contributing
 
-We welcome contributions. Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+## Useful Links
+- 📚 [Documentation](https://docs.rocketride.org/)
+- 💬 [Discord](https://discord.gg/9hr3tdZmEG)
+- 🤝 [Contributions](CONTRIBUTING.md)
+- 🔒 [Security](SECURITY.md)
+- ⚖️ [License](LICENSE)
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## Security
-
-For security concerns, please see our [Security Policy](SECURITY.md) or email security@rocketride.ai.
-
-## License
-
-This project is licensed under the MIT License -- see the [LICENSE](LICENSE) file for details.
