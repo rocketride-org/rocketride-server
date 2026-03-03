@@ -30,8 +30,11 @@ import { StatusSection, StatusHeader, StatusElapsed } from '../../components/Sta
 import { TokenSection } from '../../components/TokenSection';
 import { TabPanel } from '../../components/TabPanel';
 import { TraceSection, TraceLevel, TraceRow } from '../../components/TraceSection';
+import { VideoClipsSection } from '../../components/VideoClipsSection';
 import { EndpointInfoModal, EndpointInfo } from '../../components/EndpointInfoModal';
 import { WarningIcon } from '../../components/icons/WarningIcon';
+
+import type { ClipEntry } from '../../../shared/types/pageStatus';
 
 // Import the styles
 import '../../styles/vscode.css'
@@ -64,6 +67,13 @@ export type PageStatusIncomingMessage
 			result?: string;
 			error?: string;
 		};
+	}
+	| {
+		type: 'scrollToSection';
+		section: 'errors' | 'warnings';
+	} | {
+		type: 'clipsList';
+		clips: ClipEntry[];
 	};
 
 export type PageStatusOutgoingMessage
@@ -77,6 +87,9 @@ export type PageStatusOutgoingMessage
 	| {
 		type: 'pipelineAction';
 		action: 'stop' | 'run' | 'restart';
+	}
+	| {
+		type: 'listClips';
 	};
 
 /**
@@ -101,6 +114,8 @@ export const PageStatus: React.FC = () => {
 	const [traceLevel, setTraceLevel] = useState<TraceLevel>('none');
 	const [traceRows, setTraceRows] = useState<TraceRow[]>([]);
 	const [scrollToSectionTarget, setScrollToSectionTarget] = useState<'errors' | 'warnings' | null>(null);
+	const [clips, setClips] = useState<ClipEntry[]>([]);
+	const [clipsLoading, setClipsLoading] = useState(false);
 
 	// Refs for elapsed timer
 	const intervalRef = useRef<number | null>(null);
@@ -149,6 +164,11 @@ export const PageStatus: React.FC = () => {
 					case 'scrollToSection': {
 						setActiveTab('errors');
 						setScrollToSectionTarget(message.section);
+						break;
+					}
+					case 'clipsList': {
+						setClips(message.clips);
+						setClipsLoading(false);
 						break;
 					}
 					case 'traceEvent': {
@@ -367,6 +387,18 @@ export const PageStatus: React.FC = () => {
 
 	const handlePipelineAction = (action: 'stop' | 'run') => sendMessage({ type: 'pipelineAction', action });
 
+	const requestClips = () => {
+		setClipsLoading(true);
+		sendMessage({ type: 'listClips' });
+	};
+
+	const handleTabChange = (tab: string) => {
+		setActiveTab(tab);
+		if (tab === 'clips') {
+			requestClips();
+		}
+	};
+
 	// ========================================================================
 	// RENDER
 	// ========================================================================
@@ -401,6 +433,7 @@ export const PageStatus: React.FC = () => {
 		{ id: 'tokens', label: 'Tokens' },
 		{ id: 'flow', label: 'Flow' },
 		{ id: 'trace', label: 'Trace' },
+		{ id: 'clips', label: 'Clips', badge: clips.length > 0 ? <span style={{ fontSize: 11, opacity: 0.7 }}>{clips.length}</span> : undefined },
 		{ id: 'errors', label: 'Errors', badge: errorCount > 0 ? <WarningIcon size={14} /> : undefined }
 	];
 
@@ -449,7 +482,7 @@ export const PageStatus: React.FC = () => {
 			</div>
 
 			{/* Tab bar — outside the box, content boxed by .tab-content CSS. All panels always mounted so Performance Metrics state is preserved on tab switch. */}
-			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab}>
+			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={handleTabChange}>
 				<div
 					className={activeTab === 'status' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
 					role="tabpanel"
@@ -493,6 +526,17 @@ export const PageStatus: React.FC = () => {
 							traceIdRef.current = 0;
 							setTraceRows([]);
 						}}
+					/>
+				</div>
+				<div
+					className={activeTab === 'clips' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
+					role="tabpanel"
+					aria-hidden={activeTab !== 'clips'}
+				>
+					<VideoClipsSection
+						clips={clips}
+						onRefresh={requestClips}
+						loading={clipsLoading}
 					/>
 				</div>
 				<div

@@ -31,10 +31,16 @@ individual video clips using stream-copy for speed.
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from typing import List, TYPE_CHECKING
+from typing import List
 
-if TYPE_CHECKING:
-    from .segment_tracker import Segment
+from .segment_tracker import Segment
+
+_LOG_PATH = '/tmp/objdet_debug.log'
+
+
+def _log(msg: str):
+    with open(_LOG_PATH, 'a') as f:
+        f.write(f'[ClipExtractor] {msg}\n')
 
 
 @dataclass
@@ -77,7 +83,6 @@ def extract_clips(
         Caller is responsible for deleting the files after use.
     """
     import imageio_ffmpeg as ffmpeg
-    from .segment_tracker import Segment  # noqa: F811
 
     ffexec = ffmpeg.get_ffmpeg_exe()
     clips: List[ClipInfo] = []
@@ -113,10 +118,10 @@ def extract_clips(
         try:
             subprocess.run(cmd, check=True, timeout=120)
         except subprocess.CalledProcessError as exc:
-            print(f'[ClipExtractor] FFmpeg failed for clip {idx}: {exc}')
+            _log(f'FFmpeg failed for clip {idx}: {exc}')
             continue
         except subprocess.TimeoutExpired:
-            print(f'[ClipExtractor] FFmpeg timed out for clip {idx}')
+            _log(f'FFmpeg timed out for clip {idx}')
             continue
 
         clips.append(

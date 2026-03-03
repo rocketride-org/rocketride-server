@@ -179,6 +179,8 @@ class DataConn(DAPConn):
 
         # Get the listeners on this pipe
         listeners = pipe_instance.getListeners()
+        with open('/tmp/objdet_debug.log', 'a') as _f:
+            _f.write(f'_determine_lane: mime={mime_type} listeners={listeners}\n')
 
         # If this is rocketlib tag data, we can send it out directly on the tag lane
         if mime_type == 'application/rocketlib-tag':
