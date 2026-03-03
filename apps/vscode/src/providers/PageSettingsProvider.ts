@@ -224,7 +224,7 @@ export class PageSettingsProvider {
 
 			// Local engine settings
 			localEngineVersion: workspaceConfig.get('local.engineVersion', 'latest'),
-			localEngineArgs: workspaceConfig.get('local.engineArgs', []),
+			localEngineArgs: workspaceConfig.get('engineArgs', []),
 
 			// Debugging settings
 			pipelineRestartBehavior: workspaceConfig.get('pipelineRestartBehavior', 'prompt'),
@@ -278,7 +278,7 @@ export class PageSettingsProvider {
 				await workspaceConfig.update('local.engineVersion', settings.localEngineVersion, vscode.ConfigurationTarget.Global);
 			}
 			if (settings.localEngineArgs !== undefined) {
-				await workspaceConfig.update('local.engineArgs', settings.localEngineArgs, vscode.ConfigurationTarget.Global);
+				await workspaceConfig.update('engineArgs', settings.localEngineArgs, vscode.ConfigurationTarget.Global);
 			}
 
 			// Save debugging settings

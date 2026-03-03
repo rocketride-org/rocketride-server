@@ -850,7 +850,8 @@ export class PageStatusProvider {
 							projectId: viewState.projectId,
 							source: viewState.sourceId,
 							pipeline: pipelineTransformed,
-							pipelineTraceLevel: 'full'
+							pipelineTraceLevel: 'full',
+							args: ConfigManager.getInstance().getConfig().engineArgs
 						});
 					} catch (error: unknown) {
 						this.logger.error(`Unable to execute pipeline: ${error}`);

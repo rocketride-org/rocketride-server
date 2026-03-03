@@ -6,7 +6,6 @@
 			"type": "shell",
 			"command": "./builder",
 			"args": [
-				"vscode:clean",
 				"vscode:build"
 			],
 			"options": {

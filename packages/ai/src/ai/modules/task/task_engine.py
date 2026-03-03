@@ -1075,9 +1075,6 @@ class Task(DAPBase):
                 message,
             )
 
-            # Output the message to the console
-            debug(output_message)
-
         else:
             # Forward to debugging clients
             await self._forward_task_event(

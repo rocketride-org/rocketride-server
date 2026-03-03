@@ -47,14 +47,15 @@ export interface ConfigManagerInfo {
 	/** Default path for creating new pipeline files */
 	defaultPipelinePath: string;
 
+	/** Additional engine arguments (passed to engine subprocess in all connection modes) */
+	engineArgs: string[];
+
 	/** Local configuration */
 	local: {
 		/** Local host address (default: 'localhost') */
 		host: string;
 		/** Local port (default: 5565) */
 		port: number;
-		/** Additional engine arguments */
-		engineArgs: string[];
 		/** Engine version to download: 'latest', 'prerelease', or a specific tag */
 		engineVersion: string;
 	};
@@ -96,10 +97,10 @@ export class ConfigManager {
 		hostUrl: 'http://localhost:5565',
 		deployUrl: '',
 		defaultPipelinePath: '',
+		engineArgs: [],
 		local: {
 			host: '',
 			port: 5565,
-			engineArgs: [],
 			engineVersion: 'latest',
 		},
 		autoConnect: true,
@@ -204,10 +205,10 @@ export class ConfigManager {
 			hostUrl: hostUrl,
 			deployUrl: deployUrl,
 			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
+			engineArgs: config.get('engineArgs', []),
 			local: {
 				host: parsedHost,
 				port: parsedPort,
-				engineArgs: config.get('local.engineArgs', []),
 				engineVersion: config.get('local.engineVersion', 'latest')
 			},
 			autoConnect: config.get('autoConnect', true),

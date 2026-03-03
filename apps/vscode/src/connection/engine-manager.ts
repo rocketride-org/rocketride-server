@@ -44,7 +44,7 @@ export class EngineManager extends BaseManager {
 	private child?: ChildProcess;
 	private started = false;
 
-	constructor(extensionPath: string) {
+constructor(extensionPath: string) {
 		super();
 		this.installer = new EngineInstaller(extensionPath);
 	}
@@ -132,7 +132,7 @@ export class EngineManager extends BaseManager {
 			'./ai/eaas.py',
 			`--host=${config.local.host}`,
 			`--port=${config.local.port}`,
-			...config.local.engineArgs
+			...config.engineArgs
 		];
 
 		await this.startProcess(executablePath, args);
@@ -216,8 +216,9 @@ export class EngineManager extends BaseManager {
 			this.child.stdout?.on('data', (data) => {
 				const output = data.toString();
 				for (const message of output.split('\n')) {
-					if (message.trim()) {
-						this.logger.output(`${icons.message} ${message.trim()}`);
+					const msg = message.trim();
+					if (msg) {
+						this.logger.console(msg.trim());
 						if (message.trim().includes('Uvicorn running')) {
 							tryResolveReady();
 						}
@@ -225,12 +226,13 @@ export class EngineManager extends BaseManager {
 				}
 			});
 
-			// Monitor stderr (all engine stdio goes to RocketRide output)
+			// Monitor stderr
 			this.child.stderr?.on('data', (data) => {
 				const output = data.toString();
 				for (const message of output.split('\n')) {
-					if (message.trim()) {
-						this.logger.output(`${icons.message} ${message.trim()}`);
+					const msg = message.trim();
+					if (msg) {
+						this.logger.console(msg.trim());
 						if (message.trim().includes('Uvicorn running')) {
 							tryResolveReady();
 						}
