@@ -24,25 +24,53 @@
 # =============================================================================
 
 """
-Firecrawl tool node instance.
+Firecrawl tool node - global (shared) state.
 
-Delegates tool invoke operations to the FirecrawlDriver.
+Reads the Firecrawl API key from config, creates a FirecrawlApp client,
+and builds a FirecrawlDriver that implements the ToolsBase interface.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from ai.common.config import Config
+from rocketlib import IGlobalBase, OPEN_MODE, warning
 
-from rocketlib import IInstanceBase
+from firecrawl import FirecrawlApp
 
-from .IGlobal import IGlobal
+from .firecrawl_driver import FirecrawlDriver
 
 
-class IInstance(IInstanceBase):
-    IGlobal: IGlobal
+class IGlobal(IGlobalBase):
+    """Global state for tool_firecrawl."""
 
-    def invoke(self, param: Any) -> Any:  # noqa: ANN401
-        driver = getattr(self.IGlobal, 'driver', None)
-        if driver is None:
-            raise RuntimeError('firecrawl_tools: driver not initialized')
-        return driver.handle_invoke(param)
+    driver: FirecrawlDriver | None = None
+
+    def beginGlobal(self) -> None:
+        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
+            return
+
+        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+
+        apikey = str((cfg.get('apikey') or '')).strip()
+
+        if not apikey:
+            raise Exception('tool_firecrawl: apikey is required')
+
+        try:
+            app = FirecrawlApp(api_key=apikey)
+            self.driver = FirecrawlDriver(server_name='firecrawl', app=app)
+        except Exception as e:
+            warning(str(e))
+            raise
+
+    def validateConfig(self) -> None:
+        try:
+            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+            apikey = str((cfg.get('apikey') or '')).strip()
+            if not apikey:
+                warning('apikey is required')
+        except Exception as e:
+            warning(str(e))
+
+    def endGlobal(self) -> None:
+        self.driver = None

@@ -1,11 +1,11 @@
 {
 	"title": "Firecrawl",
-	"protocol": "firecrawl_tools://",
+	"protocol": "tool_firecrawl://",
 	"classType": ["tool"],
 	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
-	"path": "nodes.firecrawl_tools",
+	"path": "nodes.tool_firecrawl",
 	"prefix": "firecrawl",
 	"icon": "firecrawl.svg",
 	"description": [
@@ -24,7 +24,7 @@
 		}
 	},
 	"fields": {
-		"firecrawl_tools.apikey": {
+		"tool_firecrawl.apikey": {
 			"type": "string",
 			"title": "API Key",
 			"description": "Firecrawl API key",
@@ -42,7 +42,7 @@
 			"properties": [
 				"type",
 				"name",
-				"firecrawl_tools.apikey"
+				"tool_firecrawl.apikey"
 			]
 		}
 	]
