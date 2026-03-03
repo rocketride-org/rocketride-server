@@ -78,17 +78,17 @@ jobs:
       - name: Set up vcpkg
         run: ${{ matrix.builder_cmd }} vcpkg:submodule-build
       - name: Set up vcpkg nuget / Linux/macOS
-        if: matrix.platform != 'windows' && matrix.platform != 'ubuntu-arm'
+        if: matrix.platform != 'windows'
         run: |
-          NUGET_EXE=$(${{ matrix.vcpkg_cmd }} fetch nuget | tail -n1)
-          mono $NUGET_EXE sources add \
-            -Source "${{ env.NUGET_FEED_URL }}" \
-            -StorePasswordInClearText \
-            -Name GitHubPackages \
-            -UserName "${{ env.VCPKG_NUGET_USER }}" \
-            -Password "${{ secrets.GITHUB_TOKEN }}" || true
-          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
-            -Source "${{ env.NUGET_FEED_URL }}"
+          dotnet nuget add source "${{ env.NUGET_FEED_URL }}" \
+            --name GitHubPackages \
+            --username "${{ env.VCPKG_NUGET_USER }}" \
+            --password "${{ secrets.GITHUB_TOKEN }}" \
+            --store-password-in-clear-text || true
+          dotnet nuget update source GitHubPackages \
+            --username "${{ env.VCPKG_NUGET_USER }}" \
+            --password "${{ secrets.GITHUB_TOKEN }}" \
+            --store-password-in-clear-text || true
       - name: Set up vcpkg nuget / Windows
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -172,15 +172,15 @@ jobs:
 
       - name: Configure vcpkg NuGet cache
         run: |
-          NUGET_EXE=$(./build/vcpkg/vcpkg fetch nuget | tail -n1)
-          mono $NUGET_EXE sources add \
-            -Source "${{ env.NUGET_FEED_URL }}" \
-            -StorePasswordInClearText \
-            -Name GitHubPackages \
-            -UserName "${{ env.VCPKG_NUGET_USER }}" \
-            -Password "${{ secrets.GITHUB_TOKEN }}" || true
-          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
-            -Source "${{ env.NUGET_FEED_URL }}"
+          dotnet nuget add source "${{ env.NUGET_FEED_URL }}" \
+            --name GitHubPackages \
+            --username "${{ env.VCPKG_NUGET_USER }}" \
+            --password "${{ secrets.GITHUB_TOKEN }}" \
+            --store-password-in-clear-text || true
+          dotnet nuget update source GitHubPackages \
+            --username "${{ env.VCPKG_NUGET_USER }}" \
+            --password "${{ secrets.GITHUB_TOKEN }}" \
+            --store-password-in-clear-text || true
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
