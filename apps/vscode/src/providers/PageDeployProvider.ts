@@ -25,7 +25,7 @@
  * Deploy Page Provider
  *
  * Provides a webview panel for the Deploy page: deploy to RocketRide.ai cloud
- * or pull and run from GHCR.
+ * or pull and deploy from GHCR.
  */
 
 import * as vscode from 'vscode';
@@ -82,8 +82,8 @@ export class PageDeployProvider {
 					} else if (message.type === 'copyToClipboard' && typeof message.text === 'string') {
 						await vscode.env.clipboard.writeText(message.text);
 						vscode.window.showInformationMessage('Copied to clipboard.');
-					} else if (message.type === 'dockerRun') {
-						this.runDockerEngine();
+					} else if (message.type === 'dockerDeployLocal') {
+						this.deployDockerLocal();
 					}
 				} catch (err) {
 					vscode.window.showErrorMessage(`Deploy action failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -104,16 +104,18 @@ export class PageDeployProvider {
 
 	private static readonly ENGINE_IMAGE = 'ghcr.io/rocketride-org/rocketride-engine:latest';
 
-	private runDockerEngine(): void {
+	private deployDockerLocal(): void {
 		try {
+			const image = PageDeployProvider.ENGINE_IMAGE;
 			const term = vscode.window.createTerminal({
-				name: 'RocketRide Engine',
+				name: 'RocketRide Deploy',
 				hideFromUser: false
 			});
 			term.show();
-			term.sendText(`docker run --rm -p 5565:5565 ${PageDeployProvider.ENGINE_IMAGE}`);
+			term.sendText(`docker pull ${image}`);
+			term.sendText(`docker create --name rocketride-engine -p 5565:5565 ${image}`);
 		} catch (err) {
-			vscode.window.showErrorMessage(`Failed to start Docker engine: ${err instanceof Error ? err.message : String(err)}`);
+			vscode.window.showErrorMessage(`Failed to deploy Docker image: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	}
 
