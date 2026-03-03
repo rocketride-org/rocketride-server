@@ -31,7 +31,7 @@ import './styles.css';
 type PageDeployIncomingMessage =
 	| { type: 'init'; rocketrideLogoDarkUri?: string; rocketrideLogoLightUri?: string; dockerIconUri?: string; onpremIconUri?: string; engineImage?: string };
 
-type PageDeployOutgoingMessage = { type: 'ready' } | { type: 'copyToClipboard'; text: string } | { type: 'dockerRun' };
+type PageDeployOutgoingMessage = { type: 'ready' } | { type: 'copyToClipboard'; text: string } | { type: 'dockerDeployLocal' };
 
 export const PageDeploy: React.FC = () => {
 	const [logoDarkUri, setLogoDarkUri] = useState<string | undefined>();
@@ -39,7 +39,7 @@ export const PageDeploy: React.FC = () => {
 	const [dockerUri, setDockerUri] = useState<string | undefined>();
 	const [onpremUri, setOnpremUri] = useState<string | undefined>();
 	const [engineImage, setEngineImage] = useState('ghcr.io/rocketride-org/rocketride-engine:latest');
-	const [dockerRunning, setDockerRunning] = useState(false);
+	const [deploying, setDeploying] = useState(false);
 
 	const { sendMessage } = useMessaging<PageDeployOutgoingMessage, PageDeployIncomingMessage>({
 		onMessage: (message) => {
@@ -56,6 +56,8 @@ export const PageDeploy: React.FC = () => {
 	useEffect(() => {
 		sendMessage({ type: 'ready' });
 	}, [sendMessage]);
+
+	const remoteCommands = `docker pull ${engineImage}\ndocker create --name rocketride-engine -p 5565:5565 ${engineImage}`;
 
 	return (
 		<div className="deploy-app">
@@ -77,33 +79,37 @@ export const PageDeploy: React.FC = () => {
 						<img src={dockerUri} alt="Docker" className="deploy-panel-icon" />
 					)}
 					<div className="deploy-panel-content">
-						<h1 className="deploy-panel-title">Docker</h1>
+						<h1 className="deploy-panel-title">Deploy Image</h1>
 						<p className="deploy-panel-description">
-							Pull and run the RocketRide engine container. Requires Docker to be installed.
+							Download the RocketRide engine image and create a container.
+							Requires Docker to be installed.
 						</p>
 						<div className="deploy-panel-actions">
 							<button
 								type="button"
 								className="deploy-panel-btn deploy-panel-btn-primary"
-								disabled={dockerRunning}
+								disabled={deploying}
 								onClick={() => {
-									setDockerRunning(true);
-									sendMessage({ type: 'dockerRun' });
+									setDeploying(true);
+									sendMessage({ type: 'dockerDeployLocal' });
 								}}
 							>
-								{dockerRunning ? 'Engine started' : 'Run engine'}
+								{deploying ? 'Image deployed' : 'Deploy locally'}
 							</button>
 						</div>
 						<details className="deploy-panel-details">
-							<summary>Show commands</summary>
+							<summary>Deploy to a remote server</summary>
 							<div className="deploy-panel-commands">
-								<pre className="deploy-panel-code"><code>{`docker run --rm -p 5565:5565 ${engineImage}`}</code></pre>
+								<p className="deploy-panel-description">
+									Run these commands on your target server to pull the image and create a container:
+								</p>
+								<pre className="deploy-panel-code"><code>{remoteCommands}</code></pre>
 								<button
 									type="button"
 									className="deploy-panel-copy"
-									onClick={() => sendMessage({ type: 'copyToClipboard', text: `docker run --rm -p 5565:5565 ${engineImage}` })}
+									onClick={() => sendMessage({ type: 'copyToClipboard', text: remoteCommands })}
 								>
-									Copy run command
+									Copy commands
 								</button>
 							</div>
 						</details>
