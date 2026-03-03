@@ -24,6 +24,7 @@ from ._internal.host import AgentHostServices
 from ._internal.agent_tool import handle_agent_tool_invoke
 from ._internal.trace import make_tracing_invoker
 from ._internal.utils import (
+    apply_node_instructions,
     extract_prompt,
     extract_text,
     messages_to_transcript,
@@ -34,6 +35,7 @@ from ._internal.utils import (
     truncate_at_stop_words,
 )
 from ai.common.tools import ToolsBase
+
 
 class AgentBase(ABC):
     """
@@ -85,6 +87,7 @@ class AgentBase(ABC):
                 return safe_str(value)
 
         try:
+            apply_node_instructions(question, pSelf)
             prompt = extract_prompt(question)
             task_id = self._get_task_id(pSelf)
 

@@ -40,11 +40,10 @@ from ai.common.tools import ToolsBase
 class CrewDriver(AgentBase):
     FRAMEWORK = 'crewai'
 
-    def __init__(self, *, instructions: str = '', process: Any = None):
+    def __init__(self, *, process: Any = None):
         """
         Initialize the CrewDriver.
         """
-        self._instructions = _safe_str(instructions).strip()
         self._process = process
 
     def _bind_framework_llm(
@@ -175,8 +174,6 @@ class CrewDriver(AgentBase):
             'User request:',
             _safe_str(agent_input.prompt or ''),
         ]
-        if self._instructions:
-            desc_parts.extend(['', 'Additional instructions:', self._instructions])
         desc = '\n'.join(desc_parts).strip()
 
         desc = desc.replace('{', '{{').replace('}', '}}')
