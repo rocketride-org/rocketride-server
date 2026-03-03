@@ -84,11 +84,37 @@ class CrewDriver(AgentBase):
     ) -> List[Any]:
 
         from crewai.tools import BaseTool
-        from pydantic import BaseModel, ConfigDict, Field
+        from pydantic import BaseModel, ConfigDict, Field, create_model  # noqa: E501
 
         class _ToolInput(BaseModel):
             input: Any = Field(default=None, description='Tool input payload')
             model_config = ConfigDict(extra='allow')
+
+        def _make_args_schema(input_schema: Optional[Dict[str, Any]]) -> type[BaseModel]:
+            """Build a dynamic Pydantic model from a JSON Schema so that
+            CrewAI's argument filter preserves real tool parameters."""
+            if not isinstance(input_schema, dict):
+                return _ToolInput
+            props = input_schema.get('properties', {})
+            if not props:
+                return _ToolInput
+            required_keys = set(input_schema.get('required', []))
+            field_defs: Dict[str, Any] = {}
+            for key, prop in props.items():
+                desc = prop.get('description', '')
+                if key in required_keys:
+                    field_defs[key] = (Any, Field(..., description=desc))
+                else:
+                    default = prop.get('default', None)
+                    field_defs[key] = (Any, Field(default=default, description=desc))
+            try:
+                return create_model(
+                    '_DynToolInput',
+                    __config__=ConfigDict(extra='allow'),
+                    **field_defs,
+                )
+            except Exception:
+                return _ToolInput
 
         class HostTool(BaseTool):
             name: str
@@ -115,8 +141,21 @@ class CrewDriver(AgentBase):
         for td in tool_descriptors:
             name = td.get('name', '') if isinstance(td, dict) else getattr(td, 'name', '')
             desc = td.get('description', '') if isinstance(td, dict) else getattr(td, 'description', '')
-            if name:
-                tools.append(HostTool(name=name, description=desc or f'Invoke host tool: {name}'))
+            if not name:
+                continue
+            if not desc:
+                desc = f'Invoke host tool: {name}'
+            input_schema = td.get('input_schema') if isinstance(td, dict) else None
+            if isinstance(input_schema, dict):
+                try:
+                    schema_text = json.dumps(input_schema, ensure_ascii=False)
+                except Exception:
+                    schema_text = ''
+                if schema_text:
+                    desc = f'{desc}\n\nTool input schema (JSON): {schema_text}'
+
+            schema_cls = _make_args_schema(input_schema)
+            tools.append(HostTool(name=name, description=desc, args_schema=schema_cls))
         return tools
 
     def _run(
