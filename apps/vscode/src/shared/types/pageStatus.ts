@@ -23,6 +23,12 @@
 
 import { TaskStatus, ConnectionState } from './index';
 
+export interface ClipEntry {
+	name: string;
+	uri: string;
+	sizeMB: number;
+}
+
 export type PageStatusIncomingMessage
 	= {
 		type: 'update';
@@ -49,6 +55,9 @@ export type PageStatusIncomingMessage
 	| {
 		type: 'scrollToSection';
 		section: 'errors' | 'warnings';
+	} | {
+		type: 'clipsList';
+		clips: ClipEntry[];
 	};
 
 export type PageStatusOutgoingMessage

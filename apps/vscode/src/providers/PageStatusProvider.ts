@@ -39,6 +39,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { TaskStatus, GenericEvent, GenericResponse } from '../shared/types';
 import { getLogger } from '../shared/util/output';
 import { ConfigManager } from '../config';
@@ -386,7 +387,10 @@ export class PageStatusProvider {
 			{
 				enableScripts: true,
 				retainContextWhenHidden: true,
-				localResourceRoots: [this.context.extensionUri]
+				localResourceRoots: [
+					this.context.extensionUri,
+					vscode.Uri.file('/tmp/objdet_clips')
+				]
 			}
 		);
 
@@ -794,6 +798,11 @@ export class PageStatusProvider {
 					await this.handlePipelineAction(message.action, viewState, message.tracing);
 					break;
 				}
+
+				case 'listClips': {
+					await this.handleListClips(viewState);
+					break;
+				}
 			}
 		} catch (error) {
 			this.logger.error(`Handling webview message of type ${message.type}: ${error}`);
@@ -909,6 +918,40 @@ export class PageStatusProvider {
 		} catch (error) {
 			this.logger.error(`Handling pipeline action ${action}: ${error}`);
 		}
+	}
+
+	/**
+	 * Lists video clips from the objdet_clips directory and sends webview URIs back
+	 */
+	private async handleListClips(viewState: ViewMonitoringState): Promise<void> {
+		const clipsDir = '/tmp/objdet_clips';
+		const clips: ClipEntry[] = [];
+
+		try {
+			if (fs.existsSync(clipsDir)) {
+				const files = fs.readdirSync(clipsDir)
+					.filter(f => f.endsWith('.mp4'))
+					.sort();
+
+				for (const file of files) {
+					const filePath = path.join(clipsDir, file);
+					const stat = fs.statSync(filePath);
+					const fileUri = vscode.Uri.file(filePath);
+					const webviewUri = viewState.panel.webview.asWebviewUri(fileUri);
+
+					clips.push({
+						name: file,
+						uri: webviewUri.toString(),
+						sizeMB: Math.round(stat.size / 1024 / 1024 * 100) / 100,
+					});
+				}
+			}
+		} catch (error) {
+			this.logger.error(`Listing clips: ${error}`);
+		}
+
+		const msg: PageStatusIncomingMessage = { type: 'clipsList', clips };
+		await viewState.panel.webview.postMessage(msg);
 	}
 
 	/**

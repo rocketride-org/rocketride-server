@@ -35,12 +35,41 @@ from typing import Any, Dict, List, Optional, Set
 from .segment_tracker import Detection
 
 
+def _is_columnar(d: dict) -> bool:
+    """True when the dict has list-valued fields (grouped/columnar format)."""
+    for v in d.values():
+        if isinstance(v, list):
+            return True
+    return False
+
+
+def _unzip_columnar(d: dict) -> list:
+    """Convert {'label': ['a','b'], 'score': [0.9,0.8]} to [{label:'a',score:0.9}, ...]."""
+    list_keys = [k for k, v in d.items() if isinstance(v, list)]
+    if not list_keys:
+        return [d]
+    n = len(d[list_keys[0]])
+    result = []
+    for i in range(n):
+        row = {}
+        for k, v in d.items():
+            if isinstance(v, list) and i < len(v):
+                row[k] = v[i]
+            else:
+                row[k] = v
+        result.append(row)
+    return result
+
+
 def _decode_data_url(value: str) -> bytes:
     """Decode a data-url string (``data:...;base64,XXXX``) or plain base64."""
     if value.startswith('data:'):
         _, encoded = value.split(',', 1)
         return base64.b64decode(encoded)
     return base64.b64decode(value)
+
+
+_LOG_PATH = '/tmp/objdet_debug.log'
 
 
 class ObjectDetector:
@@ -55,8 +84,9 @@ class ObjectDetector:
       4. Return detections that pass all filters
     """
 
+    _frame_idx: int = 0
+
     def __init__(self, config: Dict[str, Any]):
-        import numpy as np
         from ai.common.models.transformers import pipeline
 
         det_model = config.get('detection_model', 'facebook/detr-resnet-50')
@@ -71,8 +101,9 @@ class ObjectDetector:
         else:
             self._class_allowlist = set()
 
-        self._min_confidence: float = config.get('min_confidence', 0.7)
-        self._similarity_threshold: float = config.get('similarity_threshold', 0.75)
+        self._min_confidence: float = config.get('min_confidence', 0.3)
+        self._similarity_threshold: float = config.get('similarity_threshold', 0.82)
+        self._crop_padding: float = config.get('crop_padding', 0.20)
 
         self._det_pipeline = pipeline(
             task='object-detection', model=det_model
@@ -88,9 +119,14 @@ class ObjectDetector:
             ref_bytes = _decode_data_url(ref_image_raw)
             self._reference_embedding = self._embed_image(ref_bytes)
 
-        print(f'[ObjectDetector] Model: {det_model}')
-        print(f'[ObjectDetector] Class allowlist: {self._class_allowlist or "all"}')
-        print(
+        self._frame_idx = 0
+
+        self._log(f'[ObjectDetector] Model: {det_model}')
+        self._log(f'[ObjectDetector] min_confidence={self._min_confidence}')
+        self._log(f'[ObjectDetector] similarity_threshold={self._similarity_threshold}')
+        self._log(f'[ObjectDetector] crop_padding={self._crop_padding}')
+        self._log(f'[ObjectDetector] Class allowlist: {self._class_allowlist or "all"}')
+        self._log(
             f'[ObjectDetector] Reference matching: '
             f'{"enabled" if self._reference_embedding is not None else "disabled"}'
         )
@@ -107,7 +143,6 @@ class ObjectDetector:
         self._clip_model = CLIPModel.from_pretrained(clip_name)
         self._clip_processor = CLIPProcessor.from_pretrained(clip_name)
         self._clip_model.eval()
-        print(f'[ObjectDetector] CLIP model loaded: {clip_name}')
 
     def _embed_image(self, image_bytes: bytes):
         """Compute a unit-normalised CLIP embedding for an image."""
@@ -146,15 +181,18 @@ class ObjectDetector:
         try:
             raw_results = self._det_pipeline([frame_image])
         except Exception as e:
-            print(f'[ObjectDetector] Detection error: {e}')
+            self._log(f'[ObjectDetector] Detection error: {e}')
             return []
 
         detections_list = self._parse_raw_detections(raw_results)
 
+        self._log_raw(detections_list)
+
         matched: List[Detection] = []
         for det in detections_list:
             label = det.get('label', '')
-            score = float(det.get('score', 0.0))
+            score_raw = det.get('score', 0.0)
+            score = float(score_raw) if not isinstance(score_raw, (list, type(None))) else 0.0
             box = det.get('box', {})
 
             if score < self._min_confidence:
@@ -172,6 +210,7 @@ class ObjectDetector:
                 crop.save(buf, format='PNG')
                 crop_emb = self._embed_image(buf.getvalue())
                 similarity = float(np.dot(self._reference_embedding, crop_emb))
+                self._log_sim(label, score, similarity)
                 if similarity < self._similarity_threshold:
                     continue
 
@@ -190,6 +229,12 @@ class ObjectDetector:
         """
         Normalise detection output from the RocketRide pipeline wrapper
         or a raw HuggingFace pipeline into a flat list of detection dicts.
+
+        Handles three formats:
+        1. HF batch: [[{det}, ...], ...]
+        2. Flat list: [{det}, ...]
+        3. Grouped/columnar from RocketRide wrapper:
+           [{'label': ['car', 'person'], 'score': [0.9, 0.8], 'box': [{...}, {...}]}]
         """
         if not raw:
             return []
@@ -198,22 +243,70 @@ class ObjectDetector:
         if isinstance(raw, list) and raw and isinstance(raw[0], list):
             return raw[0]
 
-        # Already a flat list of dicts
+        # Already a flat list of individual detection dicts
         if isinstance(raw, list) and raw and isinstance(raw[0], dict):
+            first = raw[0]
+            # Check if this is columnar (values are lists) vs per-detection dicts
+            if _is_columnar(first):
+                return _unzip_columnar(first)
             return raw
 
         return []
 
-    @staticmethod
-    def _crop_detection(image, box: Dict[str, float]):
-        """Crop a bounding box from the frame, or None if too small."""
-        xmin = max(0, int(box.get('xmin', 0)))
-        ymin = max(0, int(box.get('ymin', 0)))
-        xmax = min(image.width, int(box.get('xmax', image.width)))
-        ymax = min(image.height, int(box.get('ymax', image.height)))
+    def _crop_detection(self, image, box: Dict[str, float]):
+        """Crop a bounding box from the frame with padding for CLIP context."""
+        xmin = int(box.get('xmin', 0))
+        ymin = int(box.get('ymin', 0))
+        xmax = int(box.get('xmax', image.width))
+        ymax = int(box.get('ymax', image.height))
+
+        w = xmax - xmin
+        h = ymax - ymin
 
         min_px = 16
-        if (xmax - xmin) < min_px or (ymax - ymin) < min_px:
+        if w < min_px or h < min_px:
             return None
 
+        pad = self._crop_padding
+        pad_x = int(w * pad)
+        pad_y = int(h * pad)
+
+        xmin = max(0, xmin - pad_x)
+        ymin = max(0, ymin - pad_y)
+        xmax = min(image.width, xmax + pad_x)
+        ymax = min(image.height, ymax + pad_y)
+
         return image.crop((xmin, ymin, xmax, ymax))
+
+    # ------------------------------------------------------------------
+    # Diagnostic logging
+    # ------------------------------------------------------------------
+
+    def _log(self, msg: str):
+        with open(_LOG_PATH, 'a') as f:
+            f.write(msg + '\n')
+
+    def _log_raw(self, detections_list: List[Dict[str, Any]]):
+        """Log a summary of raw DETR detections before any filtering."""
+        self._frame_idx += 1
+        if self._frame_idx % 10 != 1:
+            return
+        labels = {}
+        for det in detections_list:
+            lbl = det.get('label', '?')
+            sc = det.get('score', 0)
+            sc = float(sc) if not isinstance(sc, (list, type(None))) else 0
+            labels.setdefault(lbl, []).append(round(sc, 3))
+        summary = ', '.join(
+            f'{lbl}({len(scores)}): {sorted(scores, reverse=True)[:5]}'
+            for lbl, scores in sorted(labels.items(), key=lambda x: -len(x[1]))
+        )
+        self._log(f'[DETR raw] frame={self._frame_idx} total={len(detections_list)} | {summary}')
+
+    def _log_sim(self, label: str, score: float, similarity: float):
+        """Log CLIP similarity score for a candidate detection."""
+        tag = 'PASS' if similarity >= self._similarity_threshold else 'REJECT'
+        self._log(
+            f'[CLIP] {tag} label={label} conf={score:.3f} '
+            f'sim={similarity:.4f} (threshold={self._similarity_threshold})'
+        )

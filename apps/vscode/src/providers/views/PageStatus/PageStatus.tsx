@@ -33,6 +33,8 @@ import { TraceSection, TraceRow } from '../../components/TraceSection';
 import { EndpointInfoModal, EndpointInfo } from '../../components/EndpointInfoModal';
 import { WarningIcon } from '../../components/icons/WarningIcon';
 
+import type { ClipEntry } from '../../../shared/types/pageStatus';
+
 // Import the styles
 import '../../styles/vscode.css'
 import '../../styles/app.css';
@@ -64,6 +66,13 @@ export type PageStatusIncomingMessage
 			result?: string;
 			error?: string;
 		};
+	}
+	| {
+		type: 'scrollToSection';
+		section: 'errors' | 'warnings';
+	} | {
+		type: 'clipsList';
+		clips: ClipEntry[];
 	};
 
 export type PageStatusOutgoingMessage
@@ -102,6 +111,8 @@ export const PageStatus: React.FC = () => {
 	const [tracingEnabled, setTracingEnabled] = useState(false);
 	const [traceRows, setTraceRows] = useState<TraceRow[]>([]);
 	const [scrollToSectionTarget, setScrollToSectionTarget] = useState<'errors' | 'warnings' | null>(null);
+	const [clips, setClips] = useState<ClipEntry[]>([]);
+	const [clipsLoading, setClipsLoading] = useState(false);
 
 	// Refs for elapsed timer
 	const intervalRef = useRef<number | null>(null);
@@ -150,6 +161,11 @@ export const PageStatus: React.FC = () => {
 					case 'scrollToSection': {
 						setActiveTab('errors');
 						setScrollToSectionTarget(message.section);
+						break;
+					}
+					case 'clipsList': {
+						setClips(message.clips);
+						setClipsLoading(false);
 						break;
 					}
 					case 'traceEvent': {
@@ -411,6 +427,7 @@ export const PageStatus: React.FC = () => {
 		{ id: 'tokens', label: 'Tokens' },
 		{ id: 'flow', label: 'Flow' },
 		{ id: 'trace', label: 'Trace' },
+		{ id: 'clips', label: 'Clips', badge: clips.length > 0 ? <span style={{ fontSize: 11, opacity: 0.7 }}>{clips.length}</span> : undefined },
 		{ id: 'errors', label: 'Errors', badge: errorCount > 0 ? <WarningIcon size={14} /> : undefined }
 	];
 
@@ -469,7 +486,7 @@ export const PageStatus: React.FC = () => {
 			</div>
 
 			{/* Tab bar — outside the box, content boxed by .tab-content CSS. All panels always mounted so Performance Metrics state is preserved on tab switch. */}
-			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab}>
+			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={handleTabChange}>
 				<div
 					className={activeTab === 'status' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
 					role="tabpanel"
@@ -511,6 +528,17 @@ export const PageStatus: React.FC = () => {
 							traceIdRef.current = 0;
 							setTraceRows([]);
 						}}
+					/>
+				</div>
+				<div
+					className={activeTab === 'clips' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
+					role="tabpanel"
+					aria-hidden={activeTab !== 'clips'}
+				>
+					<VideoClipsSection
+						clips={clips}
+						onRefresh={requestClips}
+						loading={clipsLoading}
 					/>
 				</div>
 				<div
