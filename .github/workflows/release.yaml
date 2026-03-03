@@ -83,7 +83,7 @@ jobs:
       - name: Set up vcpkg
         run: ${{ matrix.builder_cmd }} vcpkg:submodule-build
       - name: Set up vcpkg nuget / Linux/macOS
-        if: matrix.platform != 'windows'
+        if: matrix.platform != 'windows' && matrix.platform != 'ubuntu-arm'
         run: |
           NUGET_EXE=$(${{ matrix.vcpkg_cmd }} fetch nuget | tail -n1)
           mono $NUGET_EXE sources add \
