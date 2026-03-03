@@ -32,8 +32,9 @@ import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
 import { RocketRideClient, DAPMessage, AuthenticationException } from 'rocketride';
 import { ConfigManager } from '../config';
-import { EngineServer } from './engine';
-import { EngineInstaller } from './engine-installer';
+import { BaseManager } from './base-manager';
+import { EngineManager } from './engine-manager';
+import { CloudManager } from './cloud-manager';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConnectionStatus, ConnectionState, GenericResponse } from '../shared/types';
@@ -43,8 +44,8 @@ export class ConnectionManager extends EventEmitter {
 
 	// Core connection components
 	private client?: RocketRideClient;
-	private dapServer?: EngineServer;
-	private engineInstaller?: EngineInstaller;
+	private manager?: BaseManager;
+	private extensionPath?: string;
 	private configManager = ConfigManager.getInstance();
 	private logger = getLogger();
 
@@ -63,6 +64,13 @@ export class ConnectionManager extends EventEmitter {
 	private reconnectTimeout?: NodeJS.Timeout;
 	private retryingMessageShown = false;
 	private isManualDisconnect = false;
+
+	// Debounce timer for configuration changes (saveAllSettings writes each
+	// setting individually, firing onDidChangeConfiguration for each one)
+	private configChangeTimeout?: NodeJS.Timeout;
+
+	// Engine install cancellation (cancelled on disconnect/config change)
+	private engineCts?: vscode.CancellationTokenSource;
 
 	// Resource cleanup tracking
 	private disposables: vscode.Disposable[] = [];
@@ -86,28 +94,49 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	public setExtensionPath(extensionPath: string): void {
-		this.engineInstaller = new EngineInstaller(extensionPath);
+		this.extensionPath = extensionPath;
 	}
 
 	private setupConfigurationListener(): void {
-		const disposable = this.configManager.onConfigurationChanged(async (_config) => {
+		const disposable = this.configManager.onConfigurationChanged((_config) => {
 			// Don't process configuration changes during disposal
 			if (this.isDisposing) {
 				return;
 			}
 
-			this.logger.output(`${icons.info} Configuration changed, reconnecting...`);
-			await this.updateCredentialsStatus();
-
-			this.disconnect();
-			this.resetRetryState();
-
-			setTimeout(async () => {
-				await this.initialize();
-			}, 500);
+			// Debounce: the settings page saves each setting individually, firing
+			// this event for each one. Wait until the burst of changes settles
+			// before running a single disconnect/reconnect cycle.
+			if (this.configChangeTimeout) {
+				clearTimeout(this.configChangeTimeout);
+			} else {
+			}
+			this.configChangeTimeout = setTimeout(() => {
+				this.configChangeTimeout = undefined;
+				this.handleConfigurationChanged();
+			}, 300);
 		});
 
 		this.disposables.push(disposable);
+	}
+
+	private async handleConfigurationChanged(): Promise<void> {
+		if (this.isDisposing) {
+			return;
+		}
+
+		this.logger.output(`${icons.info} Configuration changed, reconnecting...`);
+		await this.updateCredentialsStatus();
+
+		await this.disconnect();
+
+		this.connectionStatus.retryAttempt = 0;
+		this.retryingMessageShown = false;
+
+		await this.initialize();
+
+		// Now safe to clear the manual disconnect flag
+		this.isManualDisconnect = false;
 	}
 
 	private resetRetryState(): void {
@@ -203,11 +232,6 @@ export class ConnectionManager extends EventEmitter {
 	private async _connect(): Promise<void> {
 		const config = this.configManager.getConfig();
 
-		if ((config.connectionMode === 'cloud' || config.connectionMode === 'onprem') && (!config.apiKey || !config.hostUrl)) {
-			await this.configManager.openSettings();
-			return;
-		}
-
 		const errors = await this.configManager.validateConfig();
 		if (errors.length > 0) {
 			const errorMessage = `Configuration errors: ${errors.join(', ')}`;
@@ -220,90 +244,65 @@ export class ConnectionManager extends EventEmitter {
 		}
 
 		try {
+			// Stop any existing manager (engine process) before creating a new one
+			await this.stopManager();
+
+			// Create the appropriate manager based on connection mode
+			this.createManager(config.connectionMode);
+
+			// Listen for status updates from the manager
+			this.manager!.on('status', (msg: string) => {
+				this.updateConnectionStatus({ progressMessage: msg });
+			});
+			this.manager!.on('terminated', (details: { code: number | null; signal: string | null }) => {
+				this.logger.output(`${icons.warning} Local server terminated (code=${details.code}, signal=${details.signal})`);
+				this.handleConnectionLoss();
+			});
+
+			// Cancel any in-flight operation from a previous connection attempt
+			this.engineCts?.cancel();
+			this.engineCts?.dispose();
+			this.engineCts = new vscode.CancellationTokenSource();
+
+			this.updateConnectionStatus({ state: ConnectionState.DOWNLOADING_ENGINE });
+			await this.manager!.start(config, this.engineCts.token);
+			this.updateConnectionStatus({ progressMessage: undefined });
+
+			// Connect the WebSocket client
 			if (config.connectionMode === 'local') {
-				await this._connectLocal();
+				await this._connectClientWithRetries();
 			} else {
-				await this._connectCloud();
+				await this._connectClient();
 			}
 		} catch (error) {
-			this.handleConnectionError(error);
+			await this.handleConnectionError(error);
 		}
 	}
 
-	private async _connectLocal(): Promise<void> {
-		await this.ensureEngineInstalled();
-		await this.startEngine();
-		await this._connectClientWithRetries();
+	/**
+	 * Creates the appropriate backend manager based on connection mode.
+	 */
+	private createManager(connectionMode: string): void {
+		if (connectionMode === 'local') {
+			if (!this.extensionPath) {
+				throw new Error('Extension path not set. Cannot create EngineManager.');
+			}
+			this.manager = new EngineManager(this.extensionPath);
+		} else {
+			this.manager = new CloudManager();
+		}
 	}
 
-	private async ensureEngineInstalled(): Promise<void> {
-		if (!this.engineInstaller) {
-			throw new Error('Engine installer not initialized. Extension path not set.');
+	/**
+	 * Stops and clears the current backend manager if one exists.
+	 */
+	private async stopManager(): Promise<void> {
+		if (this.manager) {
+			this.manager.removeAllListeners();
+			await this.manager.stop();
+			this.manager = undefined;
+		} else {
 		}
-
-		const config = this.configManager.getConfig();
-		const versionSpec = config.local.engineVersion || 'latest';
-
-		// Check if we already have the right version installed
-		if (this.engineInstaller.isInstalled()) {
-			if (versionSpec !== 'latest' && versionSpec !== 'prerelease') {
-				const installed = this.engineInstaller.getInstalledVersion();
-				if (installed === versionSpec) {
-					return;
-				}
-				// Different version requested — need to re-download
-			} else {
-				return;
-			}
-		}
-
-		this.updateConnectionStatus({ state: ConnectionState.DOWNLOADING_ENGINE });
-
-		// Use existing GitHub sign-in if present (avoids 60/hr rate limit; no prompt)
-		let githubToken: string | undefined;
-		try {
-			const session = await vscode.authentication.getSession('github', [], { createIfNone: false });
-			githubToken = session?.accessToken;
-		} catch {
-			// Proceed without token; may hit rate limit
-		}
-
-		// Route progress through the connection status instead of a toast notification
-		const progress: vscode.Progress<{ message?: string; increment?: number }> = {
-			report: (value) => {
-				if (value.message) {
-					this.updateConnectionStatus({ progressMessage: value.message });
-				}
-			}
-		};
-
-		try {
-			await this.engineInstaller.ensureEngine(versionSpec, progress, undefined, githubToken);
-		} catch (error: unknown) {
-			const msg = error instanceof Error ? error.message : String(error);
-			if (!githubToken && msg.toLowerCase().includes('rate limit')) {
-				// Prompt user to sign into GitHub to get a higher rate limit
-				this.logger.output(`${icons.info} Requesting GitHub sign-in to avoid rate limits...`);
-				try {
-					const session = await vscode.authentication.getSession('github', [], { createIfNone: true });
-					if (session?.accessToken) {
-						githubToken = session.accessToken;
-						await this.engineInstaller.ensureEngine(versionSpec, progress, undefined, githubToken);
-						this.updateConnectionStatus({ progressMessage: undefined });
-						return;
-					}
-				} catch {
-					// User declined sign-in
-				}
-				throw new Error('GitHub API rate limit exceeded. Sign into GitHub (via Accounts menu) to increase the limit, then reconnect.');
-			}
-			throw error;
-		}
-		this.updateConnectionStatus({ progressMessage: undefined });
-	}
-
-	private async _connectCloud(): Promise<void> {
-		await this._connectClient();
 	}
 
 	private createClient(): RocketRideClient {
@@ -331,6 +330,9 @@ export class ConnectionManager extends EventEmitter {
 				this.emit('event', message);
 			},
 			onDisconnected: async (reason?: string, hasError?: boolean) => {
+				const isStale = this.client !== client;
+				// Ignore stale callbacks from a client that has been replaced or cleaned up
+				if (isStale) { return; }
 				this.logger.output(`${icons.warning} WebSocket disconnected (reason: ${reason ?? 'unknown'}, error: ${hasError ?? false})`);
 				this.handleConnectionLoss();
 			},
@@ -404,48 +406,6 @@ export class ConnectionManager extends EventEmitter {
 		this.onConnectionEstablished();
 	}
 
-	private async startEngine(): Promise<void> {
-		const config = this.configManager.getConfig();
-
-		this.updateConnectionStatus({ state: ConnectionState.STARTING_ENGINE });
-
-		const executablePath = this.engineInstaller!.getExecutablePath();
-
-		this.logger.output(`${icons.launch} Starting local server at ${config.local.host}:${config.local.port}`);
-
-		if (this.dapServer) {
-			this.dapServer.removeAllListeners();
-			this.dapServer.stopServer();
-		}
-
-		this.dapServer = new EngineServer();
-
-		const args = [
-			'--autoterm',  // Exit when VS Code closes (stdin monitoring)
-			'./ai/eaas.py',
-			`--host=${config.local.host}`,
-			`--port=${config.local.port}`,
-			...config.local.engineArgs
-		];
-
-		try {
-			await this.dapServer.startServer(executablePath, args);
-
-			this.dapServer.on('terminated', (details) => {
-				this.logger.output(`${icons.warning} Local server terminated (code=${details.code}, signal=${details.signal})`);
-				this.handleConnectionLoss();
-			});
-
-			this.logger.output(`${icons.success} Local server started`);
-		} catch (error) {
-			this.updateConnectionStatus({
-				state: ConnectionState.ENGINE_STARTUP_FAILED,
-				lastError: 'Error starting local engine'
-			});
-			throw error;
-		}
-	}
-
 	private onConnectionEstablished(): void {
 		this.updateConnectionStatus({
 			state: ConnectionState.CONNECTED,
@@ -472,7 +432,7 @@ export class ConnectionManager extends EventEmitter {
 		});
 	}
 
-	private handleConnectionLoss(): void {
+	private async handleConnectionLoss(): Promise<void> {
 		// Don't process connection loss during disposal
 		if (this.isDisposing) {
 			return;
@@ -482,13 +442,14 @@ export class ConnectionManager extends EventEmitter {
 			this.connectionStatus.hasCredentials &&
 			this.connectionStatus.retryAttempt < this.connectionStatus.maxRetryAttempts;
 
+
 		if (shouldReconnect && this.connectionStatus.state === ConnectionState.CONNECTED) {
 			this.updateConnectionStatus({ state: ConnectionState.CONNECTING });
 		} else if (!shouldReconnect) {
 			this.updateConnectionStatus({ state: ConnectionState.DISCONNECTED });
 		}
 
-		this.cleanup();
+		await this.cleanup();
 		this.emit('disconnected');
 
 		if (shouldReconnect) {
@@ -496,7 +457,7 @@ export class ConnectionManager extends EventEmitter {
 		}
 	}
 
-	private handleConnectionError(error: unknown): void {
+	private async handleConnectionError(error: unknown): Promise<void> {
 		// Don't process errors during disposal
 		if (this.isDisposing) {
 			return;
@@ -507,7 +468,7 @@ export class ConnectionManager extends EventEmitter {
 
 		// Engine startup failure: status already set in startEngine() catch; do not retry
 		if (this.connectionStatus.state === ConnectionState.ENGINE_STARTUP_FAILED) {
-			this.cleanup();
+			await this.cleanup();
 			this.emit('error', error);
 			return;
 		}
@@ -521,6 +482,7 @@ export class ConnectionManager extends EventEmitter {
 			!isRateLimit &&
 			this.connectionStatus.retryAttempt < this.connectionStatus.maxRetryAttempts;
 
+
 		if (!shouldReconnect) {
 			this.updateConnectionStatus({
 				state: ConnectionState.DISCONNECTED,
@@ -533,7 +495,7 @@ export class ConnectionManager extends EventEmitter {
 			});
 		}
 
-		this.cleanup();
+		await this.cleanup();
 		this.emit('error', error);
 
 		if (shouldReconnect) {
@@ -567,6 +529,7 @@ export class ConnectionManager extends EventEmitter {
 				} catch {
 					// Error handled within _connect()
 				}
+			} else {
 			}
 		}, delayMs);
 	}
@@ -618,6 +581,14 @@ export class ConnectionManager extends EventEmitter {
 	 * Use this when opening a page editor so the UI can show immediately.
 	 * Call refreshServices() to update the cache in the background.
 	 */
+	public getEngineInfo(): { version: string | null; publishedAt: string | null } {
+		const info = this.manager?.getInfo();
+		return {
+			version: info?.version ?? null,
+			publishedAt: info?.publishedAt ?? null
+		};
+	}
+
 	public getCachedServices(): { services: Record<string, unknown>; servicesError?: string } {
 		if (!this.isConnected()) {
 			return { services: {}, servicesError: 'Not connected' };
@@ -680,7 +651,7 @@ export class ConnectionManager extends EventEmitter {
 		this.servicesRefreshPromise = null;
 	}
 
-	public disconnect(): void {
+	public async disconnect(): Promise<void> {
 		this.logger.output(`${icons.warning} Disconnected from RocketRide by request`);
 		this.isManualDisconnect = true;
 
@@ -689,24 +660,34 @@ export class ConnectionManager extends EventEmitter {
 			this.reconnectTimeout = undefined;
 		}
 
-		this.cleanup();
+		await this.cleanup();
 
 		this.updateConnectionStatus({
 			state: ConnectionState.DISCONNECTED,
 			retryAttempt: 0
 		});
 
-		this.resetRetryState();
+		// Only reset retry counters — keep isManualDisconnect true to prevent
+		// stale onDisconnected callbacks from triggering reconnection.
+		// The flag is cleared on next successful connection (onConnectionEstablished
+		// → resetRetryState) or by explicit caller action (e.g. config change handler).
+		this.connectionStatus.retryAttempt = 0;
+		this.retryingMessageShown = false;
 	}
 
 	public async reconnect(): Promise<void> {
-		this.disconnect();
+		await this.disconnect();
 		await this.connect();
 	}
 
-	private cleanup(): void {
+	private async cleanup(): Promise<void> {
+		// Cancel any in-flight engine download
+		this.engineCts?.cancel();
+		this.engineCts?.dispose();
+		this.engineCts = undefined;
+
 		this.cleanupClient();
-		this.stopEngine();
+		await this.stopManager();
 		this.clearServicesCache();
 	}
 
@@ -715,20 +696,7 @@ export class ConnectionManager extends EventEmitter {
 			// Fire-and-forget disconnect; don't await to avoid blocking disposal
 			this.client.disconnect().catch(() => { /* ignore */ });
 			this.client = undefined;
-		}
-	}
-
-	private stopEngine(): void {
-		if (this.dapServer) {
-			this.updateConnectionStatus({ state: ConnectionState.STOPPING_ENGINE });
-
-			this.logger.output(`${icons.stop} Stopping local server...`);
-
-			this.dapServer.removeAllListeners();
-			this.dapServer.stopServer();
-			this.dapServer = undefined;
-
-			this.updateConnectionStatus({ state: ConnectionState.DISCONNECTED });
+		} else {
 		}
 	}
 
@@ -742,19 +710,24 @@ export class ConnectionManager extends EventEmitter {
 		return new Promise(resolve => setTimeout(resolve, ms));
 	}
 
-	public dispose(): void {
+	public async dispose(): Promise<void> {
 		// Set disposing flag first to prevent any operations
 		this.isDisposing = true;
 
 		// Disconnect and cleanup
 		this.isManualDisconnect = true;
 
+		if (this.configChangeTimeout) {
+			clearTimeout(this.configChangeTimeout);
+			this.configChangeTimeout = undefined;
+		}
+
 		if (this.reconnectTimeout) {
 			clearTimeout(this.reconnectTimeout);
 			this.reconnectTimeout = undefined;
 		}
 
-		this.cleanup();
+		await this.cleanup();
 
 		// Clean up configuration listeners
 		this.disposables.forEach(d => d.dispose());

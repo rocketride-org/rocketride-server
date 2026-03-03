@@ -90,9 +90,9 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 				}
 			}),
 
-			vscode.commands.registerCommand('rocketride.sidebar.connection.disconnect', () => {
+			vscode.commands.registerCommand('rocketride.sidebar.connection.disconnect', async () => {
 				try {
-					this.connectionManager.disconnect();
+					await this.connectionManager.disconnect();
 				} catch {
 					// Error handling is done through event listeners
 				}
