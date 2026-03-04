@@ -21,25 +21,22 @@ RocketRide is a high-performance data processing engine built on a C++ core with
 
 ## ⚡ Quick Start
 
-### 1) Install the extension for your IDE:
-```bash
-code --install-extension RocketRide.rocketride        # VS Code
-cursor --install-extension RocketRide.rocketride      # Cursor
-windsurf --install-extension RocketRide.rocketride    # Windsurf
-```
-<sub>[Not seeing your IDE? Open an issue](https://github.com/rocketride-org/rocketride-server/issues/new) · [Download directly](https://open-vsx.org/extension/RocketRide/rocketride)</sub>
+1) Install the extension for your IDE:
+   ```bash
+   code --install-extension RocketRide.rocketride        # VS Code
+   cursor --install-extension RocketRide.rocketride      # Cursor
+   windsurf --install-extension RocketRide.rocketride    # Windsurf
+   ```
+   <sub>[Not seeing your IDE? Open an issue](https://github.com/rocketride-org/rocketride-server/issues/new) · [Download directly](https://open-vsx.org/extension/RocketRide/rocketride)</sub>
 
-### 2) Click the RocketRide (🚀) extension in your IDE
+2) Click the RocketRide (🚀) extension in your IDE
 
-### 3) Deploy an engine
+3) Deploy an engine — you'll be prompted on how you want to run the server. Choose the option that fits your setup:
+   - **Local (Recommended)** — This pulls the server directly into your IDE without any additional setup.
+   - **On-Premises** — Run the server on your own hardware for full control and data residency. Pull the image and deploy to Docker or clone this repo and [build from source](CONTRIBUTING.md#getting-started).
+   - **RocketRide Cloud** (👀*coming soon*) — Managed hosting with our proprietary model server. No infrastructure to maintain.
 
-You'll be prompted on how you want to run the server. Choose the option that fits your setup:
-
-- **Local (Recommended)** —  This pulls the server directly into your IDE without any additional setup.
-- **On-Premises** — Run the server on your own hardware for full control and data residency. Pull the image and deploy to Docker or clone this repo and [build from source](CONTRIBUTING.md#getting-started).
-- **RocketRide Cloud** (👀*coming soon*) — Managed hosting with our proprietary model server. No infrastructure to maintain.
-
-### 4) Create a `.pipe` file and start building
+4) Create a `.pipe` file and start building
 
 ## 🔧 Building your first pipe
 
@@ -50,33 +47,28 @@ You'll be prompted on how you want to run the server. Choose the option that fit
    - [Video Frame Grabber](https://docs.rocketride.org/examples/video-key-frame-grabber/)
    - [Audio Transcription](https://docs.rocketride.org/examples/audio-transcription-simple/)
 
-4) Connect input lanes and output lanes by type to properly wire your pipeline. Some nodes like agents or LLMs can be invoked as tools for use by a parent node as shown below:
+3) Connect input lanes and output lanes by type to properly wire your pipeline. Some nodes like agents or LLMs can be invoked as tools for use by a parent node as shown below:
+
 <p align="center">
   <img src="./images/agent_pipeline.png" alt="Pipeline canvas example">
 </p>
 
-3) You can run a pipeline from the canvas by pressing the ▶️ button on the source node or from the `Connection Manager` directly.
+4) You can run a pipeline from the canvas by pressing the ▶️ button on the source node or from the `Connection Manager` directly.
 
-4) View all available and running pipelines below the `Connection Manager`. Selecting running pipelines allows for in depth analytics. Trace call trees, token usage, memory consumption, and more to optimize your pipelines before scaling and deploying.
+5) View all available and running pipelines below the `Connection Manager`. Selecting running pipelines allows for in depth analytics. Trace call trees, token usage, memory consumption, and more to optimize your pipelines before scaling and deploying.
 
-5) Run your pipelines as standalone processes or integrate them into your existing [Python](https://docs.rocketride.org/sdk/python-sdk) and [TypeScript/JS](https://docs.rocketride.org/sdk/node-sdk) applications utilizing our SDK.
+6) 📦 Deploy your pipelines to RocketRide.ai cloud or run them on your own infrastructure. Configure your deployment connection in Settings and use the Deploy page.
 
-6) Use it, commit it, ship it.
+   - **Docker** — Download the RocketRide engine image and create a container. Requires [Docker](https://docs.docker.com/get-docker/) to be installed.
+     ```bash
+     docker pull ghcr.io/rocketride-org/rocketride-engine:latest
+     docker create --name rocketride-engine -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
+     ```
+   - **RocketRide Cloud** (👀*coming soon*) — Managed hosting with our proprietary model server and batched processing. The cheapest option to run AI workflows and pipelines at scale (seriously).
 
-## 📦 Deploy
+7) Run your pipelines as standalone processes or integrate them into your existing [Python](https://docs.rocketride.org/sdk/python-sdk) and [TypeScript/JS](https://docs.rocketride.org/sdk/node-sdk) applications utilizing our SDK.
 
-Deploy your pipelines to RocketRide.ai cloud or run them on your own infrastructure. Configure your deployment connection in Settings and use this page to deploy.
-
-### Docker
-Download the RocketRide engine image and create a container. Requires [Docker](https://docs.docker.com/get-docker/) to be installed.
-
-```bash
-docker pull ghcr.io/rocketride-org/rocketride-engine:latest
-docker create --name rocketride-engine -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
-```
-
-### RocketRide Cloud (👀*coming soon*)
-Deploy your pipelines to RocketRide.ai cloud. Our proprietary model server and batched processing ensure it's the cheapest option to run AI workflows and pipelines at scale (seriously).
+8) Use it, commit it, ship it.
 
 ## Useful Links
 - 📚 [Documentation](https://docs.rocketride.org/)
