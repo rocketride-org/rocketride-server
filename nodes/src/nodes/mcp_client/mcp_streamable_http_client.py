@@ -97,6 +97,7 @@ class McpStreamableHttpClient:
         self._headers = {str(k): str(v) for k, v in (headers or {}).items()}
         # Required by the Streamable HTTP spec: list both content types.
         self._headers.setdefault('Accept', 'application/json, text/event-stream')
+        self._headers.setdefault('User-Agent', f'{client_name}/{client_version}')
 
         self._next_id = 1
         self._session_id: str | None = None

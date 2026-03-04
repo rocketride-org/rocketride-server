@@ -80,13 +80,7 @@ class IGlobal(IGlobalBase):
                         raise Exception('mcp_client args must be a list of strings')
                     args = [str(a) for a in args]
 
-                env = cfg.get('env')
-                if env is not None and not isinstance(env, dict):
-                    raise Exception('mcp_client env must be a dictionary of strings')
-                if isinstance(env, dict):
-                    env = {str(k): str(v) for k, v in env.items()}
-
-                self._client = McpStdioClient(command=command, args=args, env=env)
+                self._client = McpStdioClient(command=command, args=args)
 
             elif self.transport in ('sse', 'streamable-http'):
                 # Shared auth headers for HTTP transports
@@ -132,7 +126,6 @@ class IGlobal(IGlobalBase):
             tools = self._client.list_tools()
             self._cache_tools(tools)
 
-            # Build tool-provider driver after cache is ready.
             self.driver = McpDriver(
                 server_name=self.serverName,
                 list_namespaced_tools=self.list_namespaced_tools,
@@ -214,7 +207,7 @@ class IGlobal(IGlobalBase):
     def list_namespaced_tools(self) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
         for namespaced, tool in (self._tools_by_namespaced or {}).items():
-            out.append({'name': namespaced, 'description': tool.description, 'inputSchema': tool.inputSchema})
+            out.append({'name': namespaced, 'description': tool.description, 'input_schema': tool.inputSchema})
         return out
 
     def get_tool(self, *, server_name: str, tool_name: str) -> Optional[McpToolDef]:
