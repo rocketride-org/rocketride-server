@@ -79,7 +79,7 @@ async function downloadGitHubFile(releaseTag, filename, task) {
             '--pattern', filename,
             '--dir', DOWNLOADS_DIR,
             '--clobber'
-        ], { task });
+        ], { task, silent: true});
         return path.join(DOWNLOADS_DIR, filename);
     } catch (err) {
         task.output = `GitHub CLI download failed ${releaseTag}/${filename}: ${err.message.trim().replace(/\n/g, ' ')}`;

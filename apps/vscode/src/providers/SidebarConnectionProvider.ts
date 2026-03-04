@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -90,9 +90,9 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 				}
 			}),
 
-			vscode.commands.registerCommand('rocketride.sidebar.connection.disconnect', () => {
+			vscode.commands.registerCommand('rocketride.sidebar.connection.disconnect', async () => {
 				try {
-					this.connectionManager.disconnect();
+					await this.connectionManager.disconnect();
 				} catch {
 					// Error handling is done through event listeners
 				}

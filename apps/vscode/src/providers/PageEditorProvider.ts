@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -656,7 +656,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 				projectId: projectId,
 				source: source,
 				pipeline: projectTransformed
-			}, '*');
+			});
 
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : String(error);

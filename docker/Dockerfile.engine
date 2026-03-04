@@ -1,0 +1,20 @@
+FROM ubuntu:jammy
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates \
+       libc++1 \
+       libc++abi1 \
+       libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r rocketride && useradd -r -g rocketride -d /opt/rocketride rocketride
+
+COPY --chown=rocketride:rocketride dist/server/ /opt/rocketride/
+
+WORKDIR /opt/rocketride
+
+USER rocketride
+
+EXPOSE 5565
+
+ENTRYPOINT ["./engine", "./ai/eaas.py"]

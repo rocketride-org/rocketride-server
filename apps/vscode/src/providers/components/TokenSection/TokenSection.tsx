@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -44,62 +44,61 @@ export const TokenSection: React.FC<TokenSectionProps> = ({ taskStatus }) => {
 	const { tokens } = taskStatus;
 
 	return (
-		<section className="status-panel token-section-panel">
-			{/* Panel Header */}
-			<div className="panel-header">
-			<div className="panel-title">Tokens</div>
-			{tokens.total !== undefined && (
-				<div className="token-total-display">
-					Total Tokens Used: <span className="token-total-value">{tokens.total.toFixed(1)}</span>
+		<section className="status-section">
+			<header className="section-header">
+				<span>Tokens</span>
+				{tokens.total !== undefined && (
+					<div className="token-total-display">
+						Total: <span className="token-total-value">{tokens.total.toFixed(1)}</span>
+					</div>
+				)}
+			</header>
+			<div className="section-content">
+				<div className="token-bars">
+					{tokens.cpu_utilization !== undefined && (
+						<div className="token-bar-row">
+							<div className="token-bar-label">CPU Usage Tokens</div>
+							<div className="token-bar-container">
+								<div
+									className="token-bar-fill token-bar-cpu-utilization"
+									style={{
+										width: `${Math.min((tokens.cpu_utilization / (tokens.total || 1)) * 100, 100)}%`
+									}}
+								/>
+							</div>
+							<div className="token-bar-value">{tokens.cpu_utilization.toFixed(1)}</div>
+						</div>
+					)}
+					{tokens.cpu_memory !== undefined && (
+						<div className="token-bar-row">
+							<div className="token-bar-label">CPU Memory Tokens</div>
+							<div className="token-bar-container">
+								<div
+									className="token-bar-fill token-bar-cpu-memory"
+									style={{
+										width: `${Math.min((tokens.cpu_memory / (tokens.total || 1)) * 100, 100)}%`
+									}}
+								/>
+							</div>
+							<div className="token-bar-value">{tokens.cpu_memory.toFixed(1)}</div>
+						</div>
+					)}
+					{tokens.gpu_memory !== undefined && (
+						<div className="token-bar-row">
+							<div className="token-bar-label">GPU Memory Tokens</div>
+							<div className="token-bar-container">
+								<div
+									className="token-bar-fill token-bar-gpu-memory"
+									style={{
+										width: `${Math.min((tokens.gpu_memory / (tokens.total || 1)) * 100, 100)}%`
+									}}
+								/>
+							</div>
+							<div className="token-bar-value">{tokens.gpu_memory.toFixed(1)}</div>
+						</div>
+					)}
 				</div>
-			)}
 			</div>
-
-	{/* Token Bars */}
-	<div className="token-bars">
-		{tokens.cpu_utilization !== undefined && (
-			<div className="token-bar-row">
-				<div className="token-bar-label">CPU Usages Tokens</div>
-				<div className="token-bar-container">
-					<div 
-						className="token-bar-fill token-bar-cpu-utilization" 
-						style={{ 
-							width: `${Math.min((tokens.cpu_utilization / (tokens.total || 1)) * 100, 100)}%` 
-						}}
-					/>
-				</div>
-				<div className="token-bar-value">{tokens.cpu_utilization.toFixed(1)}</div>
-			</div>
-		)}
-		{tokens.cpu_memory !== undefined && (
-			<div className="token-bar-row">
-				<div className="token-bar-label">CPU Memory Tokens</div>
-				<div className="token-bar-container">
-					<div 
-						className="token-bar-fill token-bar-cpu-memory" 
-						style={{ 
-							width: `${Math.min((tokens.cpu_memory / (tokens.total || 1)) * 100, 100)}%` 
-						}}
-					/>
-				</div>
-				<div className="token-bar-value">{tokens.cpu_memory.toFixed(1)}</div>
-			</div>
-		)}
-		{tokens.gpu_memory !== undefined && (
-			<div className="token-bar-row">
-				<div className="token-bar-label">GPU Memory Tokens</div>
-				<div className="token-bar-container">
-					<div 
-						className="token-bar-fill token-bar-gpu-memory" 
-						style={{ 
-							width: `${Math.min((tokens.gpu_memory / (tokens.total || 1)) * 100, 100)}%` 
-						}}
-					/>
-				</div>
-				<div className="token-bar-value">{tokens.gpu_memory.toFixed(1)}</div>
-			</div>
-		)}
-	</div>
 		</section>
 	);
 };

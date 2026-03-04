@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -79,7 +79,7 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 						break;
 
 					case 'disconnect':
-						this.connectionManager.disconnect();
+						await this.connectionManager.disconnect();
 						break;
 
 					case 'reconnect':
@@ -91,7 +91,7 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 					break;
 
 			case 'openDocs':
-				vscode.env.openExternal(vscode.Uri.parse('https://docs.rocketride.ai'));
+				vscode.env.openExternal(vscode.Uri.parse('https://docs.rocketride.org'));
 				break;
 
 			case 'openDeploy':
@@ -151,6 +151,7 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 			const connectionState = this.connectionManager.getConnectionStatus();
 			const config = this.configManager.getConfig();
 			const hasApiKey = this.configManager.hasApiKey();
+			const engineInfo = this.connectionManager.getEngineInfo();
 
 			this._view.webview.postMessage({
 				type: 'connectionUpdate',
@@ -161,7 +162,8 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 						connectionMode: config.connectionMode,
 						autoConnect: config.autoConnect
 					},
-					hasApiKey
+					hasApiKey,
+					engineInfo
 				}
 			});
 		} catch (error) {

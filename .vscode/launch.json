@@ -24,8 +24,8 @@
 			"linux": {
 				"python": "${workspaceFolder}/dist/server/engine",
 			},
-			"justMyCode": true,
-			"subProcess": false,
+			"justMyCode": false,
+			"subProcess": true,
 			"program": "${workspaceFolder}/dist/server/ai/eaas.py",
 			"args": [
 				// "--trace=debugOut,debugProtocol,servicePython"
@@ -81,14 +81,13 @@
 			//
 			"name": "C++ - Task",
 			"type": "cppvsdbg",
-			"program": "${workspaceFolder}/build/Engine/engine.exe",
+			"program": "${workspaceFolder}/dist/server/engine.exe",
 			"request": "launch",
-			"cwd": "${workspaceFolder}",
 			"console": "externalTerminal",
+			"cwd": "${workspaceRoot}/dist/server",
 			"args": [
 				//-- Options
-				"--monitor=App",
-				"testdata/tasks/1000-pipeline/80-pipelineArg.json"
+				"ai/eaas.py"
 			]
 		},
 		//--------------------------------------------------------------------------------------

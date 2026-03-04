@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -155,7 +155,7 @@ function makeStageFilesAction() {
             const pkg = JSON.parse(await readFile(pkgPath));
             pkg.main = './rocketride.js';
             pkg.icon = 'rocketride-dark-icon.png';
-            pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'package.json', 'LICENSE', 'docs/**'];
+            pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'docs/**'];
             await writeFile(path.join(BUILD_DIR, 'package.json'), JSON.stringify(pkg, null, 2));
             const iconDark = path.join(APP_ROOT, 'rocketride-dark-icon.png');
             const iconLight = path.join(APP_ROOT, 'rocketride-light-icon.png');
@@ -165,23 +165,22 @@ function makeStageFilesAction() {
             if (await exists(iconLight)) {
                 await copyFile(iconLight, path.join(BUILD_DIR, 'rocketride-light-icon.png'));
             }
+            const dockerSvg = path.join(APP_ROOT, 'docker.svg');
+            const onpremSvg = path.join(APP_ROOT, 'onprem.svg');
+            if (await exists(dockerSvg)) {
+                await copyFile(dockerSvg, path.join(BUILD_DIR, 'docker.svg'));
+            }
+            if (await exists(onpremSvg)) {
+                await copyFile(onpremSvg, path.join(BUILD_DIR, 'onprem.svg'));
+            }
             await copyFile(path.join(PROJECT_ROOT, 'LICENSE'), path.join(BUILD_DIR, 'LICENSE'));
             const docsSrc = path.join(APP_ROOT, 'docs');
             if (await exists(docsSrc)) {
                 await syncDir(docsSrc, path.join(BUILD_DIR, 'docs'));
             }
-            const webviewStatic = path.join(BUILD_DIR, 'webview', 'static');
-            const dockerSvg = path.join(APP_ROOT, 'src', 'assets', 'docker.svg');
-            const onpremSvg = path.join(APP_ROOT, 'src', 'assets', 'onprem.svg');
-            if (await exists(dockerSvg) || await exists(onpremSvg)) {
-                await mkdir(webviewStatic);
-                if (await exists(dockerSvg)) {
-                    await copyFile(dockerSvg, path.join(webviewStatic, 'docker.svg'));
-                }
-                if (await exists(onpremSvg)) {
-                    await copyFile(onpremSvg, path.join(webviewStatic, 'onprem.svg'));
-                }
-            }
+
+            // Write .vscodeignore so vsce excludes the engine directory (downloaded at runtime)
+            await writeFile(path.join(BUILD_DIR, '.vscodeignore'), 'engine/**\n');
 
             await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash);
             task.output = 'Manifest staged in build/vscode';

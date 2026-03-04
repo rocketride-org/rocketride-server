@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide Inc.
+// Copyright (c) 2026 Aparavi Software AG Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -37,11 +37,14 @@ import chatIcon from '../assets/nodes/chat.svg';
 import chromaIcon from '../assets/nodes/chroma.svg';
 import classificationIcon from '../assets/nodes/classification.svg';
 import confluenceIcon from '../assets/nodes/confluence.svg';
+import crewaiIcon from '../assets/nodes/crewai.svg';
 import deepseekIcon from '../assets/nodes/deepseek.svg';
 import dictionaryIcon from '../assets/nodes/dictionary.svg';
 import dropperIcon from '../assets/nodes/dropper.svg';
 import embeddingImageIcon from '../assets/nodes/embedding-image.svg';
+import embeddingOpenaiIcon from '../assets/nodes/embedding-openai.svg';
 import embeddingTextIcon from '../assets/nodes/embedding-text.svg';
+import elasticsearchIcon from '../assets/nodes/elasticsearch.svg';
 import fileSystemIcon from '../assets/nodes/file-system.svg';
 import firecrawlIcon from '../assets/nodes/firecrawl.svg';
 import frameGrabberIcon from '../assets/nodes/frame_grabber.svg';
@@ -51,6 +54,7 @@ import googleDriveIcon from '../assets/nodes/google-drive.svg';
 import hashIcon from '../assets/nodes/hash.svg';
 import ibmIcon from '../assets/nodes/ibm_granite.svg';
 import imageCleanupIcon from '../assets/nodes/image_cleanup.svg';
+import langchainIcon from '../assets/nodes/langchain.svg';
 import llamaindexIcon from '../assets/nodes/llamaindex_icon.svg';
 import llamaparseIcon from '../assets/nodes/llamaparse.svg';
 import milvusIcon from '../assets/nodes/milvus.svg';
@@ -63,11 +67,15 @@ import ocrIcon from '../assets/nodes/ocr.svg';
 import ollamaIcon from '../assets/nodes/ollama.svg';
 import onedriveIcon from '../assets/nodes/onedrive.svg';
 import openaiIcon from '../assets/nodes/openai.svg';
+import opensearchIcon from '../assets/nodes/opensearch.svg';
 import outlookIcon from '../assets/nodes/outlook.svg';
 import parseIcon from '../assets/nodes/parse.svg';
 import perplexityIcon from '../assets/nodes/perplexity.svg';
 import pineconeIcon from '../assets/nodes/pinecone.svg';
 import preprocessorIcon from '../assets/nodes/preprocessor.svg';
+import preprocessorCodeIcon from '../assets/nodes/preprocessor-code.svg';
+import preprocessorLlmIcon from '../assets/nodes/preprocessor-llm.svg';
+import preprocessorTextIcon from '../assets/nodes/preprocessor-text.svg';
 import postgresqlIcon from '../assets/nodes/postgres.svg';
 import promptIcon from '../assets/nodes/Prompt.svg';
 import qdrantIcon from '../assets/nodes/qdrant.svg';
@@ -85,6 +93,7 @@ import vertexIcon from '../assets/nodes/vertex.svg';
 import weaviateIcon from '../assets/nodes/weaviate.svg';
 import webhookIcon from '../assets/nodes/webhook.svg';
 import slackIcon from '../assets/nodes/slack.svg';
+import qwenIcon from '../assets/nodes/qwen.svg';
 import xaiIcon from '../assets/nodes/xai.svg';
 
 /**
@@ -106,10 +115,13 @@ const iconMap: Record<string, string> = {
 	chroma: chromaIcon,
 	classification: classificationIcon,
 	confluence: confluenceIcon,
+	crewai: crewaiIcon,
 	deepseek: deepseekIcon,
 	dictionary: dictionaryIcon,
 	dropper: dropperIcon,
+	elasticsearch: elasticsearchIcon,
 	'embedding-image': embeddingImageIcon,
+	'embedding-openai': embeddingOpenaiIcon,
 	'embedding-text': embeddingTextIcon,
 	'file-system': fileSystemIcon,
 	firecrawl: firecrawlIcon,
@@ -120,6 +132,7 @@ const iconMap: Record<string, string> = {
 	hash: hashIcon,
 	ibm_granite: ibmIcon,
 	image_cleanup: imageCleanupIcon,
+	langchain: langchainIcon,
 	llamaindex_icon: llamaindexIcon,
 	llamaparse: llamaparseIcon,
 	milvus: milvusIcon,
@@ -132,13 +145,18 @@ const iconMap: Record<string, string> = {
 	ollama: ollamaIcon,
 	onedrive: onedriveIcon,
 	openai: openaiIcon,
+	opensearch: opensearchIcon,
 	outlook: outlookIcon,
 	parse: parseIcon,
 	perplexity: perplexityIcon,
 	pinecone: pineconeIcon,
 	postgres: postgresqlIcon,
 	preprocessor: preprocessorIcon,
+	'preprocessor-code': preprocessorCodeIcon,
+	'preprocessor-llm': preprocessorLlmIcon,
+	'preprocessor-text': preprocessorTextIcon,
 	prompt: promptIcon,
+	qwen: qwenIcon,
 	qdrant: qdrantIcon,
 	question: questionIcon,
 	reducto: reductoIcon,
@@ -158,10 +176,43 @@ const iconMap: Record<string, string> = {
 };
 
 /**
+ * Icons whose colour should adapt to the active theme.  On dark themes
+ * they are rendered white; on light themes they stay dark.  The set
+ * contains iconMap keys (i.e. filenames without extension).
+ */
+const THEME_DYNAMIC_ICONS: ReadonlySet<string> = new Set([
+	// Source nodes
+	'chat', 'dropper', 'webhook',
+	// Embeddings
+	'embedding-image', 'embedding-text',
+	// LLMs
+	'anthropic', 'ollama', 'openai', 'perplexity', 'xai',
+	// Database
+	'mysql',
+	// Image processing
+	'frame_grabber', 'image_cleanup', 'ocr', 'thumbnail',
+	// Preprocessors
+	'preprocessor', 'preprocessor-code', 'preprocessor-llm', 'preprocessor-text',
+	// Text nodes
+	'util-text', 'dictionary', 'prompt', 'question', 'summaries', 'classification',
+	// Audio
+	'audio-transcribe',
+	// Data
+	'hash', 'parse',
+	// Vector DB
+	'pinecone',
+	// Infrastructure
+	'util-infrastructure', 'text-output',
+]);
+
+/**
  * Resolves a connector/service icon identifier to its bundled asset URL.
  * If the path is already a full URL it is returned as-is. If it matches
  * a known icon name (with or without file extension), the corresponding
  * bundled asset is returned. Falls back to the `unknown` icon.
+ *
+ * Theme-dynamic icons have {@code #td} appended so rendering components
+ * can detect them and apply the appropriate CSS filter.
  *
  * @param path - An icon name (e.g., 'openai'), filename (e.g., 'openai.svg'), or full URL.
  * @returns The resolved asset URL string for use in `<img>` tags.
@@ -181,5 +232,8 @@ export const getIconPath = (path?: string): string => {
 	const iconName = path.replace(/\.(svg|png|jpg|jpeg)$/i, '');
 
 	// Look up the bundled asset; fall back to unknown icon if no match
-	return iconMap[iconName] || unknownIcon;
+	const resolved = iconMap[iconName] || unknownIcon;
+
+	// Tag theme-dynamic icons so renderers can apply a colour filter
+	return THEME_DYNAMIC_ICONS.has(iconName) ? `${resolved}#td` : resolved;
 };

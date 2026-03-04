@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,22 @@ export type PageStatusIncomingMessage
 	| {
 		type: 'connectionState';
 		state: ConnectionState;
+	}
+	| {
+		type: 'traceEvent';
+		pipelineId: number;
+		op: 'begin' | 'enter' | 'leave' | 'end';
+		pipes: string[];
+		trace: {
+			lane?: string;
+			data?: Record<string, unknown>;
+			result?: string;
+			error?: string;
+		};
+	}
+	| {
+		type: 'scrollToSection';
+		section: 'errors' | 'warnings';
 	};
 
 export type PageStatusOutgoingMessage
@@ -46,5 +62,6 @@ export type PageStatusOutgoingMessage
 	| {
 		type: 'pipelineAction';
 		action: 'stop' | 'run' | 'restart';
+		tracing?: boolean;
 	};
 

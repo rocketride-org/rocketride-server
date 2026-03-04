@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -73,7 +73,10 @@ export default defineConfig({
 		externals: {
 			'vscode': 'commonjs vscode'
 		},
-		cleanDistPath: true
+		cleanDistPath: true,
+		// Inline all static assets as data URIs — VS Code webviews cannot
+		// resolve emitted file paths set dynamically from JavaScript.
+		dataUriLimit: Number.MAX_SAFE_INTEGER,
 	},
 
 	html: {

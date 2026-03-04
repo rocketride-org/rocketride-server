@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,13 @@ import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
 import { GenericEvent, GenericResponse } from '../shared/types';
 
+/** Parsed location from structured error format (ErrorType*`message`*filepath:linenumber) */
+export interface ParsedErrWarnLine {
+	filePath: string;
+	lineNumber?: number;
+	label: string;
+}
+
 export interface PipelineFileItem {
 	label: string;
 	description?: string;
@@ -54,6 +61,16 @@ export interface PipelineFileItem {
 	parsedFile?: ParsedPipelineFile;
 	sourceComponent?: ParsedSourceComponent;
 	unknownTask?: UnknownTask;
+	/** Task execution errors (for pipelineSource and errorsFolder) */
+	taskErrors?: string[];
+	/** Task execution warnings (for pipelineSource and warningsFolder) */
+	taskWarnings?: string[];
+	/** Folder type for Errors (n) / Warnings (n) nodes */
+	folderType?: 'errors' | 'warnings';
+	/** Raw error/warning strings for folder children */
+	taskItems?: string[];
+	/** Parsed file path and line for errorLine/warningLine click-to-open */
+	errorLine?: ParsedErrWarnLine;
 }
 
 export interface UnknownTask {
@@ -193,121 +210,112 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 				vscode.window.showErrorMessage('No pipeline selected');
 				return;
 			}
-			const sourceId = item.sourceComponent?.id || '';
-			const config: vscode.DebugConfiguration = {
-				type: 'rocketride',
-				request: 'launch',
-				name: `Run ${item.label}`,
-				file: item.resourceUri.fsPath,
-				source: sourceId,
-				noDebug: true
-			};
+
 			try {
-				await vscode.debug.startDebugging(undefined, config);
+				// Read the pipeline file
+				const fileContent = await vscode.workspace.fs.readFile(item.resourceUri);
+				const pipelineText = Buffer.from(fileContent).toString('utf8');
+				const pipelineJson = JSON.parse(pipelineText);
+
+				// Substitute .env settings
+				const pipelineTransformed = ConfigManager.getInstance().substituteEnvVariables(pipelineJson);
+
+				// Get project and source identifiers
+				const parsedFile = item.parsedFile || this.getParsedPipeline(item.resourceUri);
+				const projectId = parsedFile?.projectId;
+				const sourceId = item.sourceComponent?.id || '';
+
+				// Use DAP command to execute pipeline without debugging
+				await this.connectionManager.request('execute', {
+					projectId: projectId,
+					source: sourceId,
+					pipeline: pipelineTransformed,
+					args: ConfigManager.getInstance().getConfig().engineArgs
+				});
 			} catch (error) {
 				vscode.window.showErrorMessage(`Failed to run pipeline: ${error}`);
 			}
 		}),
 
-		vscode.commands.registerCommand('rocketride.sidebar.files.launchPipeline', async (item?: PipelineFileItem) => {
-			if (!item || !item.resourceUri) {
-				vscode.window.showErrorMessage('No pipeline selected');
-				return;
-			}
-
-			// Get the parsed file to extract source component if applicable
-			const _parsedFile = item.parsedFile || this.getParsedPipeline(item.resourceUri);
-			const sourceId = item.sourceComponent?.id || '';
-
-			// Create debug configuration
-			const config: vscode.DebugConfiguration = {
-				type: 'rocketride',
-				request: 'launch',
-				name: `Debug ${item.label}`,
-				file: item.resourceUri.fsPath,
-				source: sourceId
-			};
-
-			try {
-				await vscode.debug.startDebugging(undefined, config);
-			} catch (error) {
-				vscode.window.showErrorMessage(`Failed to start debugging: ${error}`);
-			}
-		}),
-
-		vscode.commands.registerCommand('rocketride.sidebar.files.attachPipeline', async (item?: PipelineFileItem) => {
+		vscode.commands.registerCommand('rocketride.sidebar.files.stopPipeline', async (item?: PipelineFileItem) => {
 			if (!item) {
 				vscode.window.showErrorMessage('No pipeline selected');
 				return;
 			}
 
-			let token: string | undefined;
+			let projectId: string | undefined;
 			let sourceId: string | undefined;
 
-			// For known pipelines with files, determine the token from active pipelines
-			if (item.contextValue?.startsWith('pipelineFile') || item.contextValue?.startsWith('pipelineSource')) {
+			if (item.contextValue?.startsWith('pipelineSource')) {
 				const parsedFile = item.parsedFile || this.getParsedPipeline(item.resourceUri);
-				
-				if (!parsedFile?.isValid || !parsedFile.projectId) {
-					vscode.window.showErrorMessage('Invalid pipeline file');
-					return;
-				}
-
-				// If it's a source component, use that specific source
-				if (item.sourceComponent?.id) {
-					sourceId = item.sourceComponent.id;
-					token = this.getActiveKey(parsedFile.projectId, sourceId);
-				} else {
-					// For pipeline files, we could prompt which source to attach to if multiple
-					const runningSources = parsedFile.sourceComponents.filter(comp => {
-						const key = this.getActiveKey(parsedFile.projectId!, comp.id);
-						return this.activePipelines.has(key);
-					});
-
-					if (runningSources.length === 0) {
-						vscode.window.showErrorMessage('No running sources found in this pipeline');
-						return;
-					} else if (runningSources.length === 1) {
-						sourceId = runningSources[0].id;
-						token = this.getActiveKey(parsedFile.projectId, sourceId);
-					} else {
-						// Multiple running sources - let user pick
-						const selected = await vscode.window.showQuickPick(
-							runningSources.map(s => ({ label: s.name || s.id, sourceId: s.id })),
-							{ placeHolder: 'Select a source to attach to' }
-						);
-						if (!selected) {
-							return;
-						}
-						sourceId = selected.sourceId;
-						token = this.getActiveKey(parsedFile.projectId, sourceId);
-					}
-				}
+				projectId = parsedFile?.projectId;
+				sourceId = item.sourceComponent?.id;
 			} else if (item.contextValue === 'unknownTask' && item.unknownTask) {
-				// For unknown tasks, use the task's projectId and sourceId
+				projectId = item.unknownTask.projectId;
 				sourceId = item.unknownTask.sourceId;
-				token = this.getActiveKey(item.unknownTask.projectId, item.unknownTask.sourceId);
 			}
 
-			if (!token) {
-				vscode.window.showErrorMessage('Could not determine pipeline token');
+			if (!projectId || !sourceId) {
+				vscode.window.showErrorMessage('Could not determine pipeline to stop');
 				return;
 			}
 
-			// Create attach configuration
-			const config: vscode.DebugConfiguration = {
-				type: 'rocketride',
-				request: 'attach',
-				name: `Attach to ${item.label}`,
-				token: token,
-				auth: token
-			};
-
 			try {
-				await vscode.debug.startDebugging(undefined, config);
-			} catch (error) {
-				vscode.window.showErrorMessage(`Failed to attach to pipeline: ${error}`);
+				const response = await this.connectionManager.request('rrext_get_token', {
+					projectId: projectId,
+					source: sourceId
+				}) as GenericResponse | undefined;
+
+				const token = response?.body?.token as string | undefined;
+
+				await this.connectionManager.request('terminate', {}, token);
+			} catch (error: unknown) {
+				this.logger.error(`Unable to stop pipeline: ${error}`);
+				vscode.window.showErrorMessage(`Failed to stop pipeline: ${error}`);
 			}
+		}),
+
+		vscode.commands.registerCommand('rocketride.sidebar.files.openFileAtLine', async (filePath: string, lineNumber?: number) => {
+			if (!filePath || typeof filePath !== 'string') return;
+			const line = typeof lineNumber === 'number' && lineNumber > 0 ? lineNumber : 1;
+			let uri: vscode.Uri;
+			if (path.isAbsolute(filePath)) {
+				uri = vscode.Uri.file(filePath);
+			} else {
+				const folders = vscode.workspace.workspaceFolders;
+				uri = folders?.length ? vscode.Uri.joinPath(folders[0].uri, filePath) : vscode.Uri.file(filePath);
+			}
+			try {
+				const doc = await vscode.workspace.openTextDocument(uri);
+				const range = new vscode.Range(line - 1, 0, line - 1, 0);
+				await vscode.window.showTextDocument(doc, { selection: range, preview: false });
+			} catch (e) {
+				this.logger.error(`Open file at line failed: ${e}`);
+				vscode.window.showErrorMessage(`Could not open ${path.basename(filePath)}: ${e}`);
+			}
+		}),
+
+		vscode.commands.registerCommand('rocketride.sidebar.files.revealErrorsSection', async (item?: PipelineFileItem) => {
+			if (!item || !item.resourceUri || !item.sourceComponent || !item.folderType) return;
+			const resourceUri = item.resourceUri as vscode.Uri;
+			const sourceComponent = item.sourceComponent as ParsedSourceComponent;
+			const parsedPipeline = this.getParsedPipeline(resourceUri);
+			if (!parsedPipeline?.isValid || !parsedPipeline.projectId) {
+				vscode.window.showErrorMessage(`Invalid pipeline file or missing project_id`);
+				return;
+			}
+			const projectId = parsedPipeline.projectId;
+			const sourceId = sourceComponent.id;
+			const services = this.connectionManager.getCachedServices()?.services ?? {};
+			const providerDef = sourceComponent.provider ? (services[sourceComponent.provider] as { title?: string } | undefined) : undefined;
+			const displayName = sourceComponent.name || providerDef?.title || sourceId;
+			const statusPageProvider = getStatusPageProvider();
+			if (!statusPageProvider) {
+				vscode.window.showErrorMessage('Status page provider not available');
+				return;
+			}
+			await statusPageProvider.show(displayName, resourceUri, projectId, sourceId);
+			statusPageProvider.revealErrorsSection(projectId, sourceId, item.folderType);
 		})
 	];
 
@@ -327,10 +335,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 
 		// Listen for connected events
 		const connectedEventListener = this.connectionManager.addListener('connected', _e => {
-			// Turn on the task monitors
-			this.connectionManager.request('rrext_monitor', {
-				"types": ["task"]
-			}, '*');
+			// Global task/output monitors are now registered in ConnectionManager.onConnectionEstablished
 		});
 
 		// Listen for disconnected events
@@ -652,6 +657,32 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	}
 
 	/**
+	 * Parses structured error/warning string (ErrorType*`message`*filepath:linenumber) for file path, line, and label.
+	 */
+	private parseErrWarnLine(raw: string, type: 'error' | 'warning'): ParsedErrWarnLine {
+		const parts = raw.split('*');
+		if (parts.length >= 3) {
+			const message = parts[1].replace(/^`|`$/g, '').trim();
+			const fileInfo = parts[2].trim();
+			const colonIndex = fileInfo.lastIndexOf(':');
+			let filePath = fileInfo;
+			let lineNumber: number | undefined;
+			if (colonIndex > 0) {
+				const lineStr = fileInfo.substring(colonIndex + 1);
+				const parsed = parseInt(lineStr, 10);
+				if (!isNaN(parsed)) {
+					filePath = fileInfo.substring(0, colonIndex);
+					lineNumber = parsed;
+				}
+			}
+			const fileName = filePath.split(/[/\\]/).pop() || filePath;
+			const label = lineNumber !== undefined ? `${fileName}:${lineNumber} — ${message}` : `${fileName} — ${message}`;
+			return { filePath, lineNumber, label };
+		}
+		return { filePath: '', label: raw };
+	}
+
+	/**
 	 * Updates VS Code context based on current data state
 	 */
 	private updateContextBasedOnData(): void {
@@ -684,6 +715,21 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 						return this.activePipelines.has(key);
 					});
 					contextValue = hasRunningComponents ? 'pipelineFile:running' : 'pipelineFile:stopped';
+					// Aggregate task errors/warnings across all sources for pipeline file description
+					const statusProvider = getStatusPageProvider();
+					let totalErrors = 0;
+					let totalWarnings = 0;
+					for (const comp of parsedFile.sourceComponents) {
+						const ts = statusProvider?.getTaskStatus(parsedFile.projectId!, comp.id);
+						totalErrors += ts?.errors?.length ?? 0;
+						totalWarnings += ts?.warnings?.length ?? 0;
+					}
+					if (totalErrors > 0 || totalWarnings > 0) {
+						const parts = [];
+						if (totalErrors > 0) parts.push(`${totalErrors} error${totalErrors !== 1 ? 's' : ''}`);
+						if (totalWarnings > 0) parts.push(`${totalWarnings} warning${totalWarnings !== 1 ? 's' : ''}`);
+						item.description = (item.description ? `${item.description} · ` : '') + parts.join(', ');
+					}
 				}
 			} else {
 				item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground'));
@@ -730,9 +776,14 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					new vscode.ThemeColor(isActive ? 'charts.red' : 'descriptionForeground')
 				);
 
-				// Description: warnings only. The label already shows the name or id.
-				const warnText = comp.warnings.length > 0 ? `${comp.warnings.length} warning(s)` : '';
-				item.description = warnText;
+				// Description: parse-time warnings + task execution errors/warnings
+				const parts: string[] = [];
+				if (comp.warnings.length > 0) parts.push(`${comp.warnings.length} warning(s)`);
+				const errCount = element.taskErrors?.length ?? 0;
+				const warnCount = element.taskWarnings?.length ?? 0;
+				if (errCount > 0) parts.push(`${errCount} error${errCount !== 1 ? 's' : ''}`);
+				if (warnCount > 0) parts.push(`${warnCount} warning${warnCount !== 1 ? 's' : ''}`);
+				item.description = parts.length > 0 ? parts.join(', ') : '';
 
 				// Update context value to include running state
 				contextValue = isActive ? 'pipelineSource:running' : 'pipelineSource:stopped';
@@ -741,6 +792,13 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 				item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground'));
 				item.description = '';
 			}
+		} else if (element.contextValue === 'errorsSection' || element.contextValue === 'warningsSection') {
+			item.iconPath = element.iconPath;
+			item.command = {
+				command: 'rocketride.sidebar.files.revealErrorsSection',
+				title: 'Go to section',
+				arguments: [element]
+			};
 		} else {
 			// Default icon for other items
 			item.iconPath = element.iconPath || new vscode.ThemeIcon('file-code');
@@ -836,27 +894,63 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 
 		// Return source components for expanded pipeline files (sorted by display name)
 		if (element.contextValue === 'pipelineFile' && element.parsedFile?.isValid) {
-			const sortedSources = [...element.parsedFile.sourceComponents].sort((a, b) => {
+			const parsedFile = element.parsedFile;
+			const projectId = parsedFile.projectId!;
+			const statusProvider = getStatusPageProvider();
+			const sortedSources = [...parsedFile.sourceComponents].sort((a, b) => {
 				const nameA = (a.name || a.id || '').toLowerCase();
 				const nameB = (b.name || b.id || '').toLowerCase();
 				return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
 			});
 			const children = sortedSources.map(sourceComponent => {
-				// Use component name if available, otherwise use id for display
 				const displayName = sourceComponent.name || sourceComponent.id;
-
+				const taskStatus = statusProvider?.getTaskStatus(projectId, sourceComponent.id);
+				const taskErrors = taskStatus?.errors?.length ? taskStatus.errors : undefined;
+				const taskWarnings = taskStatus?.warnings?.length ? taskStatus.warnings : undefined;
+				const hasErrWarn = (taskErrors?.length ?? 0) + (taskWarnings?.length ?? 0) > 0;
 				return {
 					label: displayName,
-					description: undefined, // Keep it clean
+					description: undefined,
 					resourceUri: element.resourceUri,
 					contextValue: 'pipelineSource',
-					iconPath: new vscode.ThemeIcon('circle'), // Default icon for now
-					collapsibleState: vscode.TreeItemCollapsibleState.None,
-					sourceComponent: sourceComponent
+					iconPath: new vscode.ThemeIcon('circle'),
+					collapsibleState: hasErrWarn ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
+					sourceComponent: sourceComponent,
+					taskErrors,
+					taskWarnings
 				} as PipelineFileItem;
 			});
-
 			return Promise.resolve(children);
+		}
+
+		// Return exactly two lines under a pipelineSource when there are errors/warnings: "Warnings" and/or "Errors"
+		if (element.contextValue === 'pipelineSource' && (element.taskErrors?.length || element.taskWarnings?.length)) {
+			const items: PipelineFileItem[] = [];
+			if (element.taskWarnings?.length) {
+				items.push({
+					label: 'Warnings',
+					description: `${element.taskWarnings.length}`,
+					resourceUri: element.resourceUri,
+					contextValue: 'warningsSection',
+					iconPath: new vscode.ThemeIcon('warning', new vscode.ThemeColor('editorWarning.foreground')),
+					collapsibleState: vscode.TreeItemCollapsibleState.None,
+					sourceComponent: element.sourceComponent,
+					folderType: 'warnings'
+				} as PipelineFileItem);
+			}
+			if (element.taskErrors?.length) {
+				items.push({
+					label: 'Errors',
+					description: `${element.taskErrors.length}`,
+					resourceUri: element.resourceUri,
+					contextValue: 'errorsSection',
+					iconPath: new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground')),
+					collapsibleState: vscode.TreeItemCollapsibleState.None,
+					sourceComponent: element.sourceComponent,
+					folderType: 'errors'
+				} as PipelineFileItem);
+			}
+			return Promise.resolve(items);
 		}
 
 		// Return unknown tasks for expanded "Other" item

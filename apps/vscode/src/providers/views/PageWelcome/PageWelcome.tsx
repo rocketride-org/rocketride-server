@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -71,7 +71,7 @@ type OutgoingMessage =
 
 const MODE_DESCRIPTIONS: Record<string, string> = {
 	cloud: 'Connect to RocketRide.ai cloud. Requires an API key from your account dashboard.',
-	onprem: 'Connect to your own hosted RocketRide server. Requires server URL and API key.',
+	onprem: 'Connect to your own hosted RocketRide server.',
 	local: 'Run the engine locally on your machine. The extension will download and manage the engine for you.'
 };
 
@@ -185,7 +185,8 @@ export const PageWelcome: React.FC = () => {
 		sendMessage({ type: 'testConnection', settings });
 	};
 
-	const needsApiKey = settings.connectionMode === 'cloud' || settings.connectionMode === 'onprem';
+	const isCloud = settings.connectionMode === 'cloud';
+	const needsApiKey = settings.connectionMode === 'onprem';
 
 	// ========================================================================
 	// RENDER
@@ -199,7 +200,6 @@ export const PageWelcome: React.FC = () => {
 					{logoLightUri ? <img src={logoLightUri} alt="RocketRide" /> : '\u{1F680}'}
 				</div>
 				<div className="welcome-brand-name">RocketRide</div>
-				<div className="welcome-brand-sub">Engine</div>
 				<div className="welcome-tagline">
 					High-performance data processing<br />
 					with AI/ML integration
@@ -207,18 +207,18 @@ export const PageWelcome: React.FC = () => {
 
 				<ul className="welcome-features">
 					<li><span className="welcome-feature-icon">&#9670;</span> Visual pipeline editor</li>
-					<li><span className="welcome-feature-icon">&#9670;</span> 50+ processing nodes</li>
-					<li><span className="welcome-feature-icon">&#9670;</span> LLM &amp; embedding support</li>
-					<li><span className="welcome-feature-icon">&#9670;</span> Vector database integration</li>
-					<li><span className="welcome-feature-icon">&#9670;</span> Cloud, on-prem, or local</li>
-					<li><span className="welcome-feature-icon">&#9670;</span> TypeScript &amp; Python SDKs</li>
+					<li><span className="welcome-feature-icon">&#9670;</span> High-performance C++ engine</li>
+					<li><span className="welcome-feature-icon">&#9670;</span> 50+ pipeline nodes with AI/ML</li>
+					<li><span className="welcome-feature-icon">&#9670;</span> Multi-agent workflows</li>
+					<li><span className="welcome-feature-icon">&#9670;</span> Tool and model agnostic</li>
+					<li><span className="welcome-feature-icon">&#9670;</span> TypeScript, Python &amp; MCP SDKs</li>
 				</ul>
 
 				<div className="welcome-divider" />
 
 				<div className="welcome-links">
-					<a href="#" onClick={(e) => { e.preventDefault(); sendMessage({ type: 'openExternal', url: 'https://docs.rocketride.ai' }); }}>Documentation</a>
-					<a href="#" onClick={(e) => { e.preventDefault(); sendMessage({ type: 'openExternal', url: 'https://support.rocketride.ai' }); }}>Support</a>
+					<a href="#" onClick={(e) => { e.preventDefault(); sendMessage({ type: 'openExternal', url: 'https://docs.rocketride.org' }); }}>Documentation</a>
+					<a href="#" onClick={(e) => { e.preventDefault(); sendMessage({ type: 'openExternal', url: 'https://discord.gg/9hr3tdZmEG' }); }}>Discord</a>
 				</div>
 			</div>
 
@@ -244,7 +244,20 @@ export const PageWelcome: React.FC = () => {
 					</div>
 				</div>
 
-				{/* API Key — Cloud / On-prem */}
+				{/* Coming Soon — Cloud */}
+				{isCloud && (
+					<div className="welcome-coming-soon">
+						<div className="welcome-coming-soon-icon">&#9729;</div>
+						<div className="welcome-coming-soon-title">Coming Soon</div>
+						<div className="welcome-coming-soon-text">
+							RocketRide Cloud is under active development.<br />
+							Stay tuned for managed cloud hosting with zero setup.
+						</div>
+					</div>
+				)}
+
+
+				{/* API Key — On-prem */}
 				{needsApiKey && (
 					<div className="welcome-form-group">
 						<label htmlFor="apiKey">API Key</label>
@@ -333,8 +346,8 @@ export const PageWelcome: React.FC = () => {
 					</>
 				)}
 
-				{/* Auto-connect — non-local only */}
-				{settings.connectionMode !== 'local' && (
+				{/* Auto-connect — on-prem only */}
+				{settings.connectionMode === 'onprem' && (
 					<div className="welcome-form-group welcome-checkbox-row">
 						<input
 							type="checkbox"
@@ -355,10 +368,10 @@ export const PageWelcome: React.FC = () => {
 
 				{/* Action buttons */}
 				<div className="welcome-button-row">
-					<button onClick={handleSaveAndConnect}>
+					<button onClick={handleSaveAndConnect} disabled={isCloud}>
 						Save &amp; Connect
 					</button>
-					{settings.connectionMode !== 'local' && (
+					{settings.connectionMode === 'onprem' && (
 						<button className="secondary" onClick={handleTestConnection}>
 							Test Connection
 						</button>

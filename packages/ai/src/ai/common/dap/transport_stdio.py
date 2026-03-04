@@ -701,16 +701,26 @@ class TransportStdio(TransportBase):
         # Parse debug command messages: '>DBG*operation*id*total_pipes*pipe_id'
         elif message.startswith('>DBG*'):
             try:
-                _, op, id, total_pipes, pipe_id = message.split('*', 4)
+                _, op, id, total_pipes, pipe_id, trace_str = message.split('*', 5)
+
+                # Attempt to get the data trace
+                trace = {}
+                try:
+                    trace = json.loads(trace_str)
+                except Exception:
+                    pass
+
+                # Output it
                 await self._transport_receive(
                     {
                         'type': 'event',
-                        'event': 'apaevt_flow',
+                        'event': 'apaevt_trace',
                         'body': {
                             'op': op.lower(),
                             'id': int(id, 16),
                             'total_pipes': int(total_pipes, 16),
                             'pipe_id': pipe_id,
+                            'trace': trace
                         },
                     }
                 )

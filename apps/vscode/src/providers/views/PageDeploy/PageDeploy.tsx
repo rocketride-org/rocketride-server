@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,15 +29,17 @@ import '../../styles/app.css';
 import './styles.css';
 
 type PageDeployIncomingMessage =
-	| { type: 'init'; rocketrideLogoDarkUri?: string; rocketrideLogoLightUri?: string; dockerIconUri?: string; onpremIconUri?: string };
+	| { type: 'init'; rocketrideLogoDarkUri?: string; rocketrideLogoLightUri?: string; dockerIconUri?: string; onpremIconUri?: string; engineImage?: string };
 
-type PageDeployOutgoingMessage = { type: 'ready' } | { type: 'copyToClipboard'; text: string };
+type PageDeployOutgoingMessage = { type: 'ready' } | { type: 'copyToClipboard'; text: string } | { type: 'dockerDeployLocal' };
 
 export const PageDeploy: React.FC = () => {
 	const [logoDarkUri, setLogoDarkUri] = useState<string | undefined>();
 	const [logoLightUri, setLogoLightUri] = useState<string | undefined>();
 	const [dockerUri, setDockerUri] = useState<string | undefined>();
 	const [onpremUri, setOnpremUri] = useState<string | undefined>();
+	const [engineImage, setEngineImage] = useState('ghcr.io/rocketride-org/rocketride-engine:latest');
+	const [deploying, setDeploying] = useState(false);
 
 	const { sendMessage } = useMessaging<PageDeployOutgoingMessage, PageDeployIncomingMessage>({
 		onMessage: (message) => {
@@ -46,6 +48,7 @@ export const PageDeploy: React.FC = () => {
 				if (message.rocketrideLogoLightUri) setLogoLightUri(message.rocketrideLogoLightUri);
 				if (message.dockerIconUri) setDockerUri(message.dockerIconUri);
 				if (message.onpremIconUri) setOnpremUri(message.onpremIconUri);
+				if (message.engineImage) setEngineImage(message.engineImage);
 			}
 		}
 	});
@@ -53,6 +56,8 @@ export const PageDeploy: React.FC = () => {
 	useEffect(() => {
 		sendMessage({ type: 'ready' });
 	}, [sendMessage]);
+
+	const remoteCommands = `docker pull ${engineImage}\ndocker create --name rocketride-engine -p 5565:5565 ${engineImage}`;
 
 	return (
 		<div className="deploy-app">
@@ -74,54 +79,37 @@ export const PageDeploy: React.FC = () => {
 						<img src={dockerUri} alt="Docker" className="deploy-panel-icon" />
 					)}
 					<div className="deploy-panel-content">
-						<h1 className="deploy-panel-title">Docker</h1>
+						<h1 className="deploy-panel-title">Deploy Image</h1>
 						<p className="deploy-panel-description">
-							Build the image here, then save it or create a run script. Copy the result to your server and run.
+							Download the RocketRide engine image and create a container.
+							Requires Docker to be installed.
 						</p>
 						<div className="deploy-panel-actions">
 							<button
 								type="button"
 								className="deploy-panel-btn deploy-panel-btn-primary"
-								onClick={() => sendMessage({ type: 'dockerBuild' })}
+								disabled={deploying}
+								onClick={() => {
+									setDeploying(true);
+									sendMessage({ type: 'dockerDeployLocal' });
+								}}
 							>
-								Build image
-							</button>
-							<button
-								type="button"
-								className="deploy-panel-btn deploy-panel-btn-secondary"
-								onClick={() => sendMessage({ type: 'dockerSave' })}
-							>
-								Save image to file
-							</button>
-							<button
-								type="button"
-								className="deploy-panel-btn deploy-panel-btn-secondary"
-								onClick={() => sendMessage({ type: 'dockerExportScript' })}
-							>
-								Create run script
+								{deploying ? 'Image deployed' : 'Deploy locally'}
 							</button>
 						</div>
 						<details className="deploy-panel-details">
-							<summary>Show commands</summary>
+							<summary>Deploy to a remote server</summary>
 							<div className="deploy-panel-commands">
-								<pre className="deploy-panel-code"><code>{`# Build (in repo dir on your server)
-docker build -f docker/Dockerfile.engine -t rocketride-engine .
-
-# Run on your server
-docker run -p 8080:8080 rocketride-engine`}</code></pre>
+								<p className="deploy-panel-description">
+									Run these commands on your target server to pull the image and create a container:
+								</p>
+								<pre className="deploy-panel-code"><code>{remoteCommands}</code></pre>
 								<button
 									type="button"
 									className="deploy-panel-copy"
-									onClick={() => sendMessage({ type: 'copyToClipboard', text: 'docker run -p 8080:8080 rocketride-engine' })}
+									onClick={() => sendMessage({ type: 'copyToClipboard', text: remoteCommands })}
 								>
-									Copy run command
-								</button>
-								<button
-									type="button"
-									className="deploy-panel-copy deploy-panel-copy-secondary"
-									onClick={() => sendMessage({ type: 'copyToClipboard', text: 'docker load -i rocketride-engine.tar && docker run -p 8080:8080 rocketride-engine' })}
-								>
-									Copy load and run (after save)
+									Copy commands
 								</button>
 							</div>
 						</details>

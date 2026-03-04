@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -259,6 +259,7 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 		try {
 			if (this.isLaunchRequest(message)) {
 				message.arguments.pipeline = this.pipeline;
+				message.arguments.args = this.configManager.getConfig().engineArgs;
 
 			} else if (this.isAttachRequest(message)) {
 				this.token = message.arguments?.token;

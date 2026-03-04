@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide Inc.
+// Copyright (c) 2026 Aparavi Software AG Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,10 @@ const styles = {
 	paper: {
 		backgroundColor: 'background.paper',
 		display: 'flex',
+		border: inVSCode
+			? '1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12))'
+			: '1px solid #DCDCDC',
+		borderRadius: '4px',
 	},
 	/** Base icon button styles with hover and disabled state handling. SVG sizing adapts to VS Code. */
 	iconButton: {

@@ -17,7 +17,7 @@ BEGIN
 		BLOCK "040904b0"
 		BEGIN
 			VALUE "CompanyName", "RocketRide"
-			VALUE "LegalCopyright", "Copyright (C) 2026 RocketRide, Inc."
+			VALUE "LegalCopyright", "Copyright (c) 2026 Aparavi Software AG"
 			VALUE "ProductName", "RocketRide Data Intelligence and Automation Engine"
 			VALUE "ProductVersion", VER_FILE_VERSION_STR
 			VALUE "OriginalFilename", "@ENGINE_NAME@.exe"

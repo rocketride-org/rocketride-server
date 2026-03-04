@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide Inc.
+// Copyright (c) 2026 Aparavi Software AG Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -52,8 +52,8 @@ export const nodeChildrenStyles = {
 
 /** Base CSS styles for ReactFlow node connection handles (ports). Defines the outer hit-area dimensions. */
 export const handleStyles: CSSProperties = {
-	width: `${pxToRem(14)}rem`,
-	height: `${pxToRem(14)}rem`,
+	width: `${pxToRem(18)}rem`,
+	height: `${pxToRem(18)}rem`,
 	border: 'none',
 	background: 'transparent',
 };

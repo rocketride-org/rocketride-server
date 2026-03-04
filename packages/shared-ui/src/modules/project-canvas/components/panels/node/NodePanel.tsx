@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide Inc.
+// Copyright (c) 2026 Aparavi Software AG Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -518,6 +518,7 @@ export default function NodePanel({ onClose }: IBasePanelProps): ReactNode {
 								height: '70%',
 								objectFit: 'cover',
 								mr: '1rem',
+								filter: nodeData.icon?.includes('#td') ? 'var(--icon-filter)' : undefined,
 							}}
 							src={nodeData.icon}
 						/>

@@ -3,7 +3,7 @@
 # RocketRide Engine - Build Environment Setup (Unix)
 # =============================================================================
 # MIT License
-# Copyright (c) 2026 RocketRide, Inc.
+# Copyright (c) 2026 Aparavi Software AG
 #
 # This script checks build prerequisites for compiling the server from source.
 # Called automatically by server.js on first compile.

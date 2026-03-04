@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,7 +54,7 @@ Error IFilterInstance::open(Entry &entry) noexcept {
         // Format it
         StackText msg;
         _tsbo(msg, {Format::HEX, {}, '*'}, "BEGIN", this->pipeId,
-              this->endpoint->getPipeCount(), name);
+              this->endpoint->getPipeCount(), name, "{}");
 
         ::engine::config::monitor()->other("DBG", msg);
     }
@@ -107,7 +107,7 @@ Error IFilterInstance::close() noexcept {
         // Format it
         StackText msg;
         _tsbo(msg, {Format::HEX, {}, '*'}, "END", this->pipeId,
-              this->endpoint->getPipeCount(), name);
+              this->endpoint->getPipeCount(), name, "{}");
 
         ::engine::config::monitor()->other("DBG", msg);
     }

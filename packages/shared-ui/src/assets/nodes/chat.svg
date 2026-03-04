@@ -1,10 +1,1 @@
-<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g clip-path="url(#clip0_1539_12939)">
-<path d="M31.5 9H28.5V22.5H9V25.5C9 26.325 9.675 27 10.5 27H27L33 33V10.5C33 9.675 32.325 9 31.5 9ZM25.5 18V4.5C25.5 3.675 24.825 3 24 3H4.5C3.675 3 3 3.675 3 4.5V25.5L9 19.5H24C24.825 19.5 25.5 18.825 25.5 18Z" fill="#56565A"/>
-</g>
-<defs>
-<clipPath id="clip0_1539_12939">
-<rect width="36" height="36" fill="white"/>
-</clipPath>
-</defs>
-</svg>
+<svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24" transform="" id="injected-svg" xmlns="http://www.w3.org/2000/svg"><!--Boxicons v3.0.8 https://boxicons.com | License  https://docs.boxicons.com/free--><path d="M20 8h-3V4c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h1v2c0 .38.21.72.55.89.14.07.29.11.45.11.21 0 .42-.07.6-.2L9 15v2c0 1.1.9 2 2 2h3.67l3.73 2.8c.18.13.39.2.6.2.15 0 .31-.04.45-.11A1 1 0 0 0 20 21v-2c1.1 0 2-.9 2-2v-7c0-1.1-.9-2-2-2M6 12H4V4h11v8h-5c-.12 0-.24.03-.35.07-.04.02-.07.04-.11.06-.05.02-.09.04-.14.07L7 14v-1c0-.55-.45-1-1-1m14 5h-1c-.55 0-1 .45-1 1v1l-2.4-1.8a1 1 0 0 0-.6-.2h-4v-3h4c1.1 0 2-.9 2-2v-2h3z"></path></svg>

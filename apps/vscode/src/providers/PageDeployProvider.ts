@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,11 +25,12 @@
  * Deploy Page Provider
  *
  * Provides a webview panel for the Deploy page: deploy to RocketRide.ai cloud
- * or on-prem using Docker.
+ * or pull and deploy from GHCR.
  */
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { getConnectionManager } from '../extension';
 
 export class PageDeployProvider {
 	private webviewPanel?: vscode.WebviewPanel;
@@ -76,17 +77,17 @@ export class PageDeployProvider {
 
 		this.webviewPanel.webview.onDidReceiveMessage(
 			async (message: { type: string; text?: string }) => {
-				if (message.type === 'ready') {
-					await this.sendInit();
-				} else if (message.type === 'copyToClipboard' && typeof message.text === 'string') {
-					await vscode.env.clipboard.writeText(message.text);
-					vscode.window.showInformationMessage('Copied to clipboard.');
-				} else if (message.type === 'dockerBuild') {
-					await this.runDockerBuild();
-				} else if (message.type === 'dockerSave') {
-					await this.runDockerSave();
-				} else if (message.type === 'dockerExportScript') {
-					await this.exportRunScript();
+				try {
+					if (message.type === 'ready') {
+						await this.sendInit();
+					} else if (message.type === 'copyToClipboard' && typeof message.text === 'string') {
+						await vscode.env.clipboard.writeText(message.text);
+						vscode.window.showInformationMessage('Copied to clipboard.');
+					} else if (message.type === 'dockerDeployLocal') {
+						this.deployDockerLocal();
+					}
+				} catch (err) {
+					vscode.window.showErrorMessage(`Deploy action failed: ${err instanceof Error ? err.message : String(err)}`);
 				}
 			},
 			undefined,
@@ -102,78 +103,24 @@ export class PageDeployProvider {
 		);
 	}
 
-	private getWorkspaceRoot(): string | null {
-		const folders = vscode.workspace.workspaceFolders;
-		if (!folders || folders.length === 0) return null;
-		return folders[0].uri.fsPath;
+	private getEngineImage(): string {
+		const version = getConnectionManager()?.getEngineInfo()?.version;
+		const tag = version ? version.replace(/^server-v/, '') : 'latest';
+		return `ghcr.io/rocketride-org/rocketride-engine:${tag}`;
 	}
 
-	private async runDockerBuild(): Promise<void> {
-		const root = this.getWorkspaceRoot();
-		if (!root) {
-			vscode.window.showErrorMessage('Open a workspace folder (your project root) to build the Docker image.');
-			return;
-		}
-		const term = vscode.window.createTerminal({
-			name: 'RocketRide Docker Build',
-			cwd: root,
-			hideFromUser: false
-		});
-		term.show();
-		term.sendText('docker build -f docker/Dockerfile.engine -t rocketride-engine .');
-		vscode.window.showInformationMessage('Docker build started in terminal. When it finishes, use "Save image to file" or run the container locally.');
-	}
-
-	private async runDockerSave(): Promise<void> {
-		const root = this.getWorkspaceRoot();
-		if (!root) {
-			vscode.window.showErrorMessage('Open a workspace folder to save the image.');
-			return;
-		}
-		const tarPath = path.join(root, 'rocketride-engine.tar');
-		const term = vscode.window.createTerminal({
-			name: 'RocketRide Docker Save',
-			cwd: root,
-			hideFromUser: false
-		});
-		term.show();
-		term.sendText(`docker save rocketride-engine -o "${tarPath}"`);
-		vscode.window.showInformationMessage(
-			'Saving image in terminal. When done, copy rocketride-engine.tar to your server and run: docker load -i rocketride-engine.tar && docker run -p 8080:8080 rocketride-engine'
-		);
-	}
-
-	private async exportRunScript(): Promise<void> {
-		const folders = vscode.workspace.workspaceFolders;
-		if (!folders || folders.length === 0) {
-			vscode.window.showErrorMessage('Open a workspace folder to create the run script.');
-			return;
-		}
-		const rootUri = folders[0].uri;
-		const runSh = `#!/bin/sh
-# Build and run RocketRide engine on your server (copy this repo to the server first)
-set -e
-docker build -f docker/Dockerfile.engine -t rocketride-engine .
-docker run -p 8080:8080 rocketride-engine
-`;
-		const runPs1 = `# Build and run RocketRide engine on your server (copy this repo to the server first)
-docker build -f docker/Dockerfile.engine -t rocketride-engine .
-docker run -p 8080:8080 rocketride-engine
-`;
+	private deployDockerLocal(): void {
 		try {
-			await vscode.workspace.fs.writeFile(
-				vscode.Uri.joinPath(rootUri, 'run-rocketride.sh'),
-				Buffer.from(runSh, 'utf8')
-			);
-			await vscode.workspace.fs.writeFile(
-				vscode.Uri.joinPath(rootUri, 'run-rocketride.ps1'),
-				Buffer.from(runPs1, 'utf8')
-			);
-			vscode.window.showInformationMessage(
-				'Created run-rocketride.sh and run-rocketride.ps1 in your workspace. Copy the repo to your server and run one of them.'
-			);
-		} catch (e) {
-			vscode.window.showErrorMessage(`Failed to create run script: ${String(e)}`);
+			const image = this.getEngineImage();
+			const term = vscode.window.createTerminal({
+				name: 'RocketRide Deploy',
+				hideFromUser: false
+			});
+			term.show();
+			term.sendText(`docker pull ${image}`);
+			term.sendText(`docker create --name rocketride-engine -p 5565:5565 ${image}`);
+		} catch (err) {
+			vscode.window.showErrorMessage(`Failed to deploy Docker image: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	}
 
@@ -188,10 +135,10 @@ docker run -p 8080:8080 rocketride-engine
 			vscode.Uri.joinPath(this.context.extensionUri, 'rocketride-light-icon.png')
 		);
 		const dockerUri = webview.asWebviewUri(
-			vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'static', 'docker.svg')
+			vscode.Uri.joinPath(this.context.extensionUri, 'docker.svg')
 		);
 		const onpremUri = webview.asWebviewUri(
-			vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'static', 'onprem.svg')
+			vscode.Uri.joinPath(this.context.extensionUri, 'onprem.svg')
 		);
 
 		webview.postMessage({
@@ -199,7 +146,8 @@ docker run -p 8080:8080 rocketride-engine
 			rocketrideLogoDarkUri: logoDarkUri.toString(),
 			rocketrideLogoLightUri: logoLightUri.toString(),
 			dockerIconUri: dockerUri.toString(),
-			onpremIconUri: onpremUri.toString()
+			onpremIconUri: onpremUri.toString(),
+			engineImage: this.getEngineImage()
 		});
 	}
 

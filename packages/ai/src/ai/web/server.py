@@ -43,7 +43,7 @@ logo = r"""
        |_|  \_\___/ \___|_|\_\___|\__|_|  \_\_|\__,_|\___|
                                                     
                                                     
-            Copyright (c) 2026, RocketRide Foundation, Inc
+            Copyright (c) 2026 Aparavi Software AG
                     All rights reserved
     """
 

@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -340,7 +340,7 @@ export class PageWelcomeProvider {
 				githubToken = session?.accessToken;
 			} catch { /* ignore */ }
 
-			const versions = await this.engineInstaller.fetchAllReleases(undefined, githubToken);
+			const versions = await this.engineInstaller.getReleases(undefined, githubToken);
 			this.panel.webview.postMessage({ type: 'engineVersionsLoaded', versions });
 		} catch (error) {
 			console.error('[PageWelcomeProvider] Failed to fetch engine versions:', error);

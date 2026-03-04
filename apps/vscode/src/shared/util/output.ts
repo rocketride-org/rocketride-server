@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -140,21 +140,15 @@ class OutputLogger {
 	/** Static instance holder for singleton pattern implementation */
 	private static instance: OutputLogger;
 
-	/** VS Code OutputChannel instance for writing log messages to the Output panel */
+	/** Extension channel: DAP traffic, connection lifecycle, diagnostics */
 	private readonly outputChannel: vscode.OutputChannel;
 
-	/**
-	 * Private constructor to enforce singleton pattern.
-	 * 
-	 * Creates a new VS Code OutputChannel with the name "RocketRide".
-	 * This channel will appear in VS Code's Output panel dropdown,
-	 * allowing users to view extension-specific logs separately from
-	 * other extensions and VS Code's internal logs.
-	 */
+	/** Console channel: plain server output (stdout/stderr from pipelines) */
+	private readonly consoleChannel: vscode.OutputChannel;
+
 	private constructor() {
-		// Create a named output channel that appears in VS Code's Output panel
-		// The name "RocketRide" will be visible in the Output panel's dropdown selector
-		this.outputChannel = vscode.window.createOutputChannel('RocketRide');
+		this.outputChannel = vscode.window.createOutputChannel('Rocket Ride: Extension');
+		this.consoleChannel = vscode.window.createOutputChannel('Rocket Ride: Console');
 	}
 
 	/**
@@ -194,44 +188,21 @@ class OutputLogger {
 	 * @param message The message to log - can include emojis, formatting, or plain text
 	 */
 	public output(message: string): void {
-		// Append the message to the output channel with a newline
-		// This ensures each log entry appears on its own line in the Output panel
 		this.outputChannel.appendLine(message);
 	}
 
 	/**
-	 * Logs a message to the output channel.
-	 * 
-	 * Messages are appended as new lines to the output channel, making them
-	 * visible in VS Code's Output panel when the "RocketRide" channel is selected.
-	 * 
-	 * The method supports any string content, including formatted messages with
-	 * icons, timestamps, or structured data. No automatic formatting is applied,
-	 * giving callers full control over message presentation.
-	 * 
-	 * @param message The message to log - can include emojis, formatting, or plain text
+	 * Logs plain text to the "Rocket Ride: Console" output channel.
 	 */
+	public console(message: string): void {
+		this.consoleChannel.appendLine(message);
+	}
+
 	public error(message: string): void {
-		// Append the message to the output channel with a newline
-		// This ensures each log entry appears on its own line in the Output panel
 		this.output(`${icons.error} ${message}`);
 	}
 
-	/**
-	 * Logs a message to the output channel.
-	 * 
-	 * Messages are appended as new lines to the output channel, making them
-	 * visible in VS Code's Output panel when the "RocketRide" channel is selected.
-	 * 
-	 * The method supports any string content, including formatted messages with
-	 * icons, timestamps, or structured data. No automatic formatting is applied,
-	 * giving callers full control over message presentation.
-	 * 
-	 * @param message The message to log - can include emojis, formatting, or plain text
-	 */
 	public info(message: string): void {
-		// Append the message to the output channel with a newline
-		// This ensures each log entry appears on its own line in the Output panel
 		this.output(`${icons.info} ${message}`);
 	}
 

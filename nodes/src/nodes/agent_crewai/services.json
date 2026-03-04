@@ -1,0 +1,68 @@
+{
+	"title": "Agent - CrewAI",
+	"protocol": "agent_crewai://",
+	"classType": ["agent", "tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.agent_crewai",
+	"prefix": "agent",
+	"description": [
+		"Single-agent execution using CrewAI.",
+		"Can be invoked as a tool (`<nodeId>.run_agent`) for hierarchical agent orchestration."
+	],
+	"icon": "crewai.svg",
+	"invoke": {
+		"llm": {
+			"description": "LLM used by the agent",
+			"min": 1
+		},
+		"tool": {
+			"description": "Tools available to the agent (via control-plane invoke)",
+			"min": 0
+		}
+	},
+	"lanes": {
+		"questions": ["answers"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [{ "lane": "answers" }]
+		}
+	],
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"instructions": []
+			}
+		}
+	},
+	"fields": {
+		"instructions": {
+			"type": "array",
+			"title": "Instructions",
+			"description": "Additional instructions to guide the agent.",
+			"items": {
+				"type": "string",
+				"format": "textarea"
+			}
+		},
+		"agent_crewai.default": { "object": "default", "properties": ["instructions"] },
+		"agent_crewai.profile": {
+			"title": "Profile",
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [{ "value": "default", "properties": ["agent_crewai.default"] }]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Agent - CrewAI",
+			"properties": ["instructions"]
+		}
+	]
+}

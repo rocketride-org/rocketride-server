@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide Inc.
+// Copyright (c) 2026 Aparavi Software AG Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -128,8 +128,8 @@ export default function Handle({
 		>
 			<Box
 				style={{
-					width: `${pxToRem(12)}rem`,
-					height: `${pxToRem(12)}rem`,
+					width: `${pxToRem(8)}rem`,
+					height: `${pxToRem(8)}rem`,
 					border: `1px solid ${borderColor}`,
 					borderColor: borderColor,
 					background: backgroundColor,

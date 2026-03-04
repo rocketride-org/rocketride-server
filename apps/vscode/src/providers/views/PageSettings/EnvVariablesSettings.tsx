@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -237,7 +237,7 @@ export const EnvVariablesSettings: React.FC<EnvVariablesSettingsProps> = ({
 													onClick={() => toggleValueVisibility(key)}
 													title={isVisible ? 'Hide value' : 'Show value'}
 												>
-													{isVisible ? '🙈' : '👁'}
+													{isVisible ? '🙈' : '🔍'}
 												</button>
 											</>
 										)}

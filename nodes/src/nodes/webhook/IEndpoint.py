@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2026 RocketRide, Inc.
+# Copyright (c) 2026 Aparavi Software AG
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -102,6 +102,10 @@ class IEndpoint(IEndpointBase):
                     'usr',
                     json.dumps([info]),
                 )
+                # Chat is the source component, so when it's ready, all downstream
+                # components (embedding, LLM, etc.) have already been initialized
+                # This status message indicates the chat is ready to accept questions
+                monitorStatus('Dropper ready - system is ready to process files')
 
             elif self.endpoint.logicalType in ('webhook', 'adtoolchain'):
                 # These should NOT be replacable strings!!!

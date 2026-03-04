@@ -1,7 +1,7 @@
 // =============================================================================
 // MIT License
 //
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -274,6 +274,16 @@ Error IServiceEndpoint::setConfig(const json::Value &_jobConfig,
         config.exportUpdateBehavior = EXPORT_UPDATE_BEHAVIOR::UPDATE;
     else
         config.exportUpdateBehavior = EXPORT_UPDATE_BEHAVIOR::UNKNOWN;
+
+    // Lookup the pipeline trace level
+    Text traceLevelStr;
+    config.taskConfig.lookupAssign("pipelineTraceLevel", traceLevelStr);
+    if (traceLevelStr == "metadata"_tv)
+        config.pipelineTraceLevel = PIPELINE_TRACE_LEVEL::METADATA;
+    else if (traceLevelStr == "summary"_tv)
+        config.pipelineTraceLevel = PIPELINE_TRACE_LEVEL::SUMMARY;
+    else if (traceLevelStr == "full"_tv)
+        config.pipelineTraceLevel = PIPELINE_TRACE_LEVEL::FULL;
 
     // Done
     return ccode;

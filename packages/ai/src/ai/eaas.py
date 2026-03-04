@@ -40,7 +40,6 @@ from typing import Any, Dict
 
 from ai.web import WebServer
 
-
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser for EAAS server."""
     parser = argparse.ArgumentParser(
@@ -129,9 +128,6 @@ async def run(config: Dict[str, Any] = None) -> None:
         config['base_port'] = args.base_port
         config['verbose'] = args.verbose
 
-    print('[EAAS_SERVER] Configuration:')
-    print(f'  Host: {config["host"]}')
-    print(f'  Port: {config["port"]}')
     if config.get('modelserver'):
         print(f'  Model Server: {config["modelserver"]}')
     if config.get('verbose'):

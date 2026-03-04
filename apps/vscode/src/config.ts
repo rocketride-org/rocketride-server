@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,11 +41,11 @@ export interface ConfigManagerInfo {
 	/** overall url  */
 	hostUrl: string;
 
-	/** Deploy API base URL (for Deploy to RocketRide.ai) */
-	deployUrl: string;
-
 	/** Default path for creating new pipeline files */
 	defaultPipelinePath: string;
+
+	/** Additional engine arguments (passed to engine subprocess in all connection modes) */
+	engineArgs: string[];
 
 	/** Local configuration */
 	local: {
@@ -53,8 +53,6 @@ export interface ConfigManagerInfo {
 		host: string;
 		/** Local port (default: 5565) */
 		port: number;
-		/** Additional engine arguments */
-		engineArgs: string[];
 		/** Engine version to download: 'latest', 'prerelease', or a specific tag */
 		engineVersion: string;
 	};
@@ -68,9 +66,6 @@ export interface ConfigManagerInfo {
 	/** Environment variables loaded from .env file */
 	env: Record<string, string>;
 
-	/** Integration settings */
-	copilotIntegration: boolean;
-	cursorIntegration: boolean;
 }
 
 /**
@@ -94,19 +89,16 @@ export class ConfigManager {
 		connectionMode: 'local',
 		apiKey: '',
 		hostUrl: 'http://localhost:5565',
-		deployUrl: '',
 		defaultPipelinePath: '',
+		engineArgs: [],
 		local: {
 			host: '',
 			port: 5565,
-			engineArgs: [],
 			engineVersion: 'latest',
 		},
 		autoConnect: true,
 		pipelineRestartBehavior: 'prompt',
-		env: {},
-		copilotIntegration: false,
-		cursorIntegration: false
+		env: {}
 	};
 
 	private constructor() { }
@@ -176,7 +168,6 @@ export class ConfigManager {
 	private async refreshConfig(): Promise<void> {
 		const config = vscode.workspace.getConfiguration(this.configSection);
 		const hostUrl = config.get('hostUrl', 'http://localhost:5565');
-		const deployUrl = config.get('deployUrl', 'https://cloud.rocketride.ai');
 
 		// Parse host and port from the hostUrl - host will always be localhost
 		const parsedHost = 'localhost';
@@ -202,19 +193,16 @@ export class ConfigManager {
 			connectionMode: config.get('connectionMode', 'local') as ConnectionMode,
 			apiKey: apiKey,
 			hostUrl: hostUrl,
-			deployUrl: deployUrl,
 			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
+			engineArgs: config.get('engineArgs', []),
 			local: {
 				host: parsedHost,
 				port: parsedPort,
-				engineArgs: config.get('local.engineArgs', []),
 				engineVersion: config.get('local.engineVersion', 'latest')
 			},
 			autoConnect: config.get('autoConnect', true),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
-			env: this.config?.env || {},
-			copilotIntegration: config.get('copilotIntegration', false),
-			cursorIntegration: config.get('cursorIntegration', false)
+			env: this.config?.env || {}
 		};
 	}
 

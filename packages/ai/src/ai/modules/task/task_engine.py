@@ -237,7 +237,7 @@ class Task(DAPBase):
 
         # Execution configuration
         self._threads = launch_args.get('threads', CONST_DEFAULT_MAX_THREADS)
-        self._trace = launch_args.get('trace', None)
+        self._pipelineTraceLevel = launch_args.get('pipelineTraceLevel', None)
         self._engine_process: Optional[asyncio.subprocess.Process] = None
 
         # Status tracking
@@ -371,19 +371,22 @@ class Task(DAPBase):
 
         os.makedirs(data_path, exist_ok=True)
 
-        return {
-            'config': {
-                'keystore': 'kvsfile://data/keystore.json',
-                'pipeline': {
-                    'version': self._pipeline.get('version', 1),
-                    'source': self._pipeline.get('source'),
-                    'project_id': self._pipeline.get('project_id'),
-                    'name': self._pipeline.get('name'),
-                    'description': self._pipeline.get('description'),
-                    'components': self._pipeline.get('components', []),
-                },
-                'threadCount': self._threads,
+        config = {
+            'keystore': 'kvsfile://data/keystore.json',
+            'pipeline': {
+                'version': self._pipeline.get('version', 1),
+                'source': self._pipeline.get('source'),
+                'project_id': self._pipeline.get('project_id'),
+                'name': self._pipeline.get('name'),
+                'description': self._pipeline.get('description'),
+                'components': self._pipeline.get('components', []),
             },
+            'threadCount': self._threads,
+            'pipelineTraceLevel': self._pipelineTraceLevel or None
+        }
+
+        return {
+            'config': config,
             'paths': {'base': data_path},
             'nodeId': '9a0b9f66-f693-4b3b-a85b-bb810261c26e',
             'taskId': self.token,
@@ -1016,12 +1019,13 @@ class Task(DAPBase):
             # Send out a status update when needed
             self._status_updated = True
 
-        # Handle pipeline flow events
-        elif event_type == 'apaevt_flow':
+        # Handle pipeline trace events to build summary and flow events
+        elif event_type == 'apaevt_trace':
             operation = body.get('op', '')
             total_pipes = body.get('total_pipes', 0)
             pipe_index = body.get('id', '')
             component_name = body.get('pipe_id', '')
+            trace = body.get('trace', {})
 
             self._status.pipeflow.totalPipes = total_pipes
 
@@ -1039,16 +1043,25 @@ class Task(DAPBase):
             elif operation == 'end':
                 self._status.pipeflow.byPipe[pipe_index] = []
 
-            message['body'] = self._status.pipeflow.model_dump()
+            # Build the flow event
+            body = {
+                'id': pipe_index,
+                'op': operation,
+                'pipes': self._status.pipeflow.byPipe[pipe_index],
+                'trace': trace or {},
+            }
+            flow = self.build_event('apaevt_flow', body=body)
 
             # Send out a status update when needed
             self._status_updated = True
 
-            # Forward the actual event
-            await self._forward_task_event(
-                EVENT_TYPE.FLOW,
-                message,
-            )
+            # If this task is started with tracing
+            if self._pipelineTraceLevel:
+                # Forward off the event
+                await self._forward_task_event(
+                    EVENT_TYPE.FLOW,
+                    flow
+                )
 
         # Handle debug output
         elif event_type == 'output':
@@ -1063,9 +1076,6 @@ class Task(DAPBase):
                 EVENT_TYPE.OUTPUT,
                 message,
             )
-
-            # Output the message to the console
-            debug(output_message)
 
         else:
             # Forward to debugging clients
@@ -1434,9 +1444,6 @@ class Task(DAPBase):
             modelserver = self._server._config.get('modelserver')
             if modelserver:
                 child_args.append(f'--modelserver={modelserver}')
-
-            if self._trace:
-                child_args.append(f'--trace={self._trace}')
 
             user_args = self._launch_args.get('args', [])
             child_args.extend(user_args)

@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -72,11 +72,6 @@ export const StatusFooter: React.FC<StatusFooterProps> = ({ stats }) => {
 			<div className="stat-item">
 				<span className="stat-label">Min:</span>
 				<span className="stat-value">{stats.minimum}/s</span>
-			</div>
-			<div className="stat-separator"></div>
-			<div className="stat-item">
-				<span className="stat-label">Duration:</span>
-				<span className="stat-value">{formatElapsedTime(stats.duration)}</span>
 			</div>
 		</div>
 	);

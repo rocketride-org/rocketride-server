@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -136,7 +136,7 @@ TEST_CASE("PipelineConfig") {
         SECTION("multiple") {
             pipeline["components"].append(R"({
                 "id": "source_2",
-                "provider": "smb",
+                "provider": "filesys",
                 "config": {}
             })"_json);
 
@@ -511,7 +511,7 @@ TEST_CASE("PipelineConfig") {
     SECTION("chain") {
         pipeline["components"].append(R"({
             "id": "source_2",
-            "provider": "smb",
+            "provider": "filesys",
             "config": {}
         })"_json);
 

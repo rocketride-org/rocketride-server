@@ -7,7 +7,7 @@ void banner() {
     LOGOUTPUT("-------------------------------------------------");
     LOGOUTPUT("RocketRide Data Engine");
     LOGOUTPUT("Version {} {}", projectVersion(), buildStamp());
-    LOGOUTPUT("Copyright (c) 2023 RocketRide Software AG");
+    LOGOUTPUT("Copyright (c) 2026 Aparavi Software AG");
     LOGOUTPUT("-------------------------------------------------");
     LOGOUTPUT("\n");
 }

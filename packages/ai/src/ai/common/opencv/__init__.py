@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2024 RocketRide Inc.
+# Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 """
 OpenCV wrapper that ensures opencv-contrib-python is installed.

@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2026 RocketRide, Inc.
+# Copyright (c) 2026 Aparavi Software AG
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -91,8 +91,8 @@ class Embedding(EmbeddingBase):
         debug(f'    Embedding size    : {self._vectorSize}')
         debug(f'    Embedding tokens  : {self._tokenSize}')
 
-        # Output monitor status to show model loading finished
-        monitorStatus('Loading model complete', self._model)
+        # Clear the output, we are done loading
+        monitorStatus('')
 
     def getVectorSize(self) -> int:
         """Return the vector size of the embedding module."""

@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide Inc.
+// Copyright (c) 2026 Aparavi Software AG Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -83,7 +83,7 @@ export default function CreateNodeItem({
 }: IProps): ReactNode {
 	const { t } = useTranslation();
 
-	const _icon = <img src={icon} style={{ width: '100%', objectFit: 'cover' }} />;
+	const _icon = <img src={icon} style={{ width: '100%', objectFit: 'cover', filter: icon?.includes('#td') ? 'var(--icon-filter)' : undefined }} />;
 
 	const inVSCode = isInVSCode();
 

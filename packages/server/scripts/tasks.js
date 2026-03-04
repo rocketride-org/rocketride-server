@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -77,6 +77,7 @@ async function getDistInfo(options = {}) {
     const { version } = await loadPackageJson();
     const platform = getPlatformInfo(options);
     const releaseTag = `server-v${version}`;
+    const prereleaseTag = `${releaseTag}-prerelease`;
     const baseName = `rocketride-${releaseTag}-${platform.name}`;
     const manifestFilename = `${baseName}.manifest.json`;
     const distFilename = `${baseName}.${platform.ext}`;
@@ -84,6 +85,7 @@ async function getDistInfo(options = {}) {
 
     return {
         releaseTag: releaseTag,
+        prereleaseTag: prereleaseTag,
         baseName: baseName,
         manifestFilename: manifestFilename,
         distFilename: distFilename,
@@ -459,25 +461,33 @@ function makeCheckPrebuiltAction(options = {}) {
             }
 
             const {
-                releaseTag, manifestFilename, distFilename, symDistFilename
+                releaseTag, prereleaseTag, manifestFilename, distFilename, symDistFilename
             } = await getDistInfo(options);
 
-            let serverHash = null;
+            // Try stable release first, then prerelease
+            const tagsToTry = [releaseTag, prereleaseTag];
+            let matchedTag = null;
 
-            try {
-                // Fetch release manifest and compare content hash
-                const manifestPath = await downloadGitHubFile(releaseTag, manifestFilename, task);
-                if (manifestPath) {
-                    const manifest = await readJson(manifestPath);
-                    await setState('server.releaseManifest', manifest);
-                    serverHash = manifest?.server?.contentHash;
+            for (const tag of tagsToTry) {
+                try {
+                    task.output = `Checking ${tag}...`;
+                    const manifestPath = await downloadGitHubFile(tag, manifestFilename, task);
+                    if (manifestPath) {
+                        const manifest = await readJson(manifestPath);
+                        const serverHash = manifest?.server?.contentHash;
+                        if (localHash === serverHash) {
+                            await setState('server.releaseManifest', manifest);
+                            matchedTag = tag;
+                            break;
+                        }
+                    }
+                } catch {
+                    // Manifest not available for this tag — try next
                 }
-            } catch {
-                // Manifest not available — cannot verify, must compile
             }
 
-            if (localHash !== serverHash) {
-                task.output = 'Source differs from release — will compile';
+            if (!matchedTag) {
+                task.output = 'Source differs from all releases — will compile';
                 await setState('server.contentHash', null);
                 await setState('server.downloaded', false);
                 ctx.downloaded = false;
@@ -491,8 +501,8 @@ function makeCheckPrebuiltAction(options = {}) {
             }
 
             try {
-                task.output = `Downloading ${distFilename}...`;
-                const distPath = await downloadGitHubFile(releaseTag, distFilename, task);
+                task.output = `Downloading ${distFilename} from ${matchedTag}...`;
+                const distPath = await downloadGitHubFile(matchedTag, distFilename, task);
                 if (!distPath)
                     throw new Error(`Dist file ${distFilename} cannot be downloaded`);
                 task.output = `Downloaded ${distFilename}`;
@@ -500,7 +510,7 @@ function makeCheckPrebuiltAction(options = {}) {
                 let symDistPath = null;
                 if (symDistFilename) {
                     task.output = `Downloading ${symDistFilename}...`;
-                    symDistPath = await downloadGitHubFile(releaseTag, symDistFilename, task);
+                    symDistPath = await downloadGitHubFile(matchedTag, symDistFilename, task);
                     if (symDistPath)
                         task.output = `Downloaded ${symDistFilename}`;
                     else
@@ -520,13 +530,13 @@ function makeCheckPrebuiltAction(options = {}) {
                 await setState('server.contentHash', localHash);
                 await setState('server.downloaded', true);
                 ctx.downloaded = true;
-                task.output = `Downloaded server ${releaseTag}`;
+                task.output = `Downloaded server from ${matchedTag}`;
 
             } catch {
                 await setState('server.contentHash', null);
                 await setState('server.downloaded', false);
                 ctx.downloaded = false;
-                task.output = `Release ${releaseTag} download failed: Will compile from source`;
+                task.output = `Release ${matchedTag} download failed: Will compile from source`;
             }
         }
     };

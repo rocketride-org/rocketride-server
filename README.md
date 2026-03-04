@@ -1,116 +1,83 @@
-# RocketRide Data Processing Engine
+<p align="center">
+  <img src="./images/header.jpeg" alt="Header">
+</p>
 
-[![Build](https://github.com/rocketride-org/rocketride-server/actions/workflows/build.yaml/badge.svg)](https://github.com/rocketride-org/rocketride-server/actions/workflows/build.yaml)
-[![CodeQL](https://github.com/rocketride-org/rocketride-server/actions/workflows/codeql.yml/badge.svg)](https://github.com/rocketride-org/rocketride-server/actions/workflows/codeql.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js 18+](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org/)
+<p align="center">
+  <a href="https://github.com/rocketride-org/rocketride-server/actions/workflows/ci.yml"><img src="https://github.com/rocketride-org/rocketride-server/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-18%2B-green.svg" alt="Node.js 18+"></a>
+  <a href="https://discord.gg/9hr3tdZmEG"><img src="https://img.shields.io/badge/Discord-Join%20us-5865F2.svg" alt="Discord"></a>
+</p>
 
-A high-performance, modular data processing engine with extensible pipeline nodes, AI/ML capabilities, and cross-platform client libraries.
+RocketRide is a high-performance data processing engine built on a C++ core with a Python-extensible node system. With 50+ pipeline nodes, native AI/ML support, and SDKs for TypeScript, Python, and MCP, it lets you process, transform, and analyze data at scale — entirely on your own infrastructure.
 
-## Architecture
+## Key Capabilities
+- **Stay in your IDE** — Build, debug, test, and scale heavy AI and data workloads with an intuitive visual builder in the environment you're used to. Stop using your browser.
+- **High-performance C++ engine** — Native multithreading. No bottleneck. Purpose-built for throughput, not prototypes.
+- **Multi-agent workflows** — Orchestrate and scale agents with built-in support for CrewAI and LangChain.
+- **50+ pipeline nodes** — Python-extensible, with 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more.
+- **TypeScript, Python & MCP SDKs** — Integrate pipelines into native applications or expose them as tools for AI assistants.
+- **One-click deploy** — Run on Docker, on-prem, or RocketRide Cloud (👀*coming soon*). Our architecture is made for production, not demos.
 
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {'background': '#1A1A3A', 'primaryColor': '#28284A', 'primaryBorderColor': '#4FC3F7', 'primaryTextColor': '#E0E0E0', 'lineColor': '#6B6B8A', 'secondaryColor': '#3E3E6E', 'tertiaryColor': '#28284A', 'mainBkg': '#3E3E6E', 'nodeBorder': '#4FC3F7', 'clusterBkg': '#28284A', 'clusterBorder': '#4FC3F7', 'titleColor': '#F25B32', 'edgeLabelBackground': '#28284A', 'nodeTextColor': '#E0E0E0', 'textColor': '#E0E0E0', 'fontSize': '22px', 'fontFamily': 'system-ui, -apple-system, sans-serif'}, 'flowchart': {'useMaxWidth': false, 'padding': 50, 'nodeSpacing': 50, 'rankSpacing': 45, 'wrappingWidth': 280, 'htmlLabels': true}}}%%
-flowchart TB
-    subgraph Wrapper[" "]
-        direction TB
-        subgraph Applications["Applications&nbsp;"]
-            direction LR
-            A1["Chat UI"] ~~~ A2["Dropper<br/>UI"] ~~~ A3["VSCode<br/>Extension"] ~~~ A4["Engine&nbsp;"]
-        end
+## ⚡ Quick Start
 
-        subgraph ClientLibraries["Client Libraries&nbsp;"]
-            direction LR
-            C1["TypeScript<br/>SDK"] ~~~ C2["Python<br/>SDK"] ~~~ C3["MCP<br/>Protocol<br/>Client"]
-        end
+1) Install the extension for your IDE. Search for RocketRide in the extension marketplace:
 
-        subgraph EngineLayer["Engine Layer&nbsp;"]
-            direction LR
-            E1["Pipeline<br/>Orchestrator"] ~~~ E2["AI/ML<br/>Modules"] ~~~ E3["Nodes<br/>50+"] ~~~ E4["Java/Tika<br/>Integration"]
-        end
+   <p align="center">
+     <img src="./images/install.png" alt="Install RocketRide extension">
+   </p>
 
-        subgraph CoreLibrary["Core Library (C++)&nbsp;"]
-            direction LR
-            X1["async"] ~~~ X2["crypto"] ~~~ X3["file"] ~~~ X4["json"]
-            X5["memory"] ~~~ X6["network"] ~~~ X7["string"] ~~~ X8["threading"]
-        end
+   <sub>[Not seeing your IDE? Open an issue](https://github.com/rocketride-org/rocketride-server/issues/new) · [Download directly](https://open-vsx.org/extension/RocketRide/rocketride)</sub>
 
-        Applications ~~~ ClientLibraries ~~~ EngineLayer ~~~ CoreLibrary
-    end
-```
+2) Click the RocketRide (🚀) extension in your IDE
 
-## Prerequisites
+3) Deploy a server — you'll be prompted on how you want to run the server. Choose the option that fits your setup:
+   - **Local (Recommended)** — This pulls the server directly into your IDE without any additional setup.
+   - **On-Premises** — Run the server on your own hardware for full control and data residency. Pull the image and deploy to Docker or clone this repo and [build from source](CONTRIBUTING.md#getting-started).
+   - **RocketRide Cloud** (👀*coming soon*) — Managed hosting with our proprietary model server. No infrastructure to maintain.
 
-| Component   | Version | Purpose                        |
-| ----------- | ------- | ------------------------------ |
-| **Node.js** | 18+     | Build system, client libraries |
+4) Create a `.pipe` file and start building
 
-Everything else -- pnpm, C++ toolchains, Python, Java/Maven -- is downloaded and configured automatically by the build system.
+## 🔧 Building your first pipe
 
-## Quick Start
+1) All pipelines are recognized with the `*.pipe` format. Each pipeline and configuration is a JSON object - but the extension in your IDE will render within our visual builder canvas.
 
-```bash
-git clone https://github.com/rocketride-org/rocketride-server.git
-cd engine-new
-./builder build
-```
+2) All pipelines begin with source node: *webhook*, *chat*, or *dropper*. For specific usage, examples, and inspiration 💡 on how to build pipelines, check out our [guides and documentation](https://docs.rocketride.org/)
+   - [Advanced RAG](https://docs.rocketride.org/examples/advanced-rag-pipeline/)
+   - [Video Frame Grabber](https://docs.rocketride.org/examples/video-key-frame-grabber/)
+   - [Audio Transcription](https://docs.rocketride.org/examples/audio-transcription-simple/)
 
-The `builder` script configures the environment, downloads a pre-built engine when available (or compiles from source), and builds all modules. See the [build system documentation](docs/README-builder.md) for per-module builds, commands, and options.
+3) Connect input lanes and output lanes by type to properly wire your pipeline. Some nodes like agents or LLMs can be invoked as tools for use by a parent node as shown below:
 
-## Project Structure
+<p align="center">
+  <img src="./images/agent_pipeline.png" alt="Pipeline canvas example">
+</p>
 
-```text
-engine-new/
-├── apps/                       # Runnable applications
-│   ├── engine/                 # Main engine executable (C++)
-│   ├── chat-ui/                # Chat web interface (React)
-│   ├── dropper-ui/             # File dropper interface (React)
-│   └── vscode/                 # VSCode extension
-├── packages/                   # Reusable libraries
-│   ├── server/                 # C++ server components
-│   │   ├── engine-core/        # Core library (apLib)
-│   │   └── engine-lib/         # Engine library (engLib)
-│   ├── client-typescript/      # TypeScript SDK
-│   ├── client-python/          # Python SDK
-│   ├── client-mcp/             # MCP Protocol client
-│   ├── ai/                     # AI/ML modules
-│   ├── tika/                   # Java/Tika integration
-│   ├── java/                   # JDK & Maven tooling
-│   ├── vcpkg/                  # C++ package manager
-│   └── shared-ui/              # Shared UI components
-├── nodes/                      # Pipeline nodes (Python)
-│   └── src/                    # Node implementations
-├── scripts/                    # Build system
-├── docs/                       # Documentation
-├── test/                       # Integration tests
-├── testdata/                   # Test fixtures and data
-├── examples/                   # Example projects
-├── dist/                       # Build outputs
-└── build/                      # Build intermediates
-```
+4) You can run a pipeline from the canvas by pressing the ▶️ button on the source node or from the `Connection Manager` directly.
 
-## Documentation
+5) View all available and running pipelines below the `Connection Manager`. Selecting running pipelines allows for in depth analytics. Trace call trees, token usage, memory consumption, and more to optimize your pipelines before scaling and deploying.
 
-- [Build system](docs/README-builder.md)
-- [Engine](docs/README-engine.md)
-- [Client libraries](docs/README-clients.md) -- [TypeScript](docs/README-typescript-client.md), [Python](docs/README-python-client.md), [MCP](docs/README-mcp-client.md)
-- [Pipeline nodes](docs/README-nodes.md)
-- [Node test framework](docs/README-node-testing.md)
+6) 📦 Deploy your pipelines to RocketRide.ai cloud or run them on your own infrastructure.
 
-## Contributing
+   - **Docker** — Download the RocketRide server image and create a container. Requires [Docker](https://docs.docker.com/get-docker/) to be installed.
 
-We welcome contributions. Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+     ```bash
+     docker pull ghcr.io/rocketride-org/rocketride-engine:latest
+     docker create --name rocketride-engine -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
+     ```
+   - **RocketRide Cloud** (👀*coming soon*) — Managed hosting with our proprietary model server and batched processing. The cheapest option to run AI workflows and pipelines at scale (seriously).
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+7) Run your pipelines as standalone processes or integrate them into your existing [Python](https://docs.rocketride.org/sdk/python-sdk) and [TypeScript/JS](https://docs.rocketride.org/sdk/node-sdk) applications utilizing our SDK.
 
-## Security
+8) Use it, commit it, ship it. 🚚
 
-For security concerns, please see our [Security Policy](SECURITY.md) or email security@rocketride.ai.
+## Useful Links
+- 📚 [Documentation](https://docs.rocketride.org/)
+- 💬 [Discord](https://discord.gg/9hr3tdZmEG)
+- 🤝 [Contributions](CONTRIBUTING.md)
+- 🔒 [Security](SECURITY.md)
+- ⚖️ [License](LICENSE)
 
-## License
+---
 
-This project is licensed under the MIT License -- see the [LICENSE](LICENSE) file for details.
+<p align="center">Made with ❤️ in 🌁 SF & 🇪🇺 EU</p>

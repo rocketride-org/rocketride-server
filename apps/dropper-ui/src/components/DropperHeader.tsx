@@ -1,11 +1,12 @@
 /**
  * MIT License
- * Copyright (c) 2026 RocketRide, Inc.
+ * Copyright (c) 2026 Aparavi Software AG
  * See LICENSE file for details.
  */
 
 import React from 'react';
-import { Upload, Settings, Trash2, Palette } from 'lucide-react';
+import { Trash2, Palette } from 'lucide-react';
+import { RocketRideMark } from './icons/RocketRideMark';
 import { useTheme, ThemeName } from '../hooks/useTheme';
 
 /**
@@ -72,7 +73,7 @@ export const DropperHeader: React.FC<DropperHeaderProps> = ({
 				<div className="header-info">
 					{/* Avatar with upload icon */}
 					<div className="dropper-avatar">
-						<Upload className="w-4 h-4" />
+						<RocketRideMark />
 					</div>
 
 					{/* Application title and connection status */}
@@ -116,16 +117,6 @@ export const DropperHeader: React.FC<DropperHeaderProps> = ({
 						aria-label="Clear all files"
 					>
 						<Trash2 className="w-5 h-5" />
-					</button>
-
-					{/* Settings button (placeholder for future functionality) */}
-					<button
-						className="header-btn"
-						title="Settings"
-						type="button"
-						aria-label="Settings"
-					>
-						<Settings className="w-5 h-5" />
 					</button>
 				</div>
 			</div>

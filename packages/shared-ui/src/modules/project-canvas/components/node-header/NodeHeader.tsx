@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide Inc.
+// Copyright (c) 2026 Aparavi Software AG Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -119,7 +119,7 @@ export default function NodeHeader({
 		<Box sx={{ ...styles.header, ...rootSx }} onClick={handleClick}>
 			{icon && (
 				<Box sx={styles.boxImage}>
-					<img style={styles.nodeIcon} width="auto" src={icon} />
+					<img style={{ ...styles.nodeIcon, filter: icon?.includes('#td') ? 'var(--icon-filter)' : undefined }} width="auto" src={icon} />
 				</Box>
 			)}
 			<Box sx={styles.boxLabel}>

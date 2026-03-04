@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,6 @@
 // =============================================================================
 
 #include <engLib/eng.h>
-
 #include <filesystem>
 #ifdef _WIN32
 #include <fcntl.h>  // for _O_RDONLY
@@ -112,7 +111,7 @@ Error setPaths() {
 
         for (auto devRoot : {"../..", "../../.."}) {
             auto pkgRoot = (root / devRoot / "packages").resolve();
-            for (auto pkgPath : {"server/engine-lib/rocketride-python/lib",
+            for (auto pkgPath : {"server/engine-lib/rocketlib-python/lib",
                                  "client-python/src", "ai/src"})
                 paths.push_back((pkgRoot / pkgPath).resolve().str());
 
@@ -201,6 +200,10 @@ Error setConfig(int argc, wchar_t **argv) {
 
     // Parse the argv we set
     g_config.parse_argv = 1;
+
+    // Disable Python stdio buffering so print() output reaches piped
+    // stdout immediately (e.g. when spawned by VS Code with stdio: 'pipe')
+    g_config.buffered_stdio = 0;
 
     // Setup the arguments
     if (auto ccode = checkStatus(::PyConfig_SetArgv(&g_config, argc, argv)))

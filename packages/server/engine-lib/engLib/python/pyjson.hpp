@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -119,6 +119,23 @@ public:
             }
             return value;
         }
+
+        // Pydantic v2 model — call .model_dump() to get a plain dict
+        if (py::hasattr(obj, "model_dump")) {
+            py::dict d = obj.attr("model_dump")();
+            return dictToJson(d);
+        }
+        // Pydantic v1 model — call .dict() to get a plain dict
+        if (py::hasattr(obj, "dict") && py::hasattr(obj, "__fields__")) {
+            py::dict d = obj.attr("dict")();
+            return dictToJson(d);
+        }
+        // Any callable (function, method, builtin, partial, etc.) — not serializable
+        if (PyCallable_Check(obj.ptr())) {
+            json::Value value{"<method>"};
+            return value;
+        }
+        
         throw std::runtime_error(
             "dictToJson not implemented for this type of object: " +
             py::repr(obj).cast<std::string>());

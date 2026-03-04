@@ -7,7 +7,7 @@ import threading
 if sys.path and (sys.path[0].endswith('ai') or sys.path[0].endswith('ai\\') or sys.path[0].endswith('ai/')):
     sys.path.pop(0)
 
-# Import generated gRPC code early to resolve absolute import dependencies.
+# Import directly from C++
 from engLib import debug
 
 # Global shared event loop for async operations in worker threads

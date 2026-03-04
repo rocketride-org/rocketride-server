@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,7 @@ import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
 import { ConnectionStatus, ConnectionState } from '../shared/types';
 import type { PageStatusIncomingMessage, PageStatusOutgoingMessage } from '../shared/types/pageStatus';
+import { getPipelineFilesTreeProvider } from '../extension';
 
 /**
  * Interface for tracking monitoring state per view
@@ -212,6 +213,31 @@ export class PageStatusProvider {
 				}
 				break;
 			}
+
+			case 'apaevt_flow': {
+				// Forward pipeline trace events to all open webviews
+				const body = event.body;
+				if (!body?.trace) break;
+
+				const traceMessage: PageStatusIncomingMessage = {
+					type: 'traceEvent',
+					pipelineId: body.id ?? 0,
+					op: body.op || 'enter',
+					pipes: body.pipes || [],
+					trace: body.trace || {}
+				};
+
+				// Broadcast to all webviews
+				for (const viewState of this.webviewPanels.values()) {
+					if (!viewState.isDisposed) {
+						viewState.panel.webview.postMessage(traceMessage).then(
+							undefined,
+							(error: unknown) => this.logger.error(`Posting trace event: ${error}`)
+						);
+					}
+				}
+				break;
+			}
 		}
 	}
 
@@ -235,7 +261,7 @@ export class PageStatusProvider {
 			await this.connectionManager.request('rrext_monitor', {
 				projectId: projectId,
 				source: sourceId,
-				types: ['summary']
+				types: ['summary', 'flow']
 			});
 
 			// Mark as monitoring
@@ -413,6 +439,12 @@ export class PageStatusProvider {
 	private async handlePanelDisposal(projectId: string, sourceId: string): Promise<void> {
 		const key = `${projectId}.${sourceId}`;
 
+		// Mark as disposed immediately to prevent events from reaching the webview
+		const viewState = this.webviewPanels.get(key);
+		if (viewState) {
+			viewState.isDisposed = true;
+		}
+
 		// Stop monitoring before cleanup
 		try {
 			await this.stopMonitoring(projectId, sourceId);
@@ -474,6 +506,13 @@ export class PageStatusProvider {
 		// Update the status data - may be undefined if no status
 		this.taskStatusData.set(key, taskStatus);
 
+		// Refresh sidebar Pipelines tree so error/warning counts and lines update
+		try {
+			getPipelineFilesTreeProvider()?.refresh();
+		} catch {
+			// Sidebar may not be ready yet; ignore
+		}
+
 		// Update webview if it's active
 		try {
 			await this.updateWebview(projectId, sourceId);
@@ -481,6 +520,25 @@ export class PageStatusProvider {
 			this.logger.error(`Updating webview for ${key}: ${error}`);
 			throw error;
 		}
+	}
+
+	/**
+	 * Returns task status for a given project and source (for use by sidebar tree).
+	 */
+	public getTaskStatus(projectId: string, sourceId: string): TaskStatus | undefined {
+		return this.taskStatusData.get(`${projectId}.${sourceId}`);
+	}
+
+	/**
+	 * Reveals the Errors tab and scrolls to the Warnings or Errors section in the status page webview.
+	 * Call after show() so the panel is open. No-op if the panel for this project/source is not open.
+	 */
+	public revealErrorsSection(projectId: string, sourceId: string, section: 'errors' | 'warnings'): void {
+		const key = `${projectId}.${sourceId}`;
+		const viewState = this.webviewPanels.get(key);
+		if (!viewState || viewState.isDisposed) return;
+		viewState.panel.reveal(vscode.ViewColumn.One);
+		viewState.panel.webview.postMessage({ type: 'scrollToSection', section });
 	}
 
 	/**
@@ -730,7 +788,7 @@ export class PageStatusProvider {
 				}
 
 				case 'pipelineAction': {
-					await this.handlePipelineAction(message.action, viewState);
+					await this.handlePipelineAction(message.action, viewState, message.tracing);
 					break;
 				}
 			}
@@ -747,7 +805,7 @@ export class PageStatusProvider {
 	 * @param projectId The project ID
 	 * @param sourceId The source ID
 	 */
-	private async handlePipelineAction(action: 'stop' | 'run' | 'restart', viewState: ViewMonitoringState): Promise<void> {
+	private async handlePipelineAction(action: 'stop' | 'run' | 'restart', viewState: ViewMonitoringState, tracing?: boolean): Promise<void> {
 		try {
 			switch (action) {
 				case 'stop': {
@@ -777,28 +835,25 @@ export class PageStatusProvider {
 					// Read the pipeline file
 					const fileContent = await vscode.workspace.fs.readFile(viewState.fileUri);
 
-					// Get it into a a string
+					// Get it into a string
 					const pipelineText = Buffer.from(fileContent).toString('utf8');
 
 					// Convert to json
 					const pipelineJson = JSON.parse(pipelineText);
 
-					// Substitute and .env settings
+					// Substitute .env settings
 					const pipelineTransformed = ConfigManager.getInstance().substituteEnvVariables(pipelineJson);
 
-					// Use DAP command to execute pipeline without debugging
+					// Use DAP command to execute pipeline
+					// When tracing is enabled, capture full pipeline trace data
 					try {
-						const info = await this.connectionManager.request('execute', {
+						await this.connectionManager.request('execute', {
 							projectId: viewState.projectId,
 							source: viewState.sourceId,
 							pipeline: pipelineTransformed,
-							args: [
-								'--trace=servicePython,debugOut,debugProtocol'
-							]
-						}, '*');
-
-						console.log(info);
-
+							...(tracing ? { pipelineTraceLevel: 'full' } : {}),
+							args: ConfigManager.getInstance().getConfig().engineArgs
+						});
 					} catch (error: unknown) {
 						this.logger.error(`Unable to execute pipeline: ${error}`);
 						vscode.window.showErrorMessage(String(error));

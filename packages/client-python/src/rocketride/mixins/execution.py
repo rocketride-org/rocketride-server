@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2026 RocketRide, Inc.
+# Copyright (c) 2026 Aparavi Software AG
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -150,6 +150,7 @@ class ExecutionMixin(DAPClient):
         use_existing: bool = None,
         args: List[str] = None,
         ttl: int = None,
+        pipelineTraceLevel: str = None,
     ) -> Dict[str, Any]:
         """
         Start an RocketRide pipeline for processing data.
@@ -172,6 +173,7 @@ class ExecutionMixin(DAPClient):
             use_existing: Whether to reuse existing pipeline with same token
             args: Command-line style arguments to pass to the pipeline
             ttl: Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
+            pipelineTraceLevel: Pipeline trace level ('none', 'metadata', 'summary', 'full'). When set, captures every lane write and invoke call in the response under '_trace'.
 
         Returns:
             Dict containing:
@@ -277,6 +279,8 @@ class ExecutionMixin(DAPClient):
             arguments['threads'] = threads
         if use_existing is not None:
             arguments['useExisting'] = use_existing
+        if pipelineTraceLevel is not None:
+            arguments['pipelineTraceLevel'] = pipelineTraceLevel
 
         # Send execution request to server
         request = self.build_request(command='execute', arguments=arguments)
