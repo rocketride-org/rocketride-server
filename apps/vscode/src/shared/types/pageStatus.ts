@@ -62,5 +62,6 @@ export type PageStatusOutgoingMessage
 	| {
 		type: 'pipelineAction';
 		action: 'stop' | 'run' | 'restart';
+		tracing?: boolean;
 	};
 
