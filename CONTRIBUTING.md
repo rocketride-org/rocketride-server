@@ -154,28 +154,6 @@ Feature requests are welcome! Please:
 3. Explain the expected behavior
 4. Consider implementation implications
 
-## Developer Certificate of Origin (DCO)
-
-This project uses the [Developer Certificate of Origin](https://developercertificate.org/) (DCO) to certify that contributors have the right to submit their code. All commits must include a `Signed-off-by` line.
-
-### How to sign off
-
-Add `-s` (or `--signoff`) to your `git commit` command:
-
-```bash
-git commit -s -m "feat: add new feature"
-```
-
-This adds a line like `Signed-off-by: Your Name <your.email@example.com>` to the commit message, using your configured `user.name` and `user.email` from git config.
-
-To sign off all commits in an existing branch retroactively:
-
-```bash
-git rebase --signoff HEAD~N   # where N is the number of commits to sign off
-```
-
-A CI check will verify that all commits in your pull request include this sign-off.
-
 ## Questions?
 
 If you have questions, feel free to:
