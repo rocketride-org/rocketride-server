@@ -135,10 +135,10 @@ export class PageDeployProvider {
 			vscode.Uri.joinPath(this.context.extensionUri, 'rocketride-light-icon.png')
 		);
 		const dockerUri = webview.asWebviewUri(
-			vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'static', 'docker.svg')
+			vscode.Uri.joinPath(this.context.extensionUri, 'docker.svg')
 		);
 		const onpremUri = webview.asWebviewUri(
-			vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'static', 'onprem.svg')
+			vscode.Uri.joinPath(this.context.extensionUri, 'onprem.svg')
 		);
 
 		webview.postMessage({

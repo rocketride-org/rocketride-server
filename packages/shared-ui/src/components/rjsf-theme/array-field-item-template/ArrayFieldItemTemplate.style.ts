@@ -33,11 +33,11 @@ export const styles = {
 		alignItems: 'start',
 		my: '5px',
 		listStyle: 'none',
-		color: '#333',
+		color: 'var(--vscode-foreground)',
 		fontWeight: 400,
 		fontSize: '1rem',
-		fontFamily: 'sans-serif',
-		backgroundColor: '#fff',
+		fontFamily: 'var(--vscode-font-family, sans-serif)',
+		backgroundColor: 'var(--vscode-input-background)',
 		borderRadius: '4px',
 	},
 	dragHandle: {
@@ -57,7 +57,7 @@ export const styles = {
 		backgroundColor: 'transparent',
 		WebkitTapHighlightColor: 'transparent',
 		'&:hover': {
-			backgroundColor: 'rgba(0, 0, 0, 0.05)',
+			backgroundColor: 'var(--vscode-list-hoverBackground, rgba(0, 0, 0, 0.05))',
 		},
 		'&:focus-visible': {
 			boxShadow: '0 0px 0px 2px #4c9ffe',
@@ -67,7 +67,7 @@ export const styles = {
 			margin: 'auto',
 			height: '100%',
 			overflow: 'visible',
-			fill: '#919eab',
+			fill: 'var(--vscode-descriptionForeground, #919eab)',
 		},
 	},
 };
