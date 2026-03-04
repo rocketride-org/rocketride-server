@@ -30,6 +30,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { getConnectionManager } from '../extension';
 
 export class PageDeployProvider {
 	private webviewPanel?: vscode.WebviewPanel;
@@ -102,11 +103,15 @@ export class PageDeployProvider {
 		);
 	}
 
-	private static readonly ENGINE_IMAGE = 'ghcr.io/rocketride-org/rocketride-engine:latest';
+	private getEngineImage(): string {
+		const version = getConnectionManager()?.getEngineInfo()?.version;
+		const tag = version ? version.replace(/^server-v/, '') : 'latest';
+		return `ghcr.io/rocketride-org/rocketride-engine:${tag}`;
+	}
 
 	private deployDockerLocal(): void {
 		try {
-			const image = PageDeployProvider.ENGINE_IMAGE;
+			const image = this.getEngineImage();
 			const term = vscode.window.createTerminal({
 				name: 'RocketRide Deploy',
 				hideFromUser: false
@@ -142,7 +147,7 @@ export class PageDeployProvider {
 			rocketrideLogoLightUri: logoLightUri.toString(),
 			dockerIconUri: dockerUri.toString(),
 			onpremIconUri: onpremUri.toString(),
-			engineImage: PageDeployProvider.ENGINE_IMAGE
+			engineImage: this.getEngineImage()
 		});
 	}
 
