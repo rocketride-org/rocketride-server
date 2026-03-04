@@ -38,6 +38,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 
 DEFAULT_TIMEOUT_SECONDS = 30
+MAX_TIMEOUT_SECONDS = 300
 
 
 def execute_request(
@@ -49,6 +50,7 @@ def execute_request(
     headers: Optional[Dict[str, str]] = None,
     auth: Optional[Dict[str, Any]] = None,
     body: Optional[Dict[str, Any]] = None,
+    timeout: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Execute an HTTP request and return a structured response.
 
@@ -77,7 +79,10 @@ def execute_request(
 
     _apply_body(body, req_headers, req_kwargs)
 
-    req_kwargs.setdefault('timeout', DEFAULT_TIMEOUT_SECONDS)
+    if timeout is not None and timeout > 0:
+        req_kwargs['timeout'] = min(timeout, MAX_TIMEOUT_SECONDS)
+    else:
+        req_kwargs['timeout'] = DEFAULT_TIMEOUT_SECONDS
 
     start = time.monotonic()
     resp = requests.request(**req_kwargs)

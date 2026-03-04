@@ -88,6 +88,10 @@ INPUT_SCHEMA: Dict[str, Any] = {
                 'password': {'type': 'string'},
             },
         },
+        'timeout': {
+            'type': 'number',
+            'description': 'Request timeout in seconds. Defaults to 30. Increase for slow APIs (max 300).',
+        },
         'path_params': {
             'type': 'object',
             'description': 'Path parameter replacements (e.g. {"id": "123"} replaces :id in the URL)',
@@ -186,7 +190,7 @@ class HttpDriver(ToolsBase):
                     'For JSON bodies, pass "body_json" as a JSON object (e.g. {"name": "foo"}) — it is serialized automatically. '
                     'For bearer auth, pass "bearer_token" as a string. '
                     'For basic auth, pass "basic_auth": {"username": "...", "password": "..."}. '
-                    'Optional: "headers", "query_params", "path_params".'
+                    'Optional: "headers", "query_params", "path_params", "timeout" (seconds, default 30, max 300).'
                 ),
                 'inputSchema': INPUT_SCHEMA,
             }
@@ -295,4 +299,5 @@ class HttpDriver(ToolsBase):
             headers=input_obj.get('headers'),
             auth=input_obj.get('auth'),
             body=input_obj.get('body'),
+            timeout=input_obj.get('timeout'),
         )
