@@ -84,13 +84,6 @@
 			"description": "Command line to launch MCP server (stdio transport). Example: python -m RocketRide_mcp",
 			"default": "python -m RocketRide_mcp"
 		},
-		"mcp_client.env": {
-			"type": "object",
-			"title": "Env",
-			"description": "Extra environment variables for the child process (stdio transport)",
-			"default": {}
-		},
-
 		"mcp_client.endpoint": {
 			"type": "string",
 			"title": "Endpoint",
@@ -124,8 +117,7 @@
 			"object": "stdio",
 			"title": "STDIO (subprocess)",
 			"properties": [
-				"mcp_client.commandLine",
-				"mcp_client.env"
+				"mcp_client.commandLine"
 			]
 		},
 		"mcp_client.http": {

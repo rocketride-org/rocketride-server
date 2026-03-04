@@ -62,12 +62,14 @@ class McpDriver(ToolsBase):
         if missing:
             raise ValueError(f'Tool input missing required fields: {missing}')
 
+    _FRAMEWORK_KEYS = frozenset({'security_context'})
+
     def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:  # noqa: ANN401
         server_name, bare_tool = self._split_tool_name(tool_name)
         if input_obj is None:
             arguments: Dict[str, Any] = {}
         elif isinstance(input_obj, dict):
-            arguments = input_obj
+            arguments = {k: v for k, v in input_obj.items() if k not in self._FRAMEWORK_KEYS}
         else:
             raise ValueError('Tool input must be a JSON object (dict)')
 

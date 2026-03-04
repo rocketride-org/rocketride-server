@@ -85,6 +85,7 @@ class McpSseClient:
         self._headers = {str(k): str(v) for k, v in (headers or {}).items()}
         # Recommended by SSE servers; harmless if already set.
         self._headers.setdefault('Accept', 'text/event-stream')
+        self._headers.setdefault('User-Agent', f'{client_name}/{client_version}')
 
         self._reader_thread: threading.Thread | None = None
         self._stop = threading.Event()
