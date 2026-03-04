@@ -13,7 +13,7 @@ RocketRide is a high-performance data processing engine built on a C++ core with
 
 ## Key Capabilities
 - **Stay in your IDE** — Build, debug, test, and scale heavy AI and data workloads with an intuitive visual builder in the environment you're used to. Stop using your browser.
-- **High-performance C++ engine** — Native multithreading. No GIL. No bottleneck. Purpose-built for throughput, not prototypes.
+- **High-performance C++ engine** — Native multithreading. No bottleneck. Purpose-built for throughput, not prototypes.
 - **Multi-agent workflows** — Orchestrate and scale agents with built-in support for CrewAI and LangChain.
 - **50+ pipeline nodes** — Python-extensible, with 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more.
 - **TypeScript, Python & MCP SDKs** — Integrate pipelines into native applications or expose them as tools for AI assistants.
