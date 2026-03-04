@@ -328,14 +328,6 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  nodes: {}
-
-  packages/ai: {}
-
-  packages/client-mcp: {}
-
-  packages/client-python: {}
-
   packages/client-typescript:
     dependencies:
       commander:
@@ -376,10 +368,6 @@ importers:
       ws:
         specifier: ^8.18.3
         version: 8.19.0
-
-  packages/server/engine-core: {}
-
-  packages/server/engine-lib: {}
 
   packages/shared-ui:
     dependencies:
@@ -624,8 +612,6 @@ importers:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3
-
-  packages/tika: {}
 
 packages:
 
