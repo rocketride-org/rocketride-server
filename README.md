@@ -16,16 +16,23 @@ RocketRide is a high-performance data processing engine built on a C++ core with
 
 ## Quick Start
 
-Install the extension for your IDE:
+1) Install the extension for your IDE:
 ```bash
 code --install-extension RocketRide.rocketride        # VS Code
 cursor --install-extension RocketRide.rocketride      # Cursor
 windsurf --install-extension RocketRide.rocketride    # Windsurf
 ```
-<sub>[Not seeing your IDE? Open an issue](https://github.com/rocketride-org/rocketride-server/issues/new) · · · [Download directly](https://open-vsx.org/extension/RocketRide/rocketride)</sub>
+<sub>[Not seeing your IDE? Open an issue](https://github.com/rocketride-org/rocketride-server/issues/new) · [Download directly](https://open-vsx.org/extension/RocketRide/rocketride)</sub>
 
+2) Click the RocketRide (🚀) extension in your IDE
 
-## Building your first pipe(?) or usage section?
+## Building your first pipe
+
+1) All pipelines are recognized with the `*.pipe.json` format. Create a your pipeline file and the canvas will render within your IDE.
+
+2) For specific usage and examples, check out our guides
+
+3) Use it, commit it, ship it.
 
 
 
