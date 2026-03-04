@@ -399,7 +399,7 @@ public:
         // Update the window on where we are at
         m_segmentsControlTable[segmentId].chunkOffset = virtualEntry;
 
-        // Since we read virtaulEntry into element[0], return it�s address
+        // Since we read virtaulEntry into element[0], return its address
         return m_invertedIndexSegment.data() + segmentId * m_chunkEntries;
     }
 
