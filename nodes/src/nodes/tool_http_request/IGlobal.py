@@ -113,7 +113,7 @@ class IGlobal(IGlobalBase):
 
             _, patterns = self._build_guardrails(cfg)
             if not patterns:
-                warning('URL whitelist is empty — all requests will be blocked')
+                warning('URL whitelist is empty — all URLs will be allowed')
         except Exception as e:
             warning(str(e))
 

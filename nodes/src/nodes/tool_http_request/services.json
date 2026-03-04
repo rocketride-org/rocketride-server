@@ -1,11 +1,11 @@
 {
 	"title": "HTTP Request",
-	"protocol": "tool_httpRequest://",
+	"protocol": "tool_http_request://",
 	"classType": ["tool"],
 	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
-	"path": "nodes.tool_httpRequest",
+	"path": "nodes.tool_http_request",
 	"prefix": "http",
 	"description": [
 		"Makes HTTP requests to any API endpoint — like curl for agents.",
@@ -84,7 +84,7 @@
 		},
 		"http_request.urlWhitelist": {
 			"title": "URL Whitelist",
-			"description": "Regex patterns for allowed URLs. A request URL must match at least one pattern. If empty, all requests are blocked.",
+			"description": "Regex patterns for allowed URLs. A request URL must match at least one pattern. If empty, all URLs are allowed.",
 			"type": "array",
 			"minItems": 0,
 			"items": {

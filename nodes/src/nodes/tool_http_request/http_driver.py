@@ -251,15 +251,11 @@ class HttpDriver(ToolsBase):
                 f'Enabled methods: {", ".join(sorted(self._enabled_methods))}'
             )
 
-        # --- Guardrail: URL whitelist ---
+        # --- Guardrail: URL whitelist (empty list = allow all) ---
         url = input_obj.get('url')
         if not url or not isinstance(url, str):
             raise ValueError('url is required and must be a non-empty string')
-        if not self._url_patterns:
-            raise ValueError(
-                f'URL "{url}" blocked — no URL whitelist patterns are configured.'
-            )
-        if not any(p.search(url) for p in self._url_patterns):
+        if self._url_patterns and not any(p.search(url) for p in self._url_patterns):
             raise ValueError(
                 f'URL "{url}" does not match any allowed URL pattern.'
             )

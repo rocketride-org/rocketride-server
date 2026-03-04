@@ -37,6 +37,8 @@ from typing import Any, Dict, Optional
 import requests
 from requests.auth import HTTPBasicAuth
 
+DEFAULT_TIMEOUT_SECONDS = 30
+
 
 def execute_request(
     *,
@@ -74,6 +76,8 @@ def execute_request(
     }
 
     _apply_body(body, req_headers, req_kwargs)
+
+    req_kwargs.setdefault('timeout', DEFAULT_TIMEOUT_SECONDS)
 
     start = time.monotonic()
     resp = requests.request(**req_kwargs)
