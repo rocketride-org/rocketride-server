@@ -86,7 +86,7 @@ export const PageWelcome: React.FC = () => {
 		apiKey: '',
 		hasApiKey: false,
 		autoConnect: true,
-		localEngineVersion: 'prerelease',
+		localEngineVersion: 'latest',
 	});
 
 	const [logoLightUri, setLogoLightUri] = useState<string | undefined>();
