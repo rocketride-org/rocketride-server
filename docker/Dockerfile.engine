@@ -3,7 +3,6 @@ FROM ubuntu:jammy
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates \
-       curl \
        libc++1 \
        libc++abi1 \
        libgomp1 \
@@ -17,8 +16,5 @@ WORKDIR /opt/rocketride
 USER rocketride
 
 EXPOSE 5565
-
-HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
-    CMD curl -sS -o /dev/null -w '%{http_code}' http://localhost:5565/ | grep -q '401' || exit 1
 
 ENTRYPOINT ["./engine", "./ai/eaas.py"]
