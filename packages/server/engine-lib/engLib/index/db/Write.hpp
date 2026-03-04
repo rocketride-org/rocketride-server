@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 RocketRide, Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -399,7 +399,7 @@ public:
         // Update the window on where we are at
         m_segmentsControlTable[segmentId].chunkOffset = virtualEntry;
 
-        // Since we read virtaulEntry into element[0], return it’s address
+        // Since we read virtaulEntry into element[0], return itï¿½s address
         return m_invertedIndexSegment.data() + segmentId * m_chunkEntries;
     }
 

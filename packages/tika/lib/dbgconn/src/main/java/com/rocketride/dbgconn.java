@@ -17,7 +17,7 @@ public final class dbgconn {
 		System.out.println("--------------------------------------------------");
 		System.out.println("RocketRide Java Debug Connector");
 		System.out.println("Version 0.2.0");
-		System.out.println("Copyright (c) 2026 RocketRide, Inc");
+		System.out.println("Copyright (c) 2026 Aparavi Software AG, Inc");
 		System.out.println("--------------------------------------------------");
 
 		// Java args includes only the arguments specified by user

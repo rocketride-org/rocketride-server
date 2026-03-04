@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2026 RocketRide, Inc.
+# Copyright (c) 2026 Aparavi Software AG
 #
 # This is the main CMake configuration file for the RocketRide Engine project.
 # It orchestrates the build of all C++ components including the core library,

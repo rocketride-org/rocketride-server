@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2026 RocketRide, Inc.
+# Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 """
 Mock opensearchpy for index_search node tests.

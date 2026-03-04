@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2026 RocketRide, Inc.
+# Copyright (c) 2026 Aparavi Software AG
 #
 # This file contains shared Python tooling configuration for the monorepo.
 # Individual packages may extend or override these settings.

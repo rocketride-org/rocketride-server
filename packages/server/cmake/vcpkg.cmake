@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2026 RocketRide, Inc.
+# Copyright (c) 2026 Aparavi Software AG
 #
 # This module provides functions for setting up and managing vcpkg dependencies.
 # It handles downloading, caching, and installing packages from the vcpkg

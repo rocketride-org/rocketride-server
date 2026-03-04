@@ -1,5 +1,5 @@
 # MIT License
-# Copyright (c) 2026 RocketRide, Inc.
+# Copyright (c) 2026 Aparavi Software AG
 # Pytest configuration and fixtures for rocketride-mcp tests.
 #
 # Follows the same patterns as client-python and nodes/test:

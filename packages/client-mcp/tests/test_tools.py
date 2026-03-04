@@ -1,5 +1,5 @@
 # MIT License
-# Copyright (c) 2026 RocketRide, Inc.
+# Copyright (c) 2026 Aparavi Software AG
 # Tests for rocketride_mcp.tools.
 
 from pathlib import Path
