@@ -52,8 +52,8 @@ export const nodeChildrenStyles = {
 
 /** Base CSS styles for ReactFlow node connection handles (ports). Defines the outer hit-area dimensions. */
 export const handleStyles: CSSProperties = {
-	width: `${pxToRem(14)}rem`,
-	height: `${pxToRem(14)}rem`,
+	width: `${pxToRem(18)}rem`,
+	height: `${pxToRem(18)}rem`,
 	border: 'none',
 	background: 'transparent',
 };

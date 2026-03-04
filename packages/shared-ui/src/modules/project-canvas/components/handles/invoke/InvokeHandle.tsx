@@ -112,8 +112,8 @@ export default function InvokeHandle({
 			>
 				<Box
 					style={{
-						width: `${pxToRem(12)}rem`,
-						height: `${pxToRem(12)}rem`,
+						width: `${pxToRem(8)}rem`,
+						height: `${pxToRem(8)}rem`,
 						border: `1px solid ${borderColor}`,
 						background: backgroundColor,
 						borderRadius: '2px',
