@@ -446,10 +446,10 @@ class TaskMetrics:
 
         # STUB: Log the report (will be replaced with actual API call)
         try:
-            print('[TaskMetrics] Billing report:')
-            print(f'  Incremental Tokens (this period): CPU Utilization={delta_tokens_cpu:.2f}, CPU Memory={delta_tokens_memory:.2f}, GPU Memory={delta_tokens_gpu:.2f}, Total={delta_tokens_total:.2f}')
-            print(f'  Cumulative Tokens (lifetime): CPU Utilization={self._status.tokens.cpu_utilization}, CPU Memory={self._status.tokens.cpu_memory}, GPU Memory={self._status.tokens.gpu_memory}, Total={self._status.tokens.total}')
-            print(f'  Current Metrics: CPU={self._status.metrics.cpu_percent:.1f}%, CPU Memory={self._status.metrics.cpu_memory_mb:.1f}MB, GPU Memory={self._status.metrics.gpu_memory_mb:.1f}MB')
+            debug('[TaskMetrics] Billing report:')
+            debug(f'  Incremental Tokens (this period): CPU Utilization={delta_tokens_cpu:.2f}, CPU Memory={delta_tokens_memory:.2f}, GPU Memory={delta_tokens_gpu:.2f}, Total={delta_tokens_total:.2f}')
+            debug(f'  Cumulative Tokens (lifetime): CPU Utilization={self._status.tokens.cpu_utilization}, CPU Memory={self._status.tokens.cpu_memory}, GPU Memory={self._status.tokens.gpu_memory}, Total={self._status.tokens.total}')
+            debug(f'  Current Metrics: CPU={self._status.metrics.cpu_percent:.1f}%, CPU Memory={self._status.metrics.cpu_memory_mb:.1f}MB, GPU Memory={self._status.metrics.gpu_memory_mb:.1f}MB')
         except Exception:
             # Don't let print failures break billing tracking
             pass

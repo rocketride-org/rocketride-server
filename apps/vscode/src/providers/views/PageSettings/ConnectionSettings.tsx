@@ -29,9 +29,7 @@ interface ConnectionSettingsProps {
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
 	onClearCredentials: () => void;
 	onTestDevelopmentConnection: () => void;
-	onTestDeployEndpoint: () => void;
 	developmentTestMessage: MessageData | null;
-	deployTestMessage: MessageData | null;
 	engineVersions: EngineVersionItem[];
 	engineVersionsLoading: boolean;
 }
@@ -41,9 +39,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 	onSettingsChange,
 	onClearCredentials,
 	onTestDevelopmentConnection,
-	onTestDeployEndpoint,
 	developmentTestMessage,
-	deployTestMessage,
 	engineVersions,
 	engineVersionsLoading
 }) => {
@@ -91,10 +87,6 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 			return '5565';
 		}
 	})();
-
-	const handleDeployUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-		onSettingsChange({ deployUrl: e.target.value });
-	};
 
 	const handleAutoConnectChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		onSettingsChange({ autoConnect: e.target.checked });
@@ -250,7 +242,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 									)}
 									{engineVersions.map(v => (
 										<option key={v.tag_name} value={v.tag_name}>
-											{displayVersion(v.tag_name)}{v.prerelease ? ' (pre)' : ''}
+											{displayVersion(v.tag_name)}
 										</option>
 									))}
 								</select>
@@ -325,42 +317,6 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 				</div>
 			</div>
 
-			{/* Deployment – where pipelines are sent when you deploy */}
-			<div className="section" id="deploymentSection">
-				<div className="section-title">Deployment connection</div>
-				<div className="section-description">
-					You can deploy to RocketRide.ai cloud or on-prem using Docker. Set the endpoint URL for deployment (can differ from the development connection).
-				</div>
-				<div className="form-grid">
-					<div className="form-group">
-						<label htmlFor="deployUrl">Deploy API URL</label>
-						<input
-							type="text"
-							id="deployUrl"
-							placeholder="https://cloud.rocketride.ai"
-							value={settings.deployUrl ?? ''}
-							onChange={handleDeployUrlChange}
-						/>
-						<div className="help-text">Base URL of the deploy API (usually RocketRide cloud)</div>
-					</div>
-					<div className="form-group form-group-test">
-						<button
-							type="button"
-							className="secondary"
-							onClick={onTestDeployEndpoint}
-							title="Test connection to the deploy endpoint"
-						>
-							Test deploy endpoint
-						</button>
-						<div className="help-text">Verify the deploy endpoint and account access</div>
-					</div>
-					{deployTestMessage && (
-						<div className={`message message-inline ${deployTestMessage.level}`}>
-							{deployTestMessage.message}
-						</div>
-					)}
-				</div>
-			</div>
 		</>
 	);
 };

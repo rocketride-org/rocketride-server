@@ -29,7 +29,7 @@ import { ErrWarnSection } from '../../components/ErrWarnSection';
 import { StatusSection, StatusHeader, StatusElapsed } from '../../components/StatusSection';
 import { TokenSection } from '../../components/TokenSection';
 import { TabPanel } from '../../components/TabPanel';
-import { TraceSection, TraceLevel, TraceRow } from '../../components/TraceSection';
+import { TraceSection, TraceRow } from '../../components/TraceSection';
 import { EndpointInfoModal, EndpointInfo } from '../../components/EndpointInfoModal';
 import { WarningIcon } from '../../components/icons/WarningIcon';
 
@@ -77,6 +77,7 @@ export type PageStatusOutgoingMessage
 	| {
 		type: 'pipelineAction';
 		action: 'stop' | 'run' | 'restart';
+		tracing?: boolean;
 	};
 
 /**
@@ -98,7 +99,7 @@ export const PageStatus: React.FC = () => {
 	const [host, setHost] = useState<string>('<unknown>');
 	const [isEndpointModalOpen, setIsEndpointModalOpen] = useState(false);
 	const [currentElapsed, setCurrentElapsed] = useState<number>(0);
-	const [traceLevel, setTraceLevel] = useState<TraceLevel>('none');
+	const [tracingEnabled, setTracingEnabled] = useState(false);
 	const [traceRows, setTraceRows] = useState<TraceRow[]>([]);
 	const [scrollToSectionTarget, setScrollToSectionTarget] = useState<'errors' | 'warnings' | null>(null);
 
@@ -351,21 +352,30 @@ export const PageStatus: React.FC = () => {
 	 */
 	const getControlButton = () => {
 		const state = taskStatus?.state ?? TASK_STATE.NONE;
+		const runLabel = tracingEnabled ? 'Run & Trace' : 'Run';
 
 		if (state === TASK_STATE.RUNNING || state === TASK_STATE.INITIALIZING) {
 			return { label: 'Stop', action: 'stop' as const, disabled: false, className: 'action-btn stop-btn' };
 		}
 		if (state === TASK_STATE.NONE || state === TASK_STATE.CANCELLED || state === TASK_STATE.COMPLETED) {
-			return { label: 'Run', action: 'run' as const, disabled: false, className: 'action-btn run-btn' };
+			return { label: runLabel, action: 'run' as const, disabled: false, className: 'action-btn run-btn' };
 		}
-		return { label: 'Run', action: 'run' as const, disabled: true, className: 'action-btn run-btn disabled' };
+		return { label: runLabel, action: 'run' as const, disabled: true, className: 'action-btn run-btn disabled' };
+	};
+
+	/**
+	 * Whether the pipeline is in a runnable state (show tracing toggle)
+	 */
+	const canRun = () => {
+		const state = taskStatus?.state ?? TASK_STATE.NONE;
+		return state === TASK_STATE.NONE || state === TASK_STATE.CANCELLED || state === TASK_STATE.COMPLETED;
 	};
 
 	const handleViewModeChange = (newViewMode: 'pipeline' | 'component') => setViewMode(newViewMode);
 
 	const handleOpenExternal = (url: string) => sendMessage({ type: 'openExternal', url });
 
-	const handlePipelineAction = (action: 'stop' | 'run') => sendMessage({ type: 'pipelineAction', action });
+	const handlePipelineAction = (action: 'stop' | 'run') => sendMessage({ type: 'pipelineAction', action, tracing: tracingEnabled });
 
 	// ========================================================================
 	// RENDER
@@ -444,6 +454,16 @@ export const PageStatus: React.FC = () => {
 							{controlButton.label}
 						</button>
 					</div>
+					{canRun() && (
+						<label className="tracing-toggle">
+							<input
+								type="checkbox"
+								checked={tracingEnabled}
+								onChange={(e) => setTracingEnabled(e.target.checked)}
+							/>
+							<span className="tracing-toggle-label">Enable tracing</span>
+						</label>
+					)}
 					<StatusElapsed taskStatus={taskStatus} currentElapsed={currentElapsed} />
 				</div>
 			</div>
@@ -481,8 +501,6 @@ export const PageStatus: React.FC = () => {
 					aria-hidden={activeTab !== 'trace'}
 				>
 					<TraceSection
-						traceLevel={traceLevel}
-						onTraceLevelChange={setTraceLevel}
 						rows={traceRows}
 						onClear={() => {
 							documentsRef.current.clear();

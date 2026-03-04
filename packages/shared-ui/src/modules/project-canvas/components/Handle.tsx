@@ -128,8 +128,8 @@ export default function Handle({
 		>
 			<Box
 				style={{
-					width: `${pxToRem(12)}rem`,
-					height: `${pxToRem(12)}rem`,
+					width: `${pxToRem(8)}rem`,
+					height: `${pxToRem(8)}rem`,
 					border: `1px solid ${borderColor}`,
 					borderColor: borderColor,
 					background: backgroundColor,

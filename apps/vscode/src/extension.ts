@@ -31,8 +31,6 @@ import { getLogger } from './shared/util/output';
 import { icons } from './shared/util/icons';
 
 import { registerDebugger } from './debugger/adapter';
-import { syncIntegrations } from './integrations';
-
 import { ConnectionManager } from './connection/connection';
 import { ConfigManager } from './config';
 
@@ -229,37 +227,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			}
 
 		//-------------------------------------
-		// Sync integrations based on settings
-		//-------------------------------------
-		logger.output(`${icons.info} Syncing integrations...`);
-		await syncIntegrationsFromSettings();
-
-		//-------------------------------------
 		// And done...
 		//-------------------------------------
 		logger.output(`${icons.info} Completed initializing`);
 		progress.report({ increment: 130, message: "Complete" });
 	});
-
-	// Listen for workspace folder changes to re-sync integrations
-	// Note: ConfigManager handles .env file sync automatically
-	context.subscriptions.push(
-		vscode.workspace.onDidChangeWorkspaceFolders(async () => {
-			await syncIntegrationsFromSettings();
-		})
-	);
-
-	// Listen for integration settings changes to re-sync automatically
-	// This handles changes from both the Settings page and VSCode settings panel
-	// Note: ConfigManager handles .env file sync automatically when settings change
-	context.subscriptions.push(
-		vscode.workspace.onDidChangeConfiguration(async (event) => {
-			if (event.affectsConfiguration('rocketride.copilotIntegration') ||
-				event.affectsConfiguration('rocketride.cursorIntegration')) {
-				await syncIntegrationsFromSettings();
-			}
-		})
-	);
 
 		logger.output(`${icons.success} RocketRide extension activated successfully`);
 	} catch (error) {
@@ -277,26 +249,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
  */
 function sleep(ms: number): Promise<void> {
 	return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Syncs integrations based on current settings
- */
-async function syncIntegrationsFromSettings(): Promise<void> {
-	const logger = getLogger();
-
-	try {
-		const config = vscode.workspace.getConfiguration('rocketride');
-		const copilotEnabled = config.get<boolean>('copilotIntegration', false);
-		const cursorEnabled = config.get<boolean>('cursorIntegration', false);
-
-
-		// Sync based on settings
-		await syncIntegrations(copilotEnabled, cursorEnabled);
-	} catch (error) {
-		logger.output(`${icons.warning} Failed to sync integrations: ${error}`);
-		// Don't throw - this shouldn't block extension activation
-	}
 }
 
 /**

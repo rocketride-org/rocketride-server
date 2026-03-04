@@ -157,10 +157,6 @@ export class PageSettingsProvider {
 						await this.testConnection(message.settings, panel.webview);
 						break;
 
-					case 'testDeployEndpoint':
-						await this.testDeployEndpoint(message.settings, panel.webview);
-						break;
-
 					case 'clearCredentials':
 						await this.clearCredentials(panel.webview);
 						break;
@@ -217,7 +213,6 @@ export class PageSettingsProvider {
 			hasApiKey: hasApiKey,
 			apiKey: apiKey, // Include the actual API key for form editing
 			autoConnect: workspaceConfig.get('autoConnect', true),
-			deployUrl: workspaceConfig.get('deployUrl', 'https://cloud.rocketride.ai'),
 
 			// Pipeline settings
 			defaultPipelinePath: workspaceConfig.get('defaultPipelinePath', 'pipelines'),
@@ -228,10 +223,6 @@ export class PageSettingsProvider {
 
 			// Debugging settings
 			pipelineRestartBehavior: workspaceConfig.get('pipelineRestartBehavior', 'prompt'),
-
-			// Integration settings
-			copilotIntegration: workspaceConfig.get('copilotIntegration', false),
-			cursorIntegration: workspaceConfig.get('cursorIntegration', false),
 
 			// Environment variables
 			envVars: envVars
@@ -262,10 +253,6 @@ export class PageSettingsProvider {
 
 			if (settings.autoConnect !== undefined) {
 				await workspaceConfig.update('autoConnect', settings.autoConnect, vscode.ConfigurationTarget.Global);
-			}
-
-			if (settings.deployUrl !== undefined) {
-				await workspaceConfig.update('deployUrl', settings.deployUrl, vscode.ConfigurationTarget.Global);
 			}
 
 			// Save pipeline settings
@@ -300,17 +287,6 @@ export class PageSettingsProvider {
 			// ConfigManager will ensure ROCKETRIDE_URI and ROCKETRIDE_APIKEY are always present
 			if (settings.envVars !== undefined) {
 				await this.configManager.saveAllEnvVars(settings.envVars as Record<string, string>);
-			}
-
-			// Save integration settings
-			// Note: Syncing happens automatically via onDidChangeConfiguration listener in extension.ts
-			// This works for both the Settings page and VSCode settings panel changes
-			if (settings.copilotIntegration !== undefined) {
-				await workspaceConfig.update('copilotIntegration', settings.copilotIntegration, vscode.ConfigurationTarget.Global);
-			}
-
-			if (settings.cursorIntegration !== undefined) {
-				await workspaceConfig.update('cursorIntegration', settings.cursorIntegration, vscode.ConfigurationTarget.Global);
 			}
 
 			this.showMessage(webview, 'success', 'Settings saved successfully!');
@@ -446,103 +422,6 @@ export class PageSettingsProvider {
 	}
 
 	/**
-	 * Tests the deploy endpoint with current settings (API key + deploy URL)
-	 */
-	private async testDeployEndpoint(formSettings: Record<string, unknown>, webview: vscode.Webview): Promise<void> {
-		let testClient: RocketRideClient | undefined;
-
-		try {
-			this.showMessage(webview, 'info', 'Testing deploy endpoint...', 'deploy');
-
-			const deployUrl = (formSettings.deployUrl as string) || 'https://cloud.rocketride.ai';
-			let apiKey = typeof formSettings.apiKey === 'string' ? formSettings.apiKey.trim() : '';
-			if (!apiKey) {
-				const config = this.configManager.getConfig();
-				apiKey = config.apiKey;
-			}
-
-			if (!apiKey) {
-				this.showMessage(webview, 'error', 'API key is required to test the deploy endpoint. Please enter your API key in the RocketRide account section.', 'deploy');
-				return;
-			}
-
-			let parsedUrl: URL;
-			try {
-				parsedUrl = new URL(deployUrl);
-			} catch {
-				this.showMessage(webview, 'error', 'Invalid Deploy API URL format. Please enter a valid URL (e.g., https://cloud.rocketride.ai).', 'deploy');
-				return;
-			}
-
-			testClient = new RocketRideClient({
-				auth: apiKey,
-				uri: deployUrl,
-				module: 'CONN-TST',
-				requestTimeout: 5000,
-			});
-
-			try {
-				await testClient.connect(8000);
-			} catch (connectError) {
-				if (testClient) {
-					await testClient.disconnect();
-				}
-				const errorMessage = connectError instanceof Error ? connectError.message : String(connectError);
-				if (errorMessage.includes('ECONNREFUSED')) {
-					this.showMessage(webview, 'error', `Connection refused at ${parsedUrl.host}. The deploy endpoint may not be running or reachable.`, 'deploy');
-				} else if (errorMessage.includes('ENOTFOUND')) {
-					this.showMessage(webview, 'error', `Deploy endpoint not found at ${parsedUrl.hostname}. Please check the URL.`, 'deploy');
-				} else if (errorMessage.includes('timeout')) {
-					this.showMessage(webview, 'error', `Deploy endpoint at ${parsedUrl.host} did not respond in time.`, 'deploy');
-				} else {
-					this.showMessage(webview, 'error', `Deploy endpoint test failed: ${errorMessage}`, 'deploy');
-				}
-				return;
-			}
-
-			const testArgs: Record<string, unknown> = {
-				clientID: 'vscode-deploy-test',
-				clientName: 'VS Code Deploy Test',
-				adapterID: 'rocketride',
-				pathFormat: 'path',
-				linesStartAt1: true,
-				columnsStartAt1: true,
-				supportsVariableType: true,
-				supportsVariablePaging: true,
-				supportsRunInTerminalRequest: true
-			};
-
-			let response;
-			try {
-				response = await testClient.dapRequest('initialize', testArgs, '', 5000);
-			} catch (requestError) {
-				await testClient.disconnect();
-				const errorMessage = requestError instanceof Error ? requestError.message : String(requestError);
-				this.showMessage(webview, 'error', `Deploy endpoint connected but request failed: ${errorMessage}`, 'deploy');
-				return;
-			}
-
-			await testClient.disconnect();
-
-			if (!response) {
-				this.showMessage(webview, 'error', 'Deploy endpoint returned no response.', 'deploy');
-			} else if (response.success === false) {
-				this.showMessage(webview, 'error', `Deploy endpoint rejected the request: ${response.message || 'Unknown error'}`, 'deploy');
-			} else if (response.type === 'response' && response.command === 'initialize') {
-				this.showMessage(webview, 'success', `Deploy endpoint test successful! ${parsedUrl.host} is reachable and accepted your credentials.`, 'deploy');
-			} else {
-				this.showMessage(webview, 'warning', 'Deploy endpoint responded with an unexpected format. It may still work for deployment.', 'deploy');
-			}
-		} catch (error) {
-			if (testClient) {
-				testClient.disconnect().catch(() => { /* ignore */ });
-			}
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			this.showMessage(webview, 'error', `Deploy endpoint test failed: ${errorMessage}`, 'deploy');
-		}
-	}
-
-	/**
 	 * Clears stored credentials from secure storage
 	 */
 	private async clearCredentials(webview: vscode.Webview): Promise<void> {
@@ -597,9 +476,9 @@ export class PageSettingsProvider {
 
 	/**
 	 * Sends a message to the webview.
-	 * @param context When 'development' or 'deploy', the message is shown inside that section's box; otherwise shown in the global message area.
+	 * @param context When 'development', the message is shown inside that section's box; otherwise shown in the global message area.
 	 */
-	private showMessage(webview: vscode.Webview, level: string, message: string, context?: 'development' | 'deploy'): void {
+	private showMessage(webview: vscode.Webview, level: string, message: string, context?: 'development'): void {
 		webview.postMessage({
 			type: 'showMessage',
 			level: level,

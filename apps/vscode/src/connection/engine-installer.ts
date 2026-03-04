@@ -236,7 +236,7 @@ export class EngineInstaller {
 
 	/**
 	 * Fetches all available releases for the version dropdown.
-	 * Returns releases that have assets, sorted newest first.
+	 * Returns only release (non-prerelease) versions that have assets, sorted newest first.
 	 */
 	public async getReleases(
 		token?: vscode.CancellationToken,
@@ -250,7 +250,7 @@ export class EngineInstaller {
 			per_page: 100
 		});
 		return data
-			.filter(r => r.tag_name?.startsWith('server-') && r.assets && r.assets.length > 0)
+			.filter(r => r.tag_name?.startsWith('server-') && !r.prerelease && r.assets && r.assets.length > 0)
 			.map(r => ({
 				tag_name: r.tag_name,
 				prerelease: r.prerelease

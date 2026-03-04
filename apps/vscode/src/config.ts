@@ -41,9 +41,6 @@ export interface ConfigManagerInfo {
 	/** overall url  */
 	hostUrl: string;
 
-	/** Deploy API base URL (for Deploy to RocketRide.ai) */
-	deployUrl: string;
-
 	/** Default path for creating new pipeline files */
 	defaultPipelinePath: string;
 
@@ -69,9 +66,6 @@ export interface ConfigManagerInfo {
 	/** Environment variables loaded from .env file */
 	env: Record<string, string>;
 
-	/** Integration settings */
-	copilotIntegration: boolean;
-	cursorIntegration: boolean;
 }
 
 /**
@@ -95,7 +89,6 @@ export class ConfigManager {
 		connectionMode: 'local',
 		apiKey: '',
 		hostUrl: 'http://localhost:5565',
-		deployUrl: '',
 		defaultPipelinePath: '',
 		engineArgs: [],
 		local: {
@@ -105,9 +98,7 @@ export class ConfigManager {
 		},
 		autoConnect: true,
 		pipelineRestartBehavior: 'prompt',
-		env: {},
-		copilotIntegration: false,
-		cursorIntegration: false
+		env: {}
 	};
 
 	private constructor() { }
@@ -177,7 +168,6 @@ export class ConfigManager {
 	private async refreshConfig(): Promise<void> {
 		const config = vscode.workspace.getConfiguration(this.configSection);
 		const hostUrl = config.get('hostUrl', 'http://localhost:5565');
-		const deployUrl = config.get('deployUrl', 'https://cloud.rocketride.ai');
 
 		// Parse host and port from the hostUrl - host will always be localhost
 		const parsedHost = 'localhost';
@@ -203,7 +193,6 @@ export class ConfigManager {
 			connectionMode: config.get('connectionMode', 'local') as ConnectionMode,
 			apiKey: apiKey,
 			hostUrl: hostUrl,
-			deployUrl: deployUrl,
 			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
 			engineArgs: config.get('engineArgs', []),
 			local: {
@@ -213,9 +202,7 @@ export class ConfigManager {
 			},
 			autoConnect: config.get('autoConnect', true),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
-			env: this.config?.env || {},
-			copilotIntegration: config.get('copilotIntegration', false),
-			cursorIntegration: config.get('cursorIntegration', false)
+			env: this.config?.env || {}
 		};
 	}
 
