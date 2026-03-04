@@ -1055,11 +1055,13 @@ class Task(DAPBase):
             # Send out a status update when needed
             self._status_updated = True
 
-            # Forward the actual event
-            await self._forward_task_event(
-                EVENT_TYPE.FLOW,
-                flow
-            )
+            # If this task is started with tracing
+            if self._pipelineTraceLevel:
+                # Forward off the event
+                await self._forward_task_event(
+                    EVENT_TYPE.FLOW,
+                    flow
+                )
 
         # Handle debug output
         elif event_type == 'output':
