@@ -52,10 +52,10 @@ You'll be prompted on how you want to run the server. Choose the option that fit
 
 4) Connect input lanes and output lanes by type to properly wire your pipeline. Some nodes like agents or LLMs can be invoked as tools for use by a parent node as shown below:
 <p align="center">
-  <img src="./images/agent_example.png" alt="Pipeline canvas example">
+  <img src="./images/agent_pipeline.png" alt="Pipeline canvas example">
 </p>
 
-3) You can run a pipeline from pressing the ▶️ button on the source node or from the `Connection Manager` directly.
+3) You can run a pipeline from the canvas by pressing the ▶️ button on the source node or from the `Connection Manager` directly.
 
 4) View all available and running pipelines below the `Connection Manager`. Selecting running pipelines allows for in depth analytics. Trace call trees, token usage, memory consumption, and more to optimize your pipelines before scaling and deploying.
 
