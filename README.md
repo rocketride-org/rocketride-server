@@ -21,17 +21,17 @@ RocketRide is a high-performance data processing engine built on a C++ core with
 
 ## ⚡ Quick Start
 
-1) Install the extension for your IDE:
-   ```bash
-   code --install-extension RocketRide.rocketride        # VS Code
-   cursor --install-extension RocketRide.rocketride      # Cursor
-   windsurf --install-extension RocketRide.rocketride    # Windsurf
-   ```
+1) Install the extension for your IDE. Search for RocketRide in the extension marketplace:
+
+   <p align="center">
+     <img src="./images/install.png" alt="Install RocketRide extension">
+   </p>
+
    <sub>[Not seeing your IDE? Open an issue](https://github.com/rocketride-org/rocketride-server/issues/new) · [Download directly](https://open-vsx.org/extension/RocketRide/rocketride)</sub>
 
 2) Click the RocketRide (🚀) extension in your IDE
 
-3) Deploy an engine — you'll be prompted on how you want to run the server. Choose the option that fits your setup:
+3) Deploy a server — you'll be prompted on how you want to run the server. Choose the option that fits your setup:
    - **Local (Recommended)** — This pulls the server directly into your IDE without any additional setup.
    - **On-Premises** — Run the server on your own hardware for full control and data residency. Pull the image and deploy to Docker or clone this repo and [build from source](CONTRIBUTING.md#getting-started).
    - **RocketRide Cloud** (👀*coming soon*) — Managed hosting with our proprietary model server. No infrastructure to maintain.
@@ -57,9 +57,10 @@ RocketRide is a high-performance data processing engine built on a C++ core with
 
 5) View all available and running pipelines below the `Connection Manager`. Selecting running pipelines allows for in depth analytics. Trace call trees, token usage, memory consumption, and more to optimize your pipelines before scaling and deploying.
 
-6) 📦 Deploy your pipelines to RocketRide.ai cloud or run them on your own infrastructure. Configure your deployment connection in Settings and use the Deploy page.
+6) 📦 Deploy your pipelines to RocketRide.ai cloud or run them on your own infrastructure.
 
-   - **Docker** — Download the RocketRide engine image and create a container. Requires [Docker](https://docs.docker.com/get-docker/) to be installed.
+   - **Docker** — Download the RocketRide server image and create a container. Requires [Docker](https://docs.docker.com/get-docker/) to be installed.
+
      ```bash
      docker pull ghcr.io/rocketride-org/rocketride-engine:latest
      docker create --name rocketride-engine -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
@@ -68,7 +69,7 @@ RocketRide is a high-performance data processing engine built on a C++ core with
 
 7) Run your pipelines as standalone processes or integrate them into your existing [Python](https://docs.rocketride.org/sdk/python-sdk) and [TypeScript/JS](https://docs.rocketride.org/sdk/node-sdk) applications utilizing our SDK.
 
-8) Use it, commit it, ship it.
+8) Use it, commit it, ship it. 🚚
 
 ## Useful Links
 - 📚 [Documentation](https://docs.rocketride.org/)
