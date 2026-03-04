@@ -21,4 +21,4 @@
 // SOFTWARE.
 // =============================================================================
 
-export { TraceSection, TraceLevel, TraceRow } from './TraceSection';
+export { TraceSection, TraceRow } from './TraceSection';

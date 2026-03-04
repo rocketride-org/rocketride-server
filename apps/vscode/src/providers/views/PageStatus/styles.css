@@ -317,6 +317,26 @@
 	cursor: not-allowed;
 }
 
+.tracing-toggle {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+	margin-top: 4px;
+	justify-content: flex-end;
+}
+
+.tracing-toggle input[type="checkbox"] {
+	accent-color: var(--vscode-focusBorder);
+	cursor: pointer;
+}
+
+.tracing-toggle-label {
+	user-select: none;
+}
+
 /* ============================================================================ */
 /* COMPACT STATUS LINE */
 /* ============================================================================ */

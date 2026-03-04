@@ -230,7 +230,6 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					projectId: projectId,
 					source: sourceId,
 					pipeline: pipelineTransformed,
-					pipelineTraceLevel: 'full',
 					args: ConfigManager.getInstance().getConfig().engineArgs
 				});
 			} catch (error) {

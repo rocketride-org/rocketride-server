@@ -788,7 +788,7 @@ export class PageStatusProvider {
 				}
 
 				case 'pipelineAction': {
-					await this.handlePipelineAction(message.action, viewState);
+					await this.handlePipelineAction(message.action, viewState, message.tracing);
 					break;
 				}
 			}
@@ -805,7 +805,7 @@ export class PageStatusProvider {
 	 * @param projectId The project ID
 	 * @param sourceId The source ID
 	 */
-	private async handlePipelineAction(action: 'stop' | 'run' | 'restart', viewState: ViewMonitoringState): Promise<void> {
+	private async handlePipelineAction(action: 'stop' | 'run' | 'restart', viewState: ViewMonitoringState, tracing?: boolean): Promise<void> {
 		try {
 			switch (action) {
 				case 'stop': {
@@ -844,13 +844,14 @@ export class PageStatusProvider {
 					// Substitute .env settings
 					const pipelineTransformed = ConfigManager.getInstance().substituteEnvVariables(pipelineJson);
 
-					// Use DAP command to execute pipeline without debugging
+					// Use DAP command to execute pipeline
+					// When tracing is enabled, capture full pipeline trace data
 					try {
 						await this.connectionManager.request('execute', {
 							projectId: viewState.projectId,
 							source: viewState.sourceId,
 							pipeline: pipelineTransformed,
-							pipelineTraceLevel: 'full',
+							...(tracing ? { pipelineTraceLevel: 'full' } : {}),
 							args: ConfigManager.getInstance().getConfig().engineArgs
 						});
 					} catch (error: unknown) {

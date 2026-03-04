@@ -4,8 +4,6 @@ import React, { useState, useMemo, useCallback } from 'react';
 // TYPES
 // ============================================================================
 
-export type TraceLevel = 'none' | 'minimal' | 'standard' | 'verbose';
-
 export interface TraceRow {
 	id: number;
 	docId: number;
@@ -22,8 +20,6 @@ export interface TraceRow {
 }
 
 interface TraceSectionProps {
-	traceLevel: TraceLevel;
-	onTraceLevelChange: (level: TraceLevel) => void;
 	rows: TraceRow[];
 	onClear: () => void;
 }
@@ -46,13 +42,6 @@ interface TraceObjectGroup {
 // ============================================================================
 // CONSTANTS
 // ============================================================================
-
-const TRACE_LEVELS: { value: TraceLevel; label: string }[] = [
-	{ value: 'none', label: 'None' },
-	{ value: 'minimal', label: 'Minimal' },
-	{ value: 'standard', label: 'Standard' },
-	{ value: 'verbose', label: 'Verbose' },
-];
 
 const LANE_COLORS: Record<string, string> = {
 	open: 'var(--vscode-charts-blue, #1976d2)',
@@ -543,8 +532,6 @@ const TraceDetailPanel: React.FC<{
 // ============================================================================
 
 export const TraceSection: React.FC<TraceSectionProps> = ({
-	traceLevel,
-	onTraceLevelChange,
 	rows,
 	onClear
 }) => {
@@ -653,17 +640,6 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 							Clear
 						</button>
 					)}
-					<select
-						className="trace-level-select"
-						value={traceLevel}
-						onChange={(e) => onTraceLevelChange(e.target.value as TraceLevel)}
-					>
-						{TRACE_LEVELS.map((level) => (
-							<option key={level.value} value={level.value}>
-								{level.label}
-							</option>
-						))}
-					</select>
 				</div>
 			</header>
 			<div className="section-content">
