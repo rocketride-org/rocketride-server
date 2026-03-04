@@ -165,7 +165,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 								onClick={toggleApiKeyVisibility}
 								title={showApiKey ? 'Hide API key' : 'Show API key'}
 							>
-								{showApiKey ? '🙈' : '👁'}
+								{showApiKey ? '🙈' : '🔍'}
 							</button>
 							{settings.apiKey.trim() && (
 								<button

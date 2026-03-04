@@ -237,7 +237,7 @@ export const EnvVariablesSettings: React.FC<EnvVariablesSettingsProps> = ({
 													onClick={() => toggleValueVisibility(key)}
 													title={isVisible ? 'Hide value' : 'Show value'}
 												>
-													{isVisible ? '🙈' : '👁'}
+													{isVisible ? '🙈' : '🔍'}
 												</button>
 											</>
 										)}

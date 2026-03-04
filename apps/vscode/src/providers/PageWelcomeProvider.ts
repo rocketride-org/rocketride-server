@@ -168,7 +168,7 @@ export class PageWelcomeProvider {
 				apiKey,
 				hasApiKey: this.configManager.hasApiKey(),
 				autoConnect: workspaceConfig.get('autoConnect', true),
-				localEngineVersion: workspaceConfig.get('local.engineVersion', 'latest'),
+				localEngineVersion: workspaceConfig.get('local.engineVersion', 'prerelease'),
 			}
 		});
 	}
