@@ -91,7 +91,7 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 					break;
 
 			case 'openDocs':
-				vscode.env.openExternal(vscode.Uri.parse('https://docs.rocketride.ai'));
+				vscode.env.openExternal(vscode.Uri.parse('https://docs.rocketride.org'));
 				break;
 
 			case 'openDeploy':
