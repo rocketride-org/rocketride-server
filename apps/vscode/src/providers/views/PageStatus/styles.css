@@ -569,7 +569,7 @@
 	padding: 4px 10px;
 	border-radius: 4px;
 	cursor: pointer;
-	font-size: 11px;
+	font-size: 12px;
 	font-weight: 500;
 	transition: background-color 0.2s;
 }
@@ -597,7 +597,7 @@
 .trace-tree-hdr {
 	display: flex;
 	padding: 5px 12px;
-	font-size: 10px;
+	font-size: 11px;
 	font-weight: 600;
 	color: var(--vscode-descriptionForeground);
 	text-transform: uppercase;
@@ -616,10 +616,10 @@
 }
 
 .trace-col-time {
-	width: 56px;
+	width: 60px;
 	flex-shrink: 0;
 	text-align: right;
-	font-size: 10px;
+	font-size: 11px;
 	font-family: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, monospace);
 	color: var(--vscode-descriptionForeground);
 }
@@ -631,11 +631,11 @@
 .trace-row {
 	display: flex;
 	align-items: center;
-	height: 24px;
+	height: 26px;
 	padding-right: 12px;
 	cursor: pointer;
 	border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.06));
-	font-size: 11px;
+	font-size: 12px;
 	user-select: none;
 }
 
@@ -661,10 +661,22 @@
 	padding-left: 8px;
 }
 
-/* In-flight document — italic title, lighter color */
+/* In-flight document */
 .trace-in-flight .trace-name {
 	font-style: italic;
 	color: var(--vscode-descriptionForeground);
+}
+
+.trace-in-flight-badge {
+	display: inline-block;
+	padding: 1px 6px;
+	border-radius: 3px;
+	font-size: 10px;
+	font-weight: 600;
+	background: rgba(46, 125, 50, 0.15);
+	color: var(--vscode-charts-green);
+	flex-shrink: 0;
+	animation: pulse 2s ease-in-out infinite;
 }
 
 /* Chevron */
@@ -672,7 +684,7 @@
 	width: 16px;
 	flex-shrink: 0;
 	text-align: center;
-	font-size: 9px;
+	font-size: 10px;
 	color: var(--vscode-descriptionForeground);
 	user-select: none;
 }
@@ -704,7 +716,7 @@
 .trace-name-file {
 	font-weight: 600;
 	font-family: var(--vscode-font-family, system-ui, sans-serif);
-	font-size: 12px;
+	font-size: 13px;
 }
 
 .trace-name-error {
@@ -731,9 +743,9 @@
 
 .trace-badge {
 	display: inline-block;
-	padding: 1px 5px;
+	padding: 1px 6px;
 	border-radius: 3px;
-	font-size: 9px;
+	font-size: 10px;
 	font-weight: 600;
 	font-family: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, monospace);
 }
@@ -772,18 +784,48 @@
 /* DETAIL PANEL                                                                 */
 /* ============================================================================ */
 
-.trace-detail-panel {
-	width: 260px;
+.trace-detail-wrapper {
+	position: relative;
 	flex-shrink: 0;
-	overflow-y: auto;
 	border-left: 1px solid var(--vscode-panel-border);
+	display: flex;
+}
+
+.trace-resize-handle {
+	position: absolute;
+	left: 0;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	width: 6px;
+	height: 48px;
+	border-radius: 9999px;
+	cursor: col-resize;
+	z-index: 10;
+	background: var(--vscode-panel-border);
+	opacity: 0.7;
+	transition: opacity 0.2s, background-color 0.2s;
+}
+
+.trace-resize-handle:hover {
+	opacity: 1;
+	background: var(--vscode-descriptionForeground);
+}
+
+.trace-resize-handle:active {
+	opacity: 1;
+	background: var(--vscode-focusBorder);
+}
+
+.trace-detail-panel {
+	flex: 1;
+	overflow-y: auto;
 	background: var(--vscode-sideBar-background, rgba(128, 128, 128, 0.04));
 }
 
 .trace-dp-empty {
 	padding: 24px 12px;
 	text-align: center;
-	font-size: 11px;
+	font-size: 12px;
 	color: var(--vscode-descriptionForeground);
 	font-style: italic;
 }
@@ -794,13 +836,13 @@
 }
 
 .trace-dp-hdr h2 {
-	font-size: 12px;
+	font-size: 13px;
 	color: var(--vscode-foreground);
 	margin: 0 0 2px;
 }
 
 .trace-dp-hint {
-	font-size: 10px;
+	font-size: 11px;
 	color: var(--vscode-descriptionForeground);
 }
 
@@ -810,7 +852,7 @@
 }
 
 .trace-dp-sect h3 {
-	font-size: 9px;
+	font-size: 10px;
 	color: var(--vscode-descriptionForeground);
 	text-transform: uppercase;
 	letter-spacing: 1px;
@@ -821,8 +863,8 @@
 .trace-dp-kv {
 	display: flex;
 	justify-content: space-between;
-	margin-bottom: 3px;
-	font-size: 11px;
+	margin-bottom: 4px;
+	font-size: 12px;
 }
 
 .trace-dp-k {
@@ -832,11 +874,11 @@
 .trace-dp-v {
 	color: var(--vscode-foreground);
 	font-family: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, monospace);
-	font-size: 10px;
+	font-size: 11px;
 }
 
 .trace-dp-time {
-	font-size: 10px;
+	font-size: 11px;
 	color: var(--vscode-charts-blue, #1976d2);
 	font-family: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, monospace);
 }
@@ -855,14 +897,14 @@
 }
 
 .trace-dp-bar-label {
-	font-size: 9px;
+	font-size: 10px;
 	color: var(--vscode-descriptionForeground);
 	margin-top: 3px;
 }
 
 .trace-dp-toggle {
 	cursor: pointer;
-	font-size: 11px;
+	font-size: 12px;
 	color: var(--vscode-foreground);
 	display: flex;
 	align-items: center;
@@ -873,7 +915,7 @@
 
 .trace-dp-arr {
 	color: var(--vscode-descriptionForeground);
-	font-size: 9px;
+	font-size: 10px;
 }
 
 .trace-dp-code {
@@ -881,7 +923,7 @@
 	border: 1px solid var(--vscode-panel-border);
 	border-radius: 4px;
 	padding: 8px;
-	font-size: 10px;
+	font-size: 11px;
 	font-family: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, monospace);
 	color: var(--vscode-foreground);
 	line-height: 1.5;
@@ -893,7 +935,7 @@
 }
 
 .trace-dp-expand-hint {
-	font-size: 10px;
+	font-size: 11px;
 	color: var(--vscode-descriptionForeground);
 	font-style: italic;
 	margin-top: 4px;
@@ -913,7 +955,7 @@
 }
 
 .trace-more-label {
-	font-size: 11px;
+	font-size: 12px;
 	font-style: italic;
 	color: var(--vscode-textLink-foreground, #1976d2);
 }

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 
 // ============================================================================
 // TYPES
@@ -318,7 +318,9 @@ const TraceObjectRow: React.FC<{
 		<div className={rowClass} onClick={handleClick}>
 			<span className="trace-chev" title={chevronTitle}>{expanded ? '\u25BC' : '\u25B6'}</span>
 			<span className="trace-name trace-name-file">{group.objectName}</span>
-			<span className="trace-col-lane" />
+			<span className="trace-col-lane">
+				{group.inFlight && <span className="trace-in-flight-badge">processing</span>}
+			</span>
 			{timeDisplay}
 		</div>
 	);
@@ -540,6 +542,35 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 	const [selectedRowId, setSelectedRowId] = useState<number | null>(null);
 	const [moreRevealed, setMoreRevealed] = useState<Map<string, number>>(new Map());
 
+	// Detail panel resize state
+	const [detailWidth, setDetailWidth] = useState(280);
+	const [isResizing, setIsResizing] = useState(false);
+	const [resizeStartX, setResizeStartX] = useState(0);
+	const [resizeStartWidth, setResizeStartWidth] = useState(0);
+
+	const handleResizeStart = useCallback((e: React.MouseEvent) => {
+		e.preventDefault();
+		setIsResizing(true);
+		setResizeStartX(e.clientX);
+		setResizeStartWidth(detailWidth);
+	}, [detailWidth]);
+
+	useEffect(() => {
+		if (!isResizing) return;
+		const onMove = (e: MouseEvent) => {
+			const delta = resizeStartX - e.clientX;
+			const next = Math.min(600, Math.max(200, resizeStartWidth + delta));
+			setDetailWidth(next);
+		};
+		const onUp = () => setIsResizing(false);
+		window.addEventListener('mousemove', onMove);
+		window.addEventListener('mouseup', onUp);
+		return () => {
+			window.removeEventListener('mousemove', onMove);
+			window.removeEventListener('mouseup', onUp);
+		};
+	}, [isResizing, resizeStartX, resizeStartWidth]);
+
 	const objectGroups = useMemo(() => buildObjectGroups(rows), [rows]);
 
 	// Find the selected node across all groups
@@ -701,7 +732,14 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 								);
 							})}
 						</div>
-						<TraceDetailPanel node={selectedNode} />
+						<div className="trace-detail-wrapper" style={{ width: detailWidth }}>
+							<div
+								className="trace-resize-handle"
+								onMouseDown={handleResizeStart}
+								aria-label="Resize detail panel"
+							/>
+							<TraceDetailPanel node={selectedNode} />
+						</div>
 					</div>
 				)}
 			</div>
