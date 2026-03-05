@@ -251,7 +251,7 @@ jobs:
           else
             TARBALL=$(find release-assets -name '*.tgz' | head -n1)
             echo "Publishing ${TARBALL}"
-            npm publish "${TARBALL}" --access public
+            npm publish "./${TARBALL}" --access public
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
