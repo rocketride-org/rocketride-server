@@ -22,6 +22,8 @@
  * SOFTWARE.
  */
 
+import fs from 'fs';
+import path from 'path';
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback } from './types/index.js';
@@ -314,8 +316,6 @@ export class RocketRideClient extends DAPClient {
 			// Load from .env file only (Node.js only)
 			if (!isBrowser) {
 				try {
-					const fs = require('fs');
-					const path = require('path');
 					const envPath = path.join(process.cwd(), '.env');
 
 					if (fs.existsSync(envPath)) {
@@ -820,9 +820,10 @@ export class RocketRideClient extends DAPClient {
 			}
 
 			// Load file in Node.js
-			const fs = require('fs');
 			const fileContent = fs.readFileSync(filepath, 'utf-8');
-			pipelineConfig = JSON.parse(fileContent);
+			const parsed = JSON.parse(fileContent);
+			// .pipe files wrap the config in { "pipeline": { ... } } — unwrap if present
+			pipelineConfig = parsed.pipeline ?? parsed;
 		} else {
 			pipelineConfig = pipeline!;
 		}
@@ -1063,7 +1064,6 @@ export class RocketRideClient extends DAPClient {
 			let fileSize = file.size;
 			if (typeof window === 'undefined' && objinfo?.filepath && typeof objinfo.filepath === 'string') {
 				try {
-					const fs = require('fs');
 					fileSize = fs.statSync(objinfo.filepath as string).size;
 				} catch {
 					// fallback to file.size
