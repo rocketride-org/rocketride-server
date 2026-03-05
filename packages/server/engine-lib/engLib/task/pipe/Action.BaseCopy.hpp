@@ -55,6 +55,6 @@ public:
     ///		The current parent
     //-----------------------------------------------------------------
     ErrorOr<Entry> processLine(TextView line,
-                               const Url& parent) noexcept override;
+                               const Url &parent) noexcept override;
 };
 }  // namespace engine::task::actionBaseCopy

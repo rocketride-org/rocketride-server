@@ -60,7 +60,7 @@ protected:
     ///	@param[in] 	result
     ///		The results to send back
     //-----------------------------------------------------------------
-    void reportValidationResult(const json::Value& result) noexcept {
+    void reportValidationResult(const json::Value &result) noexcept {
         ASSERT_MSG(result.isMember("valid"), "Validation result is not valid",
                    result);
         MONITOR(info, "result", result);
@@ -113,24 +113,24 @@ protected:
     ///		Execute the task
     //-----------------------------------------------------------------
     Error exec() noexcept override {
-        auto& config = jobConfig();
+        auto &config = jobConfig();
         auto regex = config["config"].lookup<Text>("regex");
         LOGT("Validating regex:", regex);
 
         // Ensure classification DLL is loaded
-        auto& loader = classifyDll();
+        auto &loader = classifyDll();
         if (!loader.isLoaded()) {
             if (auto ccode = loader.init())
                 return APERRT(ccode, "Failed to load classification DLL");
         }
 
-        const ClassifyApi* api = loader.api();
+        const ClassifyApi *api = loader.api();
         if (!api)
             return APERRT(Ec::Classify, "Classification API not available");
 
         // Create engine for validation
         ClassifyEngineHandle engine = nullptr;
-        const char* configJson = R"({"policies": []})";
+        const char *configJson = R"({"policies": []})";
 
         // Pass execDir and cachePath separately (DLL can't access host's
         // application/config)
@@ -138,7 +138,7 @@ protected:
             configJson, CLASSIFY_FLAG_NONE, Text{application::execDir()}.data(),
             Text{config::paths().cache}.data(), &engine);
         if (result != CLASSIFY_OK) {
-            const char* error = api->get_last_error();
+            const char *error = api->get_last_error();
             return APERRT(Ec::Classify,
                           "Failed to create classification engine",
                           error ? error : "unknown error");
@@ -155,7 +155,7 @@ protected:
             reportValidationSucceeded();
         } else if (result == CLASSIFY_ERR_INVALID_PARAM) {
             // Regex is invalid - get error message via get_last_error
-            const char* error = api->get_last_error();
+            const char *error = api->get_last_error();
             Text errorMessage = error ? error : "Invalid regex";
             LOGT("Classify regex validation failed:", errorMessage);
 
@@ -167,7 +167,7 @@ protected:
                                    errorOffset);
         } else {
             // Unexpected error
-            const char* lastError = api->get_last_error();
+            const char *lastError = api->get_last_error();
             return APERRT(Ec::Classify, "Regex validation failed unexpectedly",
                           lastError ? lastError : "unknown error");
         }

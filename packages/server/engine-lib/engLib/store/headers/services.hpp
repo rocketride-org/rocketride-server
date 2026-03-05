@@ -35,8 +35,8 @@ public:
     //-----------------------------------------------------------------
     /// @details
     ///		Define suported actions by a service for the UI. If you add flags,
-    ///you 		should probably add them to the services.cpp as well so 		the can be
-    ///specified in the service definitions
+    /// you 		should probably add them to the services.cpp as well so
+    /// the can be specified in the service definitions
     //-----------------------------------------------------------------
     struct SUPPORTED_ACTIONS {
         _const uint32_t DELETION = BIT(0);  // Supports deletion of an object

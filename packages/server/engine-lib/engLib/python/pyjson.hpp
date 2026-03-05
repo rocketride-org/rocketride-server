@@ -130,12 +130,13 @@ public:
             py::dict d = obj.attr("dict")();
             return dictToJson(d);
         }
-        // Any callable (function, method, builtin, partial, etc.) — not serializable
+        // Any callable (function, method, builtin, partial, etc.) — not
+        // serializable
         if (PyCallable_Check(obj.ptr())) {
             json::Value value{"<method>"};
             return value;
         }
-        
+
         throw std::runtime_error(
             "dictToJson not implemented for this type of object: " +
             py::repr(obj).cast<std::string>());

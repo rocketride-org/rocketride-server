@@ -31,14 +31,14 @@ using crc_64_type = crc_optimal<64, 0x42F0E1EBA9EA3693, 0x0, 0x0, false, false>;
 namespace ap::crypto {
 
 // Calculate the CRC-32 hash
-inline uint32_t crc32(const InputData& data) noexcept {
+inline uint32_t crc32(const InputData &data) noexcept {
     boost::crc_32_type crc;
     crc.process_bytes(data.data(), data.size());
     return crc.checksum();
 };
 
 // Calculate the ECMA-182 CRC-64 hash
-inline uint64_t crc64(const InputData& data) noexcept {
+inline uint64_t crc64(const InputData &data) noexcept {
     boost::crc_64_type crc;
     crc.process_bytes(data.data(), data.size());
     return crc.checksum();

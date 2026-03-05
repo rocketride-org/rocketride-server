@@ -32,7 +32,7 @@ namespace ap::dev {
 namespace {
 // This singleton helps us track recursive asserts, prevents a layered
 // one from executing if one is already active
-bool& fatalityExecuting() noexcept {
+bool &fatalityExecuting() noexcept {
     static bool flag = false;
     return flag;
 }
@@ -42,7 +42,7 @@ bool& fatalityExecuting() noexcept {
 // variable arguments (if specified). On windows this amounts to a call
 // to DebugBreak, posix systems we self signal SIGINT.
 template <typename... DebugInfo>
-inline void enterDebugger(Location location, DebugInfo&&... info) noexcept {
+inline void enterDebugger(Location location, DebugInfo &&...info) noexcept {
     auto message = _tsd<' ', Format::ERROROROK>(
         Color::Red, "!!!Assertion!!! ", location,
         std::forward<DebugInfo>(info)..., Backtrace(), Color::Reset);
@@ -59,7 +59,7 @@ inline void enterDebugger(Location location, DebugInfo&&... info) noexcept {
 // End of the line
 template <typename... DebugInfo>
 [[noreturn]] inline void fatality(Location location,
-                                  DebugInfo&&... info) noexcept {
+                                  DebugInfo &&...info) noexcept {
     if (!_exch(fatalityExecuting(), true)) {
         log::write(location, Color::Red,
                    "Fatal:", std::forward<DebugInfo>(info)..., '\n',
@@ -85,10 +85,10 @@ template <typename... DebugInfo>
 #endif
 }
 
-const file::Path& crashDumpLocation() noexcept;
-void crashDumpLocation(const file::Path& path) noexcept;
+const file::Path &crashDumpLocation() noexcept;
+void crashDumpLocation(const file::Path &path) noexcept;
 
-Text& crashDumpPrefix() noexcept;
+Text &crashDumpPrefix() noexcept;
 Text createCrashDumpName(TextView extension) noexcept;
 
 inline file::Path createCrashDumpPath(TextView extension) noexcept {
@@ -104,9 +104,9 @@ inline file::Path createCrashDumpPath(TextView extension) noexcept {
     return directory / createCrashDumpName(extension);
 }
 
-using CrashDumpCreatedCallback = Function<void(const file::Path&)>;
+using CrashDumpCreatedCallback = Function<void(const file::Path &)>;
 
-inline CrashDumpCreatedCallback& crashDumpCreatedCallback() noexcept {
+inline CrashDumpCreatedCallback &crashDumpCreatedCallback() noexcept {
     static CrashDumpCreatedCallback callback;
     return callback;
 }

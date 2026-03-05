@@ -36,7 +36,7 @@ public:
     using value_type = typename Traits::ValueType;
     static_assert(sizeof(value_type) == sizeof(uint8_t));
 
-    Input(const BackingT& backing, Opt<file::Path> path = {}) noexcept
+    Input(const BackingT &backing, Opt<file::Path> path = {}) noexcept
         : m_backing(backing), m_path(_mv(path)) {}
 
     uint64_t offset() const noexcept(false) { return m_offset; }
@@ -67,7 +67,7 @@ public:
     bool empty() const noexcept(false) { return size() != 0; }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         return _tsb(buff, "[Input offset:", string::toHumanSize(offset()), "]");
     }
 

@@ -102,7 +102,7 @@ ErrorCode Main() {
     config::vars().add("NodeId", config::nodeId());
 
     // Create arguments from options
-    std::vector<const Utf8Chr*> arguments;
+    std::vector<const Utf8Chr *> arguments;
     // std::vector<const Utf8Chr*> can only hold pointers, so argumentList will
     // remain throughout
     std::list<Text> argumentList;

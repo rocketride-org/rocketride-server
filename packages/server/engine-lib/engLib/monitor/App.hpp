@@ -77,7 +77,7 @@ public:
     ///	@param[in]
     ///		Error code to output
     //-----------------------------------------------------------------
-    virtual Error warning(Error&& ccode) noexcept override {
+    virtual Error warning(Error &&ccode) noexcept override {
         auto mon = ccode;
         Monitor::warning(_mv(mon));
 
@@ -90,7 +90,7 @@ public:
     ///	@param[in]
     ///		Error code to output
     //-----------------------------------------------------------------
-    virtual Error error(Error&& ccode) noexcept override {
+    virtual Error error(Error &&ccode) noexcept override {
         auto mon = ccode;
         Monitor::error(_mv(mon));
 
@@ -103,7 +103,7 @@ public:
     ///	@param[in]
     ///		Error code to output
     //-----------------------------------------------------------------
-    virtual Error exit(Error&& ccode) noexcept override {
+    virtual Error exit(Error &&ccode) noexcept override {
         auto mon = ccode;
         Monitor::exit(_mv(mon));
 
@@ -131,7 +131,7 @@ public:
     ///		Path to the crash dump file
     //-----------------------------------------------------------------
     virtual void onCrashDumpCreated(Location location,
-                                    const file::Path& path) noexcept override {
+                                    const file::Path &path) noexcept override {
         Monitor::onCrashDumpCreated(location, path);
 
         // Only report the dump name-- the directory is configured by the app
@@ -144,7 +144,7 @@ public:
     ///	@param[in]	info
     ///		Info to output
     //-----------------------------------------------------------------
-    virtual void info(const json::Value& info) noexcept override {
+    virtual void info(const json::Value &info) noexcept override {
         Monitor::info(info);
 
         outputTag(InfoTag, info.stringify(false));
@@ -156,7 +156,7 @@ public:
     ///	@param[in]	info
     ///		Info to output
     //-----------------------------------------------------------------
-    virtual void metrics(const json::Value& metrics) noexcept override {
+    virtual void metrics(const json::Value &metrics) noexcept override {
         Monitor::metrics(metrics);
 
         outputTag(MetricsTag, metrics.stringify(false));
@@ -219,7 +219,7 @@ public:
     /// @param[in] data
     ///   JSON object describing the current status
     //-----------------------------------------------------------------
-    virtual void dependencyDownload(const json::Value& data) noexcept override {
+    virtual void dependencyDownload(const json::Value &data) noexcept override {
         Monitor::status(
             data.stringify(false));  // optional, saves for internal access
         outputTag(DependencyDownloadTag,
@@ -304,11 +304,11 @@ private:
     ///	@param[in]	error
     ///		The error/warning to output
     //-----------------------------------------------------------------
-    Error outputWarningOrError(TextView tag, Error&& ccode) noexcept {
+    Error outputWarningOrError(TextView tag, Error &&ccode) noexcept {
         StackText msg;
 
         // Get the root cause of why we are here
-        auto& root = ccode.root();
+        auto &root = ccode.root();
 
         if (!ccode) {
             // If there is no error...

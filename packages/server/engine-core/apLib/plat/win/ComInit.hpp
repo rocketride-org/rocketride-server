@@ -36,11 +36,11 @@ struct ComInit {
         if (hresult && SUCCEEDED(*hresult)) ::CoUninitialize();
     }
 
-    ComInit(const ComInit&) = delete;
-    ComInit& operator=(const ComInit&) = delete;
+    ComInit(const ComInit &) = delete;
+    ComInit &operator=(const ComInit &) = delete;
 
-    ComInit(ComInit&&) = default;
-    ComInit& operator=(ComInit&&) = default;
+    ComInit(ComInit &&) = default;
+    ComInit &operator=(ComInit &&) = default;
 
     // Initializes com on the current thread
     static Error init() noexcept {

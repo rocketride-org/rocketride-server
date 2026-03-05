@@ -31,18 +31,18 @@ public:
     _const auto LogLevel = Lvl::Permissions;
 
     Sid() = default;
-    Sid(const Sid&) = default;
-    Sid(Sid&&) = default;
+    Sid(const Sid &) = default;
+    Sid(Sid &&) = default;
 
-    Sid& operator=(const Sid& sid) = default;
+    Sid &operator=(const Sid &sid) = default;
 
     ~Sid() = default;
 
-    bool operator!=(const Sid& sid) const {
+    bool operator!=(const Sid &sid) const {
         return _cast<InputData>(*this) != _cast<InputData>(sid);
     }
 
-    bool operator==(const Sid& sid) const {
+    bool operator==(const Sid &sid) const {
         return _cast<InputData>(*this) == _cast<InputData>(sid);
     }
 
@@ -51,7 +51,7 @@ public:
     explicit operator bool() const noexcept { return !empty(); }
 
     // Some of well known accounts are not supported
-    static bool supported(void* sid) noexcept {
+    static bool supported(void *sid) noexcept {
         ASSERT(sid && ::IsValidSid(sid));
 
         return !(  // not one of the following
@@ -76,7 +76,7 @@ public:
                ::IsWellKnownSid(ptr(), WinBuiltinGuestsSid);
     }
 
-    bool equals(void* sid) const noexcept {
+    bool equals(void *sid) const noexcept {
         ASSERT(sid && ::IsValidSid(sid));
 
         if (empty()) return false;
@@ -142,20 +142,21 @@ public:
     }
 
     // Implement < operator so Sid can be used as a std::map key
-    bool operator<(const Sid& sid) const noexcept {
+    bool operator<(const Sid &sid) const noexcept {
         return _cast<InputData>(*this) < _cast<InputData>(sid);
     }
 
     template <typename T = void>
-    T* ptr() const noexcept {
-        if (!empty()) return _reCast<T*>(_constCast<uint8_t*>(&m_sid.front()));
+    T *ptr() const noexcept {
+        if (!empty())
+            return _reCast<T *>(_constCast<uint8_t *>(&m_sid.front()));
         return nullptr;
     }
 
     // DataView conversion operator for use in hashing
     operator InputData() const noexcept { return {&m_sid.front(), m_length}; }
 
-    static Sid fromPtr(void* sid, size_t length) noexcept {
+    static Sid fromPtr(void *sid, size_t length) noexcept {
         if (!sid) return {};
 
         ASSERT(length <= SECURITY_MAX_SID_SIZE);
@@ -165,7 +166,7 @@ public:
         return result;
     }
 
-    static Sid fromPtr(void* sid) noexcept {
+    static Sid fromPtr(void *sid) noexcept {
         if (!sid) return {};
 
         ASSERT(IsValidSid(sid));
@@ -173,10 +174,10 @@ public:
     }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         if (empty()) return;
 
-        char* string = {};
+        char *string = {};
         ASSERTD(::ConvertSidToStringSidA(ptr(), &string) && string);
 
         buff << string;
@@ -184,7 +185,7 @@ public:
     }
 
     template <typename Buffer>
-    static Error __fromString(Sid& sid, const Buffer& buff) noexcept {
+    static Error __fromString(Sid &sid, const Buffer &buff) noexcept {
         auto sidString = buff.toString();
         if (!sidString) return {};
 
@@ -213,7 +214,7 @@ private:
 // Implement std::hash for Sid so it can be used as a std::unordered_map key
 template <>
 struct std::hash<::engine::perms::Sid> {
-    size_t operator()(const ::engine::perms::Sid& sid) const noexcept {
+    size_t operator()(const ::engine::perms::Sid &sid) const noexcept {
         return std::hash<::ap::InputData>()(sid);
     }
 };

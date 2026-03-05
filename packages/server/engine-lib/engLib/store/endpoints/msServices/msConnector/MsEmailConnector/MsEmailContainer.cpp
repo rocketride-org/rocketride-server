@@ -31,10 +31,10 @@ MsEmailContainer::MsEmailContainer() noexcept : MsContainer() {}
 
 MsEmailContainer::~MsEmailContainer() noexcept {}
 
-MsEmailContainer::MsEmailContainer(const MsEmailContainer& value) noexcept
+MsEmailContainer::MsEmailContainer(const MsEmailContainer &value) noexcept
     : MsContainer(value) {}
 
-MsEmailContainer::MsEmailContainer(MsEmailContainer&& value) noexcept
+MsEmailContainer::MsEmailContainer(MsEmailContainer &&value) noexcept
     : MsContainer(value) {}
 
 }  // namespace engine::store::filter::msNode::msEmailContainer

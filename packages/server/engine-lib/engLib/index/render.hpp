@@ -27,7 +27,7 @@ namespace engine::index {
 
 // Render document text to buffer
 template <typename Buffer>
-void renderWords(const WordDbRead& db, DocId docId, Buffer& buff,
+void renderWords(const WordDbRead &db, DocId docId, Buffer &buff,
                  Opt<size_t> maxLength = {},
                  Opt<Ref<bool>> truncated = {}) noexcept {
     if (truncated) truncated->get() = false;
@@ -49,7 +49,7 @@ void renderWords(const WordDbRead& db, DocId docId, Buffer& buff,
 }
 
 // Render document text to string
-inline Text renderWords(const WordDbRead& db, DocId docId,
+inline Text renderWords(const WordDbRead &db, DocId docId,
                         Opt<size_t> maxLength = {},
                         Opt<Ref<bool>> truncated = {}) noexcept {
     Text text;
@@ -59,8 +59,8 @@ inline Text renderWords(const WordDbRead& db, DocId docId,
 }
 
 // Render document text to file path
-inline Error renderWordsToFile(const WordDbRead& db, DocId docId,
-                               const file::Path& path,
+inline Error renderWordsToFile(const WordDbRead &db, DocId docId,
+                               const file::Path &path,
                                Opt<size_t> maxLength = {},
                                Opt<Ref<bool>> truncated = {}) noexcept {
     if (truncated) truncated->get() = false;

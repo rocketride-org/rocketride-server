@@ -37,7 +37,7 @@ ErrorOr<std::list<Text>> IServiceEndpoint::outputPermissions() noexcept {
     const auto permsList = permissionInfo.build();
 
     MONITOR(status, "Writing principals and permission sets");
-    for (const auto& [key, userRecord] : permissionInfo.getUsers()) {
+    for (const auto &[key, userRecord] : permissionInfo.getUsers()) {
         auto ccode = perms::outputPermission(userRecord);
         if (ccode.hasCcode()) {
             return ccode.ccode();
@@ -47,7 +47,7 @@ ErrorOr<std::list<Text>> IServiceEndpoint::outputPermissions() noexcept {
             outputList.push_back(val);
         }
     }
-    for (const auto& [key, groupRecord] : permissionInfo.getGroups()) {
+    for (const auto &[key, groupRecord] : permissionInfo.getGroups()) {
         auto ccode = perms::outputPermission(groupRecord);
         if (ccode.hasCcode()) {
             return ccode.ccode();
@@ -58,7 +58,7 @@ ErrorOr<std::list<Text>> IServiceEndpoint::outputPermissions() noexcept {
         }
     }
 
-    for (const auto& permSet : permsList) {
+    for (const auto &permSet : permsList) {
         ErrorOr<Text> ccode = engine::perms::outputPermission(permSet);
         if (ccode.hasCcode())
             return ccode.ccode();

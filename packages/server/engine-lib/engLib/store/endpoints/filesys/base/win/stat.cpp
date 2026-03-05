@@ -33,14 +33,14 @@ namespace engine::store::filter::filesys::base {
 //---------------------------------------------------------------------
 /// @details
 ///		Check if error code corresponds to the situation when file was moved, or
-///permissions were changed
+/// permissions were changed
 ///	@param[in]	error
 ///		error
 ///	@returns
 ///		true if file was moved, or permissions were changed
 template <log::Lvl LvlT>
 inline bool IBaseSysInstance<LvlT>::isFileMovedOrUnavailable(
-    const Error& err) noexcept {
+    const Error &err) noexcept {
     switch (err.code().value()) {
         case ERROR_FILE_NOT_FOUND:
         case ERROR_PATH_NOT_FOUND:

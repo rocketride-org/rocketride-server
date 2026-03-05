@@ -27,7 +27,7 @@ using transparent_key_t = std::reference_wrapper<Key>;
 template <typename Comp>
 struct eq_comp {
     template <typename A, typename B>
-    bool operator()(A const& lhs, B const& rhs) {
+    bool operator()(A const &lhs, B const &rhs) {
         return !comp(lhs, rhs) && !comp(rhs, lhs);
     }
     Comp comp;
@@ -36,7 +36,7 @@ struct eq_comp {
 template <typename It>
 struct dummy_iterator {
     dummy_iterator() = delete;
-    dummy_iterator(dummy_iterator const&) = delete;
+    dummy_iterator(dummy_iterator const &) = delete;
     It underlying;
 };
 
@@ -51,25 +51,25 @@ class flat_iterator<It, Convert, std::random_access_iterator_tag> {
 public:
     using difference_type = typename traits::difference_type;
     using value_type = typename traits::value_type const;
-    using pointer = value_type*;
-    using reference = value_type&;
+    using pointer = value_type *;
+    using reference = value_type &;
     using iterator_category = std::random_access_iterator_tag;
 
     flat_iterator() = default;
-    flat_iterator(flat_iterator const&) = default;
-    flat_iterator(flat_iterator&&) = default;
-    flat_iterator(Convert const& c) : underlying(c.underlying) {}
-    flat_iterator(Convert&& c) : underlying(std::move(c.underlying)) {}
-    flat_iterator(It const& underlying) : underlying(underlying) {}
-    flat_iterator(It&& underlying) : underlying(std::move(underlying)) {}
+    flat_iterator(flat_iterator const &) = default;
+    flat_iterator(flat_iterator &&) = default;
+    flat_iterator(Convert const &c) : underlying(c.underlying) {}
+    flat_iterator(Convert &&c) : underlying(std::move(c.underlying)) {}
+    flat_iterator(It const &underlying) : underlying(underlying) {}
+    flat_iterator(It &&underlying) : underlying(std::move(underlying)) {}
 
-    flat_iterator& operator=(flat_iterator const& u) = default;
-    flat_iterator& operator=(flat_iterator&& u) = default;
-    flat_iterator& operator=(It const& u) {
+    flat_iterator &operator=(flat_iterator const &u) = default;
+    flat_iterator &operator=(flat_iterator &&u) = default;
+    flat_iterator &operator=(It const &u) {
         this->underlying = u;
         return *this;
     }
-    flat_iterator& operator=(It&& u) {
+    flat_iterator &operator=(It &&u) {
         this->underlying = std::move(u);
         return *this;
     }
@@ -77,7 +77,7 @@ public:
     reference operator*() const { return *underlying; }
     pointer operator->() const { return std::addressof(*underlying); }
 
-    flat_iterator& operator++() {
+    flat_iterator &operator++() {
         ++this->underlying;
         return *this;
     }
@@ -87,7 +87,7 @@ public:
         return it;
     }
 
-    flat_iterator& operator--() {
+    flat_iterator &operator--() {
         --this->underlying;
         return *this;
     }
@@ -97,11 +97,11 @@ public:
         return it;
     }
 
-    flat_iterator& operator+=(difference_type d) {
+    flat_iterator &operator+=(difference_type d) {
         this->underlying += d;
         return *this;
     }
-    flat_iterator& operator-=(difference_type d) {
+    flat_iterator &operator-=(difference_type d) {
         this->underlying -= d;
         return *this;
     }
@@ -113,30 +113,30 @@ public:
         return this->underlying - d;
     }
 
-    difference_type operator-(flat_iterator const& o) const {
+    difference_type operator-(flat_iterator const &o) const {
         return this->underlying - o.underlying;
     }
 
     reference operator[](difference_type d) const { return *(*this + d); }
 
-    auto operator==(flat_iterator const& o) const {
+    auto operator==(flat_iterator const &o) const {
         using namespace std::rel_ops;
         return this->underlying == o.underlying;
     }
-    auto operator!=(flat_iterator const& o) const {
+    auto operator!=(flat_iterator const &o) const {
         using namespace std::rel_ops;
         return this->underlying != o.underlying;
     }
-    auto operator<(flat_iterator const& o) const {
+    auto operator<(flat_iterator const &o) const {
         return this->underlying < o.underlying;
     }
-    auto operator<=(flat_iterator const& o) const {
+    auto operator<=(flat_iterator const &o) const {
         return this->underlying <= o.underlying;
     }
-    auto operator>(flat_iterator const& o) const {
+    auto operator>(flat_iterator const &o) const {
         return this->underlying > o.underlying;
     }
-    auto operator>=(flat_iterator const& o) const {
+    auto operator>=(flat_iterator const &o) const {
         return this->underlying >= o.underlying;
     }
 
@@ -146,41 +146,41 @@ public:
 template <typename Pair, typename Compare = std::less<void>,
           typename TransparentKey = void>
 struct first_compare {
-    first_compare(const Compare& comp) : compare(comp) {}
+    first_compare(const Compare &comp) : compare(comp) {}
 
-    bool operator()(Pair const& lhs, Pair const& rhs) const {
+    bool operator()(Pair const &lhs, Pair const &rhs) const {
         return compare.get()(lhs.first, rhs.first);
     }
 
-    bool operator()(typename Pair::first_type const& lhs,
-                    Pair const& rhs) const {
+    bool operator()(typename Pair::first_type const &lhs,
+                    Pair const &rhs) const {
         return compare.get()(lhs, rhs.first);
     }
 
-    bool operator()(Pair const& lhs,
-                    typename Pair::first_type const& rhs) const {
+    bool operator()(Pair const &lhs,
+                    typename Pair::first_type const &rhs) const {
         return compare.get()(lhs.first, rhs);
     }
 
     template <typename Key>
-    bool operator()(transparent_key_t<Key> const& lhs, Pair const& rhs) const {
+    bool operator()(transparent_key_t<Key> const &lhs, Pair const &rhs) const {
         return compare.get()(lhs.get(), rhs.first);
     }
 
     template <typename Key>
-    bool operator()(transparent_key_t<Key> const& lhs,
-                    typename Pair::first_type const& rhs) const {
+    bool operator()(transparent_key_t<Key> const &lhs,
+                    typename Pair::first_type const &rhs) const {
         return compare.get()(lhs.get(), rhs);
     }
 
     template <typename Key>
-    bool operator()(Pair const& lhs, transparent_key_t<Key> const& rhs) const {
+    bool operator()(Pair const &lhs, transparent_key_t<Key> const &rhs) const {
         return compare.get()(lhs.first, rhs.get());
     }
 
     template <typename Key>
-    bool operator()(typename Pair::first_type const& lhs,
-                    transparent_key_t<Key> const& rhs) const {
+    bool operator()(typename Pair::first_type const &lhs,
+                    transparent_key_t<Key> const &rhs) const {
         return compare.get()(lhs, rhs.get());
     }
 
@@ -191,12 +191,12 @@ template <typename D, typename Key, typename Container, typename Compare,
           typename = void>
 class flat_container_base {
 #include "container_traits.hpp"
-    D const* self() const { return static_cast<D const*>(this); }
-    D* self() { return static_cast<D*>(this); }
+    D const *self() const { return static_cast<D const *>(this); }
+    D *self() { return static_cast<D *>(this); }
 
 public:
     using key_compare = Compare;
-    const key_compare& key_comp() const { return self()->comp; }
+    const key_compare &key_comp() const { return self()->comp; }
 
     // Iterators
 
@@ -263,11 +263,11 @@ public:
 
     // Modifiers
 
-    iterator insert(const_iterator hint, value_type const& value) {
+    iterator insert(const_iterator hint, value_type const &value) {
         return self()->insert(value).first;
     }
 
-    iterator insert(const_iterator hint, value_type&& value) {
+    iterator insert(const_iterator hint, value_type &&value) {
         return self()->insert(std::move(value)).first;
     }
 
@@ -285,12 +285,12 @@ public:
     }
 
     template <typename... Args>
-    auto emplace(Args&&... args) {
+    auto emplace(Args &&...args) {
         return self()->insert(value_type(std::forward<Args>(args)...));
     }
 
     template <typename... Args>
-    auto emplace_hint(const_iterator hint, Args&&... args) {
+    auto emplace_hint(const_iterator hint, Args &&...args) {
         return self()->insert(value_type(std::forward<Args>(args)...));
     }
 
@@ -308,54 +308,54 @@ public:
         self()->container.clear();
     }
 
-    void swap(D& other) noexcept(D::has_noexcept_swap()) {
+    void swap(D &other) noexcept(D::has_noexcept_swap()) {
         using std::swap;
         swap(self()->container, other.container);
     }
 
     // Lookup
 
-    const_iterator find(key_type const& key) const {
+    const_iterator find(key_type const &key) const {
         const_iterator it = self()->lower_bound(key);
         if (it == self()->end() || self()->value_comp()(key, *it))
             return self()->end();
         return it;
     }
 
-    iterator find(key_type const& key) {
+    iterator find(key_type const &key) {
         iterator it = self()->lower_bound(key);
         if (it == self()->end() || self()->value_comp()(key, *it))
             return self()->end();
         return it;
     }
 
-    const_iterator lower_bound(key_type const& key) const {
+    const_iterator lower_bound(key_type const &key) const {
         return std::lower_bound(self()->begin(), self()->end(), key,
                                 self()->value_comp());
     }
 
-    iterator lower_bound(key_type const& key) {
+    iterator lower_bound(key_type const &key) {
         return std::lower_bound(self()->begin(), self()->end(), key,
                                 self()->value_comp());
     }
 
-    const_iterator upper_bound(key_type const& key) const {
+    const_iterator upper_bound(key_type const &key) const {
         return std::upper_bound(self()->begin(), self()->end(), key,
                                 self()->value_comp());
     }
 
-    iterator upper_bound(key_type const& key) {
+    iterator upper_bound(key_type const &key) {
         return std::upper_bound(self()->begin(), self()->end(), key,
                                 self()->value_comp());
     }
 
     std::pair<const_iterator, const_iterator> equal_range(
-        key_type const& key) const {
+        key_type const &key) const {
         return std::equal_range<const_iterator>(self()->begin(), self()->end(),
                                                 key, self()->value_comp());
     }
 
-    std::pair<iterator, iterator> equal_range(key_type const& key) {
+    std::pair<iterator, iterator> equal_range(key_type const &key) {
         return std::equal_range<iterator>(self()->begin(), self()->end(), key,
                                           self()->value_comp());
     }
@@ -363,8 +363,8 @@ public:
 private:
     static constexpr bool has_noexcept_swap() {
         using std::swap;
-        return noexcept(swap(*static_cast<Container*>(nullptr),
-                             *static_cast<Container*>(nullptr)));
+        return noexcept(swap(*static_cast<Container *>(nullptr),
+                             *static_cast<Container *>(nullptr)));
     }
 
 protected:
@@ -387,8 +387,8 @@ class flat_container_base<D, Key, Container, Compare,
                           std::void_t<typename Compare::is_transparent>>
     : public flat_container_base<D, Key, Container, Compare, int> {
 #include "container_traits.hpp"
-    D const* self() const { return static_cast<D const*>(this); }
-    D* self() { return static_cast<D*>(this); }
+    D const *self() const { return static_cast<D const *>(this); }
+    D *self() { return static_cast<D *>(this); }
     using B = flat_container_base<D, Key, Container, Compare, int>;
 
 public:
@@ -401,14 +401,14 @@ public:
     // Modifiers
 
     template <class P>
-    iterator insert(const_iterator hint, P&& value) {
+    iterator insert(const_iterator hint, P &&value) {
         return insert(std::forward<P>(value)).first;
     }
 
     // Lookup
 
     template <typename K>
-    const_iterator find(K const& key) const {
+    const_iterator find(K const &key) const {
         const_iterator it = self()->lower_bound(key);
         if (it == self()->end() || self()->value_comp()(std::ref(key), *it))
             return self()->end();
@@ -416,7 +416,7 @@ public:
     }
 
     template <typename K>
-    iterator find(K const& key) {
+    iterator find(K const &key) {
         iterator it = self()->lower_bound(key);
         if (it == self()->end() || self()->value_comp()(std::ref(key), *it))
             return self()->end();
@@ -424,38 +424,38 @@ public:
     }
 
     template <typename K>
-    const_iterator lower_bound(K const& key) const {
+    const_iterator lower_bound(K const &key) const {
         return std::lower_bound(self()->begin(), self()->end(), std::ref(key),
                                 self()->value_comp());
     }
 
     template <typename K>
-    iterator lower_bound(K const& key) {
+    iterator lower_bound(K const &key) {
         return std::lower_bound(self()->begin(), self()->end(), std::ref(key),
                                 self()->value_comp());
     }
 
     template <typename K>
-    const_iterator upper_bound(K const& key) const {
+    const_iterator upper_bound(K const &key) const {
         return std::upper_bound(self()->begin(), self()->end(), std::ref(key),
                                 self()->value_comp());
     }
 
     template <typename K>
-    iterator upper_bound(K const& key) {
+    iterator upper_bound(K const &key) {
         return std::upper_bound(self()->begin(), self()->end(), std::ref(key),
                                 self()->value_comp());
     }
 
     template <typename K>
-    std::pair<const_iterator, const_iterator> equal_range(K const& key) const {
+    std::pair<const_iterator, const_iterator> equal_range(K const &key) const {
         return std::equal_range<const_iterator>(self()->begin(), self()->end(),
                                                 std::ref(key),
                                                 self()->value_comp());
     }
 
     template <typename K>
-    std::pair<iterator, iterator> equal_range(K const& key) {
+    std::pair<iterator, iterator> equal_range(K const &key) {
         return std::equal_range<iterator>(self()->begin(), self()->end(),
                                           std::ref(key), self()->value_comp());
     }

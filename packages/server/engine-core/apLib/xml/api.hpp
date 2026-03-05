@@ -26,8 +26,8 @@
 namespace ap::xml {
 
 // Creates a documents root element (its declaration)
-inline auto declare(Document& doc, const char* declaration = {}) noexcept {
-    Declaration* d;
+inline auto declare(Document &doc, const char *declaration = {}) noexcept {
+    Declaration *d;
     if (declaration)
         d = doc.NewDeclaration(declaration);
     else
@@ -37,7 +37,7 @@ inline auto declare(Document& doc, const char* declaration = {}) noexcept {
 }
 
 // For when you have a parent node to link to...
-inline auto add(Document& doc, Element* parent, const char* name) noexcept {
+inline auto add(Document &doc, Element *parent, const char *name) noexcept {
     auto e = doc.NewElement(name);
     if (parent)
         parent->LinkEndChild(e);
@@ -46,16 +46,16 @@ inline auto add(Document& doc, Element* parent, const char* name) noexcept {
     return e;
 }
 
-inline auto add(Document& doc, Element* parent, const char* name,
-                const char* value) noexcept {
+inline auto add(Document &doc, Element *parent, const char *name,
+                const char *value) noexcept {
     auto e = add(doc, parent, name);
     e->SetText(value);
     return e;
 }
 
 template <typename Value>
-inline auto add(Document& doc, Element* parent, const char* name,
-                const Value& value) noexcept {
+inline auto add(Document &doc, Element *parent, const char *name,
+                const Value &value) noexcept {
     if constexpr (traits::IsStrV<Value>)
         return add(doc, parent, name, value.c_str());
     else {
@@ -69,24 +69,24 @@ inline auto add(Document& doc, Element* parent, const char* name,
 // Name returns the node name as a view, easier to compare vs raw char * and no
 // allocation
 template <typename NodeT>
-inline TextView name(const NodeT* node) noexcept {
+inline TextView name(const NodeT *node) noexcept {
     if (auto n = node->Name()) return n;
     return {};
 }
 
 // For when you just want to link to the root node...
 template <typename Value>
-inline auto add(Document& doc, const char* name, const Value& value) noexcept {
+inline auto add(Document &doc, const char *name, const Value &value) noexcept {
     return add(doc, doc.RootElement(), name, value);
 }
 
-inline auto add(Document& doc, const char* name) noexcept {
+inline auto add(Document &doc, const char *name) noexcept {
     return add(doc, doc.RootElement(), name);
 }
 
 // Extract/convert a node value
 template <typename T = TextView, typename NodeT>
-inline ErrorOr<T> value(const NodeT* node) noexcept {
+inline ErrorOr<T> value(const NodeT *node) noexcept {
     TextView val;
     if constexpr (traits::IsSameTypeV<Element, NodeT>) {
         val = node->GetText();
@@ -104,28 +104,28 @@ inline ErrorOr<T> value(const NodeT* node) noexcept {
         return _fsc<T>(val);
 }
 
-inline auto findAttribute(const Element* elem, const char* name) noexcept {
+inline auto findAttribute(const Element *elem, const char *name) noexcept {
     return elem->FindAttribute(name);
 }
 
 template <typename T = TextView>
-inline ErrorOr<T> getAttributeValue(const Element* elem,
-                                    const char* name) noexcept {
+inline ErrorOr<T> getAttributeValue(const Element *elem,
+                                    const char *name) noexcept {
     if (auto attribute = findAttribute(elem, name)) return value<T>(attribute);
     return APERR(Ec::NotFound, "XML attribute not found", name);
 }
 
 // Visit a tree of elements
 template <typename Callback>
-inline auto visit(const Element* root, Callback&& cb) {
+inline auto visit(const Element *root, Callback &&cb) {
     // Use our callback based visitor to match the value
     CallbackVisitor visitor{std::forward<Callback>(cb)};
     root->Accept(&visitor);
 }
 
 template <typename Attrib>
-inline auto setAttribute(Element* elem, const char* name,
-                         const Attrib& attrib) noexcept {
+inline auto setAttribute(Element *elem, const char *name,
+                         const Attrib &attrib) noexcept {
     if constexpr (traits::IsStrV<Attrib>)
         elem->SetAttribute(name, attrib);
     else {
@@ -138,15 +138,15 @@ inline auto setAttribute(Element* elem, const char* name,
 }
 
 template <typename Attrib>
-inline auto setAttribute(Element* elem, const char* name,
-                         const char* attrib) noexcept {
+inline auto setAttribute(Element *elem, const char *name,
+                         const char *attrib) noexcept {
     elem->SetAttribute(name, attrib);
 }
 
 // Set one or more attributes, each attribute must be string type, followed by
 // its value
 template <typename... Attribs>
-inline auto setAttributes(Element* elem, Attribs&&... attribs) noexcept {
+inline auto setAttributes(Element *elem, Attribs &&...attribs) noexcept {
     static_assert(sizeof...(attribs) % 2 == 0,
                   "Invalid number of attribute to values");
 
@@ -159,22 +159,22 @@ inline auto setAttributes(Element* elem, Attribs&&... attribs) noexcept {
 
     // Step 3 iterate the resulting pairs and set each attribute in turn
     util::tuple::forEach(makePair<>(_mv(names), _mv(vals)),
-                         [&](const auto& name, const auto& val) noexcept {
+                         [&](const auto &name, const auto &val) noexcept {
                              setAttribute(elem, get<0>(name), get<0>(val));
                          });
 
     return elem;
 }
 
-inline auto findChild(const Node* parent, const char* name) noexcept {
+inline auto findChild(const Node *parent, const char *name) noexcept {
     return parent->FirstChildElement(name);
 }
 
-inline auto findChild(Element* parent, const char* name) noexcept {
-    return _constCast<Element*>(parent->FirstChildElement(name));
+inline auto findChild(Element *parent, const char *name) noexcept {
+    return _constCast<Element *>(parent->FirstChildElement(name));
 }
 
-inline auto childCount(Element* parent, const char* name = nullptr) noexcept {
+inline auto childCount(Element *parent, const char *name = nullptr) noexcept {
     size_t count = {};
     for (auto element = parent->FirstChildElement(name); element;
          element = element->NextSiblingElement(name)) {
@@ -183,7 +183,7 @@ inline auto childCount(Element* parent, const char* name = nullptr) noexcept {
     return count;
 }
 
-inline auto attributeCount(Element* element) noexcept {
+inline auto attributeCount(Element *element) noexcept {
     size_t count = {};
     for (auto attribute = element->FirstAttribute(); attribute;
          attribute = attribute->Next()) {
@@ -192,7 +192,7 @@ inline auto attributeCount(Element* element) noexcept {
     return count;
 }
 
-inline Error parse(TextView str, Document& doc) noexcept {
+inline Error parse(TextView str, Document &doc) noexcept {
     if (auto ec = doc.Parse(str.data(), str.size()))
         return APERR(Ec::InvalidXml, doc.ErrorStr());
     if (!doc.RootElement())
@@ -201,7 +201,7 @@ inline Error parse(TextView str, Document& doc) noexcept {
 }
 
 template <typename Buffer>
-inline void render(const Node& node, Buffer& buff,
+inline void render(const Node &node, Buffer &buff,
                    bool compact = true) noexcept {
     tinyxml2::XMLPrinter printer(nullptr, compact);
     node.Accept(&printer);
@@ -214,8 +214,8 @@ inline void render(const Node& node, Buffer& buff,
 }
 
 template <typename AllocT = std::allocator<char>>
-inline auto toString(const Node& node, bool compact = true,
-                     const AllocT& alloc = {}) noexcept {
+inline auto toString(const Node &node, bool compact = true,
+                     const AllocT &alloc = {}) noexcept {
     string::Str<char, string::Case<char>, AllocT> buff;
     render(node, buff, compact);
     return buff;
@@ -227,13 +227,13 @@ namespace tinyxml2 {
 
 // ADL lookup for __toString of XMLNode
 template <typename Buffer>
-inline auto __toString(const XMLNode& node, Buffer& buff) noexcept {
+inline auto __toString(const XMLNode &node, Buffer &buff) noexcept {
     return ::ap::xml::render(node, buff, false);
 }
 
 // ADL lookup for __toString of XMLAttribute
 template <typename Buffer>
-inline auto __toString(const XMLAttribute& attrib, Buffer& buff) noexcept {
+inline auto __toString(const XMLAttribute &attrib, Buffer &buff) noexcept {
     buff << *::ap::xml::value(&attrib);
 }
 

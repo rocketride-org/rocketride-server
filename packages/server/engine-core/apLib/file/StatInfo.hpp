@@ -72,7 +72,7 @@ struct StatInfo final {
     bool isLink = {};
     bool isOffline = {};
 
-    bool operator==(const StatInfo& info) const noexcept {
+    bool operator==(const StatInfo &info) const noexcept {
         if (changeTime != info.changeTime) {
             LOG(FileStat, "changeTime {} != {}", changeTime, info.changeTime);
             return false;
@@ -130,7 +130,7 @@ struct StatInfo final {
         return true;
     }
 
-    bool operator!=(const StatInfo& info) const noexcept {
+    bool operator!=(const StatInfo &info) const noexcept {
         return operator==(info) == false;
     }
 

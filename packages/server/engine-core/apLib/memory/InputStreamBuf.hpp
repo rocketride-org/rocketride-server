@@ -32,9 +32,9 @@ public:
     using Parent::parent;
 
 public:
-    InputStreamBuf(Input& in) noexcept : Parent(in) {}
-    InputStreamBuf(const InputStreamBuf&) = default;
-    InputStreamBuf(InputStreamBuf&&) = default;
+    InputStreamBuf(Input &in) noexcept : Parent(in) {}
+    InputStreamBuf(const InputStreamBuf &) = default;
+    InputStreamBuf(InputStreamBuf &&) = default;
 
 protected:
     // Buffer management and positioning
@@ -72,11 +72,11 @@ protected:
         return _nc<std::streamsize>(parent().size());
     }
 
-    std::streamsize xsgetn(char* s, std::streamsize n) override {
+    std::streamsize xsgetn(char *s, std::streamsize n) override {
         auto length =
             std::min<uint64_t>(n, parent().size() - parent().offset());
         return _nc<std::streamsize>(parent().read(
-            OutputData{_reCast<uint8_t*>(s), _nc<size_t>(n)}, length));
+            OutputData{_reCast<uint8_t *>(s), _nc<size_t>(n)}, length));
     }
 
     int_type underflow() override {

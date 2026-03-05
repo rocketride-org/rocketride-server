@@ -45,13 +45,13 @@ namespace engine::store::filter::filesys::base {
 ///             file
 //---------------------------------------------------------------------
 template <log::Lvl LvlT>
-ErrorOr<bool> IBaseInstance<LvlT>::stat(Entry& entry) noexcept {
+ErrorOr<bool> IBaseInstance<LvlT>::stat(Entry &entry) noexcept {
     Text path;
     if (auto ccode = Url::osPath(entry.url(), path)) return ccode;
 
     auto errorOrStatInfo = ap::file::stat(path);
     if (errorOrStatInfo.hasCcode()) {
-        auto& errorCode = errorOrStatInfo.ccode();
+        auto &errorCode = errorOrStatInfo.ccode();
         if (Parent::isFileMovedOrUnavailable(errorCode)) {
             LOGT("File is unavailable", path);
             return true;
@@ -97,7 +97,7 @@ ErrorOr<bool> IBaseInstance<LvlT>::stat(Entry& entry) noexcept {
 ///		Error
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
-Error IBaseInstance<LvlT>::isObjectUpdateNeeded(const Url& url) noexcept {
+Error IBaseInstance<LvlT>::isObjectUpdateNeeded(const Url &url) noexcept {
     if (endpoint->config.exportUpdateBehavior ==
         EXPORT_UPDATE_BEHAVIOR::UNKNOWN)
         return {};

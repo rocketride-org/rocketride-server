@@ -171,12 +171,13 @@ namespace ap::file::smb {
 /* CreateDisposition field. */
 #define FILE_SUPERSEDE \
     0 /* File exists overwrite/supersede. File not exist create. */
-#define FILE_OPEN 1         /* File exists open. File not exist fail. */
-#define FILE_CREATE 2       /* File exists fail. File not exist create. */
-#define FILE_OPEN_IF 3      /* File exists open. File not exist create. */
-#define FILE_OVERWRITE 4    /* File exists overwrite. File not exist fail. */
-#define FILE_OVERWRITE_IF 5 /* File exists overwrite. File not exist create. \
-                             */
+#define FILE_OPEN 1      /* File exists open. File not exist fail. */
+#define FILE_CREATE 2    /* File exists fail. File not exist create. */
+#define FILE_OPEN_IF 3   /* File exists open. File not exist create. */
+#define FILE_OVERWRITE 4 /* File exists overwrite. File not exist fail. */
+#define FILE_OVERWRITE_IF                              \
+    5 /* File exists overwrite. File not exist create. \
+       */
 
 struct perm_value {
     const char *perm;

@@ -51,8 +51,8 @@ static url::UrlConfig urlConfig{
      ///	@param[out]	toUrl
      ///		Receives the url
      //-------------------------------------------------------------
-     .toUrl = [](const iTextView fromProtocol, const file::Path& fromPath,
-                 Url& toUrl) -> Error {
+     .toUrl = [](const iTextView fromProtocol, const file::Path &fromPath,
+                 Url &toUrl) -> Error {
          using namespace ap::url;
 
          toUrl = builder() << protocol(Type) << fromPath;

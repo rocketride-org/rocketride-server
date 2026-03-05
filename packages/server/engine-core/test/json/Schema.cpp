@@ -30,7 +30,7 @@ struct MyThing {
     json::Value params;
     inline static bool valid = true;
 
-    bool operator==(const MyThing& other) const noexcept {
+    bool operator==(const MyThing &other) const noexcept {
         return params == other.params && val1 == other.val1 &&
                val2 == other.val2 && val3 == other.val3;
     }

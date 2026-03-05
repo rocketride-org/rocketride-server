@@ -85,8 +85,8 @@ enum class SubstrMode { Utf16, Utf32 };
 // 32 lengths of substring
 template <SubstrMode ModeT>
 inline ErrorOr<TextView> utfSubstr(TextView string, size_t modeOffset,
-                                   size_t modeLength, UtfCharsEx& substrOffsets,
-                                   UtfChars& substrLengths) noexcept {
+                                   size_t modeLength, UtfCharsEx &substrOffsets,
+                                   UtfChars &substrLengths) noexcept {
     // Checking length for 0 here simplifies the loop below
     if (!modeLength) return TextView();
 
@@ -95,10 +95,10 @@ inline ErrorOr<TextView> utfSubstr(TextView string, size_t modeOffset,
     substrLengths = {};
 
     // Reference to the length and offset we care about
-    auto& currentModeOffset = ModeT == SubstrMode::Utf16
+    auto &currentModeOffset = ModeT == SubstrMode::Utf16
                                   ? substrOffsets.utf16Chars
                                   : substrOffsets.utf32Chars;
-    auto& currentModeLength = ModeT == SubstrMode::Utf16
+    auto &currentModeLength = ModeT == SubstrMode::Utf16
                                   ? substrLengths.utf16Chars
                                   : substrLengths.utf32Chars;
 
@@ -161,23 +161,23 @@ inline ErrorOr<TextView> utfSubstr(TextView string, size_t modeOffset,
 }
 
 inline ErrorOr<TextView> utf16Substr(TextView string, size_t offset,
-                                     size_t length, UtfCharsEx& substrOffsets,
-                                     UtfChars& substrLengths) noexcept {
+                                     size_t length, UtfCharsEx &substrOffsets,
+                                     UtfChars &substrLengths) noexcept {
     return utfSubstr<SubstrMode::Utf16>(string, offset, length, substrOffsets,
                                         substrLengths);
 }
 
 inline ErrorOr<TextView> utf32Substr(TextView string, size_t offset,
-                                     size_t length, UtfCharsEx& substrOffsets,
-                                     UtfChars& substrLengths) noexcept {
+                                     size_t length, UtfCharsEx &substrOffsets,
+                                     UtfChars &substrLengths) noexcept {
     return utfSubstr<SubstrMode::Utf32>(string, offset, length, substrOffsets,
                                         substrLengths);
 }
 
 template <typename ChrT>
 inline ErrorOr<TextView> utfSubstr(TextView string, size_t offset,
-                                   size_t length, UtfCharsEx& substrOffsets,
-                                   UtfChars& substrLengths) noexcept {
+                                   size_t length, UtfCharsEx &substrOffsets,
+                                   UtfChars &substrLengths) noexcept {
     static_assert(
         sizeof(ChrT) == sizeof(Utf16Chr) || sizeof(ChrT) == sizeof(Utf32Chr),
         "Not supported");
@@ -317,7 +317,7 @@ namespace test {
 // unit-testing
 inline UtfCharsEx utfLengthsEx(Utf16View utf16) noexcept {
     UtfCharsEx res;
-    _cast<UtfChars&>(res) = utfLengths(utf16);
+    _cast<UtfChars &>(res) = utfLengths(utf16);
     res.utf8Chars = _tr<Text>(utf16).length();
     return res;
 }

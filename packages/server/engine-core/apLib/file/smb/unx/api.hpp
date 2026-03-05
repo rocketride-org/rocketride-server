@@ -25,17 +25,17 @@
 
 namespace ap::file::smb {
 
-inline Error init(const Text& username, const Text& password) noexcept {
+inline Error init(const Text &username, const Text &password) noexcept {
     return client().init(username, password);
 }
 
-inline ErrorOr<std::vector<MountCtx>> mount(const Share& share) noexcept {
+inline ErrorOr<std::vector<MountCtx>> mount(const Share &share) noexcept {
     if (!share) return APERRL(Smb, Ec::InvalidParam, "Invalid share", share);
     return client().mount(share);
 }
 
 inline ErrorOr<std::vector<Text>> enumShares(
-    const Share& share, TextView originalShareName) noexcept {
+    const Share &share, TextView originalShareName) noexcept {
     if (!share) return APERRL(Smb, Ec::InvalidParam, "Invalid share", share);
     return client().enumShares(share, originalShareName);
 }

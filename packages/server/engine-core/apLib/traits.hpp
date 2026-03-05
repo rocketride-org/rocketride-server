@@ -37,23 +37,23 @@ struct remove_deepest_const_impl<const T> {
 };
 
 template <typename T>
-struct remove_deepest_const_impl<T*> {
-    typedef typename remove_deepest_const_impl<T>::type* type;
+struct remove_deepest_const_impl<T *> {
+    typedef typename remove_deepest_const_impl<T>::type *type;
 };
 
 template <typename T>
-struct remove_deepest_const_impl<T* const> {
-    typedef typename remove_deepest_const_impl<T>::type* const type;
+struct remove_deepest_const_impl<T *const> {
+    typedef typename remove_deepest_const_impl<T>::type *const type;
 };
 
 template <typename T>
-struct remove_deepest_const_impl<T&> {
-    typedef typename remove_deepest_const_impl<T>::type& type;
+struct remove_deepest_const_impl<T &> {
+    typedef typename remove_deepest_const_impl<T>::type &type;
 };
 
 template <typename T>
-struct remove_deepest_const_impl<T&&> {
-    typedef typename remove_deepest_const_impl<T>::type&& type;
+struct remove_deepest_const_impl<T &&> {
+    typedef typename remove_deepest_const_impl<T>::type &&type;
 };
 
 template <typename T>
@@ -112,8 +112,8 @@ constexpr auto IsSameTypeV = IsSameType<T, Y>::value;
 struct nonesuch {
     nonesuch() = delete;
     ~nonesuch() = delete;
-    nonesuch(nonesuch const&) = delete;
-    void operator=(nonesuch const&) = delete;
+    nonesuch(nonesuch const &) = delete;
+    void operator=(nonesuch const &) = delete;
 };
 
 namespace detail {
@@ -169,7 +169,7 @@ template <typename StreamClass, typename T>
 class HasStreamInOverload {
     template <typename SStreamClass, typename TT>
     static auto test(int)
-        -> decltype(std::declval<SStreamClass&>() >> std::declval<TT&>(),
+        -> decltype(std::declval<SStreamClass &>() >> std::declval<TT &>(),
                     std::true_type());
 
     template <typename, typename>
@@ -189,7 +189,7 @@ template <typename L, typename R>
 class HasGlobalEqualityOperator {
     template <typename LL, typename RR>
     static auto test(int)
-        -> decltype(std::declval<LL&>() == std::declval<RR&>(),
+        -> decltype(std::declval<LL &>() == std::declval<RR &>(),
                     std::true_type());
 
     template <typename, typename>
@@ -208,9 +208,9 @@ constexpr bool HasGlobalEqualityOperatorV =
 template <typename StreamClass, typename T>
 class HasStreamOutOverload {
     template <typename SStreamClass, typename TT>
-    static auto test(int)
-        -> decltype(std::declval<SStreamClass&>() << std::declval<const TT&>(),
-                    std::true_type());
+    static auto test(int) -> decltype(std::declval<SStreamClass &>()
+                                          << std::declval<const TT &>(),
+                                      std::true_type());
 
     template <typename, typename>
     static auto test(...) -> std::false_type;
@@ -476,14 +476,14 @@ using IfNone = typename std::negation<std::disjunction<Ps<T>...>>::value;
 // Common methods we may want to detect
 template <typename TestType>
 using DetectResizeMethod =
-    decltype(std::declval<TestType&>().resize(std::declval<size_t>()));
+    decltype(std::declval<TestType &>().resize(std::declval<size_t>()));
 
 template <typename TestType>
-using DetectSizeMethod = decltype(std::declval<TestType&>().size());
+using DetectSizeMethod = decltype(std::declval<TestType &>().size());
 
 template <typename TestType>
 using DetectReserveMethod =
-    decltype(std::declval<TestType&>().reserve(std::declval<size_t>()));
+    decltype(std::declval<TestType &>().reserve(std::declval<size_t>()));
 
 template <typename ArgType>
 using DetectCloseMethodPtr = decltype(std::declval<ArgType>()->close());
@@ -493,7 +493,7 @@ using DetectRemoveMethodPtr = decltype(std::declval<ArgType>()->remove());
 
 template <typename ArgType, typename ModeType>
 using DetectOpenMethod =
-    decltype(std::declval<ArgType&>()->open(std::declval<const ModeType>)());
+    decltype(std::declval<ArgType &>()->open(std::declval<const ModeType>)());
 
 // This is a way to detect internal types of containers, instantiate your type
 // in it then you can access its inner definitions e.g.:

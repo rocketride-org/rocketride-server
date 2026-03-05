@@ -27,13 +27,13 @@ TEST_CASE("traits") {
     using namespace traits;
 
     SECTION("IsSameType") {
-        static_assert(IsSameTypeV<const char*, char*>);
-        static_assert(IsSameTypeV<char const*, char*>);
-        static_assert(IsSameTypeV<char* const, char*>);
+        static_assert(IsSameTypeV<const char *, char *>);
+        static_assert(IsSameTypeV<char const *, char *>);
+        static_assert(IsSameTypeV<char *const, char *>);
 
-        static_assert(IsSameTypeV<char*, const char*>);
-        static_assert(IsSameTypeV<char*, char const*>);
-        static_assert(IsSameTypeV<char*, char* const>);
+        static_assert(IsSameTypeV<char *, const char *>);
+        static_assert(IsSameTypeV<char *, char const *>);
+        static_assert(IsSameTypeV<char *, char *const>);
     }
 
     SECTION("HasElementType") {

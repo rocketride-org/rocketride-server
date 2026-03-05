@@ -35,8 +35,8 @@ namespace engine::store::filter::outlook {
 /// @returns
 ///     Error
 //-------------------------------------------------------------------------
-Error IFilterInstance::renderObject(ServicePipe& target,
-                                    Entry& object) noexcept {
+Error IFilterInstance::renderObject(ServicePipe &target,
+                                    Entry &object) noexcept {
     Error ccode;
 
     LOGT("Rendering Outlook object {}", object);
@@ -74,14 +74,14 @@ Error IFilterInstance::renderObject(ServicePipe& target,
 ///    @returns
 ///        Error
 //-------------------------------------------------------------------------
-Error IFilterInstance::renderStandardFile(ServicePipe& target,
-                                          Entry& object) noexcept {
+Error IFilterInstance::renderStandardFile(ServicePipe &target,
+                                          Entry &object) noexcept {
     LOGT("Rendering MS Email object {}", object.fileName());
     Error ccode;
     auto start = time::now();
 
     // Get the internal tag buffer
-    TAG* pTagBuffer;
+    TAG *pTagBuffer;
     if ((ccode = getTagBuffer(&pTagBuffer))) return ccode;
 
     Text pathName = object.name();
@@ -120,7 +120,7 @@ Error IFilterInstance::renderStandardFile(ServicePipe& target,
         // Build the tag
         const auto pDataTag = TAG_OBJECT_STREAM_DATA::build(pTagBuffer);
         auto dataBuffer = OutputData(pDataTag->data.data, sizeToRead);
-        unsigned char* ptr = dataBuffer.template cast<unsigned char>();
+        unsigned char *ptr = dataBuffer.template cast<unsigned char>();
         std::copy(m_data.begin() + offset, m_data.begin() + offset + sizeToRead,
                   ptr);
         // Indicate end of TAG buffer
@@ -158,12 +158,12 @@ Error IFilterInstance::renderStandardFile(ServicePipe& target,
 ///    @returns
 ///        Error
 //-------------------------------------------------------------------------
-Error IFilterInstance::sendTagMetadata(ServicePipe& target,
-                                       Entry& object) noexcept {
+Error IFilterInstance::sendTagMetadata(ServicePipe &target,
+                                       Entry &object) noexcept {
     Error ccode;
 
     // Get the internal tag buffer
-    TAG* pTagBuffer;
+    TAG *pTagBuffer;
     if ((ccode = getTagBuffer(&pTagBuffer))) return ccode;
 
     // Get the path
@@ -212,8 +212,8 @@ Error IFilterInstance::sendTagMetadata(ServicePipe& target,
 ///    @returns
 ///        Error
 //-------------------------------------------------------------------------
-Error IFilterInstance::sendTagBeginStream(ServicePipe& target, TAG* pTagBuffer,
-                                          Entry& object) noexcept {
+Error IFilterInstance::sendTagBeginStream(ServicePipe &target, TAG *pTagBuffer,
+                                          Entry &object) noexcept {
     // Setup
     auto type = TAG_OBJECT_STREAM_BEGIN::STREAM_TYPE::STREAM_DATA;
     size_t streamOffset = 0;
@@ -237,7 +237,7 @@ Error IFilterInstance::sendTagBeginStream(ServicePipe& target, TAG* pTagBuffer,
 ///    @returns
 ///        Error
 //-------------------------------------------------------------------------
-Error IFilterInstance::sendTagEndStream(ServicePipe& target) noexcept {
+Error IFilterInstance::sendTagEndStream(ServicePipe &target) noexcept {
     // Create the tag
     const auto streamEndTag = TAG_OBJECT_STREAM_END();
 
@@ -254,7 +254,7 @@ Error IFilterInstance::sendTagEndStream(ServicePipe& target) noexcept {
 ///	@param[in]	entry
 ///		Reference to the object to open
 //-------------------------------------------------------------------------
-Error IFilterInstance::prepareObject(Entry& entry) noexcept {
+Error IFilterInstance::prepareObject(Entry &entry) noexcept {
     // create new connection
     if (auto ccode = getClient()) {
         entry.completionCode(ccode);
@@ -279,7 +279,7 @@ Error IFilterInstance::prepareObject(Entry& entry) noexcept {
 ///	@param[in]	entry
 ///		Reference to the object
 //-------------------------------------------------------------------------
-Error IFilterInstance::getData(Entry& entry) noexcept {
+Error IFilterInstance::getData(Entry &entry) noexcept {
     // Read the data
     auto data = m_msEmailNode->getMessageInMime(entry);
     if (data.hasCcode()) return data.ccode();

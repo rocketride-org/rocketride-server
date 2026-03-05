@@ -149,7 +149,7 @@ TEST_CASE("memory::ViewAllocator") {
 
                 util::Throughput rate;
                 auto i = 0;
-                for (auto& [k, s] : set) {
+                for (auto &[k, s] : set) {
                     auto str = _ts("Index #", i++);
                     _equalTo(s.name, str, str.size());
                     rate.report();

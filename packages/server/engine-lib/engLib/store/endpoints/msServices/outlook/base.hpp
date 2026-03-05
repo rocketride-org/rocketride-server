@@ -85,7 +85,7 @@ public:
     //-----------------------------------------------------------------
     // Constructor/destructor
     //-----------------------------------------------------------------
-    IFilterEndpoint(const FactoryArgs& args) noexcept
+    IFilterEndpoint(const FactoryArgs &args) noexcept
         : Parent(args) {
 
           };
@@ -105,24 +105,24 @@ public:
     //-----------------------------------------------------------------
     virtual Error beginEndpoint(OPEN_MODE openMode) noexcept override;
     virtual Error validateConfig(bool syntaxOnly) noexcept override;
-    virtual Error getConfigSubKey(Text& key) noexcept override;
-    virtual Error setConfig(const json::Value& jobConfig,
-                            const json::Value& taskConfig,
-                            const json::Value& serviceConfig) noexcept override;
-    virtual Error scanObjects(Path& path,
-                              const ScanAddObject& callback) noexcept override;
+    virtual Error getConfigSubKey(Text &key) noexcept override;
+    virtual Error setConfig(const json::Value &jobConfig,
+                            const json::Value &taskConfig,
+                            const json::Value &serviceConfig) noexcept override;
+    virtual Error scanObjects(Path &path,
+                              const ScanAddObject &callback) noexcept override;
 
     bool isSyncEndpoint() noexcept;
     virtual Error endEndpoint() noexcept override;
-    std::mutex& getPathLock() noexcept;
-    FoldersMap& getFolderMap() noexcept;
+    std::mutex &getPathLock() noexcept;
+    FoldersMap &getFolderMap() noexcept;
 
 private:
     //-----------------------------------------------------------------
     /// Update client and return path info
     //-----------------------------------------------------------------
     ErrorOr<Path> processPath(PATH_PROCESSING_TYPE type,
-                              const Path& path) noexcept {
+                              const Path &path) noexcept {
         return path.subpth(_cast<uint32_t>(type));
     }
 
@@ -130,8 +130,8 @@ private:
     /// Process specific entry object
     //-----------------------------------------------------------------
     template <class T>
-    Error processEntry(const T& blob, Entry& object,
-                       const ScanAddObject& addObject) noexcept;
+    Error processEntry(const T &blob, Entry &object,
+                       const ScanAddObject &addObject) noexcept;
 
     //-----------------------------------------------------------------
     /// check permissions for outlook
@@ -150,7 +150,7 @@ private:
     std::shared_ptr<MsEmailNode> m_msEmailNode;
 
     ErrorOr<std::shared_ptr<MsEmailNode>> createClient(
-        IFilterEndpoint* parent) noexcept;
+        IFilterEndpoint *parent) noexcept;
     // folderMap
     FoldersMap m_folders;
 
@@ -213,10 +213,10 @@ public:
     //-----------------------------------------------------------------
     // Constructor/destructor
     //-----------------------------------------------------------------
-    IFilterInstance(const FactoryArgs& args) noexcept
+    IFilterInstance(const FactoryArgs &args) noexcept
         : Parent(args),
-          endpoint((static_cast<IFilterEndpoint&>(*args.endpoint))),
-          global((static_cast<IFilterGlobal&>(*args.global))) {};
+          endpoint((static_cast<IFilterEndpoint &>(*args.endpoint))),
+          global((static_cast<IFilterGlobal &>(*args.global))) {};
     virtual ~IFilterInstance() {};
 
     //-----------------------------------------------------------------
@@ -232,22 +232,22 @@ public:
     // Public API
     //-----------------------------------------------------------------
     virtual Error beginFilterInstance() noexcept override;
-    virtual Error renderObject(ServicePipe& target,
-                               Entry& object) noexcept override;
-    virtual Error checkChanged(Entry& object) noexcept override;
-    virtual ErrorOr<bool> stat(Entry& object) noexcept override;
-    virtual Error prepareObject(Entry& entry) noexcept override;
+    virtual Error renderObject(ServicePipe &target,
+                               Entry &object) noexcept override;
+    virtual Error checkChanged(Entry &object) noexcept override;
+    virtual ErrorOr<bool> stat(Entry &object) noexcept override;
+    virtual Error prepareObject(Entry &entry) noexcept override;
 
     //-------------------------------------------------------------
     // Public function - Permissions support
     //-------------------------------------------------------------
-    virtual Error getPermissions(Entry& entry) noexcept override;
+    virtual Error getPermissions(Entry &entry) noexcept override;
     virtual ErrorOr<std::list<Text>> outputPermissions() noexcept override;
-    Error mapId(TextView idStr, std::unordered_set<Text>& mappedIds) noexcept;
+    Error mapId(TextView idStr, std::unordered_set<Text> &mappedIds) noexcept;
 
-    Error getData(Entry& entry) noexcept;
+    Error getData(Entry &entry) noexcept;
     // No deletion supported for emails
-    virtual Error removeObject(Entry& object) noexcept override {
+    virtual Error removeObject(Entry &object) noexcept override {
         auto ccode =
             MONERR(warning, Ec::Warning, "Deletion not supported on emails");
         // mark object as failed
@@ -261,23 +261,23 @@ protected:
     /// @details
     ///		Private functions used for store
     //-----------------------------------------------------------------
-    Error processObjectStreamData(const TAG_OBJECT_STREAM_DATA* pTag) noexcept;
+    Error processObjectStreamData(const TAG_OBJECT_STREAM_DATA *pTag) noexcept;
 
     //-----------------------------------------------------------------
     // @details
     //      Implementation function used to render the object
     //-----------------------------------------------------------------
-    Error renderStandardFile(ServicePipe& target, Entry& object) noexcept;
-    Error sendTagBeginStream(ServicePipe& target, TAG* pTagBuffer,
-                             Entry& object) noexcept;
-    Error sendTagMetadata(ServicePipe& target, Entry& object) noexcept;
-    Error sendTagEndStream(ServicePipe& target) noexcept override;
+    Error renderStandardFile(ServicePipe &target, Entry &object) noexcept;
+    Error sendTagBeginStream(ServicePipe &target, TAG *pTagBuffer,
+                             Entry &object) noexcept;
+    Error sendTagMetadata(ServicePipe &target, Entry &object) noexcept;
+    Error sendTagEndStream(ServicePipe &target) noexcept override;
 
     //-----------------------------------------------------------------
     // @details
     //      Update client and extract path
     //-----------------------------------------------------------------
-    ErrorOr<Path> processPath(const Entry& object) noexcept {
+    ErrorOr<Path> processPath(const Entry &object) noexcept {
         Path path;
         if (auto ccode = Url::toPath(object.url(), path)) return ccode;
         return endpoint.processPath(PATH_PROCESSING_TYPE::ACCOUNT_AND_CONTAINER,
@@ -288,12 +288,12 @@ private:
     //-----------------------------------------------------------------
     // Reference to the bound pipe
     //-----------------------------------------------------------------
-    IFilterGlobal& global;
+    IFilterGlobal &global;
 
     //-----------------------------------------------------------------
     // Reference to the bound pipe
     //-----------------------------------------------------------------
-    IFilterEndpoint& endpoint;
+    IFilterEndpoint &endpoint;
 
     //-----------------------------------------------------------------
     ///	@details
@@ -305,5 +305,5 @@ private:
 };
 
 // helper function
-time_t convertFromAzureDateTime(const utility::datetime& dt) noexcept;
+time_t convertFromAzureDateTime(const utility::datetime &dt) noexcept;
 }  // namespace engine::store::filter::outlook

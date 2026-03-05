@@ -27,7 +27,7 @@ namespace {
 
 using namespace ap;
 
-file::Path& actualCrashDumpLocation() noexcept {
+file::Path &actualCrashDumpLocation() noexcept {
     static file::Path dir = std::filesystem::temp_directory_path();
     return dir;
 }
@@ -40,12 +40,12 @@ size_t g_nextSlot = 1;
 std::map<size_t, FatalityHandler> g_fatalityHandlers;
 std::map<size_t, CrashDumpLocationChangeHandler> g_crashDumpLocationHandlers;
 
-bool& bugCheck() noexcept {
+bool &bugCheck() noexcept {
     static bool check = plat::IsDebug ? true : false;
     return check;
 }
 
-size_t registerFatalityHandler(FatalityHandler&& handler) noexcept {
+size_t registerFatalityHandler(FatalityHandler &&handler) noexcept {
     auto slot = g_nextSlot++;
     g_fatalityHandlers[slot] = _mv(handler);
     return slot;
@@ -56,7 +56,7 @@ void deRegisterFatalityHandler(size_t slot) noexcept {
 }
 
 size_t registerCrashDumpLocationChangedHandler(
-    CrashDumpLocationChangeHandler&& handler) noexcept {
+    CrashDumpLocationChangeHandler &&handler) noexcept {
     auto slot = g_nextSlot++;
     g_crashDumpLocationHandlers[slot] = _mv(handler);
     return slot;
@@ -68,22 +68,22 @@ void deRegisterCrashDumpLocationChangedHandler(size_t slot) noexcept {
 
 void onFatality(Location location, std::string_view reason) noexcept {
     auto handlers = g_fatalityHandlers;
-    for (auto& [slot, handler] : handlers) _call(handler, location, reason);
+    for (auto &[slot, handler] : handlers) _call(handler, location, reason);
 }
 
-Text& crashDumpPrefix() noexcept {
+Text &crashDumpPrefix() noexcept {
     static Text prefix;
     return prefix;
 }
 
-const file::Path& crashDumpLocation() noexcept {
+const file::Path &crashDumpLocation() noexcept {
     return actualCrashDumpLocation();
 }
 
-void crashDumpLocation(const file::Path& path) noexcept {
+void crashDumpLocation(const file::Path &path) noexcept {
     actualCrashDumpLocation() = path;
     auto handlers = g_crashDumpLocationHandlers;
-    for (auto& [slot, handler] : handlers) _call(handler, path);
+    for (auto &[slot, handler] : handlers) _call(handler, path);
 }
 
 Text createCrashDumpName(TextView extension) noexcept {

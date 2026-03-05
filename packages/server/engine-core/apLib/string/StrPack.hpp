@@ -40,16 +40,16 @@ public:
     StrPack() = default;
 
     // Move ok, copy blocked
-    StrPack(StrPack&& strs) = default;
-    StrPack& operator=(StrPack&& str) = default;
+    StrPack(StrPack &&strs) = default;
+    StrPack &operator=(StrPack &&str) = default;
 
-    StrPack(const StrPack& strs) = delete;
-    StrPack& operator=(const StrPack& str) = delete;
+    StrPack(const StrPack &strs) = delete;
+    StrPack &operator=(const StrPack &str) = delete;
 
     // An entry packs a single string in the slab
     struct Entry {
         // Ptr to next entry
-        Entry* next = nullptr;
+        Entry *next = nullptr;
 
         // Size of the data portion of this entry
         size_t size = NoPos;
@@ -68,7 +68,7 @@ public:
     _const auto EntryOverhead = offsetof(Entry, data);
 
 public:
-    decltype(auto) operator==(const StrPack& pack) const noexcept {
+    decltype(auto) operator==(const StrPack &pack) const noexcept {
         // Have to walk both, as the ptrs may have changed after a
         // toData/fromData translation
         auto lhs = first();
@@ -82,13 +82,13 @@ public:
     }
 
     template <typename Out>
-    auto __toData(Out& out) const noexcept(false) {
+    auto __toData(Out &out) const noexcept(false) {
         // Write out the number of slabs we are dealing with
         *_tdb(out, memory::PackHdr{m_slabs.size()});
 
         // Write each slab out in order each Slab will self
         // marshal
-        for (auto& slab : m_slabs) *_tdb(out, slab);
+        for (auto &slab : m_slabs) *_tdb(out, slab);
 
         LOG(Data, "{} Packed {} slabs", out, m_slabs.size());
     }
@@ -135,23 +135,23 @@ public:
 
 private:
     // Convert a view to an entry by back tracing its ptr
-    static Entry* fromView(ViewType view) noexcept {
+    static Entry *fromView(ViewType view) noexcept {
         if (!view) return nullptr;
 
-        auto data = _reCast<const unsigned char*>(view.data());
+        auto data = _reCast<const unsigned char *>(view.data());
         data -= EntryOverhead;
 
-        return _reCast<Entry*>(_constCast<unsigned char*>(data));
+        return _reCast<Entry *>(_constCast<unsigned char *>(data));
     }
 
     // Convert an entry ptr to a view
-    static ViewType toView(const Entry* entry) noexcept {
+    static ViewType toView(const Entry *entry) noexcept {
         if (entry) return ViewType{entry->data, entry->size};
         return {};
     }
 
     // Allocates a new entry ptr to a free or allocated slab
-    Entry* allocateEntry(size_t size) noexcept {
+    Entry *allocateEntry(size_t size) noexcept {
         // See if our current slab will do
         if (m_currentSlab && m_currentSlab->size() >= size) {
             // Initialize the new entry with its own default assignment
@@ -184,7 +184,7 @@ private:
 
     // Keep the last entry around while we add to it, when the next
     // entry is added we'll link it to this before replacing it
-    Entry* m_lastEntry = {};
+    Entry *m_lastEntry = {};
 
     // Total number of stored strings
     size_t m_packCount = {};

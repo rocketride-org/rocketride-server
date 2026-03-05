@@ -68,7 +68,7 @@ TEST_CASE("file::WinPath") {
         REQUIRE(path == "c:/john/smith"_tv);
         REQUIRE(path == "c:/john/smith"_t);
         REQUIRE(path == "c:/john/smith");
-        REQUIRE(!Utf16cmp(_cast<const Utf16Chr*>(path), L"C:/john/smith"));
+        REQUIRE(!Utf16cmp(_cast<const Utf16Chr *>(path), L"C:/john/smith"));
     }
 
     SECTION("Operator /") {

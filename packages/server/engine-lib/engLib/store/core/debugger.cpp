@@ -47,8 +47,8 @@ std::unordered_map<std::string, ServiceEndpointWeak>
  *
  * @param pInstance Pointer to the service instance being entered.
  */
-void Debugger::debugEnter(IServiceFilterInstance* pInstance,
-                          const json::Value& trace) noexcept {
+void Debugger::debugEnter(IServiceFilterInstance *pInstance,
+                          const json::Value &trace) noexcept {
     m_recurseLevel++;  // Track depth of recursive calls
 
     if (::engine::config::monitor()->isAppMonitor()) {
@@ -56,8 +56,7 @@ void Debugger::debugEnter(IServiceFilterInstance* pInstance,
         StackText msg;
         _tsbo(msg, {Format::HEX, {}, '*'}, "ENTER", pInstance->pipeId,
               pInstance->endpoint->getPipeCount(),
-              pInstance->pipeType.logicalType, 
-              trace.stringify());
+              pInstance->pipeType.logicalType, trace.stringify());
 
         ::engine::config::monitor()->other("DBG", msg);
     }
@@ -70,8 +69,8 @@ void Debugger::debugEnter(IServiceFilterInstance* pInstance,
  *
  * @param pInstance Pointer to the service instance being exited.
  */
-void Debugger::debugLeave(IServiceFilterInstance* pInstance,
-                          const json::Value& trace) noexcept {
+void Debugger::debugLeave(IServiceFilterInstance *pInstance,
+                          const json::Value &trace) noexcept {
     m_recurseLevel--;
 
     if (::engine::config::monitor()->isAppMonitor()) {
@@ -79,8 +78,7 @@ void Debugger::debugLeave(IServiceFilterInstance* pInstance,
         StackText msg;
         _tsbo(msg, {Format::HEX, {}, '*'}, "LEAVE", pInstance->pipeId,
               pInstance->endpoint->getPipeCount(),
-              pInstance->pipeType.logicalType, 
-              trace.stringify());
+              pInstance->pipeType.logicalType, trace.stringify());
 
         ::engine::config::monitor()->other("DBG", msg);
     }
@@ -93,9 +91,9 @@ void Debugger::debugLeave(IServiceFilterInstance* pInstance,
  * @param pTo Pointer to the destination service instance.
  * @param methodName Name of the method or action being executed.
  */
-void Debugger::debugBreak(IServiceFilterInstance* pFrom,
-                          IServiceFilterInstance* pTo,
-                          const std::string& methodName) noexcept {
+void Debugger::debugBreak(IServiceFilterInstance *pFrom,
+                          IServiceFilterInstance *pTo,
+                          const std::string &methodName) noexcept {
     // If paused...
     if (taskIsPaused()) {
         // Paused is true, acquire lock and wait until resumed
@@ -114,10 +112,10 @@ void Debugger::debugBreak(IServiceFilterInstance* pFrom,
  * @param methodName Name of the method where the error occurred.
  * @param ccode Error object describing the failure.
  */
-void Debugger::debugError(IServiceFilterInstance* pFrom,
-                          IServiceFilterInstance* pTo,
-                          const std::string& methodName,
-                          Error& ccode) noexcept {
+void Debugger::debugError(IServiceFilterInstance *pFrom,
+                          IServiceFilterInstance *pTo,
+                          const std::string &methodName,
+                          Error &ccode) noexcept {
     LOG(DebugOut, ">DBG*ERROR*....");
     // Could log ccode and methodName for more detail if needed.
 }
@@ -180,8 +178,8 @@ void Debugger::taskStepIn() noexcept { LOG(DebugOut, "taskStepIn called"); }
  * @param msg The message to log.
  * @param bp The breakpoint to output.
  */
-void Debugger::_outputBreakpoint(const std::string& msg,
-                                 const Breakpoint& bp) noexcept {
+void Debugger::_outputBreakpoint(const std::string &msg,
+                                 const Breakpoint &bp) noexcept {
     LOG(DebugOut, msg, "(enabled=", bp.enabled, ", from=", bp.from_id,
         ", to=", bp.to_id, ", lane=", bp.lane + ")");
 }
@@ -195,12 +193,12 @@ void Debugger::_outputBreakpoint(const std::string& msg,
  * @param breakpoints Vector of Breakpoint objects to set.
  */
 void Debugger::taskBreakpointSet(
-    const std::vector<Breakpoint>& breakpoints) noexcept {
+    const std::vector<Breakpoint> &breakpoints) noexcept {
     std::lock_guard<std::mutex> lock(m_breakpoint_lock);
 
     m_breakpoints.clear();
 
-    for (const auto& bp : breakpoints) {
+    for (const auto &bp : breakpoints) {
         m_breakpoints.push_back(bp);
         _outputBreakpoint("Breakpoint set", bp);
     }
@@ -217,13 +215,13 @@ void Debugger::taskBreakpointSet(
  * @param to_id Destination instance identifier.
  * @param lane Communication lane name.
  */
-void Debugger::taskBreakpointAdd(const std::string& from_id, std::string to_id,
+void Debugger::taskBreakpointAdd(const std::string &from_id, std::string to_id,
                                  std::string lane) noexcept {
     std::lock_guard<std::mutex> lock(m_breakpoint_lock);
 
     Breakpoint new_bp(true, from_id, std::move(to_id), std::move(lane));
 
-    for (const auto& existing : m_breakpoints) {
+    for (const auto &existing : m_breakpoints) {
         if (existing == new_bp) {
             _outputBreakpoint("Breakpoint already set", existing);
             return;  // Avoid duplicates
@@ -245,7 +243,7 @@ void Debugger::taskBreakpointAdd(const std::string& from_id, std::string to_id,
  * @param to_id Destination instance identifier.
  * @param lane Communication lane name.
  */
-void Debugger::taskBreakpointRemove(const std::string& from_id,
+void Debugger::taskBreakpointRemove(const std::string &from_id,
                                     std::string to_id,
                                     std::string lane) noexcept {
     std::lock_guard<std::mutex> lock(m_breakpoint_lock);
@@ -253,7 +251,7 @@ void Debugger::taskBreakpointRemove(const std::string& from_id,
     Breakpoint id(true, from_id, std::move(to_id), std::move(lane));
 
     auto it = std::remove_if(m_breakpoints.begin(), m_breakpoints.end(),
-                             [&](const Breakpoint& bp) { return bp == id; });
+                             [&](const Breakpoint &bp) { return bp == id; });
 
     if (it != m_breakpoints.end()) {
         m_breakpoints.erase(it, m_breakpoints.end());
@@ -273,14 +271,14 @@ void Debugger::taskBreakpointRemove(const std::string& from_id,
  * @param to_id Destination instance identifier.
  * @param lane Communication lane name.
  */
-void Debugger::taskBreakpointEnable(const std::string& from_id,
+void Debugger::taskBreakpointEnable(const std::string &from_id,
                                     std::string to_id,
                                     std::string lane) noexcept {
     std::lock_guard<std::mutex> lock(m_breakpoint_lock);
 
     Breakpoint id(true, from_id, std::move(to_id), std::move(lane));
 
-    for (auto& bp : m_breakpoints) {
+    for (auto &bp : m_breakpoints) {
         if (bp == id) {
             bp.enabled = true;
             _outputBreakpoint("Breakpoint enabled", bp);
@@ -301,7 +299,7 @@ void Debugger::taskBreakpointEnable(const std::string& from_id,
  * @param to_id Destination instance identifier.
  * @param lane Communication lane name.
  */
-void Debugger::taskBreakpointDisable(const std::string& from_id,
+void Debugger::taskBreakpointDisable(const std::string &from_id,
                                      std::string to_id,
                                      std::string lane) noexcept {
     std::lock_guard<std::mutex> lock(m_breakpoint_lock);
@@ -309,7 +307,7 @@ void Debugger::taskBreakpointDisable(const std::string& from_id,
     Breakpoint id(true, from_id, std::move(to_id), std::move(lane));
 
     bool found = false;
-    for (auto& bp : m_breakpoints) {
+    for (auto &bp : m_breakpoints) {
         if (bp == id) {
             bp.enabled = false;
             _outputBreakpoint("Breakpoint disabled", bp);
@@ -348,12 +346,12 @@ void Debugger::registerDebugger(ServiceEndpointWeak endpoint) {
     s_debuggerRegistry[pEndpoint->taskId] = endpoint;
 }
 
-void Debugger::deregisterDebugger(const std::string& taskId) {
+void Debugger::deregisterDebugger(const std::string &taskId) {
     std::lock_guard<std::mutex> lock(s_registryMutex);
     s_debuggerRegistry.erase(taskId);
 }
 
-Debugger* Debugger::getDebugger(const std::string& taskId) {
+Debugger *Debugger::getDebugger(const std::string &taskId) {
     std::lock_guard<std::mutex> lock(s_registryMutex);
 
     // Handle empty taskId
@@ -363,7 +361,7 @@ Debugger* Debugger::getDebugger(const std::string& taskId) {
         }
         if (s_debuggerRegistry.size() == 1) {
             // Return the only debugger available
-            auto& pair = *s_debuggerRegistry.begin();
+            auto &pair = *s_debuggerRegistry.begin();
             auto endpoint = pair.second.lock();
             if (!endpoint) {
                 throw std::runtime_error(
@@ -394,7 +392,7 @@ std::vector<std::string> Debugger::listDebuggers() {
     std::lock_guard<std::mutex> lock(s_registryMutex);
     std::vector<std::string> result;
     result.reserve(s_debuggerRegistry.size());
-    for (const auto& [taskId, _] : s_debuggerRegistry) {
+    for (const auto &[taskId, _] : s_debuggerRegistry) {
         result.push_back(taskId);
     }
     return result;

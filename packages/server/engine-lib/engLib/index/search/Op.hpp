@@ -115,7 +115,7 @@ _const Array<iTextView, EnumIndex(OpCode::_end)> OpCodeNames{
     "engine.done"_tv};
 
 template <typename Buffer>
-inline Error __toString(const OpCode& code, Buffer& buff) noexcept {
+inline Error __toString(const OpCode &code, Buffer &buff) noexcept {
     auto index = EnumIndex(code);
     if (index >= EnumIndex(OpCode::_end) || index == EnumIndex(OpCode::Invalid))
         return APERR(Ec::InvalidParam, "Invalid op code", index);
@@ -126,7 +126,7 @@ inline Error __toString(const OpCode& code, Buffer& buff) noexcept {
 }
 
 template <typename Buffer>
-inline Error __fromString(OpCode& code, const Buffer& buff) noexcept {
+inline Error __fromString(OpCode &code, const Buffer &buff) noexcept {
     iTextView name = buff.toView();
     if (auto pos = _findIf(OpCodeNames, name);
         pos != OpCodeNames.end() && pos != OpCodeNames.begin()) {
@@ -141,20 +141,20 @@ inline Error __fromString(OpCode& code, const Buffer& buff) noexcept {
 // from the compilation process
 struct Op {
 public:
-    static auto __fromJson(Op& op, const json::Value& val) noexcept {
+    static auto __fromJson(Op &op, const json::Value &val) noexcept {
         return val.lookupAssign("opCode", op.opCode) ||
                val.lookupAssign("comment", op.comment) ||
                val.lookupAssign("params.words", op.words);
     }
 
-    auto __toJson(json::Value& val) const noexcept {
+    auto __toJson(json::Value &val) const noexcept {
         val["opCode"] = _tj(opCode);
         if (!words.empty()) val["params"]["words"] = _tj(words);
         if (comment) val["comment"] = comment;
     }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         return _tsb(buff, opCode, "(", words, ")");
     }
 

@@ -111,7 +111,7 @@ ErrorOr<MntEntInfoHolder> getGlobalCacheMntEnt(uint64_t deviceId) noexcept {
 
     if (auto found = current->mapping.find(deviceId);
         found != current->mapping.end()) {
-        auto& info = (*found).second;
+        auto &info = (*found).second;
         LOG(File, "found mount mapping", info.deviceId, info.name,
             info.mountPath, info.removable);
         return MntEntInfoHolder{current, found};
@@ -125,7 +125,7 @@ ErrorOr<MntEntInfoHolder> getGlobalCacheMntEnt(uint64_t deviceId) noexcept {
 
     if (auto found = current->mapping.find(deviceId);
         found != current->mapping.end()) {
-        auto& info = (*found).second;
+        auto &info = (*found).second;
         LOG(File, "found mount mapping after refresh", info.deviceId, info.name,
             info.mountPath, info.removable);
         return MntEntInfoHolder{current, found};
@@ -201,8 +201,8 @@ Opt<bool> isRemovable(FsType type) noexcept {
 }
 
 // Given a list of file system types, returns if the file system is removable
-Opt<bool> isRemovable(const std::vector<FsType>& types) noexcept {
-    for (auto& type : types) {
+Opt<bool> isRemovable(const std::vector<FsType> &types) noexcept {
+    for (auto &type : types) {
         auto result = isRemovable(type);
         if (result) return result;
     }
@@ -211,7 +211,7 @@ Opt<bool> isRemovable(const std::vector<FsType>& types) noexcept {
 
 // Given a file system name, returns the file system type
 FsType toFsType(TextView str) noexcept {
-    for (auto& ext : g_fsExtLookupNames) {
+    for (auto &ext : g_fsExtLookupNames) {
         if (ext.second == str) return ext.first;
     }
     return FsType::Unknown;
@@ -222,14 +222,14 @@ FsType toFsType(TextView str) noexcept {
 std::vector<FsType> toFsTypeArray(TextView str) noexcept {
     std::vector<FsType> result;
     auto types = split(str, ",");
-    for (auto& type : types) {
+    for (auto &type : types) {
         result.push_back(toFsType(str));
     }
     return result;
 }
 
 // Given a path, return the mount information for its related file system
-ErrorOr<MntEntInfo> getMntEntInfo(const Path& path) noexcept {
+ErrorOr<MntEntInfo> getMntEntInfo(const Path &path) noexcept {
     struct stat pathStat{};
     if (::stat(path.str(), &pathStat) != 0)
         return APERR(errno, "Failed to stat path", path);
@@ -239,7 +239,7 @@ ErrorOr<MntEntInfo> getMntEntInfo(const Path& path) noexcept {
 }
 
 // Given a path, return if the path is on a removable device
-bool isOnRemovableDrive(const Path& path) noexcept {
+bool isOnRemovableDrive(const Path &path) noexcept {
     struct stat pathStat{};
     if (::stat(path.str(), &pathStat) != 0) return false;
     auto result = getGlobalCacheMntEnt(_cast<uint64_t>(pathStat.st_dev));

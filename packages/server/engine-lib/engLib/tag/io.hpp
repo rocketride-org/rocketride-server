@@ -29,8 +29,8 @@ namespace engine::tag {
 // The data args will be converted to data and their size will be set in the
 // header
 template <typename HdrT, typename OutT, typename... Args>
-inline void write(memory::adapter::Output<OutT>& out,
-                  const Args&... args) noexcept(false) {
+inline void write(memory::adapter::Output<OutT> &out,
+                  const Args &...args) noexcept(false) {
     // Write the header out first
     out.write(HdrT{});
 
@@ -41,8 +41,8 @@ inline void write(memory::adapter::Output<OutT>& out,
 // Validates the args against a data definition header, then writes the header
 // and the args to an output
 template <typename HdrDataT, typename OutT, typename... Args>
-inline void writeData(memory::adapter::Output<OutT>& out,
-                      const Args&... args) noexcept(false) {
+inline void writeData(memory::adapter::Output<OutT> &out,
+                      const Args &...args) noexcept(false) {
     // Validate the args
     static_assert(IsHdrDataV<HdrDataT>);
     static_assert(
@@ -55,8 +55,8 @@ inline void writeData(memory::adapter::Output<OutT>& out,
 // Validates the args against a data definition header, then writes the args to
 // an output
 template <typename HdrDataT, typename OutT, typename... Args>
-inline auto writeDataArgs(memory::adapter::Output<OutT>& out,
-                          const Args&... args) noexcept(false) {
+inline auto writeDataArgs(memory::adapter::Output<OutT> &out,
+                          const Args &...args) noexcept(false) {
     // Validate the args
     static_assert(IsHdrDataV<HdrDataT>);
     static_assert(
@@ -68,7 +68,7 @@ inline auto writeDataArgs(memory::adapter::Output<OutT>& out,
 
 // Skips a header and its data
 template <typename HdrT, typename InT>
-inline HdrT skip(const memory::adapter::Input<InT>& in) noexcept(false) {
+inline HdrT skip(const memory::adapter::Input<InT> &in) noexcept(false) {
     HdrT hdr;
     *_fda(in, hdr);
     // Verify the header being skipped is of the expected class
@@ -80,7 +80,7 @@ inline HdrT skip(const memory::adapter::Input<InT>& in) noexcept(false) {
 // if either of these headers aren't found it will throw an error
 template <typename SkipHdrT, typename ReadHdrT, typename InT>
 inline Pair<SkipHdrT, ReadHdrT> skipRead(
-    const memory::adapter::Input<InT>& in) noexcept(false) {
+    const memory::adapter::Input<InT> &in) noexcept(false) {
     auto skipHdr = *_fd<SkipHdrT>(in);
     return {skipHdr, *_fd<ReadHdrT>(in)};
 }
@@ -94,7 +94,7 @@ inline auto nameOf() noexcept {
 }
 
 template <typename HdrT>
-inline auto cast(const GenericHdr& hdr) noexcept {
+inline auto cast(const GenericHdr &hdr) noexcept {
     if constexpr (IsHdrDataV<HdrT>)
         return hdr.template cast<typename HdrT::HdrType>();
     else
@@ -102,7 +102,7 @@ inline auto cast(const GenericHdr& hdr) noexcept {
 }
 
 template <typename ToT, typename FromT>
-inline auto expect(const FromT& hdr) noexcept(false) {
+inline auto expect(const FromT &hdr) noexcept(false) {
     if (!cast<ToT>(hdr))
         APERR_THROW(Ec::TagInvalidHdr, "Expected header", nameOf<ToT>());
     LOG(Tag, "Skip", nameOf<ToT>());
@@ -110,7 +110,7 @@ inline auto expect(const FromT& hdr) noexcept(false) {
 
 // Parse the tag arguments from an already read header
 template <typename HdrDataT, typename InT>
-inline auto readDataArgs(const memory::adapter::Input<InT>& in) noexcept(
+inline auto readDataArgs(const memory::adapter::Input<InT> &in) noexcept(
     false) {
     static_assert(IsHdrDataV<HdrDataT>);
 
@@ -118,15 +118,15 @@ inline auto readDataArgs(const memory::adapter::Input<InT>& in) noexcept(
     using Hdr = typename HdrDataT::HdrType;
     typename HdrDataT::ArgsType args;
 
-    util::tuple::forEach(args, [&](auto& arg) { *_fda(in, arg); });
+    util::tuple::forEach(args, [&](auto &arg) { *_fda(in, arg); });
     return args;
 }
 
 // Read one block of data
 template <typename HdrDataT, typename InT,
           typename AllocatorT = std::allocator<uint8_t>>
-inline auto readData(const memory::adapter::Input<InT>& in,
-                     const AllocatorT& alloc = {}) noexcept(false) {
+inline auto readData(const memory::adapter::Input<InT> &in,
+                     const AllocatorT &alloc = {}) noexcept(false) {
     // If its a data header, it contains the type info we need as a tuple
     // otherwise we will assume a raw Data<uint8_t> for the associated data
     if constexpr (IsHdrDataV<HdrDataT>) {

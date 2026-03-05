@@ -63,37 +63,37 @@ public:
     using Type = PathType;
 
     // Default construction
-    FilePath(const AllocatorType& alloc = {}) : m_path(alloc) {}
+    FilePath(const AllocatorType &alloc = {}) : m_path(alloc) {}
 
     ~FilePath() = default;
 
-    FilePath(FilePath&& path) noexcept { move(_mv(path)); }
+    FilePath(FilePath &&path) noexcept { move(_mv(path)); }
 
-    FilePath(const FilePath& path) noexcept { copy(path); }
+    FilePath(const FilePath &path) noexcept { copy(path); }
 
-    FilePath& operator=(FilePath&& path) noexcept {
+    FilePath &operator=(FilePath &&path) noexcept {
         move(_mv(path));
         return *this;
     }
 
-    FilePath& operator=(const FilePath& path) noexcept {
+    FilePath &operator=(const FilePath &path) noexcept {
         copy(path);
         return *this;
     }
 
-    FilePath(StrType&& path) noexcept : m_path(_mv(path)) { construct(); }
+    FilePath(StrType &&path) noexcept : m_path(_mv(path)) { construct(); }
 
     // Construct from something other then a FilePath, the goal here
     // is to do zero work besides copying a string on construction
     // only when any additional info is needed from the path will
     // it be classified and parsed
     template <typename T>
-    FilePath(T&& path, const AllocatorType& alloc) noexcept : m_path(alloc) {
+    FilePath(T &&path, const AllocatorType &alloc) noexcept : m_path(alloc) {
         construct(std::forward<T>(path));
     }
 
     template <typename T>
-    FilePath(T&& path) noexcept {
+    FilePath(T &&path) noexcept {
         construct(std::forward<T>(path));
     }
 
@@ -147,7 +147,7 @@ private:
     }
 
     template <typename T>
-    auto construct(T&& path) noexcept {
+    auto construct(T &&path) noexcept {
         // This is how we solve the constructor ambiguity between
         // Path and Text
         if constexpr (traits::IsSameTypeV<T, FilePath>)
@@ -156,8 +156,8 @@ private:
             m_path = StrType{path.generic_u8string()};
         else if constexpr (traits::IsFilePathV<T>)
             m_path = path.str();
-        else if constexpr (std::is_convertible_v<T, const ChrT*>)
-            m_path = _cast<const ChrT*>(path);
+        else if constexpr (std::is_convertible_v<T, const ChrT *>)
+            m_path = _cast<const ChrT *>(path);
         else if constexpr (std::is_convertible_v<T, TextView>)
             m_path = _cast<TextView>(path);
         else {
@@ -173,7 +173,7 @@ private:
 
     // Internal constructor when creating new paths
     FilePath(Type type, ViewType prefix, size_t length = 0,
-             const CompListType& comps = {},
+             const CompListType &comps = {},
              Opt<CRef<CompListType>> moreComps = {}) noexcept
         : m_type(type) {
         // Build another base path so we can reference our own views to it
@@ -190,7 +190,7 @@ private:
 
     // Concatenates a path from a type prefix and components
     static StrType build(PathType type, ViewType prefix, size_t length,
-                         const CompListType& comps,
+                         const CompListType &comps,
                          Opt<CRef<CompListType>> moreComps = {}) noexcept {
         // Use the comps to build a new path, but don't use the
         // comps directly as they are views to another path
@@ -199,20 +199,20 @@ private:
         // If no hint of length calculate it
         if (!length) {
             length += prefix.size();
-            for (auto& c : comps) length += c.size();
+            for (auto &c : comps) length += c.size();
         }
 
         path.reserve(length);
         path = prefix;
         auto first = true;
 
-        for (auto& comp : comps) {
+        for (auto &comp : comps) {
             if (!_exch(first, false)) path.append(GenericSepChr);
             path.append(comp);
         }
 
         if (moreComps) {
-            for (auto& comp : moreComps->get()) {
+            for (auto &comp : moreComps->get()) {
                 if (!_exch(first, false)) path.append(GenericSepChr);
                 path.append(comp);
             }
@@ -232,7 +232,7 @@ public:
     decltype(auto) str() const noexcept { return m_path; }
 
     template <typename T>
-    auto replace(const T& sepOrigin, const T& sepDest) const {
+    auto replace(const T &sepOrigin, const T &sepDest) const {
         m_path.replace(sepOrigin, sepDest);
     }
 
@@ -247,20 +247,20 @@ public:
 
     // Equality check
     template <typename ChrTT = ChrT, typename AllocTT = AllocT>
-    bool operator==(const FilePath<ChrTT, AllocTT>& rhs) const noexcept {
+    bool operator==(const FilePath<ChrTT, AllocTT> &rhs) const noexcept {
         return components() == rhs.components();
     }
 
     // Inequality check
     template <typename ChrTT = ChrT, typename AllocTT = AllocT>
-    bool operator!=(const FilePath<ChrTT, AllocTT>& rhs) const noexcept {
+    bool operator!=(const FilePath<ChrTT, AllocTT> &rhs) const noexcept {
         return !operator==(rhs);
     }
 
     // < comparator, compares path using proper path sorting which is delimiter
     // aware
     template <typename ChrTT = ChrT, typename AllocTT = AllocT>
-    bool operator<(const FilePath<ChrTT, AllocTT>& rhs) const noexcept {
+    bool operator<(const FilePath<ChrTT, AllocTT> &rhs) const noexcept {
         if (*this == rhs) return false;
         return gen() < rhs.gen();
     }
@@ -350,7 +350,7 @@ public:
     auto length() const noexcept { return m_path.size(); }
 
     // Returns the long form of the platform type with no enforced trailing sep
-    const StrType& platLong() const noexcept {
+    const StrType &platLong() const noexcept {
         classify();
 
         if (!m_platLong) {
@@ -365,7 +365,7 @@ public:
     }
 
     // Returns the long form of the platform type with enforced trailing sep
-    const StrType& platLongTrailingSep() const noexcept {
+    const StrType &platLongTrailingSep() const noexcept {
         classify();
 
         if (!m_platLongTrailingSep) {
@@ -380,7 +380,7 @@ public:
     }
 
     // Returns the platform specific path with no enforced trailing sep
-    const StrType& plat(bool longForm = true) const noexcept {
+    const StrType &plat(bool longForm = true) const noexcept {
         if (longForm) return platLong();
 
         classify();
@@ -396,7 +396,7 @@ public:
     }
 
     // Returns the platform specific path with enforced trailing sep
-    const StrType& platTrailingSep(bool longForm = true) const noexcept {
+    const StrType &platTrailingSep(bool longForm = true) const noexcept {
         if (longForm) return platLongTrailingSep();
 
         classify();
@@ -412,7 +412,7 @@ public:
     }
 
     // Returns the generic path always as unix sep
-    const StrType& gen() const noexcept {
+    const StrType &gen() const noexcept {
         classify();
 
         if (!m_gen) {
@@ -445,7 +445,7 @@ public:
 
     operator TextView() const noexcept { return gen(); }
 
-    auto isParentOf(const FilePath& child,
+    auto isParentOf(const FilePath &child,
                     bool inclusive = true) const noexcept {
         // Longer paths cannot be parents of shorter paths
         if (count() > child.count()) return false;
@@ -461,7 +461,7 @@ public:
         return components() == childComps;
     }
 
-    auto isChildOf(const FilePath& parent,
+    auto isChildOf(const FilePath &parent,
                    bool inclusive = true) const noexcept {
         return parent.isParentOf(*this, inclusive);
     }
@@ -473,7 +473,7 @@ public:
         if (compIndexStart >= count()) return {};
 
         // Cap the comps
-        const auto& sourceComps = components();
+        const auto &sourceComps = components();
         CompListType comps;
         if (size)
             comps = {sourceComps.begin() + compIndexStart,
@@ -489,7 +489,7 @@ public:
     }
 
     // Append a component to this path and return a new path
-    FilePath append(const FilePath& path) const noexcept {
+    FilePath append(const FilePath &path) const noexcept {
         // If the left-hand path is invalid, return the right-hand path
         if (!valid()) return path;
 
@@ -501,19 +501,19 @@ public:
 
     // Raw string literal casting so we can be used directly with
     // operating system apis
-    explicit operator const Utf16Chr*() const noexcept {
-        return _cast<const Utf16Chr*>(gen());
+    explicit operator const Utf16Chr *() const noexcept {
+        return _cast<const Utf16Chr *>(gen());
     }
 
-    explicit operator const Utf8Chr*() const noexcept {
-        return _cast<const Utf8Chr*>(gen());
+    explicit operator const Utf8Chr *() const noexcept {
+        return _cast<const Utf8Chr *>(gen());
     }
 
-    FilePath operator/(const FilePath& path) const noexcept {
+    FilePath operator/(const FilePath &path) const noexcept {
         return append(path);
     }
 
-    FilePath& operator/=(const FilePath& rhs) noexcept {
+    FilePath &operator/=(const FilePath &rhs) noexcept {
         *this = append(rhs);
         return *this;
     }
@@ -533,13 +533,13 @@ public:
 
     // Render the path as a string
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         buff << gen();
     }
 
     // Load this path from a string
     template <typename Buffer>
-    static auto __fromString(FilePath& path, const Buffer& buff) noexcept {
+    static auto __fromString(FilePath &path, const Buffer &buff) noexcept {
         path = buff.toString();
     }
 
@@ -555,7 +555,7 @@ public:
         // Create the new components that make up the path
         std::vector<StrType> newComp;
 
-        for (auto& comp : comps) {
+        for (auto &comp : comps) {
             if (comp == ".") continue;
             if (comp == ".." && newComp.size() > 0) {
                 newComp.pop_back();
@@ -568,7 +568,7 @@ public:
         // Loop through the elements
         StrType str;
         bool first = true;
-        for (auto& comp : newComp) {
+        for (auto &comp : newComp) {
             // If this is not the first, add a seperator
             if (!first) str += '/';
 
@@ -620,19 +620,19 @@ private:
     }
 
     // Returns a component view
-    const CompListType& components() const noexcept {
+    const CompListType &components() const noexcept {
         if (!m_components) m_components = split();
         return *m_components;
     }
 
-    auto move(FilePath&& path) noexcept {
+    auto move(FilePath &&path) noexcept {
         if (this == &path) return;
         reset();
         m_path = _mv(path.m_path);
         m_view = m_path;
     }
 
-    auto copy(const FilePath& path) noexcept {
+    auto copy(const FilePath &path) noexcept {
         if (this == &path) return;
         reset();
         m_path = path.m_path;
@@ -677,8 +677,8 @@ private:
 template <typename LChrT, typename LAllocT, typename RChrT = char,
           typename RTraitsT = string::Case<RChrT>,
           typename RAllocT = string::Case<RChrT>>
-inline auto operator/(const FilePath<LChrT, LAllocT>& path,
-                      const char* comp) noexcept {
+inline auto operator/(const FilePath<LChrT, LAllocT> &path,
+                      const char *comp) noexcept {
     return path.append(comp);
 }
 
@@ -686,8 +686,8 @@ template <typename LChrT, typename LAllocT, typename RChrT = char,
           typename RTraitsT = string::Case<RChrT>,
           typename RAllocT = string::Case<RChrT>>
 inline bool operator==(
-    const FilePath<LChrT, LAllocT>& lhs,
-    const string::Str<RChrT, RTraitsT, RAllocT>& rhs) noexcept {
+    const FilePath<LChrT, LAllocT> &lhs,
+    const string::Str<RChrT, RTraitsT, RAllocT> &rhs) noexcept {
     return lhs == FilePath<LChrT, LAllocT>{rhs};
 }
 
@@ -695,8 +695,8 @@ template <typename LChrT, typename LAllocT, typename RChrT = char,
           typename RTraitsT = string::Case<RChrT>,
           typename RAllocT = string::Case<RChrT>>
 inline bool operator!=(
-    const FilePath<LChrT, LAllocT>& lhs,
-    const string::Str<RChrT, RTraitsT, RAllocT>& rhs) noexcept {
+    const FilePath<LChrT, LAllocT> &lhs,
+    const string::Str<RChrT, RTraitsT, RAllocT> &rhs) noexcept {
     return lhs != FilePath<LChrT, LAllocT>{rhs};
 }
 
@@ -704,48 +704,48 @@ template <typename LChrT, typename LAllocT, typename RChrT = char,
           typename RTraitsT = string::Case<RChrT>,
           typename RAllocT = string::Case<RChrT>>
 inline bool operator<(
-    const FilePath<LChrT, LAllocT>& lhs,
-    const string::Str<RChrT, RTraitsT, RAllocT>& rhs) noexcept {
+    const FilePath<LChrT, LAllocT> &lhs,
+    const string::Str<RChrT, RTraitsT, RAllocT> &rhs) noexcept {
     return lhs < FilePath<LChrT, LAllocT>{rhs};
 }
 
 // Global operators for StrView
 template <typename LChrT, typename LAllocT, typename RChrT = char,
           typename RTraitsT = string::Case<RChrT>>
-inline bool operator==(const FilePath<LChrT, LAllocT>& lhs,
+inline bool operator==(const FilePath<LChrT, LAllocT> &lhs,
                        string::StrView<RChrT, RTraitsT> rhs) noexcept {
     return lhs == FilePath<LChrT, LAllocT>{rhs};
 }
 
 template <typename LChrT, typename LAllocT, typename RChrT = char,
           typename RTraitsT = string::Case<RChrT>>
-inline bool operator!=(const FilePath<LChrT, LAllocT>& lhs,
+inline bool operator!=(const FilePath<LChrT, LAllocT> &lhs,
                        string::StrView<RChrT, RTraitsT> rhs) noexcept {
     return lhs != FilePath<LChrT, LAllocT>{rhs};
 }
 
 template <typename LChrT, typename LAllocT, typename RChrT = char,
           typename RTraitsT = string::Case<RChrT>>
-inline bool operator<(const FilePath<LChrT, LAllocT>& lhs,
+inline bool operator<(const FilePath<LChrT, LAllocT> &lhs,
                       string::StrView<RChrT, RTraitsT> rhs) noexcept {
     return lhs < FilePath<LChrT, LAllocT>{rhs};
 }
 
 // Global operators for raw character arrays
 template <typename LChrT, typename LAllocT, size_t Length>
-inline bool operator==(const FilePath<LChrT, LAllocT>& lhs,
+inline bool operator==(const FilePath<LChrT, LAllocT> &lhs,
                        const char (&rhs)[Length]) noexcept {
     return lhs == FilePath<LChrT, LAllocT>{rhs};
 }
 
 template <typename LChrT, typename LAllocT, size_t Length>
-inline bool operator!=(const FilePath<LChrT, LAllocT>& lhs,
+inline bool operator!=(const FilePath<LChrT, LAllocT> &lhs,
                        const char (&rhs)[Length]) noexcept {
     return lhs != FilePath<LChrT, LAllocT>{rhs};
 }
 
 template <typename LChrT, typename LAllocT, size_t Length>
-inline bool operator<(const FilePath<LChrT, LAllocT>& lhs,
+inline bool operator<(const FilePath<LChrT, LAllocT> &lhs,
                       const char (&rhs)[Length]) noexcept {
     return lhs < FilePath<LChrT, LAllocT>{rhs};
 }

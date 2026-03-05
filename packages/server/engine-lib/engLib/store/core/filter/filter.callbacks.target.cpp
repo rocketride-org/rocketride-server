@@ -58,8 +58,8 @@ std::vector<std::string> IServiceFilterInstance::cb_getListeners() noexcept(
     return this->binder.getListeners();
 }
 
-void IServiceFilterInstance::cb_control(std::string& classType,
-                                        py::object& control) noexcept(false) {
+void IServiceFilterInstance::cb_control(std::string &classType,
+                                        py::object &control) noexcept(false) {
     Error ccode;
 
     // Check to make sure target mode
@@ -91,8 +91,10 @@ void IServiceFilterInstance::cb_control(std::string& classType,
         if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
             enterTrace["lane"] = "invoke";
             enterTrace["invoke"] = classType.c_str();
-            
-            if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL) enterTrace["data"] = engine::python::pyjson::dictToJson(control.attr("model_dump")());
+
+            if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL)
+                enterTrace["data"] = engine::python::pyjson::dictToJson(
+                    control.attr("model_dump")());
         }
 
         this->pipe->debugger.debugEnter(filter.get(), enterTrace);
@@ -109,7 +111,9 @@ void IServiceFilterInstance::cb_control(std::string& classType,
                 leaveTrace["invoke"] = classType.c_str();
                 leaveTrace["result"] = "continue";
 
-                if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL) leaveTrace["data"] = engine::python::pyjson::dictToJson(control.attr("model_dump")());
+                if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL)
+                    leaveTrace["data"] = engine::python::pyjson::dictToJson(
+                        control.attr("model_dump")());
             }
 
             // And inform we are leaving
@@ -126,7 +130,9 @@ void IServiceFilterInstance::cb_control(std::string& classType,
                 leaveTrace["invoke"] = classType.c_str();
                 leaveTrace["result"] = "skip";
 
-                if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL) leaveTrace["data"] = engine::python::pyjson::dictToJson(control.attr("model_dump")());
+                if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL)
+                    leaveTrace["data"] = engine::python::pyjson::dictToJson(
+                        control.attr("model_dump")());
             }
 
             // And inform we are leaving
@@ -159,7 +165,7 @@ void IServiceFilterInstance::cb_open(py::object entry) noexcept(false) {
         throw APERR(Ec::InvalidParam, "You must be in target mode to use open");
 
     // Cast a python object to the native object
-    auto& object = py::cast<Entry&>(entry);
+    auto &object = py::cast<Entry &>(entry);
 
     // Keep a python reference to prevent it from being garbage collected
     pyCurrentEntry = entry;
@@ -211,7 +217,7 @@ void IServiceFilterInstance::cb_writeTagBeginStream() noexcept(false) {
         engine::python::UnlockPython unlock;
 
         // Get the internal tag buffer
-        TAG* pTagBuffer;
+        TAG *pTagBuffer;
         if (auto ccode = getTagBuffer(&pTagBuffer)) throw ccode;
 
         // Setup the default stream begin tag
@@ -227,21 +233,21 @@ void IServiceFilterInstance::cb_writeTagBeginStream() noexcept(false) {
     }
 };
 
-void IServiceFilterInstance::cb_writeTagData(py::object& data) noexcept(false) {
+void IServiceFilterInstance::cb_writeTagData(py::object &data) noexcept(false) {
     // Check to make sure target mode
     if (this->endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
                     "You must be in target mode to use writeTagData");
 
     // Send it
-    const auto send = localfcn(size_t size, const void* pData) {
+    const auto send = localfcn(size_t size, const void *pData) {
         Error ccode;
 
         // Unlock python and send it along
         engine::python::UnlockPython unlock;
 
         // Get the internal tag buffer
-        TAG* pTagBuffer;
+        TAG *pTagBuffer;
         if (auto ccode = getTagBuffer(&pTagBuffer)) throw ccode;
 
         size_t offset = 0;
@@ -251,7 +257,7 @@ void IServiceFilterInstance::cb_writeTagData(py::object& data) noexcept(false) {
             if (chunk > MAX_IOSIZE) chunk = MAX_IOSIZE;
 
             // Get a generic ptr
-            Byte* pSendBuffer = (Byte*)pData;
+            Byte *pSendBuffer = (Byte *)pData;
 
             // Build the tag
             const auto pDataTag = TAG_OBJECT_STREAM_DATA::build(pTagBuffer);
@@ -280,13 +286,13 @@ void IServiceFilterInstance::cb_writeTagData(py::object& data) noexcept(false) {
 
         // Get the string as a utf-8 string and it's size
         Py_ssize_t size;
-        const char* value = PyUnicode_AsUTF8AndSize(object, &size);
+        const char *value = PyUnicode_AsUTF8AndSize(object, &size);
 
         // If it couldn't be mapped, error out
         if (!value) throw APERR(Ec::InvalidParam, "Unable to convert to UTF8");
 
         // Send the data
-        send(size, (void*)value);
+        send(size, (void *)value);
         return;
     }
 
@@ -298,7 +304,7 @@ void IServiceFilterInstance::cb_writeTagData(py::object& data) noexcept(false) {
         long value = PyLong_AsLong(object);
 
         // Send the data
-        send(sizeof(long), (void*)&value);
+        send(sizeof(long), (void *)&value);
         return;
     }
 
@@ -340,11 +346,11 @@ void IServiceFilterInstance::cb_writeTag(py::bytes data) noexcept(false) {
         throw APERR(Ec::InvalidParam,
                     "You must be in target mode to use writeTag");
 
-    TAG* tag = nullptr;
+    TAG *tag = nullptr;
     py::ssize_t length = 0;
 
     // Cast input bytes to TAG pointer
-    if (PYBIND11_BYTES_AS_STRING_AND_SIZE(data.ptr(), _reCast<char**>(&tag),
+    if (PYBIND11_BYTES_AS_STRING_AND_SIZE(data.ptr(), _reCast<char **>(&tag),
                                           &length))
         throw APERR(Ec::InvalidParam, "Invalid bytes");
 
@@ -373,7 +379,7 @@ void IServiceFilterInstance::cb_writeTag(py::bytes data) noexcept(false) {
     if (auto ccode = binder.writeTag(tag)) throw ccode;
 }
 
-void IServiceFilterInstance::cb_writeText(const std::u16string& text) noexcept(
+void IServiceFilterInstance::cb_writeText(const std::u16string &text) noexcept(
     false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
@@ -388,7 +394,7 @@ void IServiceFilterInstance::cb_writeText(const std::u16string& text) noexcept(
     }
 }
 
-void IServiceFilterInstance::cb_writeTable(const std::u16string& text) noexcept(
+void IServiceFilterInstance::cb_writeTable(const std::u16string &text) noexcept(
     false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
@@ -404,7 +410,7 @@ void IServiceFilterInstance::cb_writeTable(const std::u16string& text) noexcept(
 }
 
 void IServiceFilterInstance::cb_writeWords(
-    const WordVector& textWords) noexcept(false) {
+    const WordVector &textWords) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -419,8 +425,8 @@ void IServiceFilterInstance::cb_writeWords(
 }
 
 void IServiceFilterInstance::cb_writeAudio(
-    const AVI_ACTION action, Text& mimeType,
-    const pybind11::bytes& streamData) noexcept(false) {
+    const AVI_ACTION action, Text &mimeType,
+    const pybind11::bytes &streamData) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -436,8 +442,8 @@ void IServiceFilterInstance::cb_writeAudio(
 }
 
 void IServiceFilterInstance::cb_writeVideo(
-    const AVI_ACTION action, Text& mimeType,
-    const pybind11::bytes& streamData) noexcept(false) {
+    const AVI_ACTION action, Text &mimeType,
+    const pybind11::bytes &streamData) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -453,8 +459,8 @@ void IServiceFilterInstance::cb_writeVideo(
 }
 
 void IServiceFilterInstance::cb_writeImage(
-    const AVI_ACTION action, Text& mimeType,
-    const pybind11::bytes& streamData) noexcept(false) {
+    const AVI_ACTION action, Text &mimeType,
+    const pybind11::bytes &streamData) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -470,7 +476,7 @@ void IServiceFilterInstance::cb_writeImage(
 }
 
 void IServiceFilterInstance::cb_writeQuestions(
-    const pybind11::object& question) noexcept(false) {
+    const pybind11::object &question) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -485,7 +491,7 @@ void IServiceFilterInstance::cb_writeQuestions(
 }
 
 void IServiceFilterInstance::cb_writeAnswers(
-    const pybind11::object& answers) noexcept(false) {
+    const pybind11::object &answers) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -500,7 +506,7 @@ void IServiceFilterInstance::cb_writeAnswers(
 }
 
 void IServiceFilterInstance::cb_writeDocuments(
-    const pybind11::object& documents) noexcept(false) {
+    const pybind11::object &documents) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -515,8 +521,8 @@ void IServiceFilterInstance::cb_writeDocuments(
 }
 
 void IServiceFilterInstance::cb_writeClassifications(
-    const json::Value& classifications, const json::Value& classificationPolicy,
-    const json::Value& classificationRules) noexcept(false) {
+    const json::Value &classifications, const json::Value &classificationPolicy,
+    const json::Value &classificationRules) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(Ec::InvalidParam,
@@ -533,7 +539,7 @@ void IServiceFilterInstance::cb_writeClassifications(
 }
 
 void IServiceFilterInstance::cb_writeClassificationContext(
-    const json::Value& context) noexcept(false) {
+    const json::Value &context) noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
         throw APERR(

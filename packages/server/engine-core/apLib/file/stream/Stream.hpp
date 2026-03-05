@@ -40,13 +40,13 @@ public:
     Stream() = default;
 
     // Move
-    Stream(Stream&& stream) { move(_mv(stream)); }
+    Stream(Stream &&stream) { move(_mv(stream)); }
 
-    Stream& operator=(Stream&& stream) noexcept { return move(_mv(stream)); }
+    Stream &operator=(Stream &&stream) noexcept { return move(_mv(stream)); }
 
     // No copy
-    Stream(const Stream& stream) = delete;
-    Stream& operator=(const Stream& stream) = delete;
+    Stream(const Stream &stream) = delete;
+    Stream &operator=(const Stream &stream) = delete;
 
     // Throw based constructor that opens
     template <typename ChrT, typename AllocT>
@@ -85,7 +85,7 @@ public:
     template <typename AllocT = std::allocator<uint8_t>>
     ErrorOr<memory::Data<uint8_t, AllocT>> read(
         size_t length, Opt<uint64_t> offset = {},
-        const AllocT& allocator = {}) const noexcept {
+        const AllocT &allocator = {}) const noexcept {
         m_offset = offset.value_or(m_offset);
         memory::Data<uint8_t, AllocT> data(length, allocator);
         auto lengthRead = chunkedRead(data);
@@ -128,7 +128,7 @@ public:
 
     uint64_t offset() const noexcept { return m_offset; }
     void setOffset(uint64_t offset) const noexcept { m_offset = offset; }
-    const file::Path& path() const noexcept { return m_path; }
+    const file::Path &path() const noexcept { return m_path; }
     ErrorOr<uint64_t> size() const noexcept { return m_stream.size(); }
     auto platHandle() const noexcept { return m_stream.handle(); }
 
@@ -161,7 +161,7 @@ public:
                           "Cannot create input range on an un-opened file");
         auto ctx = mapRange(offset, size);
         if (!ctx) return ctx.ccode();
-        return InputData{_reCast<const uint8_t*>(ctx->get().data),
+        return InputData{_reCast<const uint8_t *>(ctx->get().data),
                          ctx->get().size};
     }
 
@@ -173,7 +173,7 @@ public:
                 "Attempt to map output range when file is opened for read");
         auto ctx = mapRange(offset, size);
         if (!ctx) return ctx.ccode();
-        return OutputData{_reCast<uint8_t*>(ctx->get().data), ctx->get().size};
+        return OutputData{_reCast<uint8_t *>(ctx->get().data), ctx->get().size};
     }
 
     template <Mode ModeT>
@@ -188,7 +188,7 @@ public:
     ErrorOr<InputData> mmap() noexcept { return mapInputRange(); }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         buff << "FileStream";
     }
 
@@ -259,12 +259,12 @@ private:
     }
 
     void unmap() noexcept {
-        for (auto& m : m_mappings) m_stream.unmap(m);
+        for (auto &m : m_mappings) m_stream.unmap(m);
         m_mappings.clear();
         m_stream.unmap();
     }
 
-    Stream& move(Stream&& strm) noexcept {
+    Stream &move(Stream &&strm) noexcept {
         if (this == &strm) return *this;
 
         close();

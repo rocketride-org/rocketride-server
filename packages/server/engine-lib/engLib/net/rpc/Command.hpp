@@ -39,8 +39,8 @@ struct CommandRequest {
 
     RequestType data;
 
-    static Error __fromJson(CommandRequest& hdr,
-                            const json::Value& val) noexcept {
+    static Error __fromJson(CommandRequest &hdr,
+                            const json::Value &val) noexcept {
         hdr.executeOn = val["executeOn"].asString();
         hdr.executeBy = val["executeBy"].asString();
         hdr.connectionId = val["connectionId"].asString();
@@ -55,7 +55,7 @@ struct CommandRequest {
         return {};
     }
 
-    auto __toJson(json::Value& val) const noexcept {
+    auto __toJson(json::Value &val) const noexcept {
         val["executeOn"] = executeOn;
         val["executeBy"] = executeBy;
         val["connectionId"] = connectionId;
@@ -73,8 +73,8 @@ struct CommandReply {
 
     ReplyType data;
 
-    static Error __fromJson(CommandReply& hdr,
-                            const json::Value& val) noexcept {
+    static Error __fromJson(CommandReply &hdr,
+                            const json::Value &val) noexcept {
         hdr.status = val["status"];
 
         auto data = _fjc<ReplyType>(val.lookup("data"));
@@ -84,7 +84,7 @@ struct CommandReply {
         return {};
     }
 
-    auto __toJson(json::Value& val) const noexcept {
+    auto __toJson(json::Value &val) const noexcept {
         val["status"] = status;
         val["data"] = _tj(data);
     }

@@ -29,7 +29,7 @@ inline ErrorOr<Text> osVersion() noexcept {
     // Get specific distro information if /etc/os-release is present
     Text id, version;
     if (auto data = file::fetch<TextChr>("/etc/os-release")) {
-        for (auto& line : string::split(*data, "\n")) {
+        for (auto &line : string::split(*data, "\n")) {
             auto [key, value] = string::slice(line, "=");
             key.trim();
             if (key.equals("ID", false))
@@ -63,7 +63,7 @@ inline ErrorOr<std::vector<file::Path>> getModulePaths() noexcept {
 
     // Collect as a set of strings to efficiently ensure uniqueness
     std::set<Text> modulePaths;
-    for (auto& line : maps->split('\n')) {
+    for (auto &line : maps->split('\n')) {
         auto components = line.split(' ');
         if (components.size() == 6 && components[5].startsWith("/"))
             modulePaths.insert(components[5]);

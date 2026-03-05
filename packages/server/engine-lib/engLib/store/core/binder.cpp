@@ -108,8 +108,7 @@ Error Binder::callMethods(
         return {};  // No bound instances, return success
 
     // Get the trace level
-    auto traceLevel =
-        pThis->m_pInstance->endpoint->config.pipelineTraceLevel;
+    auto traceLevel = pThis->m_pInstance->endpoint->config.pipelineTraceLevel;
 
     // Iterate over bound instances and invoke the callback
     for (auto *pInstance : *(it->second)) {
@@ -261,10 +260,10 @@ Error Binder::writeText(const Utf16View &text) noexcept {
     json::Value data;
 
     auto traceLevel = m_pInstance->endpoint->config.pipelineTraceLevel;
-    
+
     if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA)
         data["length"] = (int)text.length();
-    if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL) 
+    if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL)
         data["text"] = _tr<Text>(text).substr(0, 2000);
 
     return callMethods(this, "text", call, data);
@@ -320,7 +319,8 @@ Error Binder::writeAudio(const AVI_ACTION action, Text &mimeType,
     };
     json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
+        PIPELINE_TRACE_LEVEL::METADATA) {
         data["action"] = (int)action;
         data["mimeType"] = mimeType;
 
@@ -346,7 +346,8 @@ Error Binder::writeVideo(const AVI_ACTION action, Text &mimeType,
     };
     json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
+        PIPELINE_TRACE_LEVEL::METADATA) {
         data["action"] = (int)action;
         data["mimeType"] = mimeType;
 
@@ -372,7 +373,8 @@ Error Binder::writeImage(const AVI_ACTION action, Text &mimeType,
     };
     json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
+        PIPELINE_TRACE_LEVEL::METADATA) {
         data["action"] = (int)action;
         data["mimeType"] = mimeType;
 
@@ -395,11 +397,13 @@ Error Binder::writeQuestions(const pybind11::object &question) noexcept {
     };
     json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::FULL) {
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
+        PIPELINE_TRACE_LEVEL::FULL) {
         engine::python::LockPython lock;
-        data["questions"] = engine::python::pyjson::dictToJson(question.attr("model_dump")());
+        data["questions"] =
+            engine::python::pyjson::dictToJson(question.attr("model_dump")());
     }
-    
+
     return callMethods(this, "questions", call, data);
 }
 
@@ -415,9 +419,11 @@ Error Binder::writeAnswers(const pybind11::object &answers) noexcept {
     };
     json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::FULL) {
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
+        PIPELINE_TRACE_LEVEL::FULL) {
         engine::python::LockPython lock;
-        data["answers"] = engine::python::pyjson::dictToJson(answers.attr("model_dump")());
+        data["answers"] =
+            engine::python::pyjson::dictToJson(answers.attr("model_dump")());
     }
     return callMethods(this, "answers", call, data);
 }
@@ -437,7 +443,8 @@ Error Binder::writeClassifications(
     };
 
     json::Value data;
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::SUMMARY) {
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
+        PIPELINE_TRACE_LEVEL::SUMMARY) {
         data["count"] = (int)classifications.size();
     }
 
@@ -457,7 +464,8 @@ Error Binder::writeClassificationContext(
     };
     json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::SUMMARY) {
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
+        PIPELINE_TRACE_LEVEL::SUMMARY) {
         data["count"] = (int)classifications.size();
     }
 
@@ -476,17 +484,21 @@ Error Binder::writeDocuments(const pybind11::object &documents) noexcept {
     };
     json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
+    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
+        PIPELINE_TRACE_LEVEL::METADATA) {
         try {
             engine::python::LockPython lock;
             data["count"] = (int)py::len(documents);
-            if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::FULL) {
+            if (m_pInstance->endpoint->config.pipelineTraceLevel >=
+                PIPELINE_TRACE_LEVEL::FULL) {
                 py::list docDicts;
                 for (auto doc : documents)
                     docDicts.append(doc.attr("toDict")());
-                data["documents"] = engine::python::pyjson::dictToJson(docDicts);
+                data["documents"] =
+                    engine::python::pyjson::dictToJson(docDicts);
             }
-        } catch (...) {}
+        } catch (...) {
+        }
     }
 
     return callMethods(this, "documents", call, data);

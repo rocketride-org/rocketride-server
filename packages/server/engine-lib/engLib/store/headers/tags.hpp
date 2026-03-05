@@ -51,21 +51,21 @@ APUTIL_DEFINE_ENUM(
     OBEG =
         TAG_DEFINE("OBEG"),     //	TAG_OBJECT_BEGIN				Begin an object
     OMET = TAG_DEFINE("OMET"),  //		TAG_OBJECT_METADATA				String:
-                                //JSON encoded metadata
+                                // JSON encoded metadata
     OENC = TAG_DEFINE("OENC"),  //		TAG_OBJECT_STREAM_ENCRYPTED		Blob: OS
-                                //encrypted binary data
+                                // encrypted binary data
     SBGN = TAG_DEFINE("SBGN"),  //		TAG_OBJECT_STREAM				Dword,
-                                //String: Stream type and name
+                                // String: Stream type and name
     SDAT = TAG_DEFINE(
         "SDAT"),  //		TAG_OBJECT_STREAM_DATA			Blob: Binary data
     SEND =
         TAG_DEFINE("SEND"),     //		TAG_OBJECT_STREAM_END			End a stream
     OSIG = TAG_DEFINE("OSIG"),  //		TAG_OBJECT_SIGNATURE			String:
-                                //Object signature (sha512 hash)
+                                // Object signature (sha512 hash)
     OEND = TAG_DEFINE(
         "OEND"),                //	TAG_OBJECT_END						End an object,
     ENCK = TAG_DEFINE("ENCK"),  //	TAG_ENCRYPTION_KEY				String:
-                                //Encryption key name
+                                // Encryption key name
     ENCR =
         TAG_DEFINE("ENCR"),  //	TAG_ENCRYPTED					Encrypted tag
     CMPR =

@@ -27,7 +27,8 @@ namespace ap::async {
 
 // Single definition to avoid duplicate thread-local init symbols when linking
 // (e.g. classify wrapper dylib on macOS).
-thread_local Variant<std::monostate, ThreadCtx *, ThreadCtx> ThreadApi::m_thisCtx = {};
+thread_local Variant<std::monostate, ThreadCtx *, ThreadCtx>
+    ThreadApi::m_thisCtx = {};
 
 Opt<async::Thread> g_failsafe;
 

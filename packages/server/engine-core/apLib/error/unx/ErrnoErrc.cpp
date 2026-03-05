@@ -28,11 +28,11 @@ namespace ap {
 // Define the Errno error category, representing a platform
 // error on the windows subsystem
 struct ErrnoErrorCategory : std::error_category {
-    const char* name() const noexcept override;
+    const char *name() const noexcept override;
     std::string message(int ev) const override;
 };
 
-const char* ErrnoErrorCategory::name() const noexcept { return "errno"; }
+const char *ErrnoErrorCategory::name() const noexcept { return "errno"; }
 
 std::string ErrnoErrorCategory::message(int code) const {
     if (auto desc = strerror(code)) return string::trim(desc);

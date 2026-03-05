@@ -27,7 +27,7 @@ namespace engine::perms {
 
 _const SID_IDENTIFIER_AUTHORITY AzureAdSidAuthority = {0, 0, 0, 0, 0, 12};
 
-inline ErrorOr<Sid> getSid(const wchar_t* username) noexcept {
+inline ErrorOr<Sid> getSid(const wchar_t *username) noexcept {
     ASSERTD(username);
 
     uint8_t sid[SECURITY_MAX_SID_SIZE];
@@ -62,7 +62,7 @@ inline ErrorOr<Sid> getCurrentUserSid() noexcept {
     DWORD length = 0;
     ::GetTokenInformation(hProcessToken.get(), TokenUser, nullptr, 0, &length);
 
-    auto userInfo = reinterpret_cast<TOKEN_USER*>(malloc(length));
+    auto userInfo = reinterpret_cast<TOKEN_USER *>(malloc(length));
     if (!userInfo) return APERRL(Permissions, Ec::OutOfMemory);
     util::Guard userInfoCleanup([=]() { free(userInfo); });
 
@@ -74,7 +74,7 @@ inline ErrorOr<Sid> getCurrentUserSid() noexcept {
 }
 
 // Test whether a user or group SID is local (vs. domain)
-inline bool isLocalSid(const Sid& sid) noexcept {
+inline bool isLocalSid(const Sid &sid) noexcept {
     if (auto domainSid = sid.domainSid()) return machineSid() == domainSid;
     return true;
 }
@@ -101,7 +101,7 @@ inline bool isGroupSidUse(SID_NAME_USE sidUse) noexcept {
 
 // Gets a user or group's effective rights from an file's DACL
 // WARNING: Slow and unreliable
-inline ErrorOr<ACCESS_MASK> getSidEffectiveRights(const Sid& sid,
+inline ErrorOr<ACCESS_MASK> getSidEffectiveRights(const Sid &sid,
                                                   PACL dacl) noexcept {
     ASSERT(sid && dacl);
 
@@ -132,12 +132,12 @@ struct WindowsIdentity {
     bool isGroup;
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         return string::formatBuffer(buff, "{}\\{}", domain, username);
     }
 };
 
-inline WindowsIdentity::Type getIdentityType(const Sid& sid) noexcept {
+inline WindowsIdentity::Type getIdentityType(const Sid &sid) noexcept {
     if (isLocalSid(sid)) {
         if (compareSidAuthorities(
                 ::GetSidIdentifierAuthority(sid.ptr()),
@@ -151,7 +151,7 @@ inline WindowsIdentity::Type getIdentityType(const Sid& sid) noexcept {
 
 // Retrieve the Windows user or group for a given SID
 inline ErrorOr<WindowsIdentity> sidToWindowsIdentity(
-    const Sid& sid, const Text& systemName) noexcept {
+    const Sid &sid, const Text &systemName) noexcept {
     // Lookup the SID
     ASSERT(sid);
     wchar_t username[1_kb];
@@ -193,7 +193,7 @@ inline Sid ownerSid(PSECURITY_DESCRIPTOR sd) noexcept {
     return {};
 }
 
-inline Sid ownerGid(Text& parentPath) noexcept {
+inline Sid ownerGid(Text &parentPath) noexcept {
     PSID ownerGid = nullptr;
     PSECURITY_DESCRIPTOR pSecurityDescriptor;
     auto result = ::GetNamedSecurityInfo(
@@ -213,7 +213,7 @@ inline Sid ownerGid(Text& parentPath) noexcept {
 
     for (decltype(dacl->AceCount) i = 0; i < dacl->AceCount; ++i) {
         PACE_HEADER header;
-        if (!::GetAce(dacl, i, _reCast<LPVOID*>(&header))) return {};
+        if (!::GetAce(dacl, i, _reCast<LPVOID *>(&header))) return {};
 
         switch (header->AceType) {
             case ACCESS_ALLOWED_ACE_TYPE: {
@@ -236,7 +236,7 @@ inline Sid ownerGid(Text& parentPath) noexcept {
 
 template <typename AllocT = std::allocator<uint8_t>>
 ErrorOr<memory::Data<uint8_t, AllocT>> fileSecurityDescriptor(
-    const file::Path& path, const AllocT& allocator = {}) noexcept {
+    const file::Path &path, const AllocT &allocator = {}) noexcept {
     // Allocate an initial buffer of 512 bytes (SECURITY_DESCRIPTOR_MIN_LENGTH
     // is 40 and is usually too small)
     memory::Data<uint8_t, AllocT> sdBuffer(allocator);
@@ -267,8 +267,8 @@ ErrorOr<memory::Data<uint8_t, AllocT>> fileSecurityDescriptor(
 }
 
 template <typename Callback>
-Error expandLocalGroup(const WindowsIdentity& group,
-                       Callback&& callback) noexcept {
+Error expandLocalGroup(const WindowsIdentity &group,
+                       Callback &&callback) noexcept {
     if (!group.isGroup || (group.type != WindowsIdentity::Type::typeLocal &&
                            group.type != WindowsIdentity::Type::typeDomain))
         return APERRL(Permissions, Ec::InvalidParam, "Not a local group",
@@ -285,7 +285,7 @@ Error expandLocalGroup(const WindowsIdentity& group,
         bool useDomain = !group.sid.builtinSecurityGroup();
         status = ::NetLocalGroupGetMembers(
             useDomain ? group.domain.c_str() : nullptr, group.username, 0,
-            _reCast<LPBYTE*>(&members), MAX_PREFERRED_LENGTH, &entriesRead,
+            _reCast<LPBYTE *>(&members), MAX_PREFERRED_LENGTH, &entriesRead,
             &totalEntries, &resumeHandle);
         switch (status) {
             case NERR_Success:
@@ -323,8 +323,8 @@ Error expandLocalGroup(const WindowsIdentity& group,
 // The "Domain Users" group is a computed group with no actual members and must
 // be expanded differently [APPLAT-805]
 template <typename Callback>
-Error expandDomainUsersGroup(const Sid& domainSid,
-                             Callback&& callback) noexcept {
+Error expandDomainUsersGroup(const Sid &domainSid,
+                             Callback &&callback) noexcept {
     if (!domainSid)
         return APERRL(Permissions, Ec::InvalidParam, "Domain SID is null");
 
@@ -344,7 +344,7 @@ Error expandDomainUsersGroup(const Sid& domainSid,
             return APERRL(Permissions, Ec::Unexpected,
                           "Unable to determine domain's distinguished name",
                           domainSid);
-    } catch (const Error& ccode) {
+    } catch (const Error &ccode) {
         return APERRL(Permissions, ccode, "Failed to open domain object",
                       domainSid);
     }
@@ -359,15 +359,15 @@ Error expandDomainUsersGroup(const Sid& domainSid,
                 return ccode;
         }
         return {};
-    } catch (const Error& ccode) {
+    } catch (const Error &ccode) {
         return APERRL(Permissions, ccode, "Failed to enumerate domain users",
                       domainSid);
     }
 }
 
 template <typename Callback>
-Error expandDomainGroup(const WindowsIdentity& group,
-                        Callback&& callback) noexcept {
+Error expandDomainGroup(const WindowsIdentity &group,
+                        Callback &&callback) noexcept {
     if (!group.isGroup || group.type != WindowsIdentity::Type::typeDomain)
         return APERRL(Permissions, Ec::InvalidParam, "Not a domain group",
                       group);
@@ -398,17 +398,17 @@ Error expandDomainGroup(const WindowsIdentity& group,
                 perms::adsi::DirectoryObject member(memberDn);
                 if (auto memberSid = member.sid())
                     memberSids.emplace_back(_mv(memberSid));
-            } catch (const Error& ccode) {
+            } catch (const Error &ccode) {
                 // Log the member that failed
                 LOG(Permissions, "Failed to map group member", ccode, memberDn);
             }
         }
-    } catch (const Error& ccode) {
+    } catch (const Error &ccode) {
         return APERRL(Permissions, ccode, "Failed to expand domain group",
                       group);
     }
 
-    for (auto& memberSid : memberSids) {
+    for (auto &memberSid : memberSids) {
         if (auto ccode = callback(memberSid); ccode && ccode != Ec::NotFound)
             return ccode;
     }
@@ -416,7 +416,7 @@ Error expandDomainGroup(const WindowsIdentity& group,
 }
 
 template <typename Callback>
-Error expandGroup(const WindowsIdentity& group, Callback&& callback) noexcept {
+Error expandGroup(const WindowsIdentity &group, Callback &&callback) noexcept {
     switch (group.type) {
         case perms::WindowsIdentity::Type::typeLocal:
             return expandLocalGroup(group, _mv(callback));

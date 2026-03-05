@@ -25,17 +25,17 @@
 
 namespace ap::file::snap {
 
-void Context::__toJson(json::Value& val) const noexcept {
+void Context::__toJson(json::Value &val) const noexcept {
     val = json::objectValue;
-    for (auto& [vol, snap] : snaps) val[vol] = _tj(snap);
+    for (auto &[vol, snap] : snaps) val[vol] = _tj(snap);
 }
 
-Error Context::__fromJson(Context& ctx, const json::Value& val) noexcept {
+Error Context::__fromJson(Context &ctx, const json::Value &val) noexcept {
     if (!val.isObject())
         return APERRL(Snap, Ec::InvalidJson, "Expected object", val);
 
-    for (auto&& vol : val.keys()) {
-        auto& snap = ctx.snaps[vol];
+    for (auto &&vol : val.keys()) {
+        auto &snap = ctx.snaps[vol];
         if (auto ccode = val.lookupAssign(vol, snap)) return ccode;
         if (!snap) return APERRL(Snap, Ec::InvalidJson, "Empty mapping", vol);
     }

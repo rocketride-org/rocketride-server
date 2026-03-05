@@ -50,9 +50,9 @@ inline uint32_t gpuSize() noexcept {
 #if ROCKETRIDE_PLAT_MAC
     return macGPUSize();
 #else
-    const char* cmd =
+    const char *cmd =
         "nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits";
-    FILE* pipe = popen(cmd, "r");
+    FILE *pipe = popen(cmd, "r");
     if (!pipe) {
         return 0;  // nvidia-smi unavailable or no GPU detected
     }
@@ -65,7 +65,7 @@ inline uint32_t gpuSize() noexcept {
         try {
             // Convert buffer content (string) to uint32_t
             gpuMemoryMB = std::stoi(buffer);
-        } catch (const std::exception& e) {
+        } catch (const std::exception &e) {
             std::cerr << "Error parsing GPU memory: " << e.what() << std::endl;
             gpuMemoryMB = 0;  // Fallback to 0 if parsing fails
         }
@@ -83,7 +83,7 @@ inline ErrorOr<int> systemDiskUtilization() noexcept {
     return APERR(Ec::NotSupported);
 }
 
-inline ErrorOr<DiskUsage> diskUsage(const file::Path& path) noexcept {
+inline ErrorOr<DiskUsage> diskUsage(const file::Path &path) noexcept {
     struct statvfs fsInfo;
     if (statvfs(path.plat(), &fsInfo))
         return APERR(errno, "statvfs failed", path);
@@ -107,9 +107,9 @@ inline ErrorOr<DiskUsage> diskUsage(const file::Path& path) noexcept {
 }
 
 template <typename MethodT>
-inline ErrorOr<MethodT*> dynamicBind(const file::Path& libPath,
-                                     const char* methodName,
-                                     bool changeDir) noexcept {
+inline ErrorOr<MethodT *> dynamicBind(const file::Path &libPath,
+                                      const char *methodName,
+                                      bool changeDir) noexcept {
     if (changeDir) {
         if (::chdir(libPath.parent().plat()))
             return APERR(errno, "Failed to change dir", libPath);
@@ -118,7 +118,7 @@ inline ErrorOr<MethodT*> dynamicBind(const file::Path& libPath,
     auto hLib = ::dlopen(libPath.plat(), RTLD_LAZY);
     if (!hLib) return APERR(Ec::Read, "Failed to load", libPath, ::dlerror());
 
-    auto method = _reCast<MethodT*>(::dlsym(hLib, methodName));
+    auto method = _reCast<MethodT *>(::dlsym(hLib, methodName));
     if (!method)
         return APERR(Ec::Read, "Failed to bind method", libPath, methodName,
                      ::dlerror());
@@ -148,15 +148,15 @@ inline ErrorOr<timespec> getFileAccessTime(int fd) noexcept {
 #endif
 }
 
-inline Error setFileAccessTime(int fd, const timespec& atime) noexcept {
+inline Error setFileAccessTime(int fd, const timespec &atime) noexcept {
     const timespec times[2] = {atime, {0, UTIME_OMIT}};
     if (::futimens(fd, times)) return APERR(errno, "futimens");
     return {};
 }
 
-inline Error setFileAccessAndModificationTimes(const file::Path& path,
-                                               const timeval& atime,
-                                               const timeval& mtime) noexcept {
+inline Error setFileAccessAndModificationTimes(const file::Path &path,
+                                               const timeval &atime,
+                                               const timeval &mtime) noexcept {
     const timeval times[2] = {
         atime,
         mtime,
@@ -165,7 +165,7 @@ inline Error setFileAccessAndModificationTimes(const file::Path& path,
     return {};
 }
 
-inline ErrorOr<timespec> getFileAccessTime(const file::Path& path) noexcept {
+inline ErrorOr<timespec> getFileAccessTime(const file::Path &path) noexcept {
     struct ::stat info;
     if (::stat(path.plat(), &info)) return APERR(errno, "stat", path);
 #if ROCKETRIDE_PLAT_MAC
@@ -175,8 +175,8 @@ inline ErrorOr<timespec> getFileAccessTime(const file::Path& path) noexcept {
 #endif
 }
 
-inline Error setFileAccessTime(const file::Path& path,
-                               const timespec& atime) noexcept {
+inline Error setFileAccessTime(const file::Path &path,
+                               const timespec &atime) noexcept {
     const timespec times[2] = {atime, {0, UTIME_OMIT}};
     if (::utimensat(-1, path.plat(), times, 0))
         return APERR(errno, "utimensat");
@@ -329,11 +329,11 @@ inline ErrorOr<std::vector<Processor>> getProcessors() noexcept {
     auto cpuinfo = file::fetchStringEx("/proc/cpuinfo", 1_mb);
     if (!cpuinfo) return cpuinfo.ccode();
 
-    auto toBool = [](auto& text) { return text == "yes"; };
+    auto toBool = [](auto &text) { return text == "yes"; };
 
     std::vector<Processor> res;
     Opt<Processor> current;
-    for (auto& line : cpuinfo->split('\n', true)) {
+    for (auto &line : cpuinfo->split('\n', true)) {
         // If we found an empty line, end the current processor
         if (!line) {
             if (current) {

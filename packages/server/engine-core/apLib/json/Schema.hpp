@@ -38,7 +38,7 @@ namespace ap::json {
 //		}
 //	};
 template <typename... Args>
-inline auto makeSchema(Args&&... args) noexcept {
+inline auto makeSchema(Args &&...args) noexcept {
     static_assert(sizeof...(args) % 2 == 0,
                   "Invalid json schema argument list");
 

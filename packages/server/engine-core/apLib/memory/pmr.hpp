@@ -65,7 +65,7 @@ private:
     ///		Define the layout of each chunk
     //---------------------------------------------------------
     struct MemoryChunk {
-        MemoryChunk* pNext;
+        MemoryChunk *pNext;
         uint8_t buffer[1];
     };
 
@@ -85,7 +85,7 @@ public:
     /// @details
     ///		Disable copy
     //---------------------------------------------------------
-    constant_mbr& operator=(const constant_mbr&) = delete;
+    constant_mbr &operator=(const constant_mbr &) = delete;
 
     //---------------------------------------------------------
     /// @details
@@ -101,12 +101,12 @@ protected:
     /// @details
     ///		Perform a sub-allocation
     //---------------------------------------------------------
-    void* do_allocate(size_t bytes, size_t alignment) override {
+    void *do_allocate(size_t bytes, size_t alignment) override {
         // Ensures we don't return the same pointer twice.
         if (bytes == 0) bytes = 1;
 
         // Align the ptr
-        void* p = std::align(alignment, bytes, _M_current_buf, _M_avail);
+        void *p = std::align(alignment, bytes, _M_current_buf, _M_avail);
 
         // If we couldn't align it (due to the fact it
         // is not there, or remaining is too small)
@@ -119,7 +119,7 @@ protected:
         }
 
         // Adjust it
-        _M_current_buf = (char*)_M_current_buf + bytes;
+        _M_current_buf = (char *)_M_current_buf + bytes;
         _M_avail -= bytes;
         return p;
     }
@@ -128,13 +128,13 @@ protected:
     /// @details
     ///		Nothing to do as we do not support releasing
     //---------------------------------------------------------
-    void do_deallocate(void*, size_t, size_t) override {}
+    void do_deallocate(void *, size_t, size_t) override {}
 
     //---------------------------------------------------------
     /// @details
     ///		Check if two constant_mbr are the same
     //---------------------------------------------------------
-    bool do_is_equal(const memory_resource& other) const noexcept override {
+    bool do_is_equal(const memory_resource &other) const noexcept override {
         return this == &other;
     }
 
@@ -148,7 +148,7 @@ private:
     void _M_new_buffer(size_t bytes) {
         // Get a new buffer
         auto p =
-            (MemoryChunk*)new uint8_t[offsetof(MemoryChunk, buffer) + bytes];
+            (MemoryChunk *)new uint8_t[offsetof(MemoryChunk, buffer) + bytes];
 
         // Link the buffer
         p->pNext = _M_head;
@@ -183,13 +183,13 @@ private:
     /// @details
     ///		Linked list of chunks we have allocated
     //---------------------------------------------------------
-    MemoryChunk* _M_head = nullptr;
+    MemoryChunk *_M_head = nullptr;
 
     //---------------------------------------------------------
     /// @details
     ///		Point to the next byte to allocate within the chunk
     //---------------------------------------------------------
-    void* _M_current_buf = nullptr;
+    void *_M_current_buf = nullptr;
 
     //---------------------------------------------------------
     /// @details

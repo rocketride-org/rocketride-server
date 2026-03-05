@@ -28,19 +28,19 @@ namespace std::chrono {
 // Define the __toData/__fromData hooks in the same namespace as the type
 // so adl lookup will work for our system stamp type
 template <typename In>
-inline void __fromData(time_point<system_clock>& stamp,
-                       const In& in) noexcept(false) {
+inline void __fromData(time_point<system_clock> &stamp,
+                       const In &in) noexcept(false) {
     uint64_t timeT;
-    in.read({_reCast<uint8_t*>(&timeT), sizeof(timeT)});
+    in.read({_reCast<uint8_t *>(&timeT), sizeof(timeT)});
     stamp =
         ::ap::time::fromTimeT<time_point<system_clock>>(_cast<time_t>(timeT));
 }
 
 template <typename Out>
-inline void __toData(const time_point<system_clock>& stamp,
-                     Out& out) noexcept(false) {
+inline void __toData(const time_point<system_clock> &stamp,
+                     Out &out) noexcept(false) {
     auto timeT = _cast<uint64_t>(::ap::time::toTimeT(stamp));
-    out.write({_reCast<const uint8_t*>(&timeT), sizeof(timeT)});
+    out.write({_reCast<const uint8_t *>(&timeT), sizeof(timeT)});
 }
 
 }  // namespace std::chrono

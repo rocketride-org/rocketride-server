@@ -29,7 +29,7 @@
 
 static jmp_buf jbuf;
 
-static bool& crashCheck() {
+static bool &crashCheck() {
     static bool value{};
     return value;
 }
@@ -88,7 +88,7 @@ TEST_CASE("breakpad", "[.]") {
 
             std::set<std::filesystem::path> dumpFiles;
 
-            for (const auto& entry :
+            for (const auto &entry :
                  std::filesystem::directory_iterator(crashPath)) {
                 auto entryPath = entry.path();
                 auto ext = entryPath.extension();
@@ -106,7 +106,7 @@ TEST_CASE("breakpad", "[.]") {
                 plat::minidumpAltSignalHandlersEnable();
 
                 auto crashLambda = []() {
-                    volatile int* a = (int*)(NULL);
+                    volatile int *a = (int *)(NULL);
                     *a = 1;
                 };
 
@@ -116,7 +116,7 @@ TEST_CASE("breakpad", "[.]") {
             REQUIRE(crashCheck());
 
             bool newDumpEntry{};
-            for (const auto& entry :
+            for (const auto &entry :
                  std::filesystem::directory_iterator(crashPath)) {
                 auto entryPath = entry.path();
                 auto ext = entryPath.extension();

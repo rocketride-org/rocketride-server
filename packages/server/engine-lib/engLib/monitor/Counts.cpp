@@ -36,7 +36,7 @@ void Counts::startCounters() noexcept { m_rate.start(); }
 ///	@param[in]	other
 ///		Other status to add to this one
 //-------------------------------------------------------------------------
-Counts& Counts::operator+=(const Counts& other) noexcept {
+Counts &Counts::operator+=(const Counts &other) noexcept {
     if (this == &other) return *this;
 
     m_total += other.m_total;
@@ -53,7 +53,7 @@ Counts& Counts::operator+=(const Counts& other) noexcept {
 ///	@param[in]	counts
 ///		Count/size to add
 //-------------------------------------------------------------------------
-Counts& Counts::addCompleted(CountSize counts) noexcept {
+Counts &Counts::addCompleted(CountSize counts) noexcept {
     auto guard = lock();
     m_rate.report(counts.size, counts.count);
     m_total += counts;
@@ -67,7 +67,7 @@ Counts& Counts::addCompleted(CountSize counts) noexcept {
 ///	@param[in]	counts
 ///		Count/size to add
 //-------------------------------------------------------------------------
-Counts& Counts::addFailed(CountSize counts) noexcept {
+Counts &Counts::addFailed(CountSize counts) noexcept {
     auto guard = lock();
     m_failed += counts;
     m_total += counts;
@@ -81,7 +81,7 @@ Counts& Counts::addFailed(CountSize counts) noexcept {
 ///	@param[in]	counts
 ///		Count/size to add
 //-------------------------------------------------------------------------
-Counts& Counts::addWords(CountSize counts) noexcept {
+Counts &Counts::addWords(CountSize counts) noexcept {
     auto guard = lock();
     m_words += counts;
     m_updateCounts = true;
@@ -111,7 +111,7 @@ void Counts::beginObject(TextView path, uint64_t size) noexcept {
 ///	@param[in]	object
 ///		Object we are starting
 //-------------------------------------------------------------------------
-void Counts::beginObject(Entry& object) noexcept {
+void Counts::beginObject(Entry &object) noexcept {
     beginObject(static_cast<TextView>(object.url()), object.size());
 }
 
@@ -146,7 +146,7 @@ void Counts::endObject(TextView path) noexcept {
 ///	@param[in]	object
 ///		Object we are stopping
 //-------------------------------------------------------------------------
-void Counts::endObject(Entry& object) noexcept {
+void Counts::endObject(Entry &object) noexcept {
     // Remove it
     endObject(static_cast<TextView>(object.url()));
 }
@@ -157,7 +157,7 @@ void Counts::endObject(Entry& object) noexcept {
 ///	@param[in]	val
 ///		Receives the json info
 //-------------------------------------------------------------------------
-void Counts::__toJson(json::Value& val) const noexcept {
+void Counts::__toJson(json::Value &val) const noexcept {
     auto guard = lock();
 
     auto stats = rate();
@@ -189,7 +189,7 @@ void Counts::__toJson(json::Value& val) const noexcept {
 ///		Formatting options
 //-------------------------------------------------------------------------
 template <typename Buffer>
-void Counts::__toString(Buffer& buff, FormatOptions opts) const noexcept {
+void Counts::__toString(Buffer &buff, FormatOptions opts) const noexcept {
     auto guard = lock();
     buff << "Completed: " << m_rate.counts();
     if (m_failed) _tsbo(buff, opts, " ", Color::Red, "Failed: ", m_failed);

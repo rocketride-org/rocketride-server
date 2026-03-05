@@ -28,7 +28,7 @@ namespace ap::memory {
 namespace {
 
 template <typename T>
-inline Error validate(const T& result) noexcept {
+inline Error validate(const T &result) noexcept {
     Error ccode;
 
     if constexpr (traits::IsDetectedExact<Error, traits::DetectValidateMethod,
@@ -42,7 +42,7 @@ inline Error validate(const T& result) noexcept {
 }
 
 template <typename T, typename Input, typename Value = traits::ValueT<T>>
-inline void unpackContainerData(const Input& in, T& result) noexcept(false) {
+inline void unpackContainerData(const Input &in, T &result) noexcept(false) {
     // Figure out how many elements we have
     auto count = _fdb<PackHdr>(in)->size;
 
@@ -63,7 +63,7 @@ inline void unpackContainerData(const Input& in, T& result) noexcept(false) {
 }
 
 template <typename T, typename Input, typename Value = traits::ValueT<T>>
-inline void unpackPodVector(const Input& in, T& result) noexcept(false) {
+inline void unpackPodVector(const Input &in, T &result) noexcept(false) {
     // Read the data in all at once and memcpy it directly into the vector,
     // this is the most optimized means of marshaling a vector
     auto hdr = *_fdb<PackHdr>(in);
@@ -82,13 +82,13 @@ inline void unpackPodVector(const Input& in, T& result) noexcept(false) {
     result.resize(size / sizeof(Value));
 
     // Read it in
-    in.read({_reCast<uint8_t*>(&result.front()), size});
+    in.read({_reCast<uint8_t *>(&result.front()), size});
 
     LOG(Data, "{} Unpacked {} pod vector elements", in, result.size());
 }
 
 template <typename T, typename Input, typename Value = traits::ValueT<T>>
-inline void unpackContainer(const Input& in, T& result) noexcept(false) {
+inline void unpackContainer(const Input &in, T &result) noexcept(false) {
     static_assert(!traits::IsArrayV<T>, "Arrays are not supported");
 
     // Limit the scope for now
@@ -120,7 +120,7 @@ inline void unpackContainer(const Input& in, T& result) noexcept(false) {
 }
 
 template <typename T, typename Input, typename... Args>
-inline auto unpack(const Input& in, T& result, Args&&... args) noexcept
+inline auto unpack(const Input &in, T &result, Args &&...args) noexcept
     -> adapter::concepts::IfInput<Input, Error> {
     // Member versions
     if constexpr (traits::IsDetectedExact<Error, traits::DetectDataUnpackMethod,
@@ -151,7 +151,7 @@ inline auto unpack(const Input& in, T& result, Args&&... args) noexcept
         if constexpr (traits::IsPodV<typename T::first_type> &&
                       traits::IsPodV<typename T::second_type>)
             return _callChk(
-                [&] { return in.read({(uint8_t*)(&result), sizeof(T)}); });
+                [&] { return in.read({(uint8_t *)(&result), sizeof(T)}); });
         else
             return _callChk([&] {
                 unpack(in, result.first);
@@ -159,7 +159,7 @@ inline auto unpack(const Input& in, T& result, Args&&... args) noexcept
             });
     } else if constexpr (traits::IsPodV<T>)
         return _callChk(
-            [&] { return in.read({(uint8_t*)(&result), sizeof(T)}); });
+            [&] { return in.read({(uint8_t *)(&result), sizeof(T)}); });
     else if constexpr (traits::IsContainerV<T>)
         return _callChk([&] { unpackContainer(in, result); });
     else
@@ -167,7 +167,7 @@ inline auto unpack(const Input& in, T& result, Args&&... args) noexcept
 }
 
 template <typename T, typename Input, typename... Args>
-inline auto unpack(const Input& _in, T& result, Args&&... args) noexcept
+inline auto unpack(const Input &_in, T &result, Args &&...args) noexcept
     -> adapter::concepts::IfNotInput<Input, Error> {
     auto in = adapter::makeInput(_in);
     return unpack<T>(in, result, std::forward<Args>(args)...);
@@ -176,7 +176,7 @@ inline auto unpack(const Input& _in, T& result, Args&&... args) noexcept
 }  // namespace
 
 template <typename T, typename Input, typename... Args>
-inline ErrorOr<T> fromData(const Input& in, Args&&... args) noexcept {
+inline ErrorOr<T> fromData(const Input &in, Args &&...args) noexcept {
     T result = {};
 
     if (auto ccode = unpack(in, result, std::forward<Args>(args)...))
@@ -189,8 +189,8 @@ inline ErrorOr<T> fromData(const Input& in, Args&&... args) noexcept {
 }
 
 template <typename T, typename Input, typename... Args>
-inline Error fromDataAssign(const Input& in, T& result,
-                            Args&&... args) noexcept {
+inline Error fromDataAssign(const Input &in, T &result,
+                            Args &&...args) noexcept {
     return unpack(in, result, std::forward<Args>(args)...);
 }
 

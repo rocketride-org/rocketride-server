@@ -27,25 +27,25 @@ namespace ap {
 
 // Simple accessors to dereference Opt<Ref<T>>
 template <typename T>
-inline const auto& deref(const Opt<CRef<T>>& optRef) noexcept {
+inline const auto &deref(const Opt<CRef<T>> &optRef) noexcept {
     ASSERTD(optRef);
     return optRef->get();
 }
 
 template <typename T>
-inline auto& deref(const Opt<Ref<T>>& optRef) noexcept {
+inline auto &deref(const Opt<Ref<T>> &optRef) noexcept {
     ASSERTD(optRef);
     return optRef->get();
 }
 
 // Simple accessors to dereference ErrorOr<Ref<T>>
 template <typename T>
-inline const auto& deref(const ErrorOr<CRef<T>>& refOr) noexcept(false) {
+inline const auto &deref(const ErrorOr<CRef<T>> &refOr) noexcept(false) {
     return refOr->get();
 }
 
 template <typename T>
-inline auto& deref(const ErrorOr<Ref<T>>& refOr) noexcept(false) {
+inline auto &deref(const ErrorOr<Ref<T>> &refOr) noexcept(false) {
     return refOr->get();
 }
 

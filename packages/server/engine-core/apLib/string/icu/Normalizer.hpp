@@ -45,7 +45,7 @@ public:
     template <typename ChrT, typename TraitsT = Case<ChrT>,
               typename AllocT = std::allocator<ChrT>>
     ErrorOr<Str<ChrT, TraitsT, AllocT>> normalize(
-        StrView<ChrT, TraitsT> text, const AllocT& alloc = {}) const noexcept {
+        StrView<ChrT, TraitsT> text, const AllocT &alloc = {}) const noexcept {
         UErrorCode ec = U_ZERO_ERROR;
         if constexpr (traits::IsSameTypeV<ChrT, Utf8Chr>) {
             // Normalize using a buffer
@@ -69,8 +69,8 @@ public:
 
     template <typename ChrT, typename TraitsT = Case<ChrT>,
               typename AllocT = std::allocator<ChrT>>
-    auto normalize(const Str<ChrT, TraitsT>& text,
-                   const AllocT& alloc = {}) const noexcept {
+    auto normalize(const Str<ChrT, TraitsT> &text,
+                   const AllocT &alloc = {}) const noexcept {
         return normalize(_cast<StrView<ChrT, TraitsT>>(text), alloc);
     }
 
@@ -95,23 +95,23 @@ public:
     }
 
     template <typename ChrT, typename TraitsT = Case<ChrT>>
-    auto isNormalized(const Str<ChrT, TraitsT>& text) const noexcept {
+    auto isNormalized(const Str<ChrT, TraitsT> &text) const noexcept {
         return isNormalized(_cast<StrView<ChrT, TraitsT>>(text));
     }
 
 protected:
-    Normalizer(const ::icu::Normalizer2* instance) noexcept
+    Normalizer(const ::icu::Normalizer2 *instance) noexcept
         : m_instance(instance) {
         ASSERT(m_instance);
     }
 
 protected:
-    const ::icu::Normalizer2* m_instance;
+    const ::icu::Normalizer2 *m_instance;
 };
 
 inline ErrorOr<Normalizer> getNormalizer(
     NormalizationForm form = Normalizer::DefaultForm) noexcept {
-    const ::icu::Normalizer2* instance = {};
+    const ::icu::Normalizer2 *instance = {};
     UErrorCode ec = U_ZERO_ERROR;
     switch (form) {
         case NormalizationForm::NFD:
@@ -144,7 +144,7 @@ template <typename ChrT, typename TraitsT = Case<ChrT>,
 ErrorOr<Str<ChrT, TraitsT, AllocT>> normalize(
     StrView<ChrT, TraitsT> text,
     NormalizationForm form = Normalizer::DefaultForm,
-    const AllocT& alloc = {}) noexcept {
+    const AllocT &alloc = {}) noexcept {
     auto normalizer = getNormalizer(form);
     if (!normalizer) return normalizer.ccode();
     return normalizer->normalize(text, alloc);
@@ -152,9 +152,9 @@ ErrorOr<Str<ChrT, TraitsT, AllocT>> normalize(
 
 template <typename ChrT, typename TraitsT = Case<ChrT>,
           typename AllocT = std::allocator<ChrT>>
-auto normalize(const Str<ChrT, TraitsT>& text,
+auto normalize(const Str<ChrT, TraitsT> &text,
                NormalizationForm form = Normalizer::DefaultForm,
-               const AllocT& alloc = {}) noexcept {
+               const AllocT &alloc = {}) noexcept {
     return normalize(_cast<StrView<ChrT, TraitsT>>(text), form, alloc);
 }
 
@@ -167,7 +167,7 @@ bool isNormalized(StrView<ChrT, TraitsT> text,
 }
 
 template <typename ChrT, typename TraitsT = Case<ChrT>>
-auto isNormalized(const Str<ChrT, TraitsT>& text,
+auto isNormalized(const Str<ChrT, TraitsT> &text,
                   NormalizationForm form = Normalizer::DefaultForm) noexcept {
     return isNormalized(_cast<StrView<ChrT, TraitsT>>(text), form);
 }

@@ -24,7 +24,7 @@
 #include <apLib/ap.h>
 
 namespace {
-auto& mountedShares() noexcept {
+auto &mountedShares() noexcept {
     static std::vector<file::smb::Share> shares;
     return shares;
 }
@@ -32,7 +32,7 @@ auto& mountedShares() noexcept {
 
 namespace ap::file::smb {
 
-Error Client::init(const Text& username, const Text& password) noexcept {
+Error Client::init(const Text &username, const Text &password) noexcept {
     auto lock = m_lock.lock();
     if (m_api) return {};
 
@@ -62,7 +62,7 @@ Error Client::init(const Text& username, const Text& password) noexcept {
         if (api->setLogCallback) {
             (*api->setLogCallback)(
                 ctx, nullptr,
-                [](void* userData, int level, const char* msg) noexcept {
+                [](void *userData, int level, const char *msg) noexcept {
                     LOG(Smb, msg);
                 });
         } else
@@ -73,10 +73,10 @@ Error Client::init(const Text& username, const Text& password) noexcept {
         api->setDebug(ctx, 0);
 
     // Callback to supply credentials to SMB client library
-    api->setFunctionAuthData(ctx, [](const char* server, const char* share,
-                                     char* workgroup, int workgroupLen,
-                                     char* username, int usernameLen,
-                                     char* password, int passwordLen) noexcept {
+    api->setFunctionAuthData(ctx, [](const char *server, const char *share,
+                                     char *workgroup, int workgroupLen,
+                                     char *username, int usernameLen,
+                                     char *password, int passwordLen) noexcept {
         // If the username is of form "domain\user", set the workgroup and
         // username
         if (auto domain = plat::domainFromUsername(client().m_username)) {
@@ -104,16 +104,16 @@ Error Client::init(const Text& username, const Text& password) noexcept {
     return {};
 }
 
-ErrorOr<std::vector<MountCtx>> Client::mount(const Share& share) noexcept {
+ErrorOr<std::vector<MountCtx>> Client::mount(const Share &share) noexcept {
     if (auto ccode = init(share.username, share.password)) return ccode;
 
     auto lock = m_lock.lock();
 
     // Check if we've already verified and added this share
     // Temporarily add the share to the list of mounted shares and verify it
-    for (const auto& shareName : share.names) {
+    for (const auto &shareName : share.names) {
         if (std::find_if(m_mountedShares.begin(), m_mountedShares.end(),
-                         [&share, &shareName](const auto& pair) {
+                         [&share, &shareName](const auto &pair) {
                              return pair.first == share.server &&
                                     pair.second == shareName;
                          }) != m_mountedShares.end()) {
@@ -142,7 +142,7 @@ ErrorOr<std::vector<MountCtx>> Client::mount(const Share& share) noexcept {
 }
 
 ErrorOr<std::vector<Text>> Client::enumShares(
-    const Share& share, TextView originalShareName) noexcept {
+    const Share &share, TextView originalShareName) noexcept {
     if (auto ccode = init(share.username, share.password)) return ccode;
 
     // Check if we've already verified and added this share
