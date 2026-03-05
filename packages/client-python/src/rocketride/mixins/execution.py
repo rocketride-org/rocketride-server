@@ -245,9 +245,11 @@ class ExecutionMixin(DAPClient):
             with open(filepath, 'r', encoding='utf-8') as file:
                 # Prefer JSON5 for better developer experience (comments, trailing commas)
                 if json5:
-                    pipeline_config = json5.load(file)
+                    parsed = json5.load(file)
                 else:
-                    pipeline_config = json.load(file)
+                    parsed = json.load(file)
+                # .pipe files wrap the config in { "pipeline": { ... } } — unwrap if present
+                pipeline_config = parsed.get('pipeline', parsed) if isinstance(parsed, dict) else parsed
         else:
             pipeline_config = pipeline
 
