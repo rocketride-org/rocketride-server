@@ -177,6 +177,9 @@ jobs:
     needs: [init, build]
     runs-on: ubuntu-latest
     environment: release
+    permissions:
+      contents: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -251,7 +254,7 @@ jobs:
           else
             TARBALL=$(find release-assets -name '*.tgz' | head -n1)
             echo "Publishing ${TARBALL}"
-            npm publish "./${TARBALL}" --access public
+            npm publish "./${TARBALL}" --access public --provenance
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
