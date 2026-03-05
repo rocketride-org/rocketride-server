@@ -54,7 +54,11 @@ class AccountPipelineValidation:
             visited.add(id)
 
             node = nodes.get(id)
+            if node is None:
+                continue
             schema = getServiceDefinition(node.get('provider'))
+            if schema is None:
+                continue
             plans = schema.get('plans', [])
             required_plans = required_plans | set(plans)
 

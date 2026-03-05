@@ -373,12 +373,15 @@ export class PageStatusProvider {
 		}
 
 		// Create a meaningful title for the panel
-		const fileName = path.basename(fileUri.fsPath);
+		const isUnknownTask = fileUri.scheme === 'rocketride';
+		const panelTitle = isUnknownTask
+			? `${displayName} (${projectId.substring(0, 8)}…)`
+			: `${displayName} (${path.basename(fileUri.fsPath)})`;
 
 		// Create new webview panel
 		const panel = vscode.window.createWebviewPanel(
 			'rocketride.pageStatus',
-			`${displayName} (${fileName})`,
+			panelTitle,
 			vscode.ViewColumn.One,
 			{
 				enableScripts: true,

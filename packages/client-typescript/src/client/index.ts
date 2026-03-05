@@ -32,13 +32,13 @@
  */
 
 // Export all exceptions
-export * from './exceptions';
+export * from './exceptions/index.js';
 
 // Export all schema classes
-export * from './schema';
+export * from './schema/index.js';
 
 // Export all type definitions
-export * from './types';
+export * from './types/index.js';
 
 // Export the main client and utilities
-export * from './client';
+export * from './client.js';
