@@ -25,7 +25,7 @@
 
 namespace ap::plat {
 
-inline Text env(const Text& key) noexcept {
+inline Text env(const Text &key) noexcept {
 #if ROCKETRIDE_PLAT_WIN
     // Support environment variables up to 1k in length
     // If we use getenv instead here, we may not see environment variables set
@@ -46,13 +46,13 @@ inline Text env(const Text& key) noexcept {
     return {};
 }
 
-inline Text envOr(const Text& key, TextView defaultValue) noexcept {
+inline Text envOr(const Text &key, TextView defaultValue) noexcept {
     auto value = env(key);
     if (value) return value;
     return defaultValue;
 }
 
-inline void setEnv(const Text& key, const Text& value) noexcept {
+inline void setEnv(const Text &key, const Text &value) noexcept {
 #if ROCKETRIDE_PLAT_WIN
     ::SetEnvironmentVariableA(key, value);
 #else

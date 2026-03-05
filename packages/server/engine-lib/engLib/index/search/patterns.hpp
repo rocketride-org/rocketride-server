@@ -25,7 +25,7 @@
 
 namespace engine::index::search {
 
-inline ErrorOr<globber::Glob> compileGlob(const Text& pattern) noexcept {
+inline ErrorOr<globber::Glob> compileGlob(const Text &pattern) noexcept {
     // Check for empty patterns (invalid)
     if (pattern.empty())
         return APERR(Ec::InvalidFormat,
@@ -40,7 +40,7 @@ inline ErrorOr<globber::Glob> compileGlob(const Text& pattern) noexcept {
 }
 
 inline ErrorOr<std::regex> compileRegularExpression(
-    const Text& expression) noexcept {
+    const Text &expression) noexcept {
     // Check for empty expressions (invalid)
     if (expression.empty())
         return APERR(Ec::InvalidFormat,
@@ -51,7 +51,7 @@ inline ErrorOr<std::regex> compileRegularExpression(
         return std::regex(expression, std::regex_constants::ECMAScript |
                                           std::regex_constants::icase |
                                           std::regex_constants::nosubs);
-    } catch (std::regex_error& e) {
+    } catch (std::regex_error &e) {
         return APERR(Ec::InvalidFormat, "Regular expression is invalid",
                      expression, e);
     }

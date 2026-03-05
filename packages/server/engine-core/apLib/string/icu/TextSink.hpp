@@ -32,11 +32,11 @@ public:
     using StrType = Str<Utf8Chr, Case<Utf8Chr>, AllocT>;
 
     TextSink() = default;
-    TextSink(const AllocT& alloc) noexcept : m_text(alloc), m_buffer(alloc) {}
-    TextSink(const TextSink&) = delete;
-    TextSink(TextSink&&) = delete;
+    TextSink(const AllocT &alloc) noexcept : m_text(alloc), m_buffer(alloc) {}
+    TextSink(const TextSink &) = delete;
+    TextSink(TextSink &&) = delete;
 
-    virtual void Append(const char* bytes, int32_t length) noexcept override {
+    virtual void Append(const char *bytes, int32_t length) noexcept override {
         // If this is our buffer, resize and move
         if (bytes == m_buffer.data()) {
             ASSERTD(length <= m_buffer.size());
@@ -51,10 +51,10 @@ public:
             m_text += TextView(bytes, length);
     }
 
-    virtual char* GetAppendBuffer(int32_t min_capacity,
-                                  int32_t desired_capacity_hint, char* scratch,
+    virtual char *GetAppendBuffer(int32_t min_capacity,
+                                  int32_t desired_capacity_hint, char *scratch,
                                   int32_t scratch_capacity,
-                                  int32_t* result_capacity) noexcept override {
+                                  int32_t *result_capacity) noexcept override {
         auto size = std::max(min_capacity, desired_capacity_hint);
         m_buffer.resize(size);
         *result_capacity = size;

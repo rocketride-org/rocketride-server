@@ -84,7 +84,7 @@ Error IFilterEndpoint::beginEndpoint(OPEN_MODE openMode_) noexcept {
 /// @details
 ///		Make static, finalized configs
 //-----------------------------------------------------------------
-Error IFilterEndpoint::getConfigSubKey(Text& key) noexcept {
+Error IFilterEndpoint::getConfigSubKey(Text &key) noexcept {
     if (config.serviceMode == SERVICE_MODE::SOURCE) {
         key = _ts(m_msConfig->m_tenantId);
         if (!m_msConfig->m_isEnterprise)
@@ -109,9 +109,9 @@ Error IFilterEndpoint::getConfigSubKey(Text& key) noexcept {
 ///	@returns
 ///		Error
 //-----------------------------------------------------------------
-Error IFilterEndpoint::setConfig(const json::Value& jobConfig,
-                                 const json::Value& taskConfig,
-                                 const json::Value& serviceConfig) noexcept {
+Error IFilterEndpoint::setConfig(const json::Value &jobConfig,
+                                 const json::Value &taskConfig,
+                                 const json::Value &serviceConfig) noexcept {
     // Let the parent decode everything first
     if (auto ccode = Parent::setConfig(jobConfig, taskConfig, serviceConfig))
         return ccode;
@@ -134,8 +134,8 @@ Error IFilterEndpoint::setConfig(const json::Value& jobConfig,
 ///    @param[in]    callback
 ///        Pass a Entry with all the information filled
 //-----------------------------------------------------------------
-Error IFilterEndpoint::scanObjects(Path& path,
-                                   const ScanAddObject& callback) noexcept {
+Error IFilterEndpoint::scanObjects(Path &path,
+                                   const ScanAddObject &callback) noexcept {
     // Create getSyncToken callback
     const msNode::GetSyncTokenCallBack getSyncTokenFn =
         [this](TextView key) -> ErrorOr<Text> { return getSyncToken(key); };
@@ -187,7 +187,7 @@ Error IFilterEndpoint::endEndpoint() noexcept {
 ///		end the endpoint operation
 //-------------------------------------------------------------------------
 ErrorOr<std::shared_ptr<MsEmailNode>> IFilterEndpoint::createClient(
-    IFilterEndpoint* parent) noexcept {
+    IFilterEndpoint *parent) noexcept {
     // Start the endpoint
     auto msEmailNode = std::make_shared<MsEmailNode>(m_msConfig, parent);
 
@@ -201,13 +201,13 @@ ErrorOr<std::shared_ptr<MsEmailNode>> IFilterEndpoint::createClient(
 /// @details
 ///		get the mutex
 //-------------------------------------------------------------------------
-std::mutex& IFilterEndpoint::getPathLock() noexcept { return m_pathLock; }
+std::mutex &IFilterEndpoint::getPathLock() noexcept { return m_pathLock; }
 
 //-------------------------------------------------------------------------
 /// @details
 ///		get the foldermap
 //-------------------------------------------------------------------------
-FoldersMap& IFilterEndpoint::getFolderMap() noexcept { return m_folders; }
+FoldersMap &IFilterEndpoint::getFolderMap() noexcept { return m_folders; }
 //-------------------------------------------------------------------------
 /// @details
 ///		create client for connection to sharepoint

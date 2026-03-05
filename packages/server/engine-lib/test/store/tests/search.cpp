@@ -157,8 +157,8 @@ inline Text calculateContext(int startingIndex, int count) {
     }
     return result;
 }
-inline bool documentExist(Text& docId) { return !!docId; }
-inline bool documentNotExist(Text& docId) { return !docId; }
+inline bool documentExist(Text &docId) { return !!docId; }
+inline bool documentNotExist(Text &docId) { return !docId; }
 void initWords() {
     // Init words
     wordNotExist1 = getNotExistentWord(1);
@@ -173,8 +173,8 @@ void initWords() {
 
 void testSearch3Words(
     json::Value configVariable, TextView searchType, TextView word1,
-    TextView word2, TextView word3, std::function<bool(Text&)> condition,
-    const std::vector<std::tuple<Text, Text, Text>>& expectedValuesVector) {
+    TextView word2, TextView word3, std::function<bool(Text &)> condition,
+    const std::vector<std::tuple<Text, Text, Text>> &expectedValuesVector) {
     auto config = configVariable;
     /* prepare config */
     config["config"]["opCodes"][1]["opCode"] = searchType;
@@ -201,10 +201,10 @@ void testSearch3Words(
         LOG(Test, "Context is: {}", context);
         REQUIRE(expectedValuesVector.size() == context.size());
         for (int index = 0; index < expectedValuesVector.size(); ++index) {
-            const auto& expectedValues = expectedValuesVector[index];
-            const auto& expectedLeading = std::get<0>(expectedValues);
-            const auto& expectedMatch = std::get<1>(expectedValues);
-            const auto& expectedTrailing = std::get<2>(expectedValues);
+            const auto &expectedValues = expectedValuesVector[index];
+            const auto &expectedLeading = std::get<0>(expectedValues);
+            const auto &expectedMatch = std::get<1>(expectedValues);
+            const auto &expectedTrailing = std::get<2>(expectedValues);
             Text actualLeading = context[index][0].asString();
             Text actualMatch = context[index][1].asString();
             Text actualTrailing = context[index][2].asString();
@@ -234,10 +234,10 @@ void testSearch3Words(
         LOG(Test, "Context is: {}", context);                               \
         REQUIRE(expectedValuesVector.size() == context.size());             \
         for (int index = 0; index < expectedValuesVector.size(); ++index) { \
-            const auto& expectedValues = expectedValuesVector[index];       \
-            const Text& expectedLeading = std::get<0>(expectedValues);      \
-            const Text& expectedMatch = std::get<1>(expectedValues);        \
-            const Text& expectedTrailing = std::get<2>(expectedValues);     \
+            const auto &expectedValues = expectedValuesVector[index];       \
+            const Text &expectedLeading = std::get<0>(expectedValues);      \
+            const Text &expectedMatch = std::get<1>(expectedValues);        \
+            const Text &expectedTrailing = std::get<2>(expectedValues);     \
             Text actualLeading = context[index][0].asString();              \
             Text actualMatch = context[index][1].asString();                \
             Text actualTrailing = context[index][2].asString();             \

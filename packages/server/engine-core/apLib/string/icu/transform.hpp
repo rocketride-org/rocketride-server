@@ -26,69 +26,69 @@
 namespace ap {
 
 // Convert from Text to icu::StringPiece
-inline void __transform(const TextView& source,
-                        string::icu::StringPiece& piece) noexcept {
+inline void __transform(const TextView &source,
+                        string::icu::StringPiece &piece) noexcept {
     piece.set(source.data(), _nc<int32_t>(source.size()));
 }
 
 // Convert from TextView to icu::StringPiece
-inline void __transform(const Text& source,
-                        string::icu::StringPiece& piece) noexcept {
+inline void __transform(const Text &source,
+                        string::icu::StringPiece &piece) noexcept {
     piece.set(source.data(), _nc<int32_t>(source.size()));
 }
 
 // Convert from TextView to icu::UnicodeString
-inline void __transform(const TextView& source,
-                        string::icu::UnicodeString& string) noexcept {
+inline void __transform(const TextView &source,
+                        string::icu::UnicodeString &string) noexcept {
     string = string::icu::UnicodeString::fromUTF8(
         _tr<string::icu::StringPiece>(source));
 }
 
 // Convert from Text to icu::UnicodeString
-inline void __transform(const Text& source,
-                        string::icu::UnicodeString& string) noexcept {
+inline void __transform(const Text &source,
+                        string::icu::UnicodeString &string) noexcept {
     string = string::icu::UnicodeString::fromUTF8(
         _tr<string::icu::StringPiece>(source));
 }
 
 // Convert from icu::UnicodeString to Text
-inline void __transform(const string::icu::UnicodeString& source,
-                        Text& text) noexcept {
+inline void __transform(const string::icu::UnicodeString &source,
+                        Text &text) noexcept {
     text = string::icu::toUtf8(source);
 }
 
 // Convert from Utf16View to icu::UnicodeString
-inline void __transform(const Utf16View& source,
-                        string::icu::UnicodeString& string) noexcept {
-    string.setTo(_reCast<const char16_t*>(source.data()),
+inline void __transform(const Utf16View &source,
+                        string::icu::UnicodeString &string) noexcept {
+    string.setTo(_reCast<const char16_t *>(source.data()),
                  _nc<int32_t>(source.size()));
 }
 
 // Convert from Utf16 to icu::UnicodeString
-inline void __transform(const Utf16& source,
-                        string::icu::UnicodeString& string) noexcept {
-    string.setTo(_reCast<const char16_t*>(source.data()),
+inline void __transform(const Utf16 &source,
+                        string::icu::UnicodeString &string) noexcept {
+    string.setTo(_reCast<const char16_t *>(source.data()),
                  _nc<int32_t>(source.size()));
 }
 
 // Convert from icu::UnicodeString to Utf16View
-inline void __transform(const string::icu::UnicodeString& source,
-                        Utf16View& text) noexcept {
-    text = Utf16View(_reCast<const Utf16Chr*>(source.getBuffer()),
+inline void __transform(const string::icu::UnicodeString &source,
+                        Utf16View &text) noexcept {
+    text = Utf16View(_reCast<const Utf16Chr *>(source.getBuffer()),
                      source.length());
 }
 
 // Convert from icu::UnicodeString to Utf16
-inline void __transform(const string::icu::UnicodeString& source,
-                        Utf16& text) noexcept {
+inline void __transform(const string::icu::UnicodeString &source,
+                        Utf16 &text) noexcept {
     text = string::icu::toUtf16(source);
 }
 
 // Convert from Utf32View to icu::UnicodeString
-inline void __transform(const Utf32View& source,
-                        string::icu::UnicodeString& string) noexcept {
+inline void __transform(const Utf32View &source,
+                        string::icu::UnicodeString &string) noexcept {
     string = string::icu::UnicodeString::fromUTF32(
-        _reCast<const UChar32*>(source.data()), _nc<int32_t>(source.size()));
+        _reCast<const UChar32 *>(source.data()), _nc<int32_t>(source.size()));
 }
 
 }  // namespace ap

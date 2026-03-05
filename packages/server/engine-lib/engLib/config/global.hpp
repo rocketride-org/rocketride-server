@@ -25,13 +25,13 @@
 
 namespace engine::config {
 
-inline Text& nodeId(bool verify = true) noexcept {
+inline Text &nodeId(bool verify = true) noexcept {
     static Text id;
     if (verify && !id) dev::fatality(_location, "NodeId not defined");
     return id;
 }
 
-inline Paths& paths() noexcept {
+inline Paths &paths() noexcept {
     static Paths pths;
     return pths;
 }
@@ -41,14 +41,14 @@ inline bool isPath(iTextView name) noexcept {
            name == "log";
 }
 
-inline util::Vars& vars() noexcept {
+inline util::Vars &vars() noexcept {
     static util::Vars vrs;
     return vrs;
 }
 
 inline Text expand(TextView str) noexcept { return vars().expand(str); }
 
-inline auto& monitor() noexcept {
+inline auto &monitor() noexcept {
     static Ptr<monitor::Monitor> monitor = nullPtr<monitor::Monitor>();
     return monitor;
 }
@@ -56,7 +56,7 @@ inline auto& monitor() noexcept {
 // Loads the optionally parsed json::Value from user.json, this file
 // must exist in the working directory, or the executable path (in that order)
 // of engine to be loaded properly
-inline const auto& user() noexcept {
+inline const auto &user() noexcept {
     auto fetch = [] {
         // Cwd first
         if (auto res =

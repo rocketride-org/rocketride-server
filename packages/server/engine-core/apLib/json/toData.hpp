@@ -26,12 +26,12 @@
 namespace ap::json {
 
 template <typename Out>
-inline void __toData(const json::Value& val, Out& out) noexcept(false) {
+inline void __toData(const json::Value &val, Out &out) noexcept(false) {
     out.write(val.stringify(false));
 }
 
 template <typename In>
-inline void __fromData(json::Value& val, const In& in) noexcept(false) {
+inline void __fromData(json::Value &val, const In &in) noexcept(false) {
     Text data;
     data.resize(in.size());
     in.read(data);

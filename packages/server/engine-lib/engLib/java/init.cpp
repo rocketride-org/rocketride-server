@@ -55,13 +55,13 @@ TextVector g_javaArgs;
 /// @details
 ///		The ptr to the loaded jvm
 ///------------------------------------------------------------------------
-JavaVM* g_jvm = nullptr;
+JavaVM *g_jvm = nullptr;
 
 //-------------------------------------------------------------------------
 /// @details
 ///		The ptr to the initialize env
 ///------------------------------------------------------------------------
-JNIEnv* g_env = nullptr;
+JNIEnv *g_env = nullptr;
 
 //-------------------------------------------------------------------------
 /// @details
@@ -81,7 +81,7 @@ std::vector<DeinitCallback> g_deinitCallbacks;
 ///	@param[in]	jvm
 ///     The jvm to register with
 //-------------------------------------------------------------------------
-void processArguments(JNIEnv* env, jobject ins, jobjectArray args) {
+void processArguments(JNIEnv *env, jobject ins, jobjectArray args) {
     GET_JAVA_JNI_THROW(jni);
 
     // Build args
@@ -113,9 +113,9 @@ void debugRegisterCallbacks() noexcept(false) {
 
     // Register native callbacks
     JNINativeMethod nativeMethodTable[] = {
-        {_constCast<char*>("processArguments"),
-         _constCast<char*>("([Ljava/lang/String;)V"),
-         _reCast<void*>(processArguments)}
+        {_constCast<char *>("processArguments"),
+         _constCast<char *>("([Ljava/lang/String;)V"),
+         _reCast<void *>(processArguments)}
 
     };
 
@@ -138,7 +138,7 @@ void debugRegisterCallbacks() noexcept(false) {
 ///------------------------------------------------------------------------
 Error getJars() {
     // Add all the files we find to the jarPaths list
-    const std::function<Error(file::Path&)> scanFiles =
+    const std::function<Error(file::Path &)> scanFiles =
         localfcn(file::Path & parentPath)->Error {
         // Get the search mask
         file::Path scanPath = parentPath / "*";
@@ -286,30 +286,31 @@ void initJvm() noexcept(false) {
 
     // Build the option list
     std::vector<JavaVMOption> options;
-    auto addOption = [&](const char* option, void* extra = nullptr) {
-        options.push_back({const_cast<char*>(option), extra});
+    auto addOption = [&](const char *option, void *extra = nullptr) {
+        options.push_back({const_cast<char *>(option), extra});
     };
 
     // Add all the options strings we generated
-    for (auto& option : optionStrings) {
+    for (auto &option : optionStrings) {
         addOption(option);
     }
 
     // Add hooks for JNI's vfprintf, abort, and exit
     // Clang won't allow the lambdas to be converted to e.g. decltype(&exit)
     // because of exit's [[noreturn]] attribute, so typedef the C functions
-    using jvmVfprintf = int (*)(FILE*, const char*, va_list);
+    using jvmVfprintf = int (*)(FILE *, const char *, va_list);
     addOption("vfprintf",
-              _reCast<void*>(_cast<jvmVfprintf>([](FILE* fp, const char* format,
-                                                   va_list args) noexcept {
-                  char buffer[1_kb] = {'\0'};
-                  auto retval = vsnprintf(buffer, sizeof(buffer), format, args);
-                  LOG(Java, "JNI: ", buffer);
-                  return retval;
-              })));
+              _reCast<void *>(_cast<jvmVfprintf>(
+                  [](FILE *fp, const char *format, va_list args) noexcept {
+                      char buffer[1_kb] = {'\0'};
+                      auto retval =
+                          vsnprintf(buffer, sizeof(buffer), format, args);
+                      LOG(Java, "JNI: ", buffer);
+                      return retval;
+                  })));
 
     using jvmAbort = void (*)(void);
-    addOption("abort", _reCast<void*>(_cast<jvmAbort>([]() noexcept {
+    addOption("abort", _reCast<void *>(_cast<jvmAbort>([]() noexcept {
                   const auto reason = string::format(
                       "JNI called abort on thread {}", async::threadId());
                   java::onJvmCrash(reason);
@@ -317,7 +318,7 @@ void initJvm() noexcept(false) {
               })));
 
     using jvmExit = void (*)(int);
-    addOption("exit", _reCast<void*>(_cast<jvmExit>([](int status) noexcept {
+    addOption("exit", _reCast<void *>(_cast<jvmExit>([](int status) noexcept {
                   const auto reason = string::format(
                       "JNI called exit with status {} on thread {}", status,
                       async::threadId());
@@ -326,7 +327,7 @@ void initJvm() noexcept(false) {
               })));
 
     // Add any opions we specified on the command line (in JavaExec mode)
-    for (auto& arg : g_javaArgs) {
+    for (auto &arg : g_javaArgs) {
         addOption(arg);
     }
 
@@ -347,7 +348,7 @@ void initJvm() noexcept(false) {
     // Code, it continues on without stopping.
 
     if (auto result =
-            ::JNI_CreateJavaVM(&g_jvm, _reCast<void**>(&g_env), &vg_args);
+            ::JNI_CreateJavaVM(&g_jvm, _reCast<void **>(&g_env), &vg_args);
         result != JNI_OK) {
         g_jvm = nullptr;
         APERR_THROW(Ec::Java, "Failed to initialize JVM",
@@ -389,11 +390,11 @@ void deinitJvm() noexcept {
     try {
         // Invoke any configured deinit callbacks
         LOG(Java, "Invoking deinit callbacks");
-        for (auto& callback : g_deinitCallbacks) {
+        for (auto &callback : g_deinitCallbacks) {
             try {
                 GET_JAVA_JNI_THROW(jni);
                 callback(jni);
-            } catch (const Error& e) {
+            } catch (const Error &e) {
                 LOG(Always,
                     "Caught exception while invoking JVM deinit callback", e);
             }
@@ -402,7 +403,7 @@ void deinitJvm() noexcept {
         LOG(Java, "Destroying JVM");
         g_jvm->DestroyJavaVM();
         LOG(Java, "JVM destroyed");
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
         LOG(Always, "Caught exception while destroying JVM", e);
     }
 
@@ -415,7 +416,7 @@ void deinitJvm() noexcept {
 ///		Initializes the calling thread to be able to call jni
 ///		functions
 ///------------------------------------------------------------------------
-JNIEnv* initThread(bool detachable = false) noexcept(false) {
+JNIEnv *initThread(bool detachable = false) noexcept(false) {
     LOG(Java, "Initializing thread, detachable:", detachable);
 
     // If the calling thread is also the thread that initialized the JVM (e.g.
@@ -426,19 +427,19 @@ JNIEnv* initThread(bool detachable = false) noexcept(false) {
     }
 
     LOG(Java, "Attaching thread to JVM");
-    JNIEnv* env = nullptr;
+    JNIEnv *env = nullptr;
 
     // Depending on how the caller is using this context, attach as a daemon
     // thread or normal thread
     if (detachable) {
         if (auto result =
-                g_jvm->AttachCurrentThread(_reCast<void**>(&env), nullptr);
+                g_jvm->AttachCurrentThread(_reCast<void **>(&env), nullptr);
             result != JNI_OK)
             APERR_THROW(Ec::Java, "Failed to attach thread to JVM",
                         renderJniError(result));
     } else {
         if (auto result = g_jvm->AttachCurrentThreadAsDaemon(
-                _reCast<void**>(&env), nullptr);
+                _reCast<void **>(&env), nullptr);
             result != JNI_OK)
             APERR_THROW(Ec::Java, "Failed to attach thread to JVM",
                         renderJniError(result));
@@ -468,7 +469,7 @@ void deinitThread() noexcept {
 /// @details
 ///		Return the jvm reference
 ///------------------------------------------------------------------------
-ErrorOr<Jvm*> getJvm() noexcept {
+ErrorOr<Jvm *> getJvm() noexcept {
     if (g_jvm) return g_jvm;
     return APERR(Ec::InvalidState, "Java not initialized");
 }
@@ -477,7 +478,7 @@ ErrorOr<Jvm*> getJvm() noexcept {
 /// @details
 ///		Return a JNI class ptr the current thread
 ///------------------------------------------------------------------------
-ErrorOr<Jni*> getJni(bool detachable) noexcept {
+ErrorOr<Jni *> getJni(bool detachable) noexcept {
     // Only once per thread
     _thread_local async::Tls<java::Jni> jni{_location};
 
@@ -499,7 +500,7 @@ ErrorOr<Jni*> getJni(bool detachable) noexcept {
 /// @details
 ///		Return a JNI interface for the current thread
 ///------------------------------------------------------------------------
-ErrorOr<JNIEnv*> getEnv(bool detachable) noexcept {
+ErrorOr<JNIEnv *> getEnv(bool detachable) noexcept {
     GET_JAVA_JNI(jni);
     return jni.getEnv();
 }
@@ -523,7 +524,7 @@ void addDeinitCallback(DeinitCallback callback) noexcept {
 //---------------------------------------------------------------------
 bool isJava() noexcept {
     // Get the command line
-    auto& cmds = application::cmdline();
+    auto &cmds = application::cmdline();
 
     // If --java or --tika was specified, forces into java mode
     if (ExecJava || ExecTika) return true;
@@ -535,7 +536,7 @@ bool isJava() noexcept {
     // which can be ignored
     for (auto index = 1; index < args.size(); index++) {
         // Get the argument
-        auto& arg = args[index];
+        auto &arg = args[index];
 
         // These options indicate java
         if (arg == "-cp" || arg == "-classpath") {

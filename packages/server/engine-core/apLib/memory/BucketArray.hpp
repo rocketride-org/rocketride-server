@@ -64,14 +64,14 @@ public:
     //---------------------------------------------------------
     // Constructor creates main block
     //---------------------------------------------------------
-    BucketArrayBase(memory_resource* allocator) noexcept
+    BucketArrayBase(memory_resource *allocator) noexcept
         : m_resourseAllocator(allocator) {
         ASSERT(m_resourseAllocator);
 
         // allocate main block on creation
         // do it from regular memory because of pretty big size allocating here
-        auto bytesCount = sizeof(SecondaryBlock*) * BUCKET_ELEMENTS_COUNT;
-        m_mainBlock = new SecondaryBlock*[BUCKET_ELEMENTS_COUNT];
+        auto bytesCount = sizeof(SecondaryBlock *) * BUCKET_ELEMENTS_COUNT;
+        m_mainBlock = new SecondaryBlock *[BUCKET_ELEMENTS_COUNT];
         memset(m_mainBlock, 0, bytesCount);
     }
 
@@ -107,7 +107,7 @@ public:
     ///	@param[in]	index
     ///		Index of object
     //---------------------------------------------------------
-    const SecondaryBlock* get(IndexType index) const noexcept {
+    const SecondaryBlock *get(IndexType index) const noexcept {
         ASSERT(index >= 0);
 
         size_t bucket = index / BUCKET_ELEMENTS_COUNT;
@@ -150,7 +150,7 @@ public:
 
             for (size_t j = 0; j < BUCKET_ELEMENTS_COUNT; ++j) {
                 if (m_mainBlock[i][j]) {
-                    SlistNode* var = m_mainBlock[i][j].first;
+                    SlistNode *var = m_mainBlock[i][j].first;
                     while (var) {
                         ++curLen;
                         var = var->pNext;
@@ -168,7 +168,7 @@ public:
 #pragma pack(push, 1)  // pack contents of struct SlistNode to 1-byte alignment
                        // to save some bytes
     struct SlistNode {
-        SlistNode* pNext;
+        SlistNode *pNext;
         StoreType data;
     };
 #pragma pack(pop)
@@ -179,8 +179,8 @@ public:
     ///     to first and last nodes of singly-linked list
     //---------------------------------------------------------
     struct SecondaryBlock {
-        SlistNode* first;
-        SlistNode* last;
+        SlistNode *first;
+        SlistNode *last;
 
         operator bool() const noexcept { return first && last; }
     };
@@ -195,7 +195,7 @@ public:
         //---------------------------------------------------------
         // Constructor
         //---------------------------------------------------------
-        BucketArrayIterator(SecondaryBlock** mainBlock, size_t i,
+        BucketArrayIterator(SecondaryBlock **mainBlock, size_t i,
                             size_t j) noexcept
             : m_mainBlock(mainBlock), m_i(i), m_j(j) {}
 
@@ -212,7 +212,7 @@ public:
         ///		Pair consisting of index and pointer to secondary
         ///		block under this iterator
         //---------------------------------------------------------
-        std::pair<IndexType, const SecondaryBlock*> get() const noexcept {
+        std::pair<IndexType, const SecondaryBlock *> get() const noexcept {
             IndexType index =
                 _cast<IndexType>(m_i * BUCKET_ELEMENTS_COUNT + m_j);
 
@@ -261,21 +261,21 @@ public:
         /// @details
         ///		Prefix increment operator for convenience
         //---------------------------------------------------------
-        BucketArrayIterator& operator++() noexcept {
+        BucketArrayIterator &operator++() noexcept {
             this->next();
             return *this;
         }
 
     private:
-        SecondaryBlock** m_mainBlock = nullptr;
+        SecondaryBlock **m_mainBlock = nullptr;
         size_t m_i{}, m_j{};
     };
 
 protected:
-    memory_resource* m_resourseAllocator =
+    memory_resource *m_resourseAllocator =
         nullptr;  // resourse allocator that manages slabs of preallocated
                   // memory
-    SecondaryBlock** m_mainBlock =
+    SecondaryBlock **m_mainBlock =
         nullptr;  // array of pointers to secondary blocks
 };
 

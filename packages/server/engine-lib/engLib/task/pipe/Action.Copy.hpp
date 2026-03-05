@@ -52,6 +52,6 @@ public:
     /// @param[in] entry
     ///		The entry to copy
     //-----------------------------------------------------------------
-    Error processItem(Entry& entry) noexcept override;
+    Error processItem(Entry &entry) noexcept override;
 };
 }  // namespace engine::task::actionCopy

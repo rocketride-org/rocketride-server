@@ -30,7 +30,7 @@ class Key {
 public:
     _const auto LogLevel = Lvl::Crypto;
 
-    Key(const Cipher& cipher, Buffer key, Text id = {}) noexcept
+    Key(const Cipher &cipher, Buffer key, Text id = {}) noexcept
         : m_cipher(cipher),
           m_key(_mv(key), m_cipher.keyLength()),
           m_immutableId(_ts(immutableKeyId(m_key))),
@@ -41,26 +41,26 @@ public:
         if (!m_id) m_id = m_immutableId;
     }
 
-    Key(const Cipher& cipher, TextView hexKey, Text id = {}) noexcept(false)
+    Key(const Cipher &cipher, TextView hexKey, Text id = {}) noexcept(false)
         : Key(cipher, hexDecode(hexKey), _mv(id)) {}
 
-    Key(const Key&) = default;
-    Key(Key&&) = default;
+    Key(const Key &) = default;
+    Key(Key &&) = default;
 
-    auto& cipher() const { return m_cipher; }
+    auto &cipher() const { return m_cipher; }
     InputData keyData() const noexcept { return m_key; }
     auto keyLength() const noexcept { return m_key.size(); }
     TextView immutableId() const noexcept { return m_immutableId; }
     TextView id() const noexcept { return m_id; }
     // ID must not be updated after key is added to a keyring
-    auto& id() noexcept { return m_id; }
+    auto &id() noexcept { return m_id; }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         buff << m_id;
     }
 
-    static Key __fromJson(const json::Value& value) noexcept(false) {
+    static Key __fromJson(const json::Value &value) noexcept(false) {
         auto id = _fj<Text>(value["id"]);
         if (!id) APERRL_THROW(Crypto, Ec::InvalidParam, "Key is missing ID");
 
@@ -73,7 +73,7 @@ public:
         return Key(engineCipher(), *engineDecrypt(token), _mv(id));
     }
 
-    Error __toJson(json::Value& value) const noexcept {
+    Error __toJson(json::Value &value) const noexcept {
         value["id"] = m_id;
 
         // Encrypt key with the master key
@@ -87,7 +87,7 @@ public:
     }
 
     // @@TODO Replace with defaulted operator = when we update Clang
-    bool equals(const Key& compare) const noexcept {
+    bool equals(const Key &compare) const noexcept {
         if (m_cipher != compare.m_cipher) return false;
         // We only need to compare either the key or its immutable ID
         if (m_immutableId != compare.m_immutableId) return false;
@@ -95,10 +95,10 @@ public:
         return true;
     }
 
-    bool operator==(const Key& compare) const noexcept {
+    bool operator==(const Key &compare) const noexcept {
         return equals(compare);
     }
-    bool operator!=(const Key& compare) const noexcept {
+    bool operator!=(const Key &compare) const noexcept {
         return !equals(compare);
     }
 

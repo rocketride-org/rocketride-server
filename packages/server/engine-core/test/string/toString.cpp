@@ -25,7 +25,7 @@
 
 struct WillFail {
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         return APERR(Ec::InvalidParam, "Woops!");
     }
 };
@@ -51,12 +51,12 @@ TEST_CASE("string::toString") {
         auto res = _tsd<'*', Format::DOUBLE_DELIMOK>("Hi", "", "there!");
         REQUIRE(res == "Hi**there!");
 
-        res = _tsd < '*',
-        Format::LEAD | Format::DOUBLE_DELIMOK > ("Hi", "", "there!");
+        res = _tsd<'*', Format::LEAD | Format::DOUBLE_DELIMOK>("Hi", "",
+                                                               "there!");
         REQUIRE(res == "*Hi**there!");
 
-        res = _tsd < '*', Format::TRAIL | Format::LEAD |
-                              Format::DOUBLE_DELIMOK > ("Hi", "", "there!");
+        res = _tsd<'*', Format::TRAIL | Format::LEAD | Format::DOUBLE_DELIMOK>(
+            "Hi", "", "there!");
         REQUIRE(res == "*Hi**there!*");
     }
 
@@ -93,7 +93,7 @@ TEST_CASE("string::toString") {
     SECTION("toStringShortAllocatorReplace") {
         StackTextArena arena;
         StackText line{arena};
-        for (auto& str : {"lineone"_tv, "line2   "_tv, "line3"_tv}) {
+        for (auto &str : {"lineone"_tv, "line2   "_tv, "line3"_tv}) {
             _tsb(line, str);
             REQUIRE(line == str);
         }

@@ -28,11 +28,11 @@ namespace ap {
 // Define the Win32 error category, representing a platform
 // error on the windows subsystem
 struct Win32ErrorCategory : std::error_category {
-    const char* name() const noexcept override;
+    const char *name() const noexcept override;
     std::string message(int ev) const override;
 };
 
-const char* Win32ErrorCategory::name() const noexcept { return "win32"; }
+const char *Win32ErrorCategory::name() const noexcept { return "win32"; }
 
 std::string Win32ErrorCategory::message(int code) const {
     // Anything negative is com

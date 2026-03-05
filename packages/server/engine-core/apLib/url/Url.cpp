@@ -47,7 +47,7 @@ ErrorOr<UrlConfig::MapperPtr> UrlConfig::getMapper(const iTextView type) {
 /// @details
 /// 	Get the capabilities bitflags of a protocol
 //-------------------------------------------------------------------------
-Error UrlConfig::getCaps(const iTextView protocol, uint32_t& caps) {
+Error UrlConfig::getCaps(const iTextView protocol, uint32_t &caps) {
     // Find the mapper
     auto mapper = getMapper(protocol);
     if (!mapper) return mapper.ccode();
@@ -62,7 +62,7 @@ Error UrlConfig::getCaps(const iTextView protocol, uint32_t& caps) {
 /// 	Map a url to its path - removing the protocol, and any
 ///		prefixes it may have
 //-------------------------------------------------------------------------
-Error UrlConfig::toPath(const Url& fromUrl, file::Path& toPath) {
+Error UrlConfig::toPath(const Url &fromUrl, file::Path &toPath) {
     auto protocol = fromUrl.protocol();
 
     // Find the mapper
@@ -83,8 +83,8 @@ Error UrlConfig::toPath(const Url& fromUrl, file::Path& toPath) {
 /// 	Map a protocol/path to a url and add any prefixes the
 ///		url may require
 //-------------------------------------------------------------------------
-Error UrlConfig::toUrl(const iTextView fromProtocol, const file::Path& fromPath,
-                       Url& toUrl) {
+Error UrlConfig::toUrl(const iTextView fromProtocol, const file::Path &fromPath,
+                       Url &toUrl) {
     // Find the mapper
     auto mapper = getMapper(fromProtocol);
     if (!mapper) return mapper.ccode();
@@ -103,7 +103,7 @@ Error UrlConfig::toUrl(const iTextView fromProtocol, const file::Path& fromPath,
 /// 	Map a url to its path - removing the protocol, and any
 ///		prefixes it may have
 //-------------------------------------------------------------------------
-Error UrlConfig::osPath(const Url& fromUrl, Text& toPath) {
+Error UrlConfig::osPath(const Url &fromUrl, Text &toPath) {
     auto protocol = fromUrl.protocol();
 
     // Find the mapper
@@ -123,7 +123,7 @@ Error UrlConfig::osPath(const Url& fromUrl, Text& toPath) {
 /// @details
 /// 	Validate a url
 //-------------------------------------------------------------------------
-Error UrlConfig::validate(const Url& url) {
+Error UrlConfig::validate(const Url &url) {
     // Find the mapper
     auto mapper = getMapper(url.protocol());
     if (!mapper) return mapper.ccode();

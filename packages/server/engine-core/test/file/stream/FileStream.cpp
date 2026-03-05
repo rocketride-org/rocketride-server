@@ -50,13 +50,13 @@ TEST_CASE("file::FileStream", "[.]") {
 
         std::vector<Text> history;
         auto copyChunk = [&](auto data, auto index) {
-            auto& chunk = history.emplace_back(_ts("View #", index));
+            auto &chunk = history.emplace_back(_ts("View #", index));
             LOG(Test, "Copying chunk index", index);
             _copyTo(data, chunk, chunk.size());
         };
 
         auto validateChunk = [&](auto data, auto index) {
-            auto& chunk = history[index];
+            auto &chunk = history[index];
             REQUIRE(_equalTo(data, chunk));
         };
 

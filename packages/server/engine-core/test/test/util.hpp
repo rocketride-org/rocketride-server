@@ -44,9 +44,9 @@ using Catch::Matchers::StartsWith;
 // also did not get an error but actually received a value
 //-----------------------------------------------------------------------------
 
-inline const Error& __toError(const Error& err) { return err; }
+inline const Error &__toError(const Error &err) { return err; }
 template <class T>
-inline const Error& __toError(const ErrorOr<T>& val) {
+inline const Error &__toError(const ErrorOr<T> &val) {
     return val.check();
 }
 
@@ -123,20 +123,20 @@ inline auto newTestPath() {
            _ts(Format::HEX, crypto::randomNumber<uint16_t>());
 }
 
-inline file::Path& TestPath() noexcept {
+inline file::Path &TestPath() noexcept {
     static file::Path path = newTestPath();
     return path;
 }
 
 // Gets the test files temp dir for the unit test
-inline const auto& testPath() noexcept(false) {
-    auto& path = TestPath();
+inline const auto &testPath() noexcept(false) {
+    auto &path = TestPath();
     ASSERTD_MSG(!file::mkdir(path), "Failed to create path", path);
     return path;
 }
 
-inline auto testPath(const file::Path& requiredFile,
-                     const file::Path& targetDir) noexcept {
+inline auto testPath(const file::Path &requiredFile,
+                     const file::Path &targetDir) noexcept {
     auto source = datasetsPath() / requiredFile;
     auto target = targetDir / requiredFile;
     try {
@@ -144,13 +144,13 @@ inline auto testPath(const file::Path& requiredFile,
 
         *file::copy(source, target);
         LOG(Test, "Copied", source, "=>", target);
-    } catch (const Error& ccode) {
+    } catch (const Error &ccode) {
         dev::fatality(_location, "Failed to copy", source, "=>", target, ccode);
     }
     return target;
 }
 
-inline auto testPath(const file::Path& requiredFile) noexcept {
+inline auto testPath(const file::Path &requiredFile) noexcept {
     // By default, copy to test_files
     return testPath(requiredFile, testPath());
 }
@@ -158,7 +158,7 @@ inline auto testPath(const file::Path& requiredFile) noexcept {
 // Enable relevant logging for each unit if --diag=1 has been specified
 using LogScope = Opt<util::Scope>;
 template <typename... Levels>
-LogScope enableTestLogging(Levels&&... levels) noexcept {
+LogScope enableTestLogging(Levels &&...levels) noexcept {
     if (!isDiagnosticLoggingEnabled()) return {};
 
     return log::enableLevelScope(levels...);

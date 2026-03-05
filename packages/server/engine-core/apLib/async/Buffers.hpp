@@ -44,16 +44,16 @@ struct BufferOptions {
     auto bufferCount() const noexcept { return bufferSize / maxIoSize; }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         buff << "Buffer size:" << bufferSize << "Max IO size:" << maxIoSize;
     }
 
-    bool operator==(const BufferOptions& compare) const noexcept {
+    bool operator==(const BufferOptions &compare) const noexcept {
         return bufferSize == compare.bufferSize &&
                maxIoSize == compare.maxIoSize;
     }
 
-    bool operator!=(const BufferOptions& compare) const noexcept {
+    bool operator!=(const BufferOptions &compare) const noexcept {
         return !this->operator==(compare);
     }
 };
@@ -83,8 +83,8 @@ public:
     struct Buffer {
         Buffer(memory::DataView<DataT> data) noexcept : data(data) {}
 
-        Buffer(Buffer&&) = default;
-        Buffer& operator=(Buffer&&) = default;
+        Buffer(Buffer &&) = default;
+        Buffer &operator=(Buffer &&) = default;
 
         // Main chunk of memory dedicated to this buffer
         memory::DataView<DataT> data;
@@ -124,7 +124,7 @@ public:
 
     Buffers() noexcept = default;
 
-    Buffers(async::MutexLock& lock) noexcept : m_lock(lock) {}
+    Buffers(async::MutexLock &lock) noexcept : m_lock(lock) {}
 
     void reset() noexcept {
         // Clear the queues and re-set the buffers
@@ -177,7 +177,7 @@ public:
     }
 
     // Reader push/pop, both use m_readerCurrent to cache
-    Error readerPush(Buffer&& buff, bool force = false) noexcept {
+    Error readerPush(Buffer &&buff, bool force = false) noexcept {
         ASSERTD(!m_readerCurrent);
 
         if (buff.cursor && !force) {
@@ -197,7 +197,7 @@ public:
     }
 
     // Writer push/pop, both use m_writerCurrent to cache
-    Error writerPush(Buffer&& buff, bool force = false,
+    Error writerPush(Buffer &&buff, bool force = false,
                      Opt<size_t> offset = {}) noexcept {
         auto guard = lock();
 
@@ -258,7 +258,7 @@ public:
     }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         // Show the buffer usage in bytes/total
         return _tsb(buff, "[", m_opts.maxIoSize * m_used.size(), "/",
                     m_opts.bufferSize, "]");

@@ -193,7 +193,7 @@ TEST_CASE("usn::UsnWalker", "[.]") {
         };
 
         std::vector<UniqueRecord> uniqueFiles;
-        std::map<Text, UniqueRecord&> fileIdToUniqueFiles;
+        std::map<Text, UniqueRecord &> fileIdToUniqueFiles;
         uniqueFiles.reserve(CREATE_TOTAL_NEW_FILES);
 
         while (uniqueFiles.size() < CREATE_TOTAL_NEW_FILES) {
@@ -210,7 +210,7 @@ TEST_CASE("usn::UsnWalker", "[.]") {
             REQUIRE(!walker.seekLast());
             token = walker.token();
 
-            for (auto& uniqueFile : uniqueFiles) {
+            for (auto &uniqueFile : uniqueFiles) {
                 Buffer rawData(FILE_CREATE_SIZE_IN_BYTES);
                 for (size_t count = 0; count < rawData.size(); ++count)
                     rawData[count] = crypto::randomNumber<uint8_t>();
@@ -235,12 +235,12 @@ TEST_CASE("usn::UsnWalker", "[.]") {
 
                 auto found = std::find_if(
                     begin(uniqueFiles), end(uniqueFiles),
-                    [&foundName](const UniqueRecord& comp) noexcept -> bool {
+                    [&foundName](const UniqueRecord &comp) noexcept -> bool {
                         return foundName == comp.fileId;
                     });
 
                 if (found != end(uniqueFiles)) {
-                    auto& record = *found;
+                    auto &record = *found;
                     if (!record.foundNewFile) {
                         REQUIRE((*entry)->reason ==
                                 UsnWalker::Reason::ContentsAdded);
@@ -257,7 +257,7 @@ TEST_CASE("usn::UsnWalker", "[.]") {
         }
 
         // Delete all the created files to create new entries
-        for (auto& entry : uniqueFiles) {
+        for (auto &entry : uniqueFiles) {
             REQUIRE(::DeleteFileW(entry.path.str()) != 0);
         }
 
@@ -282,7 +282,7 @@ TEST_CASE("usn::UsnWalker", "[.]") {
                 if ((*entry)->reason == UsnWalker::Reason::ContentsRemoved) {
                     auto found = fileIdToUniqueFiles.find(key);
                     if (found != end(fileIdToUniqueFiles)) {
-                        auto& record = (*found).second;
+                        auto &record = (*found).second;
                         LOG(Test, "Found removed path:", record.path,
                             "reason:", (*entry)->reason,
                             "skipped:", (*entry)->skipped,

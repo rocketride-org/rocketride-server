@@ -37,20 +37,20 @@ public:
     SmbFile() = default;
 
     template <typename ChrT, typename TraitsT, typename AllocT>
-    SmbFile(const string::Str<ChrT, TraitsT, AllocT>& path,
+    SmbFile(const string::Str<ChrT, TraitsT, AllocT> &path,
             Mode mode) noexcept(false) {
         *open(path, mode);
     }
 
     ~SmbFile() noexcept { close(); }
 
-    SmbFile(const SmbFile&) = delete;
+    SmbFile(const SmbFile &) = delete;
 
-    SmbFile(SmbFile&& file) noexcept { move(_mv(file)); }
+    SmbFile(SmbFile &&file) noexcept { move(_mv(file)); }
 
-    SmbFile& operator=(const SmbFile&) = delete;
+    SmbFile &operator=(const SmbFile &) = delete;
 
-    SmbFile& operator=(SmbFile&& file) noexcept { return move(_mv(file)); }
+    SmbFile &operator=(SmbFile &&file) noexcept { return move(_mv(file)); }
 
     Error close(bool flush = false) noexcept {
         m_path = "";
@@ -69,7 +69,7 @@ public:
         return {};
     }
 
-    Error open(const Path& path, Mode mode) noexcept {
+    Error open(const Path &path, Mode mode) noexcept {
         close();
 
         int oflag = 0;
@@ -136,8 +136,8 @@ public:
         auto offset = m_offset;
 
         // const cast to close and re-open
-        const_cast<SmbFile&>(*this).close();
-        if (auto ccode = const_cast<SmbFile&>(*this).open(path, mode))
+        const_cast<SmbFile &>(*this).close();
+        if (auto ccode = const_cast<SmbFile &>(*this).open(path, mode))
             return ccode;
 
         // Finally, seek back to where we were and read the requested data
@@ -204,7 +204,7 @@ public:
     auto handle() const noexcept { return m_hFile; }
 
 private:
-    SmbFile& move(SmbFile&& file) noexcept {
+    SmbFile &move(SmbFile &&file) noexcept {
         if (this == &file) return *this;
 
         close();

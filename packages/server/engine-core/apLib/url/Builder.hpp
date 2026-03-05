@@ -30,8 +30,8 @@ namespace ap::url {
 // Authority("10.1.1.2") << Path("file.dat")
 struct Builder final {
     Builder() = default;
-    Builder(const Builder&) = default;
-    Builder(Builder&&) = default;
+    Builder(const Builder &) = default;
+    Builder(Builder &&) = default;
 
     Text finalize() const noexcept {
         Text url;
@@ -68,35 +68,35 @@ struct Builder final {
     // We define the uri explicit types as rvalues to prevent usage outside of a
     // direct
     // << stream operator from a temp var
-    decltype(auto) operator<<(Protocol&& protocol) noexcept {
+    decltype(auto) operator<<(Protocol &&protocol) noexcept {
         m_protocol = _mv(protocol);
         return *this;
     }
 
     // Render the URL as if it had an authority, i.e. always use "://"
-    decltype(auto) operator<<(ProtocolWithoutAuthority&& protocol) noexcept {
+    decltype(auto) operator<<(ProtocolWithoutAuthority &&protocol) noexcept {
         m_protocol = _mv(protocol);
         m_withoutAuthority = true;
         return *this;
     }
 
-    decltype(auto) operator<<(Authority&& authority) noexcept {
+    decltype(auto) operator<<(Authority &&authority) noexcept {
         m_authority = _mv(authority);
         return *this;
     }
 
-    decltype(auto) operator<<(Component&& component) noexcept {
+    decltype(auto) operator<<(Component &&component) noexcept {
         m_path /= component;
         return *this;
     }
 
-    decltype(auto) operator<<(const file::Path& path) noexcept {
+    decltype(auto) operator<<(const file::Path &path) noexcept {
         m_path /= path;
         return *this;
     }
 
     template <typename T>
-    decltype(auto) operator<<(ParameterValue<T>&& attrib) noexcept {
+    decltype(auto) operator<<(ParameterValue<T> &&attrib) noexcept {
         auto v = _ts(attrib.val);
         auto [iter, inserted] = m_parameters.emplace(
             makePair(_mv(attrib.key), encode(_ts(attrib.val))));
@@ -104,7 +104,7 @@ struct Builder final {
         return *this;
     }
 
-    decltype(auto) operator<<(const End& end) noexcept { return finalize(); }
+    decltype(auto) operator<<(const End &end) noexcept { return finalize(); }
 
 private:
     bool hasAuthority() const noexcept {

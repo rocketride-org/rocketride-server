@@ -56,7 +56,7 @@ public:
     ErrorOr<Key> getKeyById(TextView id) const noexcept {
         if (empty()) return APERRT(Ec::NotFound, "Keyring is empty", id);
 
-        for (auto& key : m_keys) {
+        for (auto &key : m_keys) {
             if (key.id() == id) return key;
         }
         return APERRT(Ec::NotFound, "Key ID not found", id);
@@ -66,7 +66,7 @@ public:
         if (empty())
             return APERRT(Ec::NotFound, "Keyring is empty", immutableId);
 
-        for (auto& key : m_keys) {
+        for (auto &key : m_keys) {
             if (key.immutableId() == immutableId) return key;
         }
         return APERRT(Ec::NotFound, "Key not found", immutableId);
@@ -81,13 +81,13 @@ public:
     explicit operator bool() const noexcept { return !empty(); }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         _tsbd(buff, m_keys);
     }
 
-    static Error __fromJson(Keyring& keyring,
-                            const json::Value& value) noexcept {
-        for (auto& keyJson : value) {
+    static Error __fromJson(Keyring &keyring,
+                            const json::Value &value) noexcept {
+        for (auto &keyJson : value) {
             auto key = _fjc<Key>(keyJson);
             if (!key) return key.ccode();
             if (auto ccode = keyring.addKey(_mv(*key))) return ccode;
@@ -95,12 +95,12 @@ public:
         return {};
     }
 
-    Error __toJson(json::Value& value) const noexcept {
+    Error __toJson(json::Value &value) const noexcept {
         // Make sure the value is an empty array if the key ring is empty
         value = json::ValueType::arrayValue;
 
         // Iterate the keys in their original order
-        for (auto& key : m_keys) {
+        for (auto &key : m_keys) {
             auto jsonKey = _tjc(key);
             if (!jsonKey) return jsonKey.ccode();
 
@@ -110,7 +110,7 @@ public:
         return {};
     }
 
-    bool equals(const Keyring& compare) const noexcept {
+    bool equals(const Keyring &compare) const noexcept {
         if (m_keys.size() != compare.m_keys.size()) return false;
 
         // Keyrings are implicitly ordered, so any key being different means a
@@ -122,10 +122,10 @@ public:
         return true;
     }
 
-    bool operator==(const Keyring& compare) const noexcept {
+    bool operator==(const Keyring &compare) const noexcept {
         return equals(compare);
     }
-    bool operator!=(const Keyring& compare) const noexcept {
+    bool operator!=(const Keyring &compare) const noexcept {
         return !equals(compare);
     }
 

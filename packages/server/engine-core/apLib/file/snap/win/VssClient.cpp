@@ -63,10 +63,10 @@ Error VssClient::startSnapset() noexcept {
 }
 
 // Adds a volume path to the snap set
-Error VssClient::add(const file::Path& vol) noexcept {
+Error VssClient::add(const file::Path &vol) noexcept {
     VSS_ID shadowCopyId;
     if (auto hr = m_backup->AddToSnapshotSet(
-            _constCast<WCHAR*>(vol.plat().ptr<WCHAR>()), GUID_NULL,
+            _constCast<WCHAR *>(vol.plat().ptr<WCHAR>()), GUID_NULL,
             &shadowCopyId);
         FAILED(hr))
         return APERRT(hr, "Failed to add volume to snapshot set", vol);
@@ -143,12 +143,12 @@ Error VssClient::destroy() noexcept {
     return {};
 }
 
-Error VssClient::destroy(const SnapMap& snaps) noexcept {
+Error VssClient::destroy(const SnapMap &snaps) noexcept {
     // Need a client
     VssClient client;
     if (auto ccode = client.init(true)) return ccode;
 
-    auto destroySnapshotId = [&](auto& id) -> Error {
+    auto destroySnapshotId = [&](auto &id) -> Error {
         // Perform the actual deletion
         LONG lSnapshots = 0;
         VSS_ID idNonDeletedSnapshotID = GUID_NULL;
@@ -160,7 +160,7 @@ Error VssClient::destroy(const SnapMap& snaps) noexcept {
         return {};
     };
 
-    auto destroySnapshot = [&](auto& path) -> Error {
+    auto destroySnapshot = [&](auto &path) -> Error {
         // Get list all shadow copies.
         CComPtr<IVssEnumObject> enumSnapshots;
         auto hr = client.m_backup->Query(GUID_NULL, VSS_OBJECT_NONE,
@@ -173,7 +173,7 @@ Error VssClient::destroy(const SnapMap& snaps) noexcept {
 
         // Enumerate all shadow copies. Delete each one
         VSS_OBJECT_PROP prop;
-        VSS_SNAPSHOT_PROP& Snap = prop.Obj.Snap;
+        VSS_SNAPSHOT_PROP &Snap = prop.Obj.Snap;
         _forever() {
             // Get the next element
             ULONG ulFetched;
@@ -197,7 +197,7 @@ Error VssClient::destroy(const SnapMap& snaps) noexcept {
         return {};
     };
 
-    for (auto& [vol, snap] : snaps) {
+    for (auto &[vol, snap] : snaps) {
         if (auto ccode = destroySnapshot(vol)) return ccode;
     }
 

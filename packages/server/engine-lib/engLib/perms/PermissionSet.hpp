@@ -31,7 +31,7 @@ static const Text LOCAL_SID = "S-1-2-0";
 static const Text CREATOR_OWNER_ID_SID = "S-1-3-0";
 static const Text CREATOR_GROUP_ID_SID = "S-1-3-1";
 
-static bool matchesWellKnownSID(const Text& input) {
+static bool matchesWellKnownSID(const Text &input) {
     return (input == NULL_SID || input == WORLD_SID || input == LOCAL_SID ||
             input == CREATOR_OWNER_ID_SID || input == CREATOR_GROUP_ID_SID);
 }
@@ -40,17 +40,17 @@ struct Permission {
     Text principalId;
     Rights rights;
 
-    bool operator<(const Permission& other) const noexcept {
+    bool operator<(const Permission &other) const noexcept {
         return principalId < other.principalId ||
                (!(other.principalId < principalId) && rights < other.rights);
     }
 
-    bool operator==(const Permission& other) const noexcept {
+    bool operator==(const Permission &other) const noexcept {
         return principalId == other.principalId && rights == other.rights;
     }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         buff << principalId << "|" << rights;
     }
 };
@@ -66,16 +66,16 @@ struct PermissionSet {
     }
 
     // Ignore index when calculating identity
-    bool operator<(const PermissionSet& other) const noexcept {
+    bool operator<(const PermissionSet &other) const noexcept {
         return ownerId < other.ownerId ||
                (!(other.ownerId < ownerId) && perms < other.perms);
     }
 
-    bool operator==(const PermissionSet& other) const noexcept {
+    bool operator==(const PermissionSet &other) const noexcept {
         return ownerId == other.ownerId && perms == other.perms;
     }
 
-    bool operator!=(const PermissionSet& other) const noexcept {
+    bool operator!=(const PermissionSet &other) const noexcept {
         return !(*this == other);
     }
 
@@ -83,22 +83,22 @@ struct PermissionSet {
 
     explicit operator bool() const noexcept { return !empty(); }
 
-    void __toJson(json::Value& val) const noexcept {
+    void __toJson(json::Value &val) const noexcept {
         val["ownerId"] = ownerId;
         val["perms"] = json::Value(json::arrayValue);
         val["index"] = index;
 
         json::Value permVal;
 
-        for (const auto& [principal, rights] : perms) {
+        for (const auto &[principal, rights] : perms) {
             permVal["principalId"] = principal;
             permVal["rights"] = _ts(rights);
             val["perms"].append(permVal);
         }
     }
 
-    static Error __fromJson(PermissionSet& permissionSet,
-                            const json::Value& val) noexcept {
+    static Error __fromJson(PermissionSet &permissionSet,
+                            const json::Value &val) noexcept {
         if (!val.isObject())
             return APERR(Ec::InvalidJson, "PermissionSet type must be object",
                          val);
@@ -117,7 +117,7 @@ struct PermissionSet {
                          "Missing index property in PermissionSet object", val);
 
         if (auto value = val.getKey("perms"); value && value->isArray()) {
-            for (auto& v : *value) {
+            for (auto &v : *value) {
                 Permission perm;
                 perm.principalId = v["principalId"].asString();
                 perm.rights = _fs<Rights>(v["rights"].asString());
@@ -164,7 +164,7 @@ public:
         }
     }
 
-    auto add(Text&& ownerId, std::set<Permission>&& perms) noexcept {
+    auto add(Text &&ownerId, std::set<Permission> &&perms) noexcept {
         return add({.ownerId = _mv(ownerId), .perms = _mv(perms)});
     }
 
@@ -185,18 +185,18 @@ protected:
 
 class PermissionInformation {
 public:
-    void add(const perms::UserRecord& userInfo) noexcept {
+    void add(const perms::UserRecord &userInfo) noexcept {
         add<perms::UserRecord>(m_lockUsers, userInfo, m_users);
     }
-    void add(const perms::GroupRecord& groupInfo) noexcept {
+    void add(const perms::GroupRecord &groupInfo) noexcept {
         add<perms::GroupRecord>(m_lockGroups, groupInfo, m_groups);
     }
 
     // redirect to PermissionSetBuilder
-    uint32_t add(PermissionSet&& perms) noexcept {
+    uint32_t add(PermissionSet &&perms) noexcept {
         return m_builder.add(_mv(perms));
     }
-    auto add(Text ownerId, std::set<Permission>&& perms) noexcept {
+    auto add(Text ownerId, std::set<Permission> &&perms) noexcept {
         return m_builder.add(_mv(ownerId), _mv(perms));
     }
     auto build() const noexcept { return m_builder.build(); }
@@ -212,8 +212,8 @@ public:
 
 private:
     template <class Record>
-    void add(async::SharedLock& lockObject, const Record& what,
-             std::unordered_map<Text, Record>& where) noexcept {
+    void add(async::SharedLock &lockObject, const Record &what,
+             std::unordered_map<Text, Record> &where) noexcept {
         // Check if the entry already exists (ignores index)
         _using(auto lock = lockObject.readLock()){
             if (auto it = where.find(what.id); it != where.end()) return;

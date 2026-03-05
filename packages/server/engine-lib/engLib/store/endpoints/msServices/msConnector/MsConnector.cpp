@@ -89,11 +89,12 @@ void MsNode::updateConfig(std::shared_ptr<MsConfig> msConfig) noexcept {
 ///	@param[in]	updateTokenExpireAt
 ///		Flag that specifies if `expire at` should be updated.
 ///		Using a trick here: first time `requestToken` is called from
-///`beginEndpoint`, 		and at this stage, key-value storage is not initialized (it
-///is initialized later, 		in the same `beginEndpoint`). To force update of
-///key-value storage, do not update 		`expire at` field during first call, so on
-///the next time, when expire time is checked, 		generate new token and put newly
-///obtained refresh token (if any) into key-value storage.
+///`beginEndpoint`, 		and at this stage, key-value storage is not
+/// initialized (it is initialized later, 		in the same `beginEndpoint`). To
+/// force update of key-value storage, do not update 		`expire at` field
+/// during first call, so on the next time, when expire time is checked,
+/// generate new token and put newly obtained refresh token (if any) into
+/// key-value storage.
 ///	@returns
 ///		Error
 //------------------------------------------------------------------

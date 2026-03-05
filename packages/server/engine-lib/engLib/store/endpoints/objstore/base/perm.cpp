@@ -30,7 +30,7 @@
 
 namespace engine::store::filter::baseObjectStore {
 ErrorOr<engine::perms::Rights> IBaseInstance::getRights(
-    const Aws::S3::Model::Permission& permission) noexcept {
+    const Aws::S3::Model::Permission &permission) noexcept {
     namespace AWSS3 = Aws::S3::Model;
     using namespace engine::perms;
     if (permission == AWSS3::Permission::NOT_SET)
@@ -50,7 +50,7 @@ ErrorOr<engine::perms::Rights> IBaseInstance::getRights(
 }
 
 Error IBaseInstance::mapId(TextView idStr,
-                           std::unordered_set<Text>& mappedIds) noexcept {
+                           std::unordered_set<Text> &mappedIds) noexcept {
     using namespace engine::perms;
 
     if (!idStr) return {};
@@ -67,7 +67,7 @@ Error IBaseInstance::mapId(TextView idStr,
         return {};
     }
 
-    const auto& granteeType = grantee->second.granteeType;
+    const auto &granteeType = grantee->second.granteeType;
 #if ROCKETRIDE_PLAT_WIN
     auto granteeName = _tr<Utf16>(grantee->second.granteeName);
 #else
@@ -96,7 +96,7 @@ Error IBaseInstance::mapId(TextView idStr,
     return {};
 }
 
-Error IBaseInstance::getPermissions(Entry& entry) noexcept {
+Error IBaseInstance::getPermissions(Entry &entry) noexcept {
     using namespace engine::perms;
     LOGT("Getting permissions for", entry);
     entry.permissionId.reset();
@@ -124,13 +124,13 @@ Error IBaseInstance::getPermissions(Entry& entry) noexcept {
         return {};
     }
 
-    const auto& owner = permissionsResp.GetResult().GetOwner();
+    const auto &owner = permissionsResp.GetResult().GetOwner();
     auto ownerId = owner.GetID();
     PermissionSet permSet;
     permSet.ownerId = ownerId;
 
-    const auto& grants = permissionsResp.GetResult().GetGrants();
-    for (const auto& grant : grants) {
+    const auto &grants = permissionsResp.GetResult().GetGrants();
+    for (const auto &grant : grants) {
         auto rights = getRights(grant.GetPermission());
         if (rights.hasCcode()) {
             // Fail only one object
@@ -195,9 +195,9 @@ ErrorOr<std::list<Text>> IBaseInstance::outputPermissions() noexcept {
 
     // map all users/groups
     // continue processing even if `mapId` returns an error
-    for (const auto& permSet : permsList) {
+    for (const auto &permSet : permsList) {
         Error ccode = mapId(permSet.ownerId, mappedIds);
-        for (const auto& perm : permSet.perms)
+        for (const auto &perm : permSet.perms)
             ccode = mapId(perm.principalId, mappedIds);
     }
 

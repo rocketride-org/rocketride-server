@@ -48,7 +48,7 @@ void init() noexcept {
     ::SetConsoleCtrlHandler(plat::consoleEventHandler, TRUE);
 
     // Set the COM error handler to log instead of throwing an exception
-    ::_set_com_error_handler([](HRESULT hr, IErrorInfo*) noexcept {
+    ::_set_com_error_handler([](HRESULT hr, IErrorInfo *) noexcept {
         // If error logging is enabled, construct and log an Error from the
         // HRESULT
         if (log::isLevelEnabled<false>(Lvl::Error))

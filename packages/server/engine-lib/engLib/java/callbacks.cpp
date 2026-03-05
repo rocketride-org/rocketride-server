@@ -31,7 +31,7 @@ namespace engine::java {
 ///		The method information to register
 ///----------------------------------------------------------------
 void registerNativeCallback(jclass clazz,
-                            const JNINativeMethod& method) noexcept(false) {
+                            const JNINativeMethod &method) noexcept(false) {
     GET_JAVA_JNI_THROW(jni);
     GET_JAVA_ENV_THROW(env);
 
@@ -51,8 +51,8 @@ void registerNativeCallback(jclass clazz,
 ///	@param[in]	method
 ///		The method information to register
 ///----------------------------------------------------------------
-void registerNativeCallback(const char* className,
-                            const JNINativeMethod& method) noexcept(false) {
+void registerNativeCallback(const char *className,
+                            const JNINativeMethod &method) noexcept(false) {
     GET_JAVA_ENV_THROW(env);
 
     auto clazz = env.FindClass(className);
@@ -70,8 +70,8 @@ void registerNativeCallback(const char* className,
 ///	@param[in]	functionCount
 ///		The number of methods to register
 ///----------------------------------------------------------------
-void registerNativeCallbacks(const char* className,
-                             const JNINativeMethod* functionTable,
+void registerNativeCallbacks(const char *className,
+                             const JNINativeMethod *functionTable,
                              size_t functionCount) noexcept(false) {
     GET_JAVA_ENV_THROW(env);
 

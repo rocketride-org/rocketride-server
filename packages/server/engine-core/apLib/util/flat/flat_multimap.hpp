@@ -17,8 +17,8 @@ class flat_multimap_base
 #include "impl/container_traits.hpp"
     using mapped_type = typename value_type::second_type;
     using B = flat_container_base<D, Key, Container, Compare>;
-    D const* self() const { return static_cast<D const*>(this); }
-    D* self() { return static_cast<D*>(this); }
+    D const *self() const { return static_cast<D const *>(this); }
+    D *self() { return static_cast<D *>(this); }
 
 public:
     using value_compare = first_compare<value_type, Compare>;
@@ -29,12 +29,12 @@ public:
 
     // Modifiers
 
-    iterator insert(value_type const& value) {
+    iterator insert(value_type const &value) {
         iterator it = self()->upper_bound(value.first);
         return self()->container.insert(it.underlying, value);
     }
 
-    iterator insert(value_type&& value) {
+    iterator insert(value_type &&value) {
         iterator it = self()->upper_bound(value.first);
         return self()->container.insert(it.underlying, std::move(value));
     }
@@ -44,7 +44,7 @@ public:
         this->ds_insert_(first, last);
     }
 
-    size_type erase(key_type const& key) {
+    size_type erase(key_type const &key) {
         auto it_pair = self()->equal_range(key);
         std::size_t ret = std::distance(it_pair.first, it_pair.second);
         self()->container.erase(it_pair.first.underlying,
@@ -54,7 +54,7 @@ public:
 
     // Lookup
 
-    size_type count(key_type const& key) const {
+    size_type count(key_type const &key) const {
         auto it_pair = self()->equal_range(key);
         return std::distance(it_pair.first, it_pair.second);
     }
@@ -67,8 +67,8 @@ class flat_multimap_base<D, Key, Container, Compare,
 #include "impl/container_traits.hpp"
     using mapped_type = typename value_type::second_type;
     using B = flat_multimap_base<D, Key, Container, Compare, int>;
-    D const* self() const { return static_cast<D const*>(this); }
-    D* self() { return static_cast<D*>(this); }
+    D const *self() const { return static_cast<D const *>(this); }
+    D *self() { return static_cast<D *>(this); }
 
 public:
     using B::count;
@@ -77,7 +77,7 @@ public:
     // Modifiers
 
     template <class P>
-    iterator insert(P&& value) {
+    iterator insert(P &&value) {
         iterator it = self()->upper_bound(value.first);
         return self()->container.insert(it.underlying, std::forward<P>(value));
     }
@@ -85,7 +85,7 @@ public:
     // Lookup
 
     template <typename K>
-    size_type count(K const& key) const {
+    size_type count(K const &key) const {
         auto it_pair = self()->equal_range(key);
         return std::distance(it_pair.first, it_pair.second);
     }
@@ -109,13 +109,13 @@ template <typename Key, typename T, typename Compare = std::less<void>>
 using vector_multimap = flat_multimap<std::vector<std::pair<Key, T>>, Compare>;
 
 template <typename Container, typename Compare>
-inline bool operator==(const flat_multimap<Container, Compare>& lhs,
-                       const flat_multimap<Container, Compare>& rhs) {
+inline bool operator==(const flat_multimap<Container, Compare> &lhs,
+                       const flat_multimap<Container, Compare> &rhs) {
     return lhs.container == rhs.container;
 }
 template <typename Container, typename Compare>
-inline bool operator!=(const flat_multimap<Container, Compare>& lhs,
-                       const flat_multimap<Container, Compare>& rhs) {
+inline bool operator!=(const flat_multimap<Container, Compare> &lhs,
+                       const flat_multimap<Container, Compare> &rhs) {
     return lhs.container != rhs.container;
 }
 

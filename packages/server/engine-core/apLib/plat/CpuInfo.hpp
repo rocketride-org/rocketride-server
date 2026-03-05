@@ -48,9 +48,9 @@ public:
         // Capture vendor string
         char vendorBuffer[0x20];
         memset(vendorBuffer, 0, sizeof(vendorBuffer));
-        *_reCast<int*>(vendorBuffer) = data[0][1];
-        *_reCast<int*>(vendorBuffer + 4) = data[0][3];
-        *_reCast<int*>(vendorBuffer + 8) = data[0][2];
+        *_reCast<int *>(vendorBuffer) = data[0][1];
+        *_reCast<int *>(vendorBuffer + 4) = data[0][3];
+        *_reCast<int *>(vendorBuffer + 8) = data[0][2];
         m_vendor = vendorBuffer;
         m_vendor.trim();
         if (m_vendor == "GenuineIntel")
@@ -212,7 +212,7 @@ private:
     std::bitset<32> m_f81_EDX;
 };
 
-inline const CpuInfo& cpuInfo() noexcept {
+inline const CpuInfo &cpuInfo() noexcept {
     static CpuInfo cpuInfo;
     return cpuInfo;
 }

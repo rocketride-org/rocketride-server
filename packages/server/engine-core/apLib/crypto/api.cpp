@@ -83,12 +83,12 @@ file::Path commonCertPath() noexcept {
 
 // Get the cipher, key, and embedded key ID used by the engine to encrypt user
 // data
-const Cipher& engineCipher() noexcept {
+const Cipher &engineCipher() noexcept {
     static const Cipher cipher(EngineCipherName);
     return cipher;
 }
 
-const Key& engineKey() noexcept {
+const Key &engineKey() noexcept {
     static const Key engineKey(engineCipher(), EngineKey);
     return engineKey;
 }

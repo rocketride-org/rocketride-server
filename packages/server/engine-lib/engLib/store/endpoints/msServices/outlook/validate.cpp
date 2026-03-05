@@ -86,7 +86,7 @@ Error IFilterEndpoint::validateConfig(bool syntaxOnly) noexcept {
 ///     Error (empty if successful, error details if validation fails)
 //-------------------------------------------------------------------------
 Error IFilterEndpoint::checkOutlookPermissions() noexcept {
-    const Text& clientId = m_msConfig->m_clientId;
+    const Text &clientId = m_msConfig->m_clientId;
     LOGT("Checking Outlook permissions for client ID: {}", clientId);
 
     if (!m_msEmailNode) {
@@ -128,7 +128,7 @@ Error IFilterEndpoint::checkOutlookPermissions() noexcept {
         bool hasUserPermission = false;
         bool hasMailboxPermission = false;
 
-        for (const auto& roleId : appRoleIds.value()) {
+        for (const auto &roleId : appRoleIds.value()) {
             LOGT("Checking assigned role ID:", roleId);
             // Check for Mail permissions (hierarchy: ReadWrite > Read)
             // Required for reading email messages
@@ -192,7 +192,7 @@ Error IFilterEndpoint::checkOutlookPermissions() noexcept {
                      "Outlook access. Please ensure admin consent is provided "
                      "for the following permissions:",
                      missingPermissionsMessage);
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
         return APERR(Ec::RequestFailed,
                      "Exception while checking permissions:", e.what());
     }

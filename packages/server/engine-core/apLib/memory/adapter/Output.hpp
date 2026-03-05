@@ -39,7 +39,7 @@ public:
 
     _const auto HasResize = Traits::HasResize;
 
-    Output(BackingT& backing, Opt<file::Path> path = {}) noexcept
+    Output(BackingT &backing, Opt<file::Path> path = {}) noexcept
         : m_backing(backing), m_path(_mv(path)) {}
 
     void setOffset(uint64_t offset) const noexcept(false) {
@@ -70,7 +70,7 @@ public:
     uint64_t size() const noexcept(false) { return m_backing.get().size(); }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         return _tsb(buff, "[Output offset:", string::toHumanSize(offset()),
                     "]");
     }

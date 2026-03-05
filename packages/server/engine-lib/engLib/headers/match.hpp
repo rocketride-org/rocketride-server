@@ -34,34 +34,34 @@ struct MatchLocation {
     size_t offset = {};
     size_t length = {};
 
-    bool operator<(const MatchLocation& other) const noexcept {
+    bool operator<(const MatchLocation &other) const noexcept {
         if (offset != other.offset)
             return offset < other.offset;
         else
             return length < other.length;
     }
 
-    bool operator==(const MatchLocation& other) const noexcept {
+    bool operator==(const MatchLocation &other) const noexcept {
         return offset == other.offset && length == other.length;
     }
 
-    bool operator!=(const MatchLocation& other) const noexcept {
+    bool operator!=(const MatchLocation &other) const noexcept {
         return !(*this == other);
     }
 
-    void __toJson(json::Value& value) const noexcept {
+    void __toJson(json::Value &value) const noexcept {
         value["offset"] = offset;
         value["length"] = length;
     }
 
-    static auto __fromJson(MatchLocation& location,
-                           const json::Value& value) noexcept {
+    static auto __fromJson(MatchLocation &location,
+                           const json::Value &value) noexcept {
         return value.lookupAssign("offset", location.offset) ||
                value.lookupAssign("length", location.length);
     }
 
     template <typename Buffer>
-    void __toString(Buffer& buff) const noexcept {
+    void __toString(Buffer &buff) const noexcept {
         buff << "Offset: " << offset << ", length: " << length;
     }
 };
@@ -76,7 +76,7 @@ struct MatchContext {
     Text match;
     Text trailing;
 
-    void __toJson(json::Value& val) const noexcept {
+    void __toJson(json::Value &val) const noexcept {
         // Build the context as a JSON array of { leadingContext, matchContext,
         // trailingContext }
         val.append(leading);
@@ -126,8 +126,8 @@ struct MatchedPolicy {
 //-------------------------------------------------------------------------
 struct Match {
     // Pointers to matched classify policy and rule
-    MatchedPolicy* pPolicy;
-    MatchedRule* pRule;
+    MatchedPolicy *pPolicy;
+    MatchedRule *pRule;
 
     // Raw classify match location
     MatchLocation classifyLocation;

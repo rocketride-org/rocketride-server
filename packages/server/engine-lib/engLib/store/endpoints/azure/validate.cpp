@@ -122,7 +122,7 @@ Error IFilterEndpoint::validateConfig(bool syntaxOnly) noexcept {
                 m_client.m_blobServiceClient->ListBlobContainers(options);
             // Create a list of all containers in azure
             do {
-                for (const auto& container : response.BlobContainers) {
+                for (const auto &container : response.BlobContainers) {
                     allContainers.push_back(container.Name);
                 }
 
@@ -140,7 +140,7 @@ Error IFilterEndpoint::validateConfig(bool syntaxOnly) noexcept {
                                            allContainers.end());
             bool allExist = std::all_of(
                 m_blobConfig.containers.begin(), m_blobConfig.containers.end(),
-                [&](const Text& element) {
+                [&](const Text &element) {
                     return azureContainers.count(element) > 0;
                 });
 
@@ -152,12 +152,12 @@ Error IFilterEndpoint::validateConfig(bool syntaxOnly) noexcept {
             MONITOR(status,
                     "Successfully validated connection to Azure Blob Storage.");
             return {};  // Success
-        } catch (const Azure::Storage::StorageException& ex) {
+        } catch (const Azure::Storage::StorageException &ex) {
             MONERR(error, Ec::InvalidParam,
                    "Azure Blob Storage connection validation failed: Azure "
                    "Storage exception.",
                    ex.what());
-        } catch (const std::exception& ex) {
+        } catch (const std::exception &ex) {
             MONERR(error, Ec::InvalidParam, "Validation failed.", ex.what());
         }
         return {};

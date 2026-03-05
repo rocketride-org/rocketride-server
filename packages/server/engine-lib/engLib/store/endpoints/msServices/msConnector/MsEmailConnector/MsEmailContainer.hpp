@@ -36,8 +36,8 @@ class MsEmailContainer : public MsContainer {
 public:
     MsEmailContainer() noexcept;
     ~MsEmailContainer() noexcept;
-    MsEmailContainer(const MsEmailContainer&) noexcept;
-    MsEmailContainer(MsEmailContainer&&) noexcept;
+    MsEmailContainer(const MsEmailContainer &) noexcept;
+    MsEmailContainer(MsEmailContainer &&) noexcept;
 
     //---------------------------------------------------------------------
     /// @details
@@ -78,7 +78,7 @@ public:
     ///        list of entry
     //---------------------------------------------------------------------
     static std::list<Entry> getEntries(MsContainer msContainer,
-                                       const Entry& rootEntry = Entry(),
+                                       const Entry &rootEntry = Entry(),
                                        Text url = Text(),
                                        Text parentId = Text()) noexcept {
         std::list<Entry> m_entries;
@@ -130,7 +130,7 @@ public:
 
                     Text name(value[U_STRING_T("subject")].as_string());
                     Text forbidden("*?><|/\\:\"");
-                    for (TextChr& c : name) {
+                    for (TextChr &c : name) {
                         if (forbidden.contains(c)) {
                             c = '_';
                         }

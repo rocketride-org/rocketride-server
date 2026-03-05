@@ -99,18 +99,13 @@ public:
         // 			const char *filename,
         // 			const zip_fileinfo *zipfi,
         // 			const void *extrafield_local, uint16_t
-        // size_extrafield_local, 			const void *extrafield_global, uint16_t
-        // size_extrafield_global, 			const char *comment, 			int compression_method,
-        // 			int level,
-        // 			int raw,
-        // 			int windowBits,
-        // 			int memLevel,
-        // 			int strategy,
-        // 			const char *password,
-        // 			unsigned long crc_for_crypting,
-        // 			unsigned long version_madeby,
-        // 			unsigned long flag_base,
-        // 			int zip64)
+        // size_extrafield_local, 			const void *extrafield_global,
+        // uint16_t size_extrafield_global, 			const char *comment,
+        // int compression_method, 			int level, 			int raw,
+        // int windowBits, 			int memLevel, 			int strategy,
+        // const char *password, 			unsigned long crc_for_crypting,
+        // unsigned long version_madeby, 			unsigned long flag_base,
+        // int zip64)
         auto res =
             zipOpenNewFileInZip5(m_zipFile,              // zip control
                                  targetPath.c_str(),     // filename

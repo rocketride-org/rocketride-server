@@ -33,7 +33,7 @@ public:
     using Parent = url::UrlConfig;
 
 public:
-    GenericFileUrlConfig(const ap::iTextView& Type, ap::log::Lvl Level)
+    GenericFileUrlConfig(const ap::iTextView &Type, ap::log::Lvl Level)
         : Parent(url::UrlConfig::Mapper{
               //------------------------------------------------------------
               /// @details
@@ -57,7 +57,7 @@ public:
               ///		The name of the file - cannot contain /, \, or ..
               //-----------------------------------------------------------------
               .toUrl = [&](const iTextView fromProtocol,
-                           const file::Path& fromPath, Url& toUrl) -> Error {
+                           const file::Path &fromPath, Url &toUrl) -> Error {
                   // This doesn't really work any more...
                   using namespace url;
 
@@ -80,7 +80,7 @@ public:
               /// @param[out] toPath
               ///	Receives the path
               //------------------------------------------------------------
-              .toPath = [&](const Url& fromUrl, file::Path& toPath) -> Error {
+              .toPath = [&](const Url &fromUrl, file::Path &toPath) -> Error {
                   // Validate it
                   if (auto ccode = url::UrlConfig::validate(fromUrl))
                       return ccode;
@@ -106,7 +106,7 @@ public:
               ///	@returns
               ///		Error
               //------------------------------------------------------------
-              .osPath = [&](const Url& url, Text& toPath) -> Error {
+              .osPath = [&](const Url &url, Text &toPath) -> Error {
                   // Get the path of the url
                   file::Path path;
                   if (auto ccode = url::UrlConfig::toPath(url, path))
@@ -126,7 +126,7 @@ public:
               /// @param[out] toPath
               ///	Receives the path
               //------------------------------------------------------------
-              .validate = [&](const Url& url) -> Error {
+              .validate = [&](const Url &url) -> Error {
                   // Get the path
                   const auto path = url.fullpath();
 
@@ -158,7 +158,7 @@ public:
 /// @details
 ///		Define the actual stream interface for the Type:// endpoint.
 //-------------------------------------------------------------------------
-template <const ap::iTextView& Type, ap::log::Lvl Level>
+template <const ap::iTextView &Type, ap::log::Lvl Level>
 class GenericFileStream : public iStream {
 public:
     using Parent = iStream;
@@ -180,7 +180,7 @@ public:
     //-----------------------------------------------------------------
     // Constructor/destructor
     //-----------------------------------------------------------------
-    GenericFileStream(const FactoryArgs& args) noexcept {}
+    GenericFileStream(const FactoryArgs &args) noexcept {}
     virtual ~GenericFileStream() {}
 
     //---------------------------------------------------------------------
@@ -196,8 +196,8 @@ public:
     ///	@param[in] name
     ///		The name of the file - cannot contain /, \, or ..
     //-----------------------------------------------------------------
-    static ErrorOr<Url> toUrl(const Text& symbolicDir,
-                              const Text& fileName) noexcept {
+    static ErrorOr<Url> toUrl(const Text &symbolicDir,
+                              const Text &fileName) noexcept {
         // This doesn't really work any more...
         using namespace url;
 
@@ -227,7 +227,7 @@ public:
     ///	@param[in] url
     ///		The url to get the local path for
     //-----------------------------------------------------------------
-    static ErrorOr<file::Path> localPath(const Url& url) noexcept {
+    static ErrorOr<file::Path> localPath(const Url &url) noexcept {
         file::Path path;
 
         if (auto ccode = Url::toPath(url, path)) return ccode;
@@ -243,7 +243,7 @@ public:
     ///	@param[in] mode
     ///		The mode to open in
     //-----------------------------------------------------------------
-    Error open(const Url& url, stream::Mode mode) override {
+    Error open(const Url &url, stream::Mode mode) override {
         // Validate the url
         if (auto ccode = Url::validate(url)) return ccode;
 

@@ -53,7 +53,7 @@ protected:
     ///	@param[in] path
     ///		The file path being classified
     //-----------------------------------------------------------------
-    static json::Value createResult(const file::Path& path) noexcept {
+    static json::Value createResult(const file::Path &path) noexcept {
         json::Value result;
         result["file"] = _ts(path);
         return result;
@@ -65,7 +65,7 @@ protected:
     ///	@param[in] value
     ///		The results from the classification
     //-----------------------------------------------------------------
-    void addResult(json::Value& value) noexcept {
+    void addResult(json::Value &value) noexcept {
         m_results.emplace_back(_mv(value));
     }
 
@@ -77,7 +77,7 @@ protected:
     ///	@param[in] ccode
     ///		The failure code
     //-----------------------------------------------------------------
-    void addFailure(const file::Path& path, const Error& ccode) noexcept {
+    void addFailure(const file::Path &path, const Error &ccode) noexcept {
         MONERR(error, ccode, path);
 
         auto result = createResult(path);
@@ -99,7 +99,7 @@ protected:
     ///	@details
     ///		Execute the task - send results over the >INFO channel
     //-----------------------------------------------------------------
-    Error classifyFile(Path& path) noexcept {
+    Error classifyFile(Path &path) noexcept {
         Error ccode;
 
         // Get the url
@@ -224,7 +224,7 @@ protected:
             return ccode;
 
         // Walk through the files
-        for (auto& file : files) {
+        for (auto &file : files) {
             // Build a path
             Path path{file};
 

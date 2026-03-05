@@ -45,7 +45,7 @@ public:
     ///	@param[in]	info
     ///		Info to output
     //-----------------------------------------------------------------
-    void info(const json::Value& info) noexcept override {
+    void info(const json::Value &info) noexcept override {
         Monitor::info(info);
     }
 
@@ -120,7 +120,7 @@ private:
     ///	@param[in]	error
     ///		The error/warning to output
     //-----------------------------------------------------------------
-    Error outputWarningOrError(TextView tag, Error&& ccode) noexcept {
+    Error outputWarningOrError(TextView tag, Error &&ccode) noexcept {
         LOGL(Lvl::Always, ccode.location(), _ts(Color::Red, tag, " ", ccode));
         return _mv(ccode);
     }

@@ -30,8 +30,8 @@ inline ErrorOr<std::vector<Text>> tokenize(TextView text) noexcept {
     return Error{};
 }
 
-inline bool searchWords(search::QueryCtx& ctx,
-                        const search::CompiledOps& ops) noexcept(false) {
+inline bool searchWords(search::QueryCtx &ctx,
+                        const search::CompiledOps &ops) noexcept(false) {
     using namespace engine::index::search;
 
     // Cache results per thread, to improve responsiveness as the result heap
@@ -46,11 +46,11 @@ inline bool searchWords(search::QueryCtx& ctx,
     // need doc words for that.
     if (ctx.opts().documentsFiltered && !ctx.wantsContext() &&
         _allOf(ops,
-               [](auto& op) { return !doesOpEvaluationRequireDocWords(op); }))
+               [](auto &op) { return !doesOpEvaluationRequireDocWords(op); }))
         return true;
 
     // Run through the compiled opcodes
-    for (const auto& op : ops) {
+    for (const auto &op : ops) {
         // Is it a search (i.e. not a logical or ignored) op code?
         if (results->evaluateOpCode(op.opCode)) continue;
 
@@ -112,8 +112,8 @@ inline bool searchWords(search::QueryCtx& ctx,
     return result;
 }
 
-inline bool searchWords(search::QueryCtx& ctx, const search::CompiledOps& ops,
-                        Error& ccode) noexcept {
+inline bool searchWords(search::QueryCtx &ctx, const search::CompiledOps &ops,
+                        Error &ccode) noexcept {
     auto res = _call([&] { return searchWords(ctx, ops); });
     if (res.check()) {
         ccode = _mv(res.ccode());
@@ -123,11 +123,11 @@ inline bool searchWords(search::QueryCtx& ctx, const search::CompiledOps& ops,
 }
 
 inline DocIdSet selectDocsContainingAllWords(
-    const WordDbRead& db, const WordVariationList& variations) noexcept {
+    const WordDbRead &db, const WordVariationList &variations) noexcept {
     using namespace engine::index::search;
 
     // Empty set or any word missing variations; done
-    if (variations.empty() || _anyOf(variations, [](const WordIdList& wordIds) {
+    if (variations.empty() || _anyOf(variations, [](const WordIdList &wordIds) {
             return wordIds.empty();
         }))
         return {};
@@ -135,7 +135,7 @@ inline DocIdSet selectDocsContainingAllWords(
     // Find the ID's of all the documents that contain at least one of each of
     // the variations
     DocIdSet docsContainingAllWords;
-    for (auto& wordIds : variations) {
+    for (auto &wordIds : variations) {
         // Build a set of all documents that contain any variation of this word
         DocIdSet docsContainingThisWord;
         for (auto wordId : wordIds)
@@ -167,21 +167,21 @@ inline DocIdSet selectDocsContainingAllWords(
 
 template <typename ContainerT>
 inline DocIdSet selectDocsContainingAnyWordId(
-    const WordDbRead& db, const ContainerT& wordIds) noexcept {
+    const WordDbRead &db, const ContainerT &wordIds) noexcept {
     // Find the ID's of all the documents that contain any of the words
     DocIdSet matchingDocs;
-    for (auto& wordId : wordIds) db.lookupDocIds(wordId, matchingDocs);
+    for (auto &wordId : wordIds) db.lookupDocIds(wordId, matchingDocs);
     return matchingDocs;
 }
 
 inline DocIdSet selectDocsContainingGlobMatch(
-    const WordDbRead& db, const globber::Glob& glob) noexcept {
+    const WordDbRead &db, const globber::Glob &glob) noexcept {
     using namespace ap::globber;
 
     WordIdList matchingWordIds;
     switch (glob.mode()) {
         case Glob::Mode::STARTS_WITH: {
-            auto& prefix = glob.rule(0).value;
+            auto &prefix = glob.rule(0).value;
             ASSERT(!prefix.empty());
 
             for (auto it = db.wordNoCaseIndex().lower_bound(prefix);
@@ -204,7 +204,7 @@ inline DocIdSet selectDocsContainingGlobMatch(
         case Glob::Mode::CONTAINS:
         case Glob::Mode::GLOB:
             // Walk all the words in the DB
-            for (auto& [wordId, proxy] : db.wordIdIndex()) {
+            for (auto &[wordId, proxy] : db.wordIdIndex()) {
                 auto word = db.lookupWord(proxy);
                 if (glob.matches(word)) matchingWordIds.push_back(wordId);
             }
@@ -213,7 +213,7 @@ inline DocIdSet selectDocsContainingGlobMatch(
         case Glob::Mode::ALWAYS_MATCHED: {
             // If the globs matches everything, return all documents
             DocIdSet allDocIds;
-            for (auto& entry : db.docIdIndex()) allDocIds.insert(entry.first);
+            for (auto &entry : db.docIdIndex()) allDocIds.insert(entry.first);
             return allDocIds;
         }
 
@@ -227,8 +227,8 @@ inline DocIdSet selectDocsContainingGlobMatch(
     return selectDocsContainingAnyWordId(db, matchingWordIds);
 }
 
-inline DocIdSet selectDocsContainingRegexMatch(const WordDbRead& db,
-                                               const std::regex& regex,
+inline DocIdSet selectDocsContainingRegexMatch(const WordDbRead &db,
+                                               const std::regex &regex,
                                                TextView regexSource) noexcept {
     // std::regex doesn't store a copy of the original expression, so we need
     // both the compiled expression and its original source Determine how much
@@ -237,7 +237,7 @@ inline DocIdSet selectDocsContainingRegexMatch(const WordDbRead& db,
     // single characters.  The substring to the left of a symbols must itself
     // also be a valid UTF-8 string.
     size_t literalExtent = 0;
-    for (auto& ch : regexSource) {
+    for (auto &ch : regexSource) {
         if (!string::isSymbol(ch))
             ++literalExtent;
         else
@@ -268,7 +268,7 @@ inline DocIdSet selectDocsContainingRegexMatch(const WordDbRead& db,
     } else {
         // If there were no expressions that we could optimize, evaluate each
         // regex against every word in the DB
-        for (auto& [wordId, proxy] : db.wordIdIndex()) {
+        for (auto &[wordId, proxy] : db.wordIdIndex()) {
             auto word = db.lookupWord(proxy);
             if (std::regex_match(word.begin(), word.end(), regex))
                 matchingWordIds.push_back(wordId);
@@ -279,8 +279,8 @@ inline DocIdSet selectDocsContainingRegexMatch(const WordDbRead& db,
     return selectDocsContainingAnyWordId(db, matchingWordIds);
 }
 
-inline DocIdSet selectDocs(const WordDbRead& db,
-                           const search::CompiledOps& ops) noexcept(false) {
+inline DocIdSet selectDocs(const WordDbRead &db,
+                           const search::CompiledOps &ops) noexcept(false) {
     using namespace engine::index::search;
 
     // Stack of sets of doc ID's
@@ -295,7 +295,7 @@ inline DocIdSet selectDocs(const WordDbRead& db,
     };
 
     // Evaluate the operations
-    for (auto& op : ops) {
+    for (auto &op : ops) {
         if (isIgnoredOpCode(op.opCode)) continue;
 
         DocIdSet docIds;
@@ -354,7 +354,7 @@ inline DocIdSet selectDocs(const WordDbRead& db,
                 popDocIds();
                 std::transform(db.docIdIndex().begin(), db.docIdIndex().end(),
                                std::inserter(docIds, docIds.begin()),
-                               [](const Pair<DocId, DocHash>& item) -> DocId {
+                               [](const Pair<DocId, DocHash> &item) -> DocId {
                                    return item.first;
                                });
 
@@ -384,7 +384,7 @@ inline DocIdSet selectDocs(const WordDbRead& db,
 }
 
 inline constexpr bool doesOpEvaluationRequireDocWords(
-    const search::CompiledOp& op) noexcept {
+    const search::CompiledOp &op) noexcept {
     switch (op.opCode) {
         // These ops are all evaluated by the indicated functions during
         // filtering

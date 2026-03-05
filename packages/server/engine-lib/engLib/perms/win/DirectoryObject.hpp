@@ -32,31 +32,31 @@ class DirectoryObject {
 public:
     _const auto LogLevel = Lvl::Permissions;
 
-    DirectoryObject(const perms::Sid& sid) noexcept(false) : m_sid{sid} {
+    DirectoryObject(const perms::Sid &sid) noexcept(false) : m_sid{sid} {
         const auto ldapPath = string::format("LDAP://<SID={}>", sid);
         if (HRESULT hr =
                 ADsGetObject(ldapPath.ptr<WCHAR>(), IID_IDirectoryObject,
-                             _reCast<void**>(&m_object));
+                             _reCast<void **>(&m_object));
             FAILED(hr))
             APERRT_THROW(hr);
     }
 
-    DirectoryObject(const Utf16& dn) noexcept(false) : m_dn{dn} { open(dn); }
+    DirectoryObject(const Utf16 &dn) noexcept(false) : m_dn{dn} { open(dn); }
 
-    DirectoryObject(const Utf16View& dn) noexcept(false) : m_dn{dn} {
+    DirectoryObject(const Utf16View &dn) noexcept(false) : m_dn{dn} {
         open(dn);
     }
 
     ~DirectoryObject() = default;
-    DirectoryObject(const DirectoryObject&) = delete;
-    DirectoryObject(DirectoryObject&&) = default;
+    DirectoryObject(const DirectoryObject &) = delete;
+    DirectoryObject(DirectoryObject &&) = default;
 
-    const perms::Sid& sid() const noexcept(false) {
+    const perms::Sid &sid() const noexcept(false) {
         if (!m_sid) m_sid = adsi::Sid(*m_object);
         return m_sid;
     }
 
-    const Utf16& dn() const noexcept(false) {
+    const Utf16 &dn() const noexcept(false) {
         if (!m_dn) m_dn = adsi::Dn{*m_object}.value();
         return m_dn;
     }
@@ -74,15 +74,15 @@ public:
     }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         buff << dn();
     }
 
 protected:
-    void open(const Utf16View& dn) noexcept(false) {
+    void open(const Utf16View &dn) noexcept(false) {
         const Utf16 ldapPath = L"LDAP://" + dn;
         if (HRESULT hr = ADsGetObject(ldapPath, IID_IDirectoryObject,
-                                      _reCast<void**>(&m_object));
+                                      _reCast<void **>(&m_object));
             FAILED(hr))
             APERRT_THROW(hr);
     }

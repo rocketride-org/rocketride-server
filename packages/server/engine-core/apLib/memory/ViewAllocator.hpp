@@ -33,17 +33,17 @@ public:
     }
 
     ViewAllocatorArena(InputData data) noexcept
-        : m_data(_constCast<uint8_t*>(data.data()), data.size()),
+        : m_data(_constCast<uint8_t *>(data.data()), data.size()),
           m_rehydrate(true),
           m_readOnly(true) {
         reset();
     }
 
     ~ViewAllocatorArena() noexcept = default;
-    ViewAllocatorArena(const ViewAllocatorArena&) = delete;
-    ViewAllocatorArena& operator=(const ViewAllocatorArena&) = delete;
+    ViewAllocatorArena(const ViewAllocatorArena &) = delete;
+    ViewAllocatorArena &operator=(const ViewAllocatorArena &) = delete;
 
-    uint8_t* allocate(size_t len) noexcept(false) {
+    uint8_t *allocate(size_t len) noexcept(false) {
         auto res = m_cursor.consumeSlice(len);
         if (res.size() != len)
             APERR_THROW(Ec::OutOfMemory, "View allocator of size", size(),
@@ -51,7 +51,7 @@ public:
         return res;
     }
 
-    void deallocate(uint8_t* p, size_t len) noexcept {}
+    void deallocate(uint8_t *p, size_t len) noexcept {}
 
     size_t size() const noexcept { return m_data.size(); }
 
@@ -67,11 +67,11 @@ public:
         return m_data.slice(size.value_or(used()));
     }
 
-    friend bool operator==(const ViewAllocatorArena& a,
-                           const ViewAllocatorArena& other) noexcept;
+    friend bool operator==(const ViewAllocatorArena &a,
+                           const ViewAllocatorArena &other) noexcept;
 
 private:
-    uint8_t* validate(uint8_t* p) noexcept {
+    uint8_t *validate(uint8_t *p) noexcept {
         ASSERTD_MSG(&m_data.front() <= p && &m_data.back() >= p,
                     "Invalid address");
         return p;
@@ -81,8 +81,8 @@ private:
     OutputData m_data, m_cursor;
 };
 
-inline bool operator==(const ViewAllocatorArena& a,
-                       const ViewAllocatorArena& b) noexcept {
+inline bool operator==(const ViewAllocatorArena &a,
+                       const ViewAllocatorArena &b) noexcept {
     return a.m_data.size() == b.m_data.size() &&
            &a.m_data.front() == &b.m_data.front();
 }
@@ -100,13 +100,13 @@ public:
 public:
     ViewAllocator() = delete;
 
-    ViewAllocator(const ViewAllocator&) = default;
-    ViewAllocator& operator=(const ViewAllocator&) = default;
+    ViewAllocator(const ViewAllocator &) = default;
+    ViewAllocator &operator=(const ViewAllocator &) = default;
 
-    ViewAllocator(ArenaType& arena) noexcept : Parent(arena) {}
+    ViewAllocator(ArenaType &arena) noexcept : Parent(arena) {}
 
     template <class U, typename R = RType>
-    ViewAllocator(const ViewAllocator<U, R>& allocator) noexcept
+    ViewAllocator(const ViewAllocator<U, R> &allocator) noexcept
         : Parent(allocator.parent()) {}
 
     // When we rebind as another type, we pass along the RType, this is the
@@ -116,48 +116,48 @@ public:
         using other = ViewAllocator<Up, RType>;
     };
 
-    T* allocate(size_t count) noexcept(false) {
+    T *allocate(size_t count) noexcept(false) {
         if constexpr (traits::IsSameTypeV<RType, T>)
-            return _reCast<T*>(parent().allocate(count * sizeof(T)));
+            return _reCast<T *>(parent().allocate(count * sizeof(T)));
         else
             return ParentAllocator::allocate(count);
     }
 
-    void deallocate(T* p, size_t count) noexcept {
+    void deallocate(T *p, size_t count) noexcept {
         if constexpr (traits::IsSameTypeV<RType, T>)
-            parent().deallocate(_reCast<uint8_t*>(p), count * sizeof(T));
+            parent().deallocate(_reCast<uint8_t *>(p), count * sizeof(T));
         else
             ParentAllocator::deallocate(p, count);
     }
 
     template <typename U, typename... Args>
-    void construct(U* p, Args&&... args) {
+    void construct(U *p, Args &&...args) {
         if constexpr (traits::IsSameTypeV<U, RType>) {
             if (!parent().rehydrate())
-                ::new ((void*)p) U(std::forward<Args>(args)...);
+                ::new ((void *)p) U(std::forward<Args>(args)...);
         } else
-            ::new ((void*)p) U(std::forward<Args>(args)...);
+            ::new ((void *)p) U(std::forward<Args>(args)...);
     }
 
     size_t max_size() const noexcept { return parent().size() / sizeof(T); }
 
     template <class T1, typename R1, class U, typename R2>
-    friend bool operator==(const ViewAllocator<T1, R1>& x,
-                           const ViewAllocator<U, R2>& y) noexcept;
+    friend bool operator==(const ViewAllocator<T1, R1> &x,
+                           const ViewAllocator<U, R2> &y) noexcept;
 
     template <class U, typename R>
     friend class ViewAllocator;
 };
 
 template <class T1, typename R1, class U, typename R2>
-inline bool operator==(const ViewAllocator<T1, R1>& x,
-                       const ViewAllocator<U, R2>& y) noexcept {
+inline bool operator==(const ViewAllocator<T1, R1> &x,
+                       const ViewAllocator<U, R2> &y) noexcept {
     return x.parent() == y.parent();
 }
 
 template <class T1, typename R1, class U, typename R2>
-inline bool operator!=(const ViewAllocator<T1, R1>& x,
-                       const ViewAllocator<U, R2>& y) noexcept {
+inline bool operator!=(const ViewAllocator<T1, R1> &x,
+                       const ViewAllocator<U, R2> &y) noexcept {
     return !(x == y);
 }
 

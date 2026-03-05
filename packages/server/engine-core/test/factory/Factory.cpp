@@ -30,14 +30,14 @@ struct MyInterface {
         Text name;
     };
 
-    MyInterface(const FactoryArgs& args) noexcept : m_name(args.name) {}
+    MyInterface(const FactoryArgs &args) noexcept : m_name(args.name) {}
 
     virtual ~MyInterface() {}
 
     _const auto FactoryType = "MyInterface";
 
     static ErrorOr<Ptr<MyInterface>> __factory(
-        Location location, uint32_t flags, const FactoryArgs& args) noexcept {
+        Location location, uint32_t flags, const FactoryArgs &args) noexcept {
         return Factory::find<MyInterface>(location, flags, args.name, args);
     }
 

@@ -32,7 +32,7 @@ namespace engine::store::pythonBase {
 ///	@returns
 ///		Error
 //-------------------------------------------------------------------------
-Error IPythonInstanceBase::getPermissions(Entry& entry) noexcept {
+Error IPythonInstanceBase::getPermissions(Entry &entry) noexcept {
     LOGPIPE();
 
     // Get permissions
@@ -66,7 +66,7 @@ Error IPythonInstanceBase::getPermissions(Entry& entry) noexcept {
 ///		Error
 //-------------------------------------------------------------------------
 ErrorOr<size_t> IPythonInstanceBase::getPermissions(
-    std::vector<Entry>& entries) noexcept {
+    std::vector<Entry> &entries) noexcept {
     // if wrong value is returned -> set batch size to 1
     size_t value = 1;
 

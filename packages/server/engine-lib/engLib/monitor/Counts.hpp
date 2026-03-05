@@ -44,7 +44,7 @@ public:
     ///	@param[in]	other
     ///		The counts to set this to
     //-------------------------------------------------------------
-    Counts& operator=(const Counts& other) noexcept;
+    Counts &operator=(const Counts &other) noexcept;
 
     //-------------------------------------------------------------
     /// @details
@@ -52,7 +52,7 @@ public:
     ///	@param[in]	other
     ///		The count to add
     //-------------------------------------------------------------
-    Counts& operator+=(const Counts& other) noexcept;
+    Counts &operator+=(const Counts &other) noexcept;
 
     //-------------------------------------------------------------
     /// @details
@@ -82,7 +82,7 @@ public:
     /// @details
     ///		Add to the failed counts
     //-------------------------------------------------------------
-    Counts& addFailed(Count count, Size size = 0) noexcept {
+    Counts &addFailed(Count count, Size size = 0) noexcept {
         return addFailed({count, size});
     }
 
@@ -90,7 +90,7 @@ public:
     /// @details
     ///		Add to the completed counts
     //-------------------------------------------------------------
-    Counts& addCompleted(Count count, Size size = 0) noexcept {
+    Counts &addCompleted(Count count, Size size = 0) noexcept {
         return addCompleted({count, size});
     }
 
@@ -98,7 +98,7 @@ public:
     /// @details
     ///		Add to the completed counts
     //-------------------------------------------------------------
-    Counts& addWords(Count count, Size size = 0) noexcept {
+    Counts &addWords(Count count, Size size = 0) noexcept {
         return addWords({count, size});
     }
 
@@ -148,7 +148,7 @@ public:
     /// @details
     ///		Get the total number of items
     //-------------------------------------------------------------
-    const CountObject* currentObject() const noexcept {
+    const CountObject *currentObject() const noexcept {
         auto guard = lock();
         if (m_objects.empty())
             return nullptr;
@@ -197,18 +197,18 @@ public:
     // Public API
     //-------------------------------------------------------------
     void startCounters() noexcept;
-    Counts& addCompleted(CountSize counts) noexcept;
-    Counts& addFailed(CountSize counts) noexcept;
-    Counts& addWords(CountSize counts) noexcept;
+    Counts &addCompleted(CountSize counts) noexcept;
+    Counts &addFailed(CountSize counts) noexcept;
+    Counts &addWords(CountSize counts) noexcept;
     void beginObject(TextView path, uint64_t size) noexcept;
     void endObject(TextView path) noexcept;
-    void beginObject(Entry& object) noexcept;
-    void endObject(Entry& object) noexcept;
+    void beginObject(Entry &object) noexcept;
+    void endObject(Entry &object) noexcept;
     void stopCounters() noexcept;
 
-    void __toJson(json::Value& val) const noexcept;
+    void __toJson(json::Value &val) const noexcept;
     template <typename Buffer>
-    void __toString(Buffer& buff, FormatOptions opts) const noexcept;
+    void __toString(Buffer &buff, FormatOptions opts) const noexcept;
 
 private:
     //-------------------------------------------------------------

@@ -44,7 +44,7 @@ namespace internal {
 
 inline bool minidumpSignalContinueEnabled{};
 
-inline bool& minidumpSignalerContinue() noexcept {
+inline bool &minidumpSignalerContinue() noexcept {
     // Normally this would be a static and not a global but the program has
     // crashed and doing std locks for static variables might be dangerous
     // this in this case better to use a global since it's safer
@@ -54,9 +54,9 @@ inline bool& minidumpSignalerContinue() noexcept {
 }
 
 // forward declare real handler
-void actualHandleMinidumpCallback(bool succeeded, void* context) noexcept;
+void actualHandleMinidumpCallback(bool succeeded, void *context) noexcept;
 
-inline bool filterMinidumpCallback(void* context) {
+inline bool filterMinidumpCallback(void *context) {
     // If we're being cancelled (e.g. due to SIGINT), don't write a dump
     if (async::cancelled(_location, true)) return false;
 
@@ -68,7 +68,7 @@ inline bool filterMinidumpCallback(void* context) {
 }
 
 inline bool handleMinidumpCallback(
-    const google_breakpad::MinidumpDescriptor& descriptor, void* context,
+    const google_breakpad::MinidumpDescriptor &descriptor, void *context,
     bool succeeded) noexcept {
     actualHandleMinidumpCallback(succeeded, context);
 
@@ -101,7 +101,7 @@ public:
 
     ~Minidump() noexcept = default;
 
-    auto& filePath() const noexcept { return m_dumpFilePath; }
+    auto &filePath() const noexcept { return m_dumpFilePath; }
 
 private:
     file::Path m_path;
@@ -113,8 +113,8 @@ private:
 namespace internal {
 
 inline void actualHandleMinidumpCallback(bool succeeded,
-                                         void* context) noexcept {
-    auto& mini = *(reinterpret_cast<Minidump*>(context));
+                                         void *context) noexcept {
+    auto &mini = *(reinterpret_cast<Minidump *>(context));
 
     // Notify via the callback if configured (e.g. to send the path to the
     // monitor)

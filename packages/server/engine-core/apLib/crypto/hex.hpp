@@ -32,7 +32,7 @@ inline Buffer hexDecode(TextView input) noexcept {
     Buffer result;
     result.resize(input.length() / 2);
     static_assert(sizeof(char) == sizeof(uint8_t));
-    auto buffer{_reCast<uint8_t*>(result.data())};
+    auto buffer{_reCast<uint8_t *>(result.data())};
     for (size_t pos{}; pos < input.length(); pos += 2)
         buffer[pos >> 1] = _fsh<uint8_t>(input.substr(pos, 2));
     return result;
@@ -43,7 +43,7 @@ inline Text hexEncode(InputData input) noexcept {
     if (!input) return {};
 
     auto bytes{input.byteSize()};
-    auto ptr{_reCast<const uint8_t*>(input.data())};
+    auto ptr{_reCast<const uint8_t *>(input.data())};
 
     Text result;
     result.reserve(bytes * 2);

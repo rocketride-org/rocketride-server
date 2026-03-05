@@ -32,7 +32,7 @@ inline ErrorOr<Text> osVersion() noexcept {
                        nullptr, 0) != 0)
         return APERR(errno, "sysctlbyname failed");
 
-    return _fmt("OSX {}", _reCast<const char*>(osProductVersion));
+    return _fmt("OSX {}", _reCast<const char *>(osProductVersion));
 }
 
 inline std::vector<file::Path> getModulePaths() noexcept {
@@ -59,11 +59,11 @@ inline uint32_t macCPUCount() noexcept {
 }
 
 inline uint32_t macGPUSize() noexcept {
-    const char* cmd = R"(
+    const char *cmd = R"(
         [[ $(sysctl -n machdep.cpu.brand_string) == *"Apple"* ]] && system_profiler SPHardwareDataType | grep "Memory" | awk '{print $2, $3}' || system_profiler SPDisplaysDataType | awk '/Chipset Model:/ {skipIntel = ($0 ~ /Intel/ ? 1 : 0)} /VRAM/ && !skipIntel {for (i = 1; i <= NF; i++) if ($i == "VRAM") {vram = $(i+2); unit = $(i+3); print vram, unit; exit}}'
     )";
 
-    FILE* pipe = popen(cmd, "r");
+    FILE *pipe = popen(cmd, "r");
     if (!pipe) {
         return 0;  // Command execution failed
     }

@@ -66,7 +66,7 @@ public:
 
     // Accessors
     ClassifyEngineHandle engineHandle() const noexcept { return m_engine; }
-    const ClassifyApi* api() const noexcept {
+    const ClassifyApi *api() const noexcept {
         return classifyLoader::classifyApi();
     }
 
@@ -74,10 +74,10 @@ public:
     bool wantsText() const noexcept { return m_wantsText; }
     bool wantsPolicies() const noexcept { return m_wantsPolicies; }
 
-    const std::vector<std::string>& getIncludePolicies() const noexcept {
+    const std::vector<std::string> &getIncludePolicies() const noexcept {
         return m_includePolicies;
     }
-    const std::vector<std::string>& getExcludePolicies() const noexcept {
+    const std::vector<std::string> &getExcludePolicies() const noexcept {
         return m_excludePolicies;
     }
 
@@ -106,14 +106,14 @@ public:
     _const auto Factory = Factory::makeFactory<IFilterInstance, Parent>(Type);
 
     // Constructor/destructor
-    IFilterInstance(const FactoryArgs& args) noexcept;
+    IFilterInstance(const FactoryArgs &args) noexcept;
     virtual ~IFilterInstance();
 
     // Public API
     virtual Error beginFilterInstance() noexcept override;
-    virtual Error open(Entry& object) noexcept override;
-    virtual Error writeText(const Utf16View& text) noexcept override;
-    virtual Error writeTable(const Utf16View& text) noexcept override;
+    virtual Error open(Entry &object) noexcept override;
+    virtual Error writeText(const Utf16View &text) noexcept override;
+    virtual Error writeTable(const Utf16View &text) noexcept override;
     virtual Error closing() noexcept override;
     virtual Error endFilterInstance() noexcept override;
 
@@ -122,7 +122,7 @@ private:
     Text getSessionError() const noexcept;
 
 private:
-    IFilterGlobal& m_global;
+    IFilterGlobal &m_global;
     ClassifySessionHandle m_session = nullptr;
 
     // ICU normalizer for NFKC

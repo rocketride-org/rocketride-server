@@ -26,15 +26,15 @@
 namespace ap::memory::adapter {
 
 template <typename OBackingT, typename IBackingT>
-inline decltype(auto) operator<<(Output<OBackingT>& out,
-                                 const Input<IBackingT>& in) noexcept(false) {
+inline decltype(auto) operator<<(Output<OBackingT> &out,
+                                 const Input<IBackingT> &in) noexcept(false) {
     Buffer buffer(1_mb);
     while (auto len = in.read(buffer, 0)) out.write(buffer.slice(len));
     return out;
 }
 
 template <typename IBackingT, typename OBackingT>
-Error copy(const IBackingT& source, OBackingT& dest) noexcept {
+Error copy(const IBackingT &source, OBackingT &dest) noexcept {
     auto in = memory::adapter::makeInput(source);
     auto out = memory::adapter::makeOutput(dest);
     return _callChk([&] { out << in; });

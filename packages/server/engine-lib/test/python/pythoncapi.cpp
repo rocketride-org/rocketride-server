@@ -38,7 +38,7 @@ TEST_CASE("python::pythoncapi") {
 
         // pass value from C++ to Python and back and compare
         long val = 50;
-        PyObject* p = PyLong_FromLong(val);
+        PyObject *p = PyLong_FromLong(val);
         long pyRetVal = PyLong_AsLong(p);
         REQUIRE(val == pyRetVal);
         return {};

@@ -25,7 +25,7 @@
 
 namespace ap::log {
 
-Atomic<bool>& initialized() noexcept {
+Atomic<bool> &initialized() noexcept {
     // Start out initialized as we are mostly concerned with tear down guards
     static Atomic<bool> init = {true};
     return init;
@@ -61,7 +61,7 @@ void init() noexcept {
         file::Path logPath = *LogFile;
         const auto truncateLogFile = _fs<bool>(*LogTruncate);
 
-        FILE* logFile = nullptr;
+        FILE *logFile = nullptr;
 #if ROCKETRIDE_PLAT_WIN
         // On Windows, allow the log file to be read while the application is
         // running

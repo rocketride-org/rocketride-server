@@ -29,7 +29,7 @@ struct StatefulCollator {
 
     StatefulCollator(bool mode) : m_mode(mode) {}
 
-    bool operator()(const KeyType& l, const KeyType& r) const {
+    bool operator()(const KeyType &l, const KeyType &r) const {
         if (m_mode)
             return l < r;
         else
@@ -43,7 +43,7 @@ template <typename KeyT>
 struct StatelessCollator {
     using KeyType = KeyT;
 
-    bool operator()(const KeyType& l, const KeyType& r) const { return l < r; }
+    bool operator()(const KeyType &l, const KeyType &r) const { return l < r; }
 };
 
 TEST_CASE("util::flat") {
@@ -83,7 +83,7 @@ TEST_CASE("util::flat") {
             std::shuffle(expected.begin(), expected.end(),
                          crypto::randomGenerator());
 
-            for (auto& [word, id] : expected) multiMap.emplace(word, id);
+            for (auto &[word, id] : expected) multiMap.emplace(word, id);
 
             ASSERTD(multiMap.size() == 8);
 

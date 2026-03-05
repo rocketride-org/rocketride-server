@@ -59,8 +59,8 @@ public:
     //-----------------------------------------------------------------
     // Public functions
     //-----------------------------------------------------------------
-    Error save(IFilterIndex& instance) noexcept;
-    Error load(IFilterIndex& instance, index::DocId docId) noexcept;
+    Error save(IFilterIndex &instance) noexcept;
+    Error load(IFilterIndex &instance, index::DocId docId) noexcept;
 
     void clear() noexcept;
     bool isEncrypted() const noexcept;
@@ -74,20 +74,20 @@ public:
     size_t size() const noexcept;
     auto begin() const noexcept;
     auto end() const noexcept;
-    bool operator==(const Metadata& cmp) const noexcept;
-    bool operator!=(const Metadata& cmp) const noexcept;
+    bool operator==(const Metadata &cmp) const noexcept;
+    bool operator!=(const Metadata &cmp) const noexcept;
     static Text renderProperty(TextView name, TextView value) noexcept;
     TextView getClosestKeyByIndex(size_t id) noexcept;
 
     template <typename Buffer>
-    void __toString(Buffer& buff) const noexcept {
-        for (auto& [name, value] : m_properties) {
+    void __toString(Buffer &buff) const noexcept {
+        for (auto &[name, value] : m_properties) {
             buff << renderProperty(name, value) << "\n";
         }
     }
 
-    void __toJson(json::Value& json) const noexcept {
-        for (auto& [key, value] : m_properties) {
+    void __toJson(json::Value &json) const noexcept {
+        for (auto &[key, value] : m_properties) {
             json[key] = value;
         }
     }

@@ -37,19 +37,19 @@ public:
     _const auto IsWide = sizeof(ChrT) == sizeof(Utf16Chr);
     _const auto MaxWordSize = maxWordSize;
 
-    BoundaryIterator(const AllocT& alloc = {}) noexcept(false)
+    BoundaryIterator(const AllocT &alloc = {}) noexcept(false)
         : m_word(alloc), m_iter(*allocate()) {}
 
     template <typename ChrTT = ChrT, typename TraitsTT = string::Case<ChrTT>>
     BoundaryIterator(StrView<ChrTT, TraitsTT> input,
-                     const AllocT& alloc = {}) noexcept
+                     const AllocT &alloc = {}) noexcept
         : m_word(alloc), m_iter(*allocate()) {
         setText(input);
     }
 
     template <typename ChrTT = ChrT, typename TraitsTT = string::Case<ChrTT>>
     void setText(StrView<ChrTT, TraitsTT> input,
-                 const AllocT& alloc = {}) noexcept {
+                 const AllocT &alloc = {}) noexcept {
         LOGT("Parsing text:\n", input);
         m_text = _tr<UnicodeString>(input);
         m_iter->setText(m_text);
@@ -140,7 +140,7 @@ public:
 
     template <typename ChrTT = ChrT, typename TraitsTT = TraitsT>
     static ErrorOr<std::vector<StrType>> parseWords(
-        StrView<ChrTT, TraitsTT> data, const AllocT& alloc = {}) noexcept {
+        StrView<ChrTT, TraitsTT> data, const AllocT &alloc = {}) noexcept {
         return _call([&] {
             _thread_local async::Tls<BoundaryIterator> iter(_location);
             iter->setText(data, alloc);
@@ -151,7 +151,7 @@ public:
     }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         buff << "icu::BoundaryIterator";
     }
 
@@ -172,7 +172,7 @@ protected:
 
     BreakPtr m_iter;
     UnicodeString m_text;
-    const char16_t* m_buff;
+    const char16_t *m_buff;
     StrType m_word;
     int m_start = {};
     int m_end = BreakIterator::DONE;

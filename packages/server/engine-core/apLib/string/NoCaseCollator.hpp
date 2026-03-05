@@ -28,12 +28,12 @@ namespace ap::string {
 struct NoCaseCollator {
     using is_transparent = std::true_type;
 
-    bool operator()(const iTextView& lhs, const iTextView& rhs) const noexcept {
+    bool operator()(const iTextView &lhs, const iTextView &rhs) const noexcept {
         return compare(lhs, rhs);
     }
 
     template <typename L, typename R>
-    bool compare(const L& lhs, const R& rhs) const noexcept {
+    bool compare(const L &lhs, const R &rhs) const noexcept {
         return lhs < rhs;
     }
 };

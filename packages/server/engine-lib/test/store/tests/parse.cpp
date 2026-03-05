@@ -198,7 +198,6 @@ TEST_CASE("store::parse") {
     }
 
     SECTION("parse minimal pdf") {
-
         ParseFilterTest filter;
 
         REQUIRE_NO_ERROR(filter.sendFile("minimal.pdf"));
@@ -224,7 +223,6 @@ TEST_CASE("store::parse") {
         REQUIRE(!table.empty());
         REQUIRE(table.contains("TableFallbackTest"));
     }
-
 }
 
 /*------------------------------------------------------------------

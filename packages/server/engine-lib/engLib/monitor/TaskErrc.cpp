@@ -27,11 +27,11 @@ namespace engine {
 // Define the rocketride error category, representing rocketride
 // error codes
 struct TaskErrorCategory : std::error_category {
-    const char* name() const noexcept override;
+    const char *name() const noexcept override;
     std::string message(int ev) const override;
 };
 
-const char* TaskErrorCategory::name() const noexcept { return "task"; }
+const char *TaskErrorCategory::name() const noexcept { return "task"; }
 
 std::string TaskErrorCategory::message(int ev) const {
     return _ts(EnumFrom<TaskEc>(ev));

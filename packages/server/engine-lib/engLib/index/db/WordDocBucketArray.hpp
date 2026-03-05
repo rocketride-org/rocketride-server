@@ -37,7 +37,7 @@ public:
     //---------------------------------------------------------
     // Constructor
     //---------------------------------------------------------
-    WordDocBucketArray(ap::memory::memory_resource* allocator) noexcept
+    WordDocBucketArray(ap::memory::memory_resource *allocator) noexcept
         : BucketArrayBase(allocator) {}
 
     //---------------------------------------------------------
@@ -75,7 +75,7 @@ public:
             if (!m_mainBlock[bucket]) {  // lazy init of secondary page
                 auto bytesCount =
                     sizeof(SecondaryBlock) * getBucketElementsCount();
-                SecondaryBlock* block = new SecondaryBlock
+                SecondaryBlock *block = new SecondaryBlock
                     [getBucketElementsCount()];  // do it from regular memory
                                                  // because of pretty big size
                                                  // allocating here
@@ -83,8 +83,8 @@ public:
                 m_mainBlock[bucket] = block;
             }
 
-            SlistNode* docWordIdElement =
-                _reCast<SlistNode*>(m_resourseAllocator->allocate(
+            SlistNode *docWordIdElement =
+                _reCast<SlistNode *>(m_resourseAllocator->allocate(
                     sizeof(SlistNode), nodeAlignment));
             docWordIdElement->data = data;
             docWordIdElement->pNext = nullptr;

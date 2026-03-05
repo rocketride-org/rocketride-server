@@ -26,7 +26,7 @@
 namespace ap::error {
 
 namespace {
-inline void postProcess(const Error& ccode, Location location,
+inline void postProcess(const Error &ccode, Location location,
                         Opt<Lvl> lvl = {}) noexcept {
     // Not an error; bail
     if (ccode == Ec::NoErr) return;
@@ -44,23 +44,23 @@ inline void postProcess(const Error& ccode, Location location,
 }  // namespace
 
 template <typename Code, typename Prefix, typename... Msg>
-inline Error makeErrorPrefix(Code&& code, Location location,
-                             const Prefix& prefix, Msg&&... msg) noexcept {
+inline Error makeErrorPrefix(Code &&code, Location location,
+                             const Prefix &prefix, Msg &&...msg) noexcept {
     Error ccode{std::forward<Code>(code), location, std::forward<Msg>(msg)...};
     postProcess(ccode, location, prefix.LogLevel);
     return ccode;
 }
 
 template <typename Code, typename Level, typename... Msg>
-inline Error makeErrorLevel(Code&& code, Location location, Level level,
-                            Msg&&... msg) noexcept {
+inline Error makeErrorLevel(Code &&code, Location location, Level level,
+                            Msg &&...msg) noexcept {
     Error ccode{std::forward<Code>(code), location, std::forward<Msg>(msg)...};
     postProcess(ccode, location, level);
     return ccode;
 }
 
 template <typename Code, typename... Msg>
-inline Error makeError(Code&& code, Location location, Msg&&... msg) noexcept {
+inline Error makeError(Code &&code, Location location, Msg &&...msg) noexcept {
     Error ccode{std::forward<Code>(code), location, std::forward<Msg>(msg)...};
     postProcess(ccode, location);
     return ccode;

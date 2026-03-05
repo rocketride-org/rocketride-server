@@ -38,20 +38,20 @@ struct IdentifyParam {
         Text nodeClassId;
         Text nodeId;
 
-        static auto __fromJson(Payload& rqu, const json::Value& val) noexcept {
+        static auto __fromJson(Payload &rqu, const json::Value &val) noexcept {
             return val.lookupAssign("nodeName", rqu.nodeName) ||
                    val.lookupAssign("nodeClassid", rqu.nodeClassId) ||
                    val.lookupAssign("nodeId", rqu.nodeId);
         }
 
-        auto __toJson(json::Value& val) const noexcept {
+        auto __toJson(json::Value &val) const noexcept {
             val["nodeName"] = nodeName;
             val["nodeClassId"] = nodeClassId;
             val["nodeId"] = nodeId;
         }
 
         template <typename Buffer>
-        auto __toString(Buffer& buff) const noexcept {
+        auto __toString(Buffer &buff) const noexcept {
             buff << "nodeName:" << nodeName << "nodeClassId:" << nodeClassId
                  << "nodeId:" << nodeId;
         }

@@ -44,7 +44,7 @@ inline bool isMultiwordBoundary(WordId value) noexcept {
 // Normalize vertical whitespace to a space so that we don't have linefeeds in
 // match contexts
 template <file::Mode WordDbModeT>
-TextView renderContextWord(const db::WordDb<WordDbModeT>& wordDb,
+TextView renderContextWord(const db::WordDb<WordDbModeT> &wordDb,
                            WordId wordId) noexcept {
     auto word = wordDb.lookupWord(wordId);
     if (word.length() == 1 && string::isVerticalSpace(word[0])) return " "_tv;
@@ -53,8 +53,8 @@ TextView renderContextWord(const db::WordDb<WordDbModeT>& wordDb,
 
 // Build a context from a range, stopping at metadata boundaries
 template <file::Mode WordDbModeT>
-Text renderContext(const db::WordDb<WordDbModeT>& wordDb,
-                   const WordIdListReturnType& docWordIds, size_t matchStart,
+Text renderContext(const db::WordDb<WordDbModeT> &wordDb,
+                   const WordIdListReturnType &docWordIds, size_t matchStart,
                    size_t matchLength, size_t contextStart, size_t contextEnd,
                    bool trim = true) noexcept {
     Text context;
@@ -85,8 +85,8 @@ Text renderContext(const db::WordDb<WordDbModeT>& wordDb,
 // Build match context (takes the doc's WorIdList instead of doc ID to
 // accommodate search::QueryCtx's cache
 template <file::Mode WordDbModeT>
-match::MatchContext getMatchContext(const db::WordDb<WordDbModeT>& wordDb,
-                                    const WordIdListReturnType& docWordIds,
+match::MatchContext getMatchContext(const db::WordDb<WordDbModeT> &wordDb,
+                                    const WordIdListReturnType &docWordIds,
                                     size_t matchStart, size_t matchLength,
                                     size_t words, bool includeMatch = true,
                                     bool trim = true) noexcept {
@@ -155,7 +155,7 @@ match::MatchContext getMatchContext(const db::WordDb<WordDbModeT>& wordDb,
 }
 
 template <file::Mode WordDbModeT>
-match::MatchContext getMatchContext(const db::WordDb<WordDbModeT>& wordDb,
+match::MatchContext getMatchContext(const db::WordDb<WordDbModeT> &wordDb,
                                     DocId docId, size_t matchStart,
                                     size_t matchLength, size_t words,
                                     bool includeMatch = true,
