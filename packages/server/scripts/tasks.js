@@ -1126,7 +1126,8 @@ function makePackageAction(options = {}) {
                 _task.output = `Packaging ${distFilename}...`;
                 await mkdir(DIST_ARTIFACTS_DIR);
                 await removeFile(distPath);
-                await createArchive(distPath, options.destDir, ".");
+                const entries = await readDir(options.destDir);
+                await createArchive(distPath, options.destDir, entries);
                 _task.output = `Packaged ${distFilename}`;
 
                 if (symDistPath) {
