@@ -22,13 +22,13 @@
  * SOFTWARE.
  */
 
-import { TransportWebSocket } from './core/TransportWebSocket';
-import { DAPClient } from './core/DAPClient';
-import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback } from './types';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig } from './types';
-import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants';
-import { Question } from './schema/Question';
-import { AuthenticationException } from './exceptions';
+import { TransportWebSocket } from './core/TransportWebSocket.js';
+import { DAPClient } from './core/DAPClient.js';
+import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig } from './types/index.js';
+import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
+import { Question } from './schema/Question.js';
+import { AuthenticationException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
 let clientId = 0;

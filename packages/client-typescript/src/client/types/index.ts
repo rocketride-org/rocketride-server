@@ -28,8 +28,8 @@
  * Re-exports all type definitions from individual modules for convenient imports.
  */
 
-export * from './client';
-export * from './data';
-export * from './events';
-export * from './pipeline';
-export * from './task';
+export * from './client.js';
+export * from './data.js';
+export * from './events.js';
+export * from './pipeline.js';
+export * from './task.js';

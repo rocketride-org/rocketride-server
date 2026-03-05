@@ -22,9 +22,9 @@
  * SOFTWARE.
  */
 
-import { TransportBase } from './TransportBase';
-import { DAPMessage } from '../types';
-import { CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT, CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT } from '../constants';
+import { TransportBase } from './TransportBase.js';
+import { DAPMessage } from '../types/index.js';
+import { CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT, CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT } from '../constants.js';
 
 /**
  * Node.js WebSocket (ws package) loading - ESM/CJS compatibility

@@ -117,8 +117,10 @@ class TaskCommands(DAPConn):
             self.verify_permission('task.control')
 
             # Verify required pipeline plans
-            pipeline = request.get('arguments').get('pipeline')
-            self.verify_plans(self._account_info, pipeline)
+            args = request.get('arguments') or {}
+            pipeline = args.get('pipeline')
+            if pipeline is not None:
+                self.verify_plans(self._account_info, pipeline)
 
             # Start the task without debugger attachment
             response = await self._server.start_task(
