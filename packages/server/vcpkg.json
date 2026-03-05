@@ -1,0 +1,41 @@
+{
+  "name": "rocketride-server",
+  "version": "1.0.0",
+  "description": "RocketRide server native dependencies",
+  "dependencies": [
+    "azure-core-cpp",
+    "azure-identity-cpp",
+    "azure-storage-blobs-cpp",
+    {
+      "name": "aws-sdk-cpp",
+      "default-features": false,
+      "features": ["s3", "transfer"]
+    },
+    "boost-container",
+    "boost-crc",
+    "boost-filesystem",
+    "boost-lexical-cast",
+    "boost-log",
+    "boost-numeric-conversion",
+    "boost-range",
+    "boost-stacktrace",
+    "boost-system",
+    "boost-uuid",
+    {
+      "name": "breakpad",
+      "platform": "linux"
+    },
+    "catch2",
+    "cpprestsdk",
+    "date",
+    "fastpfor",
+    "icu",
+    "libxml2",
+    "lz4",
+    "minizip-ng",
+    "pybind11",
+    "python3",
+    "tinyxml2",
+    "zstd"
+  ]
+}

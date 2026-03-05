@@ -1,0 +1,11 @@
+{
+  "search.exclude": {
+    "**/build": true,
+    "**/dist": true,
+    "**/downloads": true,
+    "**/.*": true,
+    "**/__pycache__": true,
+    "**/node_modules": true,
+  },
+  "cmake.sourceDirectory": "${workspaceFolder}/packages/server"
+}

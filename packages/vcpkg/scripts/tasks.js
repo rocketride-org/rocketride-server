@@ -29,12 +29,13 @@
 const path = require('path');
 const { 
     withLock, getState, setState,
-    execCommand, removeDir, PROJECT_ROOT, BUILD_DIR,
+    execCommand, removeDirs, PROJECT_ROOT, BUILD_DIR,
     exists, readJson, mkdir
 } = require('../../../scripts/lib');
 
 // Paths
 const VCPKG_DIR = path.join(BUILD_DIR, 'vcpkg');
+const VCPKG_INSTALLED_DIR = path.join(BUILD_DIR, 'vcpkg_installed');
 
 // Read vcpkg version from package.json (loaded async in tasks)
 let VCPKG_VERSION = '2024.11.16';
@@ -84,7 +85,7 @@ function makeCloneVcpkgAction(options = {}) {
             task.output = `Cloning v${version}...`;
             
             await withLock('vcpkg-clone', async () => {
-                await removeDir(VCPKG_DIR);
+                await removeDirs([VCPKG_DIR, VCPKG_INSTALLED_DIR]);
                 await mkdir(BUILD_DIR);
                 
                 try {
@@ -153,9 +154,8 @@ module.exports = {
         })},
         { name: 'vcpkg:submodule-clean', action: () => ({
             run: async (ctx, task) => {
-                const { withLock, removeDir, setState } = require('../../../scripts/lib');
                 await withLock('vcpkg-setup', async () => {
-                    await removeDir(VCPKG_DIR);
+                    await removeDirs([VCPKG_DIR, VCPKG_INSTALLED_DIR]);
                     await setState('vcpkg.state', null);
                     await setState('vcpkg.version', null);
                 });
