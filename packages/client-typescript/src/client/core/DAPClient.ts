@@ -22,10 +22,10 @@
  * SOFTWARE.
  */
 
-import { DAPBase } from './DAPBase';
-import { DAPMessage, RocketRideClientConfig } from '../types';
-import { TransportBase } from './TransportBase';
-import { AuthenticationException } from '../exceptions';
+import { DAPBase } from './DAPBase.js';
+import { DAPMessage, RocketRideClientConfig } from '../types/index.js';
+import { TransportBase } from './TransportBase.js';
+import { AuthenticationException } from '../exceptions/index.js';
 
 /**
  * DAP (Debug Adapter Protocol) client for communicating with RocketRide servers.

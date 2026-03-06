@@ -22,8 +22,8 @@
  * SOFTWARE.
  */
 
-import { Doc } from './Doc';
-import { DocFilter } from './DocFilter';
+import { Doc } from './Doc.js';
+import { DocFilter } from './DocFilter.js';
 
 /**
  * Defines different types of questions and queries you can ask.

@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import { TASK_STATUS } from './task';
+import { TASK_STATUS } from './task.js';
 
 /**
  * Event type enumeration for sophisticated client subscription and event routing.

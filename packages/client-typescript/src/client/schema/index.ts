@@ -28,8 +28,8 @@
  * Re-exports all schema classes and interfaces for convenient imports.
  */
 
-export * from './Doc';
-export * from './DocFilter';
-export * from './DocGroup';
-export * from './DocMetadata';
-export * from './Question';
+export * from './Doc.js';
+export * from './DocFilter.js';
+export * from './DocGroup.js';
+export * from './DocMetadata.js';
+export * from './Question.js';
