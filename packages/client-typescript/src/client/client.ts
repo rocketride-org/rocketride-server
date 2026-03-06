@@ -751,34 +751,42 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * This method loads and executes a pipeline configuration. It automatically performs
 	 * environment variable substitution on the pipeline config, replacing ${ROCKETRIDE_*}
-	 * placeholders with values from the .env file.
-	 * 
+	 * placeholders with values from the .env file or the `env` dictionary passed to the constructor.
+	 *
+	 * When loading from a file via `filepath`, the client automatically unwraps `.pipe` files
+	 * that use the `{ "pipeline": { ... } }` wrapper format. If the file contains a top-level
+	 * `pipeline` key, the inner object is extracted; otherwise the file content is used as-is.
+	 *
+	 * When passing a `pipeline` object directly, provide a flat `PipelineConfig` with
+	 * `components`, `source`, and `project_id` at the top level — do NOT wrap it in
+	 * `{ pipeline: { ... } }`.
+	 *
 	 * @param options - Pipeline execution options
 	 * @param options.token - Custom token for the pipeline (auto-generated if not provided)
-	 * @param options.filepath - Path to JSON file containing pipeline configuration
-	 * @param options.pipeline - Pipeline configuration object (alternative to filepath)
+	 * @param options.filepath - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only)
+	 * @param options.pipeline - Flat PipelineConfig object (alternative to filepath)
 	 * @param options.source - Override pipeline source
 	 * @param options.threads - Number of threads for execution (default: 1)
 	 * @param options.useExisting - Use existing pipeline instance
 	 * @param options.args - Command line arguments to pass to pipeline
 	 * @param options.ttl - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
-	 * 
+	 * @param options.pipelineTraceLevel - Trace level: 'none' | 'metadata' | 'summary' | 'full'. When set, captures every lane write and invoke call in the response under '_trace'.
+	 *
 	 * @returns Promise resolving to an object containing the task token and other metadata
 	 * @throws Error if neither pipeline nor filepath is provided
-	 * 
+	 *
 	 * @example
 	 * ```typescript
-	 * // Using pipeline file
-	 * const result = await client.use({ filepath: './pipeline.json' });
-	 * 
-	 * // Using pipeline object
+	 * // Using a .pipe file (wrapper is automatically unwrapped)
+	 * const result = await client.use({ filepath: './chat.pipe' });
+	 *
+	 * // Using a flat pipeline config object
 	 * const result = await client.use({
-	 *   pipeline: { name: 'My Pipeline', components: [...], source: 'local', project_id: '123' }
+	 *   pipeline: { components: [...], source: 'chat_1', project_id: '...' }
 	 * });
-	 * 
-	 * // With environment variable substitution
-	 * // Pipeline config: { "endpoint": "${ROCKETRIDE_URI}/api" }
-	 * // Will be replaced with actual ROCKETRIDE_URI value from .env
+	 *
+	 * // Reuse an existing pipeline
+	 * const result = await client.use({ filepath: './chat.pipe', useExisting: true });
 	 * ```
 	 */
 	async use(options: {
