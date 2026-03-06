@@ -50,11 +50,18 @@
  * - upload: Upload files to a pipeline (with --pipeline or --token)
  * - status: Monitor real-time status of a running pipeline
  * - stop: Terminate a running pipeline gracefully
- * 
+ * - validate: Validate pipeline file offline (optionally with --server for full validation)
+ *
  * @example
  * ```bash
  * # Start a pipeline
  * rocketride start --pipeline ./my-pipeline.json --apikey YOUR_KEY
+ *
+ * # Validate pipeline (offline, no server required)
+ * rocketride validate --pipeline ./my-pipeline.pipe
+ *
+ * # Validate with server (full validation)
+ * rocketride validate --pipeline ./my-pipeline.pipe --server --apikey YOUR_KEY
  *
  * # Upload files with progress tracking
  * rocketride upload files/*.csv --pipeline ./pipeline.json --max-concurrent 10
@@ -75,6 +82,7 @@ import { Command } from 'commander';
 import { RocketRideClient } from '../client/client';
 import { DAPMessage, PipelineConfig, UPLOAD_RESULT } from '../client/types';
 import { CONST_DEFAULT_WEB_LOCAL } from '../client/constants';
+import { validatePipeline } from './validatePipeline';
 
 // ANSI Color and Control Codes for terminal formatting
 const ANSI_RESET = '\x1b[0m';
@@ -982,6 +990,37 @@ export class RocketRideCLI {
 
 		addCommonOptions(stopCmd);
 
+		// Validate command (offline by default; use --server for full validation)
+		const validateCmd = program
+			.command('validate')
+			.description('Validate pipeline file (offline). Use --server to also validate against RocketRide server')
+			.option('--pipeline <file>', 'Path to .pipe or .json pipeline file (can use ROCKETRIDE_PIPELINE in .env)', process.env.ROCKETRIDE_PIPELINE)
+			.option('--server', 'Also validate via RocketRide server (requires --uri and --apikey)')
+			.action(async (options) => {
+				if (!options.pipeline) {
+					console.error('Error: Pipeline file is required for validate. Use --pipeline or set ROCKETRIDE_PIPELINE in .env');
+					process.exit(1);
+				}
+				this.args = {
+					command: 'validate',
+					...options,
+					pipeline: options.pipeline,
+					server: !!options.server
+				};
+				this.uri = options.uri;
+				try {
+					const exitCode = await this.cmdValidate();
+					process.exit(exitCode);
+				} finally {
+					if (this.args.server) {
+						this.cancel();
+						await this.cleanupClient();
+					}
+				}
+			});
+
+		addCommonOptions(validateCmd);
+
 		return program;
 	}
 
@@ -1055,6 +1094,62 @@ export class RocketRideCLI {
 			} else {
 				throw new Error(`Error reading ${pipelineFile}: ${error}`);
 			}
+		}
+	}
+
+	async cmdValidate(): Promise<number> {
+		const pipelineFile = this.args.pipeline!;
+		let loaded: PipelineConfig;
+		try {
+			loaded = this.loadPipelineConfig(pipelineFile);
+		} catch (err) {
+			console.error('Error:', err instanceof Error ? err.message : String(err));
+			return 1;
+		}
+
+		const raw = loaded as unknown as Record<string, unknown>;
+		const result = validatePipeline(raw);
+		if (!result.valid) {
+			console.error(`${ANSI_RED}Validation failed${ANSI_RESET} (${pipelineFile}):`);
+			for (const msg of result.errors) {
+				console.error(`  ${ANSI_RED}${CHR_CROSS}${ANSI_RESET} ${msg}`);
+			}
+			return 1;
+		}
+
+		if (!this.args.server) {
+			console.log(`${ANSI_GREEN}${CHR_CHECK} Pipeline valid${ANSI_RESET} (${pipelineFile})`);
+			if (result.normalized) {
+				console.log(`  source: ${result.normalized.source}, components: ${result.normalized.components.length}`);
+			}
+			return 0;
+		}
+
+		try {
+			await this.createAndConnectClient();
+			const serverResult = await this.client!.validate({
+				pipeline: loaded,
+				source: result.normalized?.source
+			});
+			const errors = (serverResult?.errors as Array<{ message?: string }>) || [];
+			const warnings = (serverResult?.warnings as Array<{ message?: string }>) || [];
+			if (errors.length > 0) {
+				console.error(`${ANSI_RED}Server validation failed${ANSI_RESET} (${pipelineFile}):`);
+				for (const e of errors) {
+					console.error(`  ${ANSI_RED}${CHR_CROSS}${ANSI_RESET} ${e.message ?? JSON.stringify(e)}`);
+				}
+				return 1;
+			}
+			console.log(`${ANSI_GREEN}${CHR_CHECK} Pipeline valid${ANSI_RESET} (${pipelineFile}) [offline + server]`);
+			if (warnings.length > 0) {
+				for (const w of warnings) {
+					console.log(`  ${ANSI_YELLOW}!${ANSI_RESET} ${w.message ?? JSON.stringify(w)}`);
+				}
+			}
+			return 0;
+		} catch (err) {
+			console.error(`${ANSI_RED}Server validation error${ANSI_RESET}:`, err instanceof Error ? err.message : String(err));
+			return 1;
 		}
 	}
 
