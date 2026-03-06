@@ -86,7 +86,7 @@ function makeBuildWebviewAction() {
                 return;
             }
             
-            await execCommand('npx', ['rsbuild', 'build'], { task, cwd: APP_ROOT });
+            await execCommand('pnpm', ['exec', 'rsbuild', 'build'], { task, cwd: APP_ROOT });
             
             await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash);
         }
