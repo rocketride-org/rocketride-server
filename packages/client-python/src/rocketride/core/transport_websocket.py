@@ -56,6 +56,7 @@ Usage (Internal):
 import json
 import asyncio
 from typing import Dict, Any, Union, Optional
+from urllib.parse import urlencode, urlparse, parse_qs
 from .constants import CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT, CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 
 # Optional dependency handling for websockets library
@@ -299,9 +300,18 @@ class TransportWebSocket(TransportBase):
             # Convert ms to seconds for websockets library, or use default
             effective_open_timeout = timeout / 1000.0 if timeout is not None else CONST_SOCKET_TIMEOUT
 
-            # Connect without auth on upgrade; first DAP message must be auth (sent by connect flow via request())
+            # Server requires auth at WebSocket upgrade (header or query). Pass auth as query param
+            # so the upgrade request is accepted; DAP auth command is still sent after connect.
+            connect_uri = self._uri
+            if self._auth:
+                parsed = urlparse(self._uri)
+                qs = parse_qs(parsed.query)
+                qs['auth'] = [self._auth]
+                new_query = urlencode(qs, doseq=True)
+                connect_uri = parsed._replace(query=new_query).geturl()
+
             self._websocket = await websockets.connect(
-                self._uri,
+                connect_uri,
                 ping_interval=CONST_WS_PING_INTERVAL,  # Send ping every 15 seconds
                 ping_timeout=CONST_WS_PING_TIMEOUT,  # Wait up to 60 seconds for pong
                 close_timeout=CONST_SOCKET_TIMEOUT,

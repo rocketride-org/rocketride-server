@@ -217,7 +217,9 @@ function makeRunPytestAction(options = {}) {
             const serverDir = path.join(PROJECT_ROOT, 'dist', 'server');
             const testEnv = {
                 ...process.env,
-                ROCKETRIDE_URI: serverUri
+                ROCKETRIDE_URI: serverUri,
+                // Ensure test default API key is set so server accepts WebSocket upgrade and DAP auth
+                ROCKETRIDE_APIKEY: process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY'
             };
             
             // Use absolute paths since cwd is dist/server

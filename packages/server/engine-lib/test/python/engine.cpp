@@ -47,5 +47,9 @@ TEST_CASE("python::config") {
 }
 
 TEST_CASE("python::webhook") {
-    REQUIRE_NO_ERROR(engine::python::loadModule("nodes.webhook", true));
+    // Hold GIL so the returned py::object (module) is destroyed while GIL is held.
+    // Otherwise pybind11 dec_ref runs without GIL and triggers PyGILState_Check() failure.
+    engine::python::LockPython lock;
+    auto result = engine::python::loadModule("nodes.webhook", true);
+    REQUIRE_NO_ERROR(result);
 }

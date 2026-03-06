@@ -51,7 +51,9 @@ module.exports = {
 	verbose: true,
 
 	// Module name mapping for cleaner imports
+	// Resolve .js imports to .ts source so Jest finds TypeScript files (ESM-style imports)
 	moduleNameMapper: {
+		'^(\\.\\.?/.*)\\.js$': '$1',
 		'^@/(.*)$': '<rootDir>/src/$1',
-	}
+	},
 };
