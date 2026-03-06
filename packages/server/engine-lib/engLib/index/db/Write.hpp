@@ -399,7 +399,7 @@ public:
         // Update the window on where we are at
         m_segmentsControlTable[segmentId].chunkOffset = virtualEntry;
 
-        // Since we read virtaulEntry into element[0], return it�s address
+        // Since we read virtualEntry into element[0], return its address
         return m_invertedIndexSegment.data() + segmentId * m_chunkEntries;
     }
 
@@ -1322,13 +1322,13 @@ public:
     Error commit(const DocHash &hash, WordIdList &wordIds,
                  engine::store::VirtualBuffer &vbuf,
                  bool docStructChunked) noexcept {
-        // if doc structure is chunked check its size
-        if (docStructChunked) {
-            if (!vbuf.size()) return {};
-        } else {  // otherwise doc structure is fully presented in wordIds so
-                  // check its size
-            // If we have no words, then no need to add it
-            if (!wordIds.size()) return {};
+        if ((docStructChunked && !vbuf.size()) ||
+            (!docStructChunked && !wordIds.size())) {
+            // Register the document hash even with no words so that
+            // lookupDocId will find it during renderObject (e.g. images)
+            addDocHashFirst(hash);
+            ++m_docCount;
+            return {};
         }
 
         // Allocate this document id
