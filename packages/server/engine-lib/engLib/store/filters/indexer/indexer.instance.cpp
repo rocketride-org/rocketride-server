@@ -219,6 +219,7 @@ Error IFilterInstance::renderObject(ServicePipe &target,
 
         // Document hash is registered but has no indexed words (e.g. images)
         if (!db.hasDocId(docId)) return {};
+
         // The word buffer convertted to utf16
         Utf16 utf16;
 
