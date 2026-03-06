@@ -55,6 +55,7 @@ class DataConnPipe:
     semaphore_acquired: bool = False  # Track if semaphore was acquired for this pipe
     created_time: float = field(default_factory=time.time)  # Track when pipe was created
     last_activity_time: float = field(default_factory=time.time)  # Track last write/close activity
+    in_use: bool = False  # True while a sync operation (write) is actively running in a thread
 
 
 class DataConn(DAPConn):
@@ -353,6 +354,10 @@ class DataConn(DAPConn):
 
                 # Find pipes that haven't been used in the timeout period
                 for pipe_id, conn_pipe in list(self._pipe_map.items()):
+                    # Skip pipes that are actively processing (e.g. long LLM calls)
+                    if conn_pipe.in_use:
+                        continue
+
                     time_since_last_activity = current_time - conn_pipe.last_activity_time
 
                     if time_since_last_activity > self._pipe_timeout:
@@ -526,21 +531,22 @@ class DataConn(DAPConn):
         considered a zombie for another 60 seconds.
         """
 
+        # Resolve conn_pipe in the async scope so we can set in_use before dispatching
+        pipe_id = args.get('pipe_id', None)
+        if pipe_id is None:
+            raise ValueError('No pipe_id specified')
+
+        conn_pipe = self._pipe_map.get(pipe_id, None)
+        if not conn_pipe:
+            raise ValueError(f'Write pipe with id {pipe_id} not found')
+
+        if not conn_pipe.is_open:
+            raise ValueError(f'Write pipe with id {pipe_id} is not open')
+
+        if conn_pipe.has_failed:
+            raise ValueError(f'Write pipe with id {pipe_id} has failed')
+
         def write_sync():
-            pipe_id = args.get('pipe_id', None)
-            if pipe_id is None:
-                raise ValueError('No pipe_id specified')
-
-            # Retrieve the DataConnPipe instance from our mapping
-            conn_pipe = self._pipe_map.get(pipe_id, None)
-            if not conn_pipe:
-                raise ValueError(f'Write pipe with id {pipe_id} not found')
-
-            if not conn_pipe.is_open:
-                raise ValueError(f'Write pipe with id {pipe_id} is not open')
-
-            if conn_pipe.has_failed:
-                raise ValueError(f'Write pipe with id {pipe_id} has failed')
 
             # Get the data to write
             data: bytes = args.get('data', None)
@@ -629,8 +635,12 @@ class DataConn(DAPConn):
                 self.debug_message(f'Error handling write request: {e}')
                 raise
 
-        # Execute in thread
-        await asyncio.to_thread(write_sync)
+        # Execute in thread, marking pipe as in-use so the zombie detector skips it
+        conn_pipe.in_use = True
+        try:
+            await asyncio.to_thread(write_sync)
+        finally:
+            conn_pipe.in_use = False
         return self.build_response(request)
 
     async def _close(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
