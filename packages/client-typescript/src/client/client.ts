@@ -22,8 +22,6 @@
  * SOFTWARE.
  */
 
-import fs from 'fs';
-import path from 'path';
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback } from './types/index.js';
@@ -306,47 +304,17 @@ export class RocketRideClient extends DAPClient {
 		const isBrowser = typeof window !== 'undefined';
 
 		// Build environment variables dictionary
-		// Priority: provided env > .env file
+		// Priority: provided env > process.env (Node.js only)
 		let clientEnv: Record<string, string> = {};
 
 		if (config.env) {
 			// Use provided env dictionary
 			clientEnv = { ...config.env };
-		} else {
-			// Load from .env file only (Node.js only)
-			if (!isBrowser) {
-				try {
-					const envPath = path.join(process.cwd(), '.env');
-
-					if (fs.existsSync(envPath)) {
-						const content = fs.readFileSync(envPath, 'utf-8');
-
-						// Parse each line
-						for (const line of content.split('\n')) {
-							const trimmed = line.trim();
-							// Skip comments and empty lines
-							if (!trimmed || trimmed.startsWith('#')) {
-								continue;
-							}
-
-							// Parse KEY=VALUE format
-							const match = trimmed.match(/^([^=]+)=(.*)$/);
-							if (match) {
-								const key = match[1].trim();
-								let value = match[2].trim();
-
-								// Remove quotes if present
-								if ((value.startsWith('"') && value.endsWith('"')) ||
-									(value.startsWith("'") && value.endsWith("'"))) {
-									value = value.slice(1, -1);
-								}
-
-								clientEnv[key] = value;
-							}
-						}
-					}
-				} catch {
-					// File doesn't exist or can't be read - that's okay
+		} else if (!isBrowser && typeof process !== 'undefined' && process.env) {
+			// In Node.js, copy process.env values that are strings
+			for (const [key, value] of Object.entries(process.env)) {
+				if (typeof value === 'string') {
+					clientEnv[key] = value;
 				}
 			}
 		}
@@ -689,6 +657,42 @@ export class RocketRideClient extends DAPClient {
 		return obj;
 	}
 
+	/**
+	 * Load Node.js fs/promises at runtime without static imports.
+	 * This keeps browser bundles free of Node built-ins while preserving Node features.
+	 */
+	private async _loadNodeFsPromises(): Promise<{
+		readFile: (path: string, encoding: string) => Promise<string>;
+		stat: (path: string) => Promise<{ size: number }>;
+	}> {
+		if (typeof window !== 'undefined') {
+			throw new Error('Node.js filesystem APIs are not available in browser environment.');
+		}
+
+		try {
+			const req = (0, eval)('require') as undefined | ((moduleName: string) => any);
+			if (typeof req === 'function') {
+				const fsPromises = req('fs/promises');
+				if (fsPromises) {
+					return fsPromises as {
+						readFile: (path: string, encoding: string) => Promise<string>;
+						stat: (path: string) => Promise<{ size: number }>;
+					};
+				}
+			}
+		} catch {
+			// Fall through to runtime dynamic import
+		}
+
+		// Use Function to avoid bundlers statically resolving Node built-ins.
+		const dynamicImport = new Function('specifier', 'return import(specifier);') as (specifier: string) => Promise<any>;
+		const fsPromises = await dynamicImport('fs/promises');
+		return fsPromises as {
+			readFile: (path: string, encoding: string) => Promise<string>;
+			stat: (path: string) => Promise<{ size: number }>;
+		};
+	}
+
 	// ============================================================================
 	// VALIDATION METHODS
 	// ============================================================================
@@ -819,8 +823,9 @@ export class RocketRideClient extends DAPClient {
 				throw new Error('File loading not available in browser environment. Please provide pipeline object directly.');
 			}
 
-			// Load file in Node.js
-			const fileContent = fs.readFileSync(filepath, 'utf-8');
+			// Load file in Node.js without static fs imports (browser-safe bundle)
+			const fsPromises = await this._loadNodeFsPromises();
+			const fileContent = await fsPromises.readFile(filepath, 'utf-8');
 			const parsed = JSON.parse(fileContent);
 			// .pipe files wrap the config in { "pipeline": { ... } } — unwrap if present
 			pipelineConfig = parsed.pipeline ?? parsed;
@@ -1064,7 +1069,8 @@ export class RocketRideClient extends DAPClient {
 			let fileSize = file.size;
 			if (typeof window === 'undefined' && objinfo?.filepath && typeof objinfo.filepath === 'string') {
 				try {
-					fileSize = fs.statSync(objinfo.filepath as string).size;
+					const fsPromises = await this._loadNodeFsPromises();
+					fileSize = (await fsPromises.stat(objinfo.filepath as string)).size;
 				} catch {
 					// fallback to file.size
 				}
