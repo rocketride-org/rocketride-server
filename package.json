@@ -5,7 +5,7 @@
 	"private": true,
 	"license": "MIT",
 	"vcpkg": {
-		"version": "2025.08.27"
+		"version": "2026.02.27"
 	},
 	"java": {
 		"jdkVersion": "17",

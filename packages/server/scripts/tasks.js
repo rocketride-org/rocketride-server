@@ -462,6 +462,18 @@ function makeCheckPrebuiltAction(options = {}) {
                 return;
             }
 
+            let manifest = null;
+            const manifestPath = await downloadGitHubFile(tag, manifestFilename, task);
+            if (manifestPath) {
+                manifest = await readJson(manifestPath);
+            }
+
+            if (manifest?.vcpkg?.version !== require('../../vcpkg/scripts/tasks').VCPKG_VERSION) {
+                task.output = 'Download skipped: vcpkg version mismatch';
+                ctx.downloaded = false;
+                return;
+            }
+
             const {
                 releaseTag, prereleaseTag, manifestFilename, distFilename, symDistFilename
             } = await getDistInfo(options);
@@ -473,15 +485,10 @@ function makeCheckPrebuiltAction(options = {}) {
             for (const tag of tagsToTry) {
                 try {
                     task.output = `Checking ${tag}...`;
-                    const manifestPath = await downloadGitHubFile(tag, manifestFilename, task);
-                    if (manifestPath) {
-                        const manifest = await readJson(manifestPath);
-                        const serverHash = manifest?.server?.contentHash;
-                        if (localHash === serverHash) {
-                            await setState('server.releaseManifest', manifest);
-                            matchedTag = tag;
-                            break;
-                        }
+                    if (localHash === manifest?.server?.contentHash) {
+                        await setState('server.releaseManifest', manifest);
+                        matchedTag = tag;
+                        break;
                     }
                 } catch {
                     // Manifest not available for this tag — try next
