@@ -21,21 +21,17 @@
 # SOFTWARE.
 # =============================================================================
 
-from ai.common.database import DatabaseInstanceBase
-from .IGlobal import IGlobal
-from .mysql_driver import MySQLDriver
+# ------------------------------------------------------------------------------
+# Main module
+# ------------------------------------------------------------------------------
+import os
+from depends import depends  # type: ignore
 
+# Install psycopg2-binary and SQLAlchemy before importing any driver code.
+requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+depends(requirements)
 
-class IInstance(DatabaseInstanceBase):
-    """MySQL-specific instance state.
+from .IGlobal import IGlobal  # noqa: E402
+from .IInstance import IInstance  # noqa: E402
 
-    The only MySQL-specific knowledge here is which driver to instantiate.
-    All lane handlers, SQL execution, and data insertion are in the base.
-    """
-
-    # Narrow the base type annotation to the concrete MySQL IGlobal so that
-    # IDE tooling resolves attributes like IGlobal.table without casting.
-    IGlobal: IGlobal
-
-    def _create_driver(self) -> MySQLDriver:
-        return MySQLDriver(instance=self)
+__all__ = ['IGlobal', 'IInstance']

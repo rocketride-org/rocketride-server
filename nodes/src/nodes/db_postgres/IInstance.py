@@ -23,19 +23,19 @@
 
 from ai.common.database import DatabaseInstanceBase
 from .IGlobal import IGlobal
-from .mysql_driver import MySQLDriver
+from .postgres_driver import PostgreSQLDriver
 
 
 class IInstance(DatabaseInstanceBase):
-    """MySQL-specific instance state.
+    """PostgreSQL-specific instance state.
 
-    The only MySQL-specific knowledge here is which driver to instantiate.
+    The only PostgreSQL-specific knowledge here is which driver to instantiate.
     All lane handlers, SQL execution, and data insertion are in the base.
     """
 
-    # Narrow the base type annotation to the concrete MySQL IGlobal so that
-    # IDE tooling resolves attributes like IGlobal.table without casting.
+    # Narrow the base type annotation to the concrete PostgreSQL IGlobal so
+    # that IDE tooling resolves attributes like IGlobal.table without casting.
     IGlobal: IGlobal
 
-    def _create_driver(self) -> MySQLDriver:
-        return MySQLDriver(instance=self)
+    def _create_driver(self) -> PostgreSQLDriver:
+        return PostgreSQLDriver(instance=self)
