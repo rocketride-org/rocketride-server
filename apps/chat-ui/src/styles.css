@@ -266,6 +266,17 @@ body {
 	color: var(--text-muted);
 }
 
+.message-result-key::before {
+	content: '·';
+	margin-right: 0.3rem;
+}
+
+.message-result-key {
+	font-size: 0.7rem;
+	color: var(--text-muted);
+	font-style: italic;
+}
+
 /* Typing Indicator */
 .typing-indicator {
 	display: flex;
