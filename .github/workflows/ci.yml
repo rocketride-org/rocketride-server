@@ -23,6 +23,7 @@ env:
   GH_TOKEN: ${{ github.token }}
   VCPKG_NUGET_USER: ${{ github.repository_owner }}
   NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+  VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite
 
 # ---------------------------------------------------------------------------
 #  Build
@@ -151,6 +152,10 @@ jobs:
       contents: read
       packages: write
       security-events: write
+    env:
+      VCPKG_NUGET_USER: ${{ github.repository_owner }}
+      NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+      VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
