@@ -61,6 +61,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       VCPKG_NUGET_USER: ${{ github.repository_owner }}
       NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+      VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite
     strategy:
       fail-fast: false
       matrix:

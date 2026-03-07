@@ -14,9 +14,10 @@
 cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 
 # -----------------------------------------------------------------------------
-# Project root directory (two levels up from packages/server)
+# Project directories
 # -----------------------------------------------------------------------------
 get_filename_component(ROCKETRIDE_PROJECT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+set(ROCKETRIDE_PACKAGES_DIR "${ROCKETRIDE_PROJECT_ROOT}/packages")
 
 # -----------------------------------------------------------------------------
 # Display CMake configuration information
@@ -50,10 +51,10 @@ if(NOT CMAKE_PROJECT_VERSION)
     set(PACKAGE_JSON "${ROCKETRIDE_PROJECT_ROOT}/package.json")
     if(EXISTS "${PACKAGE_JSON}")
         file(READ "${PACKAGE_JSON}" JSON_CONTENT)
-        
+
         # Extract version string from JSON
         string(REGEX MATCH "\"version\"[ \t]*:[ \t]*\"([^\"]+)\"" _ "${JSON_CONTENT}")
-        
+
         if(DEFINED CMAKE_MATCH_1)
             set(CMAKE_PROJECT_VERSION "${CMAKE_MATCH_1}.9999")
             message(STATUS "Version (from package.json): ${CMAKE_PROJECT_VERSION}")
@@ -63,7 +64,7 @@ if(NOT CMAKE_PROJECT_VERSION)
     else()
         message(WARNING "package.json not found at: ${PACKAGE_JSON}")
     endif()
-    
+
     # Fall back to default version if not found
     if(NOT CMAKE_PROJECT_VERSION)
         set(CMAKE_PROJECT_VERSION "1.0.0.9999")
@@ -80,13 +81,13 @@ set(ROCKETRIDE_PROJECT_VERSION "${CMAKE_PROJECT_VERSION}")
 # Installation directory configuration
 # By default, install to the build directory
 # -----------------------------------------------------------------------------
-set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_BINARY_DIR}" 
+set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_BINARY_DIR}"
     CACHE PATH "Installation directory (defaults to build directory)" FORCE)
 
 # -----------------------------------------------------------------------------
 # Project declaration
 # -----------------------------------------------------------------------------
-project(RocketRideEngine 
+project(RocketRideEngine
     VERSION ${CMAKE_PROJECT_VERSION}
     DESCRIPTION "High-performance data processing engine"
     HOMEPAGE_URL "https://github.com/rocketride/rocketride-engine"
@@ -105,7 +106,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # CMake module path configuration
 # Add our custom CMake modules to the search path
 # -----------------------------------------------------------------------------
-list(APPEND CMAKE_MODULE_PATH 
+list(APPEND CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_LIST_DIR}/cmake
     ${CMAKE_CURRENT_LIST_DIR}/engine-core/cmake
 )
@@ -114,8 +115,7 @@ list(APPEND CMAKE_MODULE_PATH
 # vcpkg integration
 # Bootstrap and configure vcpkg for dependency management
 # -----------------------------------------------------------------------------
-include(vcpkg)
-rocketride_setup_vcpkg(${ROCKETRIDE_PROJECT_ROOT})
+include(cmake/setup_vcpkg.cmake)
 
 # -----------------------------------------------------------------------------
 # Setup and include rocketride cmake api
@@ -169,7 +169,7 @@ endif()
 # -----------------------------------------------------------------------------
 # Include vcpkg as system headers to suppress warnings
 # -----------------------------------------------------------------------------
-include_directories(SYSTEM vcpkg)
+include_directories(SYSTEM ${VCPKG_INSTALLED_TRIPLET_DIR})
 
 # -----------------------------------------------------------------------------
 # Export compile commands for IDE integration

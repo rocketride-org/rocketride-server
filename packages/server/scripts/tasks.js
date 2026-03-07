@@ -105,9 +105,8 @@ async function isConfigured() {
     const cmakeCache = path.join(BUILD_DIR, 'CMakeCache.txt');
     if (!await exists(cmakeCache)) return false;
     
-    // Check vcpkg packages are installed
-    const triplet = getVcpkgTriplet();
-    const vcpkgInstalled = path.join(VCPKG_DIR, 'installed', triplet);
+    // Check vcpkg packages are installed (manifest or classic path)
+    const vcpkgInstalled = await getVcpkgInstalledDir();
     if (!await exists(vcpkgInstalled)) return false;
     
     return true;
@@ -177,6 +176,10 @@ function getVcpkgTriplet(options = {}) {
     return 'x64-linux-clang-rocketride';
 }
 
+async function getVcpkgInstalledDir(options = {}) {
+    return path.join(PROJECT_ROOT, 'build', 'vcpkg_installed', getVcpkgTriplet(options));
+}
+
 function getParallelJobs() {
     return os.cpus().length || 4;
 }
@@ -235,8 +238,8 @@ async function copySambaLibs(options = {}) {
     if (!isMac()) return { copied: false, reason: 'Not macOS' };
 
     const destDir = options.destDir || DIST_DIR;
-    const triplet = getVcpkgTriplet(options);
-    const sambaSrc = path.join(VCPKG_DIR, 'installed', triplet, 'samba');
+    const vcpkgInstalled = await getVcpkgInstalledDir(options);
+    const sambaSrc = path.join(vcpkgInstalled, 'samba');
 
     if (!await exists(sambaSrc)) {
         return { copied: false, reason: 'Samba not found in vcpkg' };
@@ -265,8 +268,7 @@ async function copyJavaJre(options = {}) {
 
 async function copyPythonEnv(options = {}) {
     const destDir = options.destDir || DIST_DIR;
-    const triplet = getVcpkgTriplet(options);
-    const vcpkgInstalled = path.join(VCPKG_DIR, 'installed', triplet);
+    const vcpkgInstalled = await getVcpkgInstalledDir(options);
 
     if (!await exists(vcpkgInstalled)) {
         return { copied: false, reason: 'vcpkg not installed' };
@@ -576,7 +578,9 @@ function makeConfigureServerAction(options = {}) {
                 taskDebug('cleared CMake state for fresh configure');
             }
             const triplet = getVcpkgTriplet(options);
-            const toolchainFile = path.join(SERVER_DIR, 'engine-core', 'cmake', 'triplets', triplet + '.cmake');
+            const vcpkgToolchain = path.join(VCPKG_DIR, 'scripts', 'buildsystems', 'vcpkg.cmake');
+            const overlayPorts = path.join(SERVER_DIR, 'engine-core', 'cmake', 'ports');
+            const overlayTriplets = path.join(SERVER_DIR, 'engine-core', 'cmake', 'triplets');
 
             const cmakeArgs = [
                 'cmake',
@@ -584,7 +588,11 @@ function makeConfigureServerAction(options = {}) {
                 '-S', SERVER_DIR,
                 ...generator,
                 '-DCMAKE_BUILD_TYPE=Release',
-                `-DCMAKE_TOOLCHAIN_FILE=${toolchainFile}`
+                `-DCMAKE_TOOLCHAIN_FILE=${vcpkgToolchain}`,
+                `-DVCPKG_TARGET_TRIPLET=${triplet}`,
+                `-DVCPKG_HOST_TRIPLET=${triplet}`,
+                `-DVCPKG_OVERLAY_PORTS=${overlayPorts}`,
+                `-DVCPKG_OVERLAY_TRIPLETS=${overlayTriplets}`
             ];
 
             if (options.batchSize) {
