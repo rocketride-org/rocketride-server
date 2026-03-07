@@ -28,40 +28,42 @@ from ai.common.database import DatabaseGlobalBase
 
 
 class IGlobal(DatabaseGlobalBase):
-    """MySQL-specific global state.
+    """PostgreSQL-specific global state.
 
-    Implements the two abstract methods that carry MySQL knowledge:
+    Implements the two abstract methods that carry PostgreSQL knowledge:
     how to read connection params from the node config, and how to
-    build a pymysql DSN from those params.  Everything else (schema
+    build a psycopg2 DSN from those params.  Everything else (schema
     reflection, type inference, session lifecycle) lives in the base.
     """
 
     def _connection_params(self, config: Dict[str, Any]) -> Dict[str, str]:
-        # The UI stores connection fields nested under 'mysql.default'; fall
+        # The UI stores connection fields nested under 'postgres.default'; fall
         # back to flat keys for compatibility with hand-crafted configs.
-        block = config.get('mysql.default')
+        block = config.get('postgresdb.default')
         if not isinstance(block, dict):
             block = {}
         return {
-            'host':     (block.get('mysql.host')     or config.get('host')     or 'localhost').strip(),
-            'user':     (block.get('mysql.user')     or config.get('user')     or 'root').strip(),
-            'password': str(block.get('mysql.password') or config.get('password') or ''),
-            'database': (block.get('mysql.database') or config.get('database') or 'database').strip(),
-            'table':    (block.get('mysql.table')    or config.get('table')    or 'table').strip(),
+            'host':     (block.get('postgresdb.host')     or config.get('host')     or 'localhost').strip(),
+            'user':     (block.get('postgresdb.user')     or config.get('user')     or 'postgres').strip(),
+            'password': str(block.get('postgresdb.password') or config.get('password') or ''),
+            'database': (block.get('postgresdb.database') or config.get('database') or 'postgres').strip(),
+            'table':    (block.get('postgresdb.table')    or config.get('table')    or 'table').strip(),
         }
 
     def _build_connection_url(self, params: Dict[str, str]) -> str:
         # URL-encode the password so special characters (e.g. @, /, #) don't
         # break the SQLAlchemy connection string.
+        # Host may include an explicit port (e.g. localhost:5433); SQLAlchemy
+        # handles host:port in the authority section correctly.
         password = urllib.parse.quote_plus(params['password'])
-        return f'mysql+pymysql://{params["user"]}:{password}@{params["host"]}/{params["database"]}'
+        return f'postgresql+psycopg2://{params["user"]}:{password}@{params["host"]}/{params["database"]}'
 
     def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
-        # Read from the same mysql.default block as the other connection fields.
-        block = config.get('mysql.default')
+        # Read from the same postgres.default block as the other connection fields.
+        block = config.get('postgresdb.default')
         if not isinstance(block, dict):
             block = {}
         try:
-            return int(block.get('mysql.max_attempts') or config.get('mysql.max_attempts') or 5)
+            return int(block.get('postgresdb.max_attempts') or config.get('postgresdb.max_attempts') or 5)
         except (ValueError, TypeError):
             return 5

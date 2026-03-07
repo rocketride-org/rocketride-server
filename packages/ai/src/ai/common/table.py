@@ -18,11 +18,12 @@ class Table:
         def to_number(val):
             """Convert string to int/float if possible."""
             try:
-                if '.' in val:
-                    return float(val)
                 return int(val)
             except ValueError:
-                return val
+                try:
+                    return float(val)
+                except ValueError:
+                    return val
 
         lines = [line.strip() for line in md.strip().splitlines() if '|' in line]
 
@@ -46,8 +47,17 @@ class Table:
             col_count = len(rows[0])
             headers = [Table._excel_column_name(i) for i in range(col_count)]
 
-        # Convert each row's values to appropriate types
-        items = [[to_number(cell) for cell in row] for row in data_rows]
+        # Normalize data rows to header column count, then convert types
+        col_count = len(headers)
+        normalized = []
+        for row in data_rows:
+            if len(row) < col_count:
+                row = row + [''] * (col_count - len(row))
+            else:
+                row = row[:col_count]
+            normalized.append(row)
+
+        items = [[to_number(cell) for cell in row] for row in normalized]
 
         return headers, items
 
@@ -58,6 +68,8 @@ class Table:
 
         # Generate headers if not provided
         if headers is None:
+            if col_count == 0:
+                return ''
             headers = [Table._excel_column_name(i) for i in range(col_count)]
 
         # Add row numbers if requested

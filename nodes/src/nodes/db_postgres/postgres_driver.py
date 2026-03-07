@@ -21,21 +21,21 @@
 # SOFTWARE.
 # =============================================================================
 
-from ai.common.database import DatabaseInstanceBase
-from .IGlobal import IGlobal
-from .mysql_driver import MySQLDriver
+from ai.common.database import DatabaseDriverBase
 
 
-class IInstance(DatabaseInstanceBase):
-    """MySQL-specific instance state.
+class PostgreSQLDriver(DatabaseDriverBase):
+    """PostgreSQL tool-provider driver.
 
-    The only MySQL-specific knowledge here is which driver to instantiate.
-    All lane handlers, SQL execution, and data insertion are in the base.
+    The only PostgreSQL-specific knowledge here is the tool namespace prefix
+    and the display name used in tool descriptions shown to the LLM.  All tool
+    logic (get_schema, get_sql, get_data, validation, safety checks) is
+    implemented in the base class.
     """
 
-    # Narrow the base type annotation to the concrete MySQL IGlobal so that
-    # IDE tooling resolves attributes like IGlobal.table without casting.
-    IGlobal: IGlobal
+    def _db_tool_name(self) -> str:
+        # Must match the 'prefix' field in services.json.
+        return 'postgres'
 
-    def _create_driver(self) -> MySQLDriver:
-        return MySQLDriver(instance=self)
+    def _db_display_name(self) -> str:
+        return 'PostgreSQL'
