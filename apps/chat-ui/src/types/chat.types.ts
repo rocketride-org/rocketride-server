@@ -34,6 +34,7 @@ export interface Message {
 	text: string;
 	sender: 'user' | 'bot' | 'system';
 	timestamp: string;
+	resultKey?: string | undefined;
 }
 
 /**

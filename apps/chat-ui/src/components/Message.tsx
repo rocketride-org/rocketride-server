@@ -32,10 +32,10 @@ interface MessageProps {
 
 /**
  * Individual message bubble component
- * 
+ *
  * Displays a single message with appropriate styling based on sender.
  * Bot messages use markdown rendering, user messages display as plain text.
- * 
+ *
  * @param message - Message data to display
  */
 export const Message: React.FC<MessageProps> = ({ message }) => {
@@ -48,6 +48,7 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 					</div>
 					<div className="message-timestamp">
 						{message.timestamp}
+						{message.resultKey && <span className="message-result-key">{message.resultKey}</span>}
 					</div>
 				</div>
 			</div>
