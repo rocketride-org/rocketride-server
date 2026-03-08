@@ -476,6 +476,11 @@ function makeCheckPrebuiltAction(options = {}) {
                     const manifestPath = await downloadGitHubFile(tag, manifestFilename, task);
                     if (manifestPath) {
                         const manifest = await readJson(manifestPath);
+                        if (manifest?.vcpkg?.version !== require('../../vcpkg/scripts/tasks').VCPKG_VERSION) {
+                            task.output = 'Download skipped: vcpkg version mismatch';
+                            ctx.downloaded = false;
+                            return;
+                        }
                         const serverHash = manifest?.server?.contentHash;
                         if (localHash === serverHash) {
                             await setState('server.releaseManifest', manifest);
