@@ -11,7 +11,8 @@ export interface TraceRow {
 	lane: string;
 	filterName: string;
 	depth: number;
-	data?: Record<string, unknown>;
+	entryData?: Record<string, unknown>;
+	exitData?: Record<string, unknown>;
 	result?: string;
 	error?: string;
 	timestamp: number;
@@ -483,7 +484,7 @@ const TraceDetailPanel: React.FC<{
 			)}
 
 			{/* Input Data */}
-			{row.data && (
+			{row.entryData && (
 				<div className="trace-dp-sect">
 					<div
 						className="trace-dp-toggle"
@@ -494,14 +495,14 @@ const TraceDetailPanel: React.FC<{
 					</div>
 					{inputExpanded && (
 						<pre className="trace-dp-code">
-							{JSON.stringify(row.data, null, 2)}
+							{JSON.stringify(row.entryData, null, 2)}
 						</pre>
 					)}
 				</div>
 			)}
 
 			{/* Output Data */}
-			{(row.result || row.error) && (
+			{(row.exitData || row.error) && (
 				<div className="trace-dp-sect">
 					<div
 						className="trace-dp-toggle"
@@ -514,8 +515,8 @@ const TraceDetailPanel: React.FC<{
 						<pre className="trace-dp-code">
 							{JSON.stringify(
 								row.error
-									? { result: row.result, error: row.error }
-									: { result: row.result },
+									? { error: row.error }
+									: row.exitData,
 								null, 2
 							)}
 						</pre>

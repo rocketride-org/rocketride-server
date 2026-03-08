@@ -191,7 +191,7 @@ export const PageStatus: React.FC = () => {
 								lane,
 								filterName,
 								depth,
-								data: trace.data,
+								entryData: trace.data,
 								timestamp: Date.now(),
 								objectName: doc.objectName
 							};
@@ -211,6 +211,7 @@ export const PageStatus: React.FC = () => {
 								if (idx !== -1) {
 									doc.rows[idx] = {
 										...doc.rows[idx],
+										exitData: trace.data,
 										result: trace.result,
 										error: trace.error,
 										endTimestamp: Date.now()

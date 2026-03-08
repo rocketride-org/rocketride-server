@@ -90,9 +90,11 @@ public:
     virtual std::vector<std::string> getListeners() noexcept;
     virtual bool hasListener(const std::string &methodName) noexcept;
 
-    static Error callMethods(Binder *pThis, const std::string &methodName,
-                             std::function<Error(IServiceFilterInstance *)> fcn,
-                             const json::Value &traceData = {}) noexcept;
+    static Error callMethods(
+        Binder *pThis, const std::string &methodName,
+        std::function<Error(IServiceFilterInstance *)> fcn,
+        std::function<void(PIPELINE_TRACE_LEVEL, json::Value &)>
+            serializeTrace) noexcept;
 
     //-----------------------------------------------------------------
     ///	@details
