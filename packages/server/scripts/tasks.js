@@ -584,8 +584,8 @@ function makeConfigureServerAction(options = {}) {
             }
             const triplet = getVcpkgTriplet(options);
             const vcpkgToolchain = path.join(VCPKG_DIR, 'scripts', 'buildsystems', 'vcpkg.cmake');
-            const overlayPorts = path.join(SERVER_DIR, 'engine-core', 'cmake', 'ports');
-            const overlayTriplets = path.join(SERVER_DIR, 'engine-core', 'cmake', 'triplets');
+            const overlayPorts = path.join(SERVER_DIR, 'cmake', 'ports');
+            const overlayTriplets = path.join(SERVER_DIR, 'cmake', 'triplets');
 
             const cmakeArgs = [
                 'cmake',

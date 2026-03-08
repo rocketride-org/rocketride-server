@@ -48,7 +48,7 @@ else()
 endif()
 
 # Include triplet for compiler/flags (ROCKETRIDE_* definitions)
-set(TRIPLET_PATH engine-core/cmake/triplets/${VCPKG_TARGET_TRIPLET}.cmake)
+set(TRIPLET_PATH ${CMAKE_CURRENT_LIST_DIR}/triplets/${VCPKG_TARGET_TRIPLET}.cmake)
 include(${TRIPLET_PATH} RESULT_VARIABLE RES)
 if(RES STREQUAL "NOTFOUND")
     message(FATAL_ERROR "Failed to include triplet: ${TRIPLET_PATH}")
