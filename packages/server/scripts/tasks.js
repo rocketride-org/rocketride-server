@@ -599,6 +599,18 @@ function makeConfigureServerAction(options = {}) {
                 cmakeArgs.push(`-DROCKETRIDE_UNITY_BATCH_SIZE:STRING=${options.batchSize}`);
             }
 
+            if (ctx.options.buildVersion) {
+                cmakeArgs.push(`-DCMAKE_PROJECT_VERSION:STRING=${ctx.options.buildVersion}`);
+            }
+
+            if (ctx.options.buildHash) {
+                cmakeArgs.push(`-DROCKETRIDE_BUILD_HASH_SHORT:STRING=${ctx.options.buildHash}`);
+            }
+
+            if (ctx.options.buildStamp) {
+                cmakeArgs.push(`-DROCKETRIDE_BUILD_STAMP:STRING=${ctx.options.buildStamp}`);
+            }
+
             const baseEnv = isWindows() ? await getVsEnvironment() : process.env;
             const env = {
                 ...baseEnv,

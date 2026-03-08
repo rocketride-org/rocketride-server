@@ -29,8 +29,32 @@ env:
 #  Build
 # ---------------------------------------------------------------------------
 jobs:
+  init:
+    name: Initialize
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Set up variables
+        id: vars
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          echo "FULL_VERSION=$VERSION.${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "BUILD_HASH=$(echo ${{ github.sha }} | cut -c1-8)" >> $GITHUB_OUTPUT
+          echo "BUILD_STAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+          cat $GITHUB_OUTPUT
+    outputs:
+      FULL_VERSION: ${{ steps.vars.outputs.FULL_VERSION }}
+      BUILD_HASH: ${{ steps.vars.outputs.BUILD_HASH }}
+      BUILD_STAMP: ${{ steps.vars.outputs.BUILD_STAMP }}
+
   build:
     name: Build / ${{ matrix.label }}
+    needs: init
     if: github.event_name != 'schedule'
     timeout-minutes: 90
     runs-on: ${{ matrix.runner }}
@@ -100,7 +124,8 @@ jobs:
             -Source "${{ env.NUGET_FEED_URL }}"
 
       - name: Build
-        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall
+        run: |
+          ${{ matrix.builder_cmd }} build --verbose --autoinstall --version=${{ needs.init.outputs.FULL_VERSION }} --hash=${{ needs.init.outputs.BUILD_HASH }} --stamp=${{ needs.init.outputs.BUILD_STAMP }}
 
       - name: Test
         run: ${{ matrix.builder_cmd }} test --verbose

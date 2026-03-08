@@ -46,7 +46,10 @@ function parseArgs(args) {
         listDeps: false,
         listModules: false,
         logFile: null,    // Log file for test output
-        overlayRoot: null // Root directory for overlay
+        overlayRoot: null, // Root directory for overlay
+        buildVersion: null,
+        buildHash: null,
+        buildStamp: null,
     };
     const globalCommands = [];  // Commands without module (e.g., just "build")
     
@@ -103,6 +106,12 @@ function parseArgs(args) {
                 console.error(`Invalid --arch value: ${archValue}. Use 'arm' or 'intel'.`);
                 process.exit(1);
             }
+        } else if (arg.startsWith('--version=')) {
+            options.buildVersion = arg.substring('--version='.length);
+        } else if (arg.startsWith('--hash=')) {
+            options.buildHash = arg.substring('--hash='.length);
+        } else if (arg.startsWith('--stamp=')) {
+            options.buildStamp = arg.substring('--stamp='.length);
         } else if (arg.includes(':')) {
             // Unified model: action names like "server:build", "nodes:sync"
             // Extract module from action name (first part before colon)
@@ -191,6 +200,9 @@ Options:
   --testport=N        Use existing server on port N for tests (skip build/start)
   --log=FILE          Write output to FILE (grouped by module)
   --overlay-root=DIR  Set overlay root directory
+  --version=VERSION   Set full build version x.x.x.x
+  --hash=HASH         Set build hash
+  --stamp=STAMP       Set build stamp
   --list-modules      List all registered modules
   --list-actions      List all registered actions (including internal)
   --list-deps         Show pipeline flow diagram for specified actions
