@@ -228,28 +228,6 @@ jobs:
           category: "/language:cpp"
 
   # ---------------------------------------------------------------------------
-  #  Dependency review
-  # ---------------------------------------------------------------------------
-  dependency-review:
-    name: Dependency review
-    # Temporarily disabled as it fails in PR checks
-    if: github.event_name == 'pull_request' && false
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Dependency Review
-        uses: actions/dependency-review-action@05fe4576374b728f0c523d6a13d64c25081e0803 # v4
-        with:
-          fail-on-severity: high
-          deny-licenses: AGPL-3.0-only, AGPL-3.0-or-later
-          comment-summary-in-pr: always
-
-  # ---------------------------------------------------------------------------
   #  Container scan
   # ---------------------------------------------------------------------------
   container-scan:
