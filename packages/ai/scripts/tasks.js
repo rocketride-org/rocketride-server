@@ -33,17 +33,17 @@
  */
 const path = require('path');
 const {
-    execCommand, syncDir, formatSyncStats, PROJECT_ROOT
+    execCommand, syncDir, formatSyncStats, DIST_ROOT
 } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'ai');
 const TESTS_DIR = path.join(PACKAGE_DIR, 'tests');
-const SERVER_DIR = path.join(PROJECT_ROOT, 'dist', 'server');
+const SERVER_DIR = path.join(DIST_ROOT, 'server');
 const DIST_DIR = path.join(SERVER_DIR, 'ai');
 
 // Engine executable (built by build:server)
-const ENGINE_EXE = path.join(PROJECT_ROOT, 'dist', 'server', process.platform === 'win32' ? 'engine.exe' : 'engine');
+const ENGINE = path.join(SERVER_DIR, 'engine');
 
 // ============================================================================
 // Action Factories
@@ -69,7 +69,7 @@ function makeRunPytestAction(options = {}) {
                 pytestArgs.push(...options.pytest);
             }
 
-            await execCommand(ENGINE_EXE, pytestArgs, {
+            await execCommand(ENGINE, pytestArgs, {
                 task,
                 cwd: SERVER_DIR
             });

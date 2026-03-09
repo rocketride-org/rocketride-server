@@ -14,9 +14,13 @@
  *   builder --help
  */
 
+// ! 
+// ! IMPORTANT:
+// ! 
+// ! build.js must NOT use any other scripts/ modules unless
+// ! parseArgs() is called first and global variables are set.
+// ! 
 const path = require('path');
-const { execCommand } = require('./lib/exec');
-const { setupSystem } = require('./setup');
 
 const ROOT = path.join(__dirname, '..');
 
@@ -52,7 +56,7 @@ function parseArgs(args) {
         buildStamp: null,
     };
     const globalCommands = [];  // Commands without module (e.g., just "build")
-    
+
     for (const arg of args) {
         if (arg === '--autoinstall') {
             options.autoinstall = true;
@@ -94,6 +98,9 @@ function parseArgs(args) {
             } else {
                 options.overlayRoot = path.join(process.cwd(), overlayRoot);
             }
+            const paths = require('./lib/paths');
+            paths.BUILD_ROOT = path.join(options.overlayRoot, 'build');
+            paths.DIST_ROOT = path.join(options.overlayRoot, 'dist');
         } else if (arg === '--nodownload') {
             options.nodownload = true;
         } else if (arg.startsWith('--arch=')) {
@@ -126,7 +133,7 @@ function parseArgs(args) {
             process.exit(1);
         }
     }
-    
+
     return { requests, options, globalCommands };
 }
 
@@ -137,14 +144,14 @@ function parseArgs(args) {
  */
 function expandGlobalCommands(globalCommands, registry) {
     const requests = [];
-    
+
     for (const command of globalCommands) {
         for (const moduleName of registry.names()) {
             const actionName = `${moduleName}:${command}`;
             const actionDef = registry.getAction(actionName);
             if (actionDef) {
-                const actionObj = typeof actionDef.action === 'function' 
-                    ? actionDef.action() 
+                const actionObj = typeof actionDef.action === 'function'
+                    ? actionDef.action()
                     : actionDef.action;
                 // Only expand to public actions (those with descriptions)
                 if (actionObj?.description) {
@@ -153,7 +160,7 @@ function expandGlobalCommands(globalCommands, registry) {
             }
         }
     }
-    
+
     return requests;
 }
 
@@ -164,9 +171,9 @@ Rocketride Build System
 Usage: builder <action> [...] [options]
 
 Actions:`);
-    
+
     const commands = registry.listCommands();
-    
+
     // Group by module
     const grouped = {};
     for (const cmd of commands) {
@@ -175,7 +182,7 @@ Actions:`);
         }
         grouped[cmd.module].push(cmd);
     }
-    
+
     for (const [moduleName, cmds] of Object.entries(grouped).sort()) {
         const mod = registry.get(moduleName);
         console.log(`
@@ -184,7 +191,7 @@ Actions:`);
             console.log(`    ${cmd.full.padEnd(30)} ${cmd.description}`);
         }
     }
-    
+
     console.log(`
 Options:
   --autoinstall       Install missing tools (pnpm; on Windows/Linux, VS/C++ when compiling engine)
@@ -210,7 +217,7 @@ Options:
 
 Examples:
   builder server:build             # Build server
-  builder nodes:test               # Run node tests  
+  builder nodes:test               # Run node tests
   builder server:build nodes:build # Build server and nodes
   builder build -s                 # Build ALL sequentially (global command)
   builder clean                    # Clean ALL modules (global command)
@@ -219,13 +226,14 @@ Examples:
 
 async function main() {
     const args = process.argv.slice(2);
-    
+
     // Parse arguments early to check for --help
     const { requests: explicitRequests, options, globalCommands } = parseArgs(args);
 
     // Make sure the system is setup
+    const { setupSystem } = require('./setup');
     await setupSystem(options);
-    
+
     // =========================================================================
     // Install node deps so module tasks.js can be loaded
     // =========================================================================
@@ -235,13 +243,14 @@ async function main() {
     } catch {
         console.log('Installing dependencies (fresh clone)...\n');
         try {
+            const { execCommand } = require('./lib/exec');
             await execCommand('pnpm', ['install'], { cwd: ROOT, stdio: 'inherit' });
         } catch {
             process.exit(1);
         }
         Listr = require('listr2').Listr;
     }
-    
+
     // Run deps check silently (only outputs if install needed)
     const { checkDependencies } = require('./deps-tasks');
     await checkDependencies();
@@ -264,20 +273,20 @@ async function main() {
     if (options.overlayRoot) {
         await registry.discover(options.overlayRoot);
     }
-    
+
     if (registry.names().length === 0) {
         console.error('Error: No build modules found. Make sure tasks.js files exist.');
         process.exit(1);
     }
-    
+
     // Expand global commands (e.g., "build" -> "build:server", "build:chat-ui", etc.)
     const expandedRequests = expandGlobalCommands(globalCommands, registry);
     const requests = [...explicitRequests, ...expandedRequests];
-    
+
     // Handle --list-actions - show ALL registered actions across all modules
     if (options.listActions) {
         console.log('\nAll Registered Actions:\n');
-        
+
         const allActions = registry.listActions();
         for (const action of allActions) {
             const desc = action.description ? ` - ${action.description}` : '';
@@ -286,11 +295,11 @@ async function main() {
         console.log(`\nTotal: ${allActions.length} actions\n`);
         process.exit(0);
     }
-    
+
     // Handle --list-modules - show all registered modules
     if (options.listModules) {
         console.log('\nRegistered Modules:\n');
-        
+
         const modules = registry.names().sort();
         for (const name of modules) {
             const mod = registry.get(name);
@@ -299,13 +308,13 @@ async function main() {
         console.log(`\nTotal: ${modules.length} modules\n`);
         process.exit(0);
     }
-    
+
     // Show help if requested or no commands given
     if (options.help || requests.length === 0) {
         showHelp(registry);
         process.exit(options.help ? 0 : 1);
     }
-    
+
     // Handle --list-deps
     if (options.listDeps) {
         console.log('\nPipeline Flow:\n');
@@ -316,15 +325,15 @@ async function main() {
                 console.log(`  ✖ Unknown module: ${module}\n`);
                 continue;
             }
-            
+
             const actionDef = registry.getAction(command);
-            
+
             console.log(`${command}`);
             console.log('─'.repeat(40));
-            
+
             if (actionDef) {
-                const actionObj = typeof actionDef.action === 'function' 
-                    ? actionDef.action() 
+                const actionObj = typeof actionDef.action === 'function'
+                    ? actionDef.action()
                     : actionDef.action;
                 if (actionObj?.steps) {
                     printFlowDiagram({ steps: actionObj.steps });
@@ -337,7 +346,7 @@ async function main() {
         }
         process.exit(0);
     }
-    
+
     // Validate all requested actions exist
     for (const { module, command } of requests) {
         if (!registry.has(module)) {
@@ -345,7 +354,7 @@ async function main() {
             console.error(`Available modules: ${registry.names().join(', ')}`);
             process.exit(1);
         }
-        
+
         const actionDef = registry.getAction(command);
         if (!actionDef) {
             console.error(`Error: Unknown action '${command}'`);
@@ -353,8 +362,8 @@ async function main() {
             const availableActions = (mod.actions || [])
                 .map(a => a.name)
                 .filter(n => {
-                    const obj = typeof registry.getAction(n)?.action === 'function' 
-                        ? registry.getAction(n).action() 
+                    const obj = typeof registry.getAction(n)?.action === 'function'
+                        ? registry.getAction(n).action()
                         : registry.getAction(n)?.action;
                     return obj?.description;
                 });
@@ -364,23 +373,23 @@ async function main() {
             process.exit(1);
         }
     }
-    
+
     // Clear log buffer if logging enabled
     if (options.logFile) {
         clearLog();
     }
-    
+
     // Run!
     try {
         const runner = new TaskRunner(options);
         await runner.run(requests);
-        
+
         // Write log file if enabled and has entries
         if (options.logFile && hasLogEntries()) {
             await writeLog(options.logFile);
             console.log(`\n✔ Log written to ${options.logFile}`);
         }
-        
+
         console.log('\n✔ Builder complete!');
         process.exit(0);
     } catch (err) {
@@ -389,7 +398,7 @@ async function main() {
             await writeLog(options.logFile);
             console.log(`\nLog written to ${options.logFile}`);
         }
-        
+
         console.error(`\n✖ Builder failed: ${err.message}`);
         if (options.verbose) {
             console.error(err.stack);

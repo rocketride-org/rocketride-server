@@ -27,16 +27,16 @@
  * Handles downloading JDK, JRE, and Maven.
  */
 const path = require('path');
-const { 
+const {
     withLock, getState, setState,
     downloadFile, extractArchive,
-    removeDir, getPlatform, PROJECT_ROOT,
+    removeDir, getPlatform, PROJECT_ROOT, BUILD_ROOT,
     exists, readJson, mkdir,
     parallel
 } = require('../../../scripts/lib');
 
 // Paths
-const BUILD_DIR = path.join(PROJECT_ROOT, 'build', 'java');
+const BUILD_DIR = path.join(BUILD_ROOT, 'java');
 const JDK_DIR = path.join(BUILD_DIR, 'jdk');
 const JRE_DIR = path.join(BUILD_DIR, 'jre');
 const MAVEN_DIR = path.join(BUILD_DIR, 'maven');
@@ -84,17 +84,17 @@ function makeSetupJdkAction(options = {}) {
         outputLines: 1,
         run: async (ctx, task) => {
             const { jdkVersion } = await loadPackageJson();
-            
+
             // Skip if already installed
             if (!options.force && await getState('java.jdk') === 'installed' && await exists(JDK_DIR)) {
                 task.output = `JDK ${jdkVersion} already installed`;
                 return;
             }
-            
+
             const { ext, os } = getPlatform();
             task.output = `Downloading JDK ${jdkVersion}...`;
             await mkdir(BUILD_DIR);
-            
+
             await withLock('java-jdk', async () => {
                 const archivePath = await downloadFile(getJdkUrl(), `jdk-${jdkVersion}.${ext}`, task);
                 const stripLevels = os === "mac" ? 3 : 1;
@@ -102,7 +102,7 @@ function makeSetupJdkAction(options = {}) {
                 await extractArchive(archivePath, JDK_DIR, { stripLevels: stripLevels });
                 await setState('java.jdk', 'installed');
             });
-            
+
             task.output = `JDK ${jdkVersion} installed`;
         }
     };
@@ -114,22 +114,22 @@ function makeSetupMavenAction(options = {}) {
         outputLines: 1,
         run: async (ctx, task) => {
             const { mavenVersion } = await loadPackageJson();
-            
+
             // Skip if already installed
             if (!options.force && await getState('java.maven') === 'installed' && await exists(MAVEN_DIR)) {
                 task.output = `Maven ${mavenVersion} already installed`;
                 return;
             }
-            
+
             task.output = `Downloading Maven ${mavenVersion}...`;
-            
+
             await withLock('java-maven', async () => {
                 const archivePath = await downloadFile(getMavenUrl(), `maven-${mavenVersion}.tar.gz`, task);
                 task.output = 'Extracting...';
                 await extractArchive(archivePath, MAVEN_DIR, { stripLevels: 1 });
                 await setState('java.maven', 'installed');
             });
-            
+
             task.output = `Maven ${mavenVersion} installed`;
         }
     };
@@ -141,16 +141,16 @@ function makeSetupJreAction(options = {}) {
         outputLines: 1,
         run: async (ctx, task) => {
             const { jdkVersion } = await loadPackageJson();
-            
+
             // Skip if already installed
             if (!options.force && await getState('java.jre') === 'installed' && await exists(JRE_DIR)) {
                 task.output = `JRE ${jdkVersion} already installed`;
                 return;
             }
-            
+
             const { ext, os } = getPlatform();
             task.output = `Downloading JRE ${jdkVersion}...`;
-            
+
             await withLock('java-jre', async () => {
                 const archivePath = await downloadFile(getJreUrl(), `jre-${jdkVersion}.${ext}`, task);
                 const stripLevels = os === "mac" ? 3 : 1;
@@ -158,7 +158,7 @@ function makeSetupJreAction(options = {}) {
                 await extractArchive(archivePath, JRE_DIR, { stripLevels: stripLevels });
                 await setState('java.jre', 'installed');
             });
-            
+
             task.output = `JRE ${jdkVersion} installed`;
         }
     };
@@ -171,13 +171,13 @@ function makeSetupJreAction(options = {}) {
 module.exports = {
     name: 'java',
     description: 'Java Development Kit & Maven',
-    
+
     actions: [
         // Internal actions
         { name: 'java:setup-jdk', action: makeSetupJdkAction },
         { name: 'java:setup-maven', action: makeSetupMavenAction },
         { name: 'java:setup-jre', action: makeSetupJreAction },
-        
+
         // Submodule actions (called by server:build-core / server:clean-all)
         { name: 'java:submodule-build', action: () => ({
             steps: [

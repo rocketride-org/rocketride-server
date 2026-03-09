@@ -90,12 +90,11 @@ target_include_directories(engLib PUBLIC
     ${CMAKE_CURRENT_LIST_DIR}/../
 )
 
-# Add JDK include path from build/java/jdk (installed by builder setup:java)
-# Note: ROCKETRIDE_PROJECT_ROOT is set in the main CMakeLists.txt (packages/server/)
-set(ROCKETRIDE_JDK_DIR "${ROCKETRIDE_PROJECT_ROOT}/build/java/jdk")
+# Add JDK include path from build/java/jdk (installed by builder java:setup-jdk)
+set(ROCKETRIDE_JDK_DIR "${CMAKE_BINARY_DIR}/java/jdk")
 
 if(NOT EXISTS "${ROCKETRIDE_JDK_DIR}/include")
-    message(FATAL_ERROR "JDK include directory not found: ${ROCKETRIDE_JDK_DIR}/include\nRun: builder setup:java")
+    message(FATAL_ERROR "JDK include directory not found: ${ROCKETRIDE_JDK_DIR}/include\nRun: builder java:setup-jdk")
 endif()
 
 target_include_directories(engLib PUBLIC "${ROCKETRIDE_JDK_DIR}/include")

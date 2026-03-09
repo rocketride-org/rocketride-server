@@ -27,15 +27,15 @@
  * Handles downloading and bootstrapping vcpkg.
  */
 const path = require('path');
-const { 
+const {
     withLock, getState, setState,
-    execCommand, removeDirs, PROJECT_ROOT, BUILD_DIR,
+    execCommand, removeDirs, PROJECT_ROOT, BUILD_ROOT,
     exists, readJson, mkdir
 } = require('../../../scripts/lib');
 
 // Paths
-const VCPKG_DIR = path.join(BUILD_DIR, 'vcpkg');
-const VCPKG_INSTALLED_DIR = path.join(BUILD_DIR, 'vcpkg_installed');
+const VCPKG_DIR = path.join(BUILD_ROOT, 'vcpkg');
+const VCPKG_INSTALLED_DIR = path.join(BUILD_ROOT, 'vcpkg_installed');
 
 // Read vcpkg version from package.json (loaded async in tasks)
 let VCPKG_VERSION = '2024.11.16';
@@ -73,21 +73,21 @@ function makeCloneVcpkgAction(options = {}) {
         run: async (ctx, task) => {
             const version = await loadPackageJson();
             const vcpkgVersion = await getState('vcpkg.version');
-            
+
             // Skip if already cloned
-            if (!options.force && 
-                await exists(path.join(VCPKG_DIR, '.git')) && 
+            if (!options.force &&
+                await exists(path.join(VCPKG_DIR, '.git')) &&
                 vcpkgVersion === version) {
                 task.output = `v${version} already cloned`;
                 return;
             }
-            
+
             task.output = `Cloning v${version}...`;
-            
+
             await withLock('vcpkg-clone', async () => {
                 await removeDirs([VCPKG_DIR, VCPKG_INSTALLED_DIR]);
-                await mkdir(BUILD_DIR);
-                
+                await mkdir(BUILD_ROOT);
+
                 try {
                     await execCommand('git', [
                         'clone', '--depth', '1', '--branch', version,
@@ -98,11 +98,11 @@ function makeCloneVcpkgAction(options = {}) {
                     await execCommand('git', ['clone', '--depth', '100', VCPKG_REPO, VCPKG_DIR], { task });
                     await execCommand('git', ['checkout', version], { cwd: VCPKG_DIR, task });
                 }
-                
+
                 await setState('vcpkg.state', 'cloned');
                 await setState('vcpkg.version', version);
             });
-            
+
             task.output = `Cloned v${version}`;
         }
     };
@@ -114,22 +114,22 @@ function makeBootstrapVcpkgAction(options = {}) {
         run: async (ctx, task) => {
             const vcpkgState = await getState('vcpkg.state');
             const vcpkgPath = path.join(VCPKG_DIR, process.platform === 'win32' ? 'vcpkg.exe' : 'vcpkg');
-            
+
             // Skip if already bootstrapped
             if (!options.force && vcpkgState === 'bootstrapped' && await exists(vcpkgPath)) {
                 task.output = 'Already bootstrapped';
                 return;
             }
-            
+
             task.output = 'Bootstrapping...';
-            
+
             await withLock('vcpkg-bootstrap', async () => {
                 const bootstrapScript = getBootstrapScript();
                 await execCommand(bootstrapScript, ['-disableMetrics'], { cwd: VCPKG_DIR, task });
                 await execCommand(path.join(VCPKG_DIR, 'vcpkg'), ['--version'], { cwd: VCPKG_DIR, task });
                 await setState('vcpkg.state', 'bootstrapped');
             });
-            
+
             task.output = 'Bootstrapped';
         }
     };
@@ -142,12 +142,12 @@ function makeBootstrapVcpkgAction(options = {}) {
 module.exports = {
     name: 'vcpkg',
     description: 'C++ Package Manager',
-    
+
     actions: [
         // Internal actions
         { name: 'vcpkg:clone', action: makeCloneVcpkgAction },
         { name: 'vcpkg:bootstrap', action: makeBootstrapVcpkgAction },
-        
+
         // Submodule actions (called by server:build-core / server:clean-all)
         { name: 'vcpkg:submodule-build', action: () => ({
             steps: ['vcpkg:clone', 'vcpkg:bootstrap']

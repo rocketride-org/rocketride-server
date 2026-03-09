@@ -1,18 +1,18 @@
 /**
  * MIT License
- *
+ * 
  * Copyright (c) 2026 Aparavi Software AG
- *
+ * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- *
+ * 
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- *
+ * 
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,7 +24,7 @@
 
 /**
  * Build tasks for @rocketride/client-mcp
- *
+ * 
  * Commands:
  *   build - Build Python wheel and sdist
  *   test  - Run pytest (starts test server automatically)
@@ -33,7 +33,7 @@
 const path = require('path');
 const {
     execCommand, syncDir, formatSyncStats,
-    removeDirs, removeMatching, removeDirAndParents, PROJECT_ROOT,
+    removeDirs, removeMatching, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT,
     mkdir, readDir, copyFile, exists,
     hasSourceChanged, saveSourceHash, setState,
     startServer, stopServer,
@@ -42,12 +42,13 @@ const {
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src');
-const BUILD_DIR = path.join(PROJECT_ROOT, 'build', 'clients', 'mcp');
-const DIST_DIR = path.join(PROJECT_ROOT, 'dist', 'clients', 'mcp');
-const SERVER_STATIC_DIR = path.join(PROJECT_ROOT, 'dist', 'server', 'static', 'clients', 'mcp');
+const BUILD_DIR = path.join(BUILD_ROOT, 'clients', 'mcp');
+const DIST_DIR = path.join(DIST_ROOT, 'clients', 'mcp');
+const SERVER_DIR = path.join(DIST_ROOT, 'server');
+const SERVER_STATIC_DIR = path.join(SERVER_DIR, 'static', 'clients', 'mcp');
 
 // Engine (built by server:build; execCommand resolves extension on Windows)
-const ENGINE = path.join(PROJECT_ROOT, 'dist', 'server', 'engine');
+const ENGINE = path.join(SERVER_DIR, 'engine');
 
 // State key for source fingerprint
 const SRC_HASH_KEY = 'client-mcp.srcHash';
@@ -96,15 +97,13 @@ function makeBuildWheelAction() {
             }
 
             // engine.exe uses an isolated environment - cwd must be dist/server
-            const serverDir = path.join(PROJECT_ROOT, 'dist', 'server');
-
             await mkdir(DIST_DIR);
             await execCommand(ENGINE, [
                 '-m', 'build',
                 '--no-isolation',
                 BUILD_DIR,
                 '--outdir', DIST_DIR
-            ], { task, cwd: serverDir });
+            ], { task, cwd: SERVER_DIR });
 
             // Copy wheel and sdist to server static directory
             await mkdir(SERVER_STATIC_DIR);
@@ -136,13 +135,11 @@ function makeRunPytestAction(options = {}) {
             const port = bracket?.port || ctx.port;
             const serverUri = bracket?.serverUri || `http://localhost:${port}`;
 
-            const serverDir = path.join(PROJECT_ROOT, 'dist', 'server');
-
             // Install MCP test dependencies
             task.output = 'Installing test deps (mcp, python-dotenv)...';
             await execCommand(ENGINE, [
                 '-m', 'pip', 'install', 'mcp>=1.2.0', 'python-dotenv>=1.0.0', '--quiet'
-            ], { task, cwd: serverDir });
+            ], { task, cwd: SERVER_DIR });
 
             // Run pytest
             const buildSrcDir = path.join(BUILD_DIR, 'src');
@@ -153,7 +150,7 @@ function makeRunPytestAction(options = {}) {
             }
             await execCommand(ENGINE, pytestArgs, {
                 task,
-                cwd: serverDir,
+                cwd:  SERVER_DIR,
                 env: {
                     ...process.env,
                     ROCKETRIDE_URI: serverUri,
