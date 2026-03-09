@@ -39,7 +39,7 @@ const HTML_WRAPPER_TEMPLATE = (bodyContent: string) => `<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    body { margin: 0; padding: 16px; font-family: system-ui, sans-serif; }
+    body { margin: 0; padding: 16px; font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif); font-size: var(--vscode-font-size, 13px); }
   </style>
 </head>
 <body>
@@ -81,7 +81,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 							customStyle={{
 								margin: 0,
 								borderRadius: '6px',
-								fontSize: '14px'
+								fontSize: 'var(--vscode-editor-font-size, 13px)'
 							}}
 						>
 							{codeContent}

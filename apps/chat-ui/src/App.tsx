@@ -52,6 +52,24 @@ const App: React.FC = () => {
 		}
 	});
 
+	// Bridge copy to parent VS Code webview so Cmd/Ctrl+C works in the iframe
+	useEffect(() => {
+		if (!isVSCode) return;
+
+		const handleCopy = (e: KeyboardEvent) => {
+			if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
+				const selection = window.getSelection()?.toString();
+				if (selection) {
+					e.preventDefault();
+					window.parent.postMessage({ type: 'copyText', text: selection }, '*');
+				}
+			}
+		};
+
+		document.addEventListener('keydown', handleCopy);
+		return () => document.removeEventListener('keydown', handleCopy);
+	}, [isVSCode]);
+
 	useEffect(() => {
 		// Handle authentication
 		const urlParams = new URLSearchParams(window.location.search);

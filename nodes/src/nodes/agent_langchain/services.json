@@ -1,5 +1,5 @@
 {
-	"title": "Agent - LangChain",
+	"title": "LangChain",
 	"protocol": "agent_langchain://",
 	"classType": ["agent", "tool"],
 	"capabilities": ["invoke"],
@@ -61,7 +61,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Agent - LangChain",
+			"title": "LangChain",
 			"properties": ["instructions"]
 		}
 	]

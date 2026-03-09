@@ -1,5 +1,5 @@
 {
-	"title": "Agent - CrewAI",
+	"title": "CrewAI",
 	"protocol": "agent_crewai://",
 	"classType": ["agent", "tool"],
 	"capabilities": ["invoke"],
@@ -61,7 +61,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Agent - CrewAI",
+			"title": "CrewAI",
 			"properties": ["instructions"]
 		}
 	]
