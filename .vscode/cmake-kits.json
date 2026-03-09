@@ -2,42 +2,46 @@
   {
     "name": "RocketRide Linux",
     "cmakeSettings": {
+      "ROCKETRIDE_CMAKE_KIST": "TRUE",
       "CMAKE_TOOLCHAIN_FILE": "${workspaceFolder}/build/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "VCPKG_TARGET_TRIPLET": "x64-linux-clang-rocketride",
       "VCPKG_HOST_TRIPLET": "x64-linux-clang-rocketride",
-      "VCPKG_OVERLAY_TRIPLETS": "${workspaceFolder}/packages/server/engine-core/cmake/triplets",
-      "VCPKG_OVERLAY_PORTS": "${workspaceFolder}/packages/server/engine-core/cmake/ports"
+      "VCPKG_OVERLAY_TRIPLETS": "${workspaceFolder}/packages/server/cmake/triplets",
+      "VCPKG_OVERLAY_PORTS": "${workspaceFolder}/packages/server/cmake/ports"
     }
   },
   {
     "name": "RocketRide macOS x64",
     "cmakeSettings": {
+      "ROCKETRIDE_CMAKE_KIST": "TRUE",
       "CMAKE_TOOLCHAIN_FILE": "${workspaceFolder}/build/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "VCPKG_TARGET_TRIPLET": "x64-osx-appleclang-rocketride",
       "VCPKG_HOST_TRIPLET": "x64-osx-appleclang-rocketride",
-      "VCPKG_OVERLAY_TRIPLETS": "${workspaceFolder}/packages/server/engine-core/cmake/triplets",
-      "VCPKG_OVERLAY_PORTS": "${workspaceFolder}/packages/server/engine-core/cmake/ports"
+      "VCPKG_OVERLAY_TRIPLETS": "${workspaceFolder}/packages/server/cmake/triplets",
+      "VCPKG_OVERLAY_PORTS": "${workspaceFolder}/packages/server/cmake/ports"
     }
   },
   {
     "name": "RocketRide macOS arm64",
     "cmakeSettings": {
+      "ROCKETRIDE_CMAKE_KIST": "TRUE",
       "CMAKE_TOOLCHAIN_FILE": "${workspaceFolder}/build/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "VCPKG_TARGET_TRIPLET": "arm64-osx-appleclang-rocketride",
       "VCPKG_HOST_TRIPLET": "arm64-osx-appleclang-rocketride",
-      "VCPKG_OVERLAY_TRIPLETS": "${workspaceFolder}/packages/server/engine-core/cmake/triplets",
-      "VCPKG_OVERLAY_PORTS": "${workspaceFolder}/packages/server/engine-core/cmake/ports"
+      "VCPKG_OVERLAY_TRIPLETS": "${workspaceFolder}/packages/server/cmake/triplets",
+      "VCPKG_OVERLAY_PORTS": "${workspaceFolder}/packages/server/cmake/ports"
     }
   },
   {
     "name": "RocketRide Windows",
     "environmentSetupScript": "${workspaceFolder}/scripts/vsvars.cmd",
     "cmakeSettings": {
+      "ROCKETRIDE_CMAKE_KIST": "TRUE",
       "CMAKE_TOOLCHAIN_FILE": "${workspaceFolder}/build/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "VCPKG_TARGET_TRIPLET": "x64-windows-vc-rocketride",
       "VCPKG_HOST_TRIPLET": "x64-windows-vc-rocketride",
-      "VCPKG_OVERLAY_TRIPLETS": "${workspaceFolder}/packages/server/engine-core/cmake/triplets",
-      "VCPKG_OVERLAY_PORTS": "${workspaceFolder}/packages/server/engine-core/cmake/ports"
+      "VCPKG_OVERLAY_TRIPLETS": "${workspaceFolder}/packages/server/cmake/triplets",
+      "VCPKG_OVERLAY_PORTS": "${workspaceFolder}/packages/server/cmake/ports"
     }
   }
 ]

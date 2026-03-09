@@ -1930,12 +1930,11 @@ Error IServices::init() noexcept {
         return {};
     };
 
-    const auto execDir = application::execDir();
     // The sources path if the engine/engtest is running in the dev mode
-    auto rootPath = (execDir / "../../nodes/src/nodes").resolve();
-    if (!file::exists(rootPath) || !file::isDir(rootPath))
+    auto rootPath = application::projectDir() ? application::projectDir() / "nodes/src/nodes" : "";
+    if (!rootPath || !file::exists(rootPath) || !file::isDir(rootPath))
         // The exec path if the engine is running in the prod mode
-        rootPath = execDir / "nodes";
+        rootPath = application::execDir() / "nodes";
     if (!file::exists(rootPath) || !file::isDir(rootPath)) {
         LOG(Services, "Loading skipped: the nodes directory not found");
         return {};

@@ -107,30 +107,27 @@ Error setPaths() {
         // This causes real problems in python since they will be loaded
         // as two distinct modules, when they actually should be the
         // same module
-        std::vector<Text> paths;
+        std::vector<file::Path> paths;
 
-        for (auto devRoot : {"../..", "../../.."}) {
-            auto pkgRoot = (root / devRoot / "packages").resolve();
-            for (auto pkgPath : {"server/engine-lib/rocketlib-python/lib",
-                                 "client-python/src", "ai/src"})
-                paths.push_back((pkgRoot / pkgPath).resolve().str());
-
-            paths.push_back((root / devRoot / "nodes/src").resolve().str());
+        if (const auto &projectDir = application::projectDir()) {
+            paths.push_back(projectDir / "packages/server/engine-lib/rocketlib-python/lib");
+            paths.push_back(projectDir / "packages/client-python/src");
+            paths.push_back(projectDir / "packages/ai/src");
+            paths.push_back(projectDir / "nodes/src");
 
             if (_allOf(paths, file::exists)) {
                 // We found all the paths, we are in dev mode
-                LOG(Python, "Python development paths:", pkgRoot);
-                break;
+                LOG(Python, "Python development path:", projectDir);
+            } else {
+                // Clear out the paths since we didn't find them all
+                paths.clear();
             }
-
-            // Clear out the paths since we didn't find them all
-            paths.clear();
         }
 
         // Let's add the production path only if we are not in dev mode
         if (paths.empty()) {
-            LOG(Python, "Python production paths:", root);
-            paths.push_back(root.str());
+            LOG(Python, "Python production path:", root);
+            paths.push_back(root);
         }
 
         // Access Python's sys.path
@@ -146,7 +143,7 @@ Error setPaths() {
         for (auto it = paths.rbegin(); it != paths.rend(); ++it) {
             try {
                 // Convert the path to a string
-                const std::string path = *it;
+                const std::string path = it->str().c_str();
 
                 // Create a python path string
                 const auto path_python_string = py::str(path);
@@ -592,7 +589,3 @@ Error executePythonArguments(py::object &argv) {
     return ccode;
 }
 }  // namespace engine::python
-
-namespace engine::python::test {
-const ::PyConfig &config() noexcept { return g_config; }
-}  // namespace engine::python::test

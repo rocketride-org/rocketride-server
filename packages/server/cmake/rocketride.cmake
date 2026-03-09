@@ -138,6 +138,12 @@ function(rocketride_add_executable targetName)
 
     rocketride_set_common_target_options(${targetName})
 
+    if (ROCKETRIDE_CMAKE_KIST)
+        add_custom_command(TARGET ${targetName} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${ROCKETRIDE_PROJECT_ROOT}/dist/server"
+            COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${targetName}> "${ROCKETRIDE_PROJECT_ROOT}/dist/server/"
+            COMMENT "Copying ${targetName} binary to dist/server directory")
+    endif()
 endfunction()
 
 #

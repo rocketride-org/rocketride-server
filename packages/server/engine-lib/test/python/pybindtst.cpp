@@ -48,12 +48,14 @@ TEST_CASE("python::pybind") {
 
     // Python code to execute
     const auto python = localfcn()->Error {
-        py::print(
-            "                    Hello World from Python!");  // use the Python
-                                                              // API
+        py::module_ sys = py::module_::import("sys");
+
+        // use Python API to print something and check the version
+        py::print("                    Hello World from Python!");
+        py::print("                    My version is", sys.attr("version"));
+
 
         // These are automatically built in modules
-        REQUIRE_NOTHROW(py::module_::import("sys"));
         REQUIRE_NOTHROW(py::module_::import("errno"));
 
         // Equivalent to "from decimal import Decimal"

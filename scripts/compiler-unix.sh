@@ -180,7 +180,7 @@ select_linux_triplet() {
         fi
     fi
 
-    TRIPLET_FILE="packages/server/engine-core/cmake/triplets/$TRIPLET_NAME"
+    TRIPLET_FILE="packages/server/cmake/triplets/$TRIPLET_NAME"
 }
 
 select_macos_triplet() {
@@ -206,7 +206,7 @@ select_macos_triplet() {
     export CC=clang
     export CXX=clang++
     
-    TRIPLET_FILE="packages/server/engine-core/cmake/triplets/$TRIPLET_NAME"
+    TRIPLET_FILE="packages/server/cmake/triplets/$TRIPLET_NAME"
 }
 
 # =============================================================================

@@ -157,14 +157,36 @@ async function getVsEnvironment() {
 // Helpers
 // =============================================================================
 
-function getPythonLibDest(options = {}) {
+async function getPythonLibDest(options = {}) {
     const destDir = options.destDir || DIST_DIR;
     const platform = os.platform();
     if (platform === 'win32') {
         return path.join(destDir, 'lib');
     } else {
-        return path.join(destDir, 'lib', 'python3.10');
+        const pythonVersion = await getPythonVersion(options);
+        return path.join(destDir, 'lib', `python${pythonVersion}`);
     }
+}
+
+async function getPythonVersion(options = {}) {
+    let pythonVersion = await getState('vcpkg.pythonVersion');
+    if (pythonVersion !== undefined) return pythonVersion;
+
+    const vcpkgJsonPath = path.join(BUILD_DIR, 'vcpkg', 'ports', 'python3', 'vcpkg.json');
+    if (!await exists(vcpkgJsonPath))
+        throw new Error('Python port not found');
+
+    const vcpkgJson = await readJson(vcpkgJsonPath);
+    if (!vcpkgJson || !vcpkgJson.version)
+        throw new Error(`Python version not found in ${vcpkgJsonPath}`);
+
+    // Get major.minor from manifest version (e.g., "3.12.9" -> "3.12")
+    const match = /^(\d+\.\d+)/.exec(vcpkgJson.version);
+    if (!match) throw new Error(`Unexpected Python version format: ${vcpkgJson.version}`);
+
+    pythonVersion = match[1];
+    await setState('vcpkg.pythonVersion', pythonVersion);
+    return pythonVersion;
 }
 
 function getVcpkgTriplet(options = {}) {
@@ -177,7 +199,7 @@ function getVcpkgTriplet(options = {}) {
 }
 
 async function getVcpkgInstalledDir(options = {}) {
-    return path.join(PROJECT_ROOT, 'build', 'vcpkg_installed', getVcpkgTriplet(options));
+    return path.join(BUILD_DIR, 'vcpkg_installed', getVcpkgTriplet(options));
 }
 
 function getParallelJobs() {
@@ -275,13 +297,14 @@ async function copyPythonEnv(options = {}) {
     }
 
     const platform = os.platform();
-    const pythonLibDest = getPythonLibDest(options);
+    const pythonLibDest = await getPythonLibDest(options);
 
     let pythonLibSrc;
     if (platform === 'win32') {
         pythonLibSrc = path.join(vcpkgInstalled, 'tools', 'python3', 'lib');
     } else {
-        pythonLibSrc = path.join(vcpkgInstalled, 'lib', 'python3.10');
+        const pythonVersion = await getPythonVersion(options);
+        pythonLibSrc = path.join(vcpkgInstalled, 'lib', `python${pythonVersion}`);
     }
 
     let totalStats = { added: 0, updated: 0, unchanged: 0, removed: 0 };
@@ -367,7 +390,7 @@ async function copyPythonEnv(options = {}) {
 
 async function syncRocketlibPythonLib(options = {}) {
     const rocketrideLib = path.join(SERVER_DIR, 'engine-lib', 'rocketlib-python', 'lib');
-    const pythonLibDest = getPythonLibDest(options);
+    const pythonLibDest = await getPythonLibDest(options);
 
     if (!await exists(rocketrideLib)) {
         return { synced: false, reason: 'Source not found' };
@@ -476,6 +499,11 @@ function makeCheckPrebuiltAction(options = {}) {
                     const manifestPath = await downloadGitHubFile(tag, manifestFilename, task);
                     if (manifestPath) {
                         const manifest = await readJson(manifestPath);
+                        if (manifest?.vcpkg?.version !== require('../../vcpkg/scripts/tasks').VCPKG_VERSION) {
+                            task.output = 'Download skipped: vcpkg version mismatch';
+                            ctx.downloaded = false;
+                            return;
+                        }
                         const serverHash = manifest?.server?.contentHash;
                         if (localHash === serverHash) {
                             await setState('server.releaseManifest', manifest);
@@ -579,8 +607,8 @@ function makeConfigureServerAction(options = {}) {
             }
             const triplet = getVcpkgTriplet(options);
             const vcpkgToolchain = path.join(VCPKG_DIR, 'scripts', 'buildsystems', 'vcpkg.cmake');
-            const overlayPorts = path.join(SERVER_DIR, 'engine-core', 'cmake', 'ports');
-            const overlayTriplets = path.join(SERVER_DIR, 'engine-core', 'cmake', 'triplets');
+            const overlayPorts = path.join(SERVER_DIR, 'cmake', 'ports');
+            const overlayTriplets = path.join(SERVER_DIR, 'cmake', 'triplets');
 
             const cmakeArgs = [
                 'cmake',
