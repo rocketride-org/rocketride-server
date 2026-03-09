@@ -43,6 +43,7 @@ import { PageDeployProvider } from './providers/PageDeployProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
 import { SidebarConnectionProvider } from './providers/SidebarConnectionProvider';
+import { registerMcpProvider, writeServicesFile } from './connection/mcp-provider';
 
 
 // Core managers
@@ -225,6 +226,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 					console.error('[ROCKETRIDE] Connection initialization failed:', error);
 				});
 			}
+
+		//-------------------------------------
+		// Register MCP server for AI assistants
+		//-------------------------------------
+		logger.output(`${icons.info} Registering MCP server provider...`);
+		registerMcpProvider(context);
+
+		// Write .rocketride/services.md whenever engine services are fetched
+		if (connectionManager) {
+			context.subscriptions.push(
+				connectionManager.addListener('servicesUpdated', (payload: { services: Record<string, unknown>; servicesError?: string }) => {
+					if (payload.services && Object.keys(payload.services).length > 0) {
+						try {
+							writeServicesFile(payload.services);
+						} catch (err) {
+							logger.output(`${icons.warning} Failed to write services.md: ${err}`);
+						}
+					}
+				})
+			);
+		}
 
 		//-------------------------------------
 		// And done...

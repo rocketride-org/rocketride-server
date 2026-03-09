@@ -37,6 +37,13 @@
 		"onDebugDynamicConfigurations"
 	],
 	"contributes": {
+		"mcpServerDefinitionProviders": [
+			{
+				"id": "rocketride-pipeline-builder",
+				"label": "RocketRide Pipeline Builder",
+				"isEnabled": true
+			}
+		],
 		"breakpoints": [
 			{
 				"language": "pipeline"

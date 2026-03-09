@@ -37,8 +37,6 @@ def load_settings() -> Settings:
     """Load settings from environment variables."""
     apikey = os.environ.get('ROCKETRIDE_AUTH') or os.environ.get('ROCKETRIDE_APIKEY') or ''
     uri = os.environ.get('ROCKETRIDE_URI') or ''
-    if not apikey:
-        raise ValueError('Missing required environment variable: ROCKETRIDE_AUTH or ROCKETRIDE_APIKEY')
     if not uri:
         raise ValueError('Missing required environment variable: ROCKETRIDE_URI')
     return Settings(apikey=apikey, uri=uri)

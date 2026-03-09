@@ -35,6 +35,7 @@ import mcp.types as types
 from rocketride import RocketRideClient
 
 from .config import load_settings
+from .services import fetch_services
 from .tools import get_tools, format_tools, execute_tool
 
 # Global client instance
@@ -87,6 +88,12 @@ async def _handle_call(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, A
     }
 
 
+# ---------------------------------------------------------------------------
+# Resource URIs
+# ---------------------------------------------------------------------------
+_SERVICES_URI = 'rocketride://services'
+
+
 async def run_server() -> None:
     """Start and run the MCP stdio server."""
     global _client
@@ -101,10 +108,26 @@ async def run_server() -> None:
 
     server = Server('rocketride-mcp')
 
+    # ------------------------------------------------------------------
+    # Tools
+    # ------------------------------------------------------------------
+    _SERVICE_CATALOG_TOOL = 'get_service_catalog'
+
     @server.list_tools()  # type: ignore[untyped-decorator,no-untyped-call]
     async def list_tools() -> list[types.Tool]:
+        tools: list[types.Tool] = [
+            types.Tool(
+                name=_SERVICE_CATALOG_TOOL,
+                description=(
+                    'Get the live RocketRide node service catalog from the running engine. '
+                    'Returns every available pipeline node, its profiles, config fields, '
+                    'lane types, and capabilities. Call this tool FIRST before building '
+                    'or modifying any RocketRide pipeline.'
+                ),
+                inputSchema={'type': 'object', 'properties': {}, 'required': []},
+            ),
+        ]
         entries = await _dynamic_tools()
-        tools: list[types.Tool] = []
         for entry in entries:
             tools.append(
                 types.Tool(
@@ -117,11 +140,111 @@ async def run_server() -> None:
 
     @server.call_tool()  # type: ignore[untyped-decorator]
     async def call_tool(name: str, arguments: dict[str, Any] | None) -> list[types.TextContent]:
+        if name == _SERVICE_CATALOG_TOOL:
+            if _client is None:
+                raise RuntimeError('Client is not connected')
+            content = await fetch_services(_client)
+            if not content:
+                raise RuntimeError('Service catalog is not available — engine may not be running')
+            return [types.TextContent(type='text', text=content)]
+
         resp = await _handle_call(name, arguments or {})
         if resp.get('isError'):
             raise RuntimeError(resp['content'][0]['text'])
         return [types.TextContent(type='text', text=resp['content'][0]['text'])]
 
+    # ------------------------------------------------------------------
+    # Resources: live service catalog from the running engine
+    # ------------------------------------------------------------------
+    @server.list_resources()  # type: ignore[untyped-decorator,no-untyped-call]
+    async def list_resources() -> list[types.Resource]:
+        return [
+            types.Resource(
+                uri=_SERVICES_URI,
+                name='RocketRide Live Service Catalog',
+                description=(
+                    'Live node definitions from the running RocketRide engine. '
+                    'Includes every available node, its profiles, config schemas, '
+                    'and lane types. Always reflects what is currently deployed.'
+                ),
+                mimeType='text/markdown',
+            ),
+        ]
+
+    @server.read_resource()  # type: ignore[untyped-decorator]
+    async def read_resource(uri: str) -> str:
+        if uri == _SERVICES_URI:
+            if _client is None:
+                raise RuntimeError('Client is not connected')
+            content = await fetch_services(_client)
+            if content:
+                return content
+            raise ValueError('Service catalog is not available')
+
+        raise ValueError(f'Unknown resource: {uri}')
+
+    # ------------------------------------------------------------------
+    # Prompts: pipeline-building workflow
+    # ------------------------------------------------------------------
+    @server.list_prompts()  # type: ignore[untyped-decorator,no-untyped-call]
+    async def list_prompts() -> list[types.Prompt]:
+        return [
+            types.Prompt(
+                name='build-pipeline',
+                description=(
+                    'Build a RocketRide data processing pipeline from a natural '
+                    'language description. Uses the live service catalog from the '
+                    'running engine to generate a .pipe file and SDK code.'
+                ),
+                arguments=[
+                    types.PromptArgument(
+                        name='description',
+                        description='Natural language description of what the pipeline should do',
+                        required=True,
+                    ),
+                ],
+            ),
+        ]
+
+    @server.get_prompt()  # type: ignore[untyped-decorator]
+    async def get_prompt(
+        name: str, arguments: dict[str, str] | None
+    ) -> types.GetPromptResult:
+        if name != 'build-pipeline':
+            raise ValueError(f'Unknown prompt: {name}')
+
+        user_description = (arguments or {}).get('description', '')
+
+        # Gather live services from engine
+        services_text = ''
+        if _client:
+            services_text = await fetch_services(_client) or ''
+
+        messages: list[types.PromptMessage] = [
+            types.PromptMessage(
+                role='user',
+                content=types.TextContent(
+                    type='text',
+                    text=(
+                        f'Build a RocketRide pipeline for the following request:\n\n'
+                        f'{user_description}\n\n'
+                        f'---\n\n'
+                        f'Use the following live service catalog to generate a '
+                        f'correct .pipe file and SDK code.\n\n'
+                        f'## Live Service Catalog\n\n{services_text}'
+                    ),
+                ),
+            ),
+        ]
+
+        return types.GetPromptResult(
+            description='Build a RocketRide pipeline',
+            messages=messages,
+        )
+
+    # ------------------------------------------------------------------
+    # Run
+    # ------------------------------------------------------------------
     try:
         async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
             await server.run(
@@ -129,7 +252,7 @@ async def run_server() -> None:
                 write_stream,
                 InitializationOptions(
                     server_name='rocketride-mcp',
-                    server_version='0.1.0',
+                    server_version='1.1.0',
                     capabilities=server.get_capabilities(
                         notification_options=NotificationOptions(),
                         experimental_capabilities={},
@@ -137,7 +260,6 @@ async def run_server() -> None:
                 ),
             )
     finally:
-        # Disconnect client on shutdown
         if _client:
             await _client.disconnect()
 
