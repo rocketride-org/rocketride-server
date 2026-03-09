@@ -99,21 +99,27 @@
 				"detection_model": "facebook/detr-resnet-50",
 				"min_confidence": 0.3,
 				"similarity_threshold": 0.65,
-				"fps": 1.0
+				"fps": 1.0,
+				"pre_roll": 3,
+				"post_roll": 3
 			},
 			"yolos-tiny": {
 				"title": "YOLOS Tiny - Fast lightweight detection",
 				"detection_model": "hustvl/yolos-tiny",
 				"min_confidence": 0.3,
 				"similarity_threshold": 0.60,
-				"fps": 2.0
+				"fps": 2.0,
+				"pre_roll": 3,
+				"post_roll": 3
 			},
 			"custom": {
 				"title": "Custom model configuration",
 				"detection_model": "",
 				"min_confidence": 0.3,
 				"similarity_threshold": 0.60,
-				"fps": 1.0
+				"fps": 1.0,
+				"pre_roll": 3,
+				"post_roll": 3
 			}
 		}
 	},

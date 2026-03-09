@@ -32,7 +32,6 @@ from rocketlib import IInstanceBase, AVI_ACTION, Entry
 from .IGlobal import IGlobal
 
 _LOG_PATH = '/tmp/objdet_debug.log'
-_CLIPS_DIR = '/tmp/objdet_clips'
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
@@ -66,8 +65,6 @@ class IInstance(IInstanceBase):
         if output_path and os.path.exists(output_path):
             file_size = os.path.getsize(output_path)
             self._log(f'encoded {output_path} ({file_size} bytes)')
-
-            self._save_clip_copy(output_path)
 
             if self.instance.hasListener('video'):
                 self._stream_video(output_path)
@@ -161,22 +158,6 @@ class IInstance(IInstanceBase):
                     break
                 self.instance.writeVideo(AVI_ACTION.WRITE, 'video/mp4', chunk)
         self.instance.writeVideo(AVI_ACTION.END, 'video/mp4')
-
-    # ------------------------------------------------------------------
-    # Save a copy to /tmp for the Clips tab
-    # ------------------------------------------------------------------
-
-    def _save_clip_copy(self, video_path: str):
-        os.makedirs(_CLIPS_DIR, exist_ok=True)
-        dest = os.path.join(
-            _CLIPS_DIR,
-            f'composed_{int(time.time())}_{self._frame_count}frames.mp4',
-        )
-        try:
-            shutil.copy2(video_path, dest)
-            self._log(f'saved clip copy: {dest}')
-        except Exception as e:
-            self._log(f'failed to save clip copy: {e}')
 
     # ------------------------------------------------------------------
     # Cleanup

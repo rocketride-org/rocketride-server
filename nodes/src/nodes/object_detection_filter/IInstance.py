@@ -21,6 +21,8 @@
 # SOFTWARE.
 # =============================================================================
 
+from collections import deque
+
 from rocketlib import IInstanceBase, AVI_ACTION, Entry
 from ai.common.table import Table
 
@@ -36,10 +38,19 @@ class IInstance(IInstanceBase):
         self._frame_idx = 0
         self._matched = 0
         self._total = 0
+        self._forwarded = 0
         self._match_rows = []
         self._image_buf = bytearray()
         self._image_mime = 'image/png'
-        self._fps = self.IGlobal.config.get('fps', 1.0)
+
+        cfg = self.IGlobal.config
+        self._fps = cfg.get('fps', 1.0)
+        self._pre_roll = int(cfg.get('pre_roll', 3))
+        self._post_roll = int(cfg.get('post_roll', 3))
+
+        self._ring = deque(maxlen=self._pre_roll) if self._pre_roll > 0 else None
+        self._forwarding = False
+        self._post_remaining = 0
 
     def endInstance(self):
         pass
@@ -48,10 +59,19 @@ class IInstance(IInstanceBase):
         self._frame_idx = 0
         self._matched = 0
         self._total = 0
+        self._forwarded = 0
         self._match_rows = []
+        self._forwarding = False
+        self._post_remaining = 0
+        if self._ring is not None:
+            self._ring.clear()
 
     def close(self):
-        self._log(f'close: {self._matched}/{self._total} frames matched')
+        self._log(
+            f'close: {self._matched}/{self._total} frames matched, '
+            f'{self._forwarded} frames forwarded '
+            f'(pre_roll={self._pre_roll}, post_roll={self._post_roll})'
+        )
 
         if self.instance.hasListener('table') and self._match_rows:
             table = Table.generate_markdown_table(
@@ -68,17 +88,20 @@ class IInstance(IInstanceBase):
         if action == AVI_ACTION.BEGIN:
             self._image_buf = bytearray()
             self._image_mime = mimeType
+            self.preventDefault()
 
         elif action == AVI_ACTION.WRITE:
             if buffer:
                 self._image_buf.extend(buffer)
+            self.preventDefault()
 
         elif action == AVI_ACTION.END:
             self._on_frame_complete(bytes(self._image_buf), self._image_mime)
             self._image_buf = bytearray()
+            self.preventDefault()
 
     # ------------------------------------------------------------------
-    # Per-frame detection + forwarding
+    # Per-frame detection + ring buffer forwarding
     # ------------------------------------------------------------------
 
     def _on_frame_complete(self, image_bytes: bytes, mime: str):
@@ -91,32 +114,69 @@ class IInstance(IInstanceBase):
             detections = self.IGlobal.detector.detect_and_match(image_bytes)
         except Exception as e:
             self._log(f'frame {idx} detection error: {e}')
+            detections = []
+
+        is_match = len(detections) > 0
+
+        if is_match:
+            self._matched += 1
+            best = max(detections, key=lambda d: d.similarity if d.similarity else d.score)
+            self._match_rows.append([
+                idx,
+                self._fmt_time(timestamp),
+                best.label,
+                f'{best.score:.3f}',
+                f'{best.similarity:.3f}' if best.similarity else '-',
+            ])
+            self._log(
+                f'frame {idx} t={timestamp:.2f}s MATCH '
+                f'label={best.label} conf={best.score:.3f} '
+                f'sim={best.similarity}'
+            )
+
+        if is_match and not self._forwarding:
+            self._flush_ring()
+            self._forward_frame(image_bytes, mime)
+            self._forwarding = True
+            self._post_remaining = self._post_roll
+
+        elif is_match and self._forwarding:
+            self._forward_frame(image_bytes, mime)
+            self._post_remaining = self._post_roll
+
+        elif not is_match and self._forwarding:
+            if self._post_remaining > 0:
+                self._forward_frame(image_bytes, mime)
+                self._post_remaining -= 1
+            else:
+                self._forwarding = False
+                self._push_ring(image_bytes, mime, idx)
+
+        else:
+            self._push_ring(image_bytes, mime, idx)
+
+    # ------------------------------------------------------------------
+    # Ring buffer helpers
+    # ------------------------------------------------------------------
+
+    def _push_ring(self, image_bytes: bytes, mime: str, idx: int):
+        if self._ring is not None:
+            self._ring.append((image_bytes, mime, idx))
+
+    def _flush_ring(self):
+        if self._ring is None:
             return
+        for img, mime, idx in self._ring:
+            self._log(f'  pre-roll: forwarding buffered frame {idx}')
+            self._forward_frame(img, mime)
+        self._ring.clear()
 
-        if not detections:
-            return
-
-        self._matched += 1
-        best = max(detections, key=lambda d: d.similarity if d.similarity else d.score)
-
-        self._match_rows.append([
-            idx,
-            self._fmt_time(timestamp),
-            best.label,
-            f'{best.score:.3f}',
-            f'{best.similarity:.3f}' if best.similarity else '-',
-        ])
-
-        self._log(
-            f'frame {idx} t={timestamp:.2f}s MATCH '
-            f'label={best.label} conf={best.score:.3f} '
-            f'sim={best.similarity}'
-        )
-
+    def _forward_frame(self, image_bytes: bytes, mime: str):
         if self.instance.hasListener('image'):
             self.instance.writeImage(AVI_ACTION.BEGIN, mime)
             self.instance.writeImage(AVI_ACTION.WRITE, mime, image_bytes)
             self.instance.writeImage(AVI_ACTION.END, mime)
+            self._forwarded += 1
 
     # ------------------------------------------------------------------
     # Helpers
