@@ -122,7 +122,7 @@ class DAPBase:
         # Route the debugger output either through our kernel
         # or through logging depending on which one is running us
         try:
-            from rocketride import debug, Lvl
+            from rocketlib import debug, Lvl
 
             def _debug_message(message: str) -> None:
                 debug(Lvl.DebugOut, message)
