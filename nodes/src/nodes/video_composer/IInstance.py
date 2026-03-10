@@ -68,6 +68,9 @@ class IInstance(IInstanceBase):
 
             if self.instance.hasListener('video'):
                 self._stream_video(output_path)
+                self._log(f'streamed video downstream ({file_size} bytes)')
+            else:
+                self._log('WARNING: no listener on video lane, video not streamed')
 
             try:
                 os.remove(output_path)
