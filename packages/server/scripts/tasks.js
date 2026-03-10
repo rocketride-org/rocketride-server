@@ -32,7 +32,7 @@ const {
     getState, setState, updateState,
     removeDirs, resetDir, syncDir, removeFiles,
     overlayDir, formatSyncStats,
-    execCommand, PROJECT_ROOT, BUILD_DIR, isWindows, isMac, isLinux,
+    execCommand, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux,
     exists, readFile, readJson, readDir, mkdir, copyFile, removeFile, chmod,
     loadPackageJson, downloadGitHubFile, createArchive, extractArchive,
     parallel, whenNot, fingerprint, contentHash,
@@ -44,10 +44,10 @@ const { runCompilerSetup } = require('../../../scripts/compiler');
 // Paths
 const PACKAGES_DIR = path.join(PROJECT_ROOT, 'packages');
 const SERVER_DIR = path.join(PACKAGES_DIR, 'server');
-const DIST_DIR = path.join(PROJECT_ROOT, 'dist', 'server');
-const VCPKG_DIR = path.join(BUILD_DIR, 'vcpkg');
-const BUILD_ARTIFACTS_DIR = path.join(BUILD_DIR, 'artifacts');
-const DIST_ARTIFACTS_DIR = path.join(PROJECT_ROOT, 'dist', 'artifacts');
+const DIST_DIR = path.join(DIST_ROOT, 'server');
+const VCPKG_DIR = path.join(BUILD_ROOT, 'vcpkg');
+const BUILD_ARTIFACTS_DIR = path.join(BUILD_ROOT, 'artifacts');
+const DIST_ARTIFACTS_DIR = path.join(DIST_ROOT, 'artifacts');
 
 // =============================================================================
 // Platform Detection
@@ -100,15 +100,15 @@ async function getDistInfo(options = {}) {
 async function isConfigured() {
     const configured = await getState('server.configured');
     if (configured !== true) return false;
-    
+
     // Check CMakeCache.txt exists
-    const cmakeCache = path.join(BUILD_DIR, 'CMakeCache.txt');
+    const cmakeCache = path.join(BUILD_ROOT, 'CMakeCache.txt');
     if (!await exists(cmakeCache)) return false;
-    
+
     // Check vcpkg packages are installed (manifest or classic path)
     const vcpkgInstalled = await getVcpkgInstalledDir();
     if (!await exists(vcpkgInstalled)) return false;
-    
+
     return true;
 }
 
@@ -133,7 +133,7 @@ async function getWindowsToolchain() {
     if (windowsToolchainCache) return windowsToolchainCache;
     const vsRoot = await getState('build.vsPath');
     if (!vsRoot || !(await exists(vsRoot))) {
-        throw new Error('Visual Studio build path not set. Run server:setup-tools first (e.g. pnpm run builder server:setup-tools --autoinstall).');
+        throw new Error('Visual Studio build path not set. Run server:setup-tools first (e.g. run builder server:setup-tools --autoinstall).');
     }
     const ninjaPath = path.join(vsRoot, 'Common7', 'IDE', 'CommonExtensions', 'Microsoft', 'CMake', 'Ninja', 'ninja.exe');
     const ninjaExists = await exists(ninjaPath);
@@ -147,7 +147,7 @@ async function getVsEnvironment() {
     if (!isWindows()) return process.env;
     const buildEnv = await getState('build.env');
     if (!buildEnv || typeof buildEnv !== 'object' || Object.keys(buildEnv).length === 0) {
-        throw new Error('Visual Studio environment not in state. Run server:setup-tools first (e.g. pnpm run builder server:setup-tools --autoinstall).');
+        throw new Error('Visual Studio environment not in state. Run server:setup-tools first (e.g. run builder server:setup-tools --autoinstall).');
     }
     vsEnvCache = { ...process.env, ...buildEnv };
     return vsEnvCache;
@@ -172,7 +172,7 @@ async function getPythonVersion(options = {}) {
     let pythonVersion = await getState('vcpkg.pythonVersion');
     if (pythonVersion !== undefined) return pythonVersion;
 
-    const vcpkgJsonPath = path.join(BUILD_DIR, 'vcpkg', 'ports', 'python3', 'vcpkg.json');
+    const vcpkgJsonPath = path.join(BUILD_ROOT, 'vcpkg', 'ports', 'python3', 'vcpkg.json');
     if (!await exists(vcpkgJsonPath))
         throw new Error('Python port not found');
 
@@ -199,7 +199,7 @@ function getVcpkgTriplet(options = {}) {
 }
 
 async function getVcpkgInstalledDir(options = {}) {
-    return path.join(BUILD_DIR, 'vcpkg_installed', getVcpkgTriplet(options));
+    return path.join(BUILD_ROOT, 'vcpkg_installed', getVcpkgTriplet(options));
 }
 
 function getParallelJobs() {
@@ -275,7 +275,7 @@ async function copySambaLibs(options = {}) {
 
 async function copyJavaJre(options = {}) {
     const destDir = options.destDir || DIST_DIR;
-    const jreSrc = path.join(BUILD_DIR, 'java', 'jre');
+    const jreSrc = path.join(BUILD_ROOT, 'java', 'jre');
     const jreDest = path.join(destDir, 'java', 'jre');
 
     if (!await exists(jreSrc)) {
@@ -594,15 +594,15 @@ function makeConfigureServerAction(options = {}) {
                 return;
             }
 
-            await mkdir(BUILD_DIR);
+            await mkdir(BUILD_ROOT);
 
-            const cached = await getCachedGeneratorArgs(BUILD_DIR);
+            const cached = await getCachedGeneratorArgs(BUILD_ROOT);
             const generator = cached ?? (await detectGenerator());
             taskDebug('configure generator source:', cached ? 'cached (CMakeCache.txt)' : 'state (compiler-windows)');
             taskDebug('configure generator args:', generator);
             if (!cached) {
-                await removeFiles(BUILD_DIR, ['CMakeCache.txt', 'cmake_install.cmake']);
-                await removeDirs([path.join(BUILD_DIR, 'CMakeFiles')]);
+                await removeFiles(BUILD_ROOT, ['CMakeCache.txt', 'cmake_install.cmake']);
+                await removeDirs([path.join(BUILD_ROOT, 'CMakeFiles')]);
                 taskDebug('cleared CMake state for fresh configure');
             }
             const triplet = getVcpkgTriplet(options);
@@ -612,7 +612,7 @@ function makeConfigureServerAction(options = {}) {
 
             const cmakeArgs = [
                 'cmake',
-                '-B', BUILD_DIR,
+                '-B', BUILD_ROOT,
                 '-S', SERVER_DIR,
                 ...generator,
                 '-DCMAKE_BUILD_TYPE=Release',
@@ -642,7 +642,7 @@ function makeConfigureServerAction(options = {}) {
             const baseEnv = isWindows() ? await getVsEnvironment() : process.env;
             const env = {
                 ...baseEnv,
-                VCPKG_ROOT: path.join(BUILD_DIR, 'vcpkg')  // Help vcpkg find itself faster
+                VCPKG_ROOT: path.join(BUILD_ROOT, 'vcpkg')  // Help vcpkg find itself faster
             };
             await execCommand(cmakeArgs[0], cmakeArgs.slice(1), { task, env, verbose: !!(ctx.options && ctx.options.verbose) });
 
@@ -660,11 +660,11 @@ function makeSetupPythonAction(options = {}) {
         run: async (ctx, task) => {
             task.output = 'Copying Python environment from vcpkg...';
             const copyResult = await copyPythonEnv(options);
-            
+
             if (!copyResult.copied) {
                 throw new Error(`Failed to copy Python environment: ${copyResult.reason}`);
             }
-            
+
             task.output = 'Syncing rocketlib-python lib...';
             const syncResult = await syncRocketlibPythonLib();
 
@@ -748,17 +748,17 @@ function makeCompileEngineAction(options = {}) {
             const baseEnv = isWindows() ? await getVsEnvironment() : process.env;
             const env = {
                 ...baseEnv,
-                VCPKG_ROOT: path.join(BUILD_DIR, 'vcpkg')
+                VCPKG_ROOT: path.join(BUILD_ROOT, 'vcpkg')
             };
 
             if (options.force) {
                 task.output = 'Cleaning build directory...';
-                await execCommand('cmake', ['--build', BUILD_DIR, '--target', 'clean'], { task, env, verbose: !!(ctx.options && ctx.options.verbose) });
+                await execCommand('cmake', ['--build', BUILD_ROOT, '--target', 'clean'], { task, env, verbose: !!(ctx.options && ctx.options.verbose) });
             }
 
             const jobs = getParallelJobs();
             const cmakeArgs = [
-                'cmake', '--build', BUILD_DIR,
+                'cmake', '--build', BUILD_ROOT,
                 '--config', 'Release',
                 '--target', 'engine',
                 '--parallel', String(jobs)
@@ -769,8 +769,8 @@ function makeCompileEngineAction(options = {}) {
             await mkdir(DIST_DIR);
             const exeExt = isWindows() ? '.exe' : '';
             const enginePaths = [
-                path.join(BUILD_DIR, 'apps', 'engine', 'Release', 'engine' + exeExt),
-                path.join(BUILD_DIR, 'apps', 'engine', 'engine' + exeExt)
+                path.join(BUILD_ROOT, 'apps', 'engine', 'Release', 'engine' + exeExt),
+                path.join(BUILD_ROOT, 'apps', 'engine', 'engine' + exeExt)
             ];
 
             for (const src of enginePaths) {
@@ -782,8 +782,8 @@ function makeCompileEngineAction(options = {}) {
 
             if (isWindows()) {
                 const pdbPaths = [
-                    path.join(BUILD_DIR, 'apps', 'engine', 'Release', 'engine.pdb'),
-                    path.join(BUILD_DIR, 'apps', 'engine', 'engine.pdb')
+                    path.join(BUILD_ROOT, 'apps', 'engine', 'Release', 'engine.pdb'),
+                    path.join(BUILD_ROOT, 'apps', 'engine', 'engine.pdb')
                 ];
                 for (const src of pdbPaths) {
                     if (await exists(src)) {
@@ -830,18 +830,18 @@ function makeCompileTestsAction() {
             const baseEnv = isWindows() ? await getVsEnvironment() : process.env;
             const env = {
                 ...baseEnv,
-                VCPKG_ROOT: path.join(BUILD_DIR, 'vcpkg')
+                VCPKG_ROOT: path.join(BUILD_ROOT, 'vcpkg')
             };
             const jobs = getParallelJobs();
 
             // Build aptest
             task.output = 'Building aptest...';
-            const aptestArgs = ['--build', BUILD_DIR, '--config', 'Release', '--target', 'aptest', '--parallel', String(jobs)];
+            const aptestArgs = ['--build', BUILD_ROOT, '--config', 'Release', '--target', 'aptest', '--parallel', String(jobs)];
             await execCommand('cmake', aptestArgs, { task, env, verbose: !!(ctx.options && ctx.options.verbose) });
 
             // Build engtest
             task.output = 'Building engtest...';
-            const engtestArgs = ['--build', BUILD_DIR, '--config', 'Release', '--target', 'engtest', '--parallel', String(jobs)];
+            const engtestArgs = ['--build', BUILD_ROOT, '--config', 'Release', '--target', 'engtest', '--parallel', String(jobs)];
             await execCommand('cmake', engtestArgs, { task, env, verbose: !!(ctx.options && ctx.options.verbose) });
 
             // Save test source hash after successful build
@@ -913,15 +913,15 @@ function makeCopyTestDataAction() {
                 {
                     name: 'aptest',
                     paths: [
-                        path.join(BUILD_DIR, 'engine-core', 'test', 'Release', 'aptest' + exeExt),
-                        path.join(BUILD_DIR, 'engine-core', 'test', 'aptest' + exeExt)
+                        path.join(BUILD_ROOT, 'engine-core', 'test', 'Release', 'aptest' + exeExt),
+                        path.join(BUILD_ROOT, 'engine-core', 'test', 'aptest' + exeExt)
                     ]
                 },
                 {
                     name: 'engtest',
                     paths: [
-                        path.join(BUILD_DIR, 'engine-lib', 'test', 'Release', 'engtest' + exeExt),
-                        path.join(BUILD_DIR, 'engine-lib', 'test', 'engtest' + exeExt)
+                        path.join(BUILD_ROOT, 'engine-lib', 'test', 'Release', 'engtest' + exeExt),
+                        path.join(BUILD_ROOT, 'engine-lib', 'test', 'engtest' + exeExt)
                     ]
                 }
             ];
@@ -1020,7 +1020,7 @@ function makeCleanServerAction() {
         run: async (ctx, task) => {
             await setState('server', {});
 
-            await removeFiles(BUILD_DIR, [
+            await removeFiles(BUILD_ROOT, [
                 'CMakeCache.txt', 'cmake_install.cmake',
                 'build.ninja', '.ninja_deps', '.ninja_log', 'compile_commands.json',
                 'CPackConfig.cmake', 'CPackSourceConfig.cmake', 'CTestTestfile.cmake',
@@ -1029,13 +1029,13 @@ function makeCleanServerAction() {
 
             // Clean only the server build artifacts; vcpkg state is managed by vcpkg:clean
             await removeDirs([
-                path.join(BUILD_DIR, 'CMakeFiles'),
-                path.join(BUILD_DIR, 'Testing'),
-                path.join(BUILD_DIR, 'apps'),
-                path.join(BUILD_DIR, 'engine-core'),
-                path.join(BUILD_DIR, 'engine-lib'),
-                path.join(BUILD_DIR, 'packages'),
-                path.join(BUILD_DIR, '_download_temp'),
+                path.join(BUILD_ROOT, 'CMakeFiles'),
+                path.join(BUILD_ROOT, 'Testing'),
+                path.join(BUILD_ROOT, 'apps'),
+                path.join(BUILD_ROOT, 'engine-core'),
+                path.join(BUILD_ROOT, 'engine-lib'),
+                path.join(BUILD_ROOT, 'packages'),
+                path.join(BUILD_ROOT, '_download_temp'),
                 BUILD_ARTIFACTS_DIR,
                 DIST_ARTIFACTS_DIR,
                 DIST_DIR
@@ -1158,8 +1158,8 @@ function makePackageAction(options = {}) {
                     (async(options) => {
                         const exeExt = isWindows() ? '.exe' : '';
                         const enginePaths = [
-                            path.join(BUILD_DIR, 'apps', 'engine', 'Release', 'engine' + exeExt),
-                            path.join(BUILD_DIR, 'apps', 'engine', 'engine' + exeExt)
+                            path.join(BUILD_ROOT, 'apps', 'engine', 'Release', 'engine' + exeExt),
+                            path.join(BUILD_ROOT, 'apps', 'engine', 'engine' + exeExt)
                         ];
                         for (const src of enginePaths) {
                             if (await exists(src)) {

@@ -31,9 +31,9 @@
  *   clean - Remove build artifacts
  */
 const path = require('path');
-const { 
-    execCommand, syncDir, formatSyncStats, 
-    removeDirs, removeMatching, removeDirAndParents, PROJECT_ROOT,
+const {
+    execCommand, syncDir, formatSyncStats,
+    removeDirs, removeMatching, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT,
     mkdir, readDir, copyFile, exists,
     startServer, stopServer,
     bracket, parallel,
@@ -42,16 +42,17 @@ const {
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'rocketride');
-const BUILD_DIR = path.join(PROJECT_ROOT, 'build', 'clients', 'python');
-const DIST_DIR = path.join(PROJECT_ROOT, 'dist', 'clients', 'python');
-const SERVER_CLIENTS_DIR = path.join(PROJECT_ROOT, 'dist', 'server', 'rocketride');
-const SERVER_STATIC_DIR = path.join(PROJECT_ROOT, 'dist', 'server', 'static', 'clients', 'python');
+const BUILD_DIR = path.join(BUILD_ROOT, 'clients', 'python');
+const DIST_DIR = path.join(DIST_ROOT, 'clients', 'python');
+const SERVER_DIR = path.join(DIST_ROOT, 'server');
+const SERVER_CLIENTS_DIR = path.join(SERVER_DIR, 'rocketride');
+const SERVER_STATIC_DIR = path.join(SERVER_DIR, 'static', 'clients', 'python');
 
 // Directories to skip when copying to build
 const SKIP_DIRS = ['node_modules', '__pycache__', '.pytest_cache', 'tests', '.git', 'scripts'];
 
 // Engine (built by server:build; execCommand resolves extension on Windows)
-const ENGINE = path.join(PROJECT_ROOT, 'dist', 'server', 'engine');
+const ENGINE = path.join(SERVER_DIR, 'engine');
 
 // Canonical README lives in docs/; copy it into the build dir for wheel packaging
 const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
@@ -100,23 +101,21 @@ function makeWheelBuildAction() {
             // Check if source changed
             const { changed, hash } = await hasSourceChanged(SRC_DIR, SRC_HASH_KEY);
             const outputExists = await exists(DIST_DIR);
-            
+
             if (!changed && outputExists) {
                 task.output = 'No changes detected';
                 return;
             }
-            
+
             // engine.exe uses an isolated environment - cwd must be dist/server
-            const serverDir = path.join(PROJECT_ROOT, 'dist', 'server');
-            
             await mkdir(DIST_DIR);
             await execCommand(ENGINE, [
                 '-m', 'build',
                 '--no-isolation',
                 BUILD_DIR,
                 '--outdir', DIST_DIR
-            ], { task, cwd: serverDir });
-            
+            ], { task, cwd: SERVER_DIR });
+
             // Save hash after successful build
             await saveSourceHash(SRC_HASH_KEY, hash);
         }
@@ -127,7 +126,7 @@ function makeCopyToServerStaticAction() {
     return {
         run: async (ctx, task) => {
             await mkdir(SERVER_STATIC_DIR);
-            
+
             const files = await readDir(DIST_DIR);
             let copied = 0;
             for (const file of files) {
@@ -178,7 +177,7 @@ function makeStartTestServerAction(options = {}) {
                     }
                 }
             });
-            
+
             ctx.port = result.port;
             task.output = `Server ready on port ${ctx.port}`;
             taskComplete = true;
@@ -207,29 +206,28 @@ function makeRunPytestAction(options = {}) {
         run: async (ctx, task) => {
             // Load .env for test configuration
             require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
-            
+
             const bracket = ctx.brackets?.['py-test-server'];
             const port = bracket?.port || ctx.port;
             // Use existing server URI when set (e.g. ROCKETRIDE_URI=http://localhost:5678 for debugging)
             const serverUri = bracket?.serverUri || `http://localhost:${port}`;
 
-            // engine.exe uses an isolated environment - cwd must be dist/server
-            const serverDir = path.join(PROJECT_ROOT, 'dist', 'server');
             const testEnv = {
                 ...process.env,
                 ROCKETRIDE_URI: serverUri
             };
-            
+
             // Use absolute paths since cwd is dist/server
             const testsDir = path.join(PACKAGE_DIR, 'tests');
             const pytestArgs = ['-m', 'pytest', testsDir, '-v', '--rootdir', PACKAGE_DIR];
             if (options.pytest) {
                 pytestArgs.push(...options.pytest);
             }
-            
-            await execCommand(ENGINE, pytestArgs, { 
-                task, 
-                cwd: serverDir,
+
+            // engine.exe uses an isolated environment - cwd must be dist/server
+            await execCommand(ENGINE, pytestArgs, {
+                task,
+                cwd: SERVER_DIR,
                 env: testEnv
             });
         }
@@ -243,7 +241,7 @@ function makeRunPytestAction(options = {}) {
 module.exports = {
     name: 'client-python',
     description: 'Python Client SDK',
-    
+
     actions: [
         // Internal actions
         { name: 'client-python:copy-readme', action: makeCopyReadmeAction },
@@ -254,9 +252,9 @@ module.exports = {
         { name: 'client-python:start-server', action: makeStartTestServerAction },
         { name: 'client-python:stop-server', action: makeStopTestServerAction },
         { name: 'client-python:run-pytest', action: makeRunPytestAction },
-        
+
         // Public actions (have descriptions)
-        { name: 'client-python:build', action: () => ({ 
+        { name: 'client-python:build', action: () => ({
             description: 'Build Python client',
             steps: [
                 'server:build',

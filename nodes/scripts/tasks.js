@@ -23,7 +23,7 @@
 
 /**
  * Build tasks for @rocketride/nodes
- *
+ * 
  * Commands:
  *   build - Sync nodes to dist
  *   test  - Run node integration tests (starts test server automatically)
@@ -34,7 +34,7 @@ const {
     syncDir,
     formatSyncStats,
     removeDir,
-    PROJECT_ROOT,
+    PROJECT_ROOT, DIST_ROOT,
     startServer,
     stopServer,
     execCommand,
@@ -45,10 +45,10 @@ const {
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'nodes');
 const TEST_DIR = path.join(PACKAGE_DIR, 'test');
-const DIST_DIR = path.join(PROJECT_ROOT, 'dist', 'server', 'nodes');
+const DIST_DIR = path.join(DIST_ROOT, 'server', 'nodes');
 
 // Engine (built by server:build; execCommand resolves extension on Windows)
-const ENGINE = path.join(PROJECT_ROOT, 'dist', 'server', 'engine');
+const ENGINE = path.join(DIST_ROOT, 'server', 'engine');
 
 // ============================================================================
 // Action Factories
@@ -72,13 +72,13 @@ function makeStartTestServerAction(options = {}) {
                 task.output = `Using existing server on port ${ctx.port}`;
                 return { port: ctx.port, server: null };
             }
-            
+
             task.output = 'Starting server...';
             let taskComplete = false;
-            
+
             // Set ROCKETRIDE_MOCK to enable mock modules for testing
             const mocksPath = path.join(PACKAGE_DIR, 'test', 'mocks');
-            
+
             const result = await startServer({
                 script: 'ai/eaas.py',
                 trace: options.trace,
@@ -94,7 +94,7 @@ function makeStartTestServerAction(options = {}) {
                     }
                 }
             });
-            
+
             ctx.port = result.port;
             task.output = `Server ready on port ${ctx.port} (mocks enabled)`;
             taskComplete = true;
@@ -123,17 +123,17 @@ function makeRunPytestAction(options = {}) {
         run: async (ctx, task) => {
             // Load .env for test configuration
             require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
-            
+
             const port = ctx.brackets?.['node-test-server']?.port || ctx.port;
-            
+
             const testEnv = {
                 ...process.env,
                 ROCKETRIDE_URI: `http://localhost:${port}`
             };
-            
+
             // Use absolute paths since cwd is dist/server
             const pytestArgs = ['-m', 'pytest', TEST_DIR, '-v', '--rootdir', PACKAGE_DIR];
-            
+
             // Add any additional pytest options (from CLI or direct options)
             // ctx.options comes from CLI args like --pytest="-s -v"
             const pytestOpts = options.pytest || ctx.options?.pytest;
@@ -148,7 +148,7 @@ function makeRunPytestAction(options = {}) {
                     }
                 }
             }
-            
+
             // Allow filtering tests by marker or pattern
             const markers = options.markers || ctx.options?.markers;
             const pattern = options.pattern || ctx.options?.pattern;
@@ -158,9 +158,9 @@ function makeRunPytestAction(options = {}) {
             if (pattern) {
                 pytestArgs.push('-k', pattern);
             }
-            
-            await execCommand(ENGINE, pytestArgs, { 
-                task, 
+
+            await execCommand(ENGINE, pytestArgs, {
+                task,
                 cwd: PACKAGE_DIR,
                 env: testEnv,
             });
@@ -172,14 +172,14 @@ function makeRunContractTestsAction() {
     return {
         run: async (ctx, task) => {
             const pytestArgs = [
-                '-m', 'pytest', 
-                path.join(TEST_DIR, 'test_contracts.py'), 
-                '-v', 
+                '-m', 'pytest',
+                path.join(TEST_DIR, 'test_contracts.py'),
+                '-v',
                 '--rootdir', PACKAGE_DIR
             ];
-            
-            await execCommand(ENGINE, pytestArgs, { 
-                task, 
+
+            await execCommand(ENGINE, pytestArgs, {
+                task,
                 cwd: PACKAGE_DIR
             });
         }
@@ -193,7 +193,7 @@ function makeRunContractTestsAction() {
 module.exports = {
     name: 'nodes',
     description: 'Pipeline Nodes',
-    
+
     actions: [
         // Internal actions
         { name: 'nodes:sync', action: makeSyncNodesAction },
@@ -201,11 +201,11 @@ module.exports = {
         { name: 'nodes:stop-server', action: makeStopTestServerAction },
         { name: 'nodes:run-pytest', action: makeRunPytestAction },
         { name: 'nodes:run-contracts', action: makeRunContractTestsAction },
-        
+
         // Public actions (have descriptions)
-        { name: 'nodes:build', action: () => ({ 
+        { name: 'nodes:build', action: () => ({
             description: 'Build pipeline nodes',
-            steps: ['server:build', 'nodes:sync'] 
+            steps: ['server:build', 'nodes:sync']
         })},
         { name: 'nodes:test', action: () => ({
             description: 'Test pipeline nodes',

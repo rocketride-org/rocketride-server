@@ -22,8 +22,10 @@
 // =============================================================================
 
 const esbuild = require('esbuild');
+const path = require('path');
 
 const production = process.argv.includes('--production');
+const outfile = path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'vscode/rocketride.js');
 
 esbuild.build({
 	entryPoints: ['src/extension.ts'],
@@ -33,7 +35,7 @@ esbuild.build({
 	sourcemap: true,
 	platform: 'node',
 	target: 'node16',
-	outfile: '../../build/vscode/rocketride.js',
+	outfile,
 	external: ['vscode'],
 	mainFields: ['main'],
 	resolveExtensions: ['.ts', '.js', '.json'],

@@ -1,6 +1,6 @@
 /**
  * Shared Execution Utilities
- *
+ * 
  * Helper functions for executing shell commands.
  * On Windows, resolves commands without extension (e.g. "mvn", "vsvars") using a fixed
  * extension order and runs .cmd/.bat via cmd /c, .ps1 via PowerShell -File, .exe/.com directly.
@@ -10,6 +10,7 @@ const path = require('path');
 const fs = require('fs');
 const { logOutput } = require('./log');
 const { taskDebug } = require('./debug');
+const { BUILD_ROOT, DIST_ROOT } = require('./paths');
 
 /** Windows: extension order and how to run. Used for resolution and execution. */
 const WIN_EXTENSIONS = [
@@ -79,7 +80,7 @@ function resolveWindowsCommand(command, cwd, env) {
 -- * Execute a command with streaming output to a Listr task.
  * On Windows, resolves bare names (e.g. "mvn", "npx") and paths without extension using
  * .com, .exe, .bat, .cmd, .ps1; runs .cmd/.bat via cmd /c, .ps1 via PowerShell -File, others directly.
- *
+ * 
  * @param {string} command - Command to run (path or name; extension optional on Windows)
  * @param {string[]} args - Command arguments
  * @param {Object} options - Options
@@ -97,7 +98,11 @@ async function execCommand(command, args, options = {}) {
     const {
         cwd = process.cwd(),
         task = null,
-        env = process.env,
+        env = {
+            ...process.env,
+            ROCKETRIDE_BUILD_ROOT: BUILD_ROOT,
+            ROCKETRIDE_DIST_ROOT: DIST_ROOT
+        },
         onOutput = null,
         collect = false,
         logModule = null,

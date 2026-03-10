@@ -23,9 +23,9 @@ const { mkdir, readDir, stat, copyFile, rm, unlink } = require('./fs');
  */
 async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, deleted: 0, unchanged: 0 }) {
     const skipDirs = options.skipDirs || ['__pycache__'];
-    
+
     await mkdir(dest);
-    
+
     // Get source entries
     const srcEntries = new Map();
     try {
@@ -35,9 +35,9 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
             srcEntries.set(entry.name, entry);
         }
     } catch (err) {
-        if (err.code !== 'ENOENT') throw err;
+        if (err.code !== 'ENOENT' || options.sourceRequired) throw err;
     }
-    
+
     // Get dest entries
     const destEntries = new Map();
     try {
@@ -48,33 +48,33 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
     } catch (err) {
         if (err.code !== 'ENOENT') throw err;
     }
-    
+
     // Process source entries - copy new/modified
     for (const [name, srcEntry] of srcEntries) {
         const srcPath = path.join(src, name);
         const destPath = path.join(dest, name);
-        
+
         if (srcEntry.isDirectory()) {
             await syncDir(srcPath, destPath, options, stats);
         } else {
             let needsCopy = true;
             let isNew = !destEntries.has(name);
-            
+
             if (destEntries.has(name)) {
                 const destEntry = destEntries.get(name);
                 if (!destEntry.isDirectory()) {
                     // Compare mtime and size
                     const srcStat = await stat(srcPath);
                     const destStat = await stat(destPath);
-                    
-                    if (srcStat.size === destStat.size && 
+
+                    if (srcStat.size === destStat.size &
                         srcStat.mtimeMs <= destStat.mtimeMs) {
                         needsCopy = false;
                         stats.unchanged++;
                     }
                 }
             }
-            
+
             if (needsCopy) {
                 await copyFile(srcPath, destPath);
                 if (isNew) {
@@ -85,7 +85,7 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
             }
         }
     }
-    
+
     // Remove dest entries that don't exist in source
     for (const [name, destEntry] of destEntries) {
         if (!srcEntries.has(name)) {
@@ -98,7 +98,7 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
             stats.deleted++;
         }
     }
-    
+
     return stats;
 }
 
@@ -120,10 +120,10 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
  */
 async function overlayDir(src, dest, options = {}, stats = { added: 0, updated: 0, unchanged: 0 }) {
     const skipDirs = options.skipDirs || ['__pycache__'];
-    
+
     // Ensure destination directory exists
     await mkdir(dest);
-    
+
     // Get source entries
     let srcEntries = [];
     try {
@@ -132,25 +132,25 @@ async function overlayDir(src, dest, options = {}, stats = { added: 0, updated: 
         if (err.code !== 'ENOENT') throw err;
         return stats;  // Source doesn't exist, nothing to copy
     }
-    
+
     // Process each source entry
     for (const entry of srcEntries) {
         if (skipDirs.includes(entry.name)) continue;
-        
+
         const srcPath = path.join(src, entry.name);
         const destPath = path.join(dest, entry.name);
-        
+
         if (entry.isDirectory()) {
             await overlayDir(srcPath, destPath, options, stats);
         } else {
             let needsCopy = true;
             let isNew = true;
-            
+
             try {
                 const srcStat = await stat(srcPath);
                 const destStat = await stat(destPath);
                 isNew = false;
-                
+
                 // Only skip copy if dest has same size and is same age or newer
                 if (srcStat.size === destStat.size && srcStat.mtimeMs <= destStat.mtimeMs) {
                     needsCopy = false;
@@ -160,7 +160,7 @@ async function overlayDir(src, dest, options = {}, stats = { added: 0, updated: 
                 if (err.code !== 'ENOENT') throw err;
                 // Dest file doesn't exist, need to copy
             }
-            
+
             if (needsCopy) {
                 await copyFile(srcPath, destPath);
                 if (isNew) {
@@ -171,7 +171,7 @@ async function overlayDir(src, dest, options = {}, stats = { added: 0, updated: 
             }
         }
     }
-    
+
     return stats;
 }
 
@@ -185,7 +185,7 @@ function formatSyncStats(stats) {
     if (changed === 0) {
         return `No changes (${stats.unchanged || 0} files up to date)`;
     }
-    
+
     const parts = [];
     if (stats.added > 0) parts.push(`+${stats.added} added`);
     if (stats.updated > 0) parts.push(`~${stats.updated} updated`);
