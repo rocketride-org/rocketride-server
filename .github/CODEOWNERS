@@ -1,29 +1,32 @@
+# CODEOWNERS – default reviewers for PRs (GitHub)
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
 # Default owners for everything
 * @rocketride-org/maintainers
 
 # C++ engine
-/packages/server/ @rocketride-org/engine
-/apps/engine/ @rocketride-org/engine
+# /packages/server/ @rocketride-org/engine
+# /apps/engine/ @rocketride-org/engine
 
 # Python pipeline nodes
-/nodes/ @rocketride-org/nodes
+# /nodes/ @rocketride-org/nodes
 
 # Client SDKs
-/packages/client-typescript/ @rocketride-org/sdk
-/packages/client-python/ @rocketride-org/sdk
-/packages/client-mcp/ @rocketride-org/sdk
+# /packages/client-typescript/ @rocketride-org/sdk
+# /packages/client-python/ @rocketride-org/sdk
+# /packages/client-mcp/ @rocketride-org/sdk
 
 # AI modules
-/packages/ai/ @rocketride-org/ai
+# /packages/ai/ @rocketride-org/ai
 
 # Applications
-/apps/chat-ui/ @rocketride-org/frontend
-/apps/dropper-ui/ @rocketride-org/frontend
-/apps/vscode/ @rocketride-org/vscode
+# /apps/chat-ui/ @rocketride-org/frontend
+# /apps/dropper-ui/ @rocketride-org/frontend
+# /apps/vscode/ @rocketride-org/vscode
 
 # CI/CD and DevOps
 /.github/ @rocketride-org/devops
 /scripts/ @rocketride-org/devops
 
 # Documentation
-/docs/ @rocketride-org/maintainers
+# /docs/ @rocketride-org/maintainers
