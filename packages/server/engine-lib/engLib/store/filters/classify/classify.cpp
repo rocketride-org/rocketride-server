@@ -236,18 +236,12 @@ Error IFilterInstance::writeText(const Utf16View &text) noexcept {
 }
 
 Error IFilterInstance::writeTable(const Utf16View &text) noexcept {
-    // Call the parent
-    if (auto err = Parent::writeText(text))
-        return err;
     // Tables are treated like regular text
     return writeText(text);
 }
 
 Error IFilterInstance::closing() noexcept {
     LOGT("closing");
-    // Call the parent
-    if (auto err = Parent::closing())
-        return err;
 
     auto *api = m_global.api();
     if (!api || !m_session) {
@@ -293,7 +287,8 @@ Error IFilterInstance::closing() noexcept {
              getSessionError());
     }
 
-    return {};
+    // Call the parent and done
+    return Parent::closing();
 }
 
 Error IFilterInstance::endFilterInstance() noexcept {
