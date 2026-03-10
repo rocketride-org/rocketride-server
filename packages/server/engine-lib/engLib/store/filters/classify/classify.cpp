@@ -126,6 +126,10 @@ Text IFilterInstance::getSessionError() const noexcept {
 Error IFilterInstance::beginFilterInstance() noexcept {
     LOGT("beginFilterInstance");
 
+    // Call our parent first
+    if (auto err = Parent::beginFilterInstance())
+            return err;
+
     auto *api = m_global.api();
     if (!api) {
         return APERRT(Ec::InvalidState, "Classification API not available");
@@ -179,6 +183,10 @@ Error IFilterInstance::open(Entry &object) noexcept {
 }
 
 Error IFilterInstance::writeText(const Utf16View &text) noexcept {
+    // Call the parent
+    if (auto err = Parent::writeText(text))
+        return err;
+
     auto *api = m_global.api();
     if (!api || !m_session) {
         return APERRT(Ec::InvalidState, "Session not initialized");
@@ -279,11 +287,15 @@ Error IFilterInstance::closing() noexcept {
              getSessionError());
     }
 
-    return {};
+    // Call the parent and done
+    return Parent::closing();
 }
 
 Error IFilterInstance::endFilterInstance() noexcept {
     LOGT("endFilterInstance");
+    // Call our parent first
+    if (auto err = Parent::endFilterInstance())
+        return err;
     return resetSession();
 }
 
