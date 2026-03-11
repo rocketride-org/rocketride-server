@@ -839,7 +839,7 @@ export class ConfigManager {
 				await this.saveEnvFile();
 			}
 		} catch (error) {
-			error;
+			console.error('Failed to ensure .env file sync:', error);
 		}
 	}
 
@@ -874,7 +874,7 @@ export class ConfigManager {
 				this.envChangeEmitter.fire(this.getEnvVars());
 			}
 		} catch (error) {
-			error;
+			console.error('Failed to sync settings to .env:', error);
 		}
 	}
 

@@ -62,8 +62,8 @@ def _memory_get(key: str, host: AgentHost) -> Any:
         result = host.tools.invoke('memory.get', {'key': key})
         if isinstance(result, dict) and result.get('ok'):
             return result.get('value')
-    except Exception:
-        pass
+    except Exception as exc:
+        error('memory_get failed for key=%s: %s', key, exc)
     return None
 
 
