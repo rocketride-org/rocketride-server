@@ -908,7 +908,11 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
         .PYBIND(hasListener, &IServiceFilterInstance::cb_hasListener)
         .PYBIND(getListeners, &IServiceFilterInstance::cb_getListeners)
-        .PYBIND(control, &IServiceFilterInstance::cb_control)
+        .PYBIND(getControllerNodeIds,
+                &IServiceFilterInstance::cb_getControllerNodeIds)
+        .PYBIND(control, &IServiceFilterInstance::cb_control,
+                py::arg("classType"), py::arg("control"),
+                py::arg("nodeId") = "")
         .PYBIND(open, &IServiceFilterInstance::cb_open)
         .PYBIND(writeTagBeginObject,
                 &IServiceFilterInstance::cb_writeTagBeginObject)

@@ -40,6 +40,7 @@ from .engine import monitorCompleted
 from .engine import monitorFailed
 from .engine import monitorMetrics
 from .engine import monitorOther
+from .engine import monitorSSE
 from .engine import monitorStatus
 from .engine import monitorDependencyDownload
 from .engine import outputEndpointParameters
@@ -114,6 +115,7 @@ __all__ = [
     'monitorFailed',
     'monitorMetrics',
     'monitorOther',
+    'monitorSSE',
     'monitorStatus',
     'monitorDependencyDownload',
     'OPEN_MODE',

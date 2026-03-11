@@ -316,8 +316,10 @@ public:
     //---------------------------------
     virtual bool cb_hasListener(std::string lane) noexcept(false);
     virtual std::vector<std::string> cb_getListeners() noexcept(false);
-    virtual void cb_control(std::string &filter,
-                            py::object &control) noexcept(false);
+    virtual std::vector<std::string> cb_getControllerNodeIds(
+        std::string &classType) noexcept(false);
+    virtual void cb_control(std::string &filter, py::object &control,
+                            std::string nodeId = "") noexcept(false);
     virtual void cb_open(py::object entry) noexcept(false);
     virtual void cb_writeTagBeginObject() noexcept(false);
     virtual void cb_writeTagBeginStream() noexcept(false);

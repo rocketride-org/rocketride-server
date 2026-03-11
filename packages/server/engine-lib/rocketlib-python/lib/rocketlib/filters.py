@@ -401,8 +401,19 @@ class IServiceFilterInstance(Protocol):
         """
         pass
 
-    def control(self, filter: str, control: IControl) -> None:
-        """Control the instance using the parameters in control."""
+    def getControllerNodeIds(self, classType: str) -> List[str]:
+        """
+        Get the pipeline node IDs of all nodes connected for a given
+        control class type (e.g. ``"tool"``, ``"llm"``).
+        """
+        pass
+
+    def control(self, filter: str, control: IControl, nodeId: str = "") -> None:
+        """Control the instance using the parameters in control.
+
+        When *nodeId* is provided, the control is dispatched directly to that
+        specific node instead of walking the full chain.
+        """
         pass
 
     def open(self, obj: Entry) -> None:
@@ -668,9 +679,9 @@ Monkey patch the C++ methods as needed
 def _patch_classes():
     """Add Python methods to C++ classes."""
 
-    def invoke(self, classType: str, *args, **kwargs) -> Any:
+    def invoke(self, classType: str, *args, nodeId: str = "", **kwargs) -> Any:
         control = IInvoke(args=args, kwargs=kwargs, result=None)
-        self.control(classType, control)
+        self.control(classType, control, nodeId=nodeId)
         return control.result
 
     # Add to the actual C++ class

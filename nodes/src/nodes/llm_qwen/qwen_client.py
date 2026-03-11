@@ -71,6 +71,7 @@ class Chat(ChatBase):
             api_key=apikey,
             base_url=base_url,
             temperature=0,
+            max_tokens=self._modelOutputTokens,
         )
 
         # Save our chat class into the bag

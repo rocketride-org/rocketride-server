@@ -63,28 +63,33 @@ export class DataPipe {
 	private _pipeId?: number;
 	private _opened = false;
 	private _closed = false;
+	private _onSSE?: (body: Record<string, unknown>) => Promise<void>;
 
 	/**
 	 * Creates a new DataPipe instance.
-	 * 
+	 *
 	 * @param client - The RocketRideClient instance managing this pipe
 	 * @param token - Task token for the pipeline receiving the data
 	 * @param objinfo - Metadata about the object being sent (e.g., filename, size)
 	 * @param mimeType - MIME type of the data being sent (default: 'application/octet-stream')
 	 * @param provider - Optional provider name for the data source
+	 * @param onSSE - Optional async callback invoked for each SSE event emitted by
+	 *                the pipeline node for this specific pipe
 	 */
 	constructor(
 		client: RocketRideClient,
 		token: string,
 		objinfo: Record<string, unknown> = {},
 		mimeType = 'application/octet-stream',
-		provider?: string
+		provider?: string,
+		onSSE?: (body: Record<string, unknown>) => Promise<void>
 	) {
 		this._client = client;
 		this._token = token;
 		this._objinfo = objinfo;
 		this._mimeType = mimeType;
 		this._provider = provider;
+		this._onSSE = onSSE;
 	}
 
 	/**
@@ -141,6 +146,13 @@ export class DataPipe {
 
 		this._pipeId = response.body?.pipe_id as number | undefined;
 		this._opened = true;
+
+		// If an SSE callback was provided, subscribe and register for this pipe
+		if (this._onSSE !== undefined && this._pipeId !== undefined) {
+			await this._client.setEvents(this._token, ['SSE'], this._pipeId);
+			this._client._ssePipeCallbacks.set(this._pipeId, this._onSSE);
+		}
+
 		return this;
 	}
 
@@ -211,6 +223,16 @@ export class DataPipe {
 			return response.body as PIPELINE_RESULT;
 		} finally {
 			this._closed = true;
+
+			// Unregister SSE callback and scoped monitor subscription
+			if (this._onSSE !== undefined && this._pipeId !== undefined) {
+				this._client._ssePipeCallbacks.delete(this._pipeId);
+				try {
+					await this._client.setEvents(this._token, [], this._pipeId);
+				} catch {
+					// Best-effort cleanup
+				}
+			}
 		}
 	}
 }
@@ -244,6 +266,8 @@ export class RocketRideClient extends DAPClient {
 	private _dapAttempted = false;
 	private _dapSend?: (event: unknown) => void;
 	private _nextChatId = 1;
+	/** Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch. */
+	readonly _ssePipeCallbacks = new Map<number, (body: Record<string, unknown>) => Promise<void>>();
 
 	// Persistence properties for automatic reconnection
 	private _persist: boolean = false;
@@ -1178,8 +1202,9 @@ export class RocketRideClient extends DAPClient {
 	async chat(options: {
 		token: string;
 		question: Question;
+		onSSE?: (body: Record<string, unknown>) => Promise<void>;
 	}): Promise<PIPELINE_RESULT> {
-		const { token, question } = options;
+		const { token, question, onSSE } = options;
 
 		try {
 			// Validate that we have a question to ask
@@ -1197,7 +1222,8 @@ export class RocketRideClient extends DAPClient {
 				token,
 				objinfo,
 				'application/rocketride-question',
-				'chat'
+				'chat',
+				onSSE
 			);
 
 			try {
@@ -1285,6 +1311,21 @@ export class RocketRideClient extends DAPClient {
 		// Forward to debugging interface if available
 		this._sendVSCodeEvent(eventType, eventBody);
 
+		// Dispatch pipe-scoped SSE events to the registered DataPipe callback
+		if (eventType === 'apaevt_sse') {
+			const pipeId = (eventBody as Record<string, unknown>)?.pipe_id as number | undefined;
+			if (pipeId !== undefined) {
+				const cb = this._ssePipeCallbacks.get(pipeId);
+				if (cb) {
+					try {
+						await cb(eventBody as Record<string, unknown>);
+					} catch (error) {
+						this.debugMessage(`Error in SSE callback for pipe ${pipeId}: ${error}`);
+					}
+				}
+			}
+		}
+
 		// Call user-provided event handler if available
 		if (this._callerOnEvent) {
 			try {
@@ -1365,10 +1406,12 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Subscribe to specific types of events from the server.
 	 */
-	async setEvents(token: string, eventTypes: string[]): Promise<void> {
+	async setEvents(token: string, eventTypes: string[], pipeId?: number): Promise<void> {
 		// Build event subscription request
+		const args: Record<string, unknown> = { types: eventTypes };
+		if (pipeId !== undefined) args.pipeId = pipeId;
 		const request = this.buildRequest('rrext_monitor', {
-			arguments: { types: eventTypes },
+			arguments: args,
 			token,
 		});
 

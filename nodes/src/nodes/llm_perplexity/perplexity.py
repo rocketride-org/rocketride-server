@@ -76,6 +76,7 @@ class Chat(ChatBase):
             temperature=0,
             timeout=timeout,
             max_retries=0,  # We handle retries ourselves
+            max_tokens=self._modelOutputTokens,
         )
 
         # Store in bag for pipeline access

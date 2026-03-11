@@ -172,6 +172,15 @@
 			"default": "table",
 			"description": "Name of table"
 		},
+		"mysql.db_description": {
+			"type": "string",
+			"title": "Database description",
+			"default": "",
+			"description": "Optional plain-language description of the database content and purpose (helps the LLM generate better queries)",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
 		"mysql.max_attempts": {
 			"type": "integer",
 			"title": "Max validation attempts",
@@ -188,6 +197,7 @@
 				"mysql.password",
 				"mysql.database",
 				"mysql.table",
+				"mysql.db_description",
 				"mysql.max_attempts"
 			]
 		},

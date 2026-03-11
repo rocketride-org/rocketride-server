@@ -8,5 +8,6 @@ Schemas and contracts remain importable from `ai.common.agent.types`.
 """
 
 from .agent import AgentBase
+from ._internal.utils import extract_text, safe_str
 
-__all__ = ['AgentBase']
+__all__ = ['AgentBase', 'extract_text', 'safe_str']

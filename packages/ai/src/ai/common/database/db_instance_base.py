@@ -173,6 +173,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         question: Question = Question(type=QuestionType.QUESTION, role='You are a technical assistant.')
         question.addQuestion(question_text)
+
+        if self.IGlobal.db_description:
+            question.addContext(f'Database description: {self.IGlobal.db_description}')
+
         question.addContext(db_schema_description)
         question.expectJson = True
 

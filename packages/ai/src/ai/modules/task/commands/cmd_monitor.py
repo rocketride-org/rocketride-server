@@ -88,7 +88,7 @@ class MonitorCommands(DAPConn):
         self,
         type: EVENT_TYPE,
         token: str,
-        event: Dict[str, Any],
+        event: Dict[str, Any] = None,
     ) -> None:
         """
         Forward a task event to subscribed monitors based on their subscription preferences.
@@ -129,22 +129,35 @@ class MonitorCommands(DAPConn):
         # Get the task by token
         control = self._server.get_task_control(token)
 
-        # Verify we are allowed to receive events for this task
-        self.verify_permission('task.monitor')
+        # Verify we are allowed to receive events for this task - for SSE events, it requires data
+        # access, for all others, it's monitor access
+        if type == EVENT_TYPE.SSE:
+            self.verify_permission('task.data')
+        else:
+            self.verify_permission('task.monitor')
 
         # Verify that this notification is going to the correct apikey
         if control.apikey != self._account_info.apikey:
             return
 
-        # Check if any monitor is subscribed to this project/source
+        # Build the base project-scoped key
         project_key = f'p.{control.project_id}.{control.source}'
+
+        # Pipe-scoped check (most specific) — SSE events embed pipe_id in body
+        pipe_id = (event or {}).get('body', {}).get('pipe_id')
+        if pipe_id is not None:
+            pipe_key = f'{project_key}.{pipe_id}'
+            if pipe_key in self._monitors:
+                subscriber_preference = self._monitors[pipe_key]
+                await _send_event(subscriber_preference)
+
+        # Project-scoped check
         if project_key in self._monitors:
-            # Get the subscriber's event type for this specific token
             subscriber_preference = self._monitors[project_key]
             await _send_event(subscriber_preference)
 
+        # Wildcard check
         if '*' in self._monitors:
-            # Get the subscriber preference for all tokens
             subscriber_preference = self._monitors['*']
             await _send_event(subscriber_preference)
 
@@ -236,6 +249,7 @@ class MonitorCommands(DAPConn):
         token: str = None,
         project_id: str = None,
         source: str = None,
+        pipe_id: int = None,
         type: EVENT_TYPE = EVENT_TYPE.NONE,
     ) -> Dict[str, Any]:
         """
@@ -305,6 +319,11 @@ class MonitorCommands(DAPConn):
             # Invalid
             raise ValueError('You must specifiy either token or project_id/source')
 
+        # If a pipe_id is specified, narrow the key to that specific pipe
+        if pipe_id is not None and event_key != '*':
+            event_key = f'{event_key}.{pipe_id}'
+            filter_name = f'{filter_name}.pipe{pipe_id}'
+
         try:
             if type == EVENT_TYPE.NONE:
                 # Unsubscribe: remove from monitor registry
@@ -373,13 +392,13 @@ class MonitorCommands(DAPConn):
         # Verify permission
         token = self.get_task_token(request, 'task.monitor')
 
-        # Get the project_id/source if specified
-        args = request.get('arguments', {})
-        project_id = args.get('projectId', None)
-        source = args.get('source', None)
-
         # Parse monitoring configuration from request arguments
         args = request.get('arguments', {})
+
+        # Get the project_id/source/pipeId if specified
+        project_id = args.get('projectId', None)
+        source = args.get('source', None)
+        pipe_id = args.get('pipeId', None)
 
         # Determine the desired event subscription level
         types = args.get('types', None)
@@ -401,6 +420,7 @@ class MonitorCommands(DAPConn):
             token=token,
             project_id=project_id,
             source=source,
+            pipe_id=pipe_id,
             type=event_type,
         )
 

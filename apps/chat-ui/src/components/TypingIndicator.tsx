@@ -26,11 +26,12 @@ import React from 'react';
 
 /**
  * Animated typing indicator to show bot is composing a response
- * 
+ *
  * Displays three animated dots in a bubble to indicate the bot
- * is processing and will respond soon.
+ * is processing and will respond soon. When a streaming message
+ * is provided it is shown as a status label next to the dots.
  */
-export const TypingIndicator: React.FC = () => {
+export const TypingIndicator: React.FC<{ message?: string | null }> = ({ message }) => {
 	return (
 		<div className="typing-indicator">
 			<div className="typing-bubble">
@@ -39,6 +40,7 @@ export const TypingIndicator: React.FC = () => {
 					<div className="typing-dot"></div>
 					<div className="typing-dot"></div>
 				</div>
+				{message && <span className="typing-status">{message}</span>}
 			</div>
 		</div>
 	);

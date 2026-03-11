@@ -548,6 +548,7 @@ class TransportStdio(TransportBase):
         - '>DBG*operation*id*total_pipes*pipe_id' - Debug commands
         - '>DL*json_data' - pip install info
         - '>USR**json' - User data for prompting
+        - '>SSE*json' - Real-time node-to-UI message (pipe_id + message + optional data)
         - '>EXIT*exit_code_hex*exit_message' - Process exit
         """
         # Parse object status messages: '>OBJ*size_hex*object_name'
@@ -763,6 +764,19 @@ class TransportStdio(TransportBase):
                 await self._transport_receive({'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 1, 'message': 'Malformed exit message'}})
                 # TRIGGER ON_DISCONNECTED CALLBACK (malformed exit)
                 await self._transport_disconnected('Process exited with malformed exit message', has_error=True)
+
+        # Parse SSE messages: '>SSE*{"pipe_id": N, "message": "...", "data": {...}}'
+        elif message.startswith('>SSE*'):
+            try:
+                parts = message.split('*', 1)
+                payload = json.loads(parts[1]) if len(parts) > 1 else {}
+                await self._transport_receive({
+                    'type': 'event',
+                    'event': 'apaevt_sse',
+                    'body': payload,
+                })
+            except Exception as e:
+                self._debug_message(f'Malformed SSE message: {message}, error: {e}')
 
         # Handle unknown control messages starting with '>'
         elif message.startswith('>'):

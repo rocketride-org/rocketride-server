@@ -61,6 +61,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     session = None
     database: str = ''
     table: str = ''
+    db_description: str = ''
     schema: Dict[str, Tuple[str, str]] = {}
     db_schema: Dict[str, Dict] = {}
     max_validation_attempts: int = 5
@@ -84,6 +85,14 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         The base implementation returns 5, matching the services.json default.
         """
         return 5
+
+    def _db_description(self, config: Dict[str, Any]) -> str:
+        """Return the user-provided description of the database content and purpose.
+
+        Override in a derived class to read the value from the node's config.
+        The base implementation returns an empty string.
+        """
+        return ''
 
     @abstractmethod
     def _build_connection_url(self, params: Dict[str, str]) -> str:
@@ -426,6 +435,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         # Read behavior settings from config before opening the engine so
         # they're available to the instance as soon as beginGlobal returns.
         self.max_validation_attempts = max(1, self._max_validation_attempts(raw))
+        self.db_description = (self._db_description(raw) or '').strip()
 
         self.database = params['database']
         self.table = params['table']

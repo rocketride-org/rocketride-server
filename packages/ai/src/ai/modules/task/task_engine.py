@@ -1063,6 +1063,10 @@ class Task(DAPBase):
                     flow
                 )
 
+        # Handle real-time node-to-UI SSE messages (pass-through, no status tracking)
+        elif event_type == 'apaevt_sse':
+            await self._forward_task_event(EVENT_TYPE.SSE, message)
+
         # Handle debug output
         elif event_type == 'output':
             output_message = body.get('output', '')

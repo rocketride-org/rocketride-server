@@ -214,6 +214,68 @@ body {
 	gap: 1rem;
 }
 
+.message-status {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.15rem 0.25rem;
+	color: var(--text-muted, #aaa);
+	font-size: 0.78rem;
+	font-style: italic;
+}
+
+.message-status-dot {
+	width: 0.4rem;
+	height: 0.4rem;
+	border-radius: 50%;
+	background: var(--accent-primary);
+	opacity: 0.5;
+	flex-shrink: 0;
+}
+
+.thinking-group {
+	margin: 4px 0;
+}
+
+.thinking-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	background: none;
+	border: none;
+	cursor: pointer;
+	padding: 2px 0;
+	color: var(--text-muted);
+	font-size: 0.78rem;
+	font-style: italic;
+}
+
+.thinking-header:hover {
+	color: var(--text-secondary);
+}
+
+.thinking-chevron {
+	display: inline-block;
+	width: 0;
+	height: 0;
+	border-left: 4px solid transparent;
+	border-right: 4px solid transparent;
+	border-top: 5px solid currentColor;
+	transition: transform 0.15s ease;
+	transform: rotate(-90deg);
+}
+
+.thinking-chevron.open {
+	transform: rotate(0deg);
+}
+
+.thinking-messages {
+	padding-left: 14px;
+	border-left: 2px solid var(--border-color);
+	margin-left: 2px;
+	margin-top: 2px;
+}
+
 .message-wrapper {
 	display: flex;
 	align-items: flex-start;
@@ -290,6 +352,19 @@ body {
 	border-radius: 1rem;
 	box-shadow: none;
 	border: none;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.typing-status {
+	font-size: 0.8rem;
+	color: var(--text-secondary, #888);
+	font-style: italic;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 20rem;
 }
 
 .typing-dots {

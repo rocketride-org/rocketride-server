@@ -75,23 +75,34 @@ export const useChatMessages = () => {
 				expectJson: false
 			});
 
-			question.addInstruction('Format', 'I am using markdown, so try to format responses nicely.')
-			question.addInstruction('Tools', 'Never return just the tool output.')
 			question.addQuestion(userMessage);
 
 			// Include last 6 messages for context - helps AI maintain conversation flow
-			// Filter out system messages (UI-only greetings/notifications) to avoid priming the LLM
-			messages.filter(msg => msg.sender !== 'system').slice(-6).forEach(msg => {
+			// Filter out system/status messages (UI-only) to avoid priming the LLM
+			messages.filter(msg => msg.sender !== 'system' && msg.sender !== 'status').slice(-6).forEach(msg => {
 				question.addHistory({
 					role: msg.sender === 'user' ? 'user' : 'assistant',
 					content: msg.text
 				});
 			});
 
-			// Send to RocketRide using authToken
+			// Send to RocketRide; onSSE adds real-time status messages to the chat
 			const result: PIPELINE_RESULT = await client.chat({
 				token: authToken,
-				question: question
+				question: question,
+				onSSE: async (body: Record<string, unknown>) => {
+					const text = body.message as string | undefined;
+					const sseType = (body.type as string | undefined) ?? 'thinking';
+					if (text) {
+						setMessages(prev => [...prev, {
+							id: Date.now(),
+							text,
+							sender: 'status',
+							sseType: sseType as 'thinking' | 'acting' | 'confirm',
+							timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+						}]);
+					}
+				}
 			});
 
 			// Extract text responses from result

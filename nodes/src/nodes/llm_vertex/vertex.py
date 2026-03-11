@@ -111,7 +111,7 @@ class Chat(ChatBase):
         vertex_model_name = self._model
 
         # Initialize LLM using unified ChatVertexAI for all models
-        self._llm = ChatVertexAI(model=vertex_model_name, temperature=0, credentials=credentials, project=project, location=location)
+        self._llm = ChatVertexAI(model=vertex_model_name, temperature=0, credentials=credentials, project=project, location=location, max_output_tokens=self._modelOutputTokens)
 
         # Save our chat class into the bag
         bag['chat'] = self

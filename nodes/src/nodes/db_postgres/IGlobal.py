@@ -67,3 +67,9 @@ class IGlobal(DatabaseGlobalBase):
             return int(block.get('postgresdb.max_attempts') or config.get('postgresdb.max_attempts') or 5)
         except (ValueError, TypeError):
             return 5
+
+    def _db_description(self, config: Dict[str, Any]) -> str:
+        block = config.get('postgresdb.default')
+        if not isinstance(block, dict):
+            block = {}
+        return str(block.get('postgresdb.db_description') or config.get('postgresdb.db_description') or '')

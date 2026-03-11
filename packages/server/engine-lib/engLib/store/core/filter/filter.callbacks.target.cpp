@@ -58,8 +58,28 @@ std::vector<std::string> IServiceFilterInstance::cb_getListeners() noexcept(
     return this->binder.getListeners();
 }
 
+std::vector<std::string> IServiceFilterInstance::cb_getControllerNodeIds(
+    std::string &classType) noexcept(false) {
+    // Check to make sure target mode
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use getControllerNodeIds");
+
+    std::vector<std::string> result;
+    auto it = this->controller.find(classType);
+    if (it != this->controller.end()) {
+        for (auto idx : it->second) {
+            auto &filter =
+                this->endpoint->m_instanceStacks[this->pipeId][idx];
+            result.push_back(filter->pipeType.id);
+        }
+    }
+    return result;
+}
+
 void IServiceFilterInstance::cb_control(std::string &classType,
-                                        py::object &control) noexcept(false) {
+                                        py::object &control,
+                                        std::string nodeId) noexcept(false) {
     Error ccode;
 
     // Check to make sure target mode
@@ -78,9 +98,55 @@ void IServiceFilterInstance::cb_control(std::string &classType,
     // Get the trace level
     auto traceLevel = endpoint->config.pipelineTraceLevel;
 
-    // Walk the filters we need to call. We will call them in order, until
-    // one doesn't throw. If we go through all of them and they all throw, we
-    // will throw an invalid parameter error
+    // ---- Targeted dispatch: if nodeId is provided, call that node directly
+    if (!nodeId.empty()) {
+        for (auto filterId : controls->second) {
+            ServiceInstance filter =
+                this->endpoint->m_instanceStacks[this->pipeId][filterId];
+
+            if (filter->pipeType.id != nodeId) continue;
+
+            // Build enter trace
+            json::Value enterTrace;
+            if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
+                enterTrace["lane"] = "invoke";
+                enterTrace["invoke"] = classType.c_str();
+
+                if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL)
+                    enterTrace["data"] = engine::python::pyjson::dictToJson(
+                        control.attr("model_dump")());
+            }
+
+            this->pipe->debugger.debugEnter(filter.get(), enterTrace);
+
+            ccode = filter->control(control);
+
+            // Build leave trace
+            json::Value leaveTrace;
+            if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
+                leaveTrace["lane"] = "invoke";
+                leaveTrace["invoke"] = classType.c_str();
+                leaveTrace["result"] = ccode ? "error" : "continue";
+
+                if (ccode && ccode.code() != Ec::PreventDefault)
+                    leaveTrace["error"] = ccode.message();
+
+                if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL)
+                    leaveTrace["data"] = engine::python::pyjson::dictToJson(
+                        control.attr("model_dump")());
+            }
+
+            this->pipe->debugger.debugLeave(filter.get(), leaveTrace);
+
+            if (ccode) throw ccode;
+            return;
+        }
+
+        throw APERR(Ec::InvalidParam, "Node '", nodeId,
+                    "' not found for control type '", classType, "'");
+    }
+
+    // ---- Chain dispatch: walk all filters until one succeeds
     for (auto filterId : controls->second) {
         // Get a ptr to the specified filter
         ServiceInstance filter =

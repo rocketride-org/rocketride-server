@@ -691,10 +691,8 @@ export class ConfigManager {
 			await this.saveEnvFile();
 
 			this.envChangeEmitter.fire(this.getEnvVars());
-			console.log('[ConfigManager] Saved all environment variables');
 		} catch (error) {
 			console.error('[ConfigManager] Failed to save environment variables:', error);
-			throw new Error(`Failed to save environment variables: ${error}`);
 		}
 	}
 
@@ -824,16 +822,13 @@ export class ConfigManager {
 			const updates: Record<string, string> = {};
 
 			if (!fileExists) {
-				console.log('[ConfigManager] Creating initial .env file');
 				updates['ROCKETRIDE_URI'] = this.getApiHost();
 				updates['ROCKETRIDE_APIKEY'] = this.getApiKey();
 			} else {
 				if (!('ROCKETRIDE_URI' in this.config.env)) {
-					console.log('[ConfigManager] Adding missing ROCKETRIDE_URI to .env file');
 					updates['ROCKETRIDE_URI'] = this.getApiHost();
 				}
 				if (!('ROCKETRIDE_APIKEY' in this.config.env)) {
-					console.log('[ConfigManager] Adding missing ROCKETRIDE_APIKEY to .env file');
 					updates['ROCKETRIDE_APIKEY'] = this.getApiKey();
 				}
 			}
@@ -842,10 +837,9 @@ export class ConfigManager {
 				Object.assign(this.config.env, updates);
 				this.envRawText = this.updateEnvRawText(updates);
 				await this.saveEnvFile();
-				console.log('[ConfigManager] Ensured .env file has ROCKETRIDE_URI and ROCKETRIDE_APIKEY');
 			}
 		} catch (error) {
-			console.error('[ConfigManager] Failed to ensure .env file sync:', error);
+			error;
 		}
 	}
 
@@ -878,10 +872,9 @@ export class ConfigManager {
 				this.envRawText = this.updateEnvRawText(updates);
 				await this.saveEnvFile();
 				this.envChangeEmitter.fire(this.getEnvVars());
-				console.log('[ConfigManager] Synced ROCKETRIDE_URI/APIKEY to .env file');
 			}
 		} catch (error) {
-			console.error('[ConfigManager] Failed to sync settings to .env:', error);
+			error;
 		}
 	}
 
