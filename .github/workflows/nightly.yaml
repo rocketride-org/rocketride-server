@@ -117,6 +117,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: server-artifacts-${{ matrix.platform }}
+          retention-days: 3
           path: |
             ${{ github.workspace }}/dist/artifacts/*.zip
             ${{ github.workspace }}/dist/artifacts/*.tar.gz
@@ -128,6 +129,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: vscode-artifacts
+          retention-days: 3
           path: ${{ github.workspace }}/dist/vscode/*.vsix
           if-no-files-found: error
 
@@ -136,6 +138,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: mcp-client-artifacts
+          retention-days: 3
           path: |
             ${{ github.workspace }}/dist/clients/mcp/*.whl
             ${{ github.workspace }}/dist/clients/mcp/*.tar.gz
@@ -146,6 +149,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: python-client-artifacts
+          retention-days: 3
           path: |
             ${{ github.workspace }}/dist/clients/python/*.whl
             ${{ github.workspace }}/dist/clients/python/*.tar.gz
@@ -156,6 +160,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: typescript-client-artifacts
+          retention-days: 3
           path: ${{ github.workspace }}/dist/clients/typescript/*.tgz
           if-no-files-found: error
 
