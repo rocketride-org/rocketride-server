@@ -26,33 +26,16 @@ export const AnswersView: React.FC<AnswersViewProps> = ({ answers, compareMode, 
 		);
 	}
 
-	const truncate = (text: string, max: number) => {
-		const str = String(text || '');
-		return str.length > max ? str.slice(0, max) + '...' : str;
-	};
-
 	const renderAnswer = (content: any) => {
 		if (!content) {
 			return <div className="field-value">Empty response</div>;
 		}
 
-		// Handle string content
-		if (typeof content === 'string') {
-			return (
-				<div className="field-value">
-					<pre className="text-content" title={content}>
-						{truncate(content, 256)}
-					</pre>
-				</div>
-			);
-		}
+		const text = typeof content === 'string' ? content : String(content);
 
-		// Handle object content
 		return (
 			<div className="field-value">
-				<pre className="text-content" title={String(content)}>
-					{truncate(String(content), 256)}
-				</pre>
+				<pre className="text-content">{text}</pre>
 			</div>
 		);
 	};

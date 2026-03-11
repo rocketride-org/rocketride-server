@@ -47,8 +47,8 @@ export default function AddButton<
 >({ uiSchema, registry, ...props }: IconButtonProps<T, S, F>) {
 	const { translateString } = registry;
 	return (
-		<Box sx={{ mt: 1, pl: 6.2, pr: 5.4 }}>
-			<Button {...props} sx={{ width: 1 }} color="primary" variant="outlined">
+		<Box sx={{ mt: 1 }}>
+			<Button {...props} sx={{ width: 1 }} color="primary" variant="outlined" size="small">
 				{translateString(TranslatableString.AddItemButton)}
 			</Button>
 		</Box>

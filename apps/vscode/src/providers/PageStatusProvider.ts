@@ -719,6 +719,9 @@ export class PageStatusProvider {
 									if (event.data.type === 'requestPaste') {
 										vscode.postMessage({ type: 'requestPaste' });
 									}
+									if (event.data.type === 'copyText' && event.data.text) {
+										vscode.postMessage({ type: 'copyText', text: event.data.text });
+									}
 								}
 							});
 
@@ -744,12 +747,15 @@ export class PageStatusProvider {
 			`;
 
 			// Handle messages from the webview
-			const messageDisposable = panel.webview.onDidReceiveMessage(async (msg: { type: string }) => {
+			const messageDisposable = panel.webview.onDidReceiveMessage(async (msg: { type: string; text?: string }) => {
 				if (msg.type === 'requestPaste') {
 					const text = await vscode.env.clipboard.readText();
 					if (text) {
 						panel.webview.postMessage({ type: 'pasteContent', text });
 					}
+				}
+				if (msg.type === 'copyText' && msg.text) {
+					await vscode.env.clipboard.writeText(msg.text);
 				}
 			});
 

@@ -82,6 +82,7 @@ export default function FieldTemplate<
 	if (shouldHide) {
 		return <div style={{ display: 'none' }}>{children}</div>;
 	}
+
 	return (
 		<WrapIfAdditionalTemplate
 			classNames={classNames}

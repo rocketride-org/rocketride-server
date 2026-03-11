@@ -26,7 +26,7 @@ import type { DraggableSyntheticListeners, UniqueIdentifier } from '@dnd-kit/cor
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { styles } from './ArrayFieldItemTemplate.style';
-import { Box, Divider, IconButton } from '@mui/material';
+import { Box, IconButton } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import {
 	ArrayFieldTemplateItemType,
@@ -147,17 +147,18 @@ export default function ArrayFieldItemTemplate<
 		<SortableItemContext.Provider value={context}>
 			<Box ref={setNodeRef} sx={styles.root} style={animatedStyle}>
 				<DragHandle />
-				{children}
+				<Box sx={{ flex: 1, minWidth: 0 }}>
+					{children}
+				</Box>
 				<IconButton
-					sx={{ ml: 1 }}
+					sx={{ mt: '2px' }}
 					onClick={() => onDropIndexClick(index)()}
 					disabled={disabled}
 					size="small"
 				>
-					<DeleteIcon />
+					<DeleteIcon fontSize="small" />
 				</IconButton>
 			</Box>
-			{!isLast && <Divider style={{ width: '30%', margin: '0 auto' }} />}
 		</SortableItemContext.Provider>
 	);
 }
