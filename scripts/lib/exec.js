@@ -10,7 +10,6 @@ const path = require('path');
 const fs = require('fs');
 const { logOutput } = require('./log');
 const { taskDebug } = require('./debug');
-const { BUILD_ROOT, DIST_ROOT } = require('./paths');
 
 /** Windows: extension order and how to run. Used for resolution and execution. */
 const WIN_EXTENSIONS = [
@@ -98,11 +97,7 @@ async function execCommand(command, args, options = {}) {
     const {
         cwd = process.cwd(),
         task = null,
-        env = {
-            ...process.env,
-            ROCKETRIDE_BUILD_ROOT: BUILD_ROOT,
-            ROCKETRIDE_DIST_ROOT: DIST_ROOT
-        },
+        env = process.env,
         onOutput = null,
         collect = false,
         logModule = null,

@@ -101,6 +101,8 @@ function parseArgs(args) {
             const paths = require('./lib/paths');
             paths.BUILD_ROOT = path.join(options.overlayRoot, 'build');
             paths.DIST_ROOT = path.join(options.overlayRoot, 'dist');
+            process.env.ROCKETRIDE_BUILD_ROOT = paths.BUILD_ROOT;
+            process.env.ROCKETRIDE_DIST_ROOT = paths.DIST_ROOT;
         } else if (arg === '--nodownload') {
             options.nodownload = true;
         } else if (arg.startsWith('--arch=')) {
