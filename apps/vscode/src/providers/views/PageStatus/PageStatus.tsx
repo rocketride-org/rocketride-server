@@ -29,7 +29,7 @@ import { ErrWarnSection } from '../../components/ErrWarnSection';
 import { StatusSection, StatusHeader, StatusElapsed } from '../../components/StatusSection';
 import { TokenSection } from '../../components/TokenSection';
 import { TabPanel } from '../../components/TabPanel';
-import { TraceSection, TraceRow } from '../../components/TraceSection';
+import { TraceSection, TraceRow, VideoResultEntry } from '../../components/TraceSection';
 import { EndpointInfoModal, EndpointInfo } from '../../components/EndpointInfoModal';
 import { WarningIcon } from '../../components/icons/WarningIcon';
 
@@ -101,6 +101,7 @@ export const PageStatus: React.FC = () => {
 	const [currentElapsed, setCurrentElapsed] = useState<number>(0);
 	const [tracingEnabled, setTracingEnabled] = useState(false);
 	const [traceRows, setTraceRows] = useState<TraceRow[]>([]);
+	const [videos, setVideos] = useState<VideoResultEntry[]>([]);
 	const [scrollToSectionTarget, setScrollToSectionTarget] = useState<'errors' | 'warnings' | null>(null);
 
 	// Refs for elapsed timer
@@ -150,6 +151,10 @@ export const PageStatus: React.FC = () => {
 					case 'scrollToSection': {
 						setActiveTab('errors');
 						setScrollToSectionTarget(message.section);
+						break;
+					}
+					case 'videoResult': {
+						setVideos(message.videos);
 						break;
 					}
 					case 'traceEvent': {
@@ -503,6 +508,7 @@ export const PageStatus: React.FC = () => {
 				>
 					<TraceSection
 						rows={traceRows}
+						videos={videos}
 						onClear={() => {
 							documentsRef.current.clear();
 							docOrderRef.current = [];
