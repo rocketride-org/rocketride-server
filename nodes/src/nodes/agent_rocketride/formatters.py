@@ -27,9 +27,9 @@ import io
 import json
 from typing import Any, Callable, Dict, List, Optional
 
-from rocketlib import debug
 
-
+# ---------------------------------------------------------------------------
+# Individual formatters
 # ---------------------------------------------------------------------------
 # Individual formatters
 # ---------------------------------------------------------------------------
