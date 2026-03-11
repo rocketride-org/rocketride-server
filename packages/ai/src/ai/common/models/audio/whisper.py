@@ -119,6 +119,9 @@ class WhisperLoader(BaseLoader):
 
             gpu_index, torch_device = allocate_gpu(memory_gb, exclude_gpus)
             logger.info(f'Allocated GPU {gpu_index} ({torch_device}) for Whisper {model_name}')
+            # CPU (e.g. M1): float16 not supported, use int8
+            if torch_device == 'cpu' and compute_type == 'float16':
+                compute_type = 'int8'
         else:
             # === LOCAL MODE: Use specified device ===
             if device is None:
