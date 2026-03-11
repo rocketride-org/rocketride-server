@@ -30,6 +30,7 @@ import { StatusSection, StatusHeader, StatusElapsed } from '../../components/Sta
 import { TokenSection } from '../../components/TokenSection';
 import { TabPanel } from '../../components/TabPanel';
 import { TraceSection, TraceRow } from '../../components/TraceSection';
+import type { VideoResultEntry } from '../../components/TraceSection';
 import { EndpointInfoModal, EndpointInfo } from '../../components/EndpointInfoModal';
 import { WarningIcon } from '../../components/icons/WarningIcon';
 
@@ -101,6 +102,7 @@ export const PageStatus: React.FC = () => {
 	const [currentElapsed, setCurrentElapsed] = useState<number>(0);
 	const [tracingEnabled, setTracingEnabled] = useState(false);
 	const [traceRows, setTraceRows] = useState<TraceRow[]>([]);
+	const [videos, setVideos] = useState<VideoResultEntry[]>([]);
 	const [scrollToSectionTarget, setScrollToSectionTarget] = useState<'errors' | 'warnings' | null>(null);
 
 	// Refs for elapsed timer
@@ -150,6 +152,10 @@ export const PageStatus: React.FC = () => {
 					case 'scrollToSection': {
 						setActiveTab('errors');
 						setScrollToSectionTarget(message.section);
+						break;
+					}
+					case 'videoResult': {
+						setVideos(message.videos);
 						break;
 					}
 					case 'traceEvent': {
@@ -377,6 +383,10 @@ export const PageStatus: React.FC = () => {
 
 	const handlePipelineAction = (action: 'stop' | 'run') => sendMessage({ type: 'pipelineAction', action, tracing: tracingEnabled });
 
+	const handleTabChange = (tab: string) => {
+		setActiveTab(tab);
+	};
+
 	// ========================================================================
 	// RENDER
 	// ========================================================================
@@ -469,7 +479,7 @@ export const PageStatus: React.FC = () => {
 			</div>
 
 			{/* Tab bar — outside the box, content boxed by .tab-content CSS. All panels always mounted so Performance Metrics state is preserved on tab switch. */}
-			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab}>
+			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={handleTabChange}>
 				<div
 					className={activeTab === 'status' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
 					role="tabpanel"
@@ -502,6 +512,7 @@ export const PageStatus: React.FC = () => {
 				>
 					<TraceSection
 						rows={traceRows}
+						videos={videos}
 						onClear={() => {
 							documentsRef.current.clear();
 							docOrderRef.current = [];

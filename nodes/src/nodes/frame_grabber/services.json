@@ -172,6 +172,22 @@
 				]
 			]
 		},
+		"grabber.fps": {
+			"type": "number",
+			"title": "Frames per second",
+			"description": "How many frames to extract per second of video. Higher values give smoother output but increase processing time.",
+			"default": 1,
+			"enum": [
+				[0.5, "1 frame every 2 seconds"],
+				[1, "1 fps"],
+				[2, "2 fps"],
+				[5, "5 fps"],
+				[10, "10 fps"],
+				[15, "15 fps"],
+				[24, "24 fps"],
+				[30, "30 fps"]
+			]
+		},
 		"grabber.second.interval": {
 			"type": "number",
 			"title": "Interval (in seconds) between frames",
@@ -209,7 +225,7 @@
 		"grabber.interval": {
 			"object": "interval",
 			"properties": [
-				"grabber.second.interval",
+				"grabber.fps",
 				"grabber.start_time",
 				"grabber.duration"
 			]

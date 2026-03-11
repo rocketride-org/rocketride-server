@@ -22,3 +22,4 @@
 // =============================================================================
 
 export { TraceSection, TraceRow } from './TraceSection';
+export type { VideoResultEntry } from './TraceSection';

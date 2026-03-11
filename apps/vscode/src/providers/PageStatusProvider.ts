@@ -39,12 +39,13 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { TaskStatus, GenericEvent, GenericResponse } from '../shared/types';
 import { getLogger } from '../shared/util/output';
 import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
 import { ConnectionStatus, ConnectionState } from '../shared/types';
-import type { PageStatusIncomingMessage, PageStatusOutgoingMessage } from '../shared/types/pageStatus';
+import type { PageStatusIncomingMessage, PageStatusOutgoingMessage, VideoResultEntry } from '../shared/types/pageStatus';
 import { getPipelineFilesTreeProvider } from '../extension';
 
 /**
@@ -236,6 +237,12 @@ export class PageStatusProvider {
 						);
 					}
 				}
+
+				if (body.op === 'end') {
+					this.broadcastVideoResults().catch(error => {
+						this.logger.error(`Broadcasting video results: ${error}`);
+					});
+				}
 				break;
 			}
 		}
@@ -386,7 +393,10 @@ export class PageStatusProvider {
 			{
 				enableScripts: true,
 				retainContextWhenHidden: true,
-				localResourceRoots: [this.context.extensionUri]
+				localResourceRoots: [
+					this.context.extensionUri,
+					vscode.Uri.file('/tmp/rocketride_videos')
+				]
 			}
 		);
 
@@ -800,6 +810,7 @@ export class PageStatusProvider {
 					await this.handlePipelineAction(message.action, viewState, message.tracing);
 					break;
 				}
+
 			}
 		} catch (error) {
 			this.logger.error(`Handling webview message of type ${message.type}: ${error}`);
@@ -914,6 +925,44 @@ export class PageStatusProvider {
 			}
 		} catch (error) {
 			this.logger.error(`Handling pipeline action ${action}: ${error}`);
+		}
+	}
+
+	private async broadcastVideoResults(): Promise<void> {
+		const videoDir = '/tmp/rocketride_videos';
+
+		let filePaths: { filePath: string; sizeMB: number }[] = [];
+		try {
+			if (fs.existsSync(videoDir)) {
+				filePaths = fs.readdirSync(videoDir)
+					.filter(f => f.endsWith('.mp4'))
+					.sort()
+					.map(file => {
+						const filePath = path.join(videoDir, file);
+						const stat = fs.statSync(filePath);
+						return { filePath, sizeMB: Math.round(stat.size / 1024 / 1024 * 100) / 100 };
+					});
+			}
+		} catch (error) {
+			this.logger.error(`Reading video results: ${error}`);
+		}
+
+		if (filePaths.length === 0) return;
+
+		for (const viewState of this.webviewPanels.values()) {
+			if (viewState.isDisposed) continue;
+
+			const videos: VideoResultEntry[] = filePaths.map(({ filePath, sizeMB }) => ({
+				uri: viewState.panel.webview.asWebviewUri(vscode.Uri.file(filePath)).toString(),
+				mimeType: 'video/mp4',
+				sizeMB,
+			}));
+
+			const msg: PageStatusIncomingMessage = { type: 'videoResult', videos };
+			viewState.panel.webview.postMessage(msg).then(
+				undefined,
+				(error: unknown) => this.logger.error(`Posting video results: ${error}`)
+			);
 		}
 	}
 

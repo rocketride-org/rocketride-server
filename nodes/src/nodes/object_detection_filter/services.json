@@ -1,0 +1,248 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Object Detection Filter",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "object_detection_filter://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"video"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most node
+	//
+	"path": "nodes.object_detection_filter",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "object_detection_filter",
+	//
+	//	Optional:
+	//		Description of this driver
+	//
+	"description": [
+		"An image filter that detects objects in frames using a HuggingFace object-detection ",
+		"model, optionally matches them against a CLIP-embedded reference image, and forwards ",
+		"only matching frames downstream. Place after a frame_grabber and before a video_composer ",
+		"to filter video by visual content."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "object-detection.svg",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"image": [
+			"image", "table"
+		]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "Image frames to filter by object detection against a reference image.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Frames that matched the detection criteria."
+				},
+				{
+					"lane": "table",
+					"description": "Detection metadata for matched frames."
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "detr",
+		"profiles": {
+			"detr": {
+				"title": "DETR ResNet-50 - General object detection",
+				"detection_model": "facebook/detr-resnet-50",
+				"min_confidence": 0.3,
+				"similarity_threshold": 0.65,
+				"fps": 1.0,
+				"pre_roll": 3,
+				"post_roll": 3
+			},
+			"yolos-tiny": {
+				"title": "YOLOS Tiny - Fast lightweight detection",
+				"detection_model": "hustvl/yolos-tiny",
+				"min_confidence": 0.3,
+				"similarity_threshold": 0.60,
+				"fps": 2.0,
+				"pre_roll": 3,
+				"post_roll": 3
+			},
+			"custom": {
+				"title": "Custom model configuration",
+				"detection_model": "",
+				"min_confidence": 0.3,
+				"similarity_threshold": 0.60,
+				"fps": 1.0,
+				"pre_roll": 3,
+				"post_roll": 3
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service
+	//
+	"fields": {
+		"objdet.detection_model": {
+			"type": "string",
+			"title": "Detection model",
+			"description": "HuggingFace model name for object detection",
+			"minLength": 2,
+			"maxLength": 128
+		},
+		"objdet.class_allowlist": {
+			"type": "string",
+			"title": "Object types to detect",
+			"description": "Comma-separated labels to keep (e.g. 'car,truck'). Leave empty to keep all detected objects.",
+			"default": ""
+		},
+		"objdet.reference_image": {
+			"type": "string",
+			"format": "data-url",
+			"title": "Reference image",
+			"description": "Upload a reference image to match against detected objects using CLIP similarity. Leave empty to skip reference matching.",
+			"ui:options:accept": "image/*"
+		},
+		"objdet.min_confidence": {
+			"type": "number",
+			"title": "Minimum detection confidence",
+			"description": "Detection confidence threshold (0.0-1.0)",
+			"default": 0.3,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"objdet.similarity_threshold": {
+			"type": "number",
+			"title": "Reference similarity threshold",
+			"description": "Minimum CLIP cosine similarity to reference image (0.0-1.0). Only used when a reference image is provided.",
+			"default": 0.65,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"objdet.fps": {
+			"type": "number",
+			"title": "Expected input frame rate (fps)",
+			"description": "Frame rate of the upstream frame_grabber, used to compute timestamps for matched frames.",
+			"default": 1.0
+		},
+		"objdet.detr": {
+			"object": "detr",
+			"properties": [
+				"objdet.reference_image",
+				"objdet.class_allowlist",
+				"objdet.min_confidence",
+				"objdet.similarity_threshold",
+				"objdet.fps"
+			]
+		},
+		"objdet.yolos-tiny": {
+			"object": "yolos-tiny",
+			"properties": [
+				"objdet.reference_image",
+				"objdet.class_allowlist",
+				"objdet.min_confidence",
+				"objdet.similarity_threshold",
+				"objdet.fps"
+			]
+		},
+		"objdet.custom": {
+			"object": "custom",
+			"properties": [
+				"objdet.detection_model",
+				"objdet.reference_image",
+				"objdet.class_allowlist",
+				"objdet.min_confidence",
+				"objdet.similarity_threshold",
+				"objdet.fps"
+			]
+		},
+		"objdet.profile": {
+			"title": "Detection model",
+			"description": "Object detection model and configuration",
+			"type": "string",
+			"default": "detr",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "detr",
+					"properties": [
+						"objdet.detr"
+					]
+				},
+				{
+					"value": "yolos-tiny",
+					"properties": [
+						"objdet.yolos-tiny"
+					]
+				},
+				{
+					"value": "custom",
+					"properties": [
+						"objdet.custom"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Object Detection Filter",
+			"properties": [
+				"objdet.profile"
+			]
+		}
+	]
+}
