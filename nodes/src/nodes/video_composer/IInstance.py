@@ -31,8 +31,6 @@ from rocketlib import IInstanceBase, AVI_ACTION, Entry
 
 from .IGlobal import IGlobal
 
-_LOG_PATH = '/tmp/objdet_debug.log'
-
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
@@ -53,24 +51,16 @@ class IInstance(IInstanceBase):
     def open(self, obj: Entry):
         self._frames_dir = tempfile.mkdtemp(prefix='vcomp_frames_')
         self._frame_count = 0
-        self._log(f'open: buffering frames to {self._frames_dir}')
 
     def close(self):
-        self._log(f'close: {self._frame_count} frames received')
         if self._frame_count == 0:
             self._cleanup()
             return
 
         output_path = self._encode_video()
         if output_path and os.path.exists(output_path):
-            file_size = os.path.getsize(output_path)
-            self._log(f'encoded {output_path} ({file_size} bytes)')
-
             if self.instance.hasListener('video'):
                 self._stream_video(output_path)
-                self._log(f'streamed video downstream ({file_size} bytes)')
-            else:
-                self._log('WARNING: no listener on video lane, video not streamed')
 
             try:
                 os.remove(output_path)
@@ -130,21 +120,14 @@ class IInstance(IInstanceBase):
             output_path,
         ]
 
-        self._log(f'ffmpeg cmd: {" ".join(cmd)}')
-
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=300,
             )
             if result.returncode != 0:
-                self._log(f'ffmpeg failed (exit {result.returncode}): {result.stderr[:2000]}')
                 return None
             return output_path
-        except subprocess.TimeoutExpired:
-            self._log('ffmpeg timed out')
-            return None
-        except Exception as e:
-            self._log(f'ffmpeg error: {e}')
+        except (subprocess.TimeoutExpired, Exception):
             return None
 
     # ------------------------------------------------------------------
@@ -175,7 +158,3 @@ class IInstance(IInstanceBase):
         self._frames_dir = None
         self._frame_count = 0
 
-    @staticmethod
-    def _log(msg: str):
-        with open(_LOG_PATH, 'a') as f:
-            f.write(f'[VideoComposer] {msg}\n')

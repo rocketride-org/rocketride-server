@@ -491,7 +491,7 @@ const TraceDetailPanel: React.FC<{
 			)}
 
 			{/* Video Player */}
-			{row.lane === 'video' && videos.length > 0 && (
+			{videos.length > 0 && (
 				<div className="trace-dp-sect">
 					<h3>Video Result</h3>
 					{videos.map((v, i) => (

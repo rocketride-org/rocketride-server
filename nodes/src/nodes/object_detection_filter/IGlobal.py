@@ -47,18 +47,11 @@ class IGlobal(IGlobalBase):
             return
 
         try:
-            self._log(f'beginGlobal: loading detector, model={self.config.get("detection_model", "default")}')
             from .detector import ObjectDetector
 
             self.detector = ObjectDetector(self.config)
-            self._log('beginGlobal: detector loaded OK')
-        except Exception as e:
-            self._log(f'beginGlobal FAILED: {e}')
+        except Exception:
             raise
-
-    def _log(self, msg):
-        with open('/tmp/objdet_debug.log', 'a') as f:
-            f.write(f'[OBJDET] {msg}\n')
 
     def endGlobal(self):
         self.detector = None

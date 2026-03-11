@@ -78,9 +78,6 @@ def _decode_data_url(value: str) -> bytes:
     return base64.b64decode(value)
 
 
-_LOG_PATH = '/tmp/objdet_debug.log'
-
-
 class ObjectDetector:
     """
     Object detection with optional CLIP-based reference image matching.
@@ -129,16 +126,6 @@ class ObjectDetector:
             self._reference_embedding = self._embed_image(ref_bytes)
 
         self._frame_idx = 0
-
-        self._log(f'[ObjectDetector] Model: {det_model}')
-        self._log(f'[ObjectDetector] min_confidence={self._min_confidence}')
-        self._log(f'[ObjectDetector] similarity_threshold={self._similarity_threshold}')
-        self._log(f'[ObjectDetector] crop_padding={self._crop_padding}')
-        self._log(f'[ObjectDetector] Class allowlist: {self._class_allowlist or "all"}')
-        self._log(
-            f'[ObjectDetector] Reference matching: '
-            f'{"enabled" if self._reference_embedding is not None else "disabled"}'
-        )
 
     # ------------------------------------------------------------------
     # CLIP helpers
@@ -189,13 +176,10 @@ class ObjectDetector:
 
         try:
             raw_results = self._det_pipeline([frame_image])
-        except Exception as e:
-            self._log(f'[ObjectDetector] Detection error: {e}')
+        except Exception:
             return []
 
         detections_list = self._parse_raw_detections(raw_results)
-
-        self._log_raw(detections_list)
 
         matched: List[Detection] = []
         for det in detections_list:
@@ -219,7 +203,6 @@ class ObjectDetector:
                 crop.save(buf, format='PNG')
                 crop_emb = self._embed_image(buf.getvalue())
                 similarity = float(np.dot(self._reference_embedding, crop_emb))
-                self._log_sim(label, score, similarity)
                 if similarity < self._similarity_threshold:
                     continue
 
@@ -287,35 +270,3 @@ class ObjectDetector:
 
         return image.crop((xmin, ymin, xmax, ymax))
 
-    # ------------------------------------------------------------------
-    # Diagnostic logging
-    # ------------------------------------------------------------------
-
-    def _log(self, msg: str):
-        with open(_LOG_PATH, 'a') as f:
-            f.write(msg + '\n')
-
-    def _log_raw(self, detections_list: List[Dict[str, Any]]):
-        """Log a summary of raw DETR detections before any filtering."""
-        self._frame_idx += 1
-        if self._frame_idx % 10 != 1:
-            return
-        labels = {}
-        for det in detections_list:
-            lbl = det.get('label', '?')
-            sc = det.get('score', 0)
-            sc = float(sc) if not isinstance(sc, (list, type(None))) else 0
-            labels.setdefault(lbl, []).append(round(sc, 3))
-        summary = ', '.join(
-            f'{lbl}({len(scores)}): {sorted(scores, reverse=True)[:5]}'
-            for lbl, scores in sorted(labels.items(), key=lambda x: -len(x[1]))
-        )
-        self._log(f'[DETR raw] frame={self._frame_idx} total={len(detections_list)} | {summary}')
-
-    def _log_sim(self, label: str, score: float, similarity: float):
-        """Log CLIP similarity score for a candidate detection."""
-        tag = 'PASS' if similarity >= self._similarity_threshold else 'REJECT'
-        self._log(
-            f'[CLIP] {tag} label={label} conf={score:.3f} '
-            f'sim={similarity:.4f} (threshold={self._similarity_threshold})'
-        )

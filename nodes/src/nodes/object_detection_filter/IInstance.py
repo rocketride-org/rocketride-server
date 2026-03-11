@@ -28,9 +28,6 @@ from ai.common.table import Table
 
 from .IGlobal import IGlobal
 
-_LOG_PATH = '/tmp/objdet_debug.log'
-
-
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
@@ -67,12 +64,6 @@ class IInstance(IInstanceBase):
             self._ring.clear()
 
     def close(self):
-        self._log(
-            f'close: {self._matched}/{self._total} frames matched, '
-            f'{self._forwarded} frames forwarded '
-            f'(pre_roll={self._pre_roll}, post_roll={self._post_roll})'
-        )
-
         if self.instance.hasListener('table') and self._match_rows:
             table = Table.generate_markdown_table(
                 headers=['Frame', 'Time', 'Label', 'Confidence', 'Similarity'],
@@ -112,8 +103,7 @@ class IInstance(IInstanceBase):
 
         try:
             detections = self.IGlobal.detector.detect_and_match(image_bytes)
-        except Exception as e:
-            self._log(f'frame {idx} detection error: {e}')
+        except Exception:
             detections = []
 
         is_match = len(detections) > 0
@@ -128,11 +118,6 @@ class IInstance(IInstanceBase):
                 f'{best.score:.3f}',
                 f'{best.similarity:.3f}' if best.similarity else '-',
             ])
-            self._log(
-                f'frame {idx} t={timestamp:.2f}s MATCH '
-                f'label={best.label} conf={best.score:.3f} '
-                f'sim={best.similarity}'
-            )
 
         if is_match and not self._forwarding:
             self._flush_ring()
@@ -166,8 +151,7 @@ class IInstance(IInstanceBase):
     def _flush_ring(self):
         if self._ring is None:
             return
-        for img, mime, idx in self._ring:
-            self._log(f'  pre-roll: forwarding buffered frame {idx}')
+        for img, mime, _ in self._ring:
             self._forward_frame(img, mime)
         self._ring.clear()
 
@@ -189,7 +173,3 @@ class IInstance(IInstanceBase):
         s = seconds % 60
         return f'{h:02}:{m:02}:{s:05.2f}'
 
-    @staticmethod
-    def _log(msg: str):
-        with open(_LOG_PATH, 'a') as f:
-            f.write(f'[OBJDET] {msg}\n')

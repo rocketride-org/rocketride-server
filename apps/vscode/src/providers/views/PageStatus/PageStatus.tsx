@@ -389,7 +389,7 @@ export const PageStatus: React.FC = () => {
 
 	const handleOpenExternal = (url: string) => sendMessage({ type: 'openExternal', url });
 
-	const handlePipelineAction = (action: 'stop' | 'run') => sendMessage({ type: 'pipelineAction', action });
+	const handlePipelineAction = (action: 'stop' | 'run') => sendMessage({ type: 'pipelineAction', action, tracing: tracingEnabled });
 
 	const handleTabChange = (tab: string) => {
 		setActiveTab(tab);
