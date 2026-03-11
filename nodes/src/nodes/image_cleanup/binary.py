@@ -27,13 +27,13 @@ import numpy as np
 
 def binary_image(png_bytes: bytes) -> bytes:
     """
-    Convert a PNG image (in bytes) to a binary (black & white) image using grayscale conversion and Otsu thresholding.
+    Convert a PNG image (in bytes) to an enhanced grayscale image using CLAHE for improved OCR readability.
 
     Args:
         png_bytes (bytes): The input PNG image as bytes.
 
     Returns:
-        bytes: The binary image encoded as png bytes.
+        bytes: The enhanced grayscale image encoded as png bytes.
     """
     # Decode PNG bytes to a NumPy array, then read as an OpenCV image (BGR format)
     image = cv2.imdecode(np.frombuffer(png_bytes, np.uint8), cv2.IMREAD_COLOR)
@@ -43,16 +43,17 @@ def binary_image(png_bytes: bytes) -> bytes:
     # Convert the image to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    # Apply Gaussian blur to reduce noise and improve thresholding
+    # Apply Gaussian blur to reduce noise
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
-    # Apply Otsu's thresholding to create a binary image
-    _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # Apply CLAHE to enhance contrast while preserving grayscale range
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(blurred)
 
-    # Encode the binary image to png format
-    success, output_bytes = cv2.imencode('.png', binary)
+    # Encode the enhanced image to png format
+    success, output_bytes = cv2.imencode('.png', enhanced)
     if not success:
-        raise ValueError('Failed to encode binary image to PNG.')
+        raise ValueError('Failed to encode enhanced image to PNG.')
 
     # Output the png bytes
     return output_bytes.tobytes()

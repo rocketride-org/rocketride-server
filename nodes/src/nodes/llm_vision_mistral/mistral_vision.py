@@ -29,12 +29,13 @@ from typing import Any, Dict, Tuple
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from mistralai import Mistral
-from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 
 # Load requirements
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
+
+from mistralai.client import Mistral
+from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 
 
 class Chat(ChatBase):
@@ -67,9 +68,11 @@ class Chat(ChatBase):
             raise ValueError('Invalid API key format. You seem to be using an OpenAI API key. Please provide a Mistral AI API key.')
         if api_key.startswith('AI'):
             raise ValueError('Invalid API key format. You seem to be using a Google AI/Gemini API key. Please provide a Mistral AI API key.')
-        # Initialize the client with error handling
+        # Initialize the client with a custom httpx client to handle large image payloads
         try:
-            self._client = Mistral(api_key=api_key)
+            import httpx
+            http_client = httpx.Client(follow_redirects=True, timeout=120.0)
+            self._client = Mistral(api_key=api_key, client=http_client)
         except Exception as e:
             raise ValueError(f'Failed to initialize Mistral AI client: {str(e)}')
         # Get model-specific token limit
@@ -115,7 +118,6 @@ class Chat(ChatBase):
 
     def _processImageInput(self, image_data: str) -> Dict[str, Any]:
         """Process image input and return the appropriate format for Mistral API."""
-        # In this integration, image_data is always a base64 string, not raw bytes.
         if image_data.startswith(('http://', 'https://')):
             return {'type': 'image_url', 'image_url': image_data}
         if image_data.startswith('data:image/') or image_data.startswith('data:application/'):
@@ -167,7 +169,7 @@ class Chat(ChatBase):
     def _shouldRetry(self, error: Exception) -> bool:
         """Determine if an error is retryable."""
         error_msg = str(error).lower()
-        retryable_errors = ['timeout', 'timed out', 'connection', 'network', '500', '502', '503', '504', 'internal server error', 'service unavailable', 'service temporarily unavailable', 'bad gateway', 'rate limit']
+        retryable_errors = ['timeout', 'timed out', 'connection', 'network', '500', '502', '503', '504', 'internal server error', 'service unavailable', 'service temporarily unavailable', 'bad gateway']
         return any(phrase in error_msg for phrase in retryable_errors)
 
     def _getRetryConfig(self, model: str) -> Tuple[int, float]:

@@ -10,8 +10,8 @@
     "description": [
         "A component that connects to Mistral AI's vision-capable models for image analysis, ",
         "OCR, and visual understanding tasks. Supports all Mistral vision models including ",
-        "Pixtral and vision-enabled Mistral models. Features robust error handling, ",
-        "automatic image processing, and flexible prompt configuration for various use cases."
+        "Mistral Large 3, Medium 3.1, Small 3.2, and Ministral models. Features robust error ",
+        "handling, automatic image processing, and flexible prompt configuration for various use cases."
     ],
     "documentation": "https://bit.ly/47iG5Ft",
     "icon": "mistral-vision.svg",
@@ -34,14 +34,8 @@
         }
     ],
     "preconfig": {
-        "default": "pixtral-large",
+        "default": "mistral-large-3",
         "profiles": {
-            "pixtral-large": {
-                "title": "Pixtral Large - Vision Frontier (128k tokens)",
-                "model": "pixtral-large-2411",
-                "modelTotalTokens": 128000,
-                "apikey": ""
-            },
             "mistral-large-3": {
                 "title": "Mistral Large 3 - Premier Vision (256k tokens)",
                 "model": "mistral-large-2512",
@@ -93,34 +87,15 @@
         },
         "vision.systemPrompt": {
             "type": "string",
+            "format": "textarea",
             "title": "System Instructions",
-            "description": "Define the model's role and behavior for image analysis",
-            "examples": [
-                "You are an OCR specialist. Extract all text from images accurately.",
-                "You are a receipt analyzer. Extract bill numbers, items, prices, and totals.",
-                "You are a document analyzer. Identify and describe all elements in the document.",
-                "You are a chart interpreter. Analyze and explain data visualizations clearly."
-            ]
+            "description": "Define the model's role and behavior for image analysis"
         },
         "vision.prompt": {
             "type": "string",
+            "format": "textarea",
             "title": "Analysis Prompt",
-            "description": "Describe what you want to analyze or extract from the image",
-            "examples": [
-                "Transcribe this receipt",
-                "Extract the text from this document",
-                "Describe this chart in detail",
-                "What are the key elements in this image?",
-                "Extract items and prices from this receipt"
-            ]
-        },
-        "image_vision_mistral.pixtral-large": {
-            "object": "pixtral-large",
-            "properties": [
-                "llm.cloud.apikey",
-                "vision.systemPrompt",
-                "vision.prompt"
-            ]
+            "description": "Describe what you want to analyze or extract from the image"
         },
         "image_vision_mistral.mistral-large-3": {
             "object": "mistral-large-3",
@@ -174,17 +149,11 @@
             "title": "Vision Model",
             "description": "Select the Mistral vision model to use",
             "type": "string",
-            "default": "pixtral-large",
+            "default": "mistral-large-3",
             "enum": [
                 "*>preconfig.profiles.*.title"
             ],
             "conditional": [
-                {
-                    "value": "pixtral-large",
-                    "properties": [
-                        "image_vision_mistral.pixtral-large"
-                    ]
-                },
                 {
                     "value": "mistral-large-3",
                     "properties": [

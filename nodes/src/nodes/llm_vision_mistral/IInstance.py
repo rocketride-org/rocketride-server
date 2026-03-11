@@ -29,13 +29,10 @@ from rocketlib import AVI_ACTION
 class IInstance(IInstanceGenericLLM):
     """Instance handler for the Mistral Vision AI node."""
 
-    def __init__(self):
-        """
-        Initialize the IInstance class for the Mistral Vision AI node.
-        """
-        super().__init__()
-        self.IGlobal = IGlobal()
-        self.image_data = bytearray()
+    IGlobal: IGlobal
+
+    # Raw image data
+    image_data: bytearray = None
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Handle AVI_BEGIN action
