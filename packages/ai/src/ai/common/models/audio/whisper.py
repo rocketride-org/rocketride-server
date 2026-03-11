@@ -119,7 +119,10 @@ class WhisperLoader(BaseLoader):
 
             gpu_index, torch_device = allocate_gpu(memory_gb, exclude_gpus)
             logger.info(f'Allocated GPU {gpu_index} ({torch_device}) for Whisper {model_name}')
-            # CPU (e.g. M1): float16 not supported, use int8
+            # CTranslate2 does not support float16 on CPU (Intel or ARM). Use int8 for speed;
+            # use float32 in loader_options if you prefer max precision on CPU (slower, more RAM).
+            # Refs: https://opennmt.net/CTranslate2/quantization.html (fallback table),
+            #       https://github.com/SYSTRAN/faster-whisper/issues/65 (float16 on CPU).
             if torch_device == 'cpu' and compute_type == 'float16':
                 compute_type = 'int8'
         else:
@@ -130,7 +133,8 @@ class WhisperLoader(BaseLoader):
             if device == 'cpu':
                 gpu_index = -1
                 torch_device = 'cpu'
-                # Adjust compute type for CPU
+                # CTranslate2: no float16 on CPU (Intel or ARM). int8 = faster; float32 = max precision.
+                # Refs: https://opennmt.net/CTranslate2/quantization.html, faster-whisper #65.
                 if compute_type == 'float16':
                     compute_type = 'int8'
             elif ':' in device:
