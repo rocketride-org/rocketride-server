@@ -34,6 +34,7 @@ from ai.common.config import Config
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
+import httpx
 from mistralai.client import Mistral
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 
@@ -70,7 +71,6 @@ class Chat(ChatBase):
             raise ValueError('Invalid API key format. You seem to be using a Google AI/Gemini API key. Please provide a Mistral AI API key.')
         # Initialize the client with a custom httpx client to handle large image payloads
         try:
-            import httpx
             http_client = httpx.Client(follow_redirects=True, timeout=120.0)
             self._client = Mistral(api_key=api_key, client=http_client)
         except Exception as e:
