@@ -90,7 +90,6 @@ class AgentInput:
         started_at: UTC timestamp in ISO-8601 format.
     """
 
-    prompt: str
     question: Question
     run_id: str
     task_id: Optional[str]

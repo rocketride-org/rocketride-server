@@ -106,7 +106,7 @@ class DataMixin(DAPClient):
             # Results available after pipe closes
         """
 
-        def __init__(self, client, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None):
+        def __init__(self, client, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None):
             """
             Create a new data pipe (usually called via client.pipe()).
 
@@ -116,6 +116,8 @@ class DataMixin(DAPClient):
                 objinfo: Optional metadata about the data
                 mime_type: MIME type of data (e.g., "text/csv", "application/json")
                 provider: Optional provider specification
+                on_sse: Optional async callback(body: dict) called for each SSE event
+                        emitted by the pipeline node for this specific pipe
             """
             self._client = client
             self._token = token
@@ -125,6 +127,7 @@ class DataMixin(DAPClient):
             self._pipe_id = None
             self._opened = False
             self._closed = False
+            self._on_sse = on_sse
 
         @property
         def is_opened(self) -> bool:
@@ -175,6 +178,12 @@ class DataMixin(DAPClient):
 
             self._pipe_id = response.get('body', {}).get('pipe_id')
             self._opened = True
+
+            # If an SSE callback was provided, subscribe and register for this pipe
+            if self._on_sse is not None and self._pipe_id is not None:
+                await self._client.set_events(self._token, ['SSE'], pipe_id=self._pipe_id)
+                self._client._register_sse_pipe(self._pipe_id, self._on_sse)
+
             return self
 
         async def write(self, buffer: bytes) -> None:
@@ -257,6 +266,14 @@ class DataMixin(DAPClient):
             finally:
                 self._closed = True
 
+                # Unregister SSE callback and scoped monitor subscription
+                if self._on_sse is not None and self._pipe_id is not None:
+                    self._client._unregister_sse_pipe(self._pipe_id)
+                    try:
+                        await self._client.set_events(self._token, [], pipe_id=self._pipe_id)
+                    except Exception:
+                        pass  # Best-effort cleanup
+
         async def __aenter__(self):
             """Enter async context manager - automatically opens pipe."""
             return await self.open()
@@ -276,7 +293,7 @@ class DataMixin(DAPClient):
         out['size'] = size if size else 1
         return out
 
-    async def pipe(self, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None) -> DataPipe:
+    async def pipe(self, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None) -> DataPipe:
         r"""
         Create a data pipe for streaming operations.
 
@@ -309,7 +326,7 @@ class DataMixin(DAPClient):
                 results = await pipe.close()
             # Results available after context exits
         """
-        return self.DataPipe(self, token=token, objinfo=objinfo, mime_type=mime_type, provider=provider)
+        return self.DataPipe(self, token=token, objinfo=objinfo, mime_type=mime_type, provider=provider, on_sse=on_sse)
 
     async def send(
         self,

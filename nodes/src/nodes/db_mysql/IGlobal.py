@@ -65,3 +65,9 @@ class IGlobal(DatabaseGlobalBase):
             return int(block.get('mysql.max_attempts') or config.get('mysql.max_attempts') or 5)
         except (ValueError, TypeError):
             return 5
+
+    def _db_description(self, config: Dict[str, Any]) -> str:
+        block = config.get('mysql.default')
+        if not isinstance(block, dict):
+            block = {}
+        return str(block.get('mysql.db_description') or config.get('mysql.db_description') or '')

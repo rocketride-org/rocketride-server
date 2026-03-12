@@ -84,20 +84,17 @@ const App: React.FC = () => {
 			// The uri was overridden by our .devMode = true and it being specified
 			// in the .env file
 			uri = API_CONFIG.ROCKETRIDE_URI;
-			console.log('Got URI from API_CONFIG', uri);
 		}
 
 		// If we don't have a URI from the .env, use the one from where we loaded the page
 		if (!uri) {
 			uri = window.location.origin;
-			console.log('Got URI from origin', uri);
 		}
 
 		// Try to get the token from session storage (skip in VSCode webview - shared storage would mix auth across tabs)
 		if (!isVSCode) {
 			token = sessionStorage.getItem('auth') || '';
 			if (token) {
-				console.log('Got token from session', token);
 			}
 		}
 
@@ -106,7 +103,6 @@ const App: React.FC = () => {
 			// See if we can get from the .env if we are in dev mode
 			if (API_CONFIG.devMode && API_CONFIG.ROCKETRIDE_APIKEY) {
 				token = API_CONFIG.ROCKETRIDE_APIKEY;
-				console.log('Got token from API_CONFIG', token);
 			}
 		}
 
@@ -119,7 +115,6 @@ const App: React.FC = () => {
 			if (token) {
 				// Remove it so the user doesn't see it in the URL
 				window.history.replaceState({}, "", window.location.pathname);
-				console.log('Got token from urlParams', token);
 			}
 		}
 

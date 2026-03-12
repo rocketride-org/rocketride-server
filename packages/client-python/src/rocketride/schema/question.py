@@ -407,6 +407,7 @@ class Question(BaseModel):
     history: Optional[List[QuestionHistory]] = Field(default_factory=list, description='Previous messages in this conversation for context.')
     examples: Optional[List[QuestionExample]] = Field(default_factory=list, description='Example question/answer pairs to show desired response format.')
     context: Optional[List[str]] = Field(default_factory=list, description='Additional context information to help the AI understand your question.')
+    goals: Optional[List[str]] = Field(default_factory=list, description='High-level objectives the AI should work towards (rendered as ### Goal before the prompt).')
     documents: Optional[List[Doc]] = Field(default_factory=list, description='Specific documents to reference when answering.')
     questions: Optional[List[QuestionText]] = Field(default_factory=list, description='List of questions to ask (usually just one).')
 
@@ -488,6 +489,22 @@ class Question(BaseModel):
         """
         self.history.append(item)
 
+    def addGoal(self, goal: str):
+        """
+        Add a high-level goal or objective for the AI to work towards.
+
+        Goals describe what the user ultimately wants to achieve and are
+        rendered in the prompt as a dedicated ### Goal section, separate
+        from the step-specific prompt instructions.
+
+        Args:
+            goal: The goal or objective text
+
+        Example:
+            question.addGoal("Find all revenue trends in the quarterly reports")
+        """
+        self.goals.append(goal)
+
     def addQuestion(self, question: str):
         """
         Add a question to ask the AI.
@@ -529,7 +546,7 @@ class Question(BaseModel):
 
     def getPrompt(self, has_previous_json_failed: bool = False) -> str:
         """
-        Generate the complete prompt text for the AI (used internally).
+        Generate the complete prompt text for the AI.
 
         Combines all instructions, examples, context, and questions into
         a formatted prompt that guides the AI to provide the best response.
@@ -541,121 +558,103 @@ class Question(BaseModel):
             str: Complete formatted prompt text
         """
         crlf = '\r\n'
-        prompt = ''
+        parts: List[str] = []
 
-        # Helper functions for formatting different sections
-        instructionId = 0
-        hasOutputInstructions = False
-
-        def addPromptInstruction(instruction: QuestionInstruction):
-            nonlocal prompt, instructionId, hasOutputInstructions
-            if not hasOutputInstructions:
-                prompt += '### Instructions:' + crlf
-                hasOutputInstructions = True
-            prompt += f'    {instructionId + 1}) **{instruction.subtitle.strip()}**: {instruction.instructions.strip()}' + crlf + crlf
-            instructionId += 1
-
-        exampleId = 0
-
-        def addPromptExample(example: QuestionExample):
-            nonlocal prompt, exampleId
-            json_begin = '```json' + crlf if self.expectJson else ''
-            json_end = '```' + crlf if self.expectJson else ''
-            prompt += f'    Example {exampleId + 1}' + crlf
-            prompt += f'        **Given**: {example.given.strip()}' + crlf
-            prompt += f'        **Expected output**: {json_begin}{example.result.strip()}{json_end}'
-            exampleId += 1
-
-        contextId = 0
-        hasOutputContext = False
-
-        def addPromptContext(context: str):
-            nonlocal prompt, contextId, hasOutputContext
-            if not hasOutputContext:
-                prompt += '### Context:' + crlf
-                hasOutputContext = True
-            prompt += f'    {contextId + 1}) {context.strip()}' + crlf + crlf
-            contextId += 1
-
-        documentId = 0
-        hasOutputDocuments = False
-
-        def addPromptDocument(document: Doc):
-            nonlocal prompt, documentId, hasOutputDocuments
-            if not hasOutputDocuments:
-                prompt += '### Documents:' + crlf
-                hasOutputDocuments = True
-            doc = str(document.toDict()['page_content'])
-            prompt += f'    Document {documentId + 1}) Content: {doc.strip()}' + crlf
-            documentId += 1
-
-        # Add role if specified
+        # Role
         if self.role:
-            prompt += self.role + crlf
+            parts.append(f'{self.role}{crlf}')
 
-        # Add default instruction if none provided
-        if not len(self.instructions):
-            addPromptInstruction(QuestionInstruction(subtitle='Answer the following questions', instructions='Answer the following questions.'))
-            if len(self.documents):
-                addPromptInstruction(QuestionInstruction(subtitle='Documents', instructions='Use the provided documents as context for your answer.'))
+        # --- Instructions ---
+        all_instructions: List[QuestionInstruction] = []
 
-        # Add all instructions
-        for instruction in self.instructions:
-            addPromptInstruction(instruction)
-
-        # Add JSON formatting instructions if needed
+        # JSON formatting
         if self.expectJson:
-            addPromptInstruction(
-                QuestionInstruction(
-                    subtitle='JSON Response Format',
-                    instructions="""
-                    - Respond **only** with a valid JSON structure.
-                    - Properly escape all quotes within content strings
-                    - No additional text, comments, or explanations.
-                    - Ensure your answer is strictly valid JSON format.
-                    - Double check the JSON response to ensure it is valid.
-                    - Enclose the json with ````json` and ` ``` ` tags.
-                    """,
-                )
-            )
-
+            all_instructions.append(QuestionInstruction(
+                subtitle='JSON Response Format',
+                instructions=(
+                    '- Respond **only** with a fenced, valid JSON structure.\r\n'
+                    '- Properly escape all quotes within content strings.\r\n'
+                    '- No additional text, comments, or explanations.\r\n'
+                    '- Ensure your answer is strictly valid JSON format.\r\n'
+                    '- Double check the JSON response to ensure it is valid.\r\n'
+                    '- Enclose the json with ```json and ``` tags.'
+                ),
+            ))
             if has_previous_json_failed:
-                addPromptInstruction(
-                    QuestionInstruction(
-                        subtitle='CRITICAL',
-                        instructions="""
-                        - Your previous response returned invalid JSON.
-                        - Examine your JSON and ensure it is complete and follows the JSON standards.
-                        """,
-                    )
-                )
+                all_instructions.append(QuestionInstruction(
+                    subtitle='CRITICAL',
+                    instructions=(
+                        '- Your previous response returned invalid JSON.\r\n'
+                        '- Examine your JSON and ensure it is complete and follows the JSON standards.'
+                    ),
+                ))
 
-        # Add examples if provided
-        if len(self.examples):
-            addPromptInstruction(QuestionInstruction(subtitle='Examples', instructions=''))
-            for example in self.examples:
-                addPromptExample(example)
+        # User-provided instructions
+        all_instructions.extend(self.instructions)
 
-        # Add conversation history
-        if len(self.history):
-            prompt += '### Conversation History:' + crlf
+        if all_instructions:
+            lines = ['### System Instructions:']
+            for i, inst in enumerate(all_instructions, 1):
+                lines.append(f'    {i}) **{inst.subtitle.strip()}**:')
+                for line in inst.instructions.splitlines():
+                    if line.strip():
+                        lines.append(f'        {line.strip()}')
+                lines.append('')  # blank line after each instruction
+            parts.append(crlf.join(lines))
+
+        # --- Examples ---
+        if self.examples:
+            json_begin = '```json' + crlf if self.expectJson else ''
+            json_end = crlf + '```' if self.expectJson else ''
+            lines = ['### Examples:']
+            for i, ex in enumerate(self.examples, 1):
+                lines.append(f'    Example {i}')
+                lines.append(f'        **Given**: {ex.given.strip()}')
+                lines.append(f'        **Expected output**: {json_begin}{ex.result.strip()}{json_end}')
+            lines.append('')  # blank line after
+            parts.append(crlf.join(lines))
+
+        # --- Conversation history ---
+        if self.history:
+            lines = ['### Conversation History:']
             for item in self.history:
-                prompt += f'    {item.role}: {item.content}' + crlf
+                lines.append(f'    {item.role}: {item.content}')
+            lines.append('')  # blank line after
+            parts.append(crlf.join(lines))
 
-        # Add questions
-        if len(self.questions):
-            if len(self.questions) == 1:
-                prompt += self.questions[0].text + crlf
-            else:
-                for i, question in enumerate(self.questions, start=1):
-                    prompt += f"Question {i}: {question.text}{crlf}"
+        # --- Context ---
+        if self.context:
+            lines = ['### Context:']
+            for i, ctx in enumerate(self.context, 1):
+                lines.append(f'    {i}) {ctx.strip()}')
+                lines.append('')
+            lines.append('')  # blank line after
+            parts.append(crlf.join(lines))
 
-        # Add context
-        for context in self.context:
-            addPromptContext(context)
+        # --- Documents ---
+        if self.documents:
+            lines = ['### Documents:']
+            for i, doc in enumerate(self.documents, 1):
+                content = str(doc.toDict()['page_content'])
+                lines.append(f'    Document {i}) Content: {content.strip()}')
+            lines.append('')  # blank line after
+            parts.append(crlf.join(lines))
 
-        # Add documents
-        for document in self.documents:
-            addPromptDocument(document)
+        # --- Goals ---
+        if self.goals:
+            lines = ['### Ultimate Goal:']
+            for i, goal in enumerate(self.goals, 1):
+                lines.append(f'    {i}) {goal.strip()}')
+            lines.append('')  # blank line after
+            parts.append(crlf.join(lines))
 
-        return prompt
+        # --- Questions ---
+        if self.questions:
+            lines = ['### Current Task:']
+            for q in self.questions:
+                lines.append(f'    {q.text}')
+            lines.append('')  # blank line after
+            parts.append(crlf.join(lines))
+
+        parts.append('')  # blank line after
+        return crlf.join(parts)

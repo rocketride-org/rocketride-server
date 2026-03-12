@@ -16,16 +16,14 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional
 
-from rocketlib import debug, error
+from rocketlib import debug, error, monitorSSE
 from ai.common.schema import Answer, Question
+from ai.common.config import Config
 
 from .types import AgentHost, AgentInput
 from ._internal.host import AgentHostServices
 from ._internal.agent_tool import handle_agent_tool_invoke
-from ._internal.trace import make_tracing_invoker
 from ._internal.utils import (
-    apply_node_instructions,
-    extract_prompt,
     extract_text,
     messages_to_transcript,
     now_iso,
@@ -47,12 +45,37 @@ class AgentBase(ABC):
     FRAMEWORK: str = 'unknown'
     _AGENT_TOOL_NAME: str = 'run_agent'
 
+    _host: Optional[AgentHostServices] = None
+    _pipe_id: int = 0
+
+    def __init__(
+        self,
+        iGlobal: Any,
+    ):
+        """
+        Initialize be saving containing IInstance, and gathering tools
+        """
+        # Save the containing IInstance
+        self._iGlobal = iGlobal
+
+        # Get the logical type (nodeId) of our invoker
+        self._node_id = self._iGlobal.glb.logicalType
+
+        # Retrieve node-specific configuration by using the logical type and
+        # the connection configuration from the global context.
+        # Config.getNodeConfig likely returns structured config data tailored
+        # for this node instance.
+        config = Config.getNodeConfig(self._iGlobal.glb.logicalType, self._iGlobal.glb.connConfig)
+
+        # And save any specific instructions
+        self._instructions = config.get('instructions', [])
+
     # ---------------------------------------------------------------------
     # Pipeline-facing entrypoint
     # ---------------------------------------------------------------------
     def run_agent(
         self,
-        pSelf: Any,
+        iInstance,
         question: Question,
         *,
         emit_answers_lane: bool = True,
@@ -64,7 +87,7 @@ class AgentBase(ABC):
         writes a single JSON payload to the answers lane (`Answer(expectJson=True)`).
 
         Args:
-            pSelf: Node instance (`IInstance`) provided by the engine.
+            iInstance: Node instance (`IInstance`) provided by the engine.
             question: Incoming question object from the questions lane.
             emit_answers_lane: If True, write the answer JSON to the answers lane.
 
@@ -75,7 +98,10 @@ class AgentBase(ABC):
         run_id = new_run_id()
         debug(f'agent base run_agent run_id={run_id} framework={self.FRAMEWORK}')
 
-        invoker, tool_calls = make_tracing_invoker(pSelf.instance.invoke)
+        # If we have not created the host info yet, do so now. It is the same
+        # for all instances of the pipe
+        if not self._host:
+            self._host = AgentHostServices(iInstance)
 
         def _json_safe(value: Any) -> Any:
             """
@@ -86,32 +112,49 @@ class AgentBase(ABC):
             except Exception:
                 return safe_str(value)
 
+        task_id = None
         try:
-            apply_node_instructions(question, pSelf)
-            prompt = extract_prompt(question)
-            task_id = self._get_task_id(pSelf)
+            # Add any global instructions from the config
+            for inst in self._instructions:
+                question.addInstruction('Additional Instruction', inst.strip())
 
+            # Get the jobs taskId
+            task_id = iInstance.IEndpoint.endpoint.jobConfig['taskId']
+
+            # Create the input we will send to the agent
             agent_input = AgentInput(
-                prompt=prompt,
                 question=question,
                 run_id=run_id,
                 task_id=task_id,
                 started_at=started_at,
             )
 
-            host = AgentHostServices(invoker)
-            runtime_ctx = {'run_id': run_id, 'task_id': task_id, 'framework': self.FRAMEWORK}
+            # Capture pipe_id from the instance so sendSSE() can use it
+            try:
+                self._pipe_id = iInstance.instance.pipeId
+            except Exception:
+                self._pipe_id = 0
 
-            content, raw = self._run(agent_input=agent_input, host=host, ctx=runtime_ctx)
+            # Build up the context so we know what we are doing
+            runtime_ctx = {'run_id': run_id, 'task_id': task_id, 'framework': self.FRAMEWORK, 'pipe_id': self._pipe_id}
+
+            # And execute
+            content, raw = self._run(
+                agent_input=agent_input,
+                host=self._host,
+                ctx=runtime_ctx,
+            )
+
             if not isinstance(content, str):
                 content = safe_str(content)
 
             ended_at = now_iso()
+
             answer_payload: Dict[str, Any] = {
                 'content': content,
                 'meta': {
                     'framework': self.FRAMEWORK,
-                    'agent_id': self._agent_id(pSelf),
+                    'agent_id': self._agent_id(iInstance),
                     'run_id': run_id,
                     'started_at': started_at,
                     'ended_at': ended_at,
@@ -122,14 +165,6 @@ class AgentBase(ABC):
                 answer_payload['meta']['task_id'] = task_id
 
             stack: List[Dict[str, Any]] = []
-            if tool_calls:
-                stack.append(
-                    {
-                        'kind': 'RocketRide.agent.tool_calls.v1',
-                        'name': 'host.tools',
-                        'payload': _json_safe(tool_calls),
-                    }
-                )
             stack.append({'kind': 'RocketRide.agent.raw.v1', 'name': 'framework.output', 'payload': _json_safe(raw)})
             answer_payload['stack'] = stack
 
@@ -140,12 +175,11 @@ class AgentBase(ABC):
             error_message = str(e)
             error(f'agent base _run failed run_id={run_id} type={error_type} message={error_message}')
             ended_at = now_iso()
-            task_id = safe_str(self._get_task_id(pSelf)) or None
             answer_payload = {
                 'content': error_message or f'{error_type} (no message)',
                 'meta': {
                     'framework': self.FRAMEWORK,
-                    'agent_id': self._agent_id(pSelf),
+                    'agent_id': self._agent_id(iInstance),
                     'run_id': run_id,
                     'started_at': started_at,
                     'ended_at': ended_at,
@@ -154,23 +188,14 @@ class AgentBase(ABC):
                 'stack': [],
             }
             stack = []
-            if tool_calls:
-                stack.append(
-                    {'kind': 'RocketRide.agent.tool_calls.v1', 'name': 'host.tools', 'payload': _json_safe(tool_calls)}
-                )
-            stack.append(
-                {'kind': 'RocketRide.agent.error.v1', 'name': 'exception', 'payload': {'type': error_type, 'message': error_message}}
-            )
+            stack.append({'kind': 'RocketRide.agent.error.v1', 'name': 'exception', 'payload': {'type': error_type, 'message': error_message}})
             answer_payload['stack'] = stack
 
         if emit_answers_lane:
-            debug(
-                'agent base emitting answer'
-                f' run_id={answer_payload.get("meta", {}).get("run_id")} framework={answer_payload.get("meta", {}).get("framework")}'
-            )
+            debug(f'agent base emitting answer run_id={answer_payload.get("meta", {}).get("run_id")} framework={answer_payload.get("meta", {}).get("framework")}')
             answer = Answer(expectJson=False)
             answer.setAnswer(answer_payload.get('content', ''))
-            pSelf.instance.writeAnswers(answer)
+            iInstance.instance.writeAnswers(answer)
 
         return answer_payload
 
@@ -303,6 +328,21 @@ class AgentBase(ABC):
     # ---------------------------------------------------------------------
     # Engine utilities
     # ---------------------------------------------------------------------
+    def sendSSE(self, type: str, message: str, data: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Send a real-time SSE status update to the UI for this agent's pipe.
+
+        Wraps ``monitorSSE`` using the ``pipe_id`` captured at the start of
+        the current ``run_agent`` invocation.  Safe to call from ``_run`` or
+        any helper it delegates to.
+
+        Args:
+            type:    Event type ('thinking', 'acting', 'confirm').
+            message: Human-readable status string shown in the chat UI.
+            data:    Optional structured payload included in the event body.
+        """
+        monitorSSE(self._pipe_id, type, message, data)
+
     def _agent_id(self, pSelf: Any) -> str:
         """Return the logical agent identifier used in answer metadata."""
         try:
@@ -312,16 +352,3 @@ class AgentBase(ABC):
         except Exception:
             pass
         return self.__class__.__name__
-
-    def _get_task_id(self, pSelf: Any) -> Optional[str]:
-        """Return the engine taskId if present in job configuration."""
-        try:
-            endpoint = getattr(pSelf, 'IEndpoint', None)
-            eng = getattr(endpoint, 'endpoint', None)
-            job_cfg = getattr(eng, 'jobConfig', None)
-            if isinstance(job_cfg, dict):
-                task_id = job_cfg.get('taskId')
-                return str(task_id) if task_id else None
-        except Exception:
-            return None
-        return None

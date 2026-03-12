@@ -223,6 +223,7 @@ export class Question {
 	history: QuestionHistory[] = [];
 	examples: QuestionExample[] = [];
 	context: string[] = [];
+	goals: string[] = [];
 	documents: Doc[] = [];
 	questions: QuestionText[] = [];
 
@@ -293,6 +294,13 @@ export class Question {
 	 */
 	addHistory(item: QuestionHistory): void {
 		this.history.push(item);
+	}
+
+	/**
+	 * Add a high-level goal or objective for the AI to work towards.
+	 */
+	addGoal(goal: string): void {
+		this.goals.push(goal);
 	}
 
 	/**
@@ -406,7 +414,7 @@ export class Question {
 			addPromptInstruction({
 				subtitle: 'JSON Response Format',
 				instructions: `
-                    - Respond **only** with a valid JSON structure.
+                    - Respond **only** with a fenced, valid JSON structure.
                     - Properly escape all quotes within content strings
                     - No additional text, comments, or explanations.
                     - Ensure your answer is strictly valid JSON format.
@@ -443,6 +451,14 @@ export class Question {
 			for (const item of this.history) {
 				prompt += `    ${item.role}: ${item.content}` + crlf;
 			}
+		}
+
+		// Add goals
+		if (this.goals.length > 0) {
+			prompt += '### Goal:' + crlf;
+			this.goals.forEach((goal, index) => {
+				prompt += `    ${index + 1}) ${goal.trim()}` + crlf;
+			});
 		}
 
 		// Add questions
@@ -482,6 +498,7 @@ export class Question {
 			history: this.history,
 			examples: this.examples,
 			context: this.context,
+			goals: this.goals,
 			documents: this.documents,
 			questions: this.questions
 		};
@@ -502,6 +519,7 @@ export class Question {
 		question.history = (data.history || []) as QuestionHistory[];
 		question.examples = (data.examples || []) as QuestionExample[];
 		question.context = (data.context || []) as string[];
+		question.goals = (data.goals || []) as string[];
 		question.documents = (data.documents || []) as Doc[];
 		question.questions = (data.questions || []) as QuestionText[];
 

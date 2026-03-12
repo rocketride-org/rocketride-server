@@ -417,7 +417,7 @@ export class ConnectionManager extends EventEmitter {
 		this.logger.output(`${icons.success} Connected to RocketRide server`);
 		this.emit('connected');
 
-		// Register global monitors for task lifecycle and output events
+		// Register global monitors for task lifecycle, output, and SSE events
 		this.request('rrext_monitor', {
 			types: ['task', 'output']
 		}, '*').catch(err => {

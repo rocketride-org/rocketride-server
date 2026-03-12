@@ -26,7 +26,7 @@ import { isUrl } from './is-url';
 // Import all connector icons
 import amazonS3Icon from '../assets/nodes/amazon-s3.svg';
 import anthropicIcon from '../assets/nodes/anthropic.svg';
-import rocketrideIcon from '../assets/nodes/rocketride.png';
+import rocketrideIcon from '../assets/nodes/rocketride.svg';
 import astradbIcon from '../assets/nodes/astra_db.svg';
 import audioPlayerIcon from '../assets/nodes/audio-player.svg';
 import audioTranscribeIcon from '../assets/nodes/audio-transcribe.svg';

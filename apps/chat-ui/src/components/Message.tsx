@@ -39,6 +39,15 @@ interface MessageProps {
  * @param message - Message data to display
  */
 export const Message: React.FC<MessageProps> = ({ message }) => {
+	if (message.sender === 'status') {
+		return (
+			<div className="message-status">
+				<span className="message-status-dot" />
+				<span className="message-status-text">{message.text}</span>
+			</div>
+		);
+	}
+
 	if (message.sender === 'bot' || message.sender === 'system') {
 		return (
 			<div className="message-wrapper bot">

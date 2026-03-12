@@ -107,6 +107,23 @@ def monitorOther(*args) -> None:
 globals()['monitorOther'] = engLib.monitorOther  # noqa
 
 
+def monitorSSE(pipe_id: int, type: str, message: str, data: dict = None) -> None:
+    """
+    Send a real-time SSE event to the UI for the current pipe.
+
+    Args:
+        pipe_id: The current pipe's ID (self.instance.pipeId)
+        type:    Event type ('thinking', 'acting', 'confirm')
+        message: Human-readable message to display in the UI
+        data:    Optional structured data dict to include in the event
+    """
+    import json
+    payload = {'pipe_id': pipe_id, 'type': type, 'message': message}
+    if data:
+        payload['data'] = data
+    engLib.monitorOther('SSE', json.dumps(payload, separators=(',', ':')))
+
+
 class Lvl(Enum):
     """
     Engine logging levels.

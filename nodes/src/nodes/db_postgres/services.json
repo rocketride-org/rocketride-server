@@ -167,6 +167,15 @@
 			"default": "table",
 			"description": "Name of table"
 		},
+		"postgresdb.db_description": {
+			"type": "string",
+			"title": "Database description",
+			"default": "",
+			"description": "Optional plain-language description of the database content and purpose (helps the LLM generate better queries)",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
 		"postgresdb.max_attempts": {
 			"type": "integer",
 			"title": "Max validation attempts",
@@ -183,6 +192,7 @@
 				"postgresdb.password",
 				"postgresdb.database",
 				"postgresdb.table",
+				"postgresdb.db_description",
 				"postgresdb.max_attempts"
 			]
 		},

@@ -65,7 +65,7 @@ class Chat(ChatBase):
             model_prefix = 'apac.'
 
         # Get the llm
-        self._llm = ChatBedrock(model=model_prefix + self._model, aws_access_key_id=accessKey, aws_secret_access_key=secretKey, region=self.region, temperature=0)
+        self._llm = ChatBedrock(model=model_prefix + self._model, aws_access_key_id=accessKey, aws_secret_access_key=secretKey, region=self.region, temperature=0, max_tokens=self._modelOutputTokens)
 
         # Save our chat class into the bag
         bag['chat'] = self
