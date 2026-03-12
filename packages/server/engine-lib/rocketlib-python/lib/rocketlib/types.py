@@ -261,6 +261,35 @@ class IInvokeTool(IInvoke):
         model_config = ConfigDict(extra='allow')
 
 
+class IInvokeCrew(IInvoke):
+    """
+    Control-plane type for CrewAI sub-agent discovery (crewai.describe fan-out).
+
+    Each sub-agent connected on the 'crewai' channel appends a DescribeResponse
+    to Describe.agents when the orchestrator fans out a Describe request.
+    """
+
+    op: str = 'crewai.describe'
+    model_config = ConfigDict(extra='allow')
+
+    class Describe(BaseModel):
+        """Fan-out request: each connected sub-agent appends its descriptor."""
+
+        op: str = Field(default='crewai.describe', frozen=True)
+        agents: List[Any] = Field(default_factory=list)
+        model_config = ConfigDict(extra='allow')
+
+    class DescribeResponse(BaseModel):
+        """Sub-agent descriptor returned in response to crewai.describe."""
+
+        op: str = Field(default='crewai.describe', frozen=True)
+        role: str
+        task_description: str
+        node_id: str = ''  # pSelf.instance.pipeType['id'] — used to filter sub-agents from tool list
+        invoke: Any = Field(default=None)  # full pSelf IInstance — passed to AgentHostServices(d.invoke)
+        model_config = ConfigDict(extra='allow')
+
+
 class IJson(Impl_IJson):
     """
     A wrapper class for IJson that provides utility methods for handling JSON-like structures.

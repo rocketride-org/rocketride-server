@@ -42,8 +42,24 @@ class IInstance(IInstanceBase):
         self.IGlobal.agent.run_agent(self, question, emit_answers_lane=True)
 
     def invoke(self, param: Any) -> Any:  # noqa: ANN401
-        # Only intercept tool.* control-plane operations; otherwise fall back.
         op = param.get('op') if isinstance(param, dict) else getattr(param, 'op', None)
+
+        # crewai.describe fan-out: only sub-agents (CrewDriver) respond — guarded by hasattr.
+        # OrchestratorDriver has no describe() so it silently falls through.
+        if isinstance(op, str) and op == 'crewai.describe' and hasattr(self.IGlobal.agent, 'describe'):
+            descriptor = self.IGlobal.agent.describe(self)
+            existing = getattr(param, 'agents', None)
+            if isinstance(existing, list):
+                existing.append(descriptor)
+                try:
+                    param.agents = existing
+                except Exception:
+                    pass
+                return param
+            return [descriptor]
+
+        # tool.* control-plane operations for agent-as-tool.
         if isinstance(op, str) and op.startswith('tool.'):
             return self.IGlobal.agent.handle_invoke(self, param)
+
         return super().invoke(param)

@@ -34,7 +34,9 @@
 		"profiles": {
 			"default": {
 				"agent_description": "",
-				"instructions": []
+				"instructions": [],
+				"role": "Assistant",
+				"task_description": ""
 			}
 		}
 	},
@@ -58,7 +60,19 @@
 				"format": "textarea"
 			}
 		},
+		"role": {
+			"type": "string",
+			"title": "Role",
+			"description": "Short role name for this agent when used in a CrewAI Orchestrator pipeline (e.g. 'Financial Analyst')."
+		},
+		"task_description": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Task",
+			"description": "What this agent should do when used in a CrewAI Orchestrator pipeline. If blank, the incoming question is used."
+		},
 		"agent_crewai.default": { "object": "default", "properties": ["agent_description", "instructions"] },
+		"agent_crewai.subagent": { "object": "default", "properties": ["role", "task_description"] },
 		"agent_crewai.profile": {
 			"title": "Profile",
 			"type": "string",
@@ -72,6 +86,11 @@
 			"section": "Pipe",
 			"title": "CrewAI",
 			"properties": ["agent_description", "instructions"]
+		},
+		{
+			"section": "Sub-Agent Settings",
+			"title": "Settings when used in a CrewAI Orchestrator pipeline",
+			"properties": ["agent_crewai.subagent"]
 		}
 	]
 }

@@ -72,6 +72,7 @@ from .types import IDict
 from .types import IInvoke
 from .types import IInvokeLLM
 from .types import IInvokeTool
+from .types import IInvokeCrew
 from .types import IJson
 from .types import OPEN_MODE
 from .types import PROTOCOL_CAPS
@@ -110,6 +111,7 @@ __all__ = [
     'IInvoke',
     'IInvokeLLM',
     'IInvokeTool',
+    'IInvokeCrew',
     'IJson',
     'ILoader',
     'isAppMonitor',

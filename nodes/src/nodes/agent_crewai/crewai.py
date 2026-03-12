@@ -5,7 +5,7 @@
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
-# to use, copy, merge, publish, distribute, sublicense, and/or sell
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
@@ -17,7 +17,7 @@
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF OTHER DEALINGS IN THE
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
 
@@ -36,22 +36,52 @@ from ai.common.agent import AgentBase
 from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
 from rocketlib import ToolDescriptor
 
+_DEFAULT_GOAL = 'Complete the assigned task using available tools.'
+_DEFAULT_BACKSTORY = (
+    'You are a specialized agent in a multi-agent pipeline. '
+    'Use the tools available to you and complete your assigned task thoroughly.'
+)
+_DEFAULT_EXPECTED_OUTPUT = 'A thorough, accurate result for the assigned task.'
+
 
 class CrewDriver(AgentBase):
     FRAMEWORK = 'crewai'
 
-    def __init__(self, iGlobal: Any, *, process: Any = None):
+    def __init__(self, iGlobal: Any, *, process: Any = None, role: str = 'Assistant', task_description: str = ''):
         """
         Initialize the CrewDriver.
+
+        iGlobal is passed to AgentBase so it can load config/instructions.
         """
         super().__init__(iGlobal)
         self._process = process
+        self._role = role
+        self._task_description = task_description
+
+    def describe(self, pSelf: Any) -> Any:
+        """
+        Return a DescribeResponse for crewai.describe fan-out.
+
+        Called by IInstance.invoke() when the orchestrator fans out crewai.describe.
+        Stores the full pSelf IInstance in `invoke` so AgentHostServices(d.invoke)
+        can call d.invoke.instance.* correctly.
+        """
+        from rocketlib.types import IInvokeCrew
+
+        pipe_type = pSelf.instance.pipeType
+        node_id = str(pipe_type.get('id') if isinstance(pipe_type, dict) else getattr(pipe_type, 'id', '')) or ''
+        return IInvokeCrew.DescribeResponse(
+            role=self._role,
+            task_description=self._task_description,
+            node_id=node_id,
+            invoke=pSelf,
+        )
 
     def _bind_framework_llm(
         self,
         *,
         host: AgentHost,
-        call_llm_text: Callable[..., str],
+        call_llm: Callable[..., str],
         ctx: Dict[str, Any],
     ) -> Any:
 
@@ -70,7 +100,7 @@ class CrewDriver(AgentBase):
                 **kwargs: Any,
             ) -> Union[str, Any]:
                 stop_words = getattr(self, 'stop', None)
-                return call_llm_text(messages, stop_words=stop_words)
+                return call_llm(messages, stop_words=stop_words)
 
         return HostInvokeLLM()
 
@@ -169,7 +199,7 @@ class CrewDriver(AgentBase):
         ctx: Dict[str, Any],
     ) -> AgentRunResult:
         run_id = ctx.get('run_id', '')
-        debug('agent_crewai driver _run start run_id={} prompt_len={}'.format(run_id, len(agent_input.question.getPrompt() or '')))
+        debug('agent_crewai driver _run start run_id={}'.format(run_id))
 
         from crewai import Agent, Crew, Task  # type: ignore
 
@@ -179,14 +209,14 @@ class CrewDriver(AgentBase):
             return self.call_host_llm(
                 host=host,
                 messages=messages,
-                question_role='You are a helpful assistant.',
+                question_role=self._role,
                 stop_words=stop_words,
             )
 
         def _invoke_tool(tool_name: str, input: Any = None, kwargs: Optional[Dict[str, Any]] = None) -> Any:  # noqa: A002
             return self.invoke_host_tool(host=host, tool_name=tool_name, input=input, kwargs=kwargs)
 
-        llm = self._bind_framework_llm(host=host, call_llm_text=_call_llm_text, ctx=ctx)
+        llm = self._bind_framework_llm(host=host, call_llm=_call_llm_text, ctx=ctx)
         tools_for_agent = self._bind_framework_tools(
             host=host,
             tool_descriptors=tool_descriptors,
@@ -196,28 +226,24 @@ class CrewDriver(AgentBase):
         )
 
         agent_obj = Agent(
-            role='Assistant',
-            goal='Solve the user request using available tools when helpful.',
-            backstory=('You are an agent node in a tool-invocation hierarchy. You may call tools wired to you via the host tools interface. When a tool is needed, call it; otherwise respond directly. Follow any additional instructions exactly.'),
+            role=self._role,
+            goal=_DEFAULT_GOAL,
+            backstory=_DEFAULT_BACKSTORY,
             tools=tools_for_agent,
             llm=llm,
             verbose=False,
         )
 
-        desc_parts = [
-            'You are executing inside an agent pipeline.',
-            'Use tools when needed (and only those available to you).',
-            '',
-            'User request:',
-            _safe_str(agent_input.question.getPrompt() or ''),
-        ]
-        desc = '\n'.join(desc_parts).strip()
+        # Use configured task_description if set, otherwise fall back to the incoming prompt
+        from ai.common.agent._internal.utils import extract_prompt
+        prompt = extract_prompt(agent_input.question) if hasattr(agent_input, 'question') else ''
+        task_text = self._task_description or prompt or ''
 
-        desc = desc.replace('{', '{{').replace('}', '}}')
+        desc = task_text.replace('{', '{{').replace('}', '}}')
 
         task_obj = Task(
-            description=desc,
-            expected_output='A helpful, accurate response.',
+            description=desc or 'Complete the user request.',
+            expected_output=_DEFAULT_EXPECTED_OUTPUT,
             agent=agent_obj,
             markdown=False,
         )

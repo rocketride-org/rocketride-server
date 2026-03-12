@@ -26,12 +26,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase, IJson, OPEN_MODE
 
 
 class IGlobal(IGlobalBase):
     process: Any = None
     agent: Any = None
+    role: str = 'Assistant'
+    task_description: str = ''
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -46,10 +48,20 @@ class IGlobal(IGlobalBase):
 
         self.process = Process.sequential
 
-        from .crewai import CrewDriver
+        conn_config = IJson.toDict(self.glb.connConfig) if self.glb.connConfig else {}
+        conn_config = conn_config if isinstance(conn_config, dict) else {}
 
-        self.agent = CrewDriver(self, process=self.process)
+        if self.glb.logicalType == 'agent_crewai_orchestrator':
+            from .orchestrator_driver import OrchestratorDriver
+            self.agent = OrchestratorDriver(self)
+        else:
+            self.role = str(conn_config.get('role') or 'Assistant').strip() or 'Assistant'
+            self.task_description = str(conn_config.get('task_description') or '').strip()
+            from .crewai import CrewDriver
+            self.agent = CrewDriver(self, process=self.process, role=self.role, task_description=self.task_description)
 
     def endGlobal(self) -> None:
         self.agent = None
         self.process = None
+        self.role = 'Assistant'
+        self.task_description = ''
