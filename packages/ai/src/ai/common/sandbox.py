@@ -213,7 +213,13 @@ def execute_sandboxed(
         try:
             exec(compiled, sandbox_globals)  # noqa: S102
         except SystemExit as e:
-            exit_code = int(e.code) if e.code is not None else 0
+            if e.code is None:
+                exit_code = 0
+            elif isinstance(e.code, int):
+                exit_code = e.code
+            else:
+                stderr = f'SystemExit: {e.code}'
+                exit_code = 1
         except Exception:
             stderr = traceback.format_exc()
             exit_code = 1
@@ -273,9 +279,10 @@ def _truncate(text: str, max_size: int = _MAX_OUTPUT) -> str:
     """Truncate output to *max_size* characters, keeping head and tail."""
     if len(text) <= max_size:
         return text
-    half = max_size // 2
+    marker = f'\n\n... [truncated — {len(text)} chars total, limit {max_size}] ...\n\n'
+    half = (max_size - len(marker)) // 2
     return (
         text[:half]
-        + f'\n\n... [truncated — {len(text)} chars total, limit {max_size}] ...\n\n'
+        + marker
         + text[-half:]
     )
