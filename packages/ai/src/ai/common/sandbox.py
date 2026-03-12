@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import importlib
 import subprocess
+import operator
 import sys
 import threading
 import traceback
@@ -109,6 +110,23 @@ _EXTRA_SAFE_BUILTINS = frozenset({
     'max', 'min', 'next', 'object', 'print', 'reversed', 'set',
     'sum', 'super', 'type',
 })
+
+
+_INPLACE_OPS = {
+    '+=': operator.iadd,
+    '-=': operator.isub,
+    '*=': operator.imul,
+    '/=': operator.itruediv,
+    '%=': operator.imod,
+    '**=': operator.ipow,
+    '<<=': operator.ilshift,
+    '>>=': operator.irshift,
+    '|=': operator.ior,
+    '^=': operator.ixor,
+    '&=': operator.iand,
+    '//=': operator.ifloordiv,
+    '@=': operator.imatmul,
+}
 
 
 def _guarded_getitem(obj: Any, key: Any) -> Any:
@@ -196,7 +214,7 @@ def execute_sandboxed(
         '_getiter_': default_guarded_getiter,
         '_iter_unpack_sequence_': guarded_unpack_sequence,
         '_write_': full_write_guard,
-        '_inplacevar_': lambda op, x, y: op(x, y),
+        '_inplacevar_': lambda op, x, y: _INPLACE_OPS[op](x, y),
         '_print_': PrintCollector,
         '_unpack_sequence_': guarded_unpack_sequence,
         '__metaclass__': type,
