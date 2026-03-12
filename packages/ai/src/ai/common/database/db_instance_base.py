@@ -243,17 +243,13 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
     def _executeSQLQuery(self, query: str) -> list[dict] | None:
         """Execute a SQL SELECT query and return rows as a list of dicts."""
         try:
-            # Use a transaction block so any implicit state changes are rolled
-            # back automatically on error (the context manager handles rollback).
-            with self.IGlobal.session.begin():
-                result = self.IGlobal.session.execute(text(query))
+            with self.IGlobal.engine.connect() as conn:
+                result = conn.execute(text(query))
                 rows = result.fetchall()
                 column_names = result.keys()
                 return [dict(zip(column_names, row)) for row in rows]
 
         except SQLAlchemyError as e:
-            # The 'with session.begin()' context manager has already rolled back
-            # the transaction at this point; just log and return None.
             error(f'Error executing SQL query: {e}')
             return None
 
@@ -322,9 +318,6 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         except Exception as e:
             error(f'Error handling question: {e}')
-            # Roll back any partial transaction that may have been left open by
-            # a failed sub-call (e.g. _executeSQLQuery raised before committing).
-            self.IGlobal.session.rollback()
 
     def writeTable(self, markdown: str) -> None:
         """Handle incoming markdown table data — parse and insert into the database."""
@@ -349,7 +342,6 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             self._insertData(rows)
         except Exception as e:
             error(f'Error inserting table data: {e}')
-            self.IGlobal.session.rollback()
 
     def writeAnswers(self, answer: Answer) -> None:
         """Handle incoming structured answer data — extract JSON rows and insert."""
@@ -363,7 +355,6 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             self._insertData(items)
         except Exception as e:
             error(f'Error in writeAnswers: {e}')
-            self.IGlobal.session.rollback()
 
     # ------------------------------------------------------------------
     # Data insertion
@@ -451,10 +442,8 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         if insert_values:
             try:
-                # 'with session.begin()' commits on __exit__ and rolls back
-                # automatically on any exception — no explicit commit needed.
-                with self.IGlobal.session.begin():
-                    self.IGlobal.session.execute(insert(table), insert_values)
+                with self.IGlobal.engine.begin() as conn:
+                    conn.execute(insert(table), insert_values)
                 debug(f"Inserted {len(insert_values)} records into '{self.IGlobal.table}'.")
             except Exception as e:
                 # The context manager has already rolled back; re-raise so the

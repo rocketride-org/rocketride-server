@@ -48,7 +48,6 @@ from sqlalchemy import (
     Table as SQLTable, create_engine, inspect, text,
 )
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import sessionmaker
 
 from rocketlib import IGlobalBase, error, warning
 from ai.common.config import Config
@@ -58,7 +57,6 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     """Abstract base for the IGlobal layer of any relational database node."""
 
     engine = None
-    session = None
     database: str = ''
     table: str = ''
     db_description: str = ''
@@ -447,10 +445,6 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         # pool_size + max_overflow allow up to 30 concurrent connections.
         self.engine = create_engine(db_url, pool_size=10, max_overflow=20)
 
-        # Create the ORM session bound to this engine.
-        Session = sessionmaker(bind=self.engine)
-        self.session = Session()
-
         # Reflect the full database schema once at startup so LLM prompts have
         # complete context without per-query reflection overhead.
         self.db_schema = self._getDatabaseSchema()
@@ -470,10 +464,5 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             self.schema = {name: (col_type, '') for name, col_type in table_schema}
 
     def endGlobal(self) -> None:
-        # Close the session to return its connection to the pool cleanly.
-        if self.session:
-            self.session.close()
-
-        # Dispose of the engine to release all pooled connections.
         if self.engine:
             self.engine.dispose()

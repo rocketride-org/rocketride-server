@@ -39,14 +39,7 @@ class MemoryDriver(ToolsBase):
 
     def _tool_query(self) -> List[Dict[str, Any]]:
         """Return tool descriptors for all memory operations."""
-        return [
-            {
-                'name': td['name'],
-                'description': td['description'],
-                'inputSchema': td.get('input_schema', {}),
-            }
-            for td in TOOL_DESCRIPTORS
-        ]
+        return list(TOOL_DESCRIPTORS)
 
     def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:
         """Validate that the tool name is a known ``memory.*`` operation."""

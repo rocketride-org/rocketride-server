@@ -37,17 +37,12 @@ class IGlobal(DatabaseGlobalBase):
     """
 
     def _connection_params(self, config: Dict[str, Any]) -> Dict[str, str]:
-        # The UI stores connection fields nested under 'mysql.default'; fall
-        # back to flat keys for compatibility with hand-crafted configs.
-        block = config.get('mysql.default')
-        if not isinstance(block, dict):
-            block = {}
         return {
-            'host':     (block.get('mysql.host')     or config.get('host')     or 'localhost').strip(),
-            'user':     (block.get('mysql.user')     or config.get('user')     or 'root').strip(),
-            'password': str(block.get('mysql.password') or config.get('password') or ''),
-            'database': (block.get('mysql.database') or config.get('database') or 'database').strip(),
-            'table':    (block.get('mysql.table')    or config.get('table')    or 'table').strip(),
+            'host':     config.get('host', 'localhost').strip(),
+            'user':     config.get('user', 'root').strip(),
+            'password': config.get('password', '').strip(),
+            'database': config.get('database', 'database').strip(),
+            'table':    config.get('table', 'table').strip(),
         }
 
     def _build_connection_url(self, params: Dict[str, str]) -> str:
@@ -57,17 +52,10 @@ class IGlobal(DatabaseGlobalBase):
         return f'mysql+pymysql://{params["user"]}:{password}@{params["host"]}/{params["database"]}'
 
     def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
-        # Read from the same mysql.default block as the other connection fields.
-        block = config.get('mysql.default')
-        if not isinstance(block, dict):
-            block = {}
         try:
-            return int(block.get('mysql.max_attempts') or config.get('mysql.max_attempts') or 5)
+            return int(config.get('max_attempts', 5))
         except (ValueError, TypeError):
             return 5
 
     def _db_description(self, config: Dict[str, Any]) -> str:
-        block = config.get('mysql.default')
-        if not isinstance(block, dict):
-            block = {}
-        return str(block.get('mysql.db_description') or config.get('mysql.db_description') or '')
+        return config.get('db_description', '')

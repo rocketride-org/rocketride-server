@@ -28,6 +28,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { ChartJsRenderer } from './ChartJsRenderer';
 
 interface MarkdownRendererProps {
 	content: string;
@@ -53,6 +54,17 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 			remarkPlugins={[remarkGfm]}
 			rehypePlugins={[rehypeRaw]}
 			components={{
+				pre: ({ children, ...rest }: any) => {
+					// When the code renderer returns a non-code element (chart, iframe),
+					// skip the <pre> wrapper so it doesn't break layout.
+					if (React.isValidElement(children)) {
+						const child = children as React.ReactElement<any>;
+						if (child.type !== 'code') {
+							return <>{children}</>;
+						}
+					}
+					return <pre {...rest}>{children}</pre>;
+				},
 				code: (props: any) => {
 					const { inline, className, children, ...rest } = props;
 					const match = /language-(\w+)/.exec(className || '');
@@ -71,6 +83,10 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 								title="Rendered HTML"
 							/>
 						);
+					}
+
+					if (!inline && match && match[1] === 'chartjs') {
+						return <ChartJsRenderer config={codeContent} />;
 					}
 
 					return !inline && match ? (

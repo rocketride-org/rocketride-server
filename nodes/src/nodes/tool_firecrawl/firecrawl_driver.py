@@ -94,17 +94,7 @@ class FirecrawlDriver(ToolsBase):
     # ------------------------------------------------------------------
 
     def _tool_query(self) -> List[ToolsBase.ToolDescriptor]:
-        out: List[ToolsBase.ToolDescriptor] = []
-        for tool in _TOOLS_BY_BARE_NAME.values():
-            desc: ToolsBase.ToolDescriptor = {
-                'name': tool['name'],
-                'description': tool['description'],
-                'input_schema': tool['inputSchema'],
-            }
-            if 'outputSchema' in tool:
-                desc['output_schema'] = tool['outputSchema']
-            out.append(desc)
-        return out
+        return list(_TOOLS_BY_BARE_NAME.values())
 
     def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
         tool = _TOOLS_BY_BARE_NAME.get(tool_name)

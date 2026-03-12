@@ -7,6 +7,9 @@
 # Shell scripts should use LF
 *.sh text eol=lf
 
+# Python files should use LF
+*.py text eol=lf
+
 # Windows batch files should use CRLF
 *.cmd text eol=crlf
 *.bat text eol=crlf

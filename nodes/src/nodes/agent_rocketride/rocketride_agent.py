@@ -99,8 +99,6 @@ class RocketRideDriver(AgentBase):
         waves: List[Dict[str, Any]] = []
         trace: Dict[str, Any] = {'waves': waves, 'run_id': run_id}
 
-        # Plan checklist — persists across waves so the LLM can track
-        # its own progress through multi-step tasks.
         current_plan = ''
 
         for wave_num in range(_MAX_WAVES):
@@ -151,7 +149,7 @@ class RocketRideDriver(AgentBase):
 
             # Execute all tool calls in this wave concurrently and record
             # the results so subsequent planning iterations can reference them.
-            results = execute_wave(wave, host=host)
+            results = execute_wave(wave, host=host, wave_name=f'wave-{wave_num}')
             waves.append({'wave_num': wave_num, 'calls': wave, 'results': results})
             self.sendSSE('thinking', f'Step {wave_num + 1} complete', {'results': len(results)})
 
@@ -178,7 +176,7 @@ class RocketRideDriver(AgentBase):
         bullet list, injects it as context, and asks the LLM to synthesize
         a coherent answer.
         """
-        # Flatten all wave results into a compact bullet list
+        # Flatten all wave results into a compact bullet list.
         lines: List[str] = []
         for w in waves:
             for r in w.get('results', []):

@@ -46,7 +46,7 @@ from .planner import summarize_result
 
 _MAX_WORKERS = 8
 _TOOL_TIMEOUT_S = 120
-_PEEK_MAX_LEN = 500
+_PREVIEW_MAX_LEN = 500
 
 # Matches {{memory.get:key}} and {{memory.get:key@format}}
 _REF_PATTERN = re.compile(r'\{\{memory\.get:([^}@]+)(?:@([^}]+))?\}\}')
@@ -65,6 +65,7 @@ def _memory_get(key: str, host: AgentHost) -> Any:
     except Exception:
         pass
     return None
+
 
 
 def _format_value(value: Any, fmt: str, host: AgentHost) -> str:
@@ -101,7 +102,7 @@ def _resolve_refs(value: Any, host: AgentHost) -> Any:
     - Missing keys resolve to ``None``.
     """
     if isinstance(value, str):
-        # Exact match — call memory.get and return the stored value directly
+        # Exact match — return the stored value directly (preserving type)
         exact = _REF_PATTERN.fullmatch(value)
         if exact:
             key = exact.group(1)
@@ -128,7 +129,6 @@ def _resolve_refs(value: Any, host: AgentHost) -> Any:
                 return ''
             if fmt:
                 return _format_value(v, fmt, host)
-            # No format — serialize as string
             if isinstance(v, str):
                 return v
             try:
@@ -150,12 +150,7 @@ def _resolve_refs(value: Any, host: AgentHost) -> Any:
 
 
 def resolve_answer_refs(answer: str, host: AgentHost) -> str:
-    """Resolve ``{{memory.get:key[@format]}}`` references in a final answer.
-
-    This is the public entry point used by the agent driver to expand
-    memory references in the LLM's final answer before returning it
-    to the caller.
-    """
+    """Resolve ``{{memory.get:key[@format]}}`` references in a final answer."""
     if not isinstance(answer, str) or not _REF_PATTERN.search(answer):
         return answer
     return _resolve_refs(answer, host)
@@ -176,125 +171,118 @@ def _result_size_label(result: Any) -> str:
     return f'{n / 1024:.1f} KB'
 
 
-def _store_to_memory(key: str, result: Any, host: AgentHost) -> bool:
-    """Store a tool result in memory via the host ``memory.put`` tool.
+def _auto_key(wave_name: str, idx: int) -> str:
+    """Generate a memory key scoped to a wave and call index."""
+    return f'{wave_name}.r{idx}'
 
-    Serializes non-string results to JSON before storing.  Returns
-    ``True`` on success, ``False`` on failure (logged but not raised).
+
+def _store_and_preview(key: str, result: Any, host: AgentHost) -> str:
+    """Store *result* in memory under *key* and return a summary line.
+
+    Always stores the full result and returns a preview of up to
+    _PREVIEW_MAX_LEN characters so the LLM can read the data inline.
+    The summary includes the key and full size so the LLM can decide
+    whether to reference the stored value in a later wave or the answer.
     """
-    # Normalize the value to a string — memory.put expects strings
     try:
-        value = result
-        if not isinstance(value, str):
-            value = json.dumps(result, ensure_ascii=False)
+        value = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
     except Exception:
         value = str(result)
 
-    # Delegate to the memory node via the host tool control-plane
     try:
         host.tools.invoke('memory.put', {'key': key, 'value': value})
-        return True
     except Exception as exc:
         error(f'rocketride wave memory.put key={key!r} failed: {exc}')
-        return False
 
-
-def _build_summary(call: Dict[str, Any], result: Any, host: AgentHost) -> str:
-    """
-    Build the wave-history summary line based on the result mode.
-
-    For ``peek`` and ``store`` modes, stores the result via the host
-    memory.put tool.
-    """
-    # --- store mode: silent, just the key and size ---
-    store_key = call.get('store')
-    if isinstance(store_key, str) and store_key:
-        _store_to_memory(store_key, result, host)
-        return f'stored to "{store_key}" ({_result_size_label(result)})'
-
-    # --- peek mode: store + short preview ---
-    peek_key = call.get('peek')
-    if isinstance(peek_key, str) and peek_key:
-        _store_to_memory(peek_key, result, host)
-        preview = summarize_result(result, max_len=_PEEK_MAX_LEN)
-        return f'[{peek_key}] {preview}'
-
-    # --- result mode (default): full summary ---
-    return summarize_result(result)
+    size = _result_size_label(result)
+    preview = summarize_result(result, max_len=_PREVIEW_MAX_LEN)
+    return f'[key: "{key}", {size}] {preview}'
 
 
 # ---------------------------------------------------------------------------
 # Wave executor
 # ---------------------------------------------------------------------------
 
-def execute_wave(
+def _execute_wave_calls(
     wave: List[Dict[str, Any]],
     *,
     host: AgentHost,
+    wave_name: str = 'wave-0',
 ) -> List[Dict[str, Any]]:
-    """
-    Execute all tool calls in a wave in parallel and return the results.
+    """Execute all tool calls in a wave in parallel.
 
-    Args:
-        wave: List of ``{"tool": str, "args": dict}`` dicts, each optionally
-              containing one of ``"result"``, ``"peek"``, or ``"store"``.
-        host: The agent host providing tool invocation via ``host.tools.invoke()``.
-
-    Returns:
-        List of result dicts (same order as wave), each containing:
-          tool, args, result, summary, and optionally error.
+    Each call's result is automatically stored in memory under an
+    auto-generated key and a preview is returned inline so the LLM
+    can read the data without a separate fetch.
     """
     if not wave:
         return []
 
+    # Assign wave-scoped keys before dispatch so each worker knows its key
+    tagged: List[Dict[str, Any]] = [
+        {**call, '_key': _auto_key(wave_name, i)}
+        for i, call in enumerate(wave)
+    ]
+
     def _run_one(call: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a single tool call — runs inside a thread pool worker."""
         tool = call.get('tool', '')
+        key = call['_key']
         args = call.get('args') or {}
         if not isinstance(args, dict):
             args = {}
-
-        # Replace any {{memory.get:key}} placeholders with actual stored
-        # values before invoking the tool.
         args = _resolve_refs(args, host)
 
-        debug(f'rocketride wave execute tool={tool!r}')
+        debug(f'rocketride wave execute tool={tool!r} key={key!r}')
         try:
-            # Invoke the tool through the host control-plane
             result = host.tools.invoke(tool, args)
-            # Build a summary line for wave history based on the result mode
-            # (store / peek / result) specified by the planner
-            summary = _build_summary(call, result, host)
-            return {'tool': tool, 'args': args, 'result': result, 'summary': summary}
+            summary = _store_and_preview(key, result, host)
+            return {'tool': tool, 'args': args, 'key': key, 'result': result, 'summary': summary}
         except Exception as exc:
             err_msg = f'{type(exc).__name__}: {exc}'
             error(f'rocketride wave execute tool={tool!r} error={err_msg}')
-            return {'tool': tool, 'args': args, 'result': None, 'summary': '', 'error': err_msg}
+            return {'tool': tool, 'args': args, 'key': key, 'result': None, 'summary': '', 'error': err_msg}
 
-    # Cap the thread pool at _MAX_WORKERS to avoid overwhelming the host
-    n = min(_MAX_WORKERS, len(wave))
-
-    # Pre-allocate a fixed-size list so results stay in the same order
-    # as the original wave (as_completed returns in arbitrary order)
-    results: List[Any] = [None] * len(wave)
+    n = min(_MAX_WORKERS, len(tagged))
+    results: List[Any] = [None] * len(tagged)
 
     with ThreadPoolExecutor(max_workers=n) as pool:
-        # Submit all calls and map each future back to its wave index
-        future_to_idx = {pool.submit(_run_one, call): i for i, call in enumerate(wave)}
+        future_to_idx = {pool.submit(_run_one, call): i for i, call in enumerate(tagged)}
         for future in as_completed(future_to_idx):
             idx = future_to_idx[future]
             try:
                 results[idx] = future.result(timeout=_TOOL_TIMEOUT_S)
             except Exception as exc:
-                # Record the error in-place so the planner sees the failure
-                call = wave[idx]
+                call = tagged[idx]
                 results[idx] = {
                     'tool': call.get('tool', ''),
                     'args': call.get('args') or {},
+                    'key': call['_key'],
                     'result': None,
                     'summary': '',
                     'error': f'{type(exc).__name__}: {exc}',
                 }
 
-    # Filter out any remaining None slots (shouldn't happen, but defensive)
     return [r for r in results if r is not None]
+
+
+def execute_wave(
+    wave: List[Dict[str, Any]],
+    *,
+    host: AgentHost,
+    wave_name: str = 'wave-0',
+) -> List[Dict[str, Any]]:
+    """Execute all tool calls in a wave concurrently.
+
+    Every result is automatically stored in memory under a key of the form
+    ``<wave_name>.r<idx>`` (e.g. ``wave-0.r0``) and a preview is returned inline.
+
+    Args:
+        wave: List of ``{"tool": str, "args": dict}`` dicts.
+        host: The agent host providing tool invocation via ``host.tools.invoke()``.
+        wave_name: Name prefix for generated memory keys (e.g. ``"wave-0"``).
+
+    Returns:
+        List of result dicts (same order as wave), each containing:
+          tool, args, key, result, summary, and optionally error.
+    """
+    return _execute_wave_calls(wave, host=host, wave_name=wave_name)

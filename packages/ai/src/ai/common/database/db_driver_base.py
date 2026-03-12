@@ -91,19 +91,19 @@ class DatabaseDriverBase(ToolsBase):
     def _tool_query(self) -> List[Dict[str, Any]]:
         db = self._db_display_name()
         db_desc = getattr(self._instance.IGlobal, 'db_description', '') or ''
-        desc_suffix = f' Database context: {db_desc}' if db_desc else ''
+        desc_prefix = f'{db_desc} ' if db_desc else ''
         return [
             {
                 'name': f'{self._server_name}.get_data',
                 'summary': f'PRIMARY tool for {db} -- accepts natural language, no setup required. Use this first.',
                 'description': (
+                    f'{desc_prefix}'
                     f'Accepts a natural-language description of the data you want, converts it to a safe '
-                    f'SQL SELECT statement, executes it against the "{db}" database, and returns the result rows. '
+                    f'SQL SELECT statement, executes it against the {db} database, and returns the result rows. '
                     f'No schema lookup or SQL knowledge required -- just describe what you need. '
                     f'Results may be large -- consider using peek or store.'
-                    f'{desc_suffix}'
                 ),
-                'input_schema': {
+                'inputSchema': {
                     'type': 'object',
                     'required': ['question'],
                     'properties': {
@@ -113,7 +113,7 @@ class DatabaseDriverBase(ToolsBase):
                         },
                     },
                 },
-                'output_schema': {
+                'outputSchema': {
                     'type': 'object',
                     'properties': {
                         'rows': {
@@ -135,13 +135,13 @@ class DatabaseDriverBase(ToolsBase):
                 'name': f'{self._server_name}.get_schema',
                 'summary': f'FALLBACK ONLY -- {db} schema lookup. Use only if get_data fails or returns unexpected results.',
                 'description': (
-                    f'Returns the "{db}" database schema including all tables, columns, types, primary keys, '
+                    f'{desc_prefix}'
+                    f'Returns the {db} database schema including all tables, columns, types, primary keys, '
                     f'and foreign key relationships. Pass a table name to get the schema for a single table, '
                     f'or omit it to get the full database schema. '
                     f'Do NOT call this preemptively -- only use when get_data fails or returns unexpected results.'
-                    f'{desc_suffix}'
                 ),
-                'input_schema': {
+                'inputSchema': {
                     'type': 'object',
                     'properties': {
                         'table': {
@@ -150,7 +150,7 @@ class DatabaseDriverBase(ToolsBase):
                         },
                     },
                 },
-                'output_schema': {
+                'outputSchema': {
                     'type': 'object',
                     'description': 'May be large for full database schemas -- prefer peek or store.',
                     'properties': {
@@ -186,12 +186,13 @@ class DatabaseDriverBase(ToolsBase):
                 'name': f'{self._server_name}.get_sql',
                 'summary': f'Convert a natural-language question to a {db} SQL SELECT without executing it.',
                 'description': (
-                    f'Accepts a natural-language description and returns the equivalent "{db}" SQL SELECT '
+                    f'{desc_prefix}'
+                    f'Accepts a natural-language description and returns the equivalent {db} SQL SELECT '
                     f'statement without executing it. The generated query is validated as safe (SELECT '
                     f'only, no mutations). Only use when the user explicitly asks to see the SQL -- '
                     f'for actual data retrieval, use get_data instead.'
                 ),
-                'input_schema': {
+                'inputSchema': {
                     'type': 'object',
                     'required': ['question'],
                     'properties': {
@@ -201,7 +202,7 @@ class DatabaseDriverBase(ToolsBase):
                         },
                     },
                 },
-                'output_schema': {
+                'outputSchema': {
                     'type': 'object',
                     'properties': {
                         'sql': {
