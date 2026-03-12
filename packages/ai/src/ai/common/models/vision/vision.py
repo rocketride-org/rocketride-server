@@ -121,7 +121,8 @@ class VisionLoader(BaseLoader):
         import numpy as np
         from PIL import Image
 
-        bundle = model if isinstance(model, dict) else model
+        # Server passes ModelInstanceWrapper (model.model_obj = bundle); local uses bundle dict
+        bundle = model if isinstance(model, dict) else getattr(model, 'model_obj', model)
         processor = bundle['processor']
         variant = bundle.get('variant', 'clip')
 
@@ -155,10 +156,13 @@ class VisionLoader(BaseLoader):
         """Run vision model forward."""
         from ai.common.torch import torch
 
-        bundle = model if isinstance(model, dict) else model
+        # Server passes ModelInstanceWrapper (model.model_obj = bundle); local uses bundle dict
+        bundle = model if isinstance(model, dict) else getattr(model, 'model_obj', model)
         net = bundle['model']
         variant = bundle.get('variant', 'clip')
-        device = metadata.get('device', 'cpu') if metadata else 'cpu'
+        # Server: metadata is on the wrapper (inference_fn is not passed metadata)
+        meta = metadata if isinstance(metadata, dict) else getattr(model, 'metadata', None) or {}
+        device = meta.get('device', 'cpu')
 
         pixel_values = preprocessed['pixel_values'].to(device)
 
