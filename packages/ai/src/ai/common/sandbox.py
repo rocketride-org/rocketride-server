@@ -53,6 +53,7 @@ from typing import Any, Dict, Set
 from RestrictedPython import compile_restricted, safe_builtins, PrintCollector
 from RestrictedPython.Eval import default_guarded_getiter
 from RestrictedPython.Guards import (
+    full_write_guard,
     guarded_unpack_sequence,
     safer_getattr,
 )
@@ -194,7 +195,7 @@ def execute_sandboxed(
         '_getitem_': _guarded_getitem,
         '_getiter_': default_guarded_getiter,
         '_iter_unpack_sequence_': guarded_unpack_sequence,
-        '_write_': lambda obj: obj,
+        '_write_': full_write_guard,
         '_inplacevar_': lambda op, x, y: op(x, y),
         '_print_': PrintCollector,
         '_unpack_sequence_': guarded_unpack_sequence,
