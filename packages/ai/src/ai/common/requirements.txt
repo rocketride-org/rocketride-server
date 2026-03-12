@@ -3,3 +3,4 @@
 #
 rank_bm25
 json5
+RestrictedPython

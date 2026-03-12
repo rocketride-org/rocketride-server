@@ -24,137 +24,41 @@
 """
 Restricted Python execution sandbox.
 
-Runs agent-supplied code via ``exec()`` inside a controlled namespace with:
+Runs agent-supplied code via RestrictedPython inside a controlled namespace with:
 
-1. **Restricted builtins** — only safe, pure-computation builtins are exposed.
-   Dangerous functions (``open``, ``eval``, ``exec``, ``compile``,
-   ``__import__``, ``globals``, ``locals``, ``breakpoint``, ``exit``,
-   ``quit``, ``input``, ``getattr``, ``setattr``, ``delattr``) are removed.
+1. **RestrictedPython compilation** — ``compile_restricted`` transforms the AST
+   to inject runtime guard calls that prevent attribute/item access escapes.
 
-2. **Allowlist-only ``__import__``** — a gated ``__import__`` is injected that
+2. **Safe builtins** — RestrictedPython's ``safe_builtins`` replaces the full
+   ``__builtins__``, removing dangerous functions by default.
+
+3. **Allowlist-only ``__import__``** — a gated ``__import__`` is injected that
    only permits modules explicitly listed in ``allowed_modules``.  Everything
    else raises ``ImportError``.
 
-3. **stdout capture** via a ``StringIO``-backed ``print()`` override.
+4. **stdout capture** via a ``StringIO``-backed ``print()`` override.
 
-4. **Timeout enforcement** via a daemon thread with ``thread.join(timeout)``.
+5. **Timeout enforcement** via a daemon thread with ``thread.join(timeout)``.
 """
 
 from __future__ import annotations
 
-import ast
-import builtins
 import importlib
-import io
 import subprocess
 import sys
 import threading
 import traceback
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, Set
+
+from RestrictedPython import compile_restricted, safe_builtins, PrintCollector
+from RestrictedPython.Eval import default_guarded_getiter
+from RestrictedPython.Guards import (
+    guarded_unpack_sequence,
+    safer_getattr,
+)
 
 _TIMEOUT = 20
 _MAX_OUTPUT = 51200  # 50 KB
-
-# ── Builtins that are NOT exposed to sandboxed code ──────────────────────────
-#
-# These fall into a few categories:
-#   - Sandbox escape:  eval, exec, compile, __import__
-#   - File / OS access: open
-#   - Host introspection: globals, locals, vars, dir, breakpoint
-#   - Attribute manipulation: getattr, setattr, delattr (prevents reaching
-#     into objects to pull out references to blocked functionality)
-#   - Interactive / process control: input, exit, quit
-#   - Low-level: memoryview, classmethod
-# ── Dunder attributes blocked in AST validation ─────────────────────────────
-# These prevent object-graph walks like:
-#   ().__class__.__mro__[1].__subclasses__()
-# which can recover subprocess.Popen, os._wrap_close, etc. from the CPython
-# class hierarchy without using any blocked builtins.
-_BLOCKED_DUNDERS = frozenset({
-    '__subclasses__',
-    '__mro__',
-    '__bases__',
-    '__base__',
-    '__class__',
-    '__dict__',
-    '__globals__',
-    '__code__',
-    '__func__',
-    '__self__',
-    '__module__',
-    '__import__',
-    '__spec__',
-    '__loader__',
-    '__builtins__',
-    '__qualname__',
-    '__reduce__',
-    '__reduce_ex__',
-    '__getattr__',
-    '__setattr__',
-    '__delattr__',
-    '__init_subclass__',
-    '__set_name__',
-    '__class_getitem__',
-    '__instancecheck__',
-    '__subclasscheck__',
-    '__subclasshook__',
-    '__del__',
-    '__weakref__',
-})
-
-
-class SandboxValidationError(Exception):
-    """Raised when sandboxed code fails AST validation."""
-
-
-def _validate_ast(code: str) -> None:
-    """Parse *code* and reject access to dangerous dunder attributes.
-
-    Raises ``SandboxValidationError`` if the code accesses any attribute in
-    ``_BLOCKED_DUNDERS``, or ``SyntaxError`` if the code can't be parsed.
-    """
-    tree = ast.parse(code, filename='<agent_script>')
-    violations: List[str] = []
-
-    for node in ast.walk(tree):
-        # obj.__subclasses__  /  obj.__mro__  etc.
-        if isinstance(node, ast.Attribute) and node.attr in _BLOCKED_DUNDERS:
-            violations.append(
-                f'line {node.lineno}: access to "{node.attr}" is not allowed'
-            )
-        # Catch string-based access: something["__subclasses__"]
-        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
-            if isinstance(node.slice.value, str) and node.slice.value in _BLOCKED_DUNDERS:
-                violations.append(
-                    f'line {node.lineno}: access to "{node.slice.value}" via subscript is not allowed'
-                )
-
-    if violations:
-        raise SandboxValidationError(
-            'Code blocked by sandbox AST validation:\n' + '\n'.join(violations)
-        )
-
-
-_REMOVED_BUILTINS = frozenset({
-    'open',
-    'eval',
-    'exec',
-    'compile',
-    'globals',
-    'locals',
-    'vars',
-    'dir',
-    'breakpoint',
-    'exit',
-    'quit',
-    'input',
-    'getattr',
-    'setattr',
-    'delattr',
-    '__import__',
-    'memoryview',
-    'classmethod',
-})
 
 # ── Default allowed modules ─────────────────────────────────────────────────
 # Safe, pure-computation modules with no filesystem, network, or OS access.
@@ -195,12 +99,28 @@ _DEFAULT_ALLOWED_MODULES = frozenset({
 })
 
 
+# ── Extra builtins added on top of RestrictedPython's safe_builtins ───────
+# safe_builtins is intentionally minimal (no dict, list, enumerate, etc.).
+# These are non-dangerous builtins agents need for everyday data work.
+_EXTRA_SAFE_BUILTINS = frozenset({
+    'all', 'any', 'ascii', 'bin', 'bytearray', 'dict', 'enumerate',
+    'filter', 'format', 'frozenset', 'hasattr', 'iter', 'list', 'map',
+    'max', 'min', 'next', 'object', 'print', 'reversed', 'set',
+    'sum', 'super', 'type',
+})
+
+
+def _guarded_getitem(obj: Any, key: Any) -> Any:
+    """Allow subscript access — RestrictedPython requires this guard."""
+    return obj[key]
+
+
 def execute_sandboxed(
     code: str,
     *,
     allowed_modules: Set[str] | None = None,
 ) -> Dict[str, Any]:
-    """Run *code* in a restricted ``exec()`` sandbox and return the result.
+    """Run *code* in a RestrictedPython sandbox and return the result.
 
     Returns a dict with ``stdout``, ``stderr``, ``exit_code``, ``timed_out``,
     and ``result`` (the value of a variable named ``result`` if set by the
@@ -209,10 +129,14 @@ def execute_sandboxed(
     *allowed_modules*, if provided, is merged with ``_DEFAULT_ALLOWED_MODULES``
     to form the full allowlist.  Only modules in this set can be imported.
     """
-    # ── 0. AST validation — reject dunder attribute access ────────────────
+    # ── 0. Compile with RestrictedPython ───────────────────────────────
     try:
-        _validate_ast(code)
-    except (SandboxValidationError, SyntaxError) as exc:
+        compiled = compile_restricted(
+            code,
+            filename='<agent_script>',
+            mode='exec',
+        )
+    except SyntaxError as exc:
         return {
             'stdout': '',
             'stderr': str(exc),
@@ -220,16 +144,28 @@ def execute_sandboxed(
             'timed_out': False,
         }
 
+    # compile_restricted returns None when it encounters policy violations
+    if compiled is None:
+        return {
+            'stdout': '',
+            'stderr': 'Code blocked by RestrictedPython compilation policy.',
+            'exit_code': 1,
+            'timed_out': False,
+        }
+
     allowlist = _DEFAULT_ALLOWED_MODULES | (allowed_modules or set())
 
-    # ── 1. Build builtins with dangerous names removed ───────────────────
-    safe_builtins: Dict[str, Any] = {
-        k: v for k, v in vars(builtins).items()
-        if k not in _REMOVED_BUILTINS
-    }
+    # ── 1. Build safe builtins ─────────────────────────────────────────
+    # RestrictedPython's safe_builtins is very minimal — it omits common
+    # data-processing builtins that agents need (dict, list, enumerate, etc.).
+    # We add back the ones that are safe for sandboxed computation.
+    sandbox_builtins: Dict[str, Any] = dict(safe_builtins)
+    import builtins as _builtins
+    for _name in _EXTRA_SAFE_BUILTINS:
+        sandbox_builtins[_name] = getattr(_builtins, _name)
 
-    # ── 2. Inject allowlist-only __import__ ──────────────────────────────
-    original_import = builtins.__import__
+    # ── 2. Inject allowlist-only __import__ ────────────────────────────
+    original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
 
     def restricted_import(name: str, *args: Any, **kwargs: Any) -> Any:
         top_level = name.split('.')[0]
@@ -247,21 +183,26 @@ def execute_sandboxed(
                 return original_import(name, *args, **kwargs)
             raise
 
-    safe_builtins['__import__'] = restricted_import
+    sandbox_builtins['__import__'] = restricted_import
 
-    # ── 3. Capture stdout via print() override ───────────────────────────
-    captured_stdout = io.StringIO()
+    # ── 3. Execution namespace with RestrictedPython guards ──────────
+    # RestrictedPython transforms print() calls to use PrintCollector.
+    # After execution, the collected output is in the ``printed`` variable.
+    sandbox_globals: Dict[str, Any] = {
+        '__builtins__': sandbox_builtins,
+        '_getattr_': safer_getattr,
+        '_getitem_': _guarded_getitem,
+        '_getiter_': default_guarded_getiter,
+        '_iter_unpack_sequence_': guarded_unpack_sequence,
+        '_write_': lambda obj: obj,
+        '_inplacevar_': lambda op, x, y: op(x, y),
+        '_print_': PrintCollector,
+        '_unpack_sequence_': guarded_unpack_sequence,
+        '__metaclass__': type,
+        '__name__': '<agent_script>',
+    }
 
-    def _sandbox_print(*args: Any, sep: str = ' ', end: str = '\n', **kwargs: Any) -> None:
-        text = sep.join(str(a) for a in args) + end
-        captured_stdout.write(text)
-
-    safe_builtins['print'] = _sandbox_print
-
-    # ── 4. Execution namespace ───────────────────────────────────────────
-    sandbox_globals: Dict[str, Any] = {'__builtins__': safe_builtins}
-
-    # ── 5. Run in a daemon thread with timeout ───────────────────────────
+    # ── 5. Run in a daemon thread with timeout ─────────────────────────
     timed_out = False
     stderr = ''
     exit_code = 0
@@ -269,7 +210,7 @@ def execute_sandboxed(
     def _run() -> None:
         nonlocal stderr, exit_code
         try:
-            exec(compile(code, '<agent_script>', 'exec'), sandbox_globals)  # noqa: S102
+            exec(compiled, sandbox_globals)  # noqa: S102
         except SystemExit as e:
             exit_code = int(e.code) if e.code is not None else 0
         except Exception:
@@ -285,8 +226,13 @@ def execute_sandboxed(
         stderr = f'[Execution timed out after {_TIMEOUT}s]'
         exit_code = -1
 
-    # ── 6. Collect output ────────────────────────────────────────────────
-    stdout = _truncate(captured_stdout.getvalue())
+    # ── 6. Collect output ──────────────────────────────────────────────
+    # RestrictedPython stores the PrintCollector instance as '_print';
+    # calling it returns the collected text.
+    _print_collector = sandbox_globals.get('_print')
+    stdout = _truncate(
+        _print_collector() if callable(_print_collector) else ''
+    )
     stderr = _truncate(stderr)
 
     result_val = sandbox_globals.get('result')
