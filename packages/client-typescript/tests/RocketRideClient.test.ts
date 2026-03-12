@@ -1507,6 +1507,10 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 	});
 
 	describe('Services Operations', () => {
+		beforeEach(async () => {
+			await client.connect();
+		});
+
 		it('should get all services', async () => {
 			const result = await client.getServices();
 
