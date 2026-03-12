@@ -46,6 +46,8 @@ reviews:
       enabled: true
     gitleaks:
       enabled: true
+    yamllint:
+      enabled: true
 
 knowledge_base:
   learnings:
