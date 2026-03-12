@@ -88,71 +88,21 @@ class ChatMixin(DAPClient):
         *,
         token: str,
         question: Question,
+        on_sse=None,
     ) -> PIPELINE_RESULT:
         """
-        Ask a question to RocketRide's AI and get an intelligent response.
-
-        This is your main interface for AI conversations. The AI can analyze
-        your documents, answer questions, extract structured data, and provide
-        insights based on the content you have stored in RocketRide.
-
-        The AI understands context, follows instructions, learns from examples,
-        and can provide responses in both natural language and structured JSON.
-
-        Args:
-            token: Your pipeline token for authentication and resource access
-            question: A Question object containing your query, instructions,
-                     examples, and any context you want to provide
-
+        Send a Question to RocketRide's AI pipeline and return the pipeline result.
+        
+        Parameters:
+            token (str): Pipeline authentication/resource token.
+            question (Question): Question object containing the query, instructions, examples, and any context to send to the AI.
+            on_sse (callable, optional): Callback for server-sent events from the pipeline.
+        
         Returns:
-            Dict containing the AI response (PIPELINE_RESULT):
-            - answers: List of answer strings from the AI
-            - result_types: Dictionary mapping field names to types
-            - objectId: Unique identifier for this operation
-            - name: Question name/identifier
-            - path: Processing path
-
+            PIPELINE_RESULT: Dictionary containing the AI response; typically includes keys such as `answers` (list of answer strings or parsed JSON objects), `result_types` (field type mappings), `objectId`, `name`, and `path`.
+        
         Raises:
-            RuntimeError: If the question is empty or if the chat operation fails
-
-        Example:
-            # Simple question
-            from rocketride.schema import Question
-
-            question = Question()
-            question.addQuestion("What are the key findings in these research papers?")
-
-            response = await client.chat(token="your_token", question=question)
-            if 'answers' in response and len(response['answers']) > 0:
-                answer_text = response['answers'][0]
-                print(f"AI Response: {answer_text}")
-
-            # Structured data extraction (JSON)
-            question = Question(expectJson=True)
-            question.addQuestion("Extract sales data by quarter")
-            question.addExample("Show Q1 data", {"Q1": {"revenue": 100000, "units": 500}})
-            question.addInstruction("Format", "Use clear quarter labels and include both revenue and units")
-
-            response = await client.chat(token="your_token", question=question)
-            if 'answers' in response and len(response['answers']) > 0:
-                sales_data = response['answers'][0]  # Already parsed as dict for JSON responses
-                print(f"Q1 Revenue: ${sales_data['Q1']['revenue']:,}")
-
-            # Question with context
-            question = Question()
-            question.addContext("These are financial reports from TechCorp for 2024")
-            question.addQuestion("What were the main revenue drivers this year?")
-
-            response = await client.chat(token="your_token", question=question)
-            answer = response['answers'][0]
-            print(f"Analysis: {answer}")
-
-        Tips for Better Results:
-            - Be specific in your questions
-            - Provide examples of the output format you want
-            - Add context about the domain, time period, or specific focus
-            - Use custom instructions to guide the AI's analysis approach
-            - For data extraction, use expectJson=True and provide clear examples
+            RuntimeError: If `question` is empty.
         """
         try:
             # Validate that we have a question to ask
@@ -164,7 +114,7 @@ class ChatMixin(DAPClient):
             self._next_chat_id += 1
 
             # Set up a data pipe to send the question to the AI system
-            pipe = await self.pipe(token, objinfo, 'application/rocketride-question', provider='chat')
+            pipe = await self.pipe(token, objinfo, 'application/rocketride-question', provider='chat', on_sse=on_sse)
 
             try:
                 # Open the communication channel to the AI

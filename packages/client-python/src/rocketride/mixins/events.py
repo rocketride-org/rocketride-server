@@ -50,7 +50,7 @@ Usage:
 """
 
 import sys
-from typing import Dict, Any, Optional, List
+from typing import Callable, Dict, Any, Optional, List
 from ..core import DAPClient
 from ..types import EventCallback, ConnectCallback, ConnectErrorCallback, DisconnectCallback
 
@@ -83,14 +83,20 @@ class EventMixin(DAPClient):
         **kwargs,
     ):
         """
-        Initialize event handling with optional callback functions.
-
-        Args:
-            **kwargs: Configuration including optional event callbacks:
-                - on_event: Function to handle general events
-                - on_connected: Function called when connected to server
-                - on_disconnected: Function called when disconnected
-                - on_connect_error: Function called when a connection attempt fails (persist mode)
+        Initialize EventMixin and register optional lifecycle and event callbacks.
+        
+        Parameters:
+            **kwargs: Supported optional keyword arguments:
+                - on_event: Callable invoked for each received event with the event message.
+                - on_connected: Callable awaited when a connection is established; receives connection info (optional).
+                - on_disconnected: Callable awaited when the connection is closed; receives (reason, has_error).
+                - on_connect_error: Callable awaited when a connection attempt fails; receives an error string.
+                - on_protocol_message: Callable invoked with raw protocol packets for inspection or logging.
+                - on_debug_message: Callable invoked with formatted debug messages.
+        
+        Notes:
+            - Per-pipe SSE callbacks are stored in the instance mapping `_sse_pipe_callbacks`; use the internal
+              registration helpers to manage those callbacks.
         """
         super().__init__(**kwargs)
         self._caller_on_event: Optional[EventCallback] = kwargs.get('on_event', None)
@@ -99,9 +105,18 @@ class EventMixin(DAPClient):
         self._caller_on_connect_error: Optional[ConnectErrorCallback] = kwargs.get('on_connect_error', None)
         self._caller_on_protocol_message: Optional[Any] = kwargs.get('on_protocol_message', None)
         self._caller_on_debug_message: Optional[Any] = kwargs.get('on_debug_message', None)
+        # Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch
+        self._sse_pipe_callbacks: Dict[int, Callable] = {}
 
     def debug_message(self, msg: str) -> None:
-        """Forward debug messages to the user callback (if set) after internal logging."""
+        """
+        Forward a debug message to the base logger and, if configured, to the user-provided debug callback.
+        
+        The message is logged via the superclass implementation and then forwarded to the callback prefixed with "[{msg_type}]: ".
+        
+        Parameters:
+            msg (str): Debug text to log and forward to the callback.
+        """
         super().debug_message(msg)
         if self._caller_on_debug_message is not None:
             self._caller_on_debug_message(f'[{self._msg_type}]: {msg}')
@@ -238,47 +253,18 @@ class EventMixin(DAPClient):
 
     async def on_event(self, message: Dict[str, Any]) -> None:
         """
-        Handle incoming events from the RocketRide server.
-
-        Called automatically when events are received from the server. Events
-        include progress updates, status changes, completion notifications, and
-        other real-time information about your operations.
-
-        Args:
-            message: Complete event message with type, body, and metadata
-
-        Event Structure:
-            {
-                "event": "apaevt_status_upload",  # Event type
-                "body": {                         # Event-specific data
-                    "action": "write",
-                    "filepath": "/path/to/file.pdf",
-                    "bytes_sent": 1048576,
-                    "file_size": 5242880
-                },
-                "seq": 123,                       # Sequence number
-                "type": "event"                   # Message type
-            }
-
-        Common Event Types:
-            - apaevt_status_upload: File upload progress
-            - apaevt_status_processing: Pipeline processing updates
-            - apaevt_status_completion: Operation completion
-            - apaevt_status_error: Error notifications
-
-        Example Event Handler:
-            async def handle_events(event):
-                event_type = event['event']
-                body = event['body']
-
-                if event_type == 'apaevt_status_upload':
-                    if body['action'] == 'write':
-                        progress = (body['bytes_sent'] / body['file_size']) * 100
-                        print(f"Upload {body['filepath']}: {progress:.1f}%")
-                    elif body['action'] == 'complete':
-                        print(f"Upload completed: {body['filepath']}")
-
-            client = RocketRideClient(uri, auth, on_event=handle_events)
+        Handle a received server event and dispatch it to VS Code (if available), any registered per-pipe SSE callback, and the user-provided event handler.
+        
+        Parameters:
+            message (Dict[str, Any]): Event message expected to contain at least the keys:
+                - 'event': event type string (e.g., 'apaevt_sse', 'apaevt_status_upload')
+                - 'body': event-specific payload (a dict)
+                - 'seq': optional sequence number
+        
+        Notes:
+            - If the event type is 'apaevt_sse' and a per-pipe callback is registered for the event's 'pipe_id', that callback is awaited.
+            - The user-provided on_event callback, if present, is awaited with the full message.
+            - Exceptions raised by per-pipe or user callbacks are caught and forwarded to debug_message; they are logged but not propagated to avoid disrupting the event loop.
         """
         # Extract event information
         event_type = message.get('event', 'unknown')
@@ -288,6 +274,16 @@ class EventMixin(DAPClient):
         # Forward to VS Code debugger if available
         self._send_vscode_event(event_type=event_type, body=event_body)
 
+        # Dispatch pipe-scoped SSE events to the registered DataPipe callback
+        if event_type == 'apaevt_sse':
+            pipe_id = event_body.get('pipe_id')
+            callback = self._sse_pipe_callbacks.get(pipe_id)
+            if callback is not None:
+                try:
+                    await callback(event_body)
+                except Exception as e:
+                    self.debug_message(f'Error in SSE callback for pipe {pipe_id}: {e}')
+
         # Call user-provided event handler if available
         if self._caller_on_event is not None:
             try:
@@ -296,50 +292,46 @@ class EventMixin(DAPClient):
                 # Log errors but don't let user code break the connection
                 self.debug_message(f'Error in user event handler for {event_type} (seq {seq_num}): {e}')
 
-    async def set_events(self, token: str, event_types: List[str]) -> None:
+    def _register_sse_pipe(self, pipe_id: int, callback: Callable) -> None:
         """
-        Subscribe to specific types of events from the server.
+        Register a per-pipe server-sent-events (SSE) callback for the given pipe.
+        
+        Parameters:
+            pipe_id (int): Identifier of the data pipe to associate the callback with.
+            callback (Callable): Callable to invoke with SSE event bodies for this pipe.
+        """
+        self._sse_pipe_callbacks[pipe_id] = callback
 
-        Tell the server which events you want to receive. This filters the
-        event stream to only include events you're interested in, reducing
-        network traffic and processing overhead.
+    def _unregister_sse_pipe(self, pipe_id: int) -> None:
+        """
+        Unregister the SSE callback associated with a pipe identifier.
+        
+        Safely removes the callback for the given pipe if present; no error is raised when the pipe is not registered.
+        
+        Parameters:
+            pipe_id (int): Identifier of the pipe whose SSE callback should be removed.
+        """
+        self._sse_pipe_callbacks.pop(pipe_id, None)
 
-        Args:
-            token: Your pipeline or session token for authentication
-            event_types: List of event type names to subscribe to
-
+    async def set_events(self, token: str, event_types: List[str], pipe_id: int = None) -> None:
+        """
+        Subscribe the client to a set of server event types, optionally scoped to a specific pipe.
+        
+        Parameters:
+            token (str): Authentication token or pipeline session identifier used for the subscription.
+            event_types (List[str]): Names of event types to receive from the server.
+            pipe_id (int, optional): If provided, scope the subscription to the specified pipe ID.
+        
         Raises:
-            RuntimeError: If event subscription fails
-
-        Available Event Types:
-            - 'apaevt_status_upload': File upload progress and completion
-            - 'apaevt_status_processing': Pipeline processing updates
-            - 'apaevt_status_completion': Operation completion events
-            - 'apaevt_status_error': Error and warning notifications
-            - 'apaevt_status_pipeline': Pipeline lifecycle events
-
-        Example:
-            # Subscribe to upload and processing events
-            await client.set_events(token, [
-                'apaevt_status_upload',
-                'apaevt_status_processing'
-            ])
-
-            # Now upload files and receive progress events
-            results = await client.send_files(files, token)
-
-            # Subscribe to all status events
-            await client.set_events(token, [
-                'apaevt_status_upload',
-                'apaevt_status_processing',
-                'apaevt_status_completion',
-                'apaevt_status_error'
-            ])
+            RuntimeError: If the server responds indicating the subscription failed.
         """
         # Build event subscription request
+        arguments: Dict[str, Any] = {'types': event_types}
+        if pipe_id is not None:
+            arguments['pipeId'] = pipe_id
         request = self.build_request(
             command='rrext_monitor',
-            arguments={'types': event_types},
+            arguments=arguments,
             token=token,
         )
 

@@ -60,6 +60,18 @@ class IGlobal(DatabaseGlobalBase):
 
     def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
         # Read from the same postgres.default block as the other connection fields.
+        """
+        Determine the maximum number of validation attempts for the PostgreSQL connection.
+        
+        Parameters:
+            config (Dict[str, Any]): Node configuration mapping; the method reads from the nested
+                'postgresdb.default' block (falling back to top-level keys) to find
+                'postgresdb.max_attempts'.
+        
+        Returns:
+            Maximum number of validation attempts, as an integer. Defaults to 5 if the value
+            is missing or cannot be converted to an integer.
+        """
         block = config.get('postgresdb.default')
         if not isinstance(block, dict):
             block = {}
@@ -67,3 +79,15 @@ class IGlobal(DatabaseGlobalBase):
             return int(block.get('postgresdb.max_attempts') or config.get('postgresdb.max_attempts') or 5)
         except (ValueError, TypeError):
             return 5
+
+    def _db_description(self, config: Dict[str, Any]) -> str:
+        """
+        Retrieve the database description for the PostgreSQL configuration.
+        
+        Returns:
+            str: The description from the 'postgresdb.default' block key 'postgresdb.db_description', or from the top-level 'postgresdb.db_description', or an empty string if none is provided.
+        """
+        block = config.get('postgresdb.default')
+        if not isinstance(block, dict):
+            block = {}
+        return str(block.get('postgresdb.db_description') or config.get('postgresdb.db_description') or '')

@@ -965,13 +965,12 @@ class Task(DAPBase):
 
     async def on_event(self, message: Dict[str, Any]) -> None:
         """
-        Process incoming events from subprocess.
-
-        Central event dispatcher handling status updates, service state changes,
-        debug output, and event forwarding to monitoring clients.
-
-        Args:
-            message: Event message from subprocess
+        Dispatch incoming subprocess events to update task state and forward them to monitors and debuggers.
+        
+        Processes events such as service state changes, status updates, trace/flow messages, SSE, output, and exit notifications, updating internal status fields and forwarding appropriate events to monitoring clients or any attached debugger.
+        
+        Parameters:
+            message (Dict[str, Any]): Event payload received from the subprocess.
         """
         # Update event timing
         self._last_event_time = time.time()
@@ -1062,6 +1061,10 @@ class Task(DAPBase):
                     EVENT_TYPE.FLOW,
                     flow
                 )
+
+        # Handle real-time node-to-UI SSE messages (pass-through, no status tracking)
+        elif event_type == 'apaevt_sse':
+            await self._forward_task_event(EVENT_TYPE.SSE, message)
 
         # Handle debug output
         elif event_type == 'output':

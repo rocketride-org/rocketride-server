@@ -40,7 +40,12 @@ class Chat(ChatBase):
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
-        Initialize the ollama chat bot.
+        Create and configure a Chat instance for the Ollama provider.
+        
+        Parameters:
+            provider (str): Identifier for the provider node.
+            connConfig (Dict[str, Any]): Connection configuration containing node settings (e.g., 'apikey', 'serverbase').
+            bag (Dict[str, Any]): Mutable runtime bag for storing artifacts; this instance is placed into bag['chat'].
         """
         # Init the base
         super().__init__(provider, connConfig, bag)
@@ -58,7 +63,7 @@ class Chat(ChatBase):
             serverbase = serverbase.rstrip('/') + '/v1'
 
         # Get the llm
-        self._llm = ChatOpenAI(model=self._model, base_url=serverbase, api_key=apikey, temperature=0)
+        self._llm = ChatOpenAI(model=self._model, base_url=serverbase, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens)
 
         # Save our chat class into the bag
         bag['chat'] = self

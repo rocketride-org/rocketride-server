@@ -61,6 +61,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     session = None
     database: str = ''
     table: str = ''
+    db_description: str = ''
     schema: Dict[str, Tuple[str, str]] = {}
     db_schema: Dict[str, Dict] = {}
     max_validation_attempts: int = 5
@@ -78,24 +79,41 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         """
 
     def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
-        """Return the maximum number of EXPLAIN-validation retries for generated SQL.
-
-        Override in a derived class to read the value from the node's config.
-        The base implementation returns 5, matching the services.json default.
+        """
+        Provide the maximum number of EXPLAIN-validation retries for generated SQL.
+        
+        Derived classes may override to derive the value from the node configuration. The base implementation returns 5 (the services.json default).
+        
+        Returns:
+            max_attempts (int): Maximum number of EXPLAIN-validation retries (default 5).
         """
         return 5
 
+    def _db_description(self, config: Dict[str, Any]) -> str:
+        """
+        Provide a user-provided description for the target database derived from the node configuration.
+        
+        Override in subclasses to extract the description from the node's config.
+        
+        Parameters:
+            config (Dict[str, Any]): Node configuration to read the description from.
+        
+        Returns:
+            str: The database description; the base implementation returns an empty string.
+        """
+        return ''
+
     @abstractmethod
     def _build_connection_url(self, params: Dict[str, str]) -> str:
-        """Return a SQLAlchemy DSN string for this database engine.
-
-        ``params`` is the dict returned by ``_connection_params``.
-        The password in ``params['password']`` is the raw string; URL-encoding
-        should be applied here if the driver requires it.
-
-        Example (MySQL):
-            password = urllib.parse.quote_plus(params['password'])
-            return f"mysql+pymysql://{params['user']}:{password}@{params['host']}/{params['database']}"
+        """
+        Builds a SQLAlchemy DSN (connection URL) for the target database engine.
+        
+        Parameters:
+            params (Dict[str, str]): Connection parameters with keys 'host', 'user', 'password', 'database', 'table'.
+                The value in 'password' is the raw password string; URL-encode it here if the driver requires encoding.
+        
+        Returns:
+            str: A SQLAlchemy connection URL (DSN) suitable for creating an engine.
         """
 
     # ------------------------------------------------------------------
@@ -420,12 +438,18 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
 
     def beginGlobal(self) -> None:
         # Resolve connection parameters via the subclass-provided mapping.
+        """
+        Initialize the database connection, ORM session, and reflect database and table schemas from node configuration.
+        
+        Reads the node configuration to derive connection parameters and behavior flags, builds and assigns the SQLAlchemy engine and session, sets runtime fields (database, table, max_validation_attempts, db_description), reflects and caches the full database schema into `self.db_schema`, and attempts to reflect the target table schema into `self.schema`. If the target table does not exist, emits a warning and leaves `self.schema` empty.
+        """
         raw = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         params = self._connection_params(raw)
 
         # Read behavior settings from config before opening the engine so
         # they're available to the instance as soon as beginGlobal returns.
         self.max_validation_attempts = max(1, self._max_validation_attempts(raw))
+        self.db_description = (self._db_description(raw) or '').strip()
 
         self.database = params['database']
         self.table = params['table']

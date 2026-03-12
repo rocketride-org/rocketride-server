@@ -53,7 +53,17 @@ class Chat(ChatBase):
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
-        Initialize the Perplexity AI node.
+        Configure the Perplexity AI chat node by reading node settings, initializing the language-model client, and registering the node in the shared bag.
+        
+        Parameters:
+            provider (str): Identifier for the node provider.
+            connConfig (Dict[str, Any]): Connection and node configuration dictionary.
+            bag (Dict[str, Any]): Mutable pipeline/shared state; the initialized chat node is stored under the 'chat' key.
+        
+        Side effects:
+            - Sets self._model from node configuration.
+            - Initializes self._llm as a ChatOpenAI client configured to use the Perplexity API and model-specific settings.
+            - Stores this Chat instance in bag['chat'].
         """
         # Init the base
         super().__init__(provider, connConfig, bag)
@@ -76,6 +86,7 @@ class Chat(ChatBase):
             temperature=0,
             timeout=timeout,
             max_retries=0,  # We handle retries ourselves
+            max_tokens=self._modelOutputTokens,
         )
 
         # Store in bag for pipeline access

@@ -76,21 +76,23 @@ Error Binder::bind(const std::string &methodName,
 }
 
 /**
- * @brief Invokes all bound service filter instances for the given method.
+ * @brief Dispatches a named method to all bound IServiceFilterInstance targets and records pipeline trace entries.
  *
- * This function checks whether the instance is in target mode and, if
- * applicable, iterates over the bound service filter instances, invoking the
- * provided callback. If no instances are bound, it returns success.
+ * Invokes the provided callback for each bound instance registered for methodName, emits enter/leave trace data
+ * via serializeTrace according to the endpoint's pipeline trace level, and notifies the debugger about enter/leave/error
+ * events. When pipeline mode is disabled the callback is invoked only on the downstream instance.
  *
- * @param pThis Pointer to the Binder instance.
- * @param methodName The name of the method to invoke.
- * @param callback A function to execute for each bound IServiceFilterInstance.
- * @return Error Returns an error code if any instance fails, otherwise success.
- */
+ * @param pThis Binder instance owning the bindings.
+ * @param methodName Name of the method/lane to dispatch.
+ * @param callback Function executed for each bound IServiceFilterInstance; its returned Error is used to stop iteration.
+ * @param serializeTrace Callback that populates a json::Value with trace data for a given PIPELINE_TRACE_LEVEL.
+ * @return Error The last error returned by a callback, `success` if all callbacks completed, or an `InvalidParam` error
+ * if the binder is not in target endpoint mode.
 Error Binder::callMethods(
     Binder *pThis, const std::string &methodName,
     std::function<Error(IServiceFilterInstance *)> callback,
-    const json::Value &traceData) noexcept {
+    std::function<void(PIPELINE_TRACE_LEVEL, json::Value &)>
+        serializeTrace) noexcept {
     Error ccode;
 
     // Ensure the instance is operating in target mode
@@ -112,12 +114,12 @@ Error Binder::callMethods(
 
     // Iterate over bound instances and invoke the callback
     for (auto *pInstance : *(it->second)) {
-        // Build enter trace if tracing is enabled
+        // Build enter trace
         json::Value enterTrace;
-        if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA)
+        if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
             enterTrace["lane"] = methodName.c_str();
-        if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL && !traceData.isNull())
-            enterTrace["data"] = traceData;
+            serializeTrace(traceLevel, enterTrace["data"]);
+        }
 
         // Signal to the debugger we are entering a level
         pThis->m_pInstance->pipe->debugger.debugEnter(pInstance, enterTrace);
@@ -132,13 +134,14 @@ Error Binder::callMethods(
             pThis->m_pInstance->pipe->debugger.debugError(
                 pThis->m_pInstance, pInstance, methodName, ccode);
 
-            // Build leave trace with error result
+            // Build leave trace with error/skip result
             json::Value leaveTrace;
             if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
                 leaveTrace["lane"] = methodName.c_str();
 
                 if (ccode.code() == Ec::PreventDefault) {
                     leaveTrace["result"] = "skip";
+                    serializeTrace(traceLevel, leaveTrace["data"]);
                 } else {
                     leaveTrace["result"] = "error";
                     leaveTrace["error"] = ccode.message();
@@ -157,6 +160,7 @@ Error Binder::callMethods(
             if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
                 leaveTrace["lane"] = methodName.c_str();
                 leaveTrace["result"] = "continue";
+                serializeTrace(traceLevel, leaveTrace["data"]);
             }
 
             // Signal to the debugger we are leaving a level
@@ -219,54 +223,60 @@ bool Binder::hasListener(const std::string &methodName) noexcept {
 }
 
 /**
- * @brief Opens an entry by delegating to all bound service filter instances.
+ * @brief Dispatches an open operation to all bound service filter instances.
  *
  * @param entry The entry to open.
- * @return Error Returns an error code if any instance fails, otherwise success.
+ * @return Error The last error returned by a bound instance; success if all instances succeeded.
  */
 Error Binder::open(Entry &entry) noexcept {
-    // Define the servicing function
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->open(entry);
     };
 
-    // Call the methods
-    return callMethods(this, "open", call);
+    auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
+
+    return callMethods(this, "open", call, serializeTrace);
 }
 
 /**
  * @brief Writes a tag to all bound service filter instances.
  *
  * @param pTag Pointer to the tag to write.
- * @return Error Returns an error code if any instance fails, otherwise success.
+ * @return Error Error returned by the first instance that fails, or success if all instances succeed.
  */
 Error Binder::writeTag(const TAG *pTag) noexcept {
-    // Call the methods
-    return callMethods(
-        this, "tags",
-        localfcn(auto pInstance)->Error { return pInstance->writeTag(pTag); });
+    auto call = localfcn(auto pInstance)->Error {
+        return pInstance->writeTag(pTag);
+    };
+
+    auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
+
+    return callMethods(this, "tags", call, serializeTrace);
 }
 
 /**
- * @brief Writes text to all bound service filter instances.
+ * @brief Dispatches the provided text to all bound service filter instances.
  *
- * @param text The text to write.
- * @return Error Returns an error code if any instance fails, otherwise success.
+ * The binder will invoke each bound instance's writeText method in sequence.
+ * Pipeline tracing records the text length at METADATA level and up to the
+ * first 2000 characters of the text at FULL level.
+ *
+ * @param text Text to send to bound instances.
+ * @return Error The last error returned by a bound instance; success if none failed.
  */
 Error Binder::writeText(const Utf16View &text) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeText(text);
     };
-    json::Value data;
 
-    auto traceLevel = m_pInstance->endpoint->config.pipelineTraceLevel;
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::METADATA)
+            out["length"] = (int)text.length();
+        if (level >= PIPELINE_TRACE_LEVEL::FULL)
+            out["text"] = _tr<Text>(text).substr(0, 2000);
+    };
 
-    if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA)
-        data["length"] = (int)text.length();
-    if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL)
-        data["text"] = _tr<Text>(text).substr(0, 2000);
-
-    return callMethods(this, "text", call, data);
+    return callMethods(this, "text", call, serializeTrace);
 }
 
 /**
@@ -279,15 +289,15 @@ Error Binder::writeTable(const Utf16View &text) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeTable(text);
     };
-    json::Value data;
 
-    auto traceLevel = m_pInstance->endpoint->config.pipelineTraceLevel;
-    if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA)
-        data["length"] = (int)text.length();
-    if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL)
-        data["table"] = _tr<Text>(text).substr(0, 2000);
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::METADATA)
+            out["length"] = (int)text.length();
+        if (level >= PIPELINE_TRACE_LEVEL::FULL)
+            out["table"] = _tr<Text>(text).substr(0, 2000);
+    };
 
-    return callMethods(this, "table", call, data);
+    return callMethods(this, "table", call, serializeTrace);
 }
 
 /**
@@ -297,11 +307,13 @@ Error Binder::writeTable(const Utf16View &text) noexcept {
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
 Error Binder::writeWords(const WordVector &textWords) noexcept {
-    // Call the methods
-    return callMethods(
-        this, "words", localfcn(auto pInstance)->Error {
-            return pInstance->writeWords(textWords);
-        });
+    auto call = localfcn(auto pInstance)->Error {
+        return pInstance->writeWords(textWords);
+    };
+
+    auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
+
+    return callMethods(this, "words", call, serializeTrace);
 }
 
 /**
@@ -317,122 +329,133 @@ Error Binder::writeAudio(const AVI_ACTION action, Text &mimeType,
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeAudio(action, mimeType, streamData);
     };
-    json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
-        PIPELINE_TRACE_LEVEL::METADATA) {
-        data["action"] = (int)action;
-        data["mimeType"] = mimeType;
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::METADATA) {
+            out["action"] = (int)action;
+            out["mimeType"] = mimeType;
 
-        engine::python::LockPython lock;
-        data["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
-    }
+            engine::python::LockPython lock;
+            out["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
+        }
+    };
 
-    return callMethods(this, "audio", call, data);
+    return callMethods(this, "audio", call, serializeTrace);
 }
 
 /**
- * @brief Writes video data to all bound service filter instances.
+ * @brief Dispatches a video write operation to all bound service filter instances.
  *
- * @param action The action to perform on the video.
- * @param mimeType The mime type of the video.
- * @param streamData The video stream data.
- * @return Error Returns an error code if any instance fails, otherwise success.
+ * @param action Video action to perform.
+ * @param mimeType MIME type of the video.
+ * @param streamData Video data buffer.
+ * @return Error Error from the first failing instance, or success if all instances completed.
  */
 Error Binder::writeVideo(const AVI_ACTION action, Text &mimeType,
                          const pybind11::bytes &streamData) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeVideo(action, mimeType, streamData);
     };
-    json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
-        PIPELINE_TRACE_LEVEL::METADATA) {
-        data["action"] = (int)action;
-        data["mimeType"] = mimeType;
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::METADATA) {
+            out["action"] = (int)action;
+            out["mimeType"] = mimeType;
 
-        engine::python::LockPython lock;
-        data["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
-    }
+            engine::python::LockPython lock;
+            out["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
+        }
+    };
 
-    return callMethods(this, "video", call, data);
+    return callMethods(this, "video", call, serializeTrace);
 }
 
 /**
- * @brief Writes image data to all bound service filter instances.
+ * @brief Dispatches an image write operation to all bound service filter instances.
  *
- * @param action The action to perform on the image.
- * @param mimeType The mime type of the image.
- * @param streamData The image stream data.
- * @return Error Returns an error code if any instance fails, otherwise success.
+ * @param action The image action to perform (enum value).
+ * @param mimeType The image MIME type.
+ * @param streamData The image payload as Python bytes.
+ * @return Error Error code returned by the first bound instance that fails, or success if all instances succeed.
  */
 Error Binder::writeImage(const AVI_ACTION action, Text &mimeType,
                          const pybind11::bytes &streamData) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeImage(action, mimeType, streamData);
     };
-    json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
-        PIPELINE_TRACE_LEVEL::METADATA) {
-        data["action"] = (int)action;
-        data["mimeType"] = mimeType;
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::METADATA) {
+            out["action"] = (int)action;
+            out["mimeType"] = mimeType;
 
-        engine::python::LockPython lock;
-        data["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
-    }
+            engine::python::LockPython lock;
+            out["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
+        }
+    };
 
-    return callMethods(this, "image", call, data);
+    return callMethods(this, "image", call, serializeTrace);
 }
 
 /**
- * @brief Writes questions to all bound service filter instances.
+ * @brief Sends the provided questions object to all bound service filter instances.
  *
- * @param questions A Python object containing the questions.
- * @return Error Returns an error code if any instance fails, otherwise success.
+ * The provided Python object is used as-is and, when tracing at FULL level, its model_dump() output
+ * will be converted to JSON for pipeline traces.
+ *
+ * @param question Python object representing the questions; expected to implement `model_dump()`.
+ * @return Error Error code from the first bound instance that fails, or success if all instances succeed.
  */
 Error Binder::writeQuestions(const pybind11::object &question) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeQuestions(question);
     };
-    json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
-        PIPELINE_TRACE_LEVEL::FULL) {
-        engine::python::LockPython lock;
-        data["questions"] =
-            engine::python::pyjson::dictToJson(question.attr("model_dump")());
-    }
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::FULL) {
+            engine::python::LockPython lock;
+            out["questions"] = engine::python::pyjson::dictToJson(
+                question.attr("model_dump")());
+        }
+    };
 
-    return callMethods(this, "questions", call, data);
+    return callMethods(this, "questions", call, serializeTrace);
 }
 
 /**
- * @brief Writes answers to all bound service filter instances.
+ * @brief Dispatches the provided answers object to all bound service filter instances.
  *
- * @param answers A Python object containing the answers.
- * @return Error Returns an error code if any instance fails, otherwise success.
+ * When pipeline tracing is enabled at FULL level, the function will serialize the answers
+ * by calling the Python object's `model_dump()` and include that JSON in the pipeline trace.
+ *
+ * @param answers A Python object (expected to support `model_dump()`) containing the answers to dispatch.
+ * @return Error Error code returned by the first failing bound instance, or success if all instances succeed.
  */
 Error Binder::writeAnswers(const pybind11::object &answers) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeAnswers(answers);
     };
-    json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
-        PIPELINE_TRACE_LEVEL::FULL) {
-        engine::python::LockPython lock;
-        data["answers"] =
-            engine::python::pyjson::dictToJson(answers.attr("model_dump")());
-    }
-    return callMethods(this, "answers", call, data);
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::FULL) {
+            engine::python::LockPython lock;
+            out["answers"] = engine::python::pyjson::dictToJson(
+                answers.attr("model_dump")());
+        }
+    };
+
+    return callMethods(this, "answers", call, serializeTrace);
 }
 
 /**
- * @brief Writes classifications to all bound service filter instances.
+ * @brief Dispatches classification data to all bound service filter instances.
  *
- * @param classifications A JSON value containing the classifications.
- * @return Error Returns an error code if any instance fails, otherwise success.
+ * Sends the provided classifications, policy, and rules to each bound instance and aggregates the first error encountered.
+ *
+ * @param classifications JSON array or object with classification entries; the number of entries is recorded in pipeline traces at SUMMARY level.
+ * @param classificationPolicy JSON object describing the classification policy applied to the classifications.
+ * @param classificationRules JSON object describing additional classification rules.
+ * @return Error `success` if all bound instances processed the classifications; otherwise the error returned by the first instance that failed.
  */
 Error Binder::writeClassifications(
     const json::Value &classifications, const json::Value &classificationPolicy,
@@ -442,90 +465,96 @@ Error Binder::writeClassifications(
             classifications, classificationPolicy, classificationRules);
     };
 
-    json::Value data;
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
-        PIPELINE_TRACE_LEVEL::SUMMARY) {
-        data["count"] = (int)classifications.size();
-    }
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::SUMMARY)
+            out["count"] = (int)classifications.size();
+    };
 
-    return callMethods(this, "classifications", call, data);
+    return callMethods(this, "classifications", call, serializeTrace);
 }
 
 /**
- * @brief Writes classification context to all bound service filter instances.
+ * @brief Dispatches classification context to all bound service filter instances.
  *
- * @param classifications A JSON value containing the classification context.
- * @return Error Returns an error code if any instance fails, otherwise success.
+ * @param classifications JSON array or object containing classification entries; its size is used for tracing.
+ * @return Error The first error returned by a bound instance, or success if all calls succeed.
  */
 Error Binder::writeClassificationContext(
     const json::Value &classifications) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeClassificationContext(classifications);
     };
-    json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
-        PIPELINE_TRACE_LEVEL::SUMMARY) {
-        data["count"] = (int)classifications.size();
-    }
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::SUMMARY)
+            out["count"] = (int)classifications.size();
+    };
 
-    return callMethods(this, "classificationContext", call, data);
+    return callMethods(this, "classificationContext", call, serializeTrace);
 }
 
 /**
- * @brief Writes documents to all bound service filter instances.
+ * @brief Writes a collection of documents to all bound service filter instances.
  *
- * @param documents A Python object containing the documents.
- * @return Error Returns an error code if any instance fails, otherwise success.
+ * @param documents A Python iterable of document objects to be written (each expected to expose a `toDict()` method).
+ * @return Error The first error returned by a bound instance, or success if all instances complete without error.
  */
 Error Binder::writeDocuments(const pybind11::object &documents) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeDocuments(documents);
     };
-    json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >=
-        PIPELINE_TRACE_LEVEL::METADATA) {
-        try {
-            engine::python::LockPython lock;
-            data["count"] = (int)py::len(documents);
-            if (m_pInstance->endpoint->config.pipelineTraceLevel >=
-                PIPELINE_TRACE_LEVEL::FULL) {
-                py::list docDicts;
-                for (auto doc : documents)
-                    docDicts.append(doc.attr("toDict")());
-                data["documents"] =
-                    engine::python::pyjson::dictToJson(docDicts);
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::METADATA) {
+            try {
+                engine::python::LockPython lock;
+                out["count"] = (int)py::len(documents);
+                if (level >= PIPELINE_TRACE_LEVEL::FULL) {
+                    py::list docDicts;
+                    for (auto doc : documents)
+                        docDicts.append(doc.attr("toDict")());
+                    out["documents"] =
+                        engine::python::pyjson::dictToJson(docDicts);
+                }
+            } catch (...) {
             }
-        } catch (...) {
         }
-    }
+    };
 
-    return callMethods(this, "documents", call, data);
+    return callMethods(this, "documents", call, serializeTrace);
 }
 
 /**
- * @brief Calls the closing operation on all bound service filter instances.
+ * @brief Dispatches the "closing" operation to all bound service filter instances.
  *
- * @return Error Returns an error code if any instance fails, otherwise success.
+ * Calls each bound instance's closing() in pipeline order and returns the first error encountered,
+ * or success if all instances complete successfully.
+ *
+ * @return Error The first non-success error returned by a bound instance, or success if none failed.
  */
 Error Binder::closing() noexcept {
-    // Call the methods
-    return callMethods(
-        this, "closing",
-        localfcn(auto pInstance)->Error { return pInstance->closing(); });
+    auto call = localfcn(auto pInstance)->Error {
+        return pInstance->closing();
+    };
+
+    auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
+
+    return callMethods(this, "closing", call, serializeTrace);
 }
 
 /**
- * @brief Closes all bound service filter instances.
+ * @brief Close all bound service filter instances.
  *
- * @return Error Returns an error code if any instance fails, otherwise success.
+ * @return Error The last error returned by a bound instance, or success if all instances closed successfully.
  */
 Error Binder::close() noexcept {
-    // Call the methods
-    return callMethods(
-        this, "close",
-        localfcn(auto pInstance)->Error { return pInstance->close(); });
+    auto call = localfcn(auto pInstance)->Error {
+        return pInstance->close();
+    };
+
+    auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
+
+    return callMethods(this, "close", call, serializeTrace);
 }
 
 }  // namespace engine::store

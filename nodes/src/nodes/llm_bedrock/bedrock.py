@@ -40,7 +40,14 @@ class Chat(ChatBase):
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
-        Initialize the Bedrock chat bot.
+        Create and configure a Bedrock-backed chat instance.
+        
+        Retrieves node configuration to obtain AWS credentials and region, sets self.region, chooses a region-specific model prefix, instantiates a ChatBedrock client assigned to self._llm (using temperature 0 and max tokens from self._modelOutputTokens), and stores this Chat instance in bag['chat'].
+        
+        Parameters:
+            provider (str): Provider identifier used to look up node configuration.
+            connConfig (Dict[str, Any]): Connection configuration passed to Config.getNodeConfig.
+            bag (Dict[str, Any]): Mutable mapping where the created chat instance is stored under the 'chat' key.
         """
         # Init the base
         super().__init__(provider, connConfig, bag)
@@ -65,7 +72,7 @@ class Chat(ChatBase):
             model_prefix = 'apac.'
 
         # Get the llm
-        self._llm = ChatBedrock(model=model_prefix + self._model, aws_access_key_id=accessKey, aws_secret_access_key=secretKey, region=self.region, temperature=0)
+        self._llm = ChatBedrock(model=model_prefix + self._model, aws_access_key_id=accessKey, aws_secret_access_key=secretKey, region=self.region, temperature=0, max_tokens=self._modelOutputTokens)
 
         # Save our chat class into the bag
         bag['chat'] = self

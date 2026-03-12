@@ -106,16 +106,17 @@ class DataMixin(DAPClient):
             # Results available after pipe closes
         """
 
-        def __init__(self, client, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None):
+        def __init__(self, client, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None):
             """
-            Create a new data pipe (usually called via client.pipe()).
-
-            Args:
-                client: The RocketRide client instance
-                token: Pipeline token for data destination
-                objinfo: Optional metadata about the data
-                mime_type: MIME type of data (e.g., "text/csv", "application/json")
-                provider: Optional provider specification
+            Initialize a DataPipe bound to a pipeline token with optional metadata, MIME type, provider, and per-pipe SSE callback.
+            
+            Parameters:
+            	client: The RocketRide client instance the pipe will use to send requests and manage subscriptions.
+            	token (str): Pipeline token identifying the data destination.
+            	objinfo (Dict[str, Any], optional): Object metadata to associate with the streamed data (e.g., name, size); defaults to an empty dict.
+            	mime_type (str, optional): MIME type for the data stream (defaults to 'application/octet-stream' when not provided).
+            	provider (str, optional): Optional provider identifier to route the upload.
+            	on_sse (callable, optional): Optional asynchronous callback invoked for each SSE event from the pipeline; called as await on_sse(event_body: dict).
             """
             self._client = client
             self._token = token
@@ -125,6 +126,7 @@ class DataMixin(DAPClient):
             self._pipe_id = None
             self._opened = False
             self._closed = False
+            self._on_sse = on_sse
 
         @property
         def is_opened(self) -> bool:
@@ -139,20 +141,14 @@ class DataMixin(DAPClient):
         async def open(self) -> 'DataMixin.DataPipe':
             """
             Open the pipe for data transmission.
-
-            Must be called before writing data. The server assigns a unique
-            pipe ID and prepares to receive your data.
-
+            
+            Requests the server to allocate a pipe, stores the assigned pipe ID, and marks this pipe as opened. If an `on_sse` callback was provided when the pipe was created, subscribes to server-sent events for this pipe and registers the callback.
+            
             Returns:
-                self: The opened pipe instance for method chaining
-
+                self: The opened pipe instance for method chaining.
+            
             Raises:
-                RuntimeError: If pipe is already opened or if opening fails
-
-            Example:
-                pipe = await client.pipe(token, mimetype="text/plain")
-                await pipe.open()
-                # Now ready to write data
+                RuntimeError: If the pipe is already opened or if the server indicates opening failed.
             """
             if self._opened:
                 raise RuntimeError('Pipe already opened')
@@ -175,26 +171,26 @@ class DataMixin(DAPClient):
 
             self._pipe_id = response.get('body', {}).get('pipe_id')
             self._opened = True
+
+            # If an SSE callback was provided, subscribe and register for this pipe
+            if self._on_sse is not None and self._pipe_id is not None:
+                await self._client.set_events(self._token, ['SSE'], pipe_id=self._pipe_id)
+                self._client._register_sse_pipe(self._pipe_id, self._on_sse)
+
             return self
 
         async def write(self, buffer: bytes) -> None:
             """
-            Write data to the pipe.
-
-            Can be called multiple times to send data in chunks. Data must
-            be bytes - convert strings using .encode() first.
-
-            Args:
-                buffer: Data to send (must be bytes, not string)
-
+            Write a bytes buffer to the open data pipe as a chunk.
+            
+            Can be called repeatedly to send multiple sequential chunks. The buffer must be raw bytes; encode text (for example using UTF-8) before calling.
+            
+            Parameters:
+                buffer (bytes): Data to send; must be a bytes object (e.g., "text".encode("utf-8")).
+            
             Raises:
-                RuntimeError: If pipe not opened or write fails
-                ValueError: If buffer is not bytes
-
-            Example:
-                await pipe.write(b"First chunk of data")
-                await pipe.write("Second chunk".encode())
-                await pipe.write(json.dumps(data).encode())
+                RuntimeError: If the pipe is not opened or the write operation fails.
+                ValueError: If `buffer` is not a bytes object.
             """
             if not self._opened:
                 raise RuntimeError('Pipe not opened')
@@ -257,8 +253,21 @@ class DataMixin(DAPClient):
             finally:
                 self._closed = True
 
+                # Unregister SSE callback and scoped monitor subscription
+                if self._on_sse is not None and self._pipe_id is not None:
+                    self._client._unregister_sse_pipe(self._pipe_id)
+                    try:
+                        await self._client.set_events(self._token, [], pipe_id=self._pipe_id)
+                    except Exception:
+                        pass  # Best-effort cleanup
+
         async def __aenter__(self):
-            """Enter async context manager - automatically opens pipe."""
+            """
+            Enter the async context by opening the data pipe.
+            
+            Returns:
+                DataPipe: the opened DataPipe instance (`self`).
+            """
             return await self.open()
 
         async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -271,12 +280,21 @@ class DataMixin(DAPClient):
 
     @staticmethod
     def _objinfo_with_size(objinfo: Dict[str, Any] = None, size: int = 0) -> Dict[str, Any]:
-        """Return objinfo with size set; never 0 (parse filter skips "empty")."""
+        """
+        Ensure an objinfo dictionary contains a positive 'size' field.
+        
+        Parameters:
+            objinfo (Dict[str, Any]): Original object metadata to copy into the result. If None, an empty dict is used.
+            size (int): Desired size value; if less than or equal to 0, this function sets `'size'` to 1 to avoid an empty filter.
+        
+        Returns:
+            Dict[str, Any]: A new dict with the contents of `objinfo` and a `'size'` key set to `size` when > 0, otherwise 1.
+        """
         out = dict(objinfo) if objinfo else {}
         out['size'] = size if size else 1
         return out
 
-    async def pipe(self, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None) -> DataPipe:
+    async def pipe(self, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None) -> DataPipe:
         r"""
         Create a data pipe for streaming operations.
 
@@ -309,7 +327,7 @@ class DataMixin(DAPClient):
                 results = await pipe.close()
             # Results available after context exits
         """
-        return self.DataPipe(self, token=token, objinfo=objinfo, mime_type=mime_type, provider=provider)
+        return self.DataPipe(self, token=token, objinfo=objinfo, mime_type=mime_type, provider=provider, on_sse=on_sse)
 
     async def send(
         self,

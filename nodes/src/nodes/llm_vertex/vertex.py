@@ -59,7 +59,18 @@ class Chat(ChatBase):
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any], parameters: Dict[str, Any] = None):
         """
-        Initialize the vertex chat bot.
+        Initialize the Vertex AI chat wrapper and configure authentication, project/location, and the underlying ChatVertexAI model.
+        
+        Sets up credentials based on parameters['authType'] (supports NONE, SERVICE, USER), initializes self._llm as a ChatVertexAI instance (including model, temperature, credentials, project, location, and max_output_tokens), and stores this Chat instance into bag['chat'].
+        
+        Parameters:
+            provider: Identifier of the provider node.
+            connConfig: Node connection configuration dictionary (used to read project and location).
+            bag: Mutable container shared across the node where this Chat instance will be saved under the 'chat' key.
+            parameters: Optional runtime parameters that may include authentication payloads and related settings (e.g., 'authType', 'serviceKey', 'adminEmail', 'userToken').
+        
+        Raises:
+            Exception: If an unknown authentication type is specified in parameters['authType'].
         """
         # Init the base
         super().__init__(provider, connConfig, bag)
@@ -111,7 +122,7 @@ class Chat(ChatBase):
         vertex_model_name = self._model
 
         # Initialize LLM using unified ChatVertexAI for all models
-        self._llm = ChatVertexAI(model=vertex_model_name, temperature=0, credentials=credentials, project=project, location=location)
+        self._llm = ChatVertexAI(model=vertex_model_name, temperature=0, credentials=credentials, project=project, location=location, max_output_tokens=self._modelOutputTokens)
 
         # Save our chat class into the bag
         bag['chat'] = self

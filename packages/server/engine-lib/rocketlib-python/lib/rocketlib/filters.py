@@ -397,16 +397,45 @@ class IServiceFilterInstance(Protocol):
 
     def getListeners(self) -> List[str]:
         """
-        Get the lanes that are being listened to.
+        Return the names of lanes this filter instance is listening to.
+        
+        Returns:
+            listeners (List[str]): List of lane identifiers currently registered as listeners.
         """
         pass
 
-    def control(self, filter: str, control: IControl) -> None:
-        """Control the instance using the parameters in control."""
+    def getControllerNodeIds(self, classType: str) -> List[str]:
+        """
+        Retrieve pipeline node IDs connected for a given control class type.
+        
+        Parameters:
+            classType (str): Control class identifier (for example "tool" or "llm") to query.
+        
+        Returns:
+            List[str]: List of pipeline node ID strings connected for the specified class type; empty list if no nodes are connected.
+        """
+        pass
+
+    def control(self, filter: str, control: IControl, nodeId: str = "") -> None:
+        """
+        Send a control command to this filter instance.
+        
+        If `nodeId` is provided, the control is dispatched directly to that node instead of traversing the full filter chain.
+        
+        Parameters:
+            filter (str): Name or identifier of the control class/target.
+            control (IControl): Control object describing the action and carrying any arguments and the result slot.
+            nodeId (str): Optional node ID to target; when non-empty, the control is routed only to that node.
+        """
         pass
 
     def open(self, obj: Entry) -> None:
-        """Open an object."""
+        """
+        Open the provided object and prepare the instance to operate on it.
+        
+        Parameters:
+            obj (Entry): The object entry to open; implementations should initialize any instance state required for subsequent operations on this object.
+        """
         pass
 
     def writeTag(self, tag: Any) -> None:
@@ -666,11 +695,27 @@ Monkey patch the C++ methods as needed
 
 
 def _patch_classes():
-    """Add Python methods to C++ classes."""
+    """
+    Monkey-patch the engine's C++ IFilterInstance class to add a Python `invoke` method.
+    
+    The injected `invoke` builds an IInvoke control from the provided args and kwargs, calls the instance's `control` method (forwarding the optional `nodeId`), and returns the control's `result`.
+    """
 
-    def invoke(self, classType: str, *args, **kwargs) -> Any:
+    def invoke(self, classType: str, *args, nodeId: str = "", **kwargs) -> Any:
+        """
+        Invoke a control class on the filter pipe and return its result.
+        
+        Parameters:
+            classType (str): The control class/type name to invoke on the pipe.
+            *args: Positional arguments forwarded to the invoked control.
+            nodeId (str): Optional node ID to target the control to a specific pipeline node; when empty, the control is dispatched through the normal chain.
+            **kwargs: Keyword arguments forwarded to the invoked control.
+        
+        Returns:
+            Any: The result produced by the invoked control.
+        """
         control = IInvoke(args=args, kwargs=kwargs, result=None)
-        self.control(classType, control)
+        self.control(classType, control, nodeId=nodeId)
         return control.result
 
     # Add to the actual C++ class

@@ -127,15 +127,24 @@ private:
 
     // Debug assert helper method
     template <typename LockType>
+    /**
+     * @brief Asserts that the provided unique_lock currently holds its mutex.
+     *
+     * For lock types that expose an ownerId, this additionally asserts the owner
+     * matches the current thread. Emits the assertion message on failure.
+     *
+     * @tparam LockType Type of the mutex guarded by the unique_lock.
+     * @param guard The unique_lock to check for ownership.
+     */
     static void assertLocked(std::unique_lock<LockType> &guard) noexcept {
         if constexpr (TracksOwnerId<LockType>{})
             ASSERT_MSG(
                 guard.mutex() && guard.mutex()->ownerId() == threadId(),
-                "Attempting to notify without hoilding the lock is racy");
+                "Attempting to notify without holding the lock is racy");
         else
             ASSERT_MSG(
                 guard.mutex(),
-                "Attempting to notify without hoilding the lock is racy");
+                "Attempting to notify without holding the lock is racy");
     }
 
     // Contextual cancellation of this condition

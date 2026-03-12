@@ -47,7 +47,19 @@ class Chat(ChatBase):
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
-        Initialize the Qwen chat bot.
+        Create and configure a Qwen (DashScope) ChatLLM client and register it in the provided runtime bag.
+        
+        Parameters:
+            provider (str): Node/provider identifier used to look up node-specific configuration.
+            connConfig (Dict[str, Any]): Global connection configuration passed to Config.getNodeConfig.
+            bag (Dict[str, Any]): Mutable runtime bag where this instance will be stored under the 'chat' key.
+        
+        Raises:
+            ValueError: If the node configuration does not contain a valid DashScope API key (must start with "sk-").
+        
+        Side effects:
+            - Initializes self._llm with a ChatOpenAI client configured for the resolved DashScope region.
+            - Stores this Chat instance in bag['chat'].
         """
         # Init the base
         super().__init__(provider, connConfig, bag)
@@ -71,6 +83,7 @@ class Chat(ChatBase):
             api_key=apikey,
             base_url=base_url,
             temperature=0,
+            max_tokens=self._modelOutputTokens,
         )
 
         # Save our chat class into the bag

@@ -39,12 +39,16 @@ class Chat(ChatBase):
     _llm: ChatOpenAI
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
-        """Initialize the Deepseek chat bot.
-
-        Args:
-            provider (str): Provider name
-            connConfig (Dict[str, Any]): Node configuration
-            bag (Dict[str, Any]): Bag to store data
+        """
+        Initialize the DeepSeek Chat binding and configure the underlying LLM.
+        
+        Parameters:
+            provider (str): Provider identifier used to locate node configuration.
+            connConfig (Dict[str, Any]): Connection-level configuration passed to Config.getNodeConfig.
+            bag (Dict[str, Any]): Mutable storage where the created Chat instance will be stored under 'chat'.
+        
+        Raises:
+            ValueError: If the node configuration lacks 'serverbase', or if an API key format is invalid for DeepSeek cloud endpoints.
         """
         # Init the base
         super().__init__(provider, connConfig, bag)
@@ -65,7 +69,7 @@ class Chat(ChatBase):
             raise ValueError('Invalid DeepSeek API key format, please check your API key.')
 
         # Get the llm
-        self._llm = ChatOpenAI(model=self._model, base_url=serverbase, api_key=apikey, temperature=0)
+        self._llm = ChatOpenAI(model=self._model, base_url=serverbase, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens)
 
         # Save our chat class into the bag
         bag['chat'] = self

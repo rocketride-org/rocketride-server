@@ -49,44 +49,6 @@ from ai.common.tools import ToolsBase
 from .sql_safety import is_sql_safe
 
 
-# ---------------------------------------------------------------------------
-# Shared JSON schemas for the three database tools.
-# These are dialect-agnostic; the same schema works for any SQL database.
-# ---------------------------------------------------------------------------
-
-GET_SCHEMA_SCHEMA: Dict[str, Any] = {
-    'type': 'object',
-    'properties': {
-        'table': {
-            'type': 'string',
-            'description': 'Optional table name to get schema for. If omitted, returns schema for all tables.',
-        },
-    },
-}
-
-GET_SQL_SCHEMA: Dict[str, Any] = {
-    'type': 'object',
-    'required': ['question'],
-    'properties': {
-        'question': {
-            'type': 'string',
-            'description': 'Natural-language question to convert into a SQL query',
-        },
-    },
-}
-
-GET_DATA_SCHEMA: Dict[str, Any] = {
-    'type': 'object',
-    'required': ['query'],
-    'properties': {
-        'query': {
-            'type': 'string',
-            'description': 'SQL SELECT query to execute against the database',
-        },
-    },
-}
-
-
 class DatabaseDriverBase(ToolsBase):
     """Abstract base for the tool-provider driver of any relational database node."""
 
@@ -127,41 +89,149 @@ class DatabaseDriverBase(ToolsBase):
     # ------------------------------------------------------------------
 
     def _tool_query(self) -> List[Dict[str, Any]]:
+        """
+        Builds the LLM-facing tool definitions for this database driver.
+        
+        Constructs and returns a list of tool definition dictionaries (for `get_data`, `get_schema`, and `get_sql`). Each tool entry includes `name`, `summary`, `description`, `input_schema`, and `output_schema`. When available, the returned descriptions include the engine display name and optional database context from the instance.
+        """
         db = self._db_display_name()
+        db_desc = getattr(self._instance.IGlobal, 'db_description', '') or ''
+        desc_suffix = f' Database context: {db_desc}' if db_desc else ''
         return [
             {
                 'name': f'{self._server_name}.get_data',
+                'summary': f'PRIMARY tool for {db} -- accepts natural language, no setup required. Use this first.',
                 'description': (
-                    f'Query the {db} database and return result rows. This is the primary tool for answering '
-                    f'database questions — use it by default unless the user specifically asks to see the SQL. '
-                    f'The query must be a safe SELECT statement (no INSERT, UPDATE, DELETE, etc.). '
-                    f'If you do not know the database schema, call get_schema first.'
+                    f'Accepts a natural-language description of the data you want, converts it to a safe '
+                    f'SQL SELECT statement, executes it against the "{db}" database, and returns the result rows. '
+                    f'No schema lookup or SQL knowledge required -- just describe what you need. '
+                    f'Results may be large -- consider using peek or store.'
+                    f'{desc_suffix}'
                 ),
-                'input_schema': GET_DATA_SCHEMA,
+                'input_schema': {
+                    'type': 'object',
+                    'required': ['question'],
+                    'properties': {
+                        'question': {
+                            'type': 'string',
+                            'description': 'Natural-language description of the data you want to retrieve',
+                        },
+                    },
+                },
+                'output_schema': {
+                    'type': 'object',
+                    'properties': {
+                        'rows': {
+                            'type': 'array',
+                            'description': 'Result rows returned by the query. May be large -- consider using peek or store.',
+                            'items': {
+                                'type': 'object',
+                                'description': 'A single result row as a key-value map of column name to value.',
+                            },
+                        },
+                        'sql': {
+                            'type': 'string',
+                            'description': 'The generated SQL SELECT statement that was executed.',
+                        },
+                    },
+                },
             },
             {
                 'name': f'{self._server_name}.get_schema',
+                'summary': f'FALLBACK ONLY -- {db} schema lookup. Use only if get_data fails or returns unexpected results.',
                 'description': (
-                    f'Get the {db} database schema. Returns the database name and all tables with their '
-                    f'columns, types, primary keys, and foreign key relationships. '
-                    f'Optionally pass a table name to get the schema for just that table. '
-                    f'Call this first if you need to understand the database structure before writing queries.'
+                    f'Returns the "{db}" database schema including all tables, columns, types, primary keys, '
+                    f'and foreign key relationships. Pass a table name to get the schema for a single table, '
+                    f'or omit it to get the full database schema. '
+                    f'Do NOT call this preemptively -- only use when get_data fails or returns unexpected results.'
+                    f'{desc_suffix}'
                 ),
-                'input_schema': GET_SCHEMA_SCHEMA,
+                'input_schema': {
+                    'type': 'object',
+                    'properties': {
+                        'table': {
+                            'type': 'string',
+                            'description': 'Optional table name to get schema for. If omitted, returns schema for all tables.',
+                        },
+                    },
+                },
+                'output_schema': {
+                    'type': 'object',
+                    'description': 'May be large for full database schemas -- prefer peek or store.',
+                    'properties': {
+                        'database': {
+                            'type': 'string',
+                            'description': 'The name of the database.',
+                        },
+                        'tables': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'object',
+                                'properties': {
+                                    'name': {'type': 'string', 'description': 'Table name.'},
+                                    'columns': {
+                                        'type': 'array',
+                                        'items': {
+                                            'type': 'object',
+                                            'properties': {
+                                                'name': {'type': 'string'},
+                                                'type': {'type': 'string'},
+                                                'primary_key': {'type': 'boolean'},
+                                                'foreign_key': {'type': 'string', 'description': 'Referenced table.column, if applicable.'},
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
             },
             {
                 'name': f'{self._server_name}.get_sql',
+                'summary': f'Convert a natural-language question to a {db} SQL SELECT without executing it.',
                 'description': (
-                    f'Convert a natural-language question into a verified SQL SELECT query for {db}. '
-                    f'Only use this tool when the user explicitly asks to see the SQL statement itself. '
-                    f'For all other database questions, use get_data instead — it returns the actual query results. '
-                    f'The generated query is validated for safety (SELECT only, no mutations).'
+                    f'Accepts a natural-language description and returns the equivalent "{db}" SQL SELECT '
+                    f'statement without executing it. The generated query is validated as safe (SELECT '
+                    f'only, no mutations). Only use when the user explicitly asks to see the SQL -- '
+                    f'for actual data retrieval, use get_data instead.'
                 ),
-                'input_schema': GET_SQL_SCHEMA,
+                'input_schema': {
+                    'type': 'object',
+                    'required': ['question'],
+                    'properties': {
+                        'question': {
+                            'type': 'string',
+                            'description': 'Natural-language question to convert into a SQL query',
+                        },
+                    },
+                },
+                'output_schema': {
+                    'type': 'object',
+                    'properties': {
+                        'sql': {
+                            'type': 'string',
+                            'description': 'The generated SQL SELECT statement. Safe to return inline as result.',
+                        },
+                    },
+                },
             },
         ]
 
     def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:
+        """
+        Validate and enforce the expected JSON input shape for a namespaced database tool.
+        
+        Parameters:
+            tool_name (str): Namespaced tool identifier (may include a prefix, e.g. "mysql.get_data"). The namespace is ignored when determining validation rules.
+            input_obj (Any): Parsed JSON input for the tool (may be None for tools that allow empty input).
+        
+        Raises:
+            ValueError: If the tool is unknown (not `get_schema`, `get_sql`, or `get_data`).
+            ValueError: If `get_schema` receives a non-dictionary, non-None input.
+            ValueError: If `get_sql` receives a non-dictionary input, or if its `question` field is missing, not a string, or an empty/whitespace string.
+            ValueError: If `get_data` receives a non-dictionary input, or if its `question` field is missing, not a string, or an empty/whitespace string.
+        """
         name = self._strip_namespace(tool_name)
 
         if name == 'get_schema':
@@ -178,11 +248,9 @@ class DatabaseDriverBase(ToolsBase):
         elif name == 'get_data':
             if not isinstance(input_obj, dict):
                 raise ValueError('Tool input must be a JSON object')
-            query = input_obj.get('query')
-            if not query or not isinstance(query, str) or not query.strip():
-                raise ValueError('"query" is required and must be a non-empty string')
-            if not is_sql_safe(query):
-                raise ValueError('Query contains unsafe SQL. Only SELECT statements are permitted.')
+            question = input_obj.get('question')
+            if not question or not isinstance(question, str) or not question.strip():
+                raise ValueError('"question" is required and must be a non-empty string')
 
         else:
             raise ValueError(f'Unknown tool {tool_name!r} (expected get_schema, get_sql, or get_data)')
@@ -234,7 +302,18 @@ class DatabaseDriverBase(ToolsBase):
         }
 
     def _invoke_get_sql(self, input_obj: Dict[str, Any]) -> Dict[str, Any]:
-        """Translate a natural-language question to a verified SQL SELECT."""
+        """
+        Convert a natural-language question into a validated SQL SELECT or return the LLM's non-SQL answer.
+        
+        Parameters:
+            input_obj (dict): Input containing the key `'question'` with a non-empty string describing the user's request.
+        
+        Returns:
+            dict: One of:
+                - `{'sql': <sql_query>, 'valid': True}` when a safe SQL SELECT was generated.
+                - `{'error': 'Generated query contains unsafe SQL', 'sql': <sql_query>, 'valid': False}` when a SQL query was generated but failed safety checks.
+                - `{'answer': <text>, 'valid': False}` when the LLM determined the input is not a database question and returned a textual response.
+        """
         question = input_obj['question'].strip()
         result = self._instance._buildSQLQuery(question)
 
@@ -250,22 +329,96 @@ class DatabaseDriverBase(ToolsBase):
             return {'answer': sql_query, 'valid': False}
 
     def _invoke_get_data(self, input_obj: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a SQL SELECT and return the result rows."""
-        query = input_obj['query'].strip()
-        result = self._instance._executeSQLQuery(query)
+        """
+        Translate a natural-language question into SQL, run the query, and return sanitized rows and execution metadata.
+        
+        Parameters:
+            input_obj (Dict[str, Any]): Must contain 'question' (str) with the natural-language request.
+        
+        Returns:
+            Dict[str, Any]: On success, contains:
+                - 'rows' (List[Dict|List|Any]): Array of row objects or sequences with all values converted to JSON-serializable types.
+                - 'sql' (str): The SQL statement executed.
+                - 'count' (int): Number of rows returned.
+            If SQL generation is unsuccessful, returns the result object produced by the SQL-generation step (contains validation info or an 'answer').
+            If query execution fails, returns:
+                - 'error' (str): Error message.
+                - 'sql' (str): The attempted SQL.
+                - 'rows' (List): Empty list.
+        """
+        question = input_obj['question'].strip()
+
+        # Step 1: Convert NLP to SQL
+        sql_result = self._invoke_get_sql({'question': question})
+        if not sql_result.get('valid'):
+            return sql_result
+
+        sql_query = sql_result['sql']
+
+        # Step 2: Execute the SQL
+        result = self._instance._executeSQLQuery(sql_query)
 
         if result is None:
-            return {'error': 'Query execution failed', 'rows': []}
+            return {'error': 'Query execution failed', 'sql': sql_query, 'rows': []}
 
-        return {'rows': result, 'count': len(result)}
+        # Sanitize rows so all values are JSON-serializable (Decimal → float,
+        # datetime/date → ISO string, etc.)
+        rows = [self._sanitize_row(row) for row in result]
+
+        return {'rows': rows, 'sql': sql_query, 'count': len(rows)}
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _sanitize_value(val: Any) -> Any:
+        """
+        Normalize a single database value into a JSON-serializable Python value.
+        
+        Returns:
+            The normalized value:
+            - `None`, `str`, `int`, `float`, or `bool` are returned unchanged.
+            - Objects with `__float__` (e.g., Decimal) are converted to `float`.
+            - Objects with `isoformat` (e.g., `datetime`, `date`, `time`) are converted to their ISO string.
+            - `bytes` are decoded to UTF-8 strings with replacement for invalid sequences.
+            - All other values are converted to `str`.
+        """
+        if val is None or isinstance(val, (str, int, float, bool)):
+            return val
+        if hasattr(val, '__float__'):       # Decimal, numeric types
+            return float(val)
+        if hasattr(val, 'isoformat'):       # datetime, date, time
+            return val.isoformat()
+        if isinstance(val, bytes):
+            return val.decode('utf-8', errors='replace')
+        return str(val)
+
+    @classmethod
+    def _sanitize_row(cls, row: Any) -> Any:
+        """
+        Sanitize a database result row so all contained values are JSON-serializable.
+        
+        Parameters:
+            row (Any): A database row which may be a mapping (dict), sequence (list/tuple), or single value.
+        
+        Returns:
+            Any: A sanitized version of `row`: a dict with sanitized values if `row` was a mapping, a list of sanitized values if `row` was a sequence, or a single sanitized value otherwise.
+        """
+        if isinstance(row, dict):
+            return {k: cls._sanitize_value(v) for k, v in row.items()}
+        if isinstance(row, (list, tuple)):
+            return [cls._sanitize_value(v) for v in row]
+        return cls._sanitize_value(row)
+
     def _strip_namespace(self, tool_name: str) -> str:
-        """Strip the server-name prefix from a namespaced tool name."""
+        """
+        Strip the server-name prefix from a namespaced tool name.
+        
+        Returns:
+            str: The tool name with the leading "<server>." prefix (derived from self._server_name) removed if present, otherwise the original tool name.
+        """
         prefix = f'{self._server_name}.'
         if tool_name.startswith(prefix):
-            return tool_name[len(prefix):]
+            return tool_name[len(prefix) :]
         return tool_name

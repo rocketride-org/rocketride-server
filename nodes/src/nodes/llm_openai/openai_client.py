@@ -41,7 +41,14 @@ class Chat(ChatBase):
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
-        Initialize the OpenAI chat bot.
+        Create and configure the OpenAI-backed chat instance and register it in the provided bag.
+        
+        Initializes the base Chat, reads provider-specific connection configuration to obtain an API key (not retained on the instance), constructs a ChatOpenAI client configured with the node's model and output token limit, and stores this Chat instance into `bag['chat']`.
+        
+        Parameters:
+            provider (str): Identifier for the provider/node whose configuration should be used.
+            connConfig (Dict[str, Any]): Global connection configuration from which node-specific settings will be retrieved.
+            bag (Dict[str, Any]): Mutable runtime bag used to share objects across components; this method sets `bag['chat']` to the created instance.
         """
         # Init the base
         super().__init__(provider, connConfig, bag)
@@ -53,7 +60,7 @@ class Chat(ChatBase):
         apikey = config.get('apikey')
 
         # Get the llm
-        self._llm = ChatOpenAI(model=self._model, api_key=apikey, temperature=0)
+        self._llm = ChatOpenAI(model=self._model, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens)
 
         # Save our chat class into the bag
         bag['chat'] = self

@@ -58,6 +58,17 @@ class IGlobal(DatabaseGlobalBase):
 
     def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
         # Read from the same mysql.default block as the other connection fields.
+        """
+        Determine the maximum number of validation attempts from the provided configuration.
+        
+        Looks for 'mysql.max_attempts' inside the 'mysql.default' block first, then at the top level, and falls back to 5. If the configured value cannot be parsed as an integer, returns 5.
+        
+        Parameters:
+            config (Dict[str, Any]): Configuration mapping to read values from.
+        
+        Returns:
+            Maximum number of validation attempts as an int; defaults to 5 if missing or invalid.
+        """
         block = config.get('mysql.default')
         if not isinstance(block, dict):
             block = {}
@@ -65,3 +76,18 @@ class IGlobal(DatabaseGlobalBase):
             return int(block.get('mysql.max_attempts') or config.get('mysql.max_attempts') or 5)
         except (ValueError, TypeError):
             return 5
+
+    def _db_description(self, config: Dict[str, Any]) -> str:
+        """
+        Return the configured MySQL database description.
+        
+        Parameters:
+            config (Dict[str, Any]): Configuration mapping that may include a 'mysql.default' dict and/or a top-level 'mysql.db_description' entry.
+        
+        Returns:
+            str: The value of `mysql.db_description` from the 'mysql.default' block if present, otherwise the top-level `mysql.db_description`, or an empty string if neither is set.
+        """
+        block = config.get('mysql.default')
+        if not isinstance(block, dict):
+            block = {}
+        return str(block.get('mysql.db_description') or config.get('mysql.db_description') or '')

@@ -40,7 +40,15 @@ class Chat(ChatBase):
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
-        Initialize the XAI chat bot.
+        Initialize the XAI chat binding and configure its LLM.
+        
+        Parameters:
+            provider (str): Identifier of the node/provider used to resolve node-specific configuration.
+            connConfig (Dict[str, Any]): Connection-level configuration passed to the node.
+            bag (Dict[str, Any]): Shared runtime bag for storing and retrieving contextual objects; this instance is stored as bag['chat'].
+        
+        Raises:
+            ValueError: If the node configuration does not contain an API key starting with 'xai-'.
         """
         # Init the base
         super().__init__(provider, connConfig, bag)
@@ -59,7 +67,7 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Get the llm
-        self._llm = ChatXAI(model=self._model, api_key=apikey, temperature=0)
+        self._llm = ChatXAI(model=self._model, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens)
 
         # Save our chat class into the bag
         bag['chat'] = self

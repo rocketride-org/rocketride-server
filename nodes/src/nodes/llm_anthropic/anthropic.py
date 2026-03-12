@@ -87,7 +87,17 @@ class Chat(ChatBase):
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
-        Initialize the Anthropic chat bot.
+        Create and configure an Anthropic-backed chat bot instance and store it in the provided bag.
+        
+        Initializes the chat binding by reading node configuration for the given provider, validating the Anthropic API key, constructing the underlying ChatAnthropic LLM with deterministic settings, and placing this Chat instance into the supplied bag under the 'chat' key.
+        
+        Parameters:
+            provider (str): Identifier of the node/provider whose configuration to load.
+            connConfig (Dict[str, Any]): Connection-level configuration; used as input to Config.getNodeConfig.
+            bag (Dict[str, Any]): Mutable runtime bag for sharing instances; the created Chat is stored at bag['chat'].
+        
+        Raises:
+            ValueError: If the Anthropic API key is missing or does not start with 'sk-ant'.
         """
         # Get the nodes configuration
         config = Config.getNodeConfig(provider, connConfig)
@@ -107,7 +117,7 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Get the LLM
-        self._llm = ChatAnthropic(model=model, api_key=apikey, temperature=0)
+        self._llm = ChatAnthropic(model=model, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens)
 
         # Save our chat class into the bag
         bag['chat'] = self
