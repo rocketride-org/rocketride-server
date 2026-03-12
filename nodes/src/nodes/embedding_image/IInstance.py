@@ -75,7 +75,7 @@ class IInstance(IInstanceBase):
             vectors = self.IGlobal.embedding.create_image_embedding(image)
 
             # Assign the embedding vectors to the document as a list for serialization.
-            doc.embedding = vectors.tolist()
+            doc.embedding = vectors if isinstance(vectors, list) else vectors.tolist()
 
             # Store the model name used for generating the embedding for traceability.
             doc.embedding_model = self.IGlobal.embedding.model_name

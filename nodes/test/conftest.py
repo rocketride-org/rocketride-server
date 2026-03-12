@@ -159,6 +159,10 @@ def pytest_configure(config):
         'markers',
         'node(name): mark test as testing a specific node'
     )
+    config.addinivalue_line(
+        'markers',
+        'skip_node: test for a node in skip_nodes (excluded from default run; run with -m skip_node or -k <node_name>)'
+    )
 
 
 # =============================================================================
@@ -219,9 +223,10 @@ def pytest_generate_tests(metafunc):
         # excluded because they pull large libraries, use heavy models, or depend on local
         # services, which would cause CI timeouts or OOM. To run them locally:
         #   pytest nodes/test/test_dynamic.py -v -k <node_name>
+        # Groups: ML/heavy (anonymize, ocr, ner, embedding_image); image/video (image_cleanup, frame_grabber); LLM/local (llm_anthropic, llm_ollama).
         skip_nodes = {
             'anonymize', 'llm_anthropic', 'llm_ollama',
-            'ocr', 'ner', 'image_cleanup', 'frame_grabber',
+            'ocr', 'ner', 'embedding_image', 'image_cleanup', 'frame_grabber',
         }
 
         for config in configs:
