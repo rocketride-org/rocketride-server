@@ -42,6 +42,7 @@ Runs agent-supplied code via ``exec()`` inside a controlled namespace with:
 
 from __future__ import annotations
 
+import ast
 import builtins
 import importlib
 import io
@@ -49,7 +50,7 @@ import subprocess
 import sys
 import threading
 import traceback
-from typing import Any, Dict, Set
+from typing import Any, Dict, List, Set
 
 _TIMEOUT = 20
 _MAX_OUTPUT = 51200  # 50 KB
@@ -64,6 +65,76 @@ _MAX_OUTPUT = 51200  # 50 KB
 #     into objects to pull out references to blocked functionality)
 #   - Interactive / process control: input, exit, quit
 #   - Low-level: memoryview, classmethod
+# ── Dunder attributes blocked in AST validation ─────────────────────────────
+# These prevent object-graph walks like:
+#   ().__class__.__mro__[1].__subclasses__()
+# which can recover subprocess.Popen, os._wrap_close, etc. from the CPython
+# class hierarchy without using any blocked builtins.
+_BLOCKED_DUNDERS = frozenset({
+    '__subclasses__',
+    '__mro__',
+    '__bases__',
+    '__base__',
+    '__class__',
+    '__dict__',
+    '__globals__',
+    '__code__',
+    '__func__',
+    '__self__',
+    '__module__',
+    '__import__',
+    '__spec__',
+    '__loader__',
+    '__builtins__',
+    '__qualname__',
+    '__reduce__',
+    '__reduce_ex__',
+    '__getattr__',
+    '__setattr__',
+    '__delattr__',
+    '__init_subclass__',
+    '__set_name__',
+    '__class_getitem__',
+    '__instancecheck__',
+    '__subclasscheck__',
+    '__subclasshook__',
+    '__del__',
+    '__weakref__',
+})
+
+
+class SandboxValidationError(Exception):
+    """Raised when sandboxed code fails AST validation."""
+
+
+def _validate_ast(code: str) -> None:
+    """Parse *code* and reject access to dangerous dunder attributes.
+
+    Raises ``SandboxValidationError`` if the code accesses any attribute in
+    ``_BLOCKED_DUNDERS``, or ``SyntaxError`` if the code can't be parsed.
+    """
+    tree = ast.parse(code, filename='<agent_script>')
+    violations: List[str] = []
+
+    for node in ast.walk(tree):
+        # obj.__subclasses__  /  obj.__mro__  etc.
+        if isinstance(node, ast.Attribute) and node.attr in _BLOCKED_DUNDERS:
+            violations.append(
+                f'line {node.lineno}: access to "{node.attr}" is not allowed'
+            )
+        # Catch string-based access: something["__subclasses__"]
+        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
+            if isinstance(node.slice.value, str) and node.slice.value in _BLOCKED_DUNDERS:
+                violations.append(
+                    f'line {node.lineno}: access to "{node.slice.value}" via subscript is not allowed'
+                )
+
+    if violations:
+        raise SandboxValidationError(
+            'Code blocked by sandbox AST validation:\n' + '\n'.join(violations)
+        )
+
+
 _REMOVED_BUILTINS = frozenset({
     'open',
     'eval',
@@ -138,6 +209,17 @@ def execute_sandboxed(
     *allowed_modules*, if provided, is merged with ``_DEFAULT_ALLOWED_MODULES``
     to form the full allowlist.  Only modules in this set can be imported.
     """
+    # ── 0. AST validation — reject dunder attribute access ────────────────
+    try:
+        _validate_ast(code)
+    except (SandboxValidationError, SyntaxError) as exc:
+        return {
+            'stdout': '',
+            'stderr': str(exc),
+            'exit_code': 1,
+            'timed_out': False,
+        }
+
     allowlist = _DEFAULT_ALLOWED_MODULES | (allowed_modules or set())
 
     # ── 1. Build builtins with dangerous names removed ───────────────────
