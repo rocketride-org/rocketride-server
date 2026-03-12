@@ -51,7 +51,7 @@ function makeBuildDropperUiAction() {
 function makeCopyDropperUiAction() {
     return {
         run: async (ctx, task) => {
-            const stats = await syncDir(BUILD_DIR, SERVER_STATIC_DIR, { sourceRequired: true });
+            const stats = await syncDir(BUILD_DIR, SERVER_STATIC_DIR, { package: true });
             task.output = formatSyncStats(stats);
         }
     };

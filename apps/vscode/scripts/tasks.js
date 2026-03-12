@@ -27,9 +27,10 @@
  * RocketRide extension for Visual Studio Code.
  */
 const path = require('path');
+const { glob } = require('glob');
 const {
     execCommand, syncDir, removeDirs, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT,
-    hasSourceChanged, saveSourceHash, setState, exists, copyFile, readDir, mkdir, rm,
+    hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm,
     readFile, writeFile
 } = require('../../../scripts/lib');
 
@@ -195,8 +196,8 @@ function makePackageVsixAction() {
             const { changed } = await hasVscodeOrSharedUiChanged();
 
             // Check if .vsix already exists
-            const vsixFiles = await exists(VSCODE_DIST_DIR)
-                ? (await readDir(VSCODE_DIST_DIR)).filter(f => f.endsWith('.vsix'))
+            const vsixFiles = (await exists(VSCODE_DIST_DIR))
+                ? await glob('*.vsix', { cwd: VSCODE_DIST_DIR, nodir: true, absolute: true })
                 : [];
 
             if (!changed && vsixFiles.length > 0) {

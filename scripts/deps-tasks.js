@@ -1,45 +1,26 @@
 /**
  * Dependencies Check
- * 
+ *
  * Checks package.json hashes and runs pnpm install if needed.
  * Called on builder startup - silent if no changes needed.
  */
 const path = require('path');
 const crypto = require('crypto');
-const { 
-    execCommand, getState, setState, PROJECT_ROOT,
-    readDir, readFile
+const { glob } = require('glob');
+const parse = require('gitignore-globs');
+const {
+    execCommand, getState, setState, PROJECT_ROOT, readFile
 } = require('./lib');
 
 // ============================================================================
 // Package.json Hash Detection
 // ============================================================================
 
-async function findPackageJsonFiles(dir, files = []) {
-    const entries = await readDir(dir, { withFileTypes: true });
-    
-    for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        
-        // Skip directories we don't care about
-        if (entry.isDirectory()) {
-            if (['node_modules', '.git', 'build', 'dist', 'vcpkg'].includes(entry.name)) {
-                continue;
-            }
-            await findPackageJsonFiles(fullPath, files);
-        } else if (entry.name === 'package.json') {
-            files.push(fullPath);
-        }
-    }
-    
-    return files;
-}
-
 async function hashDependencies(filePath) {
     try {
         const content = await readFile(filePath);
         const pkg = JSON.parse(content);
-        
+
         // Extract only dependency-related fields
         const depsToHash = {
             dependencies: pkg.dependencies || {},
@@ -47,7 +28,7 @@ async function hashDependencies(filePath) {
             peerDependencies: pkg.peerDependencies || {},
             optionalDependencies: pkg.optionalDependencies || {}
         };
-        
+
         // Create deterministic string
         const normalized = JSON.stringify(depsToHash);
         return crypto.createHash('md5').update(normalized).digest('hex');
@@ -59,14 +40,18 @@ async function hashDependencies(filePath) {
 }
 
 async function getPackageJsonHashes() {
-    const files = await findPackageJsonFiles(PROJECT_ROOT);
+    const files = await glob('**/package.json', {
+        cwd: PROJECT_ROOT,
+        ignore: parse(path.join(PROJECT_ROOT, '.gitignore')),
+        nodir: true,
+        absolute: true
+    });
+
     const hashes = {};
-    
     for (const file of files) {
         const relativePath = path.relative(PROJECT_ROOT, file);
         hashes[relativePath] = await hashDependencies(file);
     }
-    
     return hashes;
 }
 
