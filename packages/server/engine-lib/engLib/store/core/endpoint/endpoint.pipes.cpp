@@ -397,7 +397,30 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
         }
     }
 
-    // We don't have any available pipes, create one
+    // Serialize pipe creation — Python 3.12's GIL can starve threads when
+    // many concurrent buildInstancePipe() calls compete for the GIL on
+    // low-core machines (e.g. 2-core Windows CI runners with 16 pipelines).
+    util::Guard createGuard{[&] { m_pipeCreateLock.lock(); },
+                            [&] { m_pipeCreateLock.unlock(); }};
+
+    // Re-check: another thread may have created and released a pipe
+    // while we waited on the create lock
+    _block() {
+        util::Guard stackGuard{[&] { m_stackLock.lock(); },
+                               [&] { m_stackLock.unlock(); }};
+
+        for (int i = 0; i < m_instanceStacks.size(); i++) {
+            auto &stack = m_instanceStacks[i];
+            ServiceInstance &filter = stack[0];
+            ServicePipe &pipe = (ServicePipe &)filter;
+
+            if (pipe->busy) continue;
+            pipe->busy = true;
+            return pipe;
+        }
+    }
+
+    // No available pipes — create one (serialized by m_pipeCreateLock)
     auto result = buildInstancePipe();
 
     // If we got an error

@@ -247,6 +247,7 @@ public:
     ServiceInstanceStacks m_instanceStacks;
 
     mutable async::Mutex m_stackLock;
+    mutable async::Mutex m_pipeCreateLock;
 
     //-----------------------------------------------------------------
     // These are valid to be called during beginFilterGlobal and
