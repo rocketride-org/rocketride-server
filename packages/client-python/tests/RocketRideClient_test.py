@@ -2179,8 +2179,8 @@ class TestConcurrentPipelineOperations:
             for token in sub_tokens:
                 try:
                     await client.terminate(token)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"Warning: failed to terminate pipeline token={token}: {e}")
             await client.disconnect()
 
 
