@@ -8,7 +8,7 @@ reviews:
     base_branches:
       - develop
       - main
-      - release/**
+      - release/.*
     ignore_title_keywords:
       - '[bot]'
       - 'renovate'
