@@ -3,7 +3,7 @@ Vision: CLIP and ViT image embedding loaders and facades.
 
 - VisionLoader: load/preprocess/inference/postprocess for CLIP or ViT (variant).
 - CLIPModel / ViTModel: user-facing facades with from_pretrained, get_image_features / __call__.
-  Local-only first; proxy (model server) can be added later.
+  Use model server when --modelserver is set, else local.
 """
 
 import io
@@ -11,7 +11,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..base import BaseLoader
+from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.vision')
 
@@ -196,6 +196,17 @@ class VisionLoader(BaseLoader):
         return results
 
 
+def _image_to_bytes(image: Any) -> bytes:
+    """Convert PIL Image or bytes to PNG bytes for sending to model server."""
+    if isinstance(image, bytes):
+        return image
+    if hasattr(image, 'save'):
+        buf = io.BytesIO()
+        image.convert('RGB').save(buf, format='PNG')
+        return buf.getvalue()
+    raise TypeError(f'Expected PIL Image or bytes, got {type(image)}')
+
+
 def _extract_embedding_from_bundle(bundle: Any, image: Any, metadata: Dict) -> List[float]:
     """Run loader pipeline for a single image (local facade helper)."""
     preprocessed = VisionLoader.preprocess(bundle, [image], metadata)
@@ -205,12 +216,14 @@ def _extract_embedding_from_bundle(bundle: Any, image: Any, metadata: Dict) -> L
 
 
 class CLIPModel:
-    """User-facing CLIP model. Local-only for now."""
+    """User-facing CLIP model. Uses model server when --modelserver is set, else local."""
 
-    def __init__(self, bundle: Any, metadata: Dict, output_spec: List):
+    def __init__(self, bundle: Any, metadata: Dict, output_spec: List, proxy_mode: bool = False, client: Any = None):
         self._bundle = bundle
         self._metadata = metadata
         self._output_spec = output_spec
+        self._proxy_mode = proxy_mode
+        self._client = client
 
     @classmethod
     def from_pretrained(
@@ -221,6 +234,19 @@ class CLIPModel:
         **kwargs,
     ) -> 'CLIPModel':
         output_spec = output_spec or [('image_features', None, None, None, True)]
+        server_addr = get_model_server_address()
+        should_proxy = server_addr and (device is None or device == 'server')
+
+        if should_proxy:
+            host, port = server_addr
+            client = ModelClient(port, host)
+            client.load_model(
+                model_name=model_name,
+                model_type='vision',
+                loader_options={'variant': 'clip', 'output_spec': output_spec},
+            )
+            return cls(None, client.metadata, output_spec, proxy_mode=True, client=client)
+
         bundle, metadata, _ = VisionLoader.load(
             model_name,
             variant='clip',
@@ -232,16 +258,28 @@ class CLIPModel:
 
     def get_image_features(self, image: Any) -> List[float]:
         """Expects PIL Image or image bytes. Returns normalized embedding list."""
+        if self._proxy_mode:
+            image_bytes = _image_to_bytes(image)
+            result = self._client.send_command(
+                'inference',
+                {'data': image_bytes, 'output_fields': ['embedding']},
+            )
+            results = result.get('result', [])
+            if results and isinstance(results[0], dict):
+                return results[0].get('embedding') or results[0].get('$embedding') or []
+            return list(results[0]) if results else []
         return _extract_embedding_from_bundle(self._bundle, image, self._metadata)
 
 
 class ViTModel:
-    """User-facing ViT model. Local-only for now."""
+    """User-facing ViT model. Uses model server when --modelserver is set, else local."""
 
-    def __init__(self, bundle: Any, metadata: Dict, output_spec: List):
+    def __init__(self, bundle: Any, metadata: Dict, output_spec: List, proxy_mode: bool = False, client: Any = None):
         self._bundle = bundle
         self._metadata = metadata
         self._output_spec = output_spec
+        self._proxy_mode = proxy_mode
+        self._client = client
 
     @classmethod
     def from_pretrained(
@@ -252,6 +290,19 @@ class ViTModel:
         **kwargs,
     ) -> 'ViTModel':
         output_spec = output_spec or [('last_hidden_state', None, 0, None, True)]
+        server_addr = get_model_server_address()
+        should_proxy = server_addr and (device is None or device == 'server')
+
+        if should_proxy:
+            host, port = server_addr
+            client = ModelClient(port, host)
+            client.load_model(
+                model_name=model_name,
+                model_type='vision',
+                loader_options={'variant': 'vit', 'output_spec': output_spec},
+            )
+            return cls(None, client.metadata, output_spec, proxy_mode=True, client=client)
+
         bundle, metadata, _ = VisionLoader.load(
             model_name,
             variant='vit',
@@ -263,4 +314,14 @@ class ViTModel:
 
     def __call__(self, image: Any) -> List[float]:
         """Expects PIL Image or image bytes. Returns normalized embedding list."""
+        if self._proxy_mode:
+            image_bytes = _image_to_bytes(image)
+            result = self._client.send_command(
+                'inference',
+                {'data': image_bytes, 'output_fields': ['embedding']},
+            )
+            results = result.get('result', [])
+            if results and isinstance(results[0], dict):
+                return results[0].get('embedding') or results[0].get('$embedding') or []
+            return list(results[0]) if results else []
         return _extract_embedding_from_bundle(self._bundle, image, self._metadata)
