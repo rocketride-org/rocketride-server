@@ -990,6 +990,8 @@ class TaskServer(DAPBase):
                 # make sure the user actually specified the task to use. If so,
                 # then all is ok, just use the existing task
                 if use_existing_task:
+                    if wait_for_running:
+                        await existing_control.task.wait_for_running()
                     return _return_results(existing_control)
 
                 # We are absolutely supposed to create a task or the user did

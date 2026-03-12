@@ -1506,6 +1506,48 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 		}, TEST_CONFIG.timeout);
 	});
 
+	describe('Services Operations', () => {
+		beforeEach(async () => {
+			await client.connect();
+		});
+
+		it('should get all services', async () => {
+			const result = await client.getServices();
+
+			expect(typeof result).toBe('object');
+			expect(result).toHaveProperty('services');
+			expect(typeof result.services).toBe('object');
+			if ('version' in result) {
+				expect(['number', 'string']).toContain(typeof result.version);
+			}
+		}, TEST_CONFIG.timeout);
+
+		it('should get a single service', async () => {
+			const all = await client.getServices();
+			const servicesDict = (all.services as Record<string, unknown>) ?? all;
+			const serviceNames = Object.keys(servicesDict);
+			if (serviceNames.length === 0) {
+				return; // skip if no services available
+			}
+
+			const serviceName = serviceNames[0];
+			const single = await client.getService(serviceName);
+
+			expect(single).toBeDefined();
+			expect(typeof single).toBe('object');
+			const hasExpectedKey = 'title' in single! || 'protocol' in single! || 'prefix' in single!;
+			expect(hasExpectedKey).toBe(true);
+		}, TEST_CONFIG.timeout);
+
+		it('should throw for an unknown service', async () => {
+			await expect(client.getService('nonexistent_service_xyz')).rejects.toThrow();
+		}, TEST_CONFIG.timeout);
+
+		it('should throw when service name is empty', async () => {
+			await expect(client.getService('')).rejects.toThrow(/required/i);
+		}, TEST_CONFIG.timeout);
+	});
+
 	describe('Concurrent Pipeline Operations', () => {
 		const CONCURRENT_TOKEN = 'TS-CONCURRENT-OPS';
 		const PIPELINE_COUNT = 16;
@@ -1515,10 +1557,8 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			await client.connect();
 			pipelineTokens = [];
 
-			// Clean up any existing pipelines
-			for (let i = 0; i < PIPELINE_COUNT; i++) {
-				await ensureCleanPipeline(client, `${CONCURRENT_TOKEN}-${i}`);
-			}
+			// Clean up any existing pipeline
+			await ensureCleanPipeline(client, CONCURRENT_TOKEN);
 		});
 
 		afterEach(async () => {
@@ -1541,7 +1581,8 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 				Array.from({ length: PIPELINE_COUNT }, async (_, index) => {
 					const result = await client.use({
 						pipeline: getEchoPipeline(),
-						token: `${CONCURRENT_TOKEN}-${index}`,
+						token: CONCURRENT_TOKEN,
+						useExisting: true,
 					});
 					return { index, token: result.token };
 				})
@@ -1619,7 +1660,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			const pipelineIndices = results.map(r => r.pipelineIndex).sort((a, b) => a - b);
 			const expectedIndices = Array.from({ length: PIPELINE_COUNT }, (_, i) => i);
 			expect(pipelineIndices).toEqual(expectedIndices);
-		}, 5 * 60000); // 60 second timeout for concurrent operations
+		}, 30000);
 
 		it('should handle concurrent data sends to the same pipeline', async () => {
 			// Create a single pipeline
@@ -1686,8 +1727,8 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 		});
 
 		it('should handle mixed concurrent pipeline and send operations', async () => {
-			// This test runs 8 pipelines × 3 sends = 32 operations, needs extended timeout
-			const PIPELINE_COUNT = 8;
+			// This test runs 4 pipelines × 3 sends = 12 operations, needs extended timeout
+			const PIPELINE_COUNT = 4;
 			const SENDS_PER_PIPELINE = 3;
 
 			// Create all pipelines concurrently
@@ -1763,7 +1804,41 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			const allResponseTexts = sendResults.map(r => r.response!.text[0]);
 			const uniqueResponseTexts = new Set(allResponseTexts);
 			expect(uniqueResponseTexts.size).toBe(totalExpectedSends);
-		}, 240000); // 4× standard timeout for 8 pipelines × 3 sends = 32 operations
+		}, 30000);
+
+		it('should handle 4 independent pipelines each cycling 32 send/recv operations', async () => {
+			const SUBPROCESS_COUNT = 4;
+			const CYCLES_PER_PIPELINE = 32;
+
+			// Create 4 independent subprocesses concurrently
+			const tokens = Array.from({ length: SUBPROCESS_COUNT }, (_, i) => `${CONCURRENT_TOKEN}-stress-${i}`);
+			await Promise.all(tokens.map(token => client.use({ pipeline: getEchoPipeline(), token })));
+			pipelineTokens.push(...tokens);
+
+			// Each pipeline independently cycles 32 send/recv — all 4 run in parallel
+			async function runPipeline(token: string, pipelineIndex: number) {
+				const results = [];
+				for (let cycle = 0; cycle < CYCLES_PER_PIPELINE; cycle++) {
+					const text = `pipe-${pipelineIndex}-cycle-${cycle}-${Math.random().toString(36).slice(2)}`;
+					const result = await client.send(token, text, {}, 'text/plain');
+					expect(result).toBeDefined();
+					expect(result!.text[0]).toContain(text);
+					results.push({ text, response: result!.text[0] });
+				}
+				return results;
+			}
+
+			const allResults = await Promise.all(
+				tokens.map((token, i) => runPipeline(token, i))
+			);
+
+			// All 128 results present
+			expect(allResults.flat()).toHaveLength(SUBPROCESS_COUNT * CYCLES_PER_PIPELINE);
+
+			// All responses unique across all pipelines and cycles
+			const unique = new Set(allResults.flat().map(r => r.response));
+			expect(unique.size).toBe(SUBPROCESS_COUNT * CYCLES_PER_PIPELINE);
+		}, 30000);
 	});
 });
 

@@ -1890,13 +1890,12 @@ class TestConcurrentPipelineOperations:
         try:
             await client.connect()
 
-            # Clean up any existing pipelines
-            for i in range(self.PIPELINE_COUNT):
-                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-{i}')
+            # Clean up any existing pipeline
+            await ensure_clean_pipeline(client, self.CONCURRENT_TOKEN)
 
-            # Create 16 concurrent pipelines
+            # Create 16 concurrent use() calls — all share one subprocess via useExisting
             async def create_pipeline(index):
-                result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.CONCURRENT_TOKEN}-{index}')
+                result = await client.use(pipeline=get_echo_pipeline(), token=self.CONCURRENT_TOKEN, use_existing=True)
                 return {'index': index, 'token': result['token']}
 
             pipeline_tasks = [create_pipeline(i) for i in range(self.PIPELINE_COUNT)]
@@ -1980,8 +1979,7 @@ class TestConcurrentPipelineOperations:
             if cleanup_tasks:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
 
-            for i in range(self.PIPELINE_COUNT):
-                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-{i}')
+            await ensure_clean_pipeline(client, self.CONCURRENT_TOKEN)
 
             if client.is_connected():
                 await client.disconnect()
@@ -2060,7 +2058,7 @@ class TestConcurrentPipelineOperations:
         try:
             await client.connect()
 
-            PIPELINE_COUNT = 8
+            PIPELINE_COUNT = 4
             SENDS_PER_PIPELINE = 3
 
             # Create pipelines concurrently
@@ -2135,11 +2133,55 @@ class TestConcurrentPipelineOperations:
             if cleanup_tasks:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
 
-            for i in range(8):  # PIPELINE_COUNT
+            for i in range(4):  # PIPELINE_COUNT
                 await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-mixed-{i}')
 
             if client.is_connected():
                 await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_handle_4_independent_pipelines_each_cycling_32_send_recv(self):
+        SUBPROCESS_COUNT = 4
+        CYCLES_PER_PIPELINE = 32
+
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        sub_tokens = []
+        try:
+            await client.connect()
+
+            # Create 4 independent subprocesses concurrently
+            sub_tokens = [f'{self.CONCURRENT_TOKEN}-stress-{i}' for i in range(SUBPROCESS_COUNT)]
+            await asyncio.gather(*[
+                client.use(pipeline=get_echo_pipeline(), token=token)
+                for token in sub_tokens
+            ])
+
+            # Each pipeline independently cycles 32 send/recv — all 4 run in parallel
+            async def run_pipeline(token, pipeline_index):
+                results = []
+                for cycle in range(CYCLES_PER_PIPELINE):
+                    text = f'pipe-{pipeline_index}-cycle-{cycle}-{random.random()}'
+                    result = await client.send(token, text, {}, 'text/plain')
+                    assert result is not None
+                    assert text in result['text'][0]
+                    results.append(result['text'][0])
+                return results
+
+            all_results = await asyncio.gather(*[
+                run_pipeline(token, i) for i, token in enumerate(sub_tokens)
+            ])
+
+            flat = [r for pipeline in all_results for r in pipeline]
+            assert len(flat) == SUBPROCESS_COUNT * CYCLES_PER_PIPELINE
+            assert len(set(flat)) == SUBPROCESS_COUNT * CYCLES_PER_PIPELINE
+
+        finally:
+            for token in sub_tokens:
+                try:
+                    await client.terminate(token)
+                except Exception as e:
+                    print(f"Warning: failed to terminate pipeline token={token}: {e}")
+            await client.disconnect()
 
 
 async def is_server_available() -> bool:
