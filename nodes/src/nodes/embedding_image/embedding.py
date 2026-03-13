@@ -86,7 +86,7 @@ class Embedding:
             # ViT model - extract CLS token and normalize
             self.model = ViTModel.from_pretrained(
                 self.model_name,
-                output_spec=[('last_hidden_state', None, 0, None, True)],  # Get CLS token, normalized
+                output_spec=[('last_hidden_state', 0, 0, None, True)],  # batch=0, CLS token=0, normalized
             )
             self.model_type = 'vit'
 
