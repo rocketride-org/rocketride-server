@@ -12,6 +12,7 @@ Subpackages:
 - audio: Whisper (transcription)
 - gliner: GLiNER (zero-shot NER)
 - ocr: EasyOCR, DocTR, Surya, TrOCR
+- torch: PyTorch model loader (torch.load wrapper)
 - transformers: SentenceTransformer, pipeline, AutoModel, AutoTokenizer
 
 The loaders use a unified interface so the model server can work with any
@@ -26,6 +27,9 @@ from .audio import Whisper, WhisperLoader
 
 # GLiNER models (zero-shot NER)
 from .gliner import GLiNER, GLiNERLoader
+
+# PyTorch model loader
+from .torch import TorchLoader
 
 # OCR models
 from .ocr import EasyOCR, EasyOCRLoader
@@ -49,6 +53,8 @@ __all__ = [
     # GLiNER
     'GLiNER',
     'GLiNERLoader',
+    # Torch
+    'TorchLoader',
     # OCR
     'EasyOCR',
     'EasyOCRLoader',
