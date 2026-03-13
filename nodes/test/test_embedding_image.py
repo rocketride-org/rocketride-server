@@ -8,14 +8,7 @@ excluded by default (same as other skip_nodes). Run with:
     pytest nodes/test/test_embedding_image.py -v -m skip_node
 """
 
-import sys
-from pathlib import Path
-
 import pytest
-
-# Add server dist so we can import from nodes and ai
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT / 'dist' / 'server'))
 
 
 def _vision_available():
