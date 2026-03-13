@@ -1385,23 +1385,44 @@
 }
 
 /* ============================================================================ */
-/* TRACE VIDEO PLAYER                                                           */
+/* RESULTS TAB                                                                  */
 /* ============================================================================ */
 
-.trace-video-player {
-	margin-top: 8px;
+.results-video-list {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	padding: 8px 0;
 }
 
-.trace-video-player video {
+.results-video-item {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.results-video-player {
 	display: block;
 	width: 100%;
-	max-height: 280px;
 	border-radius: 4px;
 	background: #000;
 }
 
-.trace-video-meta {
-	margin-top: 4px;
+.results-video-meta {
 	font-size: 11px;
 	color: var(--vscode-descriptionForeground, #888);
+}
+
+.results-badge {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 4px;
+	border-radius: 8px;
+	font-size: 10px;
+	font-weight: 600;
+	background: var(--vscode-badge-background, #4d8cb5);
+	color: var(--vscode-badge-foreground, #fff);
 }
