@@ -64,7 +64,7 @@ class VisionLoader(BaseLoader):
         exclude_gpus = exclude_gpus or []
         output_spec = output_spec or []
 
-        # Estimate memory (CLIP/ViT base models ~1–2 GB)
+        # Estimate memory (CLIP/ViT base models ~1-2 GB)
         memory_gb = 1.5
 
         if allocate_gpu:
