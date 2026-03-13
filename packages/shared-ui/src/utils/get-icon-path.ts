@@ -94,6 +94,10 @@ import weaviateIcon from '../assets/nodes/weaviate.svg';
 import webhookIcon from '../assets/nodes/webhook.svg';
 import slackIcon from '../assets/nodes/slack.svg';
 import qwenIcon from '../assets/nodes/qwen.svg';
+import chartjsIcon from '../assets/nodes/chartjs.svg';
+import httpIcon from '../assets/nodes/http.svg';
+import mcpIcon from '../assets/nodes/mcp.svg';
+import memoryIcon from '../assets/nodes/memory.svg';
 import xaiIcon from '../assets/nodes/xai.svg';
 
 /**
@@ -112,6 +116,7 @@ const iconMap: Record<string, string> = {
 	bedrock: bedrockIcon,
 	'Captive portal': captivePortalIcon,
 	chat: chatIcon,
+	chartjs: chartjsIcon,
 	chroma: chromaIcon,
 	classification: classificationIcon,
 	confluence: confluenceIcon,
@@ -130,11 +135,14 @@ const iconMap: Record<string, string> = {
 	gmail: gmailIcon,
 	'google-drive': googleDriveIcon,
 	hash: hashIcon,
+	http: httpIcon,
 	ibm_granite: ibmIcon,
 	image_cleanup: imageCleanupIcon,
 	langchain: langchainIcon,
 	llamaindex_icon: llamaindexIcon,
 	llamaparse: llamaparseIcon,
+	mcp: mcpIcon,
+	memory: memoryIcon,
 	milvus: milvusIcon,
 	'mistral-vision': mistralVisionIcon,
 	mistral: mistralIcon,
@@ -187,6 +195,8 @@ const THEME_DYNAMIC_ICONS: ReadonlySet<string> = new Set([
 	'embedding-image', 'embedding-text',
 	// LLMs
 	'anthropic', 'ollama', 'openai', 'perplexity', 'xai',
+	// Tools
+	'http', 'mcp', 'memory',
 	// Database
 	'mysql',
 	// Image processing

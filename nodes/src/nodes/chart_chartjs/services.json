@@ -7,6 +7,7 @@
 	"node": "python",
 	"path": "nodes.chart_chartjs",
 	"prefix": "chartjs",
+	"icon": "chartjs.svg",
 	"description": [
 		"Generates Chart.js v4 chart configurations from data using the pipeline LLM.",
 		"The agent provides raw data and an optional chart type or description.",

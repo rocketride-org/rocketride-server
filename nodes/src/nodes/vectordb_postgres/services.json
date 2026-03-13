@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "PostgreSQL",
+	"title": "PostgreSQL (pgvector)",
 	//
 	// Required:
 	//     The protocol is the endpoint protocol

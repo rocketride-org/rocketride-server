@@ -7,6 +7,7 @@
 	"node": "python",
 	"path": "nodes.mcp_client",
 	"prefix": "mcp",
+	"icon": "mcp.svg",
 	"description": [
 		"Connects to an external MCP server and exposes its tools for agent tool-calling.",
 		"Transports: STDIO (local subprocess), Streamable HTTP (modern), and legacy HTTP+SSE."
