@@ -136,7 +136,15 @@ function makeRunPytestAction(options = {}) {
 
             // Exclude skip_node tests by default (same as skip_nodes in pytest_generate_tests for dynamic tests)
             const pytestOpts = options.pytest || ctx.options?.pytest;
-            const hasExplicitMarkers = pytestOpts && (typeof pytestOpts === 'string' ? pytestOpts.includes('-m') : pytestOpts.some(o => String(o).includes('-m')));
+            const markersOpt = options.markers || ctx.options?.markers;
+            const hasExplicitMarkers = (() => {
+                if (markersOpt) return true;
+                if (!pytestOpts) return false;
+                const tokens = typeof pytestOpts === 'string'
+                    ? pytestOpts.split(/\s+/).filter(Boolean)
+                    : pytestOpts.flatMap(o => String(o).split(/\s+/).filter(Boolean));
+                return tokens.some(t => t === '-m' || (t.startsWith('-m') && !t.startsWith('--')));
+            })();
             if (!hasExplicitMarkers) {
                 pytestArgs.push('-m', 'not skip_node');
             }

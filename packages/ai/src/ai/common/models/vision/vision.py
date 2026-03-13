@@ -244,10 +244,11 @@ class CLIPModel:
         if should_proxy:
             host, port = server_addr
             client = ModelClient(port, host)
+            loader_options = {'variant': 'clip', 'output_spec': output_spec, **kwargs}
             client.load_model(
                 model_name=model_name,
                 model_type='vision',
-                loader_options={'variant': 'clip', 'output_spec': output_spec},
+                loader_options=loader_options,
             )
             return cls(None, client.metadata, output_spec, proxy_mode=True, client=client)
 
@@ -300,10 +301,11 @@ class ViTModel:
         if should_proxy:
             host, port = server_addr
             client = ModelClient(port, host)
+            loader_options = {'variant': 'vit', 'output_spec': output_spec, **kwargs}
             client.load_model(
                 model_name=model_name,
                 model_type='vision',
-                loader_options={'variant': 'vit', 'output_spec': output_spec},
+                loader_options=loader_options,
             )
             return cls(None, client.metadata, output_spec, proxy_mode=True, client=client)
 

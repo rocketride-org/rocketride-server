@@ -8,7 +8,6 @@ excluded by default (same as other skip_nodes). Run with:
     pytest nodes/test/test_embedding_image.py -v -m skip_node
 """
 
-import io
 import sys
 from pathlib import Path
 

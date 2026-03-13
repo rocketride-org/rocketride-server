@@ -2,3 +2,4 @@
 # torch via ai.common.torch
 
 transformers
+Pillow
