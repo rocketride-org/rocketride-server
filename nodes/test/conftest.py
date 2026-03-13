@@ -12,8 +12,10 @@ This module provides:
 - Dynamic test generation from service.json 'test' configs
 
 Configuration via environment variables:
-    ROCKETRIDE_URI      - Server URI (default: http://localhost:5565)
-    ROCKETRIDE_APIKEY   - API key for authentication (default: MYAPIKEY)
+    ROCKETRIDE_URI           - Server URI (default: http://localhost:5565)
+    ROCKETRIDE_APIKEY        - API key for authentication (default: MYAPIKEY)
+    ROCKETRIDE_INCLUDE_SKIP  - Comma-separated node names to opt into (e.g. embedding_image,ocr).
+                               Use to run skip_nodes when explicitly requested.
 
 Running tests:
     # Run all tests (requires server)
@@ -221,16 +223,19 @@ def pytest_generate_tests(metafunc):
         
         # Skip in dynamic node tests only (contract/other tests unchanged). These nodes are
         # excluded because they pull large libraries, use heavy models, or depend on local
-        # services, which would cause CI timeouts or OOM. To run them locally:
-        #   pytest nodes/test/test_dynamic.py -v -k <node_name>
+        # services, which would cause CI timeouts or OOM. Opt-in via ROCKETRIDE_INCLUDE_SKIP:
+        #   ROCKETRIDE_INCLUDE_SKIP=embedding_image pytest nodes/test/test_dynamic.py -v -k embedding_image
         # Groups: ML/heavy (anonymize, ocr, ner, embedding_image); image/video (image_cleanup, frame_grabber); LLM/local (llm_anthropic, llm_ollama).
         skip_nodes = {
             'anonymize', 'llm_anthropic', 'llm_ollama',
             'ocr', 'ner', 'embedding_image', 'image_cleanup', 'frame_grabber',
         }
+        include_skip = {
+            n.strip() for n in os.environ.get('ROCKETRIDE_INCLUDE_SKIP', '').split(',') if n.strip()
+        }
 
         for config in configs:
-            if config.node_name in skip_nodes:
+            if config.node_name in skip_nodes and config.node_name not in include_skip:
                 continue
             if config.has_required_env_vars():
                 # If no profiles, add once with None profile
