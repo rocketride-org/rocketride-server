@@ -259,7 +259,8 @@ class VisionLoader(BaseLoader):
             total_params = sum(p.numel() for p in model.parameters())
             total_bytes = total_params * 4 * 1.3
             return round(total_bytes / 1073741824, 2)
-        except Exception:
+        except (AttributeError, TypeError, RuntimeError) as e:
+            logger.warning('Failed to estimate model memory footprint, using fallback 1.0 GB: %s', e)
             return 1.0
 
 
