@@ -171,7 +171,7 @@
 			"type": "string",
 			"title": "Database description",
 			"default": "",
-			"description": "Optional plain-language description of the database content and purpose (helps the LLM generate better queries)",
+			"description": "What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries.",
 			"ui": {
 				"ui:widget": "textarea"
 			}
@@ -187,12 +187,12 @@
 		"postgresdb.default": {
 			"object": "default",
 			"properties": [
+				"postgresdb.db_description",
 				"postgresdb.host",
 				"postgresdb.user",
 				"postgresdb.password",
 				"postgresdb.database",
 				"postgresdb.table",
-				"postgresdb.db_description",
 				"postgresdb.max_attempts"
 			]
 		},

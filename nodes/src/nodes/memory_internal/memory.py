@@ -23,11 +23,19 @@ from typing import Any, Dict, List, Optional
 _PEEK_LINES = 10        # max lines returned by memory.peek
 _MEMORY_PREFIX = 'memory.'
 
+_OK_SCHEMA: Dict[str, Any] = {
+    'type': 'object',
+    'properties': {
+        'ok': {'type': 'boolean'},
+        'key': {'type': 'string'},
+    },
+}
+
 TOOL_DESCRIPTORS: List[Dict[str, Any]] = [
     {
         'name': 'memory.put',
         'description': 'Store a string value under a key for later retrieval.',
-        'input_schema': {
+        'inputSchema': {
             'type': 'object',
             'properties': {
                 'key': {'type': 'string', 'description': 'Storage key (alphanumeric, hyphens, underscores)'},
@@ -35,16 +43,25 @@ TOOL_DESCRIPTORS: List[Dict[str, Any]] = [
             },
             'required': ['key', 'value'],
         },
+        'outputSchema': _OK_SCHEMA,
     },
     {
         'name': 'memory.get',
         'description': 'Retrieve the full stored value for a key. Returns null if not found.',
-        'input_schema': {
+        'inputSchema': {
             'type': 'object',
             'properties': {
                 'key': {'type': 'string', 'description': 'Key to retrieve'},
             },
             'required': ['key'],
+        },
+        'outputSchema': {
+            'type': 'object',
+            'properties': {
+                'ok': {'type': 'boolean'},
+                'key': {'type': 'string'},
+                'value': {'type': ['string', 'null'], 'description': 'The stored value, or null if not found'},
+            },
         },
     },
     {
@@ -53,32 +70,55 @@ TOOL_DESCRIPTORS: List[Dict[str, Any]] = [
             'Return a small preview of a stored value (first ~10 lines of JSON or text) '
             'without loading the full value. Use this to decide whether memory.get is needed.'
         ),
-        'input_schema': {
+        'inputSchema': {
             'type': 'object',
             'properties': {
                 'key': {'type': 'string', 'description': 'Key to preview'},
             },
             'required': ['key'],
         },
+        'outputSchema': {
+            'type': 'object',
+            'properties': {
+                'ok': {'type': 'boolean'},
+                'key': {'type': 'string'},
+                'exists': {'type': 'boolean'},
+                'preview': {'type': ['string', 'null'], 'description': 'First ~10 lines of the stored value, or null if key does not exist'},
+            },
+        },
     },
     {
         'name': 'memory.list',
         'description': 'List all keys currently stored in memory.',
-        'input_schema': {
+        'inputSchema': {
             'type': 'object',
             'properties': {},
             'required': [],
+        },
+        'outputSchema': {
+            'type': 'object',
+            'properties': {
+                'ok': {'type': 'boolean'},
+                'keys': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Sorted list of all stored keys'},
+            },
         },
     },
     {
         'name': 'memory.clear',
         'description': 'Clear a specific key or all keys. Omit key to clear everything.',
-        'input_schema': {
+        'inputSchema': {
             'type': 'object',
             'properties': {
                 'key': {'type': 'string', 'description': 'Key to clear. Omit to clear all.'},
             },
             'required': [],
+        },
+        'outputSchema': {
+            'type': 'object',
+            'properties': {
+                'ok': {'type': 'boolean'},
+                'cleared': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Keys that were removed'},
+            },
         },
     },
 ]

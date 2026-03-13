@@ -77,6 +77,28 @@ body {
 	background: var(--bg-primary);
 }
 
+.chartjs-container {
+	padding: 16px;
+	width: 600px;
+	border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+	border-radius: 6px;
+}
+
+.chartjs-error {
+	padding: 12px;
+	border: 1px solid var(--error-color, #e53e3e);
+	border-radius: 6px;
+	background: var(--bg-secondary);
+	font-size: 13px;
+}
+
+.chartjs-error pre {
+	margin-top: 8px;
+	overflow-x: auto;
+	color: var(--text-secondary);
+	font-size: 12px;
+}
+
 .chatbot-container {
 	display: flex;
 	flex-direction: column;
@@ -299,6 +321,10 @@ body {
 	color: var(--text-primary);
 	box-shadow: var(--shadow-sm);
 	border: 1px solid var(--border-color);
+}
+
+.message-bubble.bot.has-chart {
+	max-width: 100%;
 }
 
 .message-bubble.bot {

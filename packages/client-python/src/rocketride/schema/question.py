@@ -51,7 +51,6 @@ Advanced Usage:
 """
 
 import json
-import re
 from enum import Enum
 from typing import Union, List, Dict, Optional, Any
 from pydantic import BaseModel, Field, field_validator
@@ -95,51 +94,6 @@ class Answer(BaseModel):
             raise ValueError("Field 'answer' cannot be set during creation")
         return value
 
-    def parseJson(self, value: str) -> Any:
-        """
-        Parse AI response text into JSON structure.
-
-        Handles common AI response formats including code blocks,
-        thinking steps, and various JSON delimiters that AI models
-        might use in their responses.
-
-        Args:
-            value: Raw text response from AI that should contain JSON
-
-        Returns:
-            Parsed JSON object (dict, list, or primitive)
-
-        Raises:
-            json.JSONDecodeError: If the text doesn't contain valid JSON
-        """
-        # Clean up the response text
-        value = value.strip()
-        value = value.replace('\r', '')
-        value = value.replace('\n', '')
-        value = value.replace('\t', ' ')
-
-        # Remove JSON code block markers if present
-        offset = value.find('```json')
-        if offset >= 0:
-            value = value[offset + 7 :].strip()
-            offset = value.rfind('```')
-            if offset >= 0:
-                value = value[:offset].strip()
-
-        # Remove generic code block markers
-        offset = value.find('```')
-        if offset >= 0:
-            value = value[offset + 3 :].strip()
-            offset = value.rfind('```')
-            if offset >= 0:
-                value = value[:offset].strip()
-
-        # Remove AI thinking steps (common with some models)
-        value = re.sub(r'<think>.*?</think>', '', value, flags=re.DOTALL).strip()
-
-        # Parse the cleaned JSON
-        return json.loads(value)
-
     def parsePython(self, value: str) -> Any:
         """
         Extract Python code from AI response.
@@ -174,8 +128,7 @@ class Answer(BaseModel):
                 return
             if isinstance(value, str):
                 try:
-                    value = self.parseJson(value)
-                    self.answer = value
+                    self.answer = json.loads(value)
                     return
                 except json.JSONDecodeError:
                     raise ValueError('Expected a JSON-compatible answer (dict or list).')

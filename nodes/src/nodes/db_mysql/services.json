@@ -176,7 +176,7 @@
 			"type": "string",
 			"title": "Database description",
 			"default": "",
-			"description": "Optional plain-language description of the database content and purpose (helps the LLM generate better queries)",
+			"description": "What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries.",
 			"ui": {
 				"ui:widget": "textarea"
 			}
@@ -192,12 +192,12 @@
 		"mysql.default": {
 			"object": "default",
 			"properties": [
+				"mysql.db_description",
 				"mysql.host",
 				"mysql.user",
 				"mysql.password",
 				"mysql.database",
 				"mysql.table",
-				"mysql.db_description",
 				"mysql.max_attempts"
 			]
 		},

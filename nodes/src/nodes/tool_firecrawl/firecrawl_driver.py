@@ -89,25 +89,26 @@ class FirecrawlDriver(ToolsBase):
         self._server_name = (server_name or '').strip() or 'firecrawl'
         self._app = app
 
+    def _bare_name(self, tool_name: str) -> str:
+        """Strip server prefix, accepting both bare and namespaced tool names."""
+        prefix = f'{self._server_name}.'
+        return tool_name[len(prefix):] if tool_name.startswith(prefix) else tool_name
+
     # ------------------------------------------------------------------
     # ToolsBase hooks
     # ------------------------------------------------------------------
 
     def _tool_query(self) -> List[ToolsBase.ToolDescriptor]:
-        out: List[ToolsBase.ToolDescriptor] = []
-        for tool in _TOOLS_BY_BARE_NAME.values():
-            desc: ToolsBase.ToolDescriptor = {
-                'name': tool['name'],
-                'description': tool['description'],
-                'input_schema': tool['inputSchema'],
-            }
-            if 'outputSchema' in tool:
-                desc['output_schema'] = tool['outputSchema']
-            out.append(desc)
-        return out
+        # Return namespaced descriptors (<server>.<tool>) so multiple Firecrawl nodes
+        # do not produce colliding tool names. _tool_validate and _tool_invoke use
+        # _bare_name() to strip the prefix when looking up _TOOLS_BY_BARE_NAME.
+        return [
+            {**tool, 'name': f'{self._server_name}.{tool["name"]}'}
+            for tool in _TOOLS_BY_BARE_NAME.values()
+        ]
 
     def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
-        tool = _TOOLS_BY_BARE_NAME.get(tool_name)
+        tool = _TOOLS_BY_BARE_NAME.get(self._bare_name(tool_name))
         if tool is None:
             raise ValueError(f'Unknown tool {tool_name}')
 
@@ -123,10 +124,11 @@ class FirecrawlDriver(ToolsBase):
 
     def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:  # noqa: ANN401
         args = _normalize_tool_input(input_obj)
+        bare = self._bare_name(tool_name)
 
-        if tool_name == 'scrape_url':
+        if bare == 'scrape_url':
             return self._invoke_scrape(args)
-        elif tool_name == 'map_url':
+        elif bare == 'map_url':
             return self._invoke_map(args)
         else:
             raise ValueError(f'Unknown tool {tool_name}')

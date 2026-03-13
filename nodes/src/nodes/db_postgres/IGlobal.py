@@ -37,17 +37,14 @@ class IGlobal(DatabaseGlobalBase):
     """
 
     def _connection_params(self, config: Dict[str, Any]) -> Dict[str, str]:
-        # The UI stores connection fields nested under 'postgres.default'; fall
-        # back to flat keys for compatibility with hand-crafted configs.
-        block = config.get('postgresdb.default')
-        if not isinstance(block, dict):
-            block = {}
+        # Config.getNodeConfig() strips the node namespace prefix before returning;
+        # keys are unprefixed here by design (e.g. 'host', not 'postgresdb.host').
         return {
-            'host':     (block.get('postgresdb.host')     or config.get('host')     or 'localhost').strip(),
-            'user':     (block.get('postgresdb.user')     or config.get('user')     or 'postgres').strip(),
-            'password': str(block.get('postgresdb.password') or config.get('password') or ''),
-            'database': (block.get('postgresdb.database') or config.get('database') or 'postgres').strip(),
-            'table':    (block.get('postgresdb.table')    or config.get('table')    or 'table').strip(),
+            'host':     config.get('host', 'localhost').strip(),
+            'user':     config.get('user', 'postgres').strip(),
+            'password': config.get('password', ''),  # Do not strip — whitespace is valid in passwords
+            'database': config.get('database', 'postgres').strip(),
+            'table':    config.get('table', 'table').strip(),
         }
 
     def _build_connection_url(self, params: Dict[str, str]) -> str:
@@ -59,17 +56,10 @@ class IGlobal(DatabaseGlobalBase):
         return f'postgresql+psycopg2://{params["user"]}:{password}@{params["host"]}/{params["database"]}'
 
     def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
-        # Read from the same postgres.default block as the other connection fields.
-        block = config.get('postgresdb.default')
-        if not isinstance(block, dict):
-            block = {}
         try:
-            return int(block.get('postgresdb.max_attempts') or config.get('postgresdb.max_attempts') or 5)
+            return int(config.get('max_attempts', 5))
         except (ValueError, TypeError):
             return 5
 
     def _db_description(self, config: Dict[str, Any]) -> str:
-        block = config.get('postgresdb.default')
-        if not isinstance(block, dict):
-            block = {}
-        return str(block.get('postgresdb.db_description') or config.get('postgresdb.db_description') or '')
+        return config.get('db_description', '')

@@ -9,7 +9,7 @@ Planner for the RocketRide Wave execution loop.
 Owns the single-phase planning cycle:
 
   **Wave planning** — present full tool descriptions (name, description,
-  input_schema, output_schema) for all available tools.  The LLM replies
+  inputSchema, outputSchema) for all available tools.  The LLM replies
   with either concrete tool calls or a final answer in one shot:
     - ``{"thought": "...", "plan": "...", "wave": [{"tool": "...", "args": {...}}, ...]}``
     - ``{"thought": "...", "plan": "...", "done": true, "answer": "..."}``
@@ -59,16 +59,10 @@ Invoke tools (use the schemas above for correct args):
     {"thought": "detailed reasoning: what you understand about the request, what you plan to do next and why, and what you expect to learn from the tool calls", "plan": "[x] done step\\n[ ] next step\\n[ ] future step", "wave": [{"tool": "<name>", "args": {...}}, ...]}
     ```
 
-Each tool call may include ONE of these result-handling modes:
-  "store": "<memory_key>" — (default) store result in memory. USE THIS for any tool that returns data.
-  "peek": "<memory_key>"  — store result in memory, show a short preview in wave history
-  "result": true          — return full result inline. ONLY for small results like confirmations.
+Every tool result is automatically stored in memory and a preview (up to 500 characters) is returned inline in the wave history. The preview includes the memory key and full data size so you can decide whether the preview is sufficient or whether to reference the full stored value later.
 
-IMPORTANT: Always use "store" or "peek" for tools that return data (queries, lookups, fetches).
-Never use "result" for data-returning tools — results may be too large for the context window.
-
-To reference stored data in a later wave, use {{memory.get:<key>}} in args:
-    {"tool": "chart.create", "args": {"data": "{{memory.get:my_data}}"}}
+To reference a stored result in a later wave or in the final answer, use {{memory.get:<key>@format}}:
+    {"tool": "chart.create", "args": {"data": "{{memory.get:wave-0.r0@csv}}"}}
 
 Final answer (ends the loop — keep the answer SHORT, use {{memory.get:key@format}} to reference stored data):
     ```json
@@ -83,9 +77,9 @@ Available formats for {{memory.get:key@format}}:
   Or any custom description — the system will format it for you.
 
 Rules:
+- No-progress: If your wave produces no new information (all tools errored, returned empty results, or you are repeating the same tool calls with the same args), return done=true immediately with whatever answer you have so far.
 - Only use the tools listed above. Do not invent or modify tool names.
-- Keep the "answer" field SHORT. Never embed raw data in the answer — reference stored data with {{memory.get:key@format}}.
-- For inline results (`result: true`), interpret the value and write a natural response — never copy raw JSON into the answer.
+- For the final answer, write natural prose. If the data fits in the preview, use it directly. For large datasets, reference the stored value with {{memory.get:key@format}} — the @format specifier is required (e.g. @markdown_table, @text, @csv).
 - When all needed data is already stored in memory and no further tool calls are needed, return done immediately."""
 
 
@@ -230,9 +224,8 @@ def plan(
     debug(f'plan: result={json.dumps(result, ensure_ascii=False, default=str)[:500]}')
 
     if not result.get('done') and not result.get('wave'):
-        debug('plan: empty wave response, returning done')
-        fallback = result.get('answer') or result.get('thought') or 'Unable to determine next steps.'
-        return {'done': True, 'answer': fallback}
+        debug('plan: empty wave response, falling through to synthesis')
+        return {}
 
     return result
 

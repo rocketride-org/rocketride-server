@@ -125,7 +125,7 @@ class _AgentAsToolProvider(ToolsBase):
         descriptor = {
             'name': self._full_name,
             'description': desc,
-            'input_schema': {
+            'inputSchema': {
                 'type': 'object',
                 'properties': {
                     'query': {'type': 'string', 'description': 'Query string for the agent (required)'},
@@ -133,7 +133,7 @@ class _AgentAsToolProvider(ToolsBase):
                 },
                 'required': ['query'],
             },
-            'output_schema': {
+            'outputSchema': {
                 'type': 'object',
                 'description': 'Agent answer JSON payload',
                 'properties': {

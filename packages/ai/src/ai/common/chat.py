@@ -408,17 +408,24 @@ class ChatBase:
         # Use chat_string which already handles network retries and token management
         response = self.chat_string(question.getPrompt())
 
-        # If JSON output is expected, validate the response and retry if needed
+        # If JSON output is expected, validate the response and retry if needed.
+        # Store the parsed result so setAnswer receives a dict/list directly —
+        # avoiding a second parse through Answer.parseJson with the raw fenced string.
+        parsed_response = None
         if question.expectJson:
             max_retries = 3
 
+
             for retry_count in range(max_retries):
                 try:
-                    # Attempt to parse the response as JSON to validate it
-                    parseJson(response)
+                    # Parse (and strip any markdown fences) — reuse the result below
+                    parsed_response = parseJson(response)
 
-                    # JSON is valid, break out of retry loop
-                    break
+                    # Create the json answer and return it
+                    answer = Answer(expectJson=True)
+                    answer.setAnswer(parsed_response)
+                    return answer
+
                 except (json.JSONDecodeError, ValueError):
                     # JSON parsing failed
                     if retry_count < max_retries - 1:
@@ -432,18 +439,14 @@ class ChatBase:
                         error_msg = f'Failed to get valid JSON response after {max_retries + 1} attempts. Last response: {response[:200]}...'
                         debug(f'Error: {error_msg}')
                         raise ValueError(error_msg)
+                    
+        else:
+            # Create the answer and assign the text
+            answer = Answer(expectJson=False)
+            answer.setAnswer(response)
 
-        # Create an Answer object that preserves the question's metadata
-        # The expectJson flag is particularly important as it affects how
-        # the response should be interpreted and validated
-        answer = Answer(expectJson=question.expectJson)
-
-        # Set the actual response content in the Answer object
-        # This may trigger internal validation or parsing depending on the
-        # Answer implementation
-        answer.setAnswer(response)
-
-        return answer
+            # And return it
+            return answer
 
 
 def getChat(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> ChatBase:

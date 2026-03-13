@@ -31,8 +31,6 @@ from typing import Any, Callable, Dict, List, Optional
 # ---------------------------------------------------------------------------
 # Individual formatters
 # ---------------------------------------------------------------------------
-# Individual formatters
-# ---------------------------------------------------------------------------
 
 def _to_rows(data: Any) -> Optional[List[Dict[str, Any]]]:
     """Try to interpret *data* as a list of dicts (table rows).
@@ -48,12 +46,17 @@ def _to_rows(data: Any) -> Optional[List[Dict[str, Any]]]:
             return None
 
     if isinstance(data, dict):
-        # Unwrap {"rows": [...], ...} from DB results
+        # Unwrap {"rows": [...]} or any dict whose sole list-of-dicts value
+        # is the actual table (e.g. {"columns": [...]}, {"data": [...]}).
         if 'rows' in data and isinstance(data['rows'], list):
             data = data['rows']
         else:
-            # Single dict — treat as one-row table
-            return [data]
+            list_values = [v for v in data.values() if isinstance(v, list) and v and isinstance(v[0], dict)]
+            if len(list_values) == 1:
+                data = list_values[0]
+            else:
+                # Single dict — treat as one-row table
+                return [data]
 
     if isinstance(data, list) and data and isinstance(data[0], dict):
         return data

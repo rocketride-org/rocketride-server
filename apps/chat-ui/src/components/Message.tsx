@@ -49,9 +49,10 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 	}
 
 	if (message.sender === 'bot' || message.sender === 'system') {
+		const hasChart = message.text.includes('```chartjs');
 		return (
 			<div className="message-wrapper bot">
-				<div className="message-bubble bot">
+				<div className={`message-bubble bot${hasChart ? ' has-chart' : ''}`}>
 					<div className="markdown-content">
 						<MarkdownRenderer content={message.text} />
 					</div>
