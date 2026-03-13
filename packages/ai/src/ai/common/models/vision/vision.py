@@ -59,6 +59,8 @@ class VisionLoader(BaseLoader):
         from ai.common.torch import torch
 
         variant = (variant or 'clip').lower()
+        if variant not in ('clip', 'vit'):
+            raise ValueError(f"variant must be 'clip' or 'vit', got: {variant!r}")
         exclude_gpus = exclude_gpus or []
         output_spec = output_spec or []
 
