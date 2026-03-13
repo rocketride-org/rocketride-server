@@ -29,7 +29,8 @@ import { ErrWarnSection } from '../../components/ErrWarnSection';
 import { StatusSection, StatusHeader, StatusElapsed } from '../../components/StatusSection';
 import { TokenSection } from '../../components/TokenSection';
 import { TabPanel } from '../../components/TabPanel';
-import { TraceSection, TraceRow, VideoResultEntry } from '../../components/TraceSection';
+import { TraceSection, TraceRow } from '../../components/TraceSection';
+import type { VideoResultEntry } from '../../shared/types/pageStatus';
 import { EndpointInfoModal, EndpointInfo } from '../../components/EndpointInfoModal';
 import { WarningIcon } from '../../components/icons/WarningIcon';
 
@@ -154,7 +155,26 @@ export const PageStatus: React.FC = () => {
 						break;
 					}
 					case 'videoResult': {
-						setVideos(message.videos);
+						const blobVideos = message.videos.map(v => {
+							if (v.uri.startsWith('data:')) {
+								try {
+									const [, base64] = v.uri.split(',', 2);
+									const binary = atob(base64);
+									const bytes = new Uint8Array(binary.length);
+									for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+									const blob = new Blob([bytes], { type: v.mimeType });
+									return { ...v, uri: URL.createObjectURL(blob) };
+								} catch {
+									return v;
+								}
+							}
+							return v;
+						});
+						setVideos(prev => {
+							prev.forEach(v => { if (v.uri.startsWith('blob:')) URL.revokeObjectURL(v.uri); });
+							return blobVideos;
+						});
+						setActiveTab('results');
 						break;
 					}
 					case 'traceEvent': {
@@ -417,6 +437,7 @@ export const PageStatus: React.FC = () => {
 		{ id: 'tokens', label: 'Tokens' },
 		{ id: 'flow', label: 'Flow' },
 		{ id: 'trace', label: 'Trace' },
+		{ id: 'results', label: 'Results', badge: videos.length > 0 ? <span className="results-badge">{videos.length}</span> : undefined },
 		{ id: 'errors', label: 'Errors', badge: errorCount > 0 ? <WarningIcon size={14} /> : undefined }
 	];
 
@@ -508,7 +529,6 @@ export const PageStatus: React.FC = () => {
 				>
 					<TraceSection
 						rows={traceRows}
-						videos={videos}
 						onClear={() => {
 							documentsRef.current.clear();
 							docOrderRef.current = [];
@@ -521,6 +541,34 @@ export const PageStatus: React.FC = () => {
 					/>
 				</div>
 				<div
+					className={activeTab === 'results' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
+					role="tabpanel"
+					aria-hidden={activeTab !== 'results'}
+				>
+					{videos.length === 0 ? (
+						<section className="status-section">
+							<header className="section-header">Results</header>
+							<div className="section-content">
+								<div className="no-data">No results yet</div>
+							</div>
+						</section>
+					) : (
+						<section className="status-section">
+							<header className="section-header">Results</header>
+							<div className="results-video-list">
+								{videos.map((v, i) => (
+									<div key={i} className="results-video-item">
+										<video controls preload="metadata" className="results-video-player">
+											<source src={v.uri} type={v.mimeType} />
+										</video>
+										<div className="results-video-meta">{v.sizeMB} MB</div>
+									</div>
+								))}
+							</div>
+						</section>
+					)}
+				</div>
+								<div
 					className={activeTab === 'errors' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
 					role="tabpanel"
 					aria-hidden={activeTab !== 'errors'}

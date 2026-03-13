@@ -32,6 +32,12 @@ from rocketlib import IInstanceBase, AVI_ACTION, Entry, monitorSSE
 
 from .IGlobal import IGlobal
 
+_LOG = open('/tmp/vcomp_debug.log', 'w', buffering=1)
+
+
+def _log(msg: str):
+    _LOG.write(f'[{time.strftime("%H:%M:%S")}] {msg}\n')
+
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
@@ -53,19 +59,25 @@ class IInstance(IInstanceBase):
     def open(self, obj: Entry):
         self._frames_dir = tempfile.mkdtemp(prefix='vcomp_frames_')
         self._frame_count = 0
+        _log(f'open: frames_dir={self._frames_dir}')
 
     def close(self):
+        _log(f'close: frame_count={self._frame_count}')
         if self._frame_count == 0:
             self._cleanup()
             return
 
         output_path = self._encode_video()
         if output_path and os.path.exists(output_path):
+            size = os.path.getsize(output_path)
+            _log(f'close: encoded ok size={size} bytes, streaming')
             self._stream_video_sse(output_path)
             try:
                 os.remove(output_path)
             except OSError:
                 pass
+        else:
+            _log(f'close: encode failed, output_path={output_path}')
 
         self._cleanup()
 
@@ -120,14 +132,18 @@ class IInstance(IInstanceBase):
             output_path,
         ]
 
+        _log(f'_encode_video: frame_count={self._frame_count} cmd={" ".join(cmd)}')
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=300,
             )
+            _log(f'_encode_video: returncode={result.returncode}')
             if result.returncode != 0:
+                _log(f'_encode_video: stderr={result.stderr[-500:]}')
                 return None
             return output_path
-        except (subprocess.TimeoutExpired, Exception):
+        except (subprocess.TimeoutExpired, Exception) as e:
+            _log(f'_encode_video: exception={e}')
             return None
 
     # ------------------------------------------------------------------
@@ -136,7 +152,7 @@ class IInstance(IInstanceBase):
 
     def _stream_video_sse(self, video_path: str):
         pipe_id = self.instance.pipeId
-        chunk_size = 64 * 1024
+        chunk_size = 48 * 1024  # 49152 = 3 * 16384, multiple of 3 so base64 chunks have no mid-stream padding
         monitorSSE(pipe_id, 'video.begin', '', {'mimeType': 'video/mp4'})
         with open(video_path, 'rb') as fh:
             while True:
