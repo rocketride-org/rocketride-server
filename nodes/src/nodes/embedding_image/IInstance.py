@@ -84,6 +84,9 @@ class IInstance(IInstanceBase):
             # Wrapping the single document in a list to comply with the expected input type.
             self.instance.writeDocuments([doc])
 
+    def beginInstance(self):
+        self._frame_counter = 0
+
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Handle AVI_BEGIN action
         if action == AVI_ACTION.BEGIN:
@@ -106,11 +109,12 @@ class IInstance(IInstanceBase):
             # Create the Doc object for the image
             metadata = DocMetadata(
                 self,
-                chunkId=0,
+                chunkId=self._frame_counter,
                 isTable=False,
                 tableId=0,
                 isDeleted=False,
             )
+            self._frame_counter += 1
 
             # Create a document
             doc = Doc(type='Image', page_content=image_str, metadata=metadata)

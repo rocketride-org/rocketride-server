@@ -13,6 +13,7 @@ Subpackages:
 - gliner: GLiNER (zero-shot NER)
 - ocr: EasyOCR, DocTR, Surya, TrOCR
 - transformers: SentenceTransformer, pipeline, AutoModel, AutoTokenizer
+- vision: CLIPModel, ViTModel
 
 The loaders use a unified interface so the model server can work with any
 model type without model-specific branching.
@@ -36,6 +37,9 @@ from .ocr import TrOCR, TrOCRLoader
 # Transformer models
 from .transformers import SentenceTransformer, SentenceTransformerLoader
 from .transformers import pipeline, AutoModel, AutoTokenizer, TransformersLoader
+
+# Vision models (CLIP, ViT)
+from .vision import CLIPModel, ViTModel, VisionLoader
 
 __all__ = [
     # Base
@@ -62,4 +66,8 @@ __all__ = [
     'AutoModel',
     'AutoTokenizer',
     'TransformersLoader',
+    # Vision
+    'CLIPModel',
+    'ViTModel',
+    'VisionLoader',
 ]
