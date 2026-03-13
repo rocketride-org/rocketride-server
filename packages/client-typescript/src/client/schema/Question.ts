@@ -90,44 +90,6 @@ export class Answer {
 	}
 
 	/**
-	 * Parse AI response text into JSON structure.
-	 */
-	static parseJson(value: string): unknown {
-		// Clean up the response text
-		let cleanValue = value.trim()
-			.replace(/\r/g, '')
-			.replace(/\n/g, '')
-			.replace(/\t/g, ' ');
-
-		// Remove JSON code block markers if present
-		let offset = cleanValue.indexOf('```json');
-		if (offset >= 0) {
-			cleanValue = cleanValue.substring(offset + 7).trim();
-			offset = cleanValue.lastIndexOf('```');
-			if (offset >= 0) {
-				cleanValue = cleanValue.substring(0, offset).trim();
-			}
-		}
-
-		// Remove generic code block markers
-		offset = cleanValue.indexOf('```');
-		if (offset >= 0) {
-			cleanValue = cleanValue.substring(offset + 3).trim();
-			offset = cleanValue.lastIndexOf('```');
-			if (offset >= 0) {
-				cleanValue = cleanValue.substring(0, offset).trim();
-			}
-		}
-
-		// Remove AI thinking steps (common with some models)
-		// Use a more compatible approach instead of the 's' flag
-		cleanValue = cleanValue.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-
-		// Parse the cleaned JSON
-		return JSON.parse(cleanValue);
-	}
-
-	/**
 	 * Extract Python code from AI response.
 	 */
 	static parsePython(value: string): string {
@@ -153,7 +115,7 @@ export class Answer {
 			}
 			if (typeof value === 'string') {
 				try {
-					this.answer = Answer.parseJson(value) as object | unknown[];
+					this.answer = JSON.parse(value) as object | unknown[];
 					return;
 				} catch {
 					throw new Error('Expected a JSON-compatible answer (object or array).');

@@ -60,7 +60,7 @@ TOOL_DESCRIPTORS: List[Dict[str, Any]] = [
             'properties': {
                 'ok': {'type': 'boolean'},
                 'key': {'type': 'string'},
-                'value': {'type': 'string', 'description': 'The stored value, or null if not found'},
+                'value': {'type': ['string', 'null'], 'description': 'The stored value, or null if not found'},
             },
         },
     },
@@ -83,7 +83,7 @@ TOOL_DESCRIPTORS: List[Dict[str, Any]] = [
                 'ok': {'type': 'boolean'},
                 'key': {'type': 'string'},
                 'exists': {'type': 'boolean'},
-                'preview': {'type': 'string', 'description': 'First ~10 lines of the stored value'},
+                'preview': {'type': ['string', 'null'], 'description': 'First ~10 lines of the stored value, or null if key does not exist'},
             },
         },
     },

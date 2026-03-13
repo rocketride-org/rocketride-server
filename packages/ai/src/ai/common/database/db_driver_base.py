@@ -115,6 +115,9 @@ class DatabaseDriverBase(ToolsBase):
                 },
                 'outputSchema': {
                     'type': 'object',
+                    # All fields that _invoke_get_data can return:
+                    # {rows, sql, count} on success; {error, sql, valid, rows} on execution failure;
+                    # {answer, valid} when the question is not a DB question (forwarded from get_sql).
                     'properties': {
                         'rows': {
                             'type': 'array',
@@ -127,6 +130,22 @@ class DatabaseDriverBase(ToolsBase):
                         'sql': {
                             'type': 'string',
                             'description': 'The generated SQL SELECT statement that was executed.',
+                        },
+                        'count': {
+                            'type': 'integer',
+                            'description': 'Number of rows returned.',
+                        },
+                        'valid': {
+                            'type': 'boolean',
+                            'description': 'Whether a valid SQL query was generated.',
+                        },
+                        'error': {
+                            'type': 'string',
+                            'description': 'Error message if query generation or execution failed.',
+                        },
+                        'answer': {
+                            'type': 'string',
+                            'description': 'LLM text response when the question is not a database query.',
                         },
                     },
                 },
@@ -158,26 +177,33 @@ class DatabaseDriverBase(ToolsBase):
                             'type': 'string',
                             'description': 'The name of the database.',
                         },
+                        # tables is an object keyed by table name, not an array.
+                        # _invoke_get_schema returns {table_name: {columns, primary_key, foreign_keys}}.
                         'tables': {
-                            'type': 'array',
-                            'items': {
+                            'type': 'object',
+                            'description': 'Map of table name to table definition.',
+                            'additionalProperties': {
                                 'type': 'object',
                                 'properties': {
-                                    'name': {'type': 'string', 'description': 'Table name.'},
                                     'columns': {
                                         'type': 'array',
                                         'items': {
                                             'type': 'object',
                                             'properties': {
-                                                'name': {'type': 'string'},
+                                                'column': {'type': 'string'},
                                                 'type': {'type': 'string'},
-                                                'primary_key': {'type': 'boolean'},
-                                                'foreign_key': {'type': 'string', 'description': 'Referenced table.column, if applicable.'},
                                             },
                                         },
                                     },
+                                    # primary_key is an array of column names (supports composite PKs).
+                                    'primary_key': {'type': 'array', 'items': {'type': 'string'}},
+                                    'foreign_keys': {'type': 'array', 'items': {'type': 'object'}},
                                 },
                             },
+                        },
+                        'error': {
+                            'type': 'string',
+                            'description': 'Error message if the specified table was not found.',
                         },
                     },
                 },
@@ -204,10 +230,25 @@ class DatabaseDriverBase(ToolsBase):
                 },
                 'outputSchema': {
                     'type': 'object',
+                    # All fields that _invoke_get_sql can return:
+                    # {sql, valid: true} on success; {error, sql, valid: false} for unsafe SQL;
+                    # {answer, valid: false} when the question is not a DB question.
                     'properties': {
                         'sql': {
                             'type': 'string',
                             'description': 'The generated SQL SELECT statement. Safe to return inline as result.',
+                        },
+                        'valid': {
+                            'type': 'boolean',
+                            'description': 'Whether a valid, safe SQL query was generated.',
+                        },
+                        'error': {
+                            'type': 'string',
+                            'description': 'Error message if the generated SQL was unsafe.',
+                        },
+                        'answer': {
+                            'type': 'string',
+                            'description': 'LLM text response when the question is not a database query.',
                         },
                     },
                 },

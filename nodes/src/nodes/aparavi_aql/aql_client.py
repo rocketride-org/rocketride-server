@@ -95,11 +95,12 @@ class AqlClient:
     # be that far in the future, so anything larger must be milliseconds.
     _MS_THRESHOLD = 10_000_000_000
 
-    _DATE_FIELDS = {
+    # frozenset — immutable constant; a mutable set could be accidentally modified at class level
+    _DATE_FIELDS: frozenset = frozenset({
         'createTime', 'modifyTime', 'accessTime',
         'docCreateTime', 'docModifyTime',
         'instanceMessageTime', 'objectMessageTime',
-    }
+    })
 
     def _normalize_row(self, row: Any) -> Any:
         if not isinstance(row, dict):

@@ -74,7 +74,9 @@ interface ChartJsRendererProps {
  * from JSON — they would render as literal text.
  */
 function stripFunctionStrings(obj: unknown): unknown {
-	if (typeof obj === 'string' && /^\s*function\s*\(/.test(obj)) {
+	// Match traditional functions and arrow functions — LLMs may generate either form.
+	// Neither can be executed from JSON; both must be stripped before Chart.js renders.
+	if (typeof obj === 'string' && /^\s*(function\s*\(|\(.*\)\s*=>|[a-zA-Z_$][\w$]*\s*=>)/.test(obj)) {
 		return undefined;
 	}
 	if (Array.isArray(obj)) {
@@ -96,7 +98,19 @@ function stripFunctionStrings(obj: unknown): unknown {
 export const ChartJsRenderer: React.FC<ChartJsRendererProps> = ({ config }) => {
 	const result = useMemo(() => {
 		try {
-			const raw = JSON.parse(config);
+			// Strip a nested ```chartjs fence if the config arrived double-fenced.
+			// This happens when the agent stores the tool output (already a ```chartjs block)
+			// in memory and then wraps the recalled value in another ```chartjs fence.
+			// react-markdown strips the outer fence, leaving the inner one here.
+			let cleanConfig = config.trim();
+			if (cleanConfig.startsWith('```chartjs')) {
+				cleanConfig = cleanConfig.slice(10).trim();
+				if (cleanConfig.endsWith('```')) {
+					cleanConfig = cleanConfig.slice(0, -3).trim();
+				}
+			}
+
+			const raw = JSON.parse(cleanConfig);
 			const parsed = stripFunctionStrings(raw) as Record<string, any>;
 
 			if (!parsed.type || !parsed.data) {
@@ -119,6 +133,10 @@ export const ChartJsRenderer: React.FC<ChartJsRendererProps> = ({ config }) => {
 	}
 
 	const { type, data, options = {} } = result.parsed;
+	// Intentional silent fallback: unknown/omitted chart types render as Bar.
+	// chart_type is validated by chartjs_driver.py; this handles edge cases gracefully.
+	// Note: expectJson=true in the LLM invoke contract guarantees markdown fences are
+	// stripped server-side before the config reaches this component — no double-fencing possible.
 	const ChartComponent = CHART_COMPONENTS[type] || Bar;
 
 	const mergedOptions = {

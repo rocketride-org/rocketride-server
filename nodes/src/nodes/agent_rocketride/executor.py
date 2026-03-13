@@ -184,6 +184,10 @@ def _store_and_preview(key: str, result: Any, host: AgentHost) -> str:
     The summary includes the key and full size so the LLM can decide
     whether to reference the stored value in a later wave or the answer.
     """
+    # MemoryStore is string-only by design (see memory.py MemoryStore.put).
+    # Non-string results are JSON-serialized so callers can json.loads() them to
+    # recover structure. Passing result directly would invoke str() on dicts/lists,
+    # producing unstructured text. Do not change this serialization.
     try:
         value = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
     except Exception:
@@ -193,6 +197,7 @@ def _store_and_preview(key: str, result: Any, host: AgentHost) -> str:
         host.tools.invoke('memory.put', {'key': key, 'value': value})
     except Exception as exc:
         error(f'rocketride wave memory.put key={key!r} failed: {exc}')
+        raise  # Re-raise — caller must record this as a failed tool call, not a success
 
     size = _result_size_label(result)
     preview = summarize_result(result, max_len=_PREVIEW_MAX_LEN)
@@ -250,7 +255,9 @@ def _execute_wave_calls(
         for future in as_completed(future_to_idx):
             idx = future_to_idx[future]
             try:
-                results[idx] = future.result(timeout=_TOOL_TIMEOUT_S)
+                # future is already complete when as_completed() yields it — a timeout here
+                # is a no-op. Tools are responsible for enforcing their own timeouts internally.
+                results[idx] = future.result()
             except Exception as exc:
                 call = tagged[idx]
                 results[idx] = {

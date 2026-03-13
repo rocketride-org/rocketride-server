@@ -37,10 +37,12 @@ class IGlobal(DatabaseGlobalBase):
     """
 
     def _connection_params(self, config: Dict[str, Any]) -> Dict[str, str]:
+        # Config.getNodeConfig() strips the node namespace prefix before returning;
+        # keys are unprefixed here by design (e.g. 'host', not 'mysql.host').
         return {
             'host':     config.get('host', 'localhost').strip(),
             'user':     config.get('user', 'root').strip(),
-            'password': config.get('password', '').strip(),
+            'password': config.get('password', ''),  # Do not strip — whitespace is valid in passwords
             'database': config.get('database', 'database').strip(),
             'table':    config.get('table', 'table').strip(),
         }

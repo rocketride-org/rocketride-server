@@ -49,6 +49,9 @@ INPUT_SCHEMA: Dict[str, Any] = {
     'required': ['data'],
     'properties': {
         'data': {
+            # Accept both array and object forms — LLMs may produce either.
+            # chart_type is optional; the renderer defaults to Bar when omitted or unknown.
+            'oneOf': [{'type': 'array'}, {'type': 'object'}],
             'description': (
                 'The raw data to chart. Can be an array of objects, '
                 'key-value pairs, or any structured data.'
@@ -104,17 +107,19 @@ class ChartjsDriver(ToolsBase):
                     'Required: "data" (the raw data to chart). '
                     'Optional: "chart_type" (bar, line, pie, doughnut, radar, polarArea, scatter, bubble), '
                     '"title" (chart title), "description" (natural language description of desired chart). '
-                    'Returns a ```chartjs fenced code block for UI rendering.'
+                    'Returns a ready-to-render string. Place it verbatim in the answer — do NOT wrap it in additional fences.'
                 ),
                 'inputSchema': INPUT_SCHEMA,
                 'outputSchema': {
                     'type': 'string',
-                    'description': 'A ```chartjs fenced code block containing the Chart.js v4 JSON configuration for UI rendering.',
+                    'description': 'A ready-to-render ```chartjs fenced block. Use this string verbatim in the answer — do not add extra fences around it.',
                 },
             }
         ]
 
     def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
+        # _tool_validate is called directly from _tool_invoke (below), not only via
+        # handle_invoke, so this guard is reachable and necessary.
         if tool_name != self._tool_name and tool_name != self._namespaced:
             raise ValueError(f'Unknown tool {tool_name!r} (expected {self._namespaced!r})')
 
@@ -200,5 +205,6 @@ class ChartjsDriver(ToolsBase):
 
         response_text = self._llm_invoke(q)
 
-        # Wrap in chartjs fenced code block
+        # Wrap in a ```chartjs fence so the UI renders this as a chart.
+        # The descriptor tells the agent to use this string verbatim — do not re-wrap.
         return f'```chartjs\n{response_text}\n```'

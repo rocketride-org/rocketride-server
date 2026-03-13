@@ -63,6 +63,10 @@ export const extractTextFromResult = (result: PIPELINE_RESULT): TextResult[] => 
 					.forEach(item => textResponses.push({ text: item, key: fieldName }));
 			} else if (typeof fieldData === 'string' && fieldData.trim()) {
 				textResponses.push({ text: fieldData, key: fieldName });
+			} else if (typeof fieldData === 'object' && fieldData !== null && typeof (fieldData as Record<string, unknown>).answer === 'string') {
+				// Answer objects arrive as { answer: string, expectJson: bool } — extract the text directly.
+				const text = ((fieldData as Record<string, unknown>).answer as string).trim();
+				if (text) textResponses.push({ text, key: fieldName });
 			}
 		}
 	}
