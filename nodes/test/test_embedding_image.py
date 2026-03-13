@@ -1,8 +1,3 @@
-# =============================================================================
-# MIT License
-# Copyright (c) 2026 Aparavi Software AG
-# =============================================================================
-
 """
 Tests for the embedding_image node (in skip_nodes: excluded from default run).
 
