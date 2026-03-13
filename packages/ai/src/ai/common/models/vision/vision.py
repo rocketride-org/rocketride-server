@@ -232,7 +232,20 @@ class VisionLoader(BaseLoader):
 
         results = []
         for i in range(batch_size):
-            extracted = extract_outputs(raw_output, output_fields)
+            # Index into the batch dimension of each output field
+            item_output = {}
+            if hasattr(raw_output, 'keys'):
+                # ModelOutput / dict-like: slice each tensor at batch index i
+                for key in raw_output.keys():
+                    val = raw_output[key]
+                    if hasattr(val, '__getitem__') and hasattr(val, 'shape'):
+                        item_output[key] = val[i]
+                    else:
+                        item_output[key] = val
+            else:
+                item_output = raw_output[i] if hasattr(raw_output, '__getitem__') else raw_output
+
+            extracted = extract_outputs(item_output, output_fields)
             results.append(extracted)
 
         return results
