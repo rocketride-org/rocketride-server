@@ -9,6 +9,7 @@ Vision: CLIP and ViT image embedding loaders and facades.
 import io
 import logging
 import os
+from types import MappingProxyType
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..base import BaseLoader, get_model_server_address, ModelClient
@@ -26,8 +27,8 @@ class VisionLoader(BaseLoader):
 
     LOADER_TYPE: str = 'vision'
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_vision.txt')
-    _DEFAULTS = {'variant': 'clip'}
-    _SERVER_PARAMS = {'allocate_gpu', 'exclude_gpus', 'device'}
+    _DEFAULTS = MappingProxyType({'variant': 'clip'})
+    _SERVER_PARAMS = frozenset({'allocate_gpu', 'exclude_gpus', 'device'})
 
     @staticmethod
     def load(
