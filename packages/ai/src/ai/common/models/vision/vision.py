@@ -127,8 +127,10 @@ class VisionLoader(BaseLoader):
 
         if model_type == 'clip':
             model, processor = VisionLoader._load_clip(model_name, **kwargs)
-        else:
+        elif model_type == 'vit':
             model, processor = VisionLoader._load_vit(model_name, **kwargs)
+        else:
+            raise ValueError(f"Unknown vision model_type: '{model_type}'. Must be 'clip' or 'vit'.")
 
         if allocate_gpu:
             # === SERVER MODE: CPU-first for accurate memory measurement ===
@@ -238,7 +240,7 @@ class VisionLoader(BaseLoader):
                 # ModelOutput / dict-like: slice each tensor at batch index i
                 for key in raw_output.keys():
                     val = raw_output[key]
-                    if hasattr(val, '__getitem__') and hasattr(val, 'shape'):
+                    if hasattr(val, '__getitem__') and hasattr(val, 'shape') and len(val.shape) > 0:
                         item_output[key] = val[i]
                     else:
                         item_output[key] = val
