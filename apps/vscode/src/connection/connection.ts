@@ -419,7 +419,7 @@ export class ConnectionManager extends EventEmitter {
 
 		// Register global monitors for task lifecycle, output, and SSE events
 		this.request('rrext_monitor', {
-			types: ['task', 'output']
+			types: ['task', 'output', 'SSE']
 		}, '*').catch(err => {
 			this.logger.error(`Failed to register global monitors: ${err}`);
 		});

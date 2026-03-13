@@ -39,7 +39,6 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import * as fs from 'fs';
 import { TaskStatus, GenericEvent, GenericResponse } from '../shared/types';
 import { getLogger } from '../shared/util/output';
 import { ConfigManager } from '../config';
@@ -67,6 +66,7 @@ interface ViewMonitoringState {
 export class PageStatusProvider {
 	private webviewPanels: Map<string, ViewMonitoringState> = new Map();
 	private taskStatusData: Map<string, TaskStatus | undefined> = new Map();
+	private videoBuffers: Map<number, { mimeType: string; chunks: string[] }> = new Map();
 	private disposables: vscode.Disposable[] = [];
 	private logger = getLogger();               // Handles output logging to VS Code channels
 
@@ -237,52 +237,43 @@ export class PageStatusProvider {
 						);
 					}
 				}
+				break;
+			}
 
-				if (body.op === 'end') {
-					this.broadcastVideoResults().catch(error => {
-						this.logger.error(`Broadcasting video results: ${error}`);
-					});
+			case 'apaevt_sse': {
+				const body = event.body;
+				const sseType = body?.type as string | undefined;
+				const pipeId = body?.pipe_id as number | undefined;
+
+				if (sseType === 'video.begin' && pipeId !== undefined) {
+					this.videoBuffers.set(pipeId, { mimeType: (body?.data?.mimeType as string) ?? 'video/mp4', chunks: [] });
+
+				} else if (sseType === 'video.buffer' && pipeId !== undefined) {
+					const buf = this.videoBuffers.get(pipeId);
+					if (buf && body?.data?.data) {
+						buf.chunks.push(body.data.data as string);
+					}
+
+				} else if (sseType === 'video.end' && pipeId !== undefined) {
+					const buf = this.videoBuffers.get(pipeId);
+					if (buf) {
+						this.videoBuffers.delete(pipeId);
+						const base64Data = buf.chunks.join('');
+						const sizeMB = Math.round(base64Data.length * 0.75 / 1024 / 1024 * 100) / 100;
+						const videos: VideoResultEntry[] = [{ uri: `data:${buf.mimeType};base64,${base64Data}`, mimeType: buf.mimeType, sizeMB }];
+						const msg: PageStatusIncomingMessage = { type: 'videoResult', videos };
+						for (const viewState of this.webviewPanels.values()) {
+							if (!viewState.isDisposed) {
+								viewState.panel.webview.postMessage(msg).then(
+									undefined,
+									(error: unknown) => this.logger.error(`Posting video result: ${error}`)
+								);
+							}
+						}
+					}
 				}
 				break;
 			}
-		}
-	}
-
-	private async broadcastVideoResults(): Promise<void> {
-		const videoDir = '/tmp/rocketride_videos';
-
-		let filePaths: { filePath: string; sizeMB: number }[] = [];
-		try {
-			if (fs.existsSync(videoDir)) {
-				filePaths = fs.readdirSync(videoDir)
-					.filter(f => f.endsWith('.mp4'))
-					.sort()
-					.map(file => {
-						const filePath = path.join(videoDir, file);
-						const stat = fs.statSync(filePath);
-						return { filePath, sizeMB: Math.round(stat.size / 1024 / 1024 * 100) / 100 };
-					});
-			}
-		} catch (error) {
-			this.logger.error(`Reading video results: ${error}`);
-		}
-
-		if (filePaths.length === 0) return;
-
-		for (const viewState of this.webviewPanels.values()) {
-			if (viewState.isDisposed) continue;
-
-			const videos: VideoResultEntry[] = filePaths.map(({ filePath, sizeMB }) => ({
-				uri: viewState.panel.webview.asWebviewUri(vscode.Uri.file(filePath)).toString(),
-				mimeType: 'video/mp4',
-				sizeMB,
-			}));
-
-			const msg: PageStatusIncomingMessage = { type: 'videoResult', videos };
-			viewState.panel.webview.postMessage(msg).then(
-				undefined,
-				(error: unknown) => this.logger.error(`Posting video results: ${error}`)
-			);
 		}
 	}
 
@@ -431,10 +422,7 @@ export class PageStatusProvider {
 			{
 				enableScripts: true,
 				retainContextWhenHidden: true,
-				localResourceRoots: [
-					this.context.extensionUri,
-					vscode.Uri.file('/tmp/rocketride_videos')
-				]
+				localResourceRoots: [this.context.extensionUri]
 			}
 		);
 

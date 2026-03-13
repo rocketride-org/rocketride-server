@@ -22,7 +22,6 @@
 # =============================================================================
 
 import os
-import time
 from rocketlib import IInstanceBase
 from ai.common.schema import Doc, Question, Answer
 from ai.common.image import ImageProcessor
@@ -30,15 +29,11 @@ from rocketlib import AVI_ACTION, Entry, debug
 from typing import List
 from .IGlobal import IGlobal
 
-_VIDEO_DIR = '/tmp/rocketride_videos'
-
-
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     text: str = ''
     image = bytearray()
-    video = bytearray()
 
     def _getkey(self, type: str):
         # Allow the key to be overriden by
@@ -81,7 +76,6 @@ class IInstance(IInstanceBase):
         """
         self.text = ''  # Reset the text buffer
         self.image = bytearray()
-        self.video = bytearray()
 
     def close(self):
         """
@@ -211,33 +205,18 @@ class IInstance(IInstanceBase):
         self.instance.currentObject.response[key].append(info)
 
     def writeVideo(self, aviAction: int, mimeType: str, data: bytes):
-        if aviAction == AVI_ACTION.BEGIN:
-            self.video = bytearray()
+        # Get the key to write to
+        key = self._getkey('video')
 
-        elif aviAction == AVI_ACTION.WRITE:
-            self.video += data
+        # If it isn't there, create it
+        if key not in self.instance.currentObject.response:
+            self.instance.currentObject.response[key] = []
 
-        elif aviAction == AVI_ACTION.END:
-            key = self._getkey('video')
+        # Create the tracking info
+        info = {'url': self.instance.currentObject.url, 'aviAction': str(aviAction), 'mimeType': mimeType, 'size': len(data)}
 
-            if key not in self.instance.currentObject.response:
-                self.instance.currentObject.response[key] = []
-
-            os.makedirs(_VIDEO_DIR, exist_ok=True)
-            video_path = os.path.join(
-                _VIDEO_DIR,
-                f'result_{int(time.time() * 1000)}.mp4',
-            )
-            with open(video_path, 'wb') as f:
-                f.write(self.video)
-
-            self.instance.currentObject.response[key].append({
-                'mime_type': mimeType,
-                'path': video_path,
-                'size': len(self.video),
-            })
-
-            self.video = bytearray()
+        # Add the info
+        self.instance.currentObject.response[key].append(info)
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Handle AVI_BEGIN action
