@@ -21,13 +21,14 @@
 # SOFTWARE.
 # =============================================================================
 
+import base64
 import os
 import shutil
 import subprocess
 import tempfile
 import time
 
-from rocketlib import IInstanceBase, AVI_ACTION, Entry
+from rocketlib import IInstanceBase, AVI_ACTION, Entry, monitorSSE
 
 from .IGlobal import IGlobal
 
@@ -60,9 +61,7 @@ class IInstance(IInstanceBase):
 
         output_path = self._encode_video()
         if output_path and os.path.exists(output_path):
-            if self.instance.hasListener('video'):
-                self._stream_video(output_path)
-
+            self._stream_video_sse(output_path)
             try:
                 os.remove(output_path)
             except OSError:
@@ -132,19 +131,20 @@ class IInstance(IInstanceBase):
             return None
 
     # ------------------------------------------------------------------
-    # Stream the encoded video downstream
+    # Stream the encoded video via SSE
     # ------------------------------------------------------------------
 
-    def _stream_video(self, video_path: str):
+    def _stream_video_sse(self, video_path: str):
+        pipe_id = self.instance.pipeId
         chunk_size = 64 * 1024
-        self.instance.writeVideo(AVI_ACTION.BEGIN, 'video/mp4')
+        monitorSSE(pipe_id, 'video.begin', '', {'mimeType': 'video/mp4'})
         with open(video_path, 'rb') as fh:
             while True:
                 chunk = fh.read(chunk_size)
                 if not chunk:
                     break
-                self.instance.writeVideo(AVI_ACTION.WRITE, 'video/mp4', chunk)
-        self.instance.writeVideo(AVI_ACTION.END, 'video/mp4')
+                monitorSSE(pipe_id, 'video.buffer', '', {'data': base64.b64encode(chunk).decode()})
+        monitorSSE(pipe_id, 'video.end', '', {})
 
     # ------------------------------------------------------------------
     # Cleanup
