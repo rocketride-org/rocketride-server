@@ -21,6 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
+import base64
 import os
 from rocketlib import IInstanceBase
 from ai.common.schema import Doc, Question, Answer
@@ -76,6 +77,8 @@ class IInstance(IInstanceBase):
         """
         self.text = ''  # Reset the text buffer
         self.image = bytearray()
+        self.video = bytearray()
+        self.video_mime = 'video/mp4'
 
     def close(self):
         """
@@ -205,18 +208,25 @@ class IInstance(IInstanceBase):
         self.instance.currentObject.response[key].append(info)
 
     def writeVideo(self, aviAction: int, mimeType: str, data: bytes):
-        # Get the key to write to
-        key = self._getkey('video')
+        if aviAction == AVI_ACTION.BEGIN:
+            self.video = bytearray()
+            self.video_mime = mimeType
 
-        # If it isn't there, create it
-        if key not in self.instance.currentObject.response:
-            self.instance.currentObject.response[key] = []
+        elif aviAction == AVI_ACTION.WRITE:
+            if data:
+                self.video += data
 
-        # Create the tracking info
-        info = {'url': self.instance.currentObject.url, 'aviAction': str(aviAction), 'mimeType': mimeType, 'size': len(data)}
+        elif aviAction == AVI_ACTION.END:
+            key = self._getkey('video')
 
-        # Add the info
-        self.instance.currentObject.response[key].append(info)
+            if key not in self.instance.currentObject.response:
+                self.instance.currentObject.response[key] = []
+
+            self.instance.currentObject.response[key].append({
+                'mime_type': self.video_mime,
+                'data': base64.b64encode(bytes(self.video)).decode(),
+            })
+            self.video = bytearray()
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Handle AVI_BEGIN action
