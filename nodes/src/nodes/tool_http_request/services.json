@@ -7,6 +7,7 @@
 	"node": "python",
 	"path": "nodes.tool_http_request",
 	"prefix": "http",
+	"icon": "http.svg",
 	"description": [
 		"Makes HTTP requests to any API endpoint — like curl for agents.",
 		"The agent provides the full request (method, URL, headers, body, auth).",
