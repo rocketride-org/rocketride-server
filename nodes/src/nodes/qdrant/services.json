@@ -191,7 +191,8 @@
 				"title": "Your own Qdrant server",
 				"host": "localhost",
 				"port": 6333,
-				"collection": "ROCKETRIDE"
+				"collection": "ROCKETRIDE",
+				"hybrid": false
 			},
 			"cloud": {
 				"mode": "cloud",
@@ -199,7 +200,8 @@
 				"host": "",
 				"port": 6333,
 				"apikey": "",
-				"collection": "ROCKETRIDE"
+				"collection": "ROCKETRIDE",
+				"hybrid": false
 			}
 		}
 	},
@@ -222,6 +224,12 @@
 		"vector.local.port": {
 			"default": 6333
 		},
+		"vector.hybrid": {
+			"title": "Hybrid Search",
+			"description": "Enable hybrid search (dense + BM25 sparse vectors via RRF fusion). Requires re-indexing existing data.",
+			"type": "boolean",
+			"default": false
+		},
 		"qdrant.cloud": {
 			"object": "cloud",
 			"properties": [
@@ -229,7 +237,8 @@
 				"vector.cloud.port",
 				"vector.apikey",
 				"vector.score",
-				"vector.collection"
+				"vector.collection",
+				"vector.hybrid"
 			]
 		},
 		"qdrant.local": {
@@ -238,7 +247,8 @@
 				"vector.local.host",
 				"vector.local.port",
 				"vector.score",
-				"vector.collection"
+				"vector.collection",
+				"vector.hybrid"
 			]
 		},
 		"qdrant.profile": {

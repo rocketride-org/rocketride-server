@@ -6,3 +6,4 @@ urllib3
 httpx
 qdrant_client
 numpy
+fastembed

@@ -42,6 +42,8 @@ from qdrant_client.models import PointStruct, Filter, FieldCondition, Record, Ma
 from qdrant_client.http import models
 from qdrant_client.conversions import common_types as types
 
+from fastembed import SparseTextEmbedding
+
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
@@ -77,6 +79,8 @@ class Store(DocumentStoreBase):
     similarity: str = 'Cosine'
     threshold_search: float = 0.0
     client: QdrantClient | None = None
+    hybrid: bool = False
+    _sparse_embedder: SparseTextEmbedding | None = None
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -113,6 +117,11 @@ class Store(DocumentStoreBase):
         else:
             url = f"http://{self.host}:{self.port}"
         self.client = QdrantClient(url=url, api_key=self.apikey, prefer_grpc=False, timeout=60)
+
+        # Hybrid mode: named dense + sparse BM25 vectors via client-side FastEmbed
+        self.hybrid = bool(config.get('hybrid', False))
+        if self.hybrid:
+            self._sparse_embedder = SparseTextEmbedding(model_name='Qdrant/bm25')
         return
 
     def __del__(self):
@@ -125,6 +134,14 @@ class Store(DocumentStoreBase):
         self.renderChunkSize = 0
         self.similarity = 'Cosine'
         self.client = None
+
+    def _sparse_embed(self, text: str) -> models.SparseVector:
+        """Generate a BM25 sparse vector from text using FastEmbed."""
+        result = list(self._sparse_embedder.embed([text]))[0]
+        return models.SparseVector(
+            indices=result.indices.tolist(),
+            values=result.values.tolist(),
+        )
 
     def _doesCollectionExist(self) -> bool:
         """
@@ -148,11 +165,17 @@ class Store(DocumentStoreBase):
         will recognize that the collection does not exists (intact anyway)
         and call this function to start setting it up again
         """
-        # Build the parameters
-        vector_params = types.VectorParams(size=vectorSize, distance=self.similarity)
-
-        # Create the collection
-        self.client.create_collection(collection_name=self.collection, vectors_config=vector_params)
+        if self.hybrid:
+            # Named dense vector + sparse BM25 vector with IDF weighting
+            self.client.create_collection(
+                collection_name=self.collection,
+                vectors_config={'dense': types.VectorParams(size=vectorSize, distance=self.similarity)},
+                sparse_vectors_config={'sparse': models.SparseVectorParams(modifier=models.Modifier.IDF)},
+            )
+        else:
+            # Legacy: single unnamed dense vector
+            vector_params = types.VectorParams(size=vectorSize, distance=self.similarity)
+            self.client.create_collection(collection_name=self.collection, vectors_config=vector_params)
 
         # See if we can get the collection info, throws if it does not exist or other error
         info = self.client.get_collection(collection_name=self.collection)
@@ -176,6 +199,9 @@ class Store(DocumentStoreBase):
 
             # Setup our payload index so we can query by isTable
             self.client.create_payload_index(collection_name=self.collection, field_name='meta.isTable', field_type=PayloadSchemaType.BOOL)
+
+            # Setup our payload index so we can query by fileName
+            self.client.create_payload_index(collection_name=self.collection, field_name='meta.fileName', field_type=PayloadSchemaType.KEYWORD)
 
             # Setup a full text keyword search on our content
             self.client.create_payload_index(collection_name=self.collection, field_name='content', field_schema=TextIndexParams(type=TextIndexType.TEXT, tokenizer=TokenizerType.WORD, min_token_len=2, max_token_len=15, lowercase=True))
@@ -290,17 +316,30 @@ class Store(DocumentStoreBase):
 
     def searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
         """
-        Keyword search.
+        Keyword search. In hybrid mode, uses sparse BM25 vectors for ranked results.
         """
         # If the collection does not exists, by definition there are
         # no search results to return
         if not self.doesCollectionExist():
             return []
 
-        # Declare the results list
-        docs: List[Doc] = []
+        limit = docFilter.limit if docFilter.limit is not None else 25
 
-        # Build up the filter
+        if self.hybrid:
+            # Hybrid: ranked BM25 keyword search via sparse vector
+            filter = self._convertFilter(docFilter)
+            points = self.client.query_points(
+                collection_name=self.collection,
+                query=self._sparse_embed(query.text),
+                using='sparse',
+                query_filter=filter,
+                with_vectors=False,
+                with_payload=True,
+                limit=limit,
+            ).points
+            return self._convertToDocs(points)
+
+        # Legacy: text filter search via scroll (no ranking)
         filter = self._convertFilter(docFilter)
 
         # Add a condition for the keyword
@@ -313,25 +352,16 @@ class Store(DocumentStoreBase):
         records, nextURL = self.client.scroll(collection_name=self.collection, scroll_filter=filter, offset=docFilter.offset, limit=docFilter.limit, with_vectors=False)
 
         # Convert the points into groups
-        docs = self._convertToDocs(records)
-
-        # Return them
-        return docs
+        return self._convertToDocs(records)
 
     def searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
         """
-        Semantic search.
+        Semantic search. In hybrid mode, fuses dense vector + sparse BM25 via RRF.
         """
         # If the collection does not exists, by definition there are
         # no search results to return
         if not self.doesCollectionExist():
             return []
-
-        # Declare the results list
-        docs: List[Doc] = []
-
-        # Build up the filter
-        filter = self._convertFilter(docFilter)
 
         # We know the collection exists, now we can check to make sure the
         # embedding is correct. This will throw if the model doesn't match
@@ -345,23 +375,40 @@ class Store(DocumentStoreBase):
         if docFilter.offset:
             raise BaseException('Non-zero offset is not supported in semantic searching')
 
-        # Perform the search
+        limit = docFilter.limit if docFilter.limit is not None else 25
+
+        if self.hybrid:
+            # Hybrid: prefetch dense + sparse BM25, fuse with RRF
+            filter = self._convertFilter(docFilter)
+            points = self.client.query_points(
+                collection_name=self.collection,
+                prefetch=[
+                    models.Prefetch(query=query.embedding, using='dense', limit=limit, filter=filter),
+                    models.Prefetch(query=self._sparse_embed(query.text), using='sparse', limit=limit, filter=filter),
+                ],
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                query_filter=filter,
+                with_vectors=False,
+                with_payload=True,
+                limit=limit,
+            ).points
+            return self._convertToDocs(points)
+
+        # Legacy: single dense vector search via SDK
+        filter = self._convertFilter(docFilter)
         points = self.client.query_points(
             collection_name=self.collection,
             query=query.embedding,
             query_filter=filter,
             with_vectors=False,
             with_payload=True,
-            limit=docFilter.limit if docFilter.limit is not None else 25,
+            limit=limit,
             score_threshold=self.threshold_search,
             search_params=SearchParams(exact=True),
         ).points
 
         # Convert the points into groups
-        docs = self._convertToDocs(points)
-
-        # Return them
-        return docs
+        return self._convertToDocs(points)
 
     def get(self, docFilter: DocFilter, checkCollection: bool = True) -> List[Doc]:
         """
@@ -445,6 +492,10 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
+        if self.hybrid:
+            self._addChunksHybrid(chunks)
+            return
+
         # Clear the points
         points: List[models.PointStruct] = []
 
@@ -505,6 +556,58 @@ class Store(DocumentStoreBase):
                 sum_size = 0
 
         # Flush any stragglers
+        flush()
+
+    def _addChunksHybrid(self, chunks: List[Doc]) -> None:
+        """
+        Add document chunks using named dense + sparse BM25 vectors.
+
+        Uses Qdrant's server-side Qdrant/bm25 inference to generate sparse vectors
+        from the chunk text content at ingest time.
+        """
+        # Collect objectIds to delete (chunk 0 triggers a full object replace)
+        objectIds: Dict = {}
+        for chunk in chunks:
+            if not chunk.metadata.chunkId:
+                objectIds[chunk.metadata.objectId] = True
+
+        # Build points with named vectors + BM25 inference
+        points: List[models.PointStruct] = []
+
+        def flush():
+            nonlocal points
+            nonlocal objectIds
+            ops = []
+
+            if len(objectIds):
+                ops.append(models.DeleteOperation(delete=models.FilterSelector(filter=Filter(must=[FieldCondition(key='meta.objectId', match=models.MatchAny(any=list(objectIds.keys())))]))))
+
+            if len(points):
+                ops.append(models.UpsertOperation(upsert=models.PointsList(points=points)))
+
+            if not len(ops):
+                return
+
+            self.client.batch_update_points(collection_name=self.collection, update_operations=ops)
+            objectIds = {}
+            points = []
+
+        for chunk in chunks:
+            if chunk.embedding is None:
+                raise Exception('No embedding in document')
+
+            points.append(PointStruct(
+                id=str(uuid4()),
+                vector={
+                    'dense': chunk.embedding,
+                    'sparse': self._sparse_embed(chunk.page_content),
+                },
+                payload={'content': chunk.page_content, 'meta': chunk.metadata},
+            ))
+
+            if len(points) >= 500:
+                flush()
+
         flush()
 
     def remove(self, objectIds: List[str]) -> None:
