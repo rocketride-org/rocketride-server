@@ -32,7 +32,7 @@ const path = require('path');
 const {
     execCommand, syncDir, formatSyncStats,
     removeDirs, removeFile, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT,
-    exists, readDir, readFile, writeFile, mkdir, copyFile,
+    exists, readFile, writeFile, syncFile,
     parallel
 } = require('../../../scripts/lib');
 
@@ -59,50 +59,24 @@ const JAVA_DIR = path.join(BUILD_ROOT, 'java');
 const JDK_DIR = path.join(JAVA_DIR, 'jdk');
 const JRE_DIR = path.join(JAVA_DIR, 'jre');
 const MAVEN_DIR = path.join(JAVA_DIR, 'maven');
+const MAVEN = path.join(MAVEN_DIR, 'bin', 'mvn');
 
-// Directories to skip when syncing
-const SKIP_DIRS = ['target', 'node_modules', '.git', 'scripts'];
+// Glob patterns to ignore when syncing
+const IGNORE = ['**/target/**', '**/node_modules/**', '**/.git/**', '**/scripts/**'];
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-async function getJavaEnv() {
-    let jdkPath = JDK_DIR;
-    if (await exists(JDK_DIR)) {
-        const subdirs = (await readDir(JDK_DIR)).filter(d => d.startsWith('jdk-'));
-        if (subdirs.length > 0) {
-            jdkPath = path.join(JDK_DIR, subdirs[0]);
-        }
-    }
-
-    let mavenPath = MAVEN_DIR;
-    if (await exists(MAVEN_DIR)) {
-        const subdirs = (await readDir(MAVEN_DIR)).filter(d => d.startsWith('apache-maven-'));
-        if (subdirs.length > 0) {
-            mavenPath = path.join(MAVEN_DIR, subdirs[0]);
-        }
-    }
-
-    return {
-        jdkPath,
-        mavenPath,
+async function execMaven(args, options = {}) {
+    return execCommand(MAVEN, args, {
+        ...options,
         env: {
             ...process.env,
-            JAVA_HOME: jdkPath,
-            PATH: `${path.join(jdkPath, 'bin')}${path.delimiter}${process.env.PATH}`
+            JAVA_HOME: JDK_DIR,
+            PATH: `${path.join(JDK_DIR, 'bin')}${path.delimiter}${process.env.PATH}`
         }
-    };
-}
-
-async function getJrePath() {
-    if (await exists(JRE_DIR)) {
-        const subdirs = (await readDir(JRE_DIR)).filter(d => d.startsWith('jdk-') || d.startsWith('jre-'));
-        if (subdirs.length > 0) {
-            return path.join(JRE_DIR, subdirs[0]);
-        }
-    }
-    return JRE_DIR;
+    });
 }
 
 // ============================================================================
@@ -114,9 +88,9 @@ function makeSyncTikaSourceAction(options = {}) {
         locks: ['tika'],
         run: async (ctx, task) => {
             task.output = 'Scanning for changes...';
-            const stats = await syncDir(PACKAGE_DIR, BUILD_DIR, { skipDirs: SKIP_DIRS });
+            const stats = await syncDir(PACKAGE_DIR, BUILD_DIR, { ignore: IGNORE });
             task.output = formatSyncStats(stats);
-            ctx.tikaSourceChanged = stats.copied > 0 || stats.updated > 0;
+            ctx.tikaSourceChanged = stats.changed > 0;
         }
     };
 }
@@ -134,13 +108,7 @@ function makeBuildDbgconnAction(options = {}) {
                 return;
             }
 
-            const { env, mavenPath } = await getJavaEnv();
-
-            await execCommand(path.join(mavenPath, 'bin', 'mvn'), ['clean', 'compile', 'package', '-q'], {
-                task,
-                cwd: buildDbgconnDir,
-                env
-            });
+            await execMaven(['clean', 'compile', 'package', '-q'], { task, cwd: buildDbgconnDir });
         }
     };
 }
@@ -159,7 +127,6 @@ function makeBuildTikaJarAction(options = {}) {
             }
 
             const tikaVersion = await loadPackageJson();
-            const { env, mavenPath } = await getJavaEnv();
 
             // Generate pom.xml from template
             const pomTemplate = await readFile(path.join(buildTikaDir, 'pom-template.xml'));
@@ -175,11 +142,7 @@ function makeBuildTikaJarAction(options = {}) {
 
             task.output = 'Generated pom.xml, building...';
 
-            await execCommand(path.join(mavenPath, 'bin', 'mvn'), ['clean', 'compile', 'package', 'dependency:copy-dependencies', '-q'], {
-                task,
-                cwd: buildTikaDir,
-                env
-            });
+            await execMaven(['clean', 'compile', 'package', 'dependency:copy-dependencies', '-q'], { task, cwd: buildTikaDir });
         }
     };
 }
@@ -202,47 +165,34 @@ function makeCopyTikaOutputsAction(options = {}) {
 
             const tikaVersion = await loadPackageJson();
             const libDir = path.join(DIST_DIR, 'lib');
-            await mkdir(libDir);
 
             // Copy JRE to dist
             const jreDist = path.join(DIST_DIR, 'jre');
-            const jreSrc = await getJrePath();
-            if (await exists(jreSrc)) {
+            if (await exists(JRE_DIR)) {
                 task.output = 'Syncing JRE...';
-                const jreStats = await syncDir(jreSrc, jreDist);
+                const jreStats = await syncDir(JRE_DIR, jreDist, { package: true });
                 task.output = `JRE: ${formatSyncStats(jreStats)}`;
             }
 
             // Copy tika-config.xml
             const tikaConfig = path.join(buildTikaDir, 'tika-config.xml');
-            if (await exists(tikaConfig)) {
-                await copyFile(tikaConfig, path.join(DIST_DIR, 'tika-config.xml'));
-            }
+            await syncFile(tikaConfig, path.join(DIST_DIR, 'tika-config.xml'), { package: true });
 
             // Copy dbgconn.jar
             const dbgconnJarWithDeps = path.join(buildDbgconnDir, 'target', 'dbgconn-2.0-jar-with-dependencies.jar');
             const dbgconnJar = path.join(buildDbgconnDir, 'target', 'dbgconn-2.0.jar');
             if (await exists(dbgconnJarWithDeps)) {
-                await copyFile(dbgconnJarWithDeps, path.join(libDir, 'dbgconn.jar'));
+                await syncFile(dbgconnJarWithDeps, path.join(libDir, 'dbgconn.jar'), { package: true });
             } else if (await exists(dbgconnJar)) {
-                await copyFile(dbgconnJar, path.join(libDir, 'dbgconn.jar'));
+                await syncFile(dbgconnJar, path.join(libDir, 'dbgconn.jar'), { package: true });
             }
 
             // Copy tika.jar
             const tikaJar = path.join(buildTikaDir, 'target', `tika-${tikaVersion}.jar`);
-            if (await exists(tikaJar)) {
-                await copyFile(tikaJar, path.join(libDir, 'tika.jar'));
-            }
+            await syncFile(tikaJar, path.join(libDir, 'tika.jar'), { package: true });
 
             // Copy tika dependencies
-            const tikaDepsDir = path.join(buildTikaDir, 'target', 'dependency');
-            if (await exists(tikaDepsDir)) {
-                const depFiles = (await readDir(tikaDepsDir)).filter(f => f.endsWith('.jar'));
-                for (const file of depFiles) {
-                    await copyFile(path.join(tikaDepsDir, file), path.join(libDir, file));
-                }
-                task.output = `Copied ${depFiles.length} dependency jars`;
-            }
+            await syncDir(path.join(buildTikaDir, 'target', 'dependency'), libDir, { mirror: false, package: true });
         }
     };
 }

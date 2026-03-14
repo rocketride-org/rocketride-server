@@ -34,7 +34,7 @@ const path = require('path');
 const {
     execCommand, syncDir, formatSyncStats,
     removeDirs, removeMatching, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT,
-    mkdir, readDir, copyFile, exists,
+    mkdir, copyFile, exists,
     startServer, stopServer,
     bracket, parallel,
     hasSourceChanged, saveSourceHash, setState
@@ -48,8 +48,8 @@ const SERVER_DIR = path.join(DIST_ROOT, 'server');
 const SERVER_CLIENTS_DIR = path.join(SERVER_DIR, 'rocketride');
 const SERVER_STATIC_DIR = path.join(SERVER_DIR, 'static', 'clients', 'python');
 
-// Directories to skip when copying to build
-const SKIP_DIRS = ['node_modules', '__pycache__', '.pytest_cache', 'tests', '.git', 'scripts'];
+// Glob patterns to ignore when copying to build
+const IGNORE = ['**/node_modules/**', '**/__pycache__/**', '**/.pytest_cache/**', '**/tests/**', '**/.git/**', '**/scripts/**'];
 
 // Engine (built by server:build; execCommand resolves extension on Windows)
 const ENGINE = path.join(SERVER_DIR, 'engine');
@@ -76,7 +76,7 @@ function makeSyncClientPythonAction() {
     return {
         run: async (ctx, task) => {
             task.output = 'Scanning for changes...';
-            const stats = await syncDir(SRC_DIR, SERVER_CLIENTS_DIR);
+            const stats = await syncDir(SRC_DIR, SERVER_CLIENTS_DIR, { package: true });
             task.output = formatSyncStats(stats);
         }
     };
@@ -86,7 +86,7 @@ function makeWheelSourceAction() {
     return {
         run: async (ctx, task) => {
             task.output = 'Scanning for changes...';
-            const stats = await syncDir(PACKAGE_DIR, BUILD_DIR, { skipDirs: SKIP_DIRS });
+            const stats = await syncDir(PACKAGE_DIR, BUILD_DIR, { ignore: IGNORE });
             task.output = formatSyncStats(stats);
         }
     };
@@ -125,20 +125,8 @@ function makeWheelBuildAction() {
 function makeCopyToServerStaticAction() {
     return {
         run: async (ctx, task) => {
-            await mkdir(SERVER_STATIC_DIR);
-
-            const files = await readDir(DIST_DIR);
-            let copied = 0;
-            for (const file of files) {
-                if (file.endsWith('.whl') || file.endsWith('.tar.gz')) {
-                    await copyFile(
-                        path.join(DIST_DIR, file),
-                        path.join(SERVER_STATIC_DIR, file)
-                    );
-                    copied++;
-                }
-            }
-            task.output = `Copied ${copied} files to server static`;
+            const stats = await syncDir(DIST_DIR, SERVER_STATIC_DIR, { pattern: ['*.whl', '*.tar.gz'], package: true });
+            task.output = formatSyncStats(stats);
         }
     };
 }

@@ -58,7 +58,7 @@ function makeSyncNodesAction() {
     return {
         run: async (ctx, task) => {
             task.output = 'Scanning for changes...';
-            const stats = await syncDir(SRC_DIR, DIST_DIR);
+            const stats = await syncDir(SRC_DIR, DIST_DIR, { package: true });
             task.output = formatSyncStats(stats);
         }
     };

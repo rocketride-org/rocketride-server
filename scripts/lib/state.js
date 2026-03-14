@@ -128,7 +128,7 @@ async function saveState(state) {
 async function getState(key) {
     return withLock('state', async () => {
         const state = await ensureLoaded();
-        const parts = key.split('.');
+        const parts = Array.isArray(key) ? key : key.split('.');
         let value = state;
         for (const part of parts) {
             if (value === undefined || value === null) return undefined;
@@ -177,7 +177,7 @@ function deleteKeyAndPrune(state, parts) {
 async function setState(key, value) {
     return withLock('state', async () => {
         const state = await ensureLoaded();
-        const parts = key.split('.');
+        const parts = Array.isArray(key) ? key : key.split('.');
         if (value === null) {
             deleteKeyAndPrune(state, parts);
         } else {

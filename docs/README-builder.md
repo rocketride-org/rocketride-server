@@ -940,9 +940,9 @@ const {
     removeFile,       // async (path) => void
     removeDirs,       // async (paths[]) => void
 
-    // Sync directories
-    syncDir,          // async (src, dest, opts) => stats
-    overlayDir,       // async (src, dest, opts) => stats
+    // Sync
+    syncDir,          // async (src, dest, opts, stats) => stats
+    syncFile,         // async (src, dest, opts, stats) => stats
     formatSyncStats,  // (stats) => string
 } = require('../../../scripts/lib');
 ```

@@ -31,9 +31,10 @@
  *   test  - Run tests
  */
 const path = require('path');
+const { glob } = require('glob');
 const {
     execCommand, removeDirs, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT,
-    exists, mkdir, readDir, writeFile, copyFile,
+    exists, mkdir, syncDir, formatSyncStats, writeFile, copyFile,
     startServer, stopServer,
     bracket, parallel,
     hasSourceChanged, saveSourceHash, setState
@@ -182,10 +183,11 @@ function makeCreateNpmPackageAction() {
             const { changed } = await checkSourceChanged();
 
             // Check if package already exists
-            const files = await exists(PACKAGE_DIST) ? await readDir(PACKAGE_DIST) : [];
-            const hasPackage = files.some(f => f.endsWith('.tgz'));
+            const files = await exists(PACKAGE_DIST)
+                        ? glob('*.tgz', { cwd: PACKAGE_DIST, nodir: true, absolute: true })
+                        : [];
 
-            if (!changed && hasPackage) {
+            if (!changed && files.length > 0) {
                 task.output = 'No changes detected';
                 return;
             }
@@ -199,20 +201,8 @@ function makeCreateNpmPackageAction() {
 function makeCopyToServerStaticAction() {
     return {
         run: async (ctx, task) => {
-            await mkdir(SERVER_STATIC_DIR);
-
-            const files = await readDir(PACKAGE_DIST);
-            let copied = 0;
-            for (const file of files) {
-                if (file.endsWith('.tgz')) {
-                    await copyFile(
-                        path.join(PACKAGE_DIST, file),
-                        path.join(SERVER_STATIC_DIR, file)
-                    );
-                    copied++;
-                }
-            }
-            task.output = `Copied ${copied} files to server static`;
+            const stats = await syncDir(PACKAGE_DIST, SERVER_STATIC_DIR, { pattern: '*.tgz', package: true });
+            task.output = formatSyncStats(stats);
         }
     };
 }

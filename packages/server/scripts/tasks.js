@@ -28,12 +28,13 @@
  */
 const path = require('path');
 const os = require('os');
+const { glob } = require('glob');
 const {
     getState, setState, updateState,
-    removeDirs, resetDir, syncDir, removeFiles,
-    overlayDir, formatSyncStats,
+    removeDirs, syncDir, syncFile, removeFiles,
+    formatSyncStats,
     execCommand, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux,
-    exists, readFile, readJson, readDir, mkdir, copyFile, removeFile, chmod,
+    exists, readFile, readJson, mkdir, copyFile, removeFile,
     loadPackageJson, downloadGitHubFile, createArchive, extractArchive,
     parallel, whenNot, fingerprint, contentHash,
     taskDebug,
@@ -57,9 +58,9 @@ function getPlatformInfo(options = {}) {
     const platform = os.platform();
     const arch = options.arch || os.arch();
 
-    if (platform === 'win32') {
+    if (isWindows()) {
         return { name: 'win64', os: 'windows', ext: 'zip' };
-    } else if (platform === 'darwin') {
+    } else if (isMac()) {
         const darwinArch = arch === 'arm64' ? 'arm64' : 'x64';
         return {
             name: `darwin-${darwinArch}`,
@@ -67,13 +68,13 @@ function getPlatformInfo(options = {}) {
             arch: darwinArch,
             ext: 'tar.gz'
         };
-    } else if (platform === 'linux') {
+    } else if (isLinux()) {
         return { name: 'linux-x64', os: 'linux', ext: 'tar.gz' };
     }
     throw new Error(`Unsupported platform: ${platform}-${arch}`);
 }
 
-async function getDistInfo(options = {}) {
+async function getPackageInfo(options = {}) {
     const { version } = await loadPackageJson();
     const platform = getPlatformInfo(options);
     const releaseTag = `server-v${version}`;
@@ -82,14 +83,18 @@ async function getDistInfo(options = {}) {
     const manifestFilename = `${baseName}.manifest.json`;
     const distFilename = `${baseName}.${platform.ext}`;
     const symDistFilename = isWindows() ? `${baseName}.symbols.${platform.ext}` : null;
+    const distFile = path.join(DIST_ARTIFACTS_DIR, distFilename);
+    const symDistFile = symDistFilename ? path.join(DIST_ARTIFACTS_DIR, symDistFilename) : null;
 
     return {
-        releaseTag: releaseTag,
-        prereleaseTag: prereleaseTag,
-        baseName: baseName,
-        manifestFilename: manifestFilename,
-        distFilename: distFilename,
-        symDistFilename: symDistFilename
+        releaseTag,
+        prereleaseTag,
+        baseName,
+        manifestFilename,
+        distFilename,
+        symDistFilename,
+        distFile,
+        symDistFile
     };
 }
 
@@ -158,13 +163,11 @@ async function getVsEnvironment() {
 // =============================================================================
 
 async function getPythonLibDest(options = {}) {
-    const destDir = options.destDir || DIST_DIR;
-    const platform = os.platform();
-    if (platform === 'win32') {
-        return path.join(destDir, 'lib');
+    if (isWindows()) {
+        return path.join(DIST_DIR, 'lib');
     } else {
         const pythonVersion = await getPythonVersion(options);
-        return path.join(destDir, 'lib', `python${pythonVersion}`);
+        return path.join(DIST_DIR, 'lib', `python${pythonVersion}`);
     }
 }
 
@@ -190,12 +193,11 @@ async function getPythonVersion(options = {}) {
 }
 
 function getVcpkgTriplet(options = {}) {
-    const platform = os.platform();
     const arch = options.arch || os.arch();
-
-    if (platform === 'win32') return 'x64-windows-vc-rocketride';
-    if (platform === 'darwin') return arch === 'arm64' ? 'arm64-osx-appleclang-rocketride' : 'x64-osx-appleclang-rocketride';
-    return 'x64-linux-clang-rocketride';
+    if (isWindows()) return 'x64-windows-vc-rocketride';
+    if (isLinux()) return 'x64-linux-clang-rocketride';
+    if (isMac()) return arch === 'arm64' ? 'arm64-osx-appleclang-rocketride' : 'x64-osx-appleclang-rocketride';
+    throw new Error('Unsupported platform');
 }
 
 async function getVcpkgInstalledDir(options = {}) {
@@ -259,7 +261,6 @@ async function getCachedGeneratorArgs(buildDir) {
 async function copySambaLibs(options = {}) {
     if (!isMac()) return { copied: false, reason: 'Not macOS' };
 
-    const destDir = options.destDir || DIST_DIR;
     const vcpkgInstalled = await getVcpkgInstalledDir(options);
     const sambaSrc = path.join(vcpkgInstalled, 'samba');
 
@@ -267,125 +268,80 @@ async function copySambaLibs(options = {}) {
         return { copied: false, reason: 'Samba not found in vcpkg' };
     }
 
-    const sambaDest = path.join(destDir, 'samba');
+    const sambaDest = path.join(DIST_DIR, 'samba');
     await mkdir(sambaDest);
-    const stats = await overlayDir(sambaSrc, sambaDest);
+    const stats = await syncDir(sambaSrc, sambaDest, { mirror: false, package: true });
     return { copied: true, stats };
 }
 
 async function copyJavaJre(options = {}) {
-    const destDir = options.destDir || DIST_DIR;
     const jreSrc = path.join(BUILD_ROOT, 'java', 'jre');
-    const jreDest = path.join(destDir, 'java', 'jre');
+    const jreDest = path.join(DIST_DIR, 'java', 'jre');
 
     if (!await exists(jreSrc)) {
         return { copied: false, reason: 'JRE not found (run java setup first)' };
     }
 
     await mkdir(path.dirname(jreDest));
-    const stats = await overlayDir(jreSrc, jreDest);
+    const stats = await syncDir(jreSrc, jreDest, { mirror: false, package: true });
 
     return { copied: true, stats };
 }
 
 async function copyPythonEnv(options = {}) {
-    const destDir = options.destDir || DIST_DIR;
     const vcpkgInstalled = await getVcpkgInstalledDir(options);
 
     if (!await exists(vcpkgInstalled)) {
         return { copied: false, reason: 'vcpkg not installed' };
     }
 
-    const platform = os.platform();
     const pythonLibDest = await getPythonLibDest(options);
 
     let pythonLibSrc;
-    if (platform === 'win32') {
+    if (isWindows()) {
         pythonLibSrc = path.join(vcpkgInstalled, 'tools', 'python3', 'lib');
     } else {
         const pythonVersion = await getPythonVersion(options);
         pythonLibSrc = path.join(vcpkgInstalled, 'lib', `python${pythonVersion}`);
     }
 
-    let totalStats = { added: 0, updated: 0, unchanged: 0, removed: 0 };
+    let stats = {};
 
-    if (await exists(pythonLibSrc)) {
-        await mkdir(pythonLibDest);
-        const stats = await overlayDir(pythonLibSrc, pythonLibDest);
-        totalStats.added += stats.added || 0;
-        totalStats.updated += stats.updated || 0;
-        totalStats.unchanged += stats.unchanged || 0;
-    }
+    await syncDir(pythonLibSrc, pythonLibDest, { mirror: false, package: true }, stats);
 
     const includeDir = path.join(vcpkgInstalled, 'include');
     if (await exists(includeDir)) {
-        const pythonIncludes = (await readDir(includeDir)).filter(d => d.startsWith('python'));
-        for (const pyInclude of pythonIncludes) {
-            const src = path.join(includeDir, pyInclude);
-            let dest;
-            if (platform === 'darwin') {
-                dest = path.join(destDir, 'include', pyInclude);
-            } else {
-                dest = path.join(destDir, 'include');
-            }
-            await mkdir(dest);
-            const stats = await overlayDir(src, dest);
-            totalStats.added += stats.added || 0;
-            totalStats.updated += stats.updated || 0;
-            totalStats.unchanged += stats.unchanged || 0;
+        const pythonIncludeDirs = await glob('python*', { cwd: includeDir, absolute: true });
+        for (const pyIncludeDir of pythonIncludeDirs) {
+            await syncDir(
+                pyIncludeDir,
+                path.join(DIST_DIR, 'include', path.basename(pyIncludeDir)),
+                { package: true }, stats);
         }
     }
 
     const rocketridePython = path.join(SERVER_DIR, 'engine-lib', 'rocketlib-python');
-    const pipBat = path.join(rocketridePython, 'pip', 'pip.bat');
-    if (await exists(pipBat)) {
-        await copyFile(pipBat, path.join(destDir, 'pip.bat'));
-    }
-    const pipSh = path.join(rocketridePython, 'pip', 'pip.sh');
-    if (await exists(pipSh)) {
-        await copyFile(pipSh, path.join(destDir, 'pip'));
-        if (platform !== 'win32') {
-            await chmod(path.join(destDir, 'pip'), 0o755);
-        }
+    if (isWindows()) {
+        const pipBat = path.join(rocketridePython, 'pip', 'pip.bat');
+        await syncFile(pipBat, path.join(DIST_DIR, 'pip.bat'), { package: true }, stats);
+    } else {
+        const pipSh = path.join(rocketridePython, 'pip', 'pip.sh');
+        await syncFile(pipSh, path.join(DIST_DIR, 'pip'), { package: true }, stats);
     }
 
-    if (platform === 'win32') {
+    if (isWindows()) {
         const libDir = path.join(vcpkgInstalled, 'lib');
-        if (await exists(libDir)) {
-            const libFiles = (await readDir(libDir)).filter(f => f.startsWith('python') && f.endsWith('.lib'));
-            if (libFiles.length > 0) {
-                const libsDest = path.join(destDir, 'libs');
-                await mkdir(libsDest);
-                for (const lib of libFiles) {
-                    const dest = path.join(libsDest, lib);
-                    if (!(await exists(dest))) {
-                        await copyFile(path.join(libDir, lib), dest);
-                    }
-                }
-            }
-        }
+        const libsDest = path.join(DIST_DIR, 'libs');
+        await syncDir(libDir, libsDest, { pattern: 'python*.lib', package: true }, stats);
 
         const binDir = path.join(vcpkgInstalled, 'bin');
-        if (await exists(binDir)) {
-            const dllFiles = (await readDir(binDir)).filter(f => f.startsWith('python') && f.endsWith('.dll'));
-            for (const dll of dllFiles) {
-                const dest = path.join(destDir, dll);
-                if (!(await exists(dest))) {
-                    await copyFile(path.join(binDir, dll), dest);
-                }
-            }
-        }
+        await syncDir(binDir, DIST_DIR, { pattern: 'python*.dll', mirror: false, package: true }, stats);
 
         const dllsDir = path.join(vcpkgInstalled, 'tools', 'python3', 'DLLs');
-        if (await exists(dllsDir)) {
-            const stats = await overlayDir(dllsDir, path.join(destDir, 'DLLs'));
-            totalStats.added += stats.added || 0;
-            totalStats.updated += stats.updated || 0;
-            totalStats.unchanged += stats.unchanged || 0;
-        }
+        await syncDir(dllsDir, path.join(DIST_DIR, 'DLLs'), { package: true }, stats);
     }
 
-    return { copied: true, stats: totalStats };
+    return { copied: true, stats };
 }
 
 async function syncRocketlibPythonLib(options = {}) {
@@ -397,15 +353,14 @@ async function syncRocketlibPythonLib(options = {}) {
     }
 
     await mkdir(pythonLibDest);
-    const stats = await overlayDir(rocketrideLib, pythonLibDest);
+    const stats = await syncDir(rocketrideLib, pythonLibDest, { mirror: false, package: true });
     return { synced: true, stats };
 }
 
 async function copyClangRuntimeLibs(options = {}) {
     if (!isLinux()) return { copied: false, reason: 'Not Linux' };
 
-    const destDir = options.destDir || DIST_DIR;
-    const destLib = path.join(destDir, 'lib');
+    const destLib = path.join(DIST_DIR, 'lib');
     await mkdir(destLib);
 
     const clangVersions = ['18', '16', '15', '10'];
@@ -414,11 +369,11 @@ async function copyClangRuntimeLibs(options = {}) {
         const libcpp = path.join(llvmLib, 'libc++.so.1');
 
         if (await exists(libcpp)) {
-            await copyFile(libcpp, path.join(destLib, 'libc++.so.1'));
+            await copyFile(libcpp, path.join(DIST_DIR, 'lib', 'libc++.so.1'));
 
             const libcppabi = path.join(llvmLib, 'libc++abi.so.1');
             if (await exists(libcppabi)) {
-                await copyFile(libcppabi, path.join(destLib, 'libc++abi.so.1'));
+                await copyFile(libcppabi, path.join(DIST_DIR, 'lib', 'libc++abi.so.1'));
             }
 
             const unwindPaths = [
@@ -429,7 +384,7 @@ async function copyClangRuntimeLibs(options = {}) {
 
             for (const unwindPath of unwindPaths) {
                 if (await exists(unwindPath)) {
-                    await copyFile(unwindPath, path.join(destLib, 'libunwind.so.1'));
+                    await copyFile(unwindPath, path.join(DIST_DIR, 'lib', 'libunwind.so.1'));
                     break;
                 }
             }
@@ -464,7 +419,7 @@ async function copyClangRuntimeLibs(options = {}) {
 // Action Factories
 // =============================================================================
 
-function makeCheckPrebuiltAction(options = {}) {
+function makeDownloadAction(options = {}) {
     return {
         run: async (ctx, task) => {
             // Compute content hash of local source (always, ~110ms)
@@ -487,7 +442,7 @@ function makeCheckPrebuiltAction(options = {}) {
 
             const {
                 releaseTag, prereleaseTag, manifestFilename, distFilename, symDistFilename
-            } = await getDistInfo(options);
+            } = await getPackageInfo(options);
 
             // Try stable release first, then prerelease
             const tagsToTry = [releaseTag, prereleaseTag];
@@ -768,29 +723,15 @@ function makeCompileEngineAction(options = {}) {
             // Copy engine to dist
             await mkdir(DIST_DIR);
             const exeExt = isWindows() ? '.exe' : '';
-            const enginePaths = [
-                path.join(BUILD_ROOT, 'apps', 'engine', 'Release', 'engine' + exeExt),
-                path.join(BUILD_ROOT, 'apps', 'engine', 'engine' + exeExt)
-            ];
-
-            for (const src of enginePaths) {
-                if (await exists(src)) {
-                    await copyFile(src, path.join(DIST_DIR, 'engine' + exeExt));
-                    break;
-                }
-            }
+            await syncFile(
+                path.join(BUILD_ROOT, 'apps', 'engine', 'engine' + exeExt),
+                path.join(DIST_DIR, 'engine' + exeExt),
+                { package: true });
 
             if (isWindows()) {
-                const pdbPaths = [
-                    path.join(BUILD_ROOT, 'apps', 'engine', 'Release', 'engine.pdb'),
-                    path.join(BUILD_ROOT, 'apps', 'engine', 'engine.pdb')
-                ];
-                for (const src of pdbPaths) {
-                    if (await exists(src)) {
-                        await copyFile(src, path.join(DIST_DIR, 'engine.pdb'));
-                        break;
-                    }
-                }
+                await syncFile(
+                    path.join(BUILD_ROOT, 'apps', 'engine', 'engine.pdb'),
+                    path.join(DIST_DIR, 'engine.pdb'));
             }
 
             // Save content hash after successful compilation
@@ -887,18 +828,15 @@ function makeCopyTestDataAction() {
 
             // Sync from each subdirectory (images, documents, audio, video, text, misc)
             // to flatten into a single datasets folder for C++ tests
-            let totalStats = { added: 0, updated: 0, unchanged: 0 };
+            let stats = {};
             const subdirs = ['images', 'documents', 'audio', 'video', 'text', 'misc'];
             for (const subdir of subdirs) {
                 const src = path.join(testdataDir, subdir);
                 if (await exists(src)) {
-                    const stats = await overlayDir(src, destDatasets);
-                    totalStats.added += stats.added || 0;
-                    totalStats.updated += stats.updated || 0;
-                    totalStats.unchanged += stats.unchanged || 0;
+                    await syncDir(src, destDatasets, { mirror: false }, stats);
                 }
             }
-            task.output = formatSyncStats(totalStats);
+            task.output = formatSyncStats(stats);
 
             // Copy cacert.pem on Linux
             if (isLinux()) {
@@ -1019,6 +957,7 @@ function makeCleanServerAction() {
         description: 'Clean server',
         run: async (ctx, task) => {
             await setState('server', {});
+            await setState('package', null);
 
             await removeFiles(BUILD_ROOT, [
                 'CMakeCache.txt', 'cmake_install.cmake',
@@ -1122,67 +1061,39 @@ function makePackageAction(options = {}) {
         description: 'Package server distribution',
         run: async (_ctx, _task) => {
             const {
-                baseName, manifestFilename, distFilename, symDistFilename
-            } = await getDistInfo(options);
-            const distPath = path.join(DIST_ARTIFACTS_DIR, distFilename);
-            const symDistPath = symDistFilename ? path.join(DIST_ARTIFACTS_DIR, symDistFilename) : null;
+                manifestFilename, distFilename, symDistFilename, distFile, symDistFile
+            } = await getPackageInfo(options);
             const symFilename = isWindows() ? 'engine.pdb' : null;
-
-            // temp dir for packaging
-            options.destDir = path.join(BUILD_ARTIFACTS_DIR, baseName);
 
             const sourceHash = await getState('server.contentHash');
             const packageHash = await getState('server.pkgHash');
             if (!sourceHash) {
                 throw new Error('Content hash not found — build server first');
-            } else if (!_ctx.force && sourceHash === packageHash && await exists(distPath)) {
+            } else if (!_ctx.options.force && sourceHash === packageHash && await exists(distFile)) {
                 _task.output = `Server package ${distFilename} is up to date`;
                 return;
             }
 
             try {
-                _task.output = `Preparing files for packaging ${distFilename}...`;
-                await resetDir(options.destDir);
-                // TODO: refactor this
-                await Promise.all([
-                    copyClangRuntimeLibs(options),
-                    copySambaLibs(options),
-                    copyPythonEnv(options),
-                    syncRocketlibPythonLib(options),
-                    // copyJavaJre(options),
-                    syncDir(path.join(DIST_DIR, 'java'), path.join(options.destDir, 'java')),
-                    syncDir(path.join(DIST_DIR, 'static'), path.join(options.destDir, 'static')),
-                    syncDir(path.join(PROJECT_ROOT, 'nodes', 'src', 'nodes'), path.join(options.destDir, 'nodes')),
-                    syncDir(path.join(PACKAGES_DIR, 'ai', 'src', 'ai'), path.join(options.destDir, 'ai')),
-                    syncDir(path.join(PACKAGES_DIR, 'client-python', 'src', 'rocketride'), path.join(options.destDir, 'rocketride')),
-                    (async(options) => {
-                        const exeExt = isWindows() ? '.exe' : '';
-                        const enginePaths = [
-                            path.join(BUILD_ROOT, 'apps', 'engine', 'Release', 'engine' + exeExt),
-                            path.join(BUILD_ROOT, 'apps', 'engine', 'engine' + exeExt)
-                        ];
-                        for (const src of enginePaths) {
-                            if (await exists(src)) {
-                                await copyFile(src, path.join(options.destDir, 'engine' + exeExt));
-                                break;
-                            }
-                        }
-                    })(options),
-                ]);
-                _task.output = `Prepared files for packaging ${distFilename}`;
-
                 _task.output = `Packaging ${distFilename}...`;
                 await mkdir(DIST_ARTIFACTS_DIR);
-                await removeFile(distPath);
-                const entries = await readDir(options.destDir);
-                await createArchive(distPath, options.destDir, entries);
+                await removeFile(distFile);
+                const packageEntries = [];
+                const packageState = await getState('package');
+                if (!packageState) {
+                    throw new Error('Package state not found — build server first');
+                }
+                for (const [_, values] of Object.entries(packageState)) {
+                    packageEntries.push(...values);
+                }
+                await createArchive(distFile, DIST_DIR, packageEntries);
                 _task.output = `Packaged ${distFilename}`;
 
-                if (symDistPath) {
-                    _task.output = `Packaging ${path.basename(symDistPath)}...`;
-                    await removeFile(symDistPath);
-                    await createArchive(symDistPath, DIST_DIR, [ symFilename ]);
-                    _task.output = `Packaged ${path.basename(symDistPath)}`;
+                if (symDistFile) {
+                    _task.output = `Packaging ${symDistFilename}...`;
+                    await removeFile(symDistFile);
+                    await createArchive(symDistFile, DIST_DIR, [symFilename]);
+                    _task.output = `Packaged ${symDistFilename}`;
                 }
 
                 await setState('server.pkgHash', sourceHash);
@@ -1191,15 +1102,11 @@ function makePackageAction(options = {}) {
                 await copyFile(STATE_FILE, path.join(DIST_ARTIFACTS_DIR, manifestFilename));
 
             } catch (err) {
-                await removeFile(distPath);
-                if (symDistPath) {
-                    await removeFile(symDistPath);
+                await removeFile(distFile);
+                if (symDistFile) {
+                    await removeFile(symDistFile);
                 }
                 throw err;
-
-            } finally {
-                // Leave it in place for testing
-                // await removeDir(options.destDir);
             }
         }
     };
@@ -1227,7 +1134,7 @@ module.exports = {
 
     actions: [
         // Internal actions (no description in help)
-        { name: 'server:download', action: makeCheckPrebuiltAction },
+        { name: 'server:download', action: makeDownloadAction },
         { name: 'server:build-core', action: makeBuildCoreAction },
         { name: 'server:setup-tools', action: makeSetupToolsAction },
         { name: 'server:configure', action: makeConfigureServerAction },

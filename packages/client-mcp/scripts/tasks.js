@@ -34,7 +34,7 @@ const path = require('path');
 const {
     execCommand, syncDir, formatSyncStats,
     removeDirs, removeMatching, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT,
-    mkdir, readDir, copyFile, exists,
+    mkdir, copyFile, exists,
     hasSourceChanged, saveSourceHash, setState,
     startServer, stopServer,
     bracket, parallel
@@ -53,8 +53,8 @@ const ENGINE = path.join(SERVER_DIR, 'engine');
 // State key for source fingerprint
 const SRC_HASH_KEY = 'client-mcp.srcHash';
 
-// Directories to skip when copying to build
-const SKIP_DIRS = ['node_modules', '__pycache__', '.pytest_cache', 'tests', '.git', 'scripts'];
+// Glob patterns to ignore when copying to build
+const IGNORE = ['**/node_modules/**', '**/__pycache__/**', '**/.pytest_cache/**', '**/tests/**', '**/.git/**', '**/scripts/**'];
 
 // Canonical README lives in docs/; copy it into the build dir for wheel packaging
 const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
@@ -78,7 +78,7 @@ function makeSyncSourceAction() {
     return {
         run: async (ctx, task) => {
             task.output = 'Scanning for changes...';
-            const stats = await syncDir(PACKAGE_DIR, BUILD_DIR, { skipDirs: SKIP_DIRS });
+            const stats = await syncDir(PACKAGE_DIR, BUILD_DIR, { ignore: IGNORE });
             task.output = formatSyncStats(stats);
         }
     };
@@ -106,22 +106,11 @@ function makeBuildWheelAction() {
             ], { task, cwd: SERVER_DIR });
 
             // Copy wheel and sdist to server static directory
-            await mkdir(SERVER_STATIC_DIR);
-            const files = await readDir(DIST_DIR);
-            let copied = 0;
-            for (const file of files) {
-                if (file.endsWith('.whl') || file.endsWith('.tar.gz')) {
-                    await copyFile(
-                        path.join(DIST_DIR, file),
-                        path.join(SERVER_STATIC_DIR, file)
-                    );
-                    copied++;
-                }
-            }
+            const stats = await syncDir(DIST_DIR, SERVER_STATIC_DIR, { pattern: ['*.whl', '*.tar.gz'], package: true });
+            task.output = formatSyncStats(stats);
 
             // Save hash after successful build
             await saveSourceHash(SRC_HASH_KEY, hash);
-            task.output = `Built wheel, copied ${copied} files to server static`;
         }
     };
 }

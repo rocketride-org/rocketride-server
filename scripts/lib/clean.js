@@ -5,7 +5,7 @@
  * All functions are async.
  */
 const path = require('path');
-const { rm, mkdir, rmdir, unlink, readDir, stat } = require('./fs');
+const { rm, rmdir, unlink, readDir, stat } = require('./fs');
 
 // Mutex for directory removal - prevents concurrent removes on overlapping paths
 const removeLocks = new Map();  // normalizedPath -> Promise
@@ -228,16 +228,6 @@ async function removeDirAndParents(basePath, dirPaths) {
 }
 
 /**
- * Reset a directory by removing all contents and recreating it
- * @param {string} dirPath - Directory to reset
- * @param {*} options - Options to pass to removeDir and mkdir
- */
-async function resetDir(dirPath, options = {}) {
-    await removeDir(dirPath, options);
-    await mkdir(dirPath, options);
-}
-
-/**
  * Clean a directory but keep it (remove all contents)
  * @param {string} dirPath - Directory to clean
  * @returns {Promise<boolean>}
@@ -272,6 +262,5 @@ module.exports = {
     remove,
     removeAll,
     removeDirAndParents,
-    resetDir,
     cleanDir
 };
