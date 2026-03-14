@@ -93,6 +93,7 @@ import vertexIcon from '../assets/nodes/vertex.svg';
 import weaviateIcon from '../assets/nodes/weaviate.svg';
 import webhookIcon from '../assets/nodes/webhook.svg';
 import slackIcon from '../assets/nodes/slack.svg';
+import pythonIcon from '../assets/nodes/python.svg';
 import qwenIcon from '../assets/nodes/qwen.svg';
 import chartjsIcon from '../assets/nodes/chartjs.svg';
 import httpIcon from '../assets/nodes/http.svg';
@@ -164,6 +165,7 @@ const iconMap: Record<string, string> = {
 	'preprocessor-llm': preprocessorLlmIcon,
 	'preprocessor-text': preprocessorTextIcon,
 	prompt: promptIcon,
+	python: pythonIcon,
 	qwen: qwenIcon,
 	qdrant: qdrantIcon,
 	question: questionIcon,
