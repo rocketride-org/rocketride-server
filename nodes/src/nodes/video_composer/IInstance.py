@@ -21,14 +21,13 @@
 # SOFTWARE.
 # =============================================================================
 
-import base64
 import os
 import shutil
 import subprocess
 import tempfile
 import time
 
-from rocketlib import IInstanceBase, AVI_ACTION, Entry, monitorSSE
+from rocketlib import IInstanceBase, AVI_ACTION, Entry
 
 from .IGlobal import IGlobal
 
@@ -71,7 +70,7 @@ class IInstance(IInstanceBase):
         if output_path and os.path.exists(output_path):
             size = os.path.getsize(output_path)
             _log(f'close: encoded ok size={size} bytes, streaming')
-            self._stream_video_sse(output_path)
+            self._output_video(output_path)
             try:
                 os.remove(output_path)
             except OSError:
@@ -147,20 +146,19 @@ class IInstance(IInstanceBase):
             return None
 
     # ------------------------------------------------------------------
-    # Stream the encoded video via SSE
+    # Write the encoded video to downstream nodes via the engine AVI mechanism
     # ------------------------------------------------------------------
 
-    def _stream_video_sse(self, video_path: str):
-        pipe_id = self.instance.pipeId
-        chunk_size = 48 * 1024  # 49152 = 3 * 16384, multiple of 3 so base64 chunks have no mid-stream padding
-        monitorSSE(pipe_id, 'video.begin', '', {'mimeType': 'video/mp4'})
+    def _output_video(self, video_path: str):
+        chunk_size = 48 * 1024
+        self.instance.writeVideo(AVI_ACTION.BEGIN, 'video/mp4', b'')
         with open(video_path, 'rb') as fh:
             while True:
                 chunk = fh.read(chunk_size)
                 if not chunk:
                     break
-                monitorSSE(pipe_id, 'video.buffer', '', {'data': base64.b64encode(chunk).decode()})
-        monitorSSE(pipe_id, 'video.end', '', {})
+                self.instance.writeVideo(AVI_ACTION.WRITE, 'video/mp4', chunk)
+        self.instance.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
 
     # ------------------------------------------------------------------
     # Cleanup
