@@ -44,6 +44,10 @@ class IInstance(IInstanceBase):
     initialized at the global lifecycle level.
     """
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._image_chunk_id = 0
+
     def writeDocuments(self, documents: List[Doc]):
         """
         Process and enrich a list of documents by generating embeddings for image documents.
@@ -75,7 +79,7 @@ class IInstance(IInstanceBase):
             vectors = self.IGlobal.embedding.create_image_embedding(image)
 
             # Assign the embedding vectors to the document as a list for serialization.
-            doc.embedding = vectors.tolist()
+            doc.embedding = vectors if isinstance(vectors, list) else vectors.tolist()
 
             # Store the model name used for generating the embedding for traceability.
             doc.embedding_model = self.IGlobal.embedding.model_name
@@ -103,10 +107,10 @@ class IInstance(IInstanceBase):
 
             embedding = self.IGlobal.embedding.create_image_embedding(image)
 
-            # Create the Doc object for the image
+            # Create the Doc object for the image (unique chunkId per image)
             metadata = DocMetadata(
                 self,
-                chunkId=0,
+                chunkId=self._image_chunk_id,
                 isTable=False,
                 tableId=0,
                 isDeleted=False,
@@ -125,5 +129,6 @@ class IInstance(IInstanceBase):
             # Pass the documents to the next pipeline stage
             self.instance.writeDocuments(documents)
 
-            # Clear the image data after processing
+            # Clear the image data and increment chunk for next image
             self.image_data = None
+            self._image_chunk_id += 1

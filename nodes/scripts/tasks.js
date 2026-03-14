@@ -134,9 +134,23 @@ function makeRunPytestAction(options = {}) {
             // Use absolute paths since cwd is dist/server
             const pytestArgs = ['-m', 'pytest', TEST_DIR, '-v', '--rootdir', PACKAGE_DIR];
 
+            // Exclude skip_node tests by default (same as skip_nodes in pytest_generate_tests for dynamic tests)
+            const pytestOpts = options.pytest || ctx.options?.pytest;
+            const markersOpt = options.markers || ctx.options?.markers;
+            const hasExplicitMarkers = (() => {
+                if (markersOpt) return true;
+                if (!pytestOpts) return false;
+                const tokens = typeof pytestOpts === 'string'
+                    ? pytestOpts.split(/\s+/).filter(Boolean)
+                    : pytestOpts.flatMap(o => String(o).split(/\s+/).filter(Boolean));
+                return tokens.some(t => t === '-m' || (t.startsWith('-m') && !t.startsWith('--')));
+            })();
+            if (!hasExplicitMarkers) {
+                pytestArgs.push('-m', 'not skip_node');
+            }
+
             // Add any additional pytest options (from CLI or direct options)
             // ctx.options comes from CLI args like --pytest="-s -v"
-            const pytestOpts = options.pytest || ctx.options?.pytest;
             if (pytestOpts) {
                 // Handle both string and array formats
                 // CLI passes array like ["-v -s"], so split each element by spaces
