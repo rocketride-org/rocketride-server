@@ -94,7 +94,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
     # SQL query helpers
     # ------------------------------------------------------------------
 
-    def _buildSQLQuery(self, question_text: str) -> dict:
+    def _buildSQLQuery(self, question_text: str, *, limit: int = 250) -> dict:
         """Generate a SQL query and validate it with EXPLAIN, retrying on failure.
 
         Calls ``_buildSQLQueryOnce`` to ask the LLM, then runs ``EXPLAIN`` on
@@ -108,7 +108,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         result: dict = {}
 
         for attempt in range(self.IGlobal.max_validation_attempts):
-            result = self._buildSQLQueryOnce(question_text, previous_sql=previous_sql, error=last_error)
+            result = self._buildSQLQueryOnce(question_text, limit=limit, previous_sql=previous_sql, error=last_error)
 
             is_valid = result.get('isValid', '').lower() == 'true'
             sql_query = result.get('query', '')
@@ -134,7 +134,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         warning(f'SQL validation failed after {self.IGlobal.max_validation_attempts} attempt(s); returning last result.')
         return result
 
-    def _buildSQLQueryOnce(self, question_text: str, *, previous_sql: str | None = None, error: str | None = None) -> dict:
+    def _buildSQLQueryOnce(self, question_text: str, *, limit: int = 250, previous_sql: str | None = None, error: str | None = None) -> dict:
         """Single LLM call: translate a natural-language question into SQL.
 
         ``previous_sql`` and ``error`` are supplied on retry attempts so the
@@ -186,7 +186,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         )
         question.addInstruction(
             'LIMIT',
-            'Limit the results to 250 unless instructed otherwise by the provided question.',
+            f'Limit the results to {limit} rows.',
         )
         question.addInstruction(
             'Formatting',

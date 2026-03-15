@@ -1,7 +1,7 @@
 {
 	"title": "Memory (Internal)",
 	"protocol": "memory_internal://",
-	"classType": ["tool"],
+	"classType": ["memory"],
 	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
