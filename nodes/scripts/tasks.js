@@ -135,8 +135,8 @@ function makeRunPytestAction(options = {}) {
             const pytestArgs = ['-m', 'pytest', TEST_DIR, '-v', '--rootdir', PACKAGE_DIR];
 
             // Exclude skip_node tests by default (same as skip_nodes in pytest_generate_tests for dynamic tests)
-            const pytestOpts = options.pytest || ctx.options?.pytest;
-            const markersOpt = options.markers || ctx.options?.markers;
+            const pytestOpts = options.pytest;
+            const markersOpt = options.markers;
             const hasExplicitMarkers = (() => {
                 if (markersOpt) return true;
                 if (!pytestOpts) return false;
@@ -150,7 +150,7 @@ function makeRunPytestAction(options = {}) {
             }
 
             // Add any additional pytest options (from CLI or direct options)
-            // ctx.options comes from CLI args like --pytest="-s -v"
+            // options comes from CLI args like --pytest="-s -v"
             if (pytestOpts) {
                 // Handle both string and array formats
                 // CLI passes array like ["-v -s"], so split each element by spaces
@@ -164,8 +164,8 @@ function makeRunPytestAction(options = {}) {
             }
 
             // Allow filtering tests by marker or pattern
-            const markers = options.markers || ctx.options?.markers;
-            const pattern = options.pattern || ctx.options?.pattern;
+            const markers = options.markers;
+            const pattern = options.pattern;
             if (markers) {
                 pytestArgs.push('-m', markers);
             }
