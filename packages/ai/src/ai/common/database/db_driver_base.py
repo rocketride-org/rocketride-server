@@ -101,6 +101,8 @@ class DatabaseDriverBase(ToolsBase):
                     f'Accepts a natural-language description of the data you want, converts it to a safe '
                     f'SQL SELECT statement, executes it against the {db} database, and returns the result rows. '
                     f'No schema lookup or SQL knowledge required -- just describe what you need. '
+                    f'Describe the end result you want, not intermediate steps -- this tool can handle '
+                    f'aggregations, tokenization, joins, and complex transformations in a single request. '
                     f'Results may be large -- consider using peek or store.'
                 ),
                 'inputSchema': {
@@ -110,6 +112,10 @@ class DatabaseDriverBase(ToolsBase):
                         'question': {
                             'type': 'string',
                             'description': 'Natural-language description of the data you want to retrieve',
+                        },
+                        'limit': {
+                            'type': 'integer',
+                            'description': 'Maximum number of rows to return (default 250, max 25000). Increase when you need the full result set.',
                         },
                     },
                 },
@@ -131,9 +137,9 @@ class DatabaseDriverBase(ToolsBase):
                             'type': 'string',
                             'description': 'The generated SQL SELECT statement that was executed.',
                         },
-                        'count': {
+                        'row_limit': {
                             'type': 'integer',
-                            'description': 'Number of rows returned.',
+                            'description': 'The row cap applied to this query. If the number of rows returned equals row_limit, more rows may exist — re-request with a higher limit.',
                         },
                         'valid': {
                             'type': 'boolean',
@@ -328,7 +334,8 @@ class DatabaseDriverBase(ToolsBase):
     def _invoke_get_sql(self, input_obj: Dict[str, Any]) -> Dict[str, Any]:
         """Translate a natural-language question to a verified SQL SELECT."""
         question = input_obj['question'].strip()
-        result = self._instance._buildSQLQuery(question)
+        limit = input_obj.get('limit', 250)
+        result = self._instance._buildSQLQuery(question, limit=limit)
 
         is_valid = result.get('isValid', '').lower() == 'true'
         sql_query = result.get('query', '')
@@ -345,8 +352,13 @@ class DatabaseDriverBase(ToolsBase):
         """Convert a natural-language question to SQL, execute it, and return the result rows."""
         question = input_obj['question'].strip()
 
-        # Step 1: Convert NLP to SQL
-        sql_result = self._invoke_get_sql({'question': question})
+        # Clamp the caller-supplied limit: default 250, hard cap 25000.
+        raw_limit = input_obj.get('limit')
+        limit = max(1, min(int(raw_limit), 25000)) if raw_limit is not None else 250
+
+        # Step 1: Convert NLP to SQL, passing the resolved limit so the
+        # SQL-generating LLM uses the correct LIMIT clause.
+        sql_result = self._invoke_get_sql({'question': question, 'limit': limit})
         if not sql_result.get('valid'):
             return sql_result
 
@@ -362,7 +374,9 @@ class DatabaseDriverBase(ToolsBase):
         # datetime/date → ISO string, etc.)
         rows = [self._sanitize_row(row) for row in result]
 
-        return {'rows': rows, 'sql': sql_query, 'count': len(rows)}
+        # row_limit is always included so the LLM can compare it against the
+        # row count in the structural summary to determine if more rows exist.
+        return {'rows': rows, 'sql': sql_query, 'row_limit': limit}
 
     # ------------------------------------------------------------------
     # Helpers

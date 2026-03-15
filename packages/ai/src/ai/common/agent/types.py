@@ -10,7 +10,7 @@ Defines the type contracts shared by all agent framework drivers:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, List, Optional, Protocol, TypedDict
+from typing import Any, Dict, List, Optional, Protocol, TypedDict
 
 from ai.common.schema import Question
 
@@ -35,11 +35,24 @@ class AgentHostTools(Protocol):
     def invoke(self, tool_name: str, input: Any) -> Any: ...
 
 
+class AgentHostMemory(Protocol):
+    """Run-scoped object store. Simple interface — all smart logic is in the executor."""
+
+    def put(self, key: str, value: Any) -> Dict[str, Any]: ...
+
+    def get(self, key: str) -> Dict[str, Any]: ...
+
+    def list(self) -> Dict[str, Any]: ...
+
+    def clear(self, key: Optional[str] = None) -> Dict[str, Any]: ...
+
+
 class AgentHost(Protocol):
     """Host services provided to framework drivers during a run."""
 
     llm: AgentHostLLM
     tools: AgentHostTools
+    memory: Optional[AgentHostMemory]
 
 
 class AgentMeta(TypedDict, total=False):
