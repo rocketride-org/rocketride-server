@@ -47,7 +47,6 @@ const PACKAGES_DIR = path.join(PROJECT_ROOT, 'packages');
 const SERVER_DIR = path.join(PACKAGES_DIR, 'server');
 const DIST_DIR = path.join(DIST_ROOT, 'server');
 const VCPKG_DIR = path.join(BUILD_ROOT, 'vcpkg');
-const BUILD_ARTIFACTS_DIR = path.join(BUILD_ROOT, 'artifacts');
 const DIST_ARTIFACTS_DIR = path.join(DIST_ROOT, 'artifacts');
 
 // =============================================================================
@@ -434,7 +433,7 @@ function makeDownloadAction(options = {}) {
                 return;
             }
 
-            if (ctx.options?.nodownload) {
+            if (options.nodownload) {
                 task.output = 'Download skipped (--nodownload)';
                 ctx.downloaded = false;
                 return;
@@ -527,12 +526,12 @@ function makeDownloadAction(options = {}) {
     };
 }
 
-function makeSetupToolsAction(_options = {}) {
+function makeSetupToolsAction(options = {}) {
     return {
         run: async (ctx, task) => {
             await runCompilerSetup({
-                autoinstall: !!(ctx.options && ctx.options.autoinstall),
-                verbose: !!(ctx.options && ctx.options.verbose),
+                autoinstall: options.autoinstall,
+                verbose: options.verbose,
                 onOutput: (line) => { task.output = line; },
                 task
             });
@@ -582,16 +581,16 @@ function makeConfigureServerAction(options = {}) {
                 cmakeArgs.push(`-DROCKETRIDE_UNITY_BATCH_SIZE:STRING=${options.batchSize}`);
             }
 
-            if (ctx.options.buildVersion) {
-                cmakeArgs.push(`-DCMAKE_PROJECT_VERSION:STRING=${ctx.options.buildVersion}`);
+            if (options.buildVersion) {
+                cmakeArgs.push(`-DCMAKE_PROJECT_VERSION:STRING=${options.buildVersion}`);
             }
 
-            if (ctx.options.buildHash) {
-                cmakeArgs.push(`-DROCKETRIDE_BUILD_HASH_SHORT:STRING=${ctx.options.buildHash}`);
+            if (options.buildHash) {
+                cmakeArgs.push(`-DROCKETRIDE_BUILD_HASH_SHORT:STRING=${options.buildHash}`);
             }
 
-            if (ctx.options.buildStamp) {
-                cmakeArgs.push(`-DROCKETRIDE_BUILD_STAMP:STRING=${ctx.options.buildStamp}`);
+            if (options.buildStamp) {
+                cmakeArgs.push(`-DROCKETRIDE_BUILD_STAMP:STRING=${options.buildStamp}`);
             }
 
             const baseEnv = isWindows() ? await getVsEnvironment() : process.env;
@@ -599,7 +598,7 @@ function makeConfigureServerAction(options = {}) {
                 ...baseEnv,
                 VCPKG_ROOT: path.join(BUILD_ROOT, 'vcpkg')  // Help vcpkg find itself faster
             };
-            await execCommand(cmakeArgs[0], cmakeArgs.slice(1), { task, env, verbose: !!(ctx.options && ctx.options.verbose) });
+            await execCommand(cmakeArgs[0], cmakeArgs.slice(1), { task, env, verbose: options.verbose });
 
             await updateServerState({
                 configured: true,
@@ -708,7 +707,7 @@ function makeCompileEngineAction(options = {}) {
 
             if (options.force) {
                 task.output = 'Cleaning build directory...';
-                await execCommand('cmake', ['--build', BUILD_ROOT, '--target', 'clean'], { task, env, verbose: !!(ctx.options && ctx.options.verbose) });
+                await execCommand('cmake', ['--build', BUILD_ROOT, '--target', 'clean'], { task, env, verbose: options.verbose});
             }
 
             const jobs = getParallelJobs();
@@ -718,7 +717,7 @@ function makeCompileEngineAction(options = {}) {
                 '--target', 'engine',
                 '--parallel', String(jobs)
             ];
-            await execCommand(cmakeArgs[0], cmakeArgs.slice(1), { task, env, verbose: !!(ctx.options && ctx.options.verbose) });
+            await execCommand(cmakeArgs[0], cmakeArgs.slice(1), { task, env, verbose: options.verbose });
 
             // Copy engine to dist
             await mkdir(DIST_DIR);
@@ -742,12 +741,12 @@ function makeCompileEngineAction(options = {}) {
     };
 }
 
-function makeCompileTestsAction() {
+function makeCompileTestsAction(options = {}) {
     return {
         locks: ['cmake'],
         run: async (ctx, task) => {
             // Check source hash to skip if nothing changed since last test build
-            if (!(ctx.options && ctx.options.force)) {
+            if (options.force) {
                 task.output = 'Checking for source changes...';
                 const [coreHash, libHash, cmakeHash] = await Promise.all([
                     fingerprint(path.join(SERVER_DIR, 'engine-core')),
@@ -778,12 +777,12 @@ function makeCompileTestsAction() {
             // Build aptest
             task.output = 'Building aptest...';
             const aptestArgs = ['--build', BUILD_ROOT, '--config', 'Release', '--target', 'aptest', '--parallel', String(jobs)];
-            await execCommand('cmake', aptestArgs, { task, env, verbose: !!(ctx.options && ctx.options.verbose) });
+            await execCommand('cmake', aptestArgs, { task, env, verbose: options.verbose });
 
             // Build engtest
             task.output = 'Building engtest...';
             const engtestArgs = ['--build', BUILD_ROOT, '--config', 'Release', '--target', 'engtest', '--parallel', String(jobs)];
-            await execCommand('cmake', engtestArgs, { task, env, verbose: !!(ctx.options && ctx.options.verbose) });
+            await execCommand('cmake', engtestArgs, { task, env, verbose: options.verbose });
 
             // Save test source hash after successful build
             if (ctx._testSrcHash) {
@@ -975,7 +974,6 @@ function makeCleanServerAction() {
                 path.join(BUILD_ROOT, 'engine-lib'),
                 path.join(BUILD_ROOT, 'packages'),
                 path.join(BUILD_ROOT, '_download_temp'),
-                BUILD_ARTIFACTS_DIR,
                 DIST_ARTIFACTS_DIR,
                 DIST_DIR
             ]);
@@ -1069,7 +1067,7 @@ function makePackageAction(options = {}) {
             const packageHash = await getState('server.pkgHash');
             if (!sourceHash) {
                 throw new Error('Content hash not found — build server first');
-            } else if (!_ctx.options.force && sourceHash === packageHash && await exists(distFile)) {
+            } else if (!options.force && sourceHash === packageHash && await exists(distFile)) {
                 _task.output = `Server package ${distFilename} is up to date`;
                 return;
             }

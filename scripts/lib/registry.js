@@ -87,7 +87,7 @@ class ModuleRegistry {
      * Actions with descriptions are shown in `builder --help`.
      * Actions without descriptions are internal/private but still callable.
      */
-    listCommands() {
+    listCommands(options) {
         const result = [];
 
         for (const [moduleName, mod] of this.modules) {
@@ -95,7 +95,7 @@ class ModuleRegistry {
 
             for (const actionDef of mod.actions) {
                 const actionObj = typeof actionDef.action === 'function'
-                    ? actionDef.action()
+                    ? actionDef.action(options)
                     : actionDef.action;
 
                 // Only list actions that have descriptions (public actions)
@@ -139,7 +139,7 @@ class ModuleRegistry {
      * List all registered actions across all modules
      * @returns {Array} Array of { name, description, module }
      */
-    listActions() {
+    listActions(options) {
         const actions = [];
 
         for (const [moduleName, mod] of this.modules) {
@@ -147,7 +147,7 @@ class ModuleRegistry {
 
             for (const actionDef of mod.actions) {
                 const actionObj = typeof actionDef.action === 'function'
-                    ? actionDef.action()
+                    ? actionDef.action(options)
                     : actionDef.action;
                 actions.push({
                     name: actionDef.name,
