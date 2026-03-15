@@ -62,7 +62,7 @@ const MAVEN_DIR = path.join(JAVA_DIR, 'maven');
 const MAVEN = path.join(MAVEN_DIR, 'bin', 'mvn');
 
 // Glob patterns to ignore when syncing
-const IGNORE = ['**/target/**', '**/node_modules/**', '**/.git/**', '**/scripts/**'];
+const IGNORE = ['**/target/**', '**/node_modules/**', '**/.git/**', '**/scripts/**', '**/lib/tika/pom.xml'];
 
 // ============================================================================
 // Helpers
