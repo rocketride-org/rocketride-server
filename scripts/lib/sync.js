@@ -156,12 +156,11 @@ async function syncFile(src, dest, options = {}, stats = { added: 0, updated: 0,
 
 /**
  * Format sync/copy stats for display
- * @param {{ added: number, updated: number, deleted?: number, unchanged: number }} stats
+ * @param {{ added: number, updated: number, deleted: number, changed: number, unchanged: number }} stats
  * @returns {string}
  */
 function formatSyncStats(stats) {
-    const changed = (stats.added || 0) + (stats.updated || 0) + (stats.deleted || 0);
-    if (changed === 0) {
+    if (stats.changed === 0) {
         return `No changes (${stats.unchanged || 0} files up to date)`;
     }
 

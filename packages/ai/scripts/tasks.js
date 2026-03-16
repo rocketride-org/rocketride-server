@@ -53,7 +53,7 @@ function makeSyncAiAction() {
     return {
         run: async (ctx, task) => {
             task.output = 'Scanning for changes...';
-            const stats = await syncDir(SRC_DIR, DIST_DIR, { package: true });
+            const stats = await syncDir(SRC_DIR, DIST_DIR, { mirror: false, package: true });
             task.output = formatSyncStats(stats);
         }
     };
