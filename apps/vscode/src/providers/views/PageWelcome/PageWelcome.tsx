@@ -135,7 +135,7 @@ export const PageWelcome: React.FC = () => {
 		if (mode === 'cloud') {
 			updates.hostUrl = 'https://cloud.rocketride.ai';
 		} else if (mode === 'onprem') {
-			if (!settings.hostUrl || settings.hostUrl === 'https://cloud.rocketride.ai' || settings.hostUrl.startsWith('http://localhost')) {
+			if (!settings.hostUrl || settings.hostUrl === 'https://cloud.rocketride.ai' || settings.hostUrl.startsWith('http://localhost:5565')) {
 				updates.hostUrl = '';
 			}
 		} else if (mode === 'local') {

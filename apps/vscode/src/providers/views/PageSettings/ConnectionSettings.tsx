@@ -190,7 +190,7 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 											checked={settings.autoConnect}
 											onChange={handleAutoConnectChange}
 										/>
-										<label htmlFor="autoConnect">Automatically connect when VS Code starts</label>
+										<label htmlFor="autoConnect">Automatically connect when extension starts</label>
 									</div>
 									<div className="help-text">Enable to connect automatically on startup</div>
 								</div>
@@ -241,34 +241,40 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 									</select>
 									<div className="help-text">Choose which server version to download. &lt;Latest&gt; gets the newest stable release.</div>
 								</div>
-								<div className="form-group">
-									<div>
-										<input
-											type="checkbox"
-											id="localDebugOutput"
-											checked={settings.localDebugOutput}
-											onChange={(e) => onSettingsChange({ localDebugOutput: e.target.checked })}
-										/>
-										<label htmlFor="localDebugOutput">Full debug output</label>
-									</div>
-									<div className="help-text">Enable detailed server trace logging (see Output&#8594;RocketRide: Console)</div>
-								</div>
-								{!settings.localDebugOutput && (
-									<div className="form-group">
-										<label htmlFor="engineArgs">Server Arguments</label>
-										<input
-											type="text"
-											id="engineArgs"
-											value={settings.localEngineArgs}
-											placeholder="--option=value --flag"
-											onChange={(e) => onSettingsChange({ localEngineArgs: e.target.value })}
-										/>
-										<div className="help-text">Additional command-line arguments for the server</div>
-									</div>
-								)}
-							</>
+								</>
 						)}
 					</div>
+
+					{/* Debug — shown for local and on-prem modes */}
+					{(settings.connectionMode === 'local' || settings.connectionMode === 'onprem') && (
+						<div className="mode-config-box">
+							<div className="form-group">
+								<div>
+									<input
+										type="checkbox"
+										id="localDebugOutput"
+										checked={settings.localDebugOutput}
+										onChange={(e) => onSettingsChange({ localDebugOutput: e.target.checked })}
+									/>
+									<label htmlFor="localDebugOutput">Full debug output</label>
+								</div>
+								<div className="help-text">Enable detailed server trace logging (see Output&#8594;RocketRide: Console)</div>
+							</div>
+							{settings.connectionMode === 'local' && (
+								<div className="form-group">
+									<label htmlFor="engineArgs">Server Arguments</label>
+									<input
+										type="text"
+										id="engineArgs"
+										value={settings.localEngineArgs}
+										placeholder="--option=value --flag"
+										onChange={(e) => onSettingsChange({ localEngineArgs: e.target.value })}
+									/>
+									<div className="help-text">Additional command-line arguments passed to the server</div>
+								</div>
+							)}
+						</div>
+					)}
 				</div>
 			</div>
 

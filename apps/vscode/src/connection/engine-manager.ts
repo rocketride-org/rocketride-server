@@ -39,7 +39,7 @@ import * as path from 'path';
 import { ChildProcess, spawn } from 'child_process';
 import { BaseManager, ManagerInfo } from './base-manager';
 import { EngineInstaller } from './engine-installer';
-import { ConfigManagerInfo } from '../config';
+import { ConfigManager, ConfigManagerInfo } from '../config';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 
@@ -141,18 +141,14 @@ export class EngineManager extends BaseManager {
 			await this.stopProcess();
 		}
 
-		// engineArgs may be a legacy string[] from old config or the new string format
-		const rawArgs = config.engineArgs;
-		const engineArgsStr = Array.isArray(rawArgs) ? rawArgs.join(' ') : String(rawArgs || '');
+		const effectiveArgs = ConfigManager.getInstance().getEffectiveEngineArgs();
 
 		const args = [
 			'--autoterm',  // Exit when VS Code closes (stdin monitoring)
 			'./ai/eaas.py',
 			'--host=localhost',
 			'--port=0',
-			...(config.local.debugOutput
-				? ['--trace=servicePython']
-				: engineArgsStr.trim() ? [engineArgsStr.trim()] : [])
+			...effectiveArgs
 		];
 
 		await this.startProcess(executablePath, args);

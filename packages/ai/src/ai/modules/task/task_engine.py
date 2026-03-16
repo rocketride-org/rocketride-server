@@ -37,6 +37,7 @@ import aiofiles
 import time
 import socket
 import hashlib
+import shlex
 import shutil
 import re
 from typing import TYPE_CHECKING, Dict, Any, List, Optional
@@ -1450,7 +1451,11 @@ class Task(DAPBase):
                 child_args.append(f'--modelserver={modelserver}')
 
             user_args = self._launch_args.get('args', [])
-            child_args.extend(user_args)
+            for arg in user_args:
+                if ' ' in arg:
+                    child_args.extend(shlex.split(arg))
+                else:
+                    child_args.append(arg)
 
             # Inherit parent engine's --trace setting if not explicitly provided
             if not any(a.startswith('--trace=') for a in child_args):

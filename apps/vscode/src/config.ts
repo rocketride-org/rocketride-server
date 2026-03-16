@@ -463,6 +463,26 @@ export class ConfigManager {
 	}
 
 	/**
+	 * Returns the effective engine args as an array, injecting --trace=servicePython
+	 * if debug output is enabled and the user hasn't specified their own --trace.
+	 */
+	public getEffectiveEngineArgs(): string[] {
+		const config = this.getConfig();
+		const rawArgs = config.engineArgs;
+		const argsStr = Array.isArray(rawArgs) ? rawArgs.join(' ') : String(rawArgs || '');
+		const hasTrace = argsStr.includes('--trace=');
+
+		const result: string[] = [];
+		if (argsStr.trim()) {
+			result.push(argsStr.trim());
+		}
+		if (config.local.debugOutput && !hasTrace) {
+			result.push('--trace=servicePython');
+		}
+		return result;
+	}
+
+	/**
 	 * Gets the API host URL for dynamic parameter replacement (SYNC)
 	 */
 	public getApiHost(): string {
@@ -473,7 +493,7 @@ export class ConfigManager {
 		}
 		// Local mode — actual URL is determined at runtime by ConnectionManager
 		// (dynamic port assigned by OS). This static value is used only for .env sync.
-		return config.hostUrl || 'http://localhost';
+		return config.hostUrl || 'http://localhost:5565';
 	}
 
 	/**

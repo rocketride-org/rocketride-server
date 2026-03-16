@@ -580,9 +580,12 @@ export class ConnectionManager extends EventEmitter {
 			return undefined;
 		}
 		try {
+			this.logger.output(`${icons.send} ${command} ${JSON.stringify(args ?? {})}`);
 			const response = await this.client.dapRequest(command, args, token);
+			this.logger.output(`${icons.receive} ${command} ${JSON.stringify(response ?? {})}`);
 			return response as unknown as GenericResponse;
-		} catch {
+		} catch (err) {
+			this.logger.output(`${icons.error} ${command} failed: ${err}`);
 			return undefined;
 		}
 	}

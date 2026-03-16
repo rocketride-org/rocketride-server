@@ -230,7 +230,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					projectId: projectId,
 					source: sourceId,
 					pipeline: pipelineTransformed,
-					args: ConfigManager.getInstance().getConfig().engineArgs
+					args: ConfigManager.getInstance().getEffectiveEngineArgs()
 				});
 			} catch (error) {
 				vscode.window.showErrorMessage(`Failed to run pipeline: ${error}`);
