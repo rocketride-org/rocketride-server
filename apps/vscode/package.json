@@ -244,10 +244,25 @@
 				"category": "RocketRide Pipeline"
 			},
 			{
+				"command": "rocketride.indexFolder",
+				"title": "Index with RocketRide",
+				"category": "RocketRide",
+				"icon": "$(database)"
+			},
+			{
+				"command": "rocketride.exportAsMCP",
+				"title": "Expose as MCP Tool",
+				"category": "RocketRide",
+				"icon": "$(remote-explorer)"
+			},
+			{
 				"command": "rocketride.page.deploy.open",
 				"title": "Open Deploy",
 				"category": "RocketRide",
-				"icon": { "dark": "./rocketride-light-icon.png", "light": "./rocketride-dark-icon.png" }
+				"icon": {
+					"dark": "./rocketride-light-icon.png",
+					"light": "./rocketride-dark-icon.png"
+				}
 			},
 			{
 				"command": "rocketride.page.welcome.open",
@@ -256,6 +271,18 @@
 			}
 		],
 		"menus": {
+			"explorer/context": [
+				{
+					"command": "rocketride.indexFolder",
+					"when": "explorerResourceIsFolder",
+					"group": "navigation"
+				},
+				{
+					"command": "rocketride.exportAsMCP",
+					"when": "resourceExtname == .pipe || resourceExtname == .json && resourceFilename =~ /\\.pipe\\.json$/",
+					"group": "navigation"
+				}
+			],
 			"view/title": [
 				{
 					"command": "rocketride.sidebar.files.refresh",

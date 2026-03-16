@@ -1,0 +1,120 @@
+{
+  "viewport": {
+    "x": 56.986215524209854,
+    "y": 198.8548651622067,
+    "zoom": 0.7974098679709688
+  },
+  "name": "",
+  "description": "",
+  "components": [
+    {
+      "id": "adtoolchain_1",
+      "provider": "adtoolchain",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "adtoolchain"
+      },
+      "ui": {
+        "position": {
+          "x": 200,
+          "y": 300
+        },
+        "measured": {
+          "width": 160,
+          "height": 129
+        },
+        "data": {
+          "provider": "adtoolchain",
+          "class": "source",
+          "type": "default"
+        },
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "objstore_1",
+      "provider": "objstore",
+      "config": {
+        "actions": {},
+        "exclude": [],
+        "include": [
+          {}
+        ],
+        "mode": "Source",
+        "parameters": {
+          "url": "https://"
+        },
+        "type": "objstore"
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 220
+        },
+        "measured": {
+          "width": 160,
+          "height": 55
+        },
+        "data": {
+          "provider": "objstore",
+          "class": "source",
+          "type": "default"
+        },
+        "formDataValid": false
+      }
+    },
+    {
+      "id": "llm_gemini_1",
+      "provider": "llm_gemini",
+      "config": {
+        "profile": "gemini-3-pro",
+        "gemini-3-pro": {}
+      },
+      "ui": {
+        "position": {
+          "x": 300,
+          "y": 560
+        },
+        "measured": {
+          "width": 160,
+          "height": 55
+        },
+        "data": {
+          "provider": "llm_gemini",
+          "class": "llm",
+          "type": "default"
+        },
+        "formDataValid": false
+      }
+    },
+    {
+      "id": "llm_bedrock_1",
+      "provider": "llm_bedrock",
+      "config": {
+        "profile": "meta_llama3_3-70b",
+        "meta_llama3_3-70b": {
+          "region": ""
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 220,
+          "y": 60
+        },
+        "measured": {
+          "width": 160,
+          "height": 59
+        },
+        "data": {
+          "provider": "llm_bedrock",
+          "class": "llm",
+          "type": "default"
+        },
+        "formDataValid": false
+      }
+    }
+  ],
+  "project_id": "c0920cb1-27a0-4cac-a551-5caa31639fc5"
+}
