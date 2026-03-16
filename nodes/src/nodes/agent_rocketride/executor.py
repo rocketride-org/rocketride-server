@@ -254,6 +254,7 @@ def _resolve_refs(value: Any, host: AgentHost) -> Any:
                 try:
                     v = jmespath.search(path, v)
                 except Exception:
+                    # Bad path — fall through with the original value so surrounding text still renders
                     pass
             if fmt:
                 return _format_value(v, fmt, host)
