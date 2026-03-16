@@ -139,7 +139,7 @@ function parseArgs(args) {
  * 
  * Looks for actions like "moduleName:command" with descriptions (public actions)
  */
-function expandGlobalCommands(globalCommands, registry) {
+function expandGlobalCommands(globalCommands, registry, options) {
     const requests = [];
 
     for (const command of globalCommands) {
@@ -148,7 +148,7 @@ function expandGlobalCommands(globalCommands, registry) {
             const actionDef = registry.getAction(actionName);
             if (actionDef) {
                 const actionObj = typeof actionDef.action === 'function'
-                    ? actionDef.action()
+                    ? actionDef.action(options)
                     : actionDef.action;
                 // Only expand to public actions (those with descriptions)
                 if (actionObj?.description) {
@@ -161,7 +161,7 @@ function expandGlobalCommands(globalCommands, registry) {
     return requests;
 }
 
-function showHelp(registry) {
+function showHelp(registry, options) {
     console.log(`
 Rocketride Build System
 
@@ -169,7 +169,7 @@ Usage: builder <action> [...] [options]
 
 Actions:`);
 
-    const commands = registry.listCommands();
+    const commands = registry.listCommands(options);
 
     // Group by module
     const grouped = {};
@@ -277,14 +277,14 @@ async function main() {
     }
 
     // Expand global commands (e.g., "build" -> "build:server", "build:chat-ui", etc.)
-    const expandedRequests = expandGlobalCommands(globalCommands, registry);
+    const expandedRequests = expandGlobalCommands(globalCommands, registry, options);
     const requests = [...explicitRequests, ...expandedRequests];
 
     // Handle --list-actions - show ALL registered actions across all modules
     if (options.listActions) {
         console.log('\nAll Registered Actions:\n');
 
-        const allActions = registry.listActions();
+        const allActions = registry.listActions(options);
         for (const action of allActions) {
             const desc = action.description ? ` - ${action.description}` : '';
             console.log(`  ${action.name}${desc}`);
@@ -308,7 +308,7 @@ async function main() {
 
     // Show help if requested or no commands given
     if (options.help || requests.length === 0) {
-        showHelp(registry);
+        showHelp(registry, options);
         process.exit(options.help ? 0 : 1);
     }
 
@@ -330,7 +330,7 @@ async function main() {
 
             if (actionDef) {
                 const actionObj = typeof actionDef.action === 'function'
-                    ? actionDef.action()
+                    ? actionDef.action(options)
                     : actionDef.action;
                 if (actionObj?.steps) {
                     printFlowDiagram({ steps: actionObj.steps });
@@ -359,9 +359,10 @@ async function main() {
             const availableActions = (mod.actions || [])
                 .map(a => a.name)
                 .filter(n => {
-                    const obj = typeof registry.getAction(n)?.action === 'function'
-                        ? registry.getAction(n).action()
-                        : registry.getAction(n)?.action;
+                    const def = registry.getAction(n);
+                    const obj = typeof def?.action === 'function'
+                        ? def.action(options)
+                        : def?.action;
                     return obj?.description;
                 });
             if (availableActions.length > 0) {

@@ -82,22 +82,23 @@ function resetActionTracking() {
 
 /**
  * Resolve an action definition from registry or inline
- * 
+ *
  * @param {string|object} step - Step (string ref like 'vcpkg:clone' or { name, action })
+ * @param {object} options - Options
  * @returns {{ name: string, actionObj: object }} Resolved action
  */
-function resolveAction(step) {
+function resolveAction(step, options) {
     if (typeof step === 'string') {
         const found = registry.getAction(step);
         if (!found) {
             throw new Error(`Action not found in registry: ${step}`);
         }
-        const actionObj = typeof found.action === 'function' ? found.action() : found.action;
+        const actionObj = typeof found.action === 'function' ? found.action(options) : found.action;
         return { name: step, actionObj };
     }
-    
+
     const { name, action } = step;
-    const actionObj = typeof action === 'function' ? action() : action;
+    const actionObj = typeof action === 'function' ? action(options) : action;
     return { name, actionObj };
 }
 
@@ -179,8 +180,9 @@ function buildLeafTask(name, actionObj, logModule) {
  * @param {object} actionObj - Action definition
  * @param {Set} seen - Set of seen action names
  * @param {string} logModule - Module name for log collection
+ * @param {object} options - Options
  */
-function buildCompoundTask(name, actionObj, seen, logModule) {
+function buildCompoundTask(name, actionObj, seen, logModule, options) {
     // Check if already seen (for deduplication)
     if (!actionObj.multi && seen.has(name)) {
         return {
@@ -202,8 +204,8 @@ function buildCompoundTask(name, actionObj, seen, logModule) {
     }
     
     // Build children
-    const children = buildTaskTree(actionObj.steps, seen, logModule);
-    
+    const children = buildTaskTree(actionObj.steps, seen, logModule, options);
+
     // Add lock release and completion marker as final child
     // Note: We combine these into one task with empty title to minimize visual noise
     const hasLocks = actionObj.locks?.length || !actionObj.multi;
@@ -275,9 +277,10 @@ function buildCompoundTask(name, actionObj, seen, logModule) {
  * @param {object} parallel - Parallel definition
  * @param {Set} seen - Set of seen action names
  * @param {string} logModule - Module name for log collection
+ * @param {object} options - Options
  */
-function buildParallelTask(parallel, seen, logModule) {
-    const children = buildTaskTree(parallel.actions, seen, logModule);
+function buildParallelTask(parallel, seen, logModule, options) {
+    const children = buildTaskTree(parallel.actions, seen, logModule, options);
     
     return {
         title: parallel.title || 'Parallel tasks',
@@ -303,9 +306,10 @@ function buildParallelTask(parallel, seen, logModule) {
  * @param {object} sequence - Sequence definition
  * @param {Set} seen - Set of seen action names
  * @param {string} logModule - Module name for log collection
+ * @param {object} options - Options
  */
-function buildSequenceTask(sequence, seen, logModule) {
-    const children = buildTaskTree(sequence.steps, seen, logModule);
+function buildSequenceTask(sequence, seen, logModule, options) {
+    const children = buildTaskTree(sequence.steps, seen, logModule, options);
     
     return {
         title: sequence.title || 'Sequential tasks',
@@ -333,11 +337,12 @@ function buildSequenceTask(sequence, seen, logModule) {
  * @param {object} bracket - Bracket definition
  * @param {Set} seen - Set of seen action names
  * @param {string} logModule - Module name for log collection
+ * @param {object} options - Options
  * @returns {Array} Array of Listr2 task definitions (not a single task)
  */
-function buildBracketTask(bracket, seen, logModule) {
+function buildBracketTask(bracket, seen, logModule, options) {
     // Build inner tasks
-    const innerTasks = buildTaskTree(bracket.steps, seen, logModule);
+    const innerTasks = buildTaskTree(bracket.steps, seen, logModule, options);
     
     // Wrap inner tasks to catch errors but allow teardown to run
     const wrappedInnerTasks = innerTasks.map((innerTask, index) => ({
@@ -439,13 +444,14 @@ function buildBracketTask(bracket, seen, logModule) {
  * @param {object} when - When definition
  * @param {Set} seen - Set of seen action names
  * @param {string} logModule - Module name for log collection
+ * @param {object} options - Options
  */
-function buildWhenTask(when, seen, logModule) {
+function buildWhenTask(when, seen, logModule, options) {
     const variant = when._variant || 'when';
-    
+
     // Pre-build both branches so structure is known
-    const thenTasks = buildTaskTree(when.then, seen, logModule);
-    const elseTasks = when.else?.length ? buildTaskTree(when.else, seen, logModule) : [];
+    const thenTasks = buildTaskTree(when.then, seen, logModule, options);
+    const elseTasks = when.else?.length ? buildTaskTree(when.else, seen, logModule, options) : [];
     
     return {
         title: `? ${variant} ${when.name}`,
@@ -488,15 +494,16 @@ function buildWhenTask(when, seen, logModule) {
  * @param {string|object} step - Step definition
  * @param {Set} seen - Set of action names already seen (for deduplication)
  * @param {string} logModule - Module name for log collection
+ * @param {object} options - Options
  * @returns {object} Listr2 task definition
  */
-function buildTask(step, seen, logModule) {
+function buildTask(step, seen, logModule, options) {
     // String reference - action name like 'vcpkg:clone'
     if (typeof step === 'string') {
-        const { name, actionObj } = resolveAction(step);
-        
+        const { name, actionObj } = resolveAction(step, options);
+
         if (actionObj.steps && Array.isArray(actionObj.steps)) {
-            return buildCompoundTask(name, actionObj, seen, logModule);
+            return buildCompoundTask(name, actionObj, seen, logModule, options);
         } else {
             // Check deduplication for leaf actions
             if (!actionObj.multi && seen.has(name)) {
@@ -521,24 +528,24 @@ function buildTask(step, seen, logModule) {
     
     // Control flow types
     if (step._type === 'parallel') {
-        return buildParallelTask(step, seen, logModule);
+        return buildParallelTask(step, seen, logModule, options);
     }
     if (step._type === 'sequence') {
-        return buildSequenceTask(step, seen, logModule);
+        return buildSequenceTask(step, seen, logModule, options);
     }
     if (step._type === 'bracket') {
-        return buildBracketTask(step, seen, logModule);
+        return buildBracketTask(step, seen, logModule, options);
     }
     if (step._type === 'when') {
-        return buildWhenTask(step, seen, logModule);
+        return buildWhenTask(step, seen, logModule, options);
     }
-    
+
     // Object with name/action - inline action definition
     if (step.name && step.action) {
-        const { name, actionObj } = resolveAction(step);
-        
+        const { name, actionObj } = resolveAction(step, options);
+
         if (actionObj.steps && Array.isArray(actionObj.steps)) {
-            return buildCompoundTask(name, actionObj, seen, logModule);
+            return buildCompoundTask(name, actionObj, seen, logModule, options);
         } else {
             if (!actionObj.multi && seen.has(name)) {
                 return {
@@ -575,16 +582,17 @@ function buildTask(step, seen, logModule) {
  * @param {Array} steps - Array of step definitions
  * @param {Set} seen - Set of action names already seen (for deduplication)
  * @param {string} logModule - Module name for log collection (e.g., 'client-python:test')
+ * @param {object} options - Options
  * @returns {Array} Array of Listr2 task definitions
  */
-function buildTaskTree(steps, seen = new Set(), logModule = null) {
+function buildTaskTree(steps, seen = new Set(), logModule = null, options = {}) {
     if (!steps || steps.length === 0) {
         return [];
     }
-    
+
     // Use flatMap because some builders (brackets) return arrays
     return steps.flatMap(step => {
-        const result = buildTask(step, seen, logModule);
+        const result = buildTask(step, seen, logModule, options);
         return Array.isArray(result) ? result : [result];
     });
 }
@@ -605,10 +613,10 @@ async function runTaskCommand(command, options = {}, ctx = {}) {
     if (!command.steps || command.steps.length === 0) {
         return;
     }
-    
-    // Phase 1: Build complete task tree
-    const tasks = buildTaskTree(command.steps);
-    
+
+    // Phase 1: Build complete task tree (pass options so nested actions get them)
+    const tasks = buildTaskTree(command.steps, new Set(), null, options);
+
     // Phase 2: Execute via Listr2
     const runner = new Listr(tasks, {
         concurrent: false,
@@ -632,8 +640,8 @@ async function runTaskCommand(command, options = {}, ctx = {}) {
  * @param {object} options - Options
  * @returns {Listr} Configured Listr instance
  */
-function stepsToListr(parentTask, steps, _options = {}) {
-    const tasks = buildTaskTree(steps);
+function stepsToListr(parentTask, steps, options = {}) {
+    const tasks = buildTaskTree(steps, new Set(), null, options);
     
     return parentTask.newListr(tasks, {
         concurrent: false,
