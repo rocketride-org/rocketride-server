@@ -56,7 +56,7 @@ void Debugger::debugEnter(IServiceFilterInstance *pInstance,
         StackText msg;
         _tsbo(msg, {Format::HEX, {}, '*'}, "ENTER", pInstance->pipeId,
               pInstance->endpoint->getPipeCount(),
-              pInstance->pipeType.logicalType, trace.stringify());
+              pInstance->pipeType.id, trace.stringify());
 
         ::engine::config::monitor()->other("DBG", msg);
     }
@@ -78,7 +78,7 @@ void Debugger::debugLeave(IServiceFilterInstance *pInstance,
         StackText msg;
         _tsbo(msg, {Format::HEX, {}, '*'}, "LEAVE", pInstance->pipeId,
               pInstance->endpoint->getPipeCount(),
-              pInstance->pipeType.logicalType, trace.stringify());
+              pInstance->pipeType.id, trace.stringify());
 
         ::engine::config::monitor()->other("DBG", msg);
     }
