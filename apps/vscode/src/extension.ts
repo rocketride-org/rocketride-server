@@ -30,7 +30,7 @@ import * as vscode from 'vscode';
 import { getLogger } from './shared/util/output';
 import { icons } from './shared/util/icons';
 
-import { registerDebugger } from './debugger/adapter';
+// import { registerDebugger } from './debugger/adapter'; // Disabled: debugger removed from package.json
 import { ConnectionManager } from './connection/connection';
 import { ConfigManager } from './config';
 
@@ -103,7 +103,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			logger.output(`${icons.info} Creating connection manager...`);
 			progress.report({ increment: 30, message: "Creating connection manager..." });
 			connectionManager = ConnectionManager.getInstance();
-			connectionManager.setExtensionPath(context.extensionPath);
+			connectionManager.setEnginesRoot(context.globalStorageUri.fsPath);
 
 			//-------------------------------------
 			// Create status bar
@@ -167,11 +167,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 			registerUtilityCommands(context);
 
 			//-------------------------------------
-			// Register debugger
+			// Register debugger (disabled — see debugger/adapter.ts to re-enable)
 			//-------------------------------------
-			logger.output(`${icons.info} Registering debugger...`);
-			progress.report({ increment: 80, message: "Registering debugger..." });
-			registerDebugger(context);
+			// registerDebugger(context);
 
 			//-------------------------------------
 			// Set up event handlers

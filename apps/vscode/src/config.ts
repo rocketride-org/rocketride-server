@@ -44,17 +44,15 @@ export interface ConfigManagerInfo {
 	/** Default path for creating new pipeline files */
 	defaultPipelinePath: string;
 
-	/** Additional engine arguments (passed to engine subprocess in all connection modes) */
-	engineArgs: string[];
+	/** Additional engine arguments as a single string (passed to engine subprocess) */
+	engineArgs: string;
 
 	/** Local configuration */
 	local: {
-		/** Local host address (default: 'localhost') */
-		host: string;
-		/** Local port (default: 5565) */
-		port: number;
 		/** Engine version to download: 'latest', 'prerelease', or a specific tag */
 		engineVersion: string;
+		/** Enable full debug output (--trace=servicePython) */
+		debugOutput: boolean;
 	};
 
 	/** General settings */
@@ -90,11 +88,10 @@ export class ConfigManager {
 		apiKey: '',
 		hostUrl: 'http://localhost:5565',
 		defaultPipelinePath: '',
-		engineArgs: [],
+		engineArgs: '',
 		local: {
-			host: '',
-			port: 5565,
 			engineVersion: 'latest',
+			debugOutput: false,
 		},
 		autoConnect: true,
 		pipelineRestartBehavior: 'prompt',
@@ -169,17 +166,6 @@ export class ConfigManager {
 		const config = vscode.workspace.getConfiguration(this.configSection);
 		const hostUrl = config.get('hostUrl', 'http://localhost:5565');
 
-		// Parse host and port from the hostUrl - host will always be localhost
-		const parsedHost = 'localhost';
-		let parsedPort = 5565;
-
-		try {
-			const url = new URL(hostUrl);
-			parsedPort = url.port ? parseInt(url.port, 10) : (url.protocol === 'https:' ? 443 : 80);
-		} catch (error) {
-			console.warn('Failed to parse hostUrl, using defaults:', error);
-		}
-
 		// Get API key from secure storage
 		const apiKey = await this.getApiKeyFromStorage();
 
@@ -194,11 +180,10 @@ export class ConfigManager {
 			apiKey: apiKey,
 			hostUrl: hostUrl,
 			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
-			engineArgs: config.get('engineArgs', []),
+			engineArgs: config.get('engineArgs', ''),
 			local: {
-				host: parsedHost,
-				port: parsedPort,
-				engineVersion: config.get('local.engineVersion', 'latest')
+				engineVersion: config.get('local.engineVersion', 'latest'),
+				debugOutput: config.get('local.debugOutput', false),
 			},
 			autoConnect: config.get('autoConnect', true),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
@@ -486,8 +471,9 @@ export class ConfigManager {
 		if (config.connectionMode === 'cloud' || config.connectionMode === 'onprem') {
 			return config.hostUrl;
 		}
-		// Local mode - construct URL from host/port
-		return `http://${config.local.host}:${config.local.port}`;
+		// Local mode — actual URL is determined at runtime by ConnectionManager
+		// (dynamic port assigned by OS). This static value is used only for .env sync.
+		return config.hostUrl || 'http://localhost';
 	}
 
 	/**
@@ -525,13 +511,7 @@ export class ConfigManager {
 				errors.push('API key is required when using on-prem mode');
 			}
 		} else {
-			// local
-			if (!config.local.host) {
-				errors.push('Local host is required when using local mode');
-			}
-			if (!config.local.port || config.local.port < 1 || config.local.port > 65535) {
-				errors.push('Local port must be a valid port number (1-65535)');
-			}
+			// local — port is dynamically assigned, no validation needed
 		}
 
 		return errors;

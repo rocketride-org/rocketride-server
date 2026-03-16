@@ -72,7 +72,7 @@ type OutgoingMessage =
 const MODE_DESCRIPTIONS: Record<string, string> = {
 	cloud: 'Connect to RocketRide.ai cloud. Requires an API key from your account dashboard.',
 	onprem: 'Connect to your own hosted RocketRide server.',
-	local: 'Run the engine locally on your machine. The extension will download and manage the engine for you.'
+	local: 'Run the server locally on your machine. The extension will download and manage the server for you.'
 };
 
 // ============================================================================
@@ -139,36 +139,12 @@ export const PageWelcome: React.FC = () => {
 				updates.hostUrl = '';
 			}
 		} else if (mode === 'local') {
-			if (!settings.hostUrl || !settings.hostUrl.startsWith('http://localhost')) {
-				updates.hostUrl = 'http://localhost:5565';
-			}
 			updates.autoConnect = true;
 			setEngineVersionsLoading(true);
 			sendMessage({ type: 'fetchEngineVersions' });
 		}
 
 		setSettings(prev => ({ ...prev, ...updates }));
-	};
-
-	const localPort = (() => {
-		if (settings.connectionMode !== 'local' || !settings.hostUrl) return '5565';
-		try {
-			const u = new URL(settings.hostUrl);
-			if (u.hostname === 'localhost' && u.port) return u.port;
-			return u.port || '5565';
-		} catch {
-			return '5565';
-		}
-	})();
-
-	const handleLocalPortChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-		const port = e.target.value.trim();
-		if (port === '' || /^\d+$/.test(port)) {
-			setSettings(prev => ({
-				...prev,
-				hostUrl: port ? `http://localhost:${port}` : 'http://localhost:5565'
-			}));
-		}
 	};
 
 	const handleVersionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -239,125 +215,114 @@ export const PageWelcome: React.FC = () => {
 						<option value="onprem">On-prem (your hosted server)</option>
 						<option value="local">Local (your machine)</option>
 					</select>
+				</div>
+
+				{/* Config box — description + mode-specific fields */}
+				<div className="welcome-config-box">
 					<div className="welcome-mode-desc">
 						{MODE_DESCRIPTIONS[settings.connectionMode]}
 					</div>
-				</div>
 
-				{/* Coming Soon — Cloud */}
-				{isCloud && (
-					<div className="welcome-coming-soon">
-						<div className="welcome-coming-soon-icon">&#9729;</div>
-						<div className="welcome-coming-soon-title">Coming Soon</div>
-						<div className="welcome-coming-soon-text">
-							RocketRide Cloud is under active development.<br />
-							Stay tuned for managed cloud hosting with zero setup.
+					{/* Coming Soon — Cloud */}
+					{isCloud && (
+						<div className="welcome-coming-soon">
+							<div className="welcome-coming-soon-icon">&#9729;</div>
+							<div className="welcome-coming-soon-title">Coming Soon</div>
+							<div className="welcome-coming-soon-text">
+								RocketRide Cloud is under active development.<br />
+								Stay tuned for managed cloud hosting with zero setup.
+							</div>
 						</div>
-					</div>
-				)}
+					)}
 
-
-				{/* API Key — On-prem */}
-				{needsApiKey && (
-					<div className="welcome-form-group">
-						<label htmlFor="apiKey">API Key</label>
-						<div className="welcome-password-row">
-							<input
-								type={showApiKey ? 'text' : 'password'}
-								id="apiKey"
-								placeholder="Enter your API key"
-								value={settings.apiKey}
-								onChange={(e) => setSettings(prev => ({
-									...prev,
-									apiKey: e.target.value,
-									hasApiKey: e.target.value.trim().length > 0
-								}))}
-							/>
-							<button
-								type="button"
-								className="secondary small"
-								onClick={() => setShowApiKey(!showApiKey)}
-							>
-								{showApiKey ? 'Hide' : 'Show'}
-							</button>
-						</div>
-						<div className="welcome-help">
-							Get your API key from <a href="https://cloud.rocketride.ai" target="_blank" rel="noopener">cloud.rocketride.ai</a>
-						</div>
-					</div>
-				)}
-
-				{/* Host URL — On-prem */}
-				{settings.connectionMode === 'onprem' && (
-					<div className="welcome-form-group">
-						<label htmlFor="hostUrl">Host URL</label>
-						<input
-							type="text"
-							id="hostUrl"
-							placeholder="your-server:5565"
-							value={settings.hostUrl}
-							onChange={(e) => setSettings(prev => ({ ...prev, hostUrl: e.target.value }))}
-						/>
-						<div className="welcome-help">Base URL of your hosted RocketRide server</div>
-					</div>
-				)}
-
-				{/* Port — Local */}
-				{settings.connectionMode === 'local' && (
-					<>
+					{/* API Key — On-prem */}
+					{needsApiKey && (
 						<div className="welcome-form-group">
-							<label htmlFor="localPort">Port</label>
+							<label htmlFor="apiKey">API Key</label>
+							<div className="welcome-password-row">
+								<input
+									type={showApiKey ? 'text' : 'password'}
+									id="apiKey"
+									placeholder="Enter your API key"
+									value={settings.apiKey}
+									onChange={(e) => setSettings(prev => ({
+										...prev,
+										apiKey: e.target.value,
+										hasApiKey: e.target.value.trim().length > 0
+									}))}
+								/>
+								<button
+									type="button"
+									className="secondary small"
+									onClick={() => setShowApiKey(!showApiKey)}
+								>
+									{showApiKey ? 'Hide' : 'Show'}
+								</button>
+							</div>
+							<div className="welcome-help">
+								Get your API key from <a href="https://cloud.rocketride.ai" target="_blank" rel="noopener">cloud.rocketride.ai</a>
+							</div>
+						</div>
+					)}
+
+					{/* Host URL — On-prem */}
+					{settings.connectionMode === 'onprem' && (
+						<div className="welcome-form-group">
+							<label htmlFor="hostUrl">Host URL</label>
 							<input
 								type="text"
-								inputMode="numeric"
-								id="localPort"
-								placeholder="5565"
-								value={localPort}
-								onChange={handleLocalPortChange}
-								style={{ width: 120 }}
+								id="hostUrl"
+								placeholder="your-server:5565"
+								value={settings.hostUrl}
+								onChange={(e) => setSettings(prev => ({ ...prev, hostUrl: e.target.value }))}
 							/>
-							<div className="welcome-help">Local engine port (default: 5565)</div>
+							<div className="welcome-help">Base URL of your hosted RocketRide server</div>
 						</div>
+					)}
 
-						<div className="welcome-form-group">
-							<label htmlFor="engineVersion">Engine Version</label>
-							<select
-								id="engineVersion"
-								value={settings.localEngineVersion}
-								onChange={handleVersionChange}
-								disabled={engineVersionsLoading}
-							>
-								<option value="latest">&lt;Latest&gt;</option>
-								<option value="prerelease">&lt;Prerelease&gt;</option>
-								{engineVersions.length > 0 && (
-									<option disabled>{'────────────────'}</option>
-								)}
-								{engineVersionsLoading && (
-									<option disabled>Loading versions...</option>
-								)}
-								{engineVersions.map(v => (
-									<option key={v.tag_name} value={v.tag_name}>
-										{displayVersion(v.tag_name)}{v.prerelease ? ' (pre)' : ''}
-									</option>
-								))}
-							</select>
-							<div className="welcome-help">Choose which engine version to download.</div>
+					{/* Auto-connect — On-prem */}
+					{settings.connectionMode === 'onprem' && (
+						<div className="welcome-form-group welcome-checkbox-row">
+							<input
+								type="checkbox"
+								id="autoConnect"
+								checked={settings.autoConnect}
+								onChange={(e) => setSettings(prev => ({ ...prev, autoConnect: e.target.checked }))}
+							/>
+							<label htmlFor="autoConnect">Auto-connect on startup</label>
 						</div>
-					</>
-				)}
+					)}
 
-				{/* Auto-connect — on-prem only */}
-				{settings.connectionMode === 'onprem' && (
-					<div className="welcome-form-group welcome-checkbox-row">
-						<input
-							type="checkbox"
-							id="autoConnect"
-							checked={settings.autoConnect}
-							onChange={(e) => setSettings(prev => ({ ...prev, autoConnect: e.target.checked }))}
-						/>
-						<label htmlFor="autoConnect">Auto-connect on startup</label>
-					</div>
-				)}
+					{/* Server Version — Local */}
+					{settings.connectionMode === 'local' && (
+						<>
+							<div className="welcome-form-group">
+								<label htmlFor="engineVersion">Server Version</label>
+								<select
+									id="engineVersion"
+									value={settings.localEngineVersion}
+									onChange={handleVersionChange}
+									disabled={engineVersionsLoading}
+								>
+									<option value="latest">&lt;Latest&gt;</option>
+									<option value="prerelease">&lt;Prerelease&gt;</option>
+									{engineVersions.length > 0 && (
+										<option disabled>{'────────────────'}</option>
+									)}
+									{engineVersionsLoading && (
+										<option disabled>Loading versions...</option>
+									)}
+									{engineVersions.map(v => (
+										<option key={v.tag_name} value={v.tag_name}>
+											{displayVersion(v.tag_name)}{v.prerelease ? ' (pre)' : ''}
+										</option>
+									))}
+								</select>
+								<div className="welcome-help">Choose which server version to download.</div>
+							</div>
+						</>
+					)}
+				</div>
 
 				{/* Message area */}
 				{message && (

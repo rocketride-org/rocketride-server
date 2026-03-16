@@ -27,6 +27,7 @@ import { ConnectionSettings } from './ConnectionSettings';
 import { PipelineSettings } from './PipelineSettings';
 import { DebuggingSettings } from './DebuggingSettings';
 import { EnvVariablesSettings } from './EnvVariablesSettings';
+import { IntegrationSettings } from './IntegrationSettings';
 import { MessageDisplay } from './MessageDisplay';
 
 // Import the styles
@@ -46,9 +47,14 @@ export interface SettingsData {
 	autoConnect: boolean;
 	defaultPipelinePath: string;
 	localEngineVersion: string;
-	localEngineArgs: string[];
+	localEngineArgs: string;
+	localDebugOutput: boolean;
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
 	envVars?: Record<string, string>;
+	integrationCopilot: boolean;
+	integrationClaudeCode: boolean;
+	integrationCursor: boolean;
+	integrationWindsurf: boolean;
 }
 
 export interface EngineVersionItem {
@@ -128,7 +134,11 @@ export const PageSettings: React.FC = () => {
 		localEngineVersion: 'latest',
 		localEngineArgs: [],
 		pipelineRestartBehavior: 'prompt',
-		envVars: {}
+		envVars: {},
+		integrationCopilot: false,
+		integrationClaudeCode: false,
+		integrationCursor: false,
+		integrationWindsurf: false
 	});
 	const [message, setMessage] = useState<MessageData | null>(null);
 	const [developmentTestMessage, setDevelopmentTestMessage] = useState<MessageData | null>(null);
@@ -295,6 +305,11 @@ export const PageSettings: React.FC = () => {
 				/>
 
 				<DebuggingSettings
+					settings={settings}
+					onSettingsChange={handleSettingsChange}
+				/>
+
+				<IntegrationSettings
 					settings={settings}
 					onSettingsChange={handleSettingsChange}
 				/>

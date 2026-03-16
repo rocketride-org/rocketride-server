@@ -22,10 +22,34 @@
 // =============================================================================
 
 /**
- * adapter.ts - Updated Debug Adapter Factory and Registration for RocketRide VS Code Extension
- * 
- * This updated version uses the persistent connection manager instead of creating
- * connections per debug session.
+ * adapter.ts - Debug Adapter Factory and Registration for RocketRide VS Code Extension
+ *
+ * This module is compiled but NOT currently registered. To re-enable the debugger,
+ * add the following back to apps/vscode/package.json:
+ *
+ * 1. Under "activationEvents":
+ *      "onDebugResolve:rocketride",
+ *      "onDebug:rocketride",
+ *      "onDebugInitialConfigurations",
+ *      "onDebugDynamicConfigurations"
+ *
+ * 2. Under "contributes.breakpoints":
+ *      { "language": "pipeline" }
+ *
+ * 3. Under "contributes.debuggers":
+ *      {
+ *        "type": "rocketride",
+ *        "label": "RocketRide Debugger",
+ *        "languages": ["pipeline"],
+ *        "initialConfigurations": [...],
+ *        "configurationSnippets": [...],
+ *        "configurationAttributes": { "launch": {...}, "attach": {...} }
+ *      }
+ *    (See git history for the full removed block.)
+ *
+ * In extension.ts, uncomment both:
+ *   - the import of registerDebugger from './debugger/adapter'
+ *   - the registerDebugger(context) call in the activation sequence
  */
 
 import * as vscode from 'vscode';

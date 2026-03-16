@@ -219,13 +219,20 @@ export class PageSettingsProvider {
 
 			// Local engine settings
 			localEngineVersion: workspaceConfig.get('local.engineVersion', 'latest'),
-			localEngineArgs: workspaceConfig.get('engineArgs', []),
+			localDebugOutput: workspaceConfig.get('local.debugOutput', false),
+			localEngineArgs: workspaceConfig.get('engineArgs', ''),
 
 			// Debugging settings
 			pipelineRestartBehavior: workspaceConfig.get('pipelineRestartBehavior', 'prompt'),
 
 			// Environment variables
-			envVars: envVars
+			envVars: envVars,
+
+			// Integration settings
+			integrationCopilot: workspaceConfig.get('integrations.copilot', false),
+			integrationClaudeCode: workspaceConfig.get('integrations.claudeCode', false),
+			integrationCursor: workspaceConfig.get('integrations.cursor', false),
+			integrationWindsurf: workspaceConfig.get('integrations.windsurf', false)
 		};
 
 		webview.postMessage({
@@ -264,6 +271,9 @@ export class PageSettingsProvider {
 			if (settings.localEngineVersion !== undefined) {
 				await workspaceConfig.update('local.engineVersion', settings.localEngineVersion, vscode.ConfigurationTarget.Global);
 			}
+			if (settings.localDebugOutput !== undefined) {
+				await workspaceConfig.update('local.debugOutput', settings.localDebugOutput, vscode.ConfigurationTarget.Global);
+			}
 			if (settings.localEngineArgs !== undefined) {
 				await workspaceConfig.update('engineArgs', settings.localEngineArgs, vscode.ConfigurationTarget.Global);
 			}
@@ -271,6 +281,20 @@ export class PageSettingsProvider {
 			// Save debugging settings
 			if (settings.pipelineRestartBehavior !== undefined) {
 				await workspaceConfig.update('pipelineRestartBehavior', settings.pipelineRestartBehavior, vscode.ConfigurationTarget.Global);
+			}
+
+			// Save integration settings
+			if (settings.integrationCopilot !== undefined) {
+				await workspaceConfig.update('integrations.copilot', settings.integrationCopilot, vscode.ConfigurationTarget.Global);
+			}
+			if (settings.integrationClaudeCode !== undefined) {
+				await workspaceConfig.update('integrations.claudeCode', settings.integrationClaudeCode, vscode.ConfigurationTarget.Global);
+			}
+			if (settings.integrationCursor !== undefined) {
+				await workspaceConfig.update('integrations.cursor', settings.integrationCursor, vscode.ConfigurationTarget.Global);
+			}
+			if (settings.integrationWindsurf !== undefined) {
+				await workspaceConfig.update('integrations.windsurf', settings.integrationWindsurf, vscode.ConfigurationTarget.Global);
 			}
 
 			// Save API key to secure storage whenever provided (used for cloud dev and deployment)
