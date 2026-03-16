@@ -4,8 +4,6 @@
  * Finds tasks.js files throughout the project and registers them.
  */
 const path = require('path');
-const { glob } = require('glob');
-const parse = require('gitignore-globs');
 const { exists } = require('./fs');
 
 class ModuleRegistry {
@@ -18,6 +16,9 @@ class ModuleRegistry {
      * Searches for scripts/tasks.js in packages/, apps/, and nodes/
      */
     async discover(rootDir) {
+        const { glob } = require('glob');
+        const parse = require('gitignore-globs');
+
         const gitignorePath = path.join(rootDir, '.gitignore');
         const gitignore = await exists(gitignorePath) ? parse(gitignorePath) : [];
 

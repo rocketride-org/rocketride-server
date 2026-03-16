@@ -4,8 +4,7 @@
  * Provides smart directory synchronization that only copies changed files.
  */
 const path = require('path');
-const { glob } = require('glob');
-const { exists, mkdir, stat, copyFileEnsure, unlink } = require('./fs');
+const { exists, stat, copyFileEnsure, unlink } = require('./fs');
 const { setState, } = require('./state');
 const { DIST_ROOT } = require('./paths');
 const SERVER_DIR = path.join(DIST_ROOT, 'server');
@@ -29,6 +28,8 @@ const SERVER_DIR = path.join(DIST_ROOT, 'server');
  * @returns {Promise<{ added: number, updated: number, deleted: number, changed: number, unchanged: number }>}
  */
 async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, deleted: 0, changed: 0, unchanged: 0 }) {
+    const { glob } = require('glob');
+    
     // Check source dir
     if (!(await stat(src)).isDirectory()) {
         throw new Error(`Source path ${src} is not a directory`);
