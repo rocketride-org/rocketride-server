@@ -250,7 +250,7 @@ async function main() {
 
     // Run deps check silently (only outputs if install needed)
     const { checkDependencies } = require('./deps-tasks');
-    await checkDependencies();
+    await checkDependencies(options);
 
     // Load rest of build system (depends on listr2 and node_modules)
     const registry = require('./lib/registry');
