@@ -10,10 +10,11 @@
 		"name": {
 			"type": "string",
 			"title": "Data Catalog Name",
-			"minLength": 2,
+			"minLength": 1,
 			"maxLength": 32,
 			"description": "Use a unique name to identify this data set inside of RocketRide.",
-			"readonly": true
+			"readonly": true,
+			"optional": true
 		},
 		"storePath": {
 			"type": "string",
