@@ -259,6 +259,126 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('rocketride.refresh', async () => {
 			await refreshAllProviders();
 			vscode.window.showInformationMessage('RocketRide views refreshed');
+		}),
+
+		vscode.commands.registerCommand('rocketride.indexFolder', async (uri?: vscode.Uri) => {
+			if (!uri) {
+				const folders = await vscode.window.showOpenDialog({
+					canSelectFiles: false,
+					canSelectFolders: true,
+					canSelectMany: false,
+					title: 'Select Folder to Index'
+				});
+				if (!folders || folders.length === 0) return;
+				uri = folders[0];
+			}
+
+			const logger = getLogger();
+			const conn = ConnectionManager.getInstance();
+
+			if (!conn.isConnected()) {
+				const connect = await vscode.window.showWarningMessage('RocketRide server is not connected. Connect now?', 'Connect');
+				if (connect === 'Connect') {
+					await vscode.commands.executeCommand('rocketride.sidebar.connection.connect');
+				} else {
+					return;
+				}
+			}
+
+			await vscode.window.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: `Indexing ${vscode.workspace.asRelativePath(uri)}`,
+				cancellable: true
+			}, async (_progress, _token) => {
+				try {
+					const projectId = `index-${Date.now()}`;
+					const folderPath = uri!.fsPath;
+
+					// Create a "Knowledge Base" pipeline on the fly
+					const pipeline = {
+						project_id: projectId,
+						components: [
+							{
+								id: "folder_source",
+								provider: "webhook", // Entry point
+								name: "Folder Source",
+								parameters: {}
+							},
+							{
+								id: "scanner",
+								provider: "tool_http_request", // Placeholder or real directory scanner if exists
+								name: "Directory Scanner",
+								parameters: {
+									path: folderPath,
+									recursive: true
+								},
+								inputs: ["folder_source"]
+							},
+							{
+								id: "indexer",
+								provider: "chroma", // Use Chroma for local vector storage
+								name: "Local Vector Store",
+								parameters: {
+									collection_name: `index_${path.basename(folderPath)}`,
+									action: "upsert"
+								},
+								inputs: ["scanner"]
+							}
+						]
+					};
+
+					logger.output(`${icons.info} Starting ad-hoc indexing for: ${folderPath}`);
+					
+					await conn.request('execute', {
+						projectId: projectId,
+						source: "folder_source",
+						pipeline: pipeline,
+						args: []
+					});
+
+					vscode.window.showInformationMessage(`Started indexing ${path.basename(folderPath)}. Check Status page for progress.`);
+					
+					// Optional: automatically open status page
+					const statusPageProvider = getStatusPageProvider();
+					if (statusPageProvider) {
+						statusPageProvider.show(`Index: ${path.basename(folderPath)}`, uri!, projectId, "folder_source");
+					}
+
+				} catch (error) {
+					logger.output(`${icons.warning} Indexing failed: ${error}`);
+					vscode.window.showErrorMessage(`Indexing failed: ${error}`);
+				}
+			});
+		}),
+
+		vscode.commands.registerCommand('rocketride.exportAsMCP', async (uri?: vscode.Uri) => {
+			if (!uri) return;
+
+			const fileName = path.basename(uri.fsPath);
+			const projectId = fileName.replace(/\.pipe(\.json)?$/, '');
+
+			// Generate the MCP config snippet
+			const mcpConfig = {
+				mcpServers: {
+					[`rocketride-${projectId}`]: {
+						command: "rocketride-engine",
+						args: [
+							"--mcp",
+							"--pipeline", uri.fsPath
+						]
+					}
+				}
+			};
+
+			const configStr = JSON.stringify(mcpConfig, null, 2);
+			
+			const doc = await vscode.workspace.openTextDocument({
+				content: `// Add this to your claude_desktop_config.json\n\n${configStr}`,
+				language: 'jsonc'
+			});
+			
+			await vscode.window.showTextDocument(doc);
+			vscode.window.showInformationMessage(`MCP configuration generated for "${projectId}". Copy it to your Claude Desktop config.`);
 		})
 	];
 

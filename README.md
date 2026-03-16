@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./images/header.jpeg" alt="Header">
+  <img src="./images/header.jpeg" alt="RocketRide Header">
 </p>
 
 <p align="center">
@@ -9,75 +9,66 @@
   <a href="https://discord.gg/9hr3tdZmEG"><img src="https://img.shields.io/badge/Discord-Join%20us-5865F2.svg" alt="Discord"></a>
 </p>
 
-RocketRide is a high-performance data processing engine built on a C++ core with a Python-extensible node system. With 50+ pipeline nodes, native AI/ML support, and SDKs for TypeScript, Python, and MCP, it lets you process, transform, and analyze data at scale — entirely on your own infrastructure.
+# RocketRide: The IDE-Native Engine for High-Performance AI Agents & Local RAG
 
-## Key Capabilities
-- **Stay in your IDE** — Build, debug, test, and scale heavy AI and data workloads with an intuitive visual builder in the environment you're used to. Stop using your browser.
-- **High-performance C++ engine** — Native multithreading. No bottleneck. Purpose-built for throughput, not prototypes.
-- **Multi-agent workflows** — Orchestrate and scale agents with built-in support for CrewAI and LangChain.
-- **50+ pipeline nodes** — Python-extensible, with 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more.
-- **TypeScript, Python & MCP SDKs** — Integrate pipelines into native applications or expose them as tools for AI assistants.
-- **One-click deploy** — Run on Docker, on-prem, or RocketRide Cloud (👀*coming soon*). Our architecture is made for production, not demos.
+**Stop jumping to the browser to build AI workflows. Build, debug, and ship production-ready agentic pipelines directly in VS Code.**
 
-## ⚡ Quick Start
-
-1) Install the extension for your IDE. Search for RocketRide in the extension marketplace:
-
-   <p align="center">
-     <img src="./images/install.png" alt="Install RocketRide extension">
-   </p>
-
-   <sub>[Not seeing your IDE? Open an issue](https://github.com/rocketride-org/rocketride-server/issues/new) · [Download directly](https://open-vsx.org/extension/RocketRide/rocketride)</sub>
-
-2) Click the RocketRide (🚀) extension in your IDE
-
-3) Deploy a server — you'll be prompted on how you want to run the server. Choose the option that fits your setup:
-   - **Local (Recommended)** — This pulls the server directly into your IDE without any additional setup.
-   - **On-Premises** — Run the server on your own hardware for full control and data residency. Pull the image and deploy to Docker or clone this repo and [build from source](CONTRIBUTING.md#getting-started).
-   - **RocketRide Cloud** (👀*coming soon*) — Managed hosting with our proprietary model server. No infrastructure to maintain.
-
-4) Create a `.pipe` file and start building
-
-## 🔧 Building your first pipe
-
-1) All pipelines are recognized with the `*.pipe` format. Each pipeline and configuration is a JSON object - but the extension in your IDE will render within our visual builder canvas.
-
-2) All pipelines begin with source node: *webhook*, *chat*, or *dropper*. For specific usage, examples, and inspiration 💡 on how to build pipelines, check out our [guides and documentation](https://docs.rocketride.org/)
-   - [Advanced RAG](https://docs.rocketride.org/examples/advanced-rag-pipeline/)
-   - [Video Frame Grabber](https://docs.rocketride.org/examples/video-key-frame-grabber/)
-   - [Audio Transcription](https://docs.rocketride.org/examples/audio-transcription-simple/)
-
-3) Connect input lanes and output lanes by type to properly wire your pipeline. Some nodes like agents or LLMs can be invoked as tools for use by a parent node as shown below:
-
-<p align="center">
-  <img src="./images/agent_pipeline.png" alt="Pipeline canvas example">
-</p>
-
-4) You can run a pipeline from the canvas by pressing the ▶️ button on the source node or from the `Connection Manager` directly.
-
-5) View all available and running pipelines below the `Connection Manager`. Selecting running pipelines allows for in depth analytics. Trace call trees, token usage, memory consumption, and more to optimize your pipelines before scaling and deploying.
-
-6) 📦 Deploy your pipelines to RocketRide.ai cloud or run them on your own infrastructure.
-
-   - **Docker** — Download the RocketRide server image and create a container. Requires [Docker](https://docs.docker.com/get-docker/) to be installed.
-
-     ```bash
-     docker pull ghcr.io/rocketride-org/rocketride-engine:latest
-     docker create --name rocketride-engine -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
-     ```
-   - **RocketRide Cloud** (👀*coming soon*) — Managed hosting with our proprietary model server and batched processing. The cheapest option to run AI workflows and pipelines at scale (seriously).
-
-7) Run your pipelines as standalone processes or integrate them into your existing [Python](https://docs.rocketride.org/sdk/python-sdk) and [TypeScript/JS](https://docs.rocketride.org/sdk/node-sdk) applications utilizing our SDK.
-
-8) Use it, commit it, ship it. 🚚
-
-## Useful Links
-- 📚 [Documentation](https://docs.rocketride.org/)
-- 💬 [Discord](https://discord.gg/9hr3tdZmEG)
-- 🤝 [Contributions](CONTRIBUTING.md)
-- 🔒 [Security](SECURITY.md)
-- ⚖️ [License](LICENSE)
+RocketRide is a high-performance orchestration engine built on a **C++ core** with a **Python-extensible node system**. While tools like Langflow and Dify focus on low-code prototyping in the browser, RocketRide is built for **Senior Engineers** who need local execution, zero-latency RAG, and seamless integration with the tools they already use: **VS Code, Cursor, and Claude Desktop.**
 
 ---
 
-<p align="center">Made with ❤️ in 🌁 SF & 🇪🇺 EU</p>
+## ⚡ Why RocketRide?
+
+*   **🚀 C++ Performance:** Bypasses the Python Global Interpreter Lock (GIL). Uses zero-copy memory to pass multi-gigabyte data (video, audio, massive PDF sets) between nodes 100x faster than Python-based orchestrators.
+*   **🛠️ IDE-Native Flow:** No context switching. A visual pipeline builder lives as a VS Code Webview, sitting directly next to your source code and git.
+*   **🔌 MCP Native:** The easiest way to build, test, and export **Model Context Protocol (MCP)** tools. Turn any visual pipeline into a "skill" for Claude Desktop or Cursor with one click.
+*   **🔓 Pure MIT License:** Build your commercial AI-as-a-Service without "multi-tenant" license traps or vendor lock-in.
+
+---
+
+## 💎 Killer Features (The "Aha!" Moment)
+
+### 1. Instant Local Knowledge (Right-Click RAG)
+Don't write scripts to index your documents. Right-click any folder in the VS Code explorer and select **"Index with RocketRide"**. Our C++ engine will chunk, embed, and store your data in a local vector database in seconds.
+
+### 2. Visual MCP Tool Creator
+Tired of writing boilerplate for MCP servers? Build your logic visually—connect LLMs, OCR, Vector DBs, and API calls. Then use **"Expose as MCP Tool"** to generate a configuration snippet for Claude or Cursor. Your AI assistant now has superpowers you designed visually.
+
+### 3. Production-Grade Debugging
+Don't guess why your agent failed. Use the integrated **RocketRide Debugger** to step through your pipeline, inspect real-time state, and visualize data flow—just like you debug your code.
+
+---
+
+## 📦 Getting Started
+
+1.  **Install the VS Code Extension**: Search for "RocketRide" in the Extension Marketplace.
+2.  **Deploy Local Engine**: The extension will automatically bootstrap the high-performance C++ engine for you.
+3.  **Build Your First Pipe**: Create a `*.pipe` file and drag-and-drop from 50+ optimized nodes (OpenAI, Anthropic, DeepSeek, Chroma, Firecrawl, etc.).
+
+### Run as a Standalone Server
+If you want to run RocketRide on your infrastructure:
+
+```bash
+docker pull ghcr.io/rocketride-org/rocketride-engine:latest
+docker run -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
+```
+
+---
+
+## 🏗️ Architecture
+- **Core Engine**: C++17 with native multithreading.
+- **Node System**: Python 3.10+ (extensible).
+- **Frontend**: VS Code Webview (React/Tailwind).
+- **Communication**: High-speed binary bridge between C++ and Python nodes.
+
+---
+
+## 🤝 Community & Support
+- 📚 [Documentation](https://docs.rocketride.org/)
+- 💬 [Discord](https://discord.gg/9hr3tdZmEG)
+- 🤝 [Contribution Guide](CONTRIBUTING.md)
+- ⚖️ [License (MIT)](LICENSE)
+
+---
+
+<p align="center">Made with ❤️ for engineers who value performance and privacy.</p>
