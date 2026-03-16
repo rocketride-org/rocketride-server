@@ -1,1 +1,1 @@
-# No external dependencies — uses only Python stdlib and the RocketRide SDK.
+jmespath

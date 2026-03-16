@@ -4,11 +4,12 @@ Framework-facing host services for agent framework drivers.
 Wraps the engine control-plane invoke seam into a small interface:
   - host.llm.invoke(...)
   - host.tools.query/validate/invoke(...)
+  - host.memory.put/get/list/clear(...)
 """
 
 from __future__ import annotations
 
-from typing import Any, List, Dict
+from typing import Any, Dict, List, Optional
 
 from rocketlib.types import IInvokeLLM, IInvokeTool
 
@@ -146,7 +147,35 @@ class AgentHostServices:
             # And return the output
             return getattr(param, 'output', None)
 
+    class Memory:
+        """Memory host interface — thin wrapper over the memory_internal node."""
+
+        def __init__(self, invoker, node_id: str) -> None:
+            self._invoker = invoker
+            self._node_id = node_id
+
+        def _invoke(self, tool_name: str, args: dict) -> Dict[str, Any]:
+            param = IInvokeTool.Invoke(tool_name=tool_name, input=args)
+            self._invoker.instance.invoke('memory', param, nodeId=self._node_id)
+            return getattr(param, 'output', None) or {}
+
+        def put(self, key: str, value: Any) -> Dict[str, Any]:
+            return self._invoke('memory.put', {'key': key, 'value': value})
+
+        def get(self, key: str) -> Dict[str, Any]:
+            return self._invoke('memory.get', {'key': key})
+
+        def list(self) -> Dict[str, Any]:
+            return self._invoke('memory.list', {})
+
+        def clear(self, key: Optional[str] = None) -> Dict[str, Any]:
+            return self._invoke('memory.clear', {'key': key} if key else {})
+
     def __init__(self, invoker):
         """Create host service wrappers bound to an engine invoker."""
         self.llm = AgentHostServices.LLM(invoker)
         self.tools = AgentHostServices.Tools(invoker)
+        nodes = invoker.instance.getControllerNodeIds('memory')
+        self.memory: Optional[AgentHostServices.Memory] = (
+            AgentHostServices.Memory(invoker, nodes[0]) if nodes else None
+        )

@@ -78,6 +78,7 @@ class AgentBase(ABC):
         iInstance,
         question: Question,
         *,
+        host: Optional[AgentHostServices] = None,
         emit_answers_lane: bool = True,
     ) -> Any:
         """
@@ -98,9 +99,11 @@ class AgentBase(ABC):
         run_id = new_run_id()
         debug(f'agent base run_agent run_id={run_id} framework={self.FRAMEWORK}')
 
-        # If we have not created the host info yet, do so now. It is the same
-        # for all instances of the pipe
-        if not self._host:
+        # Use provided host (per-instance, e.g. from IInstance.beginInstance),
+        # or create one lazily if not provided.
+        if host is not None:
+            self._host = host
+        elif not self._host:
             self._host = AgentHostServices(iInstance)
 
         def _json_safe(value: Any) -> Any:

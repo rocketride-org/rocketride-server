@@ -4,23 +4,22 @@
 # =============================================================================
 
 """
-Run-scoped keyed memory store exposed as a standalone tool node.
+Run-scoped keyed memory store exposed as a standalone memory node.
 
-Exposed to the planning LLM as five tools:
-  memory.put    — store a value under a key
+Exposed via host.memory as four operations:
+  memory.put    — store a value (string, object, or array) under a key
   memory.get    — retrieve full value by key
-  memory.peek   — retrieve a small preview (first ~10 lines) without pulling
-                  the full value into the planning context
   memory.list   — list all current keys
   memory.clear  — clear one key or all keys
+
+All smart logic (structural summaries, JMESPath extraction, chunked reading)
+lives in the executor, not here. This store is intentionally simple.
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List, Optional
 
-_PEEK_LINES = 10        # max lines returned by memory.peek
 _MEMORY_PREFIX = 'memory.'
 
 _OK_SCHEMA: Dict[str, Any] = {
@@ -34,12 +33,12 @@ _OK_SCHEMA: Dict[str, Any] = {
 TOOL_DESCRIPTORS: List[Dict[str, Any]] = [
     {
         'name': 'memory.put',
-        'description': 'Store a string value under a key for later retrieval.',
+        'description': 'Store a value (string, number, object, or array) under a key for later retrieval.',
         'inputSchema': {
             'type': 'object',
             'properties': {
                 'key': {'type': 'string', 'description': 'Storage key (alphanumeric, hyphens, underscores)'},
-                'value': {'type': 'string', 'description': 'Value to store'},
+                'value': {'description': 'Value to store (string, number, object, or array)'},
             },
             'required': ['key', 'value'],
         },
@@ -60,30 +59,7 @@ TOOL_DESCRIPTORS: List[Dict[str, Any]] = [
             'properties': {
                 'ok': {'type': 'boolean'},
                 'key': {'type': 'string'},
-                'value': {'type': ['string', 'null'], 'description': 'The stored value, or null if not found'},
-            },
-        },
-    },
-    {
-        'name': 'memory.peek',
-        'description': (
-            'Return a small preview of a stored value (first ~10 lines of JSON or text) '
-            'without loading the full value. Use this to decide whether memory.get is needed.'
-        ),
-        'inputSchema': {
-            'type': 'object',
-            'properties': {
-                'key': {'type': 'string', 'description': 'Key to preview'},
-            },
-            'required': ['key'],
-        },
-        'outputSchema': {
-            'type': 'object',
-            'properties': {
-                'ok': {'type': 'boolean'},
-                'key': {'type': 'string'},
-                'exists': {'type': 'boolean'},
-                'preview': {'type': ['string', 'null'], 'description': 'First ~10 lines of the stored value, or null if key does not exist'},
+                'value': {'description': 'The stored value, or null if not found'},
             },
         },
     },
@@ -124,48 +100,25 @@ TOOL_DESCRIPTORS: List[Dict[str, Any]] = [
 ]
 
 
-def _peek_preview(value: str, max_lines: int = _PEEK_LINES) -> str:
-    """
-    Return a compact preview of a stored string value.
-
-    If the value is valid JSON, pretty-prints it and returns the first
-    `max_lines` lines so the structure is visible. Falls back to the
-    first `max_lines` lines of the raw string.
-    """
-    # Try to pretty-print JSON so the structure is visible in the preview
-    try:
-        parsed = json.loads(value)
-        pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
-        lines = pretty.splitlines()
-    except (json.JSONDecodeError, ValueError):
-        # Not JSON — just split the raw text into lines
-        lines = value.splitlines()
-
-    # Return the first N lines, appending a count of truncated lines
-    if len(lines) <= max_lines:
-        return '\n'.join(lines)
-    return '\n'.join(lines[:max_lines]) + f'\n... ({len(lines) - max_lines} more lines)'
 
 
 class MemoryStore:
     """Run-scoped keyed memory for the RocketRide planning agent."""
 
     def __init__(self) -> None:
-        self._store: Dict[str, str] = {}
+        self._store: Dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Operations
     # ------------------------------------------------------------------
 
-    def put(self, key: str, value: str) -> Dict[str, Any]:
-        """Store a value under a key."""
+    def put(self, key: str, value: Any) -> Dict[str, Any]:
+        """Store a value (string, number, object, or array) under a key."""
         if not isinstance(key, str) or not key.strip():
             return {'ok': False, 'error': 'key must be a non-empty string'}
 
         k = key.strip()
-        v = str(value) if not isinstance(value, str) else value
-
-        self._store[k] = v
+        self._store[k] = value
         return {'ok': True, 'key': k}
 
     def get(self, key: str) -> Dict[str, Any]:
@@ -174,15 +127,6 @@ class MemoryStore:
         if k not in self._store:
             return {'ok': False, 'key': k, 'value': None}
         return {'ok': True, 'key': k, 'value': self._store[k]}
-
-    def peek(self, key: str) -> Dict[str, Any]:
-        """Return a short preview of a stored value without the full payload."""
-        k = (key or '').strip()
-        if k not in self._store:
-            return {'ok': False, 'key': k, 'exists': False, 'preview': None}
-        # Delegate to _peek_preview which handles JSON pretty-printing
-        preview = _peek_preview(self._store[k])
-        return {'ok': True, 'key': k, 'exists': True, 'preview': preview}
 
     def list(self) -> Dict[str, Any]:
         """Return a sorted list of all keys currently in memory."""
@@ -214,11 +158,9 @@ class MemoryStore:
         # Strip the "memory." prefix to get the operation name
         op = tool_name[len(_MEMORY_PREFIX):]
         if op == 'put':
-            return self.put(args.get('key', ''), args.get('value', ''))
+            return self.put(args.get('key', ''), args.get('value'))
         if op == 'get':
             return self.get(args.get('key', ''))
-        if op == 'peek':
-            return self.peek(args.get('key', ''))
         if op == 'list':
             return self.list()
         if op == 'clear':
