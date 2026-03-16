@@ -92,12 +92,7 @@ function parseArgs(args) {
             options.logFile = arg.substring('--log='.length);
             currentLogFile = options.logFile; // For signal handlers
         } else if (arg.startsWith('--overlay-root=')) {
-            const overlayRoot = arg.substring('--overlay-root='.length);
-            if (path.isAbsolute(overlayRoot)) {
-                options.overlayRoot = overlayRoot;
-            } else {
-                options.overlayRoot = path.join(process.cwd(), overlayRoot);
-            }
+            options.overlayRoot = path.resolve(arg.substring('--overlay-root='.length));
             const paths = require('./lib/paths');
             paths.BUILD_ROOT = path.join(options.overlayRoot, 'build');
             paths.DIST_ROOT = path.join(options.overlayRoot, 'dist');
