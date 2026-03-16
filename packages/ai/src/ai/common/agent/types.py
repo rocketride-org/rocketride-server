@@ -22,29 +22,37 @@ AGENT_TOOL_CALLS_TYPE = 'RocketRide.agent.tool_calls.v1'
 class AgentHostLLM(Protocol):
     """Minimal host interface for invoking an LLM control-plane operation."""
 
-    def invoke(self, param: Any) -> Any: ...
+    def invoke(self, param: Any) -> Any:
+        pass
 
 
 class AgentHostTools(Protocol):
     """Minimal host interface for tool discovery/validation/invocation."""
 
-    def query(self) -> Any: ...
+    def query(self) -> Any:
+        pass
 
-    def validate(self, tool_name: str, input: Any) -> Any: ...
+    def validate(self, tool_name: str, input: Any) -> Any:
+        pass
 
-    def invoke(self, tool_name: str, input: Any) -> Any: ...
+    def invoke(self, tool_name: str, input: Any) -> Any:
+        pass
 
 
 class AgentHostMemory(Protocol):
     """Run-scoped object store. Simple interface — all smart logic is in the executor."""
 
-    def put(self, key: str, value: Any) -> Dict[str, Any]: ...
+    def put(self, key: str, value: Any) -> Dict[str, Any]:
+        pass
 
-    def get(self, key: str) -> Dict[str, Any]: ...
+    def get(self, key: str) -> Dict[str, Any]:
+        pass
 
-    def list(self) -> Dict[str, Any]: ...
+    def list(self) -> Dict[str, Any]:
+        pass
 
-    def clear(self, key: Optional[str] = None) -> Dict[str, Any]: ...
+    def clear(self, key: Optional[str] = None) -> Dict[str, Any]:
+        pass
 
 
 class AgentHost(Protocol):
