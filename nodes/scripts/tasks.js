@@ -31,6 +31,7 @@
  */
 const path = require('path');
 const {
+    exists,
     syncDir,
     formatSyncStats,
     removeDir,
@@ -54,11 +55,21 @@ const ENGINE = path.join(DIST_ROOT, 'server', 'engine');
 // Action Factories
 // ============================================================================
 
-function makeSyncNodesAction() {
+function makeSyncNodesAction(options = {}) {
     return {
         run: async (ctx, task) => {
             task.output = 'Scanning for changes...';
-            const stats = await syncDir(SRC_DIR, DIST_DIR, { package: true });
+
+            const stats = {};
+            await syncDir(SRC_DIR, DIST_DIR, { mirror: false, package: true }, stats);
+
+            if (options.overlayRoot) {
+                const overlaySrcDir = path.join(options.overlayRoot, 'nodes', 'src', 'nodes');
+                if (await exists(overlaySrcDir)) {
+                    await syncDir(overlaySrcDir, DIST_DIR, { mirror: false, package: true }, stats);
+                }
+            }
+
             task.output = formatSyncStats(stats);
         }
     };
