@@ -27,6 +27,7 @@
  * Coordinates all extension providers and manages the overall extension lifecycle.
  */
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { getLogger } from './shared/util/output';
 import { icons } from './shared/util/icons';
 
@@ -279,7 +280,61 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 			if (!conn.isConnected()) {
 				const connect = await vscode.window.showWarningMessage('RocketRide server is not connected. Connect now?', 'Connect');
 				if (connect === 'Connect') {
+					// Trigger connection
 					await vscode.commands.executeCommand('rocketride.sidebar.connection.connect');
+					
+					// Wait for connection to be established with timeout
+					const connected = await vscode.window.withProgress({
+						location: vscode.ProgressLocation.Notification,
+						title: "Connecting to RocketRide server...",
+						cancellable: true
+					}, async (_, token) => {
+						return new Promise<boolean>((resolve) => {
+							const checkConnection = () => {
+								if (conn.isConnected()) {
+									resolve(true);
+									return true;
+								}
+								return false;
+							};
+
+							if (checkConnection()) return;
+
+							const onConnected = () => {
+								cleanup();
+								resolve(true);
+							};
+
+							const onDisconnected = () => {
+								cleanup();
+								resolve(false);
+							};
+
+							const cleanup = () => {
+								conn.removeListener('connected', onConnected);
+								conn.removeListener('disconnected', onDisconnected);
+							};
+
+							conn.on('connected', onConnected);
+							conn.on('disconnected', onDisconnected);
+
+							token.onCancellationRequested(() => {
+								cleanup();
+								resolve(false);
+							});
+
+							// Timeout after 30 seconds
+							setTimeout(() => {
+								cleanup();
+								resolve(false);
+							}, 30000);
+						});
+					});
+
+					if (!connected) {
+						vscode.window.showErrorMessage('Failed to connect to RocketRide server. Indexing cancelled.');
+						return;
+					}
 				} else {
 					return;
 				}
@@ -294,7 +349,7 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 					const projectId = `index-${Date.now()}`;
 					const folderPath = uri!.fsPath;
 
-					// Create a "Knowledge Base" pipeline on the fly
+					// Create a "Knowledge Base" pipeline on the fly using the correct filesys provider
 					const pipeline = {
 						project_id: projectId,
 						components: [
@@ -306,11 +361,13 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 							},
 							{
 								id: "scanner",
-								provider: "tool_http_request", // Placeholder or real directory scanner if exists
+								provider: "filesys", // Use real directory scanner
 								name: "Directory Scanner",
 								parameters: {
-									path: folderPath,
-									recursive: true
+									include: [folderPath],
+									excludeExternalDrives: true,
+									excludeEnableGlobal: true,
+									excludeSymlinks: true
 								},
 								inputs: ["folder_source"]
 							},
