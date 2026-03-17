@@ -321,7 +321,11 @@ class PreProcessor(PreProcessorBase):
         return
 
     # Process a document by splitting it into chunks
-    def process(self, text: str, path: str = None) -> List[str]:
+    def process(self, text: str, path: str = None, remaining_chunks: int = None) -> List[str]:
+        # If caller says no budget left, skip splitting entirely
+        if remaining_chunks is not None and remaining_chunks <= 0:
+            return []
+
         # Grab the chunks
         textChunks = self._preprocessor.split_text(text)
 
@@ -336,9 +340,11 @@ class PreProcessor(PreProcessorBase):
                     fixed.extend(self._split_safely_by_tokens(ch, self._token_limit))
             textChunks = fixed
 
-        # Apply per-file chunk limit if configured
-        if self._max_chunks_per_file is not None and len(textChunks) > self._max_chunks_per_file:
-            textChunks = textChunks[:self._max_chunks_per_file]
+        # Apply chunk limit: use caller's remaining budget if provided,
+        # otherwise fall back to per-file config limit
+        limit = remaining_chunks if remaining_chunks is not None else self._max_chunks_per_file
+        if limit is not None and len(textChunks) > limit:
+            textChunks = textChunks[:limit]
 
-        # Return the raw text chunks
+        # Return the text chunks
         return textChunks

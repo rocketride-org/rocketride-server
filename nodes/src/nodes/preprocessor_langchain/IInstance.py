@@ -33,12 +33,19 @@ class IInstance(IInstanceBase):
     chunkId: int = 0
     tableId: int = 0
 
+    def _remaining(self):
+        """Return remaining chunk budget for this file, or None if unlimited."""
+        max_chunks = self.IGlobal.preprocessor._max_chunks_per_file
+        if max_chunks is None:
+            return None
+        return max(0, max_chunks - self.chunkId)
+
     def _writeTableOrText(self, text: str, isTable: bool = False):
         # Fill in the metadata using new API
         metadata = DocMetadata(self, isTable=isTable)
 
-        # Chunk the document
-        textChunks = self.IGlobal.preprocessor.process(text)
+        # Chunk the document, passing remaining per-file budget
+        textChunks = self.IGlobal.preprocessor.process(text, remaining_chunks=self._remaining())
 
         # Create the documents
         documents: List[Doc] = []
