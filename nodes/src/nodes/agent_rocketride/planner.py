@@ -333,9 +333,6 @@ def _build_wave_question(
         - Only use the tools listed in Available Tools. Do not invent or modify tool names.
         - NEVER include raw tool results, API responses, JSON blobs, or memory values in the final
         answer. Extract only what is needed to answer the question and present it naturally.
-        EXCEPTION: Tool results that are fenced code blocks intended for UI rendering (e.g.
-        ```chartjs blocks) must be included verbatim in the answer — use {{memory.ref:key}}
-        to embed them. Do NOT unwrap, summarize, or re-encode these blocks.
         - Check before fetching: Before any tool call — including memory.peek — check scratch and
         the result previews first. If the values you need are already there, do not fetch them.
         Missing secondary fields (units, labels, timestamps) are not blockers; if the primary
