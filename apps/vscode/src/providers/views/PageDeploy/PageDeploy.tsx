@@ -96,7 +96,6 @@ export const PageDeploy: React.FC = () => {
 
 	// Service version state
 	const [versions, setVersions] = useState<VersionItem[]>([]);
-	const [versionsLoading, setVersionsLoading] = useState(false);
 	const [selectedVersion, setSelectedVersion] = useState('latest');
 
 	// Docker version state
@@ -151,7 +150,6 @@ export const PageDeploy: React.FC = () => {
 				// Version lists
 				case 'versionsLoaded':
 					setVersions(message.versions);
-					setVersionsLoading(false);
 					break;
 				case 'dockerVersionsLoaded':
 					setDockerTags(message.tags);
