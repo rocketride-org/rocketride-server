@@ -2,7 +2,7 @@
 
 Build, debug, and deploy AI pipelines - without leaving your IDE.
 
-> RocketRide is an open-source, developer-native AI pipeline platform. This extension brings the full RocketRide experience into VS Code: a visual drag-and-drop canvas builder, 50+ ready-to-use nodes, integrated debugging, and real-time analytics.
+> [RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline platform. This extension brings the full RocketRide experience into VS Code: a visual drag-and-drop canvas builder, 50+ ready-to-use nodes, integrated debugging, and real-time analytics.
 
 ## Quick Start
 
