@@ -1,0 +1,244 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Object Detector",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "object_detector://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"video"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most node
+	//
+	"path": "nodes.object_detector",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "object_detector",
+	//
+	//	Optional:
+	//		Description of this driver
+	//
+	"description": [
+		"Detects objects in video frames using a HuggingFace object-detection model ",
+		"(DETR, YOLOS, or custom). Filters frames by detection confidence and an optional ",
+		"class allowlist, then forwards matching frames downstream with pre-roll/post-roll ",
+		"context. Pair with the Visual Similarity Filter node for reference-image matching."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "object-detection.svg",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"image": [
+			"image", "table"
+		]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "Image frames to filter by object detection.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Frames that contain at least one detected object meeting the criteria."
+				},
+				{
+					"lane": "table",
+					"description": "Detection metadata (frame index, timestamp, label, confidence) for matched frames."
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "detr",
+		"profiles": {
+			"detr": {
+				"title": "DETR ResNet-50",
+				"detection_model": "facebook/detr-resnet-50",
+				"min_confidence": 0.3,
+				"fps": 1.0,
+				"pre_roll": 3,
+				"post_roll": 3
+			},
+			"yolos-tiny": {
+				"title": "YOLOS Tiny",
+				"detection_model": "hustvl/yolos-tiny",
+				"min_confidence": 0.3,
+				"fps": 2.0,
+				"pre_roll": 3,
+				"post_roll": 3
+			},
+			"custom": {
+				"title": "Custom model",
+				"detection_model": "",
+				"min_confidence": 0.3,
+				"fps": 1.0,
+				"pre_roll": 3,
+				"post_roll": 3
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service
+	//
+	"fields": {
+		"objdet.detection_model": {
+			"type": "string",
+			"title": "Detection model (HuggingFace)",
+			"description": "HuggingFace model name for object detection (e.g. facebook/detr-resnet-50)",
+			"minLength": 2,
+			"maxLength": 128
+		},
+		"objdet.class_allowlist": {
+			"type": "string",
+			"title": "Object classes to keep",
+			"description": "Comma-separated class labels to forward (e.g. 'car,truck'). Leave empty to keep all detected classes.",
+			"default": ""
+		},
+		"objdet.min_confidence": {
+			"type": "number",
+			"title": "Minimum detection confidence",
+			"description": "Detection confidence threshold (0.0–1.0). Detections below this score are discarded.",
+			"default": 0.3,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"objdet.fps": {
+			"type": "number",
+			"title": "Input frame rate (fps)",
+			"description": "Frame rate of the upstream frame_grabber, used to compute timestamps in the output table.",
+			"default": 1.0
+		},
+		"objdet.pre_roll": {
+			"type": "number",
+			"title": "Pre-roll frames",
+			"description": "Number of frames before the first detection to include in the output.",
+			"default": 3,
+			"minimum": 0
+		},
+		"objdet.post_roll": {
+			"type": "number",
+			"title": "Post-roll frames",
+			"description": "Number of frames after the last detection in a segment to include in the output.",
+			"default": 3,
+			"minimum": 0
+		},
+		"objdet.detr": {
+			"object": "detr",
+			"properties": [
+				"objdet.class_allowlist",
+				"objdet.min_confidence",
+				"objdet.fps",
+				"objdet.pre_roll",
+				"objdet.post_roll"
+			]
+		},
+		"objdet.yolos-tiny": {
+			"object": "yolos-tiny",
+			"properties": [
+				"objdet.class_allowlist",
+				"objdet.min_confidence",
+				"objdet.fps",
+				"objdet.pre_roll",
+				"objdet.post_roll"
+			]
+		},
+		"objdet.custom": {
+			"object": "custom",
+			"properties": [
+				"objdet.detection_model",
+				"objdet.class_allowlist",
+				"objdet.min_confidence",
+				"objdet.fps",
+				"objdet.pre_roll",
+				"objdet.post_roll"
+			]
+		},
+		"objdet.profile": {
+			"title": "Detection model",
+			"description": "Object detection model and configuration",
+			"type": "string",
+			"default": "detr",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "detr",
+					"properties": [
+						"objdet.detr"
+					]
+				},
+				{
+					"value": "yolos-tiny",
+					"properties": [
+						"objdet.yolos-tiny"
+					]
+				},
+				{
+					"value": "custom",
+					"properties": [
+						"objdet.custom"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Object Detector",
+			"properties": [
+				"objdet.profile"
+			]
+		}
+	]
+}
