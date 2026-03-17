@@ -83,7 +83,6 @@ class Embedding(EmbeddingBase):
         monitorStatus('Loading model', self._model)
         self._embedding = SentenceTransformer(
             model_name_or_path=self._model,
-            trust_remote_code=True,
             truncate_dim=self._truncateDim,
         )
 
