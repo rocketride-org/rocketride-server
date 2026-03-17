@@ -13,7 +13,6 @@
 		"Transports: STDIO (local subprocess), Streamable HTTP (modern), and legacy HTTP+SSE."
 	],
 	"tile": [
-		"Server: ${parameters.mcp_client.serverName}",
 		"Transport: ${parameters.mcp_client.transport}"
 	],
 	"lanes": {},
@@ -107,6 +106,7 @@
 			"type": "string",
 			"title": "Bearer token",
 			"description": "Optional Authorization bearer token",
+			"optional": true,
 			"secure": true,
 			"default": "",
 			"ui": {
@@ -147,7 +147,6 @@
 			"properties": [
 				"type",
 				"name",
-				"mcp_client.serverName",
 				"mcp_client.transport"
 			]
 		}
