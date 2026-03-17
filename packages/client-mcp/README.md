@@ -2,20 +2,20 @@
 
 Model Context Protocol (MCP) integration for the RocketRide Engine - let AI assistants run your pipelines.
 
-> [RocketRide](https://rocketride.org) is an open source, developer-native AI pipeline platform.
+> [RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline platform.
 > This package provides an MCP stdio server that lets AI assistants like Claude interact with a RocketRide engine directly --
 > discovering tools, running pipelines, and processing documents.
 
 ## What is RocketRide?
 
-[RocketRide](https://rocketride.org) is an open source, developer-native AI pipeline platform.
+[RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline platform.
 It lets you build, debug, and deploy production AI workflows without leaving your IDE --
 using a visual drag-and-drop canvas or code-first with TypeScript and Python SDKs.
 
 - **50+ ready-to-use nodes** - 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more
 - **High-performance C++ engine** - production-grade speed and reliability
 - **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
-- **MIT licensed** - fully open source, OSI-compliant
+- **MIT licensed** - fully open-source, OSI-compliant
 
 ## Overview
 
