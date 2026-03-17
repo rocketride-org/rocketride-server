@@ -112,37 +112,39 @@
 	//	Full test configuration - tests all available profiles.
 	//	Run via: builder model_server:fulltest
 	//
-	"fulltest": {
-		"profiles": [
-			"glinerSmall",
-			"glinerMedium",
-			"glinerLarge",
-			"glinerMultiPII",
-			"glinerPIILarge",
-			"glinerMergedLarge",
-			"glinerMulti",
-			"gretelSmall",
-			"gretelLarge",
-			"glinerKo",
-			"glinerIt",
-			"glinerAr",
-			"glinerCommunitySmall",
-			"glinerCommunityMedium",
-			"glinerCommunityLarge",
-			"glinerBiomedSmall",
-			"glinerBiomedLarge"
-		],
-		"cases": [
-			{
-				"text": "My name is John Smith and my email is john.smith@example.com. Please contact me at 555-123-4567.",
-				"expect": {
-					"text": {
-						"contains": "█"
+	"fulltest": [
+		{
+			"profiles": [
+				"glinerSmall",
+				"glinerMedium",
+				"glinerLarge",
+				"glinerMultiPII",
+				"glinerPIILarge",
+				"glinerMergedLarge",
+				"glinerMulti",
+				"gretelSmall",
+				"gretelLarge",
+				"glinerKo",
+				"glinerIt",
+				"glinerAr",
+				"glinerCommunitySmall",
+				"glinerCommunityMedium",
+				"glinerCommunityLarge",
+				"glinerBiomedSmall",
+				"glinerBiomedLarge"
+			],
+			"cases": [
+				{
+					"text": "My name is John Smith and my email is john.smith@example.com. Please contact me at 555-123-4567.",
+					"expect": {
+						"text": {
+							"contains": "█"
+						}
 					}
 				}
-			}
-		]
-	},
+			]
+		}
+	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver

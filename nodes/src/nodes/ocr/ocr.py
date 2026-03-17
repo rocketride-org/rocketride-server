@@ -49,7 +49,7 @@ SCRIPT_FAMILIES = {
         'hu', 'hr', 'sl', 'sq', 'lt', 'lv', 'da', 'no', 'sv', 'id', 'ms',
         'tl', 'vi', 'tr', 'az', 'uz', 'sw', 'la', 'oc',
     ],
-    'cyrillic': ['ru', 'uk', 'be', 'bg', 'sr', 'mk', 'mn', 'en'],
+    'cyrillic': ['ru', 'uk', 'be', 'bg', 'rs_cyrillic', 'mn', 'en'],  # mk not supported by EasyOCR; sr -> rs_cyrillic
     'arabic': ['ar', 'fa', 'ur', 'ug', 'en'],
     'devanagari': ['hi', 'mr', 'ne', 'en'],
     'bengali': ['bn', 'as', 'en'],
