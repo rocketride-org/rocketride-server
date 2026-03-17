@@ -269,7 +269,10 @@
 				"command": "rocketride.page.deploy.open",
 				"title": "Deploy",
 				"category": "RocketRide",
-				"icon": { "dark": "./rocketride-light-icon.png", "light": "./rocketride-dark-icon.png" }
+				"icon": {
+					"dark": "./rocketride-light-icon.png",
+					"light": "./rocketride-dark-icon.png"
+				}
 			},
 			{
 				"command": "rocketride.page.welcome.open",
@@ -279,13 +282,34 @@
 		],
 		"menus": {
 			"commandPalette": [
-				{ "command": "rocketride.sidebar.files.openStatus", "when": "false" },
-				{ "command": "rocketride.sidebar.files.openFile", "when": "false" },
-				{ "command": "rocketride.sidebar.files.runPipeline", "when": "false" },
-				{ "command": "rocketride.sidebar.files.stopPipeline", "when": "false" },
-				{ "command": "rocketride.openPipelineAsText", "when": "false" },
-				{ "command": "rocketride.page.status.open", "when": "false" },
-				{ "command": "rocketride.page.settings.setupCredentials", "when": "false" }
+				{
+					"command": "rocketride.sidebar.files.openStatus",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.files.openFile",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.files.runPipeline",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.files.stopPipeline",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.openPipelineAsText",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.status.open",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.settings.setupCredentials",
+					"when": "false"
+				}
 			],
 			"view/title": [
 				{
@@ -345,11 +369,12 @@
 		"@rsbuild/plugin-type-check": "^1.2.3",
 		"@types/adm-zip": "^0.5.5",
 		"@types/chart.js": "^2.9.41",
+		"@types/dockerode": "^4.0.1",
 		"@types/mocha": "^10.0.10",
 		"@types/node": "20.x",
+		"@types/proper-lockfile": "^4.1.4",
 		"@types/react": "^18.0.0",
 		"@types/react-dom": "^18.0.0",
-		"@types/proper-lockfile": "^4.1.4",
 		"@types/vscode": "^1.99.0",
 		"@types/vscode-webview": "^1.57.5",
 		"@vscode/debugprotocol": "^1.68.0",
@@ -363,10 +388,11 @@
 	},
 	"dependencies": {
 		"@octokit/rest": "^22.0.1",
-		"rocketride": "workspace:*",
 		"adm-zip": "^0.5.16",
 		"chart.js": "^4.4.0",
+		"dockerode": "^4.0.9",
 		"proper-lockfile": "^4.1.2",
+		"rocketride": "workspace:*",
 		"shared": "workspace:*",
 		"tar": "^7.5.8"
 	},

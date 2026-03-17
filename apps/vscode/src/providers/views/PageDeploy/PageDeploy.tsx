@@ -17,50 +17,91 @@ interface ServiceStatus {
 	installPath: string | null;
 }
 
+interface DockerStatus {
+	state: 'not-installed' | 'no-docker' | 'starting' | 'running' | 'stopping' | 'stopped';
+	version: string | null;
+	publishedAt: string | null;
+	imageTag: string | null;
+}
+
 interface VersionItem {
 	tag_name: string;
 	prerelease: boolean;
 }
 
 type IncomingMessage =
-	| { type: 'init'; rocketrideLogoDarkUri?: string; rocketrideLogoLightUri?: string; dockerIconUri?: string; onpremIconUri?: string; engineImage?: string }
+	| { type: 'init'; rocketrideLogoDarkUri?: string; rocketrideLogoLightUri?: string; dockerIconUri?: string; onpremIconUri?: string }
 	| { type: 'serviceStatus'; status: ServiceStatus }
+	| { type: 'dockerStatus'; status: DockerStatus }
 	| { type: 'versionsLoaded'; versions: VersionItem[] }
+	| { type: 'dockerVersionsLoaded'; tags: string[] }
 	| { type: 'serviceProgress'; message: string }
 	| { type: 'serviceComplete' }
-	| { type: 'serviceError'; message: string };
+	| { type: 'serviceError'; message: string }
+	| { type: 'dockerProgress'; message: string }
+	| { type: 'dockerComplete' }
+	| { type: 'dockerError'; message: string };
 
 type OutgoingMessage =
 	| { type: 'ready' }
 	| { type: 'copyToClipboard'; text: string }
-	| { type: 'dockerDeployLocal' }
 	| { type: 'fetchVersions' }
 	| { type: 'serviceInstall'; version: string }
 	| { type: 'serviceRemove' }
 	| { type: 'serviceUpdate'; version: string }
 	| { type: 'serviceStart' }
-	| { type: 'serviceStop' };
+	| { type: 'serviceStop' }
+	| { type: 'dockerInstall'; version: string }
+	| { type: 'dockerRemove' }
+	| { type: 'dockerUpdate'; version: string }
+	| { type: 'dockerStart' }
+	| { type: 'dockerStop' };
 
-const displayVersion = (tag: string): string => tag.replace(/^server-/, '');
+const displayVersion = (tag: string): string => {
+	if (tag === 'latest') return 'Latest';
+	if (tag === 'prerelease') return 'Prerelease';
+	return tag.replace(/^server-/, '');
+};
+
+const stateLabels: Record<string, string> = {
+	'not-installed': '○ Not installed',
+	'no-docker': '○ Docker unavailable',
+	'starting': '◐ Starting...',
+	'running': '● Running',
+	'stopping': '◐ Stopping...',
+	'stopped': '○ Stopped',
+};
 
 export const PageDeploy: React.FC = () => {
 	const [logoDarkUri, setLogoDarkUri] = useState<string | undefined>();
 	const [logoLightUri, setLogoLightUri] = useState<string | undefined>();
 	const [dockerUri, setDockerUri] = useState<string | undefined>();
 	const [onpremUri, setOnpremUri] = useState<string | undefined>();
-	const [engineImage, setEngineImage] = useState('ghcr.io/rocketride-org/rocketride-engine:latest');
-	const [deploying, setDeploying] = useState(false);
 
 	// Service state
 	const [serviceStatus, setServiceStatus] = useState<ServiceStatus>({
 		state: 'not-installed' as const, version: null, publishedAt: null, installPath: null
 	});
-	const [versions, setVersions] = useState<VersionItem[]>([]);
-	const [versionsLoading, setVersionsLoading] = useState(false);
-	const [selectedVersion, setSelectedVersion] = useState('latest');
 	const [serviceProgress, setServiceProgress] = useState<string | null>(null);
 	const [serviceError, setServiceError] = useState<string | null>(null);
 	const [serviceBusy, setServiceBusy] = useState(false);
+
+	// Docker state
+	const [dockerStatus, setDockerStatus] = useState<DockerStatus>({
+		state: 'not-installed' as const, version: null, publishedAt: null, imageTag: null
+	});
+	const [dockerProgress, setDockerProgress] = useState<string | null>(null);
+	const [dockerError, setDockerError] = useState<string | null>(null);
+	const [dockerBusy, setDockerBusy] = useState(false);
+
+	// Service version state
+	const [versions, setVersions] = useState<VersionItem[]>([]);
+	const [versionsLoading, setVersionsLoading] = useState(false);
+	const [selectedVersion, setSelectedVersion] = useState('latest');
+
+	// Docker version state
+	const [dockerTags, setDockerTags] = useState<string[]>([]);
+	const [dockerSelectedVersion, setDockerSelectedVersion] = useState('latest');
 
 	const { sendMessage } = useMessaging<OutgoingMessage, IncomingMessage>({
 		onMessage: (message) => {
@@ -70,18 +111,11 @@ export const PageDeploy: React.FC = () => {
 					if (message.rocketrideLogoLightUri) setLogoLightUri(message.rocketrideLogoLightUri);
 					if (message.dockerIconUri) setDockerUri(message.dockerIconUri);
 					if (message.onpremIconUri) setOnpremUri(message.onpremIconUri);
-					if (message.engineImage) setEngineImage(message.engineImage);
 					break;
+				// Service messages
 				case 'serviceStatus':
 					setServiceStatus(message.status);
-					// Don't clear progress/busy during polling — only clear when no operation is active
-					if (!serviceBusy) {
-						setServiceProgress(null);
-					}
-					break;
-				case 'versionsLoaded':
-					setVersions(message.versions);
-					setVersionsLoading(false);
+					if (!serviceBusy) setServiceProgress(null);
 					break;
 				case 'serviceProgress':
 					setServiceProgress(message.message);
@@ -96,6 +130,32 @@ export const PageDeploy: React.FC = () => {
 					setServiceBusy(false);
 					setServiceProgress(null);
 					break;
+				// Docker messages
+				case 'dockerStatus':
+					setDockerStatus(message.status);
+					if (!dockerBusy) setDockerProgress(null);
+					break;
+				case 'dockerProgress':
+					setDockerProgress(message.message);
+					setDockerError(null);
+					break;
+				case 'dockerComplete':
+					setDockerBusy(false);
+					setDockerProgress(null);
+					break;
+				case 'dockerError':
+					setDockerError(message.message);
+					setDockerBusy(false);
+					setDockerProgress(null);
+					break;
+				// Version lists
+				case 'versionsLoaded':
+					setVersions(message.versions);
+					setVersionsLoading(false);
+					break;
+				case 'dockerVersionsLoaded':
+					setDockerTags(message.tags);
+					break;
 			}
 		}
 	});
@@ -106,64 +166,49 @@ export const PageDeploy: React.FC = () => {
 		sendMessage({ type: 'fetchVersions' });
 	}, [sendMessage]);
 
-	const remoteCommands = `docker pull ${engineImage}\ndocker create --name rocketride-engine -p 5565:5565 ${engineImage}`;
+	// =========================================================================
+	// Version options (separate for each panel)
+	// =========================================================================
 
-	const handleInstall = () => {
-		setServiceBusy(true);
-		setServiceError(null);
-		sendMessage({ type: 'serviceInstall', version: selectedVersion });
-	};
-
-	const handleUpdate = () => {
-		setServiceBusy(true);
-		setServiceError(null);
-		sendMessage({ type: 'serviceUpdate', version: selectedVersion });
-	};
-
-	const handleRemove = () => {
-		setServiceBusy(true);
-		setServiceError(null);
-		sendMessage({ type: 'serviceRemove' });
-	};
-
-	const handleStart = () => {
-		setServiceBusy(true);
-		setServiceError(null);
-		sendMessage({ type: 'serviceStart' });
-	};
-
-	const handleStop = () => {
-		setServiceBusy(true);
-		setServiceError(null);
-		sendMessage({ type: 'serviceStop' });
-	};
-
-	// Split button: primary action on the left, dropdown arrow on the right
-	const [dropdownOpen, setDropdownOpen] = useState<string | null>(null); // 'install' or 'update' or null
-
-	const versionOptions = [
+	// Service panel: GitHub Releases
+	const serviceVersionOptions = [
 		{ value: 'latest', label: '<Latest>' },
 		{ value: 'prerelease', label: '<Prerelease>' },
 		...versions.map(v => ({ value: v.tag_name, label: displayVersion(v.tag_name) }))
 	];
 
-	const selectedLabel = versionOptions.find(v => v.value === selectedVersion)?.label ?? '<Latest>';
+	// Docker panel: GHCR image tags
+	const dockerVersionOptions = [
+		{ value: 'latest', label: '<Latest>' },
+		{ value: 'prerelease', label: '<Prerelease>' },
+		...dockerTags.map(t => ({ value: t, label: t }))
+	];
+
+	// =========================================================================
+	// Split button (reusable for both panels)
+	// =========================================================================
+
+	const [dropdownOpen, setDropdownOpen] = useState<string | null>(null);
 
 	const renderSplitButton = (
 		id: string,
 		label: string,
 		busyLabel: string,
 		onClick: () => void,
+		isBusy: boolean,
+		isTransitional: boolean,
+		currentVersion: string,
+		onVersionChange: (v: string) => void,
+		options: { value: string; label: string }[],
 		primary: boolean = true
 	) => {
 		const isOpen = dropdownOpen === id;
 		const btnClass = primary ? 'deploy-panel-btn-primary' : 'deploy-panel-btn-secondary';
-		const transitional = ['starting', 'stopping'].includes(serviceStatus.state);
-		const isDisabled = serviceBusy || transitional;
+		const isDisabled = isBusy || isTransitional;
+		const currentLabel = options.find(v => v.value === currentVersion)?.label ?? '<Latest>';
 
 		return (
 			<div className="split-button" ref={el => {
-				// Close dropdown on outside click
 				if (!el) return;
 				const handler = (e: MouseEvent) => {
 					if (!el.contains(e.target as Node)) setDropdownOpen(null);
@@ -177,7 +222,7 @@ export const PageDeploy: React.FC = () => {
 					disabled={isDisabled}
 					onClick={onClick}
 				>
-					{serviceBusy ? busyLabel : `${label}: ${selectedLabel}`}
+					{isBusy ? busyLabel : `${label}: ${currentLabel}`}
 				</button>
 				<button
 					type="button"
@@ -189,11 +234,11 @@ export const PageDeploy: React.FC = () => {
 				</button>
 				{isOpen && (
 					<div className="split-button-dropdown">
-						{versionOptions.map((opt, i) => (
+						{options.map((opt) => (
 							<div
 								key={opt.value}
-								className={`split-button-option ${opt.value === selectedVersion ? 'selected' : ''}`}
-								onClick={() => { setSelectedVersion(opt.value); setDropdownOpen(null); }}
+								className={`split-button-option ${opt.value === currentVersion ? 'selected' : ''}`}
+								onClick={() => { onVersionChange(opt.value); setDropdownOpen(null); }}
 							>
 								{opt.label}
 							</div>
@@ -201,6 +246,107 @@ export const PageDeploy: React.FC = () => {
 					</div>
 				)}
 			</div>
+		);
+	};
+
+	// =========================================================================
+	// Status display (reusable)
+	// =========================================================================
+
+	const renderStatusIndicator = (state: string) => (
+		<div className="service-status-row">
+			<span className="service-status-label">Status:</span>
+			<span className={`service-status-indicator ${state}`}>
+				{stateLabels[state] ?? state}
+			</span>
+		</div>
+	);
+
+	// =========================================================================
+	// Service handlers
+	// =========================================================================
+
+	const handleServiceInstall = () => {
+		setServiceBusy(true); setServiceError(null);
+		sendMessage({ type: 'serviceInstall', version: selectedVersion });
+	};
+	const handleServiceUpdate = () => {
+		setServiceBusy(true); setServiceError(null);
+		sendMessage({ type: 'serviceUpdate', version: selectedVersion });
+	};
+	const handleServiceRemove = () => {
+		setServiceBusy(true); setServiceError(null);
+		sendMessage({ type: 'serviceRemove' });
+	};
+	const handleServiceStart = () => {
+		setServiceBusy(true); setServiceError(null);
+		sendMessage({ type: 'serviceStart' });
+	};
+	const handleServiceStop = () => {
+		setServiceBusy(true); setServiceError(null);
+		sendMessage({ type: 'serviceStop' });
+	};
+
+	// =========================================================================
+	// Docker handlers
+	// =========================================================================
+
+	const handleDockerInstall = () => {
+		setDockerBusy(true); setDockerError(null);
+		sendMessage({ type: 'dockerInstall', version: dockerSelectedVersion });
+	};
+	const handleDockerUpdate = () => {
+		setDockerBusy(true); setDockerError(null);
+		sendMessage({ type: 'dockerUpdate', version: dockerSelectedVersion });
+	};
+	const handleDockerRemove = () => {
+		setDockerBusy(true); setDockerError(null);
+		sendMessage({ type: 'dockerRemove' });
+	};
+	const handleDockerStart = () => {
+		setDockerBusy(true); setDockerError(null);
+		sendMessage({ type: 'dockerStart' });
+	};
+	const handleDockerStop = () => {
+		setDockerBusy(true); setDockerError(null);
+		sendMessage({ type: 'dockerStop' });
+	};
+
+	// =========================================================================
+	// Installed action buttons (reusable)
+	// =========================================================================
+
+	const renderInstalledActions = (
+		state: string,
+		isBusy: boolean,
+		onStart: () => void,
+		onStop: () => void,
+		onRemove: () => void,
+		splitButtonId: string,
+		onUpdate: () => void,
+		currentVersion: string,
+		onVersionChange: (v: string) => void,
+		options: { value: string; label: string }[]
+	) => {
+		const transitional = state === 'starting' || state === 'stopping';
+		const allDisabled = isBusy || transitional;
+		const isRunning = state === 'running' || state === 'stopping';
+
+		return (
+			<>
+				<button
+					type="button"
+					className={`deploy-panel-btn ${isRunning ? 'deploy-panel-btn-secondary' : 'deploy-panel-btn-primary'}`}
+					disabled={allDisabled}
+					onClick={isRunning ? onStop : onStart}
+				>
+					{state === 'starting' ? 'Starting...' : state === 'stopping' ? 'Stopping...' : isRunning ? 'Stop' : 'Start'}
+				</button>
+				<button type="button" className="deploy-panel-btn deploy-panel-btn-secondary" disabled={allDisabled} onClick={onRemove}>
+					Remove
+				</button>
+				{renderSplitButton(splitButtonId, 'Update', 'Updating...', onUpdate, isBusy, transitional, currentVersion, onVersionChange, options)}
+			</>
 		);
 	};
 
@@ -226,40 +372,62 @@ export const PageDeploy: React.FC = () => {
 						<img src={dockerUri} alt="Docker" className="deploy-panel-icon" />
 					)}
 					<div className="deploy-panel-content">
-						<h1 className="deploy-panel-title">Deploy Image</h1>
+						<h1 className="deploy-panel-title">Docker Container</h1>
 						<p className="deploy-panel-description">
-							Download the RocketRide engine image and create a container.
-							Requires Docker to be installed.
+							Run the RocketRide engine as a Docker container.
+							Requires Docker to be installed and the daemon running.
 						</p>
-						<div className="deploy-panel-actions">
-							<button
-								type="button"
-								className="deploy-panel-btn deploy-panel-btn-primary"
-								disabled={deploying}
-								onClick={() => {
-									setDeploying(true);
-									sendMessage({ type: 'dockerDeployLocal' });
-								}}
-							>
-								{deploying ? 'Image deployed' : 'Deploy locally'}
-							</button>
-						</div>
-						<details className="deploy-panel-details">
-							<summary>Deploy to a remote server</summary>
-							<div className="deploy-panel-commands">
-								<p className="deploy-panel-description">
-									Run these commands on your target server to pull the image and create a container:
-								</p>
-								<pre className="deploy-panel-code"><code>{remoteCommands}</code></pre>
-								<button
-									type="button"
-									className="deploy-panel-copy"
-									onClick={() => sendMessage({ type: 'copyToClipboard', text: remoteCommands })}
-								>
-									Copy commands
-								</button>
+
+						{/* Status */}
+						{dockerStatus.state !== 'not-installed' && (
+							<div className="service-status">
+								{renderStatusIndicator(dockerStatus.state)}
+								{dockerStatus.version && (
+									<div className="service-status-row">
+										<span className="service-status-label">Version:</span>
+										<span>{displayVersion(dockerStatus.version)}{dockerStatus.publishedAt ? ` (${new Date(dockerStatus.publishedAt).toLocaleDateString()})` : ''}</span>
+									</div>
+								)}
+								{dockerStatus.imageTag && (
+									<div className="service-status-row">
+										<span className="service-status-label">Image:</span>
+										<span className="service-status-path">{IMAGE_BASE}:{dockerStatus.imageTag}</span>
+									</div>
+								)}
 							</div>
-						</details>
+						)}
+
+						{/* Progress / Error */}
+						{dockerProgress && (
+							<div className="service-progress">{dockerProgress}</div>
+						)}
+						{dockerError && (
+							<div className="service-error">{dockerError}</div>
+						)}
+
+						{/* Actions */}
+						<div className="deploy-panel-actions">
+							{dockerStatus.state === 'no-docker' ? (
+								<p className="deploy-panel-description docker-unavailable">
+									Docker is not installed or the Docker daemon is not running.
+								</p>
+							) : dockerStatus.state === 'not-installed' ? (
+								renderSplitButton(
+									'docker-install', 'Install', 'Installing...',
+									handleDockerInstall, dockerBusy, false,
+									dockerSelectedVersion, setDockerSelectedVersion,
+									dockerVersionOptions
+								)
+							) : (
+								renderInstalledActions(
+									dockerStatus.state, dockerBusy,
+									handleDockerStart, handleDockerStop, handleDockerRemove,
+									'docker-update', handleDockerUpdate,
+									dockerSelectedVersion, setDockerSelectedVersion,
+									dockerVersionOptions
+								)
+							)}
+						</div>
 					</div>
 				</div>
 
@@ -278,18 +446,7 @@ export const PageDeploy: React.FC = () => {
 						{/* Status — only shown when installed */}
 						{serviceStatus.state !== 'not-installed' && (
 							<div className="service-status">
-								<div className="service-status-row">
-									<span className="service-status-label">Status:</span>
-									<span className={`service-status-indicator ${serviceStatus.state}`}>
-										{{
-											'not-installed': '○ Not installed',
-											'starting': '◐ Starting...',
-											'running': '● Running',
-											'stopping': '◐ Stopping...',
-											'stopped': '○ Stopped',
-										}[serviceStatus.state]}
-									</span>
-								</div>
+								{renderStatusIndicator(serviceStatus.state)}
 								{serviceStatus.version && (
 									<div className="service-status-row">
 										<span className="service-status-label">Version:</span>
@@ -316,29 +473,21 @@ export const PageDeploy: React.FC = () => {
 						{/* Actions */}
 						<div className="deploy-panel-actions">
 							{serviceStatus.state === 'not-installed' ? (
-								renderSplitButton('install', 'Install', 'Installing...', handleInstall)
-							) : (() => {
-								const transitional = serviceStatus.state === 'starting' || serviceStatus.state === 'stopping';
-								const allDisabled = serviceBusy || transitional;
-								const isRunning = serviceStatus.state === 'running' || serviceStatus.state === 'stopping';
-
-								return (
-									<>
-										<button
-											type="button"
-											className={`deploy-panel-btn ${isRunning ? 'deploy-panel-btn-secondary' : 'deploy-panel-btn-primary'}`}
-											disabled={allDisabled}
-											onClick={isRunning ? handleStop : handleStart}
-										>
-											{serviceStatus.state === 'starting' ? 'Starting...' : serviceStatus.state === 'stopping' ? 'Stopping...' : isRunning ? 'Stop' : 'Start'}
-										</button>
-										<button type="button" className="deploy-panel-btn deploy-panel-btn-secondary" disabled={allDisabled} onClick={handleRemove}>
-											Remove
-										</button>
-										{renderSplitButton('update', 'Update', 'Updating...', handleUpdate)}
-									</>
-								);
-							})()}
+								renderSplitButton(
+									'service-install', 'Install', 'Installing...',
+									handleServiceInstall, serviceBusy, false,
+									selectedVersion, setSelectedVersion,
+									serviceVersionOptions
+								)
+							) : (
+								renderInstalledActions(
+									serviceStatus.state, serviceBusy,
+									handleServiceStart, handleServiceStop, handleServiceRemove,
+									'service-update', handleServiceUpdate,
+									selectedVersion, setSelectedVersion,
+									serviceVersionOptions
+								)
+							)}
 						</div>
 					</div>
 				</div>
@@ -346,3 +495,5 @@ export const PageDeploy: React.FC = () => {
 		</div>
 	);
 };
+
+const IMAGE_BASE = 'ghcr.io/rocketride-org/rocketride-engine';

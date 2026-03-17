@@ -13,8 +13,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getConnectionManager } from '../extension';
 import { createServiceManager, ServiceManager } from '../deploy/service-manager';
+import { DockerManager } from '../deploy/docker-manager';
 import { EngineInstaller } from '../connection/engine-installer';
 import { ConfigManager } from '../config';
 import { getLogger } from '../shared/util/output';
@@ -24,11 +24,14 @@ export class PageDeployProvider {
 	private webviewPanel?: vscode.WebviewPanel;
 	private disposables: vscode.Disposable[] = [];
 	private serviceManager: ServiceManager;
+	private dockerManager: DockerManager;
 	private logger = getLogger();
 	private statusPollInterval?: NodeJS.Timeout;
+	private ghcrTags: string[] = [];
 
 	constructor(private context: vscode.ExtensionContext) {
 		this.serviceManager = createServiceManager();
+		this.dockerManager = new DockerManager();
 		this.registerCommands();
 	}
 
@@ -74,6 +77,7 @@ export class PageDeployProvider {
 						case 'ready':
 							await this.sendInit();
 							await this.sendServiceStatus();
+							await this.sendDockerStatus();
 							this.startStatusPolling();
 							break;
 						case 'copyToClipboard':
@@ -82,12 +86,10 @@ export class PageDeployProvider {
 								vscode.window.showInformationMessage('Copied to clipboard.');
 							}
 							break;
-						case 'dockerDeployLocal':
-							this.deployDockerLocal();
-							break;
 						case 'fetchVersions':
 							await this.fetchVersions();
 							break;
+						// Service operations
 						case 'serviceInstall':
 							await this.serviceInstall(message.version as string);
 							break;
@@ -103,11 +105,29 @@ export class PageDeployProvider {
 						case 'serviceStop':
 							await this.serviceStop();
 							break;
+						// Docker operations
+						case 'dockerInstall':
+							await this.dockerInstall(message.version as string);
+							break;
+						case 'dockerRemove':
+							await this.dockerRemove();
+							break;
+						case 'dockerUpdate':
+							await this.dockerUpdate(message.version as string);
+							break;
+						case 'dockerStart':
+							await this.dockerStart();
+							break;
+						case 'dockerStop':
+							await this.dockerStop();
+							break;
 					}
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					this.logger.output(`${icons.error} Deploy action failed: ${msg}`);
-					this.postMessage({ type: 'serviceError', message: msg });
+					// Route error to the correct panel based on message type
+					const errorType = (message.type as string).startsWith('docker') ? 'dockerError' : 'serviceError';
+					this.postMessage({ type: errorType, message: msg });
 				}
 			},
 			undefined,
@@ -278,6 +298,7 @@ export class PageDeployProvider {
 		this.stopStatusPolling();
 		this.statusPollInterval = setInterval(() => {
 			this.sendServiceStatus();
+			this.sendDockerStatus();
 		}, 3000);
 	}
 
@@ -289,6 +310,7 @@ export class PageDeployProvider {
 	}
 
 	private async fetchVersions(): Promise<void> {
+		// Fetch service versions from GitHub Releases
 		try {
 			const githubToken = await this.getGithubToken();
 			const installer = this.getInstaller();
@@ -297,6 +319,63 @@ export class PageDeployProvider {
 		} catch {
 			this.postMessage({ type: 'versionsLoaded', versions: [] });
 		}
+
+		// Fetch Docker image tags from GHCR
+		try {
+			const { stable, all } = await this.fetchGhcrTags();
+			this.ghcrTags = all;
+			this.postMessage({ type: 'dockerVersionsLoaded', tags: stable });
+		} catch {
+			this.postMessage({ type: 'dockerVersionsLoaded', tags: [] });
+		}
+	}
+
+	/**
+	 * Lists available image tags from GHCR using the Docker Registry V2 API.
+	 * For public images, we can get an anonymous token.
+	 */
+	private async fetchGhcrTags(): Promise<{ stable: string[]; all: string[] }> {
+		// Step 1: Get anonymous pull token for the public image
+		const tokenUrl = 'https://ghcr.io/token?scope=repository:rocketride-org/rocketride-engine:pull';
+		const tokenData = await this.httpsGetJson(tokenUrl) as { token: string };
+
+		// Step 2: List tags
+		const tagsUrl = 'https://ghcr.io/v2/rocketride-org/rocketride-engine/tags/list';
+		const tagsData = await this.httpsGetJson(tagsUrl, tokenData.token) as { tags: string[] };
+
+		const all = (tagsData.tags || [])
+			.filter((t: string) => /^\d+/.test(t)) // version tags only (exclude 'latest', digests)
+			.sort((a: string, b: string) => b.localeCompare(a, undefined, { numeric: true }));
+
+		// Stable: only pure version tags (e.g. '3.1.0'), no '-prerelease' suffix
+		const stable = all.filter((t: string) => /^\d+\.\d+\.\d+$/.test(t));
+
+		return { stable, all };
+	}
+
+	private httpsGetJson(url: string, bearerToken?: string): Promise<unknown> {
+		const https = require('https');
+		return new Promise((resolve, reject) => {
+			const options: Record<string, unknown> = {
+				headers: {
+					'Accept': 'application/json',
+					...(bearerToken ? { 'Authorization': `Bearer ${bearerToken}` } : {}),
+				}
+			};
+			https.get(url, options, (res: { statusCode?: number; on: Function; setEncoding: Function }) => {
+				if (res.statusCode !== 200) {
+					reject(new Error(`GHCR API returned ${res.statusCode}`));
+					return;
+				}
+				let data = '';
+				res.setEncoding('utf8');
+				res.on('data', (chunk: string) => { data += chunk; });
+				res.on('end', () => {
+					try { resolve(JSON.parse(data)); }
+					catch (e) { reject(e); }
+				});
+			}).on('error', reject);
+		});
 	}
 
 	// =========================================================================
@@ -326,28 +405,150 @@ export class PageDeployProvider {
 	}
 
 	// =========================================================================
-	// Docker deploy (unchanged from original)
+	// Docker operations
 	// =========================================================================
 
-	private getEngineImage(): string {
-		const version = getConnectionManager()?.getEngineInfo()?.version;
-		const tag = version ? version.replace(/^server-v/, '') : 'latest';
-		return `ghcr.io/rocketride-org/rocketride-engine:${tag}`;
+	/**
+	 * Maps a versionSpec to the actual GHCR image tag.
+	 *   'latest'      → 'latest' (GHCR alias for newest stable)
+	 *   'prerelease'  → newest '*-prerelease' tag from GHCR (e.g. '3.1.0-prerelease')
+	 *   '3.1.0'       → '3.1.0' (pass through)
+	 */
+	private getDockerImageTag(versionSpec: string): string {
+		if (versionSpec === 'latest') return 'latest';
+		if (versionSpec === 'prerelease') {
+			const pre = this.ghcrTags.find(t => t.endsWith('-prerelease'));
+			if (!pre) throw new Error('No prerelease image found on GHCR');
+			return pre;
+		}
+		return versionSpec;
 	}
 
-	private deployDockerLocal(): void {
-		try {
-			const image = this.getEngineImage();
-			const term = vscode.window.createTerminal({
-				name: 'RocketRide Deploy',
-				hideFromUser: false
-			});
-			term.show();
-			term.sendText(`docker pull ${image}`);
-			term.sendText(`docker create --name rocketride-engine -p 5565:5565 ${image}`);
-		} catch (err) {
-			vscode.window.showErrorMessage(`Failed to deploy Docker image: ${err instanceof Error ? err.message : String(err)}`);
+	private async dockerInstall(versionSpec: string): Promise<void> {
+		const { imageTag } = { imageTag: this.getDockerImageTag(versionSpec) };
+		const onProgress = (message: string) => this.postMessage({ type: 'dockerProgress', message });
+
+		await this.dockerManager.install(imageTag, onProgress);
+
+		this.writeDockerConfig({ versionSpec, imageTag });
+
+		await this.waitForDockerRunning();
+		this.postMessage({ type: 'dockerComplete' });
+	}
+
+	private async dockerRemove(): Promise<void> {
+		this.postMessage({ type: 'dockerProgress', message: 'Removing container and image...' });
+		await this.dockerManager.remove(true);
+		this.deleteDockerConfig();
+		await this.sendDockerStatus();
+		this.postMessage({ type: 'dockerComplete' });
+	}
+
+	private async dockerUpdate(versionSpec: string): Promise<void> {
+		const { imageTag } = { imageTag: this.getDockerImageTag(versionSpec) };
+		const onProgress = (message: string) => this.postMessage({ type: 'dockerProgress', message });
+
+		// Check if already on this version
+		const currentConfig = this.readDockerConfig();
+		if (currentConfig && currentConfig.imageTag === imageTag) {
+			this.postMessage({ type: 'dockerProgress', message: 'Already up to date' });
+			await this.sendDockerStatus();
+			this.postMessage({ type: 'dockerComplete' });
+			return;
 		}
+
+		await this.dockerManager.update(imageTag, onProgress);
+
+		this.writeDockerConfig({ versionSpec, imageTag });
+
+		await this.waitForDockerRunning();
+		this.postMessage({ type: 'dockerComplete' });
+	}
+
+	private async dockerStart(): Promise<void> {
+		this.postMessage({ type: 'dockerProgress', message: 'Starting container...' });
+		await this.dockerManager.start();
+		await this.waitForDockerRunning();
+		this.postMessage({ type: 'dockerComplete' });
+	}
+
+	private async dockerStop(): Promise<void> {
+		this.postMessage({ type: 'dockerProgress', message: 'Stopping container...' });
+		await this.dockerManager.stop();
+		await this.sendDockerStatus();
+		this.postMessage({ type: 'dockerComplete' });
+	}
+
+	// =========================================================================
+	// Docker status
+	// =========================================================================
+
+	private async sendDockerStatus(): Promise<void> {
+		try {
+			const status = await this.dockerManager.getStatus();
+			const config = this.readDockerConfig();
+			if (config) {
+				status.version = config.versionSpec;
+			}
+			this.postMessage({ type: 'dockerStatus', status });
+		} catch {
+			this.postMessage({
+				type: 'dockerStatus',
+				status: { state: 'not-installed', version: null, publishedAt: null, imageTag: null }
+			});
+		}
+	}
+
+	private async waitForDockerRunning(timeoutMs: number = 60000): Promise<void> {
+		const start = Date.now();
+		while (Date.now() - start < timeoutMs) {
+			this.postMessage({ type: 'dockerProgress', message: 'Starting container...' });
+			const status = await this.dockerManager.getStatus();
+			const config = this.readDockerConfig();
+			if (config) {
+				status.version = config.versionSpec;
+			}
+			this.postMessage({ type: 'dockerStatus', status });
+
+			if (status.state === 'running') return;
+			await new Promise(r => setTimeout(r, 1000));
+		}
+		this.logger.output(`${icons.warning} Docker container did not reach running state within ${timeoutMs / 1000}s`);
+	}
+
+	// =========================================================================
+	// Docker config — version tracking
+	// =========================================================================
+
+	private static readonly DOCKER_CONFIG_PATH = path.join(
+		process.env.PROGRAMDATA || (process.platform === 'darwin' ? '/Library/Application Support' : '/etc'),
+		'RocketRide', 'docker-config.json'
+	);
+
+	private writeDockerConfig(info: { versionSpec: string; imageTag: string }): void {
+		const configDir = path.dirname(PageDeployProvider.DOCKER_CONFIG_PATH);
+		fs.mkdirSync(configDir, { recursive: true });
+		fs.writeFileSync(PageDeployProvider.DOCKER_CONFIG_PATH, JSON.stringify({
+			...info,
+			installedAt: new Date().toISOString()
+		}, null, 2), 'utf8');
+	}
+
+	private readDockerConfig(): { versionSpec: string; imageTag: string } | null {
+		try {
+			if (fs.existsSync(PageDeployProvider.DOCKER_CONFIG_PATH)) {
+				return JSON.parse(fs.readFileSync(PageDeployProvider.DOCKER_CONFIG_PATH, 'utf8'));
+			}
+		} catch { /* corrupt */ }
+		return null;
+	}
+
+	private deleteDockerConfig(): void {
+		try {
+			if (fs.existsSync(PageDeployProvider.DOCKER_CONFIG_PATH)) {
+				fs.unlinkSync(PageDeployProvider.DOCKER_CONFIG_PATH);
+			}
+		} catch { /* best effort */ }
 	}
 
 	// =========================================================================
@@ -399,7 +600,6 @@ export class PageDeployProvider {
 			rocketrideLogoLightUri: logoLightUri.toString(),
 			dockerIconUri: dockerUri.toString(),
 			onpremIconUri: onpremUri.toString(),
-			engineImage: this.getEngineImage()
 		});
 	}
 

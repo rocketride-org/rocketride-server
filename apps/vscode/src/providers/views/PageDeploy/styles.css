@@ -203,6 +203,16 @@ body.vscode-high-contrast .logo-dark {
 	font-style: italic;
 }
 
+.service-status-indicator.no-docker {
+	color: var(--vscode-descriptionForeground);
+	font-style: italic;
+}
+
+.docker-unavailable {
+	font-style: italic;
+	margin-top: 4px;
+}
+
 .service-status-path {
 	font-family: var(--vscode-editor-font-family);
 	font-size: 12px;
@@ -295,10 +305,14 @@ body.vscode-high-contrast .logo-dark {
 }
 
 .service-progress {
-	font-size: 12px;
+	font-size: 11px;
+	font-family: var(--vscode-editor-font-family);
 	color: var(--vscode-descriptionForeground);
-	font-style: italic;
 	margin-top: 4px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 100%;
 }
 
 .service-error {
