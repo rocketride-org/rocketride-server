@@ -146,7 +146,7 @@ class PreProcessor(PreProcessorBase):
         # Get the configuration to pass, excluding 'splitter'. We can't use
         # pop since it may be an IJson value which is not supported at this time
         # exclude internal keys that must never reach constructors
-        classConfig = {key: value for key, value in config.items() if key not in {'splitter', 'mode', 'strlen', 'tokens', 'hf_tokenizer', 'tokenizer', 'transform', 'max_model_tokens', 'bytes_per_token'}}
+        classConfig = {key: value for key, value in config.items() if key not in {'splitter', 'mode', 'strlen', 'tokens', 'hf_tokenizer', 'tokenizer', 'transform', 'max_model_tokens', 'bytes_per_token', 'max_chunks_per_file'}}
 
         # Determine the overlap and size
         chunk_size = self._splitSize
@@ -312,6 +312,10 @@ class PreProcessor(PreProcessorBase):
                 # Cap requested chunk size to the model's real max token budget
                 self._splitSize = min(self._splitSize, self._token_limit)
 
+        # Max chunks per file (0 or None = unlimited)
+        max_chunks = config.get('max_chunks_per_file')
+        self._max_chunks_per_file = int(max_chunks) if max_chunks else None
+
         # Set to none so we bind it on the first call
         self._preprocessor = self._getSplitter(provider, config)
         return
@@ -331,6 +335,10 @@ class PreProcessor(PreProcessorBase):
                 else:
                     fixed.extend(self._split_safely_by_tokens(ch, self._token_limit))
             textChunks = fixed
+
+        # Apply per-file chunk limit if configured
+        if self._max_chunks_per_file is not None and len(textChunks) > self._max_chunks_per_file:
+            textChunks = textChunks[:self._max_chunks_per_file]
 
         # Return the raw text chunks
         return textChunks

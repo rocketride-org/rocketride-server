@@ -155,6 +155,12 @@
 		// 
 		// String length
 		//
+		"langchain.splitter.max_chunks_per_file": {
+			"type": "number",
+			"title": "Max chunks per file",
+			"description": "Limit the number of chunks produced per file (0 = unlimited)",
+			"default": 0
+		},
 		"langchain.splitter.strlen": {
 			"type": "number",
 			"title": "String length",
@@ -206,7 +212,8 @@
 			"object": "default",
 			"properties": [
 				"langchain.splitter.default.splitter",
-				"langchain.splitter.mode"
+				"langchain.splitter.mode",
+				"langchain.splitter.max_chunks_per_file"
 			]
 		},
 		//
@@ -227,7 +234,8 @@
 			"properties": [
 				"langchain.splitter.recursive.splitter",
 				"langchain.splitter.recursive.separators",
-				"langchain.splitter.mode"
+				"langchain.splitter.mode",
+				"langchain.splitter.max_chunks_per_file"
 			]
 		},
 		//
@@ -248,7 +256,8 @@
 			"properties": [
 				"langchain.splitter.character.splitter",
 				"langchain.splitter.character.separator",
-				"langchain.splitter.mode"
+				"langchain.splitter.mode",
+				"langchain.splitter.max_chunks_per_file"
 			]
 		},
 		//
@@ -263,7 +272,8 @@
 			"object": "markdown",
 			"properties": [
 				"langchain.splitter.markdown.splitter",
-				"langchain.splitter.mode"
+				"langchain.splitter.mode",
+				"langchain.splitter.max_chunks_per_file"
 			]
 		},
 		//
@@ -278,7 +288,8 @@
 			"object": "latex",
 			"properties": [
 				"langchain.splitter.latex.splitter",
-				"langchain.splitter.mode"
+				"langchain.splitter.mode",
+				"langchain.splitter.max_chunks_per_file"
 			]
 		},
 		//
@@ -293,7 +304,8 @@
 			"object": "nltk",
 			"properties": [
 				"langchain.splitter.nltk.splitter",
-				"langchain.splitter.mode"
+				"langchain.splitter.mode",
+				"langchain.splitter.max_chunks_per_file"
 			]
 		},
 		//
@@ -368,7 +380,8 @@
 			"properties": [
 				"langchain.splitter.spacy.splitter",
 				"langchain.splitter.spacy.model",
-				"langchain.splitter.mode"
+				"langchain.splitter.mode",
+				"langchain.splitter.max_chunks_per_file"
 			]
 		},
 		//
@@ -384,7 +397,8 @@
 			"object": "custom",
 			"properties": [
 				"langchain.splitter.custom.splitter",
-				"langchain.splitter.mode"
+				"langchain.splitter.mode",
+				"langchain.splitter.max_chunks_per_file"
 			]
 		},
 		//
