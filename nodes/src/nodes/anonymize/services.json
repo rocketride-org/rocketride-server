@@ -220,7 +220,7 @@
 			},
 			"glinerIt": {
 				"title": "GLiNER Italian - For Italian entity extraction",
-				"model": "DeepMount00/GLiNER_ITA_LARGE",
+				"model": "DeepMount00/GLiNER_PII_ITA",
 				"anonymizeChar": "\u2588",
 				"anonymizeAll": false
 			},
