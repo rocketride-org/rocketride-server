@@ -1,6 +1,6 @@
 # RocketRide for Visual Studio Code
 
-Build, debug, and deploy AI pipelines -- without leaving your IDE.
+Build, debug, and deploy AI pipelines - without leaving your IDE.
 
 > RocketRide is an open source, developer-native AI pipeline platform. This extension brings the full RocketRide experience into VS Code: a visual drag-and-drop canvas builder, 50+ ready-to-use nodes, integrated debugging, and real-time analytics.
 
@@ -8,28 +8,28 @@ Build, debug, and deploy AI pipelines -- without leaving your IDE.
 
 1. Install the **RocketRide** extension from the VS Code Marketplace
 2. Click the **RocketRide** icon in the Activity Bar
-3. Create a `.pipe` file -- it opens automatically in the visual canvas builder
+3. Create a `.pipe` file - it opens automatically in the visual canvas builder
 4. Wire up nodes by connecting input and output lanes, then hit **Play** to run
 
 ## What is RocketRide?
 
 [RocketRide](https://rocketride.org) is an open source, developer-native AI pipeline platform.
-It lets you build, debug, and deploy production AI workflows without leaving your IDE --
+It lets you build, debug, and deploy production AI workflows without leaving your IDE -
 using a visual drag-and-drop canvas or code-first with TypeScript and Python SDKs.
 
-- **50+ ready-to-use nodes** -- 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more
-- **High-performance C++ engine** -- production-grade speed and reliability
-- **Deploy anywhere** -- locally, on-premises, or self-hosted with Docker
-- **MIT licensed** -- fully open source, OSI-compliant
+- **50+ ready-to-use nodes** - 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more
+- **High-performance C++ engine** - production-grade speed and reliability
+- **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
+- **MIT licensed** - fully open source, OSI-compliant
 
 ## Features
 
-- **Visual canvas builder** -- Drag, drop, and wire up AI workflows directly in VS Code. Create `.pipe` files to get started.
-- **50+ nodes out of the box** -- 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, multi-agent orchestration, and more.
-- **Connection manager** -- Connect to a local engine (one click, no setup) or your own on-premises server.
-- **Real-time analytics** -- Monitor running pipelines with live traces, token usage, memory stats, and more.
-- **Debugger support** -- Set breakpoints in `.pipe` files and step through pipeline execution with the VS Code debugger.
-- **SDKs for TypeScript, Python & MCP** -- Embed pipelines in your apps or expose them as tools for AI assistants.
+- **Visual canvas builder** - Drag, drop, and wire up AI workflows directly in VS Code. Create `.pipe` files to get started.
+- **50+ nodes out of the box** - 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, multi-agent orchestration, and more.
+- **Connection manager** - Connect to a local engine (one click, no setup) or your own on-premises server.
+- **Real-time analytics** - Monitor running pipelines with live traces, token usage, memory stats, and more.
+- **Debugger support** - Set breakpoints in `.pipe` files and step through pipeline execution with the VS Code debugger.
+- **SDKs for TypeScript, Python & MCP** - Embed pipelines in your apps or expose them as tools for AI assistants.
 
 ## Build a Pipeline
 
@@ -37,8 +37,8 @@ Create a `*.pipe` file and the extension opens it in the visual builder canvas.
 
 1. Start with a source node: **webhook**, **chat**, or **dropper**
 2. Wire up nodes by connecting input and output lanes
-3. Hit play to run -- or launch from the **Connection Manager**
-4. Monitor running pipelines with real-time analytics -- trace calls, token usage, memory, and more
+3. Hit play to run - or launch from the **Connection Manager**
+4. Monitor running pipelines with real-time analytics - trace calls, token usage, memory, and more
 
 Need inspiration? Check out our [example pipelines](https://docs.rocketride.org/):
 
@@ -83,4 +83,4 @@ Need inspiration? Check out our [example pipelines](https://docs.rocketride.org/
 
 ## License
 
-MIT -- see [LICENSE](https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE).
+MIT - see [LICENSE](https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE).
