@@ -173,8 +173,10 @@ export class EngineManager extends BaseManager {
 	 * Returns installed engine version info, or null if not installed.
 	 */
 	public getInfo(): ManagerInfo | null {
-		const version = this.installer.getInstalledVersion();
-		const publishedAt = this.installer.getInstalledPublishedAt();
+		const versionSpec = ConfigManager.getInstance().getConfig().local.engineVersion || 'latest';
+		const channel = versionSpec === 'prerelease' ? 'pre' as const : 'stable' as const;
+		const version = this.installer.getInstalledVersion(channel);
+		const publishedAt = this.installer.getInstalledPublishedAt(channel);
 		if (!version) {
 			return null;
 		}

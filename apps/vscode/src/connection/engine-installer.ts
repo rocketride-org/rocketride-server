@@ -170,16 +170,8 @@ export class EngineInstaller {
 	 * or null if nothing is installed.
 	 */
 	public getExecutablePath(channel?: Channel): string | null {
-		const ch = channel ?? 'stable';
-		const pointer = this.readPointer(ch);
-		if (!pointer) {
-			// Try the other channel as fallback
-			const other = ch === 'stable' ? 'pre' : 'stable';
-			const otherPointer = this.readPointer(other);
-			if (!otherPointer) return null;
-			const exe = this.executableInDir(path.join(this.enginesRoot, otherPointer.dir));
-			return fs.existsSync(exe) ? exe : null;
-		}
+		const pointer = this.getLatestPointer(channel);
+		if (!pointer) return null;
 		const exe = this.executableInDir(path.join(this.enginesRoot, pointer.dir));
 		return fs.existsSync(exe) ? exe : null;
 	}
@@ -188,8 +180,7 @@ export class EngineInstaller {
 	 * Returns the directory path for the currently installed version.
 	 */
 	public getInstalledDir(channel?: Channel): string | null {
-		const ch = channel ?? 'stable';
-		const pointer = this.readPointer(ch) ?? this.readPointer(ch === 'stable' ? 'pre' : 'stable');
+		const pointer = this.getLatestPointer(channel);
 		if (!pointer) return null;
 		return path.join(this.enginesRoot, pointer.dir);
 	}
@@ -199,15 +190,22 @@ export class EngineInstaller {
 	}
 
 	public getInstalledVersion(channel?: Channel): string | null {
-		const ch = channel ?? 'stable';
-		const pointer = this.readPointer(ch) ?? this.readPointer(ch === 'stable' ? 'pre' : 'stable');
-		return pointer?.tag ?? null;
+		return this.getLatestPointer(channel)?.tag ?? null;
 	}
 
 	public getInstalledPublishedAt(channel?: Channel): string | null {
-		const ch = channel ?? 'stable';
-		const pointer = this.readPointer(ch) ?? this.readPointer(ch === 'stable' ? 'pre' : 'stable');
-		return pointer?.publishedAt ?? null;
+		return this.getLatestPointer(channel)?.publishedAt ?? null;
+	}
+
+	/**
+	 * Returns the pointer for the given channel. If no channel specified,
+	 * falls back to stable then pre.
+	 */
+	private getLatestPointer(channel?: Channel): VersionPointer | null {
+		if (channel) {
+			return this.readPointer(channel);
+		}
+		return this.readPointer('stable') ?? this.readPointer('pre') ?? null;
 	}
 
 	/**
