@@ -212,9 +212,9 @@ def _infer_outputs_from_cases(cases: List[TestCase]) -> List[str]:
     return sorted(outputs)
 
 
-def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any]) -> Optional[NodeTestConfig]:
-    """Parse the 'test' key from a service.json into NodeTestConfig."""
-    test_data = data.get('test')
+def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], test_key: str = 'test') -> Optional[NodeTestConfig]:
+    """Parse a test key (e.g. 'test' or 'fulltest') from a service.json into NodeTestConfig."""
+    test_data = data.get(test_key)
     if not test_data:
         return None
     
@@ -255,38 +255,39 @@ def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any]) 
     )
 
 
-def discover_testable_nodes(nodes_src_dir: str = None) -> List[NodeTestConfig]:
+def discover_testable_nodes(nodes_src_dir: str = None, test_key: str = 'test') -> List[NodeTestConfig]:
     """
     Discover all nodes with test configurations.
-    
-    Scans nodes/src/*/service*.json for files containing a 'test' key.
+
+    Scans nodes/src/*/service*.json for files containing the given test key.
+    Use test_key='fulltest' to discover nodes with full-profile test configs.
     Returns a list of NodeTestConfig objects for nodes that can be tested.
     """
     if nodes_src_dir is None:
         # Default to nodes/src/nodes relative to this file
         framework_dir = Path(__file__).parent
         nodes_src_dir = framework_dir.parent.parent / 'src' / 'nodes'
-    
+
     nodes_src_dir = Path(nodes_src_dir)
     testable_nodes = []
-    
+
     # Scan all node directories
     for node_dir in nodes_src_dir.iterdir():
         if not node_dir.is_dir():
             continue
-        
+
         node_name = node_dir.name
-        
+
         # Find all service*.json files
         for service_file in node_dir.glob('service*.json'):
             data = _parse_service_json(str(service_file))
             if data is None:
                 continue
-            
-            config = _parse_test_config(node_name, str(service_file), data)
+
+            config = _parse_test_config(node_name, str(service_file), data, test_key=test_key)
             if config:
                 testable_nodes.append(config)
-    
+
     return testable_nodes
 
 

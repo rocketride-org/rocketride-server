@@ -34,7 +34,7 @@ const inVSCode = isInVSCode();
  */
 export const styles = {
 	flowRoot: {
-		width: '10rem',
+		width: '11rem',
 		backgroundColor: inVSCode ? 'background.paper' : '#fff',
 		boxShadow: inVSCode
 			? 'none'
@@ -61,7 +61,7 @@ export const styles = {
 	},
 	cornerCapBottom: {
 		position: 'relative',
-		height: '4px',
+		height: 0,
 		backgroundColor: 'background.default',
 		borderRadius: '0 0 3px 3px',
 	},

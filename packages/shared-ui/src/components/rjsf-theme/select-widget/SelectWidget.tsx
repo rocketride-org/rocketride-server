@@ -112,6 +112,7 @@ export default function SelectWidget<
 		<TextField
 			id={id}
 			name={id}
+			fullWidth={true}
 			size="small"
 			sx={{
 				textAlign: 'left',
