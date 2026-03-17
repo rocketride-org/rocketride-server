@@ -52,7 +52,7 @@
 	//		Description to of this driver
 	//
 	"description": [
-		"A filter component that, in combination with the classification component, ",
+		"A filter component that ",
 		"identifies and masks sensitive information in text data. It can be configured ",
 		"to detect and redact personally identifiable information (PII), maintaining ",
 		"data privacy while preserving document context.</br>",
@@ -77,8 +77,7 @@
 	"lanes": {
 		"text": [
 			"text"
-		],
-		"classifications": []
+		]
 	},
 	"input": [
 		{
