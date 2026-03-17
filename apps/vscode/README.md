@@ -57,6 +57,7 @@ Need inspiration? Check out our [example pipelines](https://docs.rocketride.org/
 | `rocketride.engineArgs` | `string[]` | `[]` | Additional arguments passed to the engine subprocess |
 | `rocketride.autoConnect` | `boolean` | `true` | Automatically connect to RocketRide server when extension activates |
 | `rocketride.pipelineRestartBehavior` | `string` | `"prompt"` | Behavior when a `.pipe` file changes while the pipeline is running: `"auto"`, `"manual"`, or `"prompt"` |
+| `rocketride.oauth2RootUrl` | `string` | `"https://oauth2.rocketride.ai"` | Root OAuth2 URL for the refresh path passed to the services OAuth2 endpoint |
 
 ## Commands
 
