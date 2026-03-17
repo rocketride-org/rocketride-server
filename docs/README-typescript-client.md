@@ -1,16 +1,20 @@
 # rocketride
 
-RocketRide TypeScript Client -- TypeScript/JavaScript SDK for the RocketRide Engine. Complete API reference below.
+TypeScript/JavaScript SDK for the RocketRide Engine -- build, run, and manage AI pipelines from Node.js or the browser.
 
-## Installation
+> [RocketRide](https://rocketride.org) is an open source, developer-native AI pipeline platform.
+> This package lets you connect to a RocketRide engine, start pipelines, send data, stream results,
+> and build conversational AI -- all with full TypeScript support.
+
+## Quick Start
 
 ```bash
 npm install rocketride
 # or
+yarn add rocketride
+# or
 pnpm add rocketride
 ```
-
-## Quick Start
 
 ```typescript
 import { RocketRideClient } from 'rocketride';
@@ -35,6 +39,17 @@ await client.disconnect();
 - **File upload** -- `sendFiles()` with progress; streaming with `pipe()`
 - **Connection lifecycle** -- Optional persist mode, reconnection, and callbacks (`onConnected`, `onDisconnected`, `onConnectError`)
 - **Full TypeScript support** -- Complete type definitions
+
+## What is RocketRide?
+
+[RocketRide](https://rocketride.org) is an open source, developer-native AI pipeline platform.
+It lets you build, debug, and deploy production AI workflows without leaving your IDE --
+using a visual drag-and-drop canvas or code-first with TypeScript and Python SDKs.
+
+- **50+ ready-to-use nodes** -- 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more
+- **High-performance C++ engine** -- production-grade speed and reliability
+- **Deploy anywhere** -- locally, on-premises, or self-hosted with Docker
+- **MIT licensed** -- fully open source, OSI-compliant
 
 ---
 
@@ -432,27 +447,13 @@ await client.disconnect();
 
 ---
 
-## Directory Structure
+## Links
 
-Source location in the repository:
-
-```text
-packages/client-typescript/
-├── src/
-│   ├── client/           # Main client (RocketRideClient, DAP, transport)
-│   │   ├── core/         # DAPClient, DAPBase, TransportBase, TransportWebSocket
-│   │   ├── exceptions/
-│   │   ├── schema/       # Question, Doc, DocFilter, etc.
-│   │   └── types/
-│   └── cli/              # CLI (rocketride command)
-├── tests/
-├── package.json
-├── tsconfig.json
-└── README.md
-```
-
----
+- [Documentation](https://docs.rocketride.org/)
+- [GitHub](https://github.com/rocketride-org/rocketride-server)
+- [Discord](https://discord.gg/9hr3tdZmEG)
+- [Contributing](https://github.com/rocketride-org/rocketride-server/blob/develop/CONTRIBUTING.md)
 
 ## License
 
-MIT License -- see [LICENSE](../LICENSE).
+MIT -- see [LICENSE](https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE).

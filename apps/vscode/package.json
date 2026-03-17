@@ -439,6 +439,7 @@
 		"tar": "^7.5.8"
 	},
 	"files": [
+		"README.md",
 		"rocketride-dark-icon.png",
 		"rocketride-light-icon.png",
 		"rocketride.js",
