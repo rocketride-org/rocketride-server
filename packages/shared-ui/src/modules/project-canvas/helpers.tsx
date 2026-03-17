@@ -367,7 +367,7 @@ export const computeEdgesFromNodes = (nodes: Node[]): Edge[] => {
 					id: uuid(),
 					source: control.from,
 					target: node.id,
-					sourceHandle: 'invoke-source',
+					sourceHandle: `invoke-source-${control.classType}`,
 					targetHandle: `invoke-target-${control.classType}`,
 				});
 			});

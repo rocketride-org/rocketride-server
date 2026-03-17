@@ -33,7 +33,7 @@ export const styles = {
 		borderTop: '1px solid',
 		borderColor: 'divider',
 		backgroundColor: 'background.paper',
-		padding: '0.4rem 0.6rem',
+		padding: '0.4rem 0.6rem 0.2rem',
 		fontSize: '0.65rem',
 		borderRadius: 0,
 	},

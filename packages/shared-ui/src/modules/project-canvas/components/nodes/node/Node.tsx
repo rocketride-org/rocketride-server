@@ -122,15 +122,18 @@ export default function Node({
 	const validateConnection = useCallback(
 		(edge: Edge | Connection) => {
 			if (edge.source === edge.target) return false;
-			if (edge.sourceHandle === 'invoke-source' && edge.targetHandle?.indexOf('invoke-target') !== -1) {
+			if (edge.sourceHandle?.startsWith('invoke-source') && edge.targetHandle?.indexOf('invoke-target') !== -1) {
 				const invokeType = edge?.targetHandle?.split('-').at(-1);
+				// Ensure the source invoke key matches the target class type
+				const sourceKey = edge.sourceHandle?.split('-').slice(2).join('-');
+				if (sourceKey && invokeType && sourceKey !== invokeType) return false;
 				const sourceNode = nodeMap?.[edge.source];
 				const targetNode = nodeMap?.[edge.target];
 				if (sourceNode?.parentId != targetNode?.parentId) return false;
 				const inv = (sourceNode?.data as INodeData)?.invoke?.[invokeType!] as { min?: number; max?: number } | undefined;
 				if (inv == null || (inv != null && inv.min == null && inv.max == null)) return true;
 				const existing = edges.filter(
-					(e: Edge) => e.sourceHandle === 'invoke-source' && e.source === edge.source && e.targetHandle === edge.targetHandle
+					(e: Edge) => e.sourceHandle?.startsWith('invoke-source') && e.source === edge.source && e.targetHandle === edge.targetHandle
 				);
 				if (existing.length >= inv.max!) return false;
 				return true;
@@ -210,7 +213,7 @@ export default function Node({
 					))}
 				</Box>
 			)}
-			<Box key={id} sx={styles.nodeContent}>
+			<Box key={id} sx={{ ...styles.nodeContent, ...(hasInvokeSource ? { paddingBottom: '1.2rem' } : {}) }}>
 				<Box sx={styles.cornerCapTop} />
 				<Box sx={styles.headerWrapper}>
 					<ProjectNodeHeader
@@ -238,27 +241,31 @@ export default function Node({
 				/>
 				<Box sx={styles.cornerCapBottom} />
 			</Box>
-			{/* Bottom invoke source handle — positioned below the node border */}
+			{/* Bottom invoke source handles — diamonds on the bottom edge, labels inside the node */}
 			{hasInvokeSource && (
 				<Box sx={{ position: 'absolute', bottom: 0, left: 0, right: 0, display: 'flex', justifyContent: 'center', transform: 'translateY(50%)', zIndex: 1 }}>
-					<InvokeHandle
-						id={`invoke-source`}
-						type="source"
-						position={Position.Bottom}
-						isConnected={edges.some(
-							(edge: Edge) =>
-								edge.sourceHandle === `invoke-source` && edge.source === id
-						)}
-						isValidConnection={validateConnection}
-						selected={
-							selectedHandle
-								? selectedHandle[0] === id && selectedHandle[1] === 'invoke-source'
-								: false
-						}
-						onClick={(event) =>
-							handleInvokeClick(event, 'invoke-source', invokeSourceKeys)
-						}
-					/>
+					{invokeSourceKeys.map((key: string) => (
+						<InvokeHandle
+							key={key}
+							id={`invoke-source-${key}`}
+							type="source"
+							position={Position.Bottom}
+							invokeType={key}
+							isConnected={edges.some(
+								(edge: Edge) =>
+									edge.sourceHandle === `invoke-source-${key}` && edge.source === id
+							)}
+							isValidConnection={validateConnection}
+							selected={
+								selectedHandle
+									? selectedHandle[0] === id && selectedHandle[1] === `invoke-source-${key}`
+									: false
+							}
+							onClick={(event) =>
+								handleInvokeClick(event, `invoke-source-${key}`, [key])
+							}
+						/>
+					))}
 				</Box>
 			)}
 		</>

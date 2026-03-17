@@ -199,6 +199,8 @@ const THEME_DYNAMIC_ICONS: ReadonlySet<string> = new Set([
 	'anthropic', 'ollama', 'openai', 'perplexity', 'xai',
 	// Tools
 	'http', 'mcp', 'memory',
+	// Agents
+	'langchain',
 	// Database
 	'mysql',
 	// Image processing
