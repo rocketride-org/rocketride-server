@@ -72,7 +72,7 @@ export function useConnectedLane(
 				if (edge.target !== nodeId) return false;
 
 				// Invoke edges use a special "invoke-source" handle and encode the class type differently
-				if (edge.sourceHandle === 'invoke-source') {
+				if (edge.sourceHandle?.startsWith('invoke-source')) {
 					if (edge.sourceHandle) {
 						const handleParts = edge.sourceHandle.split('-');
 						// Rejoin everything after "invoke-" to support multi-segment class types

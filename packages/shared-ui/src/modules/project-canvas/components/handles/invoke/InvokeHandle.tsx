@@ -23,11 +23,14 @@
 
 import { CSSProperties, MouseEvent as ReactMouseEvent, ReactElement, useMemo } from 'react';
 import { HandleProps, Handle as RFHandle } from '@xyflow/react';
-import { Box, useTheme } from '@mui/material';
+import { Box, Typography, useTheme } from '@mui/material';
 import pxToRem from '../../../../../utils/pxToRem';
 import { handleStyles } from '../../styles';
 import { brandOrange } from '../../../../../theme';
 import { isInVSCode } from '../../../../../utils/vscode';
+
+/** Lane label color — matches the color used for lane body text. */
+const labelColor = isInVSCode() ? 'text.disabled' : '#838383';
 
 const inVSCode = isInVSCode();
 
@@ -100,6 +103,26 @@ export default function InvokeHandle({
 
 	return (
 		<div style={{ position: 'relative', margin: '0 20px' }}>
+			{invokeType && (
+				<Typography
+					variant="caption"
+					sx={{
+						position: 'absolute',
+						bottom: '100%',
+						left: '50%',
+						transform: 'translateX(-50%)',
+						fontSize: '0.5rem',
+						lineHeight: 1,
+						color: labelColor,
+						marginBottom: `${pxToRem(6)}rem`,
+						pointerEvents: 'none',
+						userSelect: 'none',
+						whiteSpace: 'nowrap',
+					}}
+				>
+					{invokeType === 'llm' ? 'LLM' : invokeType.charAt(0).toUpperCase() + invokeType.slice(1)}
+				</Typography>
+			)}
 			<RFHandle
 				{...props}
 				type={type}

@@ -974,7 +974,7 @@ export const FlowProvider = ({
 
 					const nd = node.data as INodeData;
 					// Distinguish between invoke (control-flow) and lane (data-flow) connections
-					if (params.sourceHandle === 'invoke-source') {
+					if (params.sourceHandle?.startsWith('invoke-source')) {
 						// Extract the target class type from the handle ID suffix
 						const classType = params.targetHandle?.split('-')?.at(-1) ?? '';
 						const controlConnections: IControl[] = nd.controlConnections || [];
@@ -1042,7 +1042,7 @@ export const FlowProvider = ({
 							if (!edgeToRemove || edgeToRemove.target !== node.id) return;
 
 							const und = updatedNode.data as INodeData;
-							if (edgeToRemove.sourceHandle === 'invoke-source') {
+							if (edgeToRemove.sourceHandle?.startsWith('invoke-source')) {
 								// Remove the matching control connection entry
 								const controlConnections: IControl[] =
 									und.controlConnections || [];
