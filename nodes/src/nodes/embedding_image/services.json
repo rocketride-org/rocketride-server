@@ -184,5 +184,60 @@
 				"embedding.profile"
 			]
 		}
-	]
+	],
+	//
+	//	Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["openai-patch16"],
+		"outputs": ["documents"],
+		"timeout": 120,
+		"cases": [
+			{
+				"name": "Embed single image",
+				"image": "images/ocr_test_text.png",
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"property": [
+							{
+								"path": "[0].documents[0].embedding",
+								"minLength": 384
+							}
+						]
+					}
+				}
+			}
+		]
+	},
+	//
+	//	Full test configuration - tests all embedding_image model profiles.
+	//	Run via: builder model_server:fulltest
+	//
+	"fulltest": {
+		"profiles": [
+			"openai-patch16",
+			"openai-patch32",
+			"google16x224"
+		],
+		"outputs": ["documents"],
+		"timeout": 120,
+		"cases": [
+			{
+				"name": "Embed single image",
+				"image": "images/ocr_test_text.png",
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"property": [
+							{
+								"path": "[0].documents[0].embedding",
+								"minLength": 384
+							}
+						]
+					}
+				}
+			}
+		]
+	}
 }
