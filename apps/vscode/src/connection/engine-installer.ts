@@ -344,45 +344,74 @@ export class EngineInstaller {
 
 	/**
 	 * Removes old version directories that are not in use.
-	 * Safe to call concurrently — skips dirs with live engine processes
-	 * and catches file-lock errors on Windows.
+	 * Acquires the installer lock to prevent races with concurrent installs.
+	 * Preserves directories referenced by channel pointers and those with
+	 * live engine processes. Catches file-lock errors on Windows.
 	 */
 	public async cleanupOldVersions(keepDir: string): Promise<void> {
-		const keepDirName = path.basename(keepDir);
-
-		let entries: fs.Dirent[];
+		this.ensureLockFileExists();
+		let release: (() => Promise<void>) | undefined;
 		try {
-			entries = fs.readdirSync(this.enginesRoot, { withFileTypes: true });
+			release = await lockfile.lock(this.lockFilePath(), {
+				stale: 300_000,
+				retries: { retries: 3, minTimeout: 500, maxTimeout: 3000 },
+			});
 		} catch {
-			return; // Directory doesn't exist or isn't readable
+			// Could not acquire lock — skip cleanup to avoid races
+			this.logger.output(`${icons.info} Skipping cleanup: could not acquire installer lock`);
+			return;
 		}
 
-		for (const entry of entries) {
-			if (!entry.isDirectory()) continue;
-			if (entry.name === keepDirName) continue;
+		try {
+			const keepDirs = new Set<string>();
+			keepDirs.add(path.basename(keepDir));
 
-			// Only consider directories that look like version dirs (contain --)
-			if (!entry.name.includes('--')) continue;
-
-			const dirPath = path.join(this.enginesRoot, entry.name);
-
-			// Check for live engine processes via PID files
-			if (this.hasLiveProcesses(dirPath)) {
-				this.logger.output(`${icons.info} Skipping cleanup of ${entry.name} (engine running)`);
-				continue;
+			// Preserve directories referenced by channel pointers
+			for (const channel of ['stable', 'pre'] as const) {
+				const pointer = this.readPointer(channel);
+				if (pointer?.dir) {
+					keepDirs.add(pointer.dir);
+				}
 			}
 
+			let entries: fs.Dirent[];
 			try {
-				fs.rmSync(dirPath, { recursive: true, force: true });
-				this.logger.output(`${icons.info} Cleaned up old engine version: ${entry.name}`);
-			} catch (err: unknown) {
-				// EBUSY/EPERM on Windows when binary is locked
-				const code = (err as { code?: string }).code;
-				if (code === 'EBUSY' || code === 'EPERM') {
-					this.logger.output(`${icons.info} Skipping cleanup of ${entry.name} (file locked)`);
-				} else {
-					this.logger.output(`${icons.warning} Failed to clean up ${entry.name}: ${err}`);
+				entries = fs.readdirSync(this.enginesRoot, { withFileTypes: true });
+			} catch {
+				return; // Directory doesn't exist or isn't readable
+			}
+
+			for (const entry of entries) {
+				if (!entry.isDirectory()) continue;
+				if (keepDirs.has(entry.name)) continue;
+
+				// Only consider directories that look like version dirs (contain --)
+				if (!entry.name.includes('--')) continue;
+
+				const dirPath = path.join(this.enginesRoot, entry.name);
+
+				// Check for live engine processes via PID files
+				if (this.hasLiveProcesses(dirPath)) {
+					this.logger.output(`${icons.info} Skipping cleanup of ${entry.name} (engine running)`);
+					continue;
 				}
+
+				try {
+					fs.rmSync(dirPath, { recursive: true, force: true });
+					this.logger.output(`${icons.info} Cleaned up old engine version: ${entry.name}`);
+				} catch (err: unknown) {
+					// EBUSY/EPERM on Windows when binary is locked
+					const code = (err as { code?: string }).code;
+					if (code === 'EBUSY' || code === 'EPERM') {
+						this.logger.output(`${icons.info} Skipping cleanup of ${entry.name} (file locked)`);
+					} else {
+						this.logger.output(`${icons.warning} Failed to clean up ${entry.name}: ${err}`);
+					}
+				}
+			}
+		} finally {
+			if (release) {
+				await release();
 			}
 		}
 	}
@@ -551,9 +580,9 @@ export class EngineInstaller {
 				repo: EngineInstaller.GITHUB_REPO,
 				per_page: 20
 			});
-			const pre = data.find(r => r.tag_name.startsWith('server-') && r.assets && r.assets.length > 0);
+			const pre = data.find(r => r.tag_name.startsWith('server-') && r.prerelease && r.assets && r.assets.length > 0);
 			if (!pre) {
-				throw new Error('No server releases found on GitHub');
+				throw new Error('No prerelease server releases found on GitHub');
 			}
 			return this.toReleaseInfo(pre);
 		}

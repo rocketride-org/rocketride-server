@@ -203,11 +203,17 @@ export class EngineManager extends BaseManager {
 			let processReady = false;
 			let processErrored = false;
 
-			// Write PID file for in-use detection by cleanup
-			if (this.child.pid) {
-				this.pidFilePath = path.join(path.dirname(executablePath), `engine-${this.child.pid}.pid`);
+			// Write PID file for in-use detection by cleanup.
+			// Capture the path in a local so async handlers only remove *their own*
+			// PID file — not one belonging to a newly started child.
+			const myPidFile = this.child.pid
+				? path.join(path.dirname(executablePath), `engine-${this.child.pid}.pid`)
+				: undefined;
+
+			if (myPidFile) {
+				this.pidFilePath = myPidFile;
 				try {
-					fs.writeFileSync(this.pidFilePath, String(this.child.pid));
+					fs.writeFileSync(myPidFile, String(this.child.pid));
 				} catch {
 					// Non-fatal — cleanup will use OS-level checks as fallback
 				}
@@ -217,14 +223,14 @@ export class EngineManager extends BaseManager {
 				if (!processReady && !processErrored) {
 					processErrored = true;
 					this.logger.output(`${icons.error} DAP server failed to launch: ${err.message}`);
-					this.cleanupProcess();
+					this.cleanupProcess(myPidFile);
 					reject(err);
 				}
 			});
 
 			this.child.on('exit', (code, signal) => {
-				// Clean up PID file on exit
-				this.removePidFile();
+				// Clean up PID file on exit — only if it's still ours
+				this.removePidFile(myPidFile);
 
 				if (!processReady && !processErrored) {
 					processErrored = true;
@@ -248,11 +254,11 @@ export class EngineManager extends BaseManager {
 					const match = msg.match(portRegex);
 					if (match) {
 						this.actualPort = parseInt(match[1], 10);
+						processReady = true;
+						this.started = true;
+						this.logger.output(`${icons.success} DAP server is ready (port ${this.actualPort})`);
+						resolve();
 					}
-					processReady = true;
-					this.started = true;
-					this.logger.output(`${icons.success} DAP server is ready (port ${this.actualPort})`);
-					resolve();
 				}
 			};
 
@@ -295,6 +301,7 @@ export class EngineManager extends BaseManager {
 			return Promise.resolve();
 		}
 		const child = this.child;
+		const pidFileToRemove = this.pidFilePath;
 		this.started = false;
 		this.child = undefined;
 		this.actualPort = undefined;
@@ -304,13 +311,13 @@ export class EngineManager extends BaseManager {
 				if (!child.killed) {
 					child.kill('SIGKILL');
 				}
-				this.removePidFile();
+				this.removePidFile(pidFileToRemove);
 				resolve();
 			}, 5000);
 
 			child.once('exit', () => {
 				clearTimeout(timeout);
-				this.removePidFile();
+				this.removePidFile(pidFileToRemove);
 				resolve();
 			});
 
@@ -324,24 +331,30 @@ export class EngineManager extends BaseManager {
 		});
 	}
 
-	private cleanupProcess(): void {
+	private cleanupProcess(pidFile?: string): void {
 		this.started = false;
 		this.actualPort = undefined;
 		if (this.child && !this.child.killed) {
 			this.child.kill();
 		}
 		this.child = undefined;
-		this.removePidFile();
+		this.removePidFile(pidFile);
 	}
 
-	private removePidFile(): void {
-		if (this.pidFilePath) {
-			try {
-				fs.unlinkSync(this.pidFilePath);
-			} catch {
-				// Ignore — file may already be gone
-			}
-			this.pidFilePath = undefined;
+	/**
+	 * Removes a PID file only if it still matches the current this.pidFilePath.
+	 * This prevents a stale async handler from deleting a PID file that belongs
+	 * to a newly started child process.
+	 */
+	private removePidFile(expectedPath?: string): void {
+		if (!this.pidFilePath) return;
+		if (expectedPath && this.pidFilePath !== expectedPath) return;
+
+		try {
+			fs.unlinkSync(this.pidFilePath);
+		} catch {
+			// Ignore — file may already be gone
 		}
+		this.pidFilePath = undefined;
 	}
 }

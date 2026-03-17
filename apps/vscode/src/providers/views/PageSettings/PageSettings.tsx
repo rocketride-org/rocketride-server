@@ -132,7 +132,7 @@ export const PageSettings: React.FC = () => {
 		autoConnect: true,
 		defaultPipelinePath: 'pipelines', // Initialize with default value
 		localEngineVersion: 'latest',
-		localEngineArgs: [],
+		localEngineArgs: '',
 		pipelineRestartBehavior: 'prompt',
 		envVars: {},
 		integrationCopilot: false,

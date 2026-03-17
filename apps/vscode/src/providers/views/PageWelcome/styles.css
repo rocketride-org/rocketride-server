@@ -49,6 +49,11 @@
 /* ============================================================================ */
 
 .welcome-left {
+	--left-fg: rgba(255, 255, 255, 0.75);
+	--left-fg-strong: rgba(255, 255, 255, 0.9);
+	--left-fg-muted: rgba(255, 255, 255, 0.6);
+	--left-divider: rgba(255, 255, 255, 0.2);
+
 	width: 280px;
 	min-width: 280px;
 	background: linear-gradient(180deg, #1a1a3a 0%, #252545 100%);
@@ -94,7 +99,7 @@ body.vscode-high-contrast .welcome-logo .logo-dark {
 
 .welcome-brand-sub {
 	font-size: 12px;
-	color: rgba(255, 255, 255, 0.6);
+	color: var(--left-fg-muted);
 	margin-bottom: 30px;
 	text-transform: uppercase;
 	letter-spacing: 1.5px;
@@ -102,7 +107,7 @@ body.vscode-high-contrast .welcome-logo .logo-dark {
 
 .welcome-tagline {
 	font-size: 13px;
-	color: rgba(255, 255, 255, 0.75);
+	color: var(--left-fg);
 	text-align: center;
 	margin-bottom: 30px;
 	line-height: 1.6;
@@ -118,7 +123,7 @@ body.vscode-high-contrast .welcome-logo .logo-dark {
 
 .welcome-features li {
 	padding: 6px 0;
-	color: rgba(255, 255, 255, 0.9);
+	color: var(--left-fg-strong);
 	font-size: 12.5px;
 	display: flex;
 	align-items: center;
@@ -126,7 +131,7 @@ body.vscode-high-contrast .welcome-logo .logo-dark {
 }
 
 .welcome-feature-icon {
-	color: rgba(255, 255, 255, 0.9);
+	color: var(--left-fg-strong);
 	font-size: 14px;
 	width: 18px;
 	text-align: center;
@@ -137,7 +142,7 @@ body.vscode-high-contrast .welcome-logo .logo-dark {
 .welcome-divider {
 	width: 100%;
 	height: 1px;
-	background: rgba(255, 255, 255, 0.2);
+	background: var(--left-divider);
 	margin: 10px 0 20px;
 }
 
@@ -149,7 +154,7 @@ body.vscode-high-contrast .welcome-logo .logo-dark {
 }
 
 .welcome-links a {
-	color: rgba(255, 255, 255, 0.75);
+	color: var(--left-fg);
 	text-decoration: none;
 	font-size: 12px;
 }

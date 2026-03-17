@@ -465,6 +465,11 @@ export class ConfigManager {
 	/**
 	 * Returns the effective engine args as an array, injecting --trace=servicePython
 	 * if debug output is enabled and the user hasn't specified their own --trace.
+	 *
+	 * Note: engineArgs is passed as a single string intentionally. The backend
+	 * engine splits all arguments according to shell parsing rules (handling
+	 * quoted paths, escaped spaces, etc.). Naive whitespace splitting here
+	 * would break arguments like --path='C:\Program Files\RocketRide'.
 	 */
 	public getEffectiveEngineArgs(): string[] {
 		const config = this.getConfig();

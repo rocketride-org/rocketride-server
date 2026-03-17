@@ -10,6 +10,9 @@ import '../../styles/vscode.css';
 import '../../styles/app.css';
 import './styles.css';
 
+// These interfaces are intentionally duplicated from the extension host types
+// (service-manager.ts, docker-manager.ts). The webview runs in a sandboxed
+// iframe and cannot import from the extension — keep these in sync manually.
 interface ServiceStatus {
 	state: 'not-installed' | 'starting' | 'running' | 'stopping' | 'stopped';
 	version: string | null;
@@ -160,7 +163,6 @@ export const PageDeploy: React.FC = () => {
 
 	useEffect(() => {
 		sendMessage({ type: 'ready' });
-		setVersionsLoading(true);
 		sendMessage({ type: 'fetchVersions' });
 	}, [sendMessage]);
 
@@ -187,6 +189,17 @@ export const PageDeploy: React.FC = () => {
 	// =========================================================================
 
 	const [dropdownOpen, setDropdownOpen] = useState<string | null>(null);
+	// Close dropdown on outside click — single document listener, cleaned up properly
+	useEffect(() => {
+		const handler = (e: MouseEvent) => {
+			const target = e.target as Node;
+			if (!target.parentElement?.closest('.split-button')) {
+				setDropdownOpen(null);
+			}
+		};
+		document.addEventListener('click', handler);
+		return () => document.removeEventListener('click', handler);
+	}, []);
 
 	const renderSplitButton = (
 		id: string,
@@ -206,14 +219,7 @@ export const PageDeploy: React.FC = () => {
 		const currentLabel = options.find(v => v.value === currentVersion)?.label ?? '<Latest>';
 
 		return (
-			<div className="split-button" ref={el => {
-				if (!el) return;
-				const handler = (e: MouseEvent) => {
-					if (!el.contains(e.target as Node)) setDropdownOpen(null);
-				};
-				document.addEventListener('click', handler);
-				return () => document.removeEventListener('click', handler);
-			}}>
+			<div className="split-button">
 				<button
 					type="button"
 					className={`split-button-main ${btnClass}`}

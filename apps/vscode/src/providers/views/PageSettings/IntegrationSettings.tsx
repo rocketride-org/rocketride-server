@@ -29,7 +29,9 @@ interface IntegrationSettingsProps {
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
 }
 
-const INTEGRATIONS: { key: keyof SettingsData; label: string; description: string }[] = [
+type BooleanKeys<T> = { [K in keyof T]: T[K] extends boolean ? K : never }[keyof T];
+
+const INTEGRATIONS: { key: BooleanKeys<SettingsData>; label: string; description: string }[] = [
 	{
 		key: 'integrationCopilot',
 		label: 'GitHub Copilot',

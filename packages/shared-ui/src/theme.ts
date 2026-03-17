@@ -328,10 +328,7 @@ export const createVSCodeTheme = () => {
 				styleOverrides: {
 					root: inVSCode
 						? {
-								fontSize: '0.75rem',
-								fontStyle: 'italic',
-								fontWeight: 300,
-								opacity: 0.7,
+								fontSize: `${baseFontSize * 0.75}rem`,
 							}
 						: {},
 				},

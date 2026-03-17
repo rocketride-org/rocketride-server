@@ -121,7 +121,7 @@ export class DockerManager {
 			ExposedPorts: { [`${CONTAINER_PORT}/tcp`]: {} },
 			HostConfig: {
 				PortBindings: {
-					[`${CONTAINER_PORT}/tcp`]: [{ HostPort: String(CONTAINER_PORT) }]
+					[`${CONTAINER_PORT}/tcp`]: [{ HostPort: String(CONTAINER_PORT), HostIp: '127.0.0.1' }]
 				},
 				RestartPolicy: { Name: 'unless-stopped' }
 			}
@@ -191,19 +191,20 @@ export class DockerManager {
 	}
 
 	/**
-	 * Update: stop old container, remove it, pull new image, create + start new container.
+	 * Update: pull new image first (so the old container survives a failed pull),
+	 * then remove old container, create + start new container.
 	 */
 	async update(imageTag: string, onProgress?: ProgressCallback): Promise<void> {
 		const fullImage = `${IMAGE_BASE}:${imageTag}`;
 		this.logger.output(`${icons.info} Docker update: updating to ${fullImage}`);
 
-		// Remove existing container and its image
-		onProgress?.('Removing old container and image...');
-		await this.remove(true);
-
-		// Pull new image
+		// Pull new image first — if this fails, existing container stays intact
 		onProgress?.('Pulling new image...');
 		await this.pullImage(fullImage, onProgress);
+
+		// Remove existing container and its old image
+		onProgress?.('Removing old container...');
+		await this.remove(true);
 
 		// Create and start new container
 		onProgress?.('Creating container...');
@@ -213,7 +214,7 @@ export class DockerManager {
 			ExposedPorts: { [`${CONTAINER_PORT}/tcp`]: {} },
 			HostConfig: {
 				PortBindings: {
-					[`${CONTAINER_PORT}/tcp`]: [{ HostPort: String(CONTAINER_PORT) }]
+					[`${CONTAINER_PORT}/tcp`]: [{ HostPort: String(CONTAINER_PORT), HostIp: '127.0.0.1' }]
 				},
 				RestartPolicy: { Name: 'unless-stopped' }
 			}

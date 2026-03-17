@@ -16,7 +16,7 @@ import * as path from 'path';
 import { createServiceManager, ServiceManager } from '../deploy/service-manager';
 import { DockerManager } from '../deploy/docker-manager';
 import { EngineInstaller } from '../connection/engine-installer';
-import { ConfigManager } from '../config';
+
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 
@@ -362,7 +362,7 @@ export class PageDeployProvider {
 					...(bearerToken ? { 'Authorization': `Bearer ${bearerToken}` } : {}),
 				}
 			};
-			https.get(url, options, (res: { statusCode?: number; on: Function; setEncoding: Function }) => {
+			https.get(url, options, (res: import('http').IncomingMessage) => {
 				if (res.statusCode !== 200) {
 					reject(new Error(`GHCR API returned ${res.statusCode}`));
 					return;
@@ -383,7 +383,8 @@ export class PageDeployProvider {
 	// =========================================================================
 
 	private static readonly CONFIG_PATH = path.join(
-		process.env.PROGRAMDATA || 'C:\\ProgramData', 'RocketRide', 'config.json'
+		process.env.PROGRAMDATA || (process.platform === 'darwin' ? '/Library/Application Support' : '/etc'),
+		'RocketRide', 'config.json'
 	);
 
 	private writeServiceConfig(info: { versionSpec: string; version: string; publishedAt: string }): void {
@@ -555,10 +556,7 @@ export class PageDeployProvider {
 	// Helpers
 	// =========================================================================
 
-	private async getApiKey(): Promise<string> {
-		const config = ConfigManager.getInstance().getConfig();
-		return config.apiKey || '';
-	}
+
 
 	private async getGithubToken(): Promise<string | undefined> {
 		try {

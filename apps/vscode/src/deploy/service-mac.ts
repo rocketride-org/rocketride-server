@@ -10,6 +10,7 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -34,10 +35,11 @@ export class MacServiceManager extends ServiceManager {
 	}
 
 	public async install(executablePath: string, engineDir: string): Promise<void> {
-		fs.mkdirSync(LOGS_DIR, { recursive: true });
+		// Create logs directory with elevation (/Library paths require root)
+		await this.runSudo('mkdir', ['-p', LOGS_DIR]);
 
 		const plistContent = this.buildPlist(executablePath, engineDir);
-		const tmpPlist = path.join(INSTALL_ROOT, 'rocketride.plist.tmp');
+		const tmpPlist = path.join(os.tmpdir(), 'rocketride.plist.tmp');
 		fs.writeFileSync(tmpPlist, plistContent, 'utf8');
 		await this.runSudo('cp', [tmpPlist, PLIST_PATH]);
 		fs.unlinkSync(tmpPlist);
@@ -67,7 +69,7 @@ export class MacServiceManager extends ServiceManager {
 		try { await this.runSudo('launchctl', ['unload', PLIST_PATH]); } catch { /* ignore */ }
 
 		const plistContent = this.buildPlist(executablePath, engineDir);
-		const tmpPlist = path.join(INSTALL_ROOT, 'rocketride.plist.tmp');
+		const tmpPlist = path.join(os.tmpdir(), 'rocketride.plist.tmp');
 		fs.writeFileSync(tmpPlist, plistContent, 'utf8');
 		await this.runSudo('cp', [tmpPlist, PLIST_PATH]);
 		fs.unlinkSync(tmpPlist);
@@ -138,7 +140,9 @@ export class MacServiceManager extends ServiceManager {
 
 	private runSudo(command: string, args: string[]): Promise<void> {
 		return new Promise((resolve, reject) => {
-			const script = `do shell script "${command} ${args.map(a => `'${a}'`).join(' ')}" with administrator privileges`;
+			// Escape single quotes within args for safe AppleScript shell quoting
+			const escapeArg = (a: string) => `'${a.replace(/'/g, "'\\''")}'`;
+			const script = `do shell script "${command} ${args.map(escapeArg).join(' ')}" with administrator privileges`;
 			execFile('osascript', ['-e', script], (error, _stdout, stderr) => {
 				if (error) {
 					reject(new Error(stderr?.trim() || error.message));

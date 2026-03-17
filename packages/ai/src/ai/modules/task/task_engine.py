@@ -1453,7 +1453,11 @@ class Task(DAPBase):
             user_args = self._launch_args.get('args', [])
             for arg in user_args:
                 if ' ' in arg:
-                    child_args.extend(shlex.split(arg))
+                    try:
+                        child_args.extend(shlex.split(arg))
+                    except ValueError as e:
+                        logger.warning(f"Failed to parse engine arg {arg!r}: {e}, using as-is")
+                        child_args.append(arg)
                 else:
                     child_args.append(arg)
 

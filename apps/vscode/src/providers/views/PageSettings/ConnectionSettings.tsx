@@ -225,19 +225,17 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 										onChange={handleVersionChange}
 										disabled={engineVersionsLoading}
 									>
-										<option value="latest">&lt;Latest&gt;</option>
-										<option value="prerelease">&lt;Prerelease&gt;</option>
-										{engineVersions.length > 0 && (
-											<option disabled>{'────────────────'}</option>
-										)}
-										{engineVersionsLoading && (
-											<option disabled>Loading versions...</option>
-										)}
-										{engineVersions.map(v => (
-											<option key={v.tag_name} value={v.tag_name}>
-												{displayVersion(v.tag_name)}
-											</option>
-										))}
+										<optgroup label="Recommended">
+											<option value="latest">&lt;Latest&gt;</option>
+											<option value="prerelease">&lt;Prerelease&gt;</option>
+										</optgroup>
+										<optgroup label={engineVersionsLoading ? 'Loading versions...' : 'All versions'}>
+											{engineVersions.map(v => (
+												<option key={v.tag_name} value={v.tag_name}>
+													{displayVersion(v.tag_name)}
+												</option>
+											))}
+										</optgroup>
 									</select>
 									<div className="help-text">Choose which server version to download. &lt;Latest&gt; gets the newest stable release.</div>
 								</div>

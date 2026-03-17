@@ -10,6 +10,7 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -34,9 +35,11 @@ export class LinuxServiceManager extends ServiceManager {
 	}
 
 	public async install(executablePath: string, engineDir: string): Promise<void> {
+		// Create install root with elevation (may not be user-writable)
+		await this.runSudo('mkdir', ['-p', INSTALL_ROOT]);
+
 		const unitContent = this.buildUnitFile(executablePath, engineDir);
-		const tmpUnit = path.join(INSTALL_ROOT, 'rocketride.service.tmp');
-		fs.mkdirSync(INSTALL_ROOT, { recursive: true });
+		const tmpUnit = path.join(os.tmpdir(), 'rocketride.service.tmp');
 		fs.writeFileSync(tmpUnit, unitContent, 'utf8');
 
 		await this.runSudo('cp', [tmpUnit, UNIT_PATH]);
@@ -70,7 +73,7 @@ export class LinuxServiceManager extends ServiceManager {
 		await this.runSudo('systemctl', ['stop', UNIT_NAME]);
 
 		const unitContent = this.buildUnitFile(executablePath, engineDir);
-		const tmpUnit = path.join(INSTALL_ROOT, 'rocketride.service.tmp');
+		const tmpUnit = path.join(os.tmpdir(), 'rocketride.service.tmp');
 		fs.writeFileSync(tmpUnit, unitContent, 'utf8');
 		await this.runSudo('cp', [tmpUnit, UNIT_PATH]);
 		fs.unlinkSync(tmpUnit);

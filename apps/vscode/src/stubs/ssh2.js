@@ -1,3 +1,4 @@
+/* eslint-env node */
 // Stub for ssh2 — dockerode's docker-modem requires ssh2 at load time,
 // but we only connect to Docker via local socket/named pipe, never SSH.
 // This stub satisfies the require('ssh2').Client reference without

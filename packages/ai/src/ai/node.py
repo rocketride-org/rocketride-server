@@ -101,7 +101,8 @@ def run():
                 debugpy.wait_for_client()
 
         except Exception as e:
-            pass
+            import logging
+            logging.getLogger(__name__).warning("Failed to initialize debugpy: %s", e)
 
     # Start the global event loop for async operations
     _start_event_loop()

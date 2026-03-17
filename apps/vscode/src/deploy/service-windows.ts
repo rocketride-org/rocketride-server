@@ -245,13 +245,17 @@ export class WindowsServiceManager extends ServiceManager {
 		this.logger.output(`${icons.success} NSSM downloaded to ${NSSM_PATH}`);
 	}
 
-	private downloadFile(url: string, destPath: string): Promise<void> {
+	private downloadFile(url: string, destPath: string, maxRedirects: number = 10): Promise<void> {
 		return new Promise((resolve, reject) => {
 			const protocol = url.startsWith('https') ? https : http;
 			const req = protocol.get(url, { headers: { 'User-Agent': 'RocketRide-VSCode' } }, (response) => {
 				if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
 					response.destroy();
-					this.downloadFile(response.headers.location, destPath).then(resolve, reject);
+					if (maxRedirects <= 0) {
+						reject(new Error('Too many redirects'));
+						return;
+					}
+					this.downloadFile(response.headers.location, destPath, maxRedirects - 1).then(resolve, reject);
 					return;
 				}
 
