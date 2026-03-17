@@ -41,7 +41,6 @@
 			"title": "Firecrawl",
 			"properties": [
 				"type",
-				"name",
 				"tool_firecrawl.apikey"
 			]
 		}
