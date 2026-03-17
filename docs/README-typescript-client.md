@@ -9,10 +9,11 @@ TypeScript/JavaScript SDK for the RocketRide Engine - build, run, and manage AI 
 ## Quick Start
 
 ```bash
+# NPM
 npm install rocketride
-# or
+# Yarn
 yarn add rocketride
-# or
+# PNPM
 pnpm add rocketride
 ```
 
