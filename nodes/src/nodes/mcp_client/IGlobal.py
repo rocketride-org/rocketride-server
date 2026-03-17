@@ -41,10 +41,6 @@ from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 
-def _is_mapping(obj: Any) -> bool:
-    """Check if obj is dict-like (supports .get and .items), including IJson."""
-    return hasattr(obj, 'get') and hasattr(obj, 'items')
-
 from .mcp_stdio_client import McpStdioClient, McpToolDef
 from .mcp_sse_client import McpSseClient
 from .mcp_streamable_http_client import McpStreamableHttpClient
@@ -55,6 +51,11 @@ class IGlobal(IGlobalBase):
     """Global state for mcp_client."""
 
     driver: McpDriver | None = None
+
+    @staticmethod
+    def _is_mapping(obj: Any) -> bool:
+        """Check if obj is dict-like (supports .get and .items), including IJson."""
+        return hasattr(obj, 'get') and hasattr(obj, 'items')
 
     def beginGlobal(self) -> None:
         # Skip heavy initialization in CONFIG mode (matches other nodes).
@@ -73,7 +74,7 @@ class IGlobal(IGlobalBase):
         # of whether the config is flat (preconfig/back-compat) or nested (UI).
         _transport_key = {'stdio': 'stdio', 'sse': 'sse', 'streamable-http': 'http'}.get(self.transport)
         _sub = cfg.get(_transport_key) if _transport_key else None
-        tcfg = _sub if _is_mapping(_sub) else {}
+        tcfg = _sub if self._is_mapping(_sub) else {}
 
         def _get(key: str, default: str = '') -> str:
             """Look up a config key from the transport sub-object first, then top-level."""
@@ -106,9 +107,9 @@ class IGlobal(IGlobalBase):
             elif self.transport in ('sse', 'streamable-http'):
                 # Shared auth headers for HTTP transports
                 headers = tcfg.get('headers') or cfg.get('headers') or None
-                if headers is not None and not _is_mapping(headers):
+                if headers is not None and not self._is_mapping(headers):
                     raise Exception('mcp_client headers must be a dictionary of strings')
-                if _is_mapping(headers):
+                if self._is_mapping(headers):
                     headers = {str(k): str(v) for k, v in headers.items()}
 
                 bearer = _get('bearer') or None
@@ -171,7 +172,7 @@ class IGlobal(IGlobalBase):
 
             _transport_key = {'stdio': 'stdio', 'sse': 'sse', 'streamable-http': 'http'}.get(transport)
             _sub = cfg.get(_transport_key) if _transport_key else None
-            tcfg = _sub if _is_mapping(_sub) else {}
+            tcfg = _sub if self._is_mapping(_sub) else {}
 
             def _vget(key: str) -> str:
                 val = tcfg.get(key) if tcfg else None
