@@ -1,0 +1,246 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Image Similarity",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "visual_similarity_filter://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"video"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most node
+	//
+	"path": "nodes.visual_similarity_filter",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "visual_similarity_filter",
+	//
+	//	Optional:
+	//		Description of this driver
+	//
+	"description": [
+		"Filters video frames by visual similarity to a reference image using a CLIP ",
+		"embedding model. Upload a reference image to keep only frames that visually ",
+		"resemble it, or provide a text prompt describing what to match. Forwards ",
+		"matching frames with pre-roll/post-roll context. Pair with the Object Detector ",
+		"node to first narrow frames by detected class before similarity filtering."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "image-similarity.svg",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"image": [
+			"image", "table"
+		]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "Image frames to filter by visual similarity to the reference.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Frames that meet the similarity threshold."
+				},
+				{
+					"lane": "table",
+					"description": "Similarity scores for matched frames (frame index, timestamp, score)."
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "clip-base",
+		"profiles": {
+			"clip-base": {
+				"title": "CLIP ViT-B/32",
+				"embedding_model": "openai/clip-vit-base-patch32",
+				"similarity_threshold": 0.25,
+				"fps": 1.0,
+				"pre_roll": 3,
+				"post_roll": 3
+			},
+			"clip-large": {
+				"title": "CLIP ViT-L/14",
+				"embedding_model": "openai/clip-vit-large-patch14",
+				"similarity_threshold": 0.25,
+				"fps": 1.0,
+				"pre_roll": 3,
+				"post_roll": 3
+			},
+			"custom": {
+				"title": "Custom model",
+				"embedding_model": "",
+				"similarity_threshold": 0.25,
+				"fps": 1.0,
+				"pre_roll": 3,
+				"post_roll": 3
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service
+	//
+	"fields": {
+		"vsf.embedding_model": {
+			"type": "string",
+			"title": "Embedding model (HuggingFace)",
+			"description": "HuggingFace model name for image embedding (must be CLIP-compatible)",
+			"minLength": 2,
+			"maxLength": 128
+		},
+		"vsf.reference_image": {
+			"type": "string",
+			"format": "data-url",
+			"title": "Reference image",
+			"description": "Upload an image to match against. Frames visually similar to this image will be forwarded. Leave empty to pass all frames through.",
+			"ui:options:accept": "image/*"
+		},
+		"vsf.similarity_threshold": {
+			"type": "number",
+			"title": "Similarity threshold",
+			"description": "Minimum cosine similarity score (0.0–1.0) required to forward a frame. Lower values are more permissive.",
+			"default": 0.25,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"vsf.fps": {
+			"type": "number",
+			"title": "Input frame rate (fps)",
+			"description": "Frame rate of the upstream node, used to compute timestamps in the output table.",
+			"default": 1.0
+		},
+		"vsf.pre_roll": {
+			"type": "number",
+			"title": "Pre-roll frames",
+			"description": "Number of frames before the first match to include in the output.",
+			"default": 3,
+			"minimum": 0
+		},
+		"vsf.post_roll": {
+			"type": "number",
+			"title": "Post-roll frames",
+			"description": "Number of frames after the last match in a segment to include in the output.",
+			"default": 3,
+			"minimum": 0
+		},
+		"vsf.clip-base": {
+			"object": "clip-base",
+			"properties": [
+				"vsf.reference_image",
+				"vsf.similarity_threshold",
+				"vsf.fps",
+				"vsf.pre_roll",
+				"vsf.post_roll"
+			]
+		},
+		"vsf.clip-large": {
+			"object": "clip-large",
+			"properties": [
+				"vsf.reference_image",
+				"vsf.similarity_threshold",
+				"vsf.fps",
+				"vsf.pre_roll",
+				"vsf.post_roll"
+			]
+		},
+		"vsf.custom": {
+			"object": "custom",
+			"properties": [
+				"vsf.embedding_model",
+				"vsf.reference_image",
+				"vsf.similarity_threshold",
+				"vsf.fps",
+				"vsf.pre_roll",
+				"vsf.post_roll"
+			]
+		},
+		"vsf.profile": {
+			"title": "Embedding model",
+			"description": "CLIP model to use for visual similarity matching",
+			"type": "string",
+			"default": "clip-base",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "clip-base",
+					"properties": [
+						"vsf.clip-base"
+					]
+				},
+				{
+					"value": "clip-large",
+					"properties": [
+						"vsf.clip-large"
+					]
+				},
+				{
+					"value": "custom",
+					"properties": [
+						"vsf.custom"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Image Similarity",
+			"properties": [
+				"vsf.profile"
+			]
+		}
+	]
+}
