@@ -206,21 +206,36 @@ async def node_test_runner(client):
         await runner.teardown()
 
 
+def _build_parametrize_list(configs, skip_nodes=None, include_skip=None):
+    """Build (config, profile) pairs and ids for parametrize, applying skip_nodes filter."""
+    available_configs = []
+    ids = []
+    for config in configs:
+        if skip_nodes and config.node_name in skip_nodes:
+            if include_skip is None or config.node_name not in include_skip:
+                continue
+        if config.has_required_env_vars():
+            if not config.profiles:
+                available_configs.append((config, None))
+                ids.append(config.get_test_id())
+            else:
+                for profile in config.profiles:
+                    available_configs.append((config, profile))
+                    ids.append(f"{config.get_test_id()}:{profile}")
+    return available_configs, ids
+
+
 def pytest_generate_tests(metafunc):
     """
     Generate dynamic tests for nodes with test configurations.
-    
+
     This function is called by pytest to generate test cases dynamically.
-    It finds all nodes with 'test' configurations and creates test cases
-    for each profile and test case defined.
+    It finds all nodes with 'test' (or 'fulltest') configurations and creates
+    test cases for each profile and test case defined.
     """
     if 'node_test_config' in metafunc.fixturenames:
         configs = discover_testable_nodes()
-        
-        # Filter to nodes that have required env vars
-        available_configs = []
-        ids = []
-        
+
         # Skip in dynamic node tests only (contract/other tests unchanged). These nodes are
         # excluded because they pull large libraries, use heavy models, or depend on local
         # services, which would cause CI timeouts or OOM. Opt-in via ROCKETRIDE_INCLUDE_SKIP:
@@ -234,18 +249,12 @@ def pytest_generate_tests(metafunc):
             n.strip() for n in os.environ.get('ROCKETRIDE_INCLUDE_SKIP', '').split(',') if n.strip()
         }
 
-        for config in configs:
-            if config.node_name in skip_nodes and config.node_name not in include_skip:
-                continue
-            if config.has_required_env_vars():
-                # If no profiles, add once with None profile
-                if not config.profiles:
-                    available_configs.append((config, None))
-                    ids.append(config.get_test_id())
-                else:
-                    # Add once per profile
-                    for profile in config.profiles:
-                        available_configs.append((config, profile))
-                        ids.append(f"{config.get_test_id()}:{profile}")
-        
+        available_configs, ids = _build_parametrize_list(configs, skip_nodes, include_skip)
         metafunc.parametrize('node_test_config', available_configs, ids=ids)
+
+    if 'node_fulltest_config' in metafunc.fixturenames:
+        # Fulltest: discovers 'fulltest' key in service*.json — no skip_nodes filter,
+        # these are run explicitly via model_server:fulltest.
+        configs = discover_testable_nodes(test_key='fulltest')
+        available_configs, ids = _build_parametrize_list(configs)
+        metafunc.parametrize('node_fulltest_config', available_configs, ids=ids)

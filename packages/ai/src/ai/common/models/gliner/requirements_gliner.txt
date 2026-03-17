@@ -1,2 +1,4 @@
 gliner
+# needed for gliner_ko
+python-mecab-ko
 
