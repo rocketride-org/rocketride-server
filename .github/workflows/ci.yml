@@ -35,7 +35,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      packages: write
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -59,14 +58,8 @@ jobs:
     timeout-minutes: 90
     runs-on: ${{ matrix.runner }}
     permissions:
-      actions: read
-      checks: read
       contents: read
       packages: write
-      pull-requests: write
-      repository-projects: read
-      security-events: read
-      statuses: read
     strategy:
       fail-fast: false
       matrix:
@@ -138,9 +131,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      actions: read
       contents: read
-      packages: write
       security-events: write
     strategy:
       fail-fast: false
@@ -173,7 +164,6 @@ jobs:
     timeout-minutes: 90
     continue-on-error: true
     permissions:
-      actions: read
       contents: read
       packages: write
       security-events: write
