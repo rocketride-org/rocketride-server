@@ -183,14 +183,14 @@ if client.did_fail(res):
 result = await client.send(token, "Hello, pipeline!", objinfo={"name": "greeting.txt"}, mimetype="text/plain")
 ```
 
-**Example - stream with a pipe (context manager):**
+**Example - stream with a pipe:**
 
 ```python
 pipe = await client.pipe(token, mime_type="application/json")
-async with pipe:
-    await pipe.write(b'{"key": "value1"}')
-    await pipe.write(b'{"key": "value2"}')
-result = await pipe.close()  # result available after context
+await pipe.open()
+await pipe.write(b'{"key": "value1"}')
+await pipe.write(b'{"key": "value2"}')
+result = await pipe.close()
 ```
 
 ### Events
@@ -440,13 +440,13 @@ async def main():
         result = await client.use(filepath="ingest.json")
         token = result["token"]
         pipe = await client.pipe(token, objinfo={"name": "large.csv"}, mime_type="text/csv")
-        async with pipe:
-            with open("large.csv", "rb") as f:
-                while True:
-                    chunk = f.read(64 * 1024)
-                    if not chunk:
-                        break
-                    await pipe.write(chunk)
+        await pipe.open()
+        with open("large.csv", "rb") as f:
+            while True:
+                chunk = f.read(64 * 1024)
+                if not chunk:
+                    break
+                await pipe.write(chunk)
         result = await pipe.close()
         print(result)
         await client.terminate(token)
