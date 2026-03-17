@@ -436,20 +436,6 @@ def plan(
     result = host.llm.invoke(IInvokeLLM(op='ask', question=wave_prompt)).getJson()
     debug(f'plan: result={json.dumps(result, ensure_ascii=False, default=str)[:500]}')
 
-    # Diagnostic trace file — append each REQUEST/RESULT pair for offline
-    # analysis.  Failures are silently swallowed so a missing/locked file
-    # never crashes the agent loop.
-    # try:
-    #     with open(r'C:\agents\agent.log', 'a', encoding='utf-8') as _f:
-    #         _ts = datetime.datetime.now().isoformat(timespec='seconds')
-    #         _f.write(f'\n{"=" * 80}\n[{_ts}] REQUEST\n{"=" * 80}\n')
-    #         _f.write(wave_prompt.getPrompt())
-    #         _f.write(f'\n{"=" * 80}\n[{_ts}] RESULT\n{"=" * 80}\n')
-    #         _f.write(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-    #         _f.write('\n')
-    # except Exception as _e:
-    #     debug(f'plan: agent.txt write failed: {_e}')
-
     # If the LLM returned neither done=true nor tool_calls, the response is
     # malformed or empty.  Return {} to signal the outer loop to fall through
     # to the synthesis fallback rather than silently stalling.

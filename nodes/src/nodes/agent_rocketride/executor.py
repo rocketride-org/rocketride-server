@@ -47,10 +47,6 @@ from .formatters import format_data
 # prevents runaway thread counts when the LLM issues many parallel calls.
 _MAX_WORKERS = 8
 
-# Hard timeout per individual tool call (seconds).  Prevents a slow external
-# API from blocking the entire wave indefinitely.
-_TOOL_TIMEOUT_S = 120
-
 # Indentation used by _describe() when rendering nested structures.
 _INDENT = '  '
 

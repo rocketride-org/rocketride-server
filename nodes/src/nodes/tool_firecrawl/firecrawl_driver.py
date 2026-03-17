@@ -215,8 +215,8 @@ def _normalize_tool_input(input_obj: Any) -> Dict[str, Any]:
             parsed = _json.loads(input_obj)
             if isinstance(parsed, dict):
                 input_obj = parsed
-        except Exception:
-            pass
+        except Exception as e:
+            warning(f'firecrawl: failed to parse JSON input: {e}')
 
     if not isinstance(input_obj, dict):
         warning(f'firecrawl: unexpected input type {type(input_obj).__name__}: {input_obj!r}')

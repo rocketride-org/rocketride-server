@@ -35,6 +35,7 @@ import time
 from typing import Any, Dict, Optional
 
 import requests
+from rocketlib import debug
 from requests.auth import HTTPBasicAuth
 
 DEFAULT_TIMEOUT_SECONDS = 30
@@ -179,8 +180,8 @@ def _build_response(resp: requests.Response, elapsed_ms: int) -> Dict[str, Any]:
     if 'json' in content_type or 'javascript' in content_type:
         try:
             parsed_json = resp.json()
-        except Exception:
-            pass
+        except Exception as e:
+            debug(f'http_client: failed to parse JSON response: {e}')
 
     return {
         'status_code': resp.status_code,
