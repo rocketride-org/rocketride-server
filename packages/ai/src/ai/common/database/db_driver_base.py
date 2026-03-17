@@ -301,6 +301,8 @@ class DatabaseDriverBase(ToolsBase):
         elif name == 'get_data':
             return self._invoke_get_data(input_obj)
 
+        return None
+
     # ------------------------------------------------------------------
     # Tool implementations — fully dialect-agnostic via SQLAlchemy
     # ------------------------------------------------------------------

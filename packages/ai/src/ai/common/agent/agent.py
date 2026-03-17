@@ -352,6 +352,6 @@ class AgentBase(ABC):
             glb = getattr(pSelf, 'IGlobal', None)
             if glb and getattr(glb, 'glb', None) and getattr(glb.glb, 'logicalType', None):
                 return str(glb.glb.logicalType)
-        except Exception:
-            pass
+        except Exception as e:
+            debug(f'_agent_id lookup failed: {e}')
         return self.__class__.__name__

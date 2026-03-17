@@ -38,7 +38,6 @@ Everything else — schema reflection, type inference, table auto-creation,
 session lifecycle — is handled here and is dialect-agnostic.
 """
 
-import os
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -124,8 +123,8 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             if isinstance(args, (list, tuple)) and len(args) >= 2 and isinstance(args[0], int):
                 code, msg = args[0], args[1]
                 return f'Error {code}: {str(msg)}'.strip()
-        except Exception:
-            pass
+        except Exception as e:
+            warning(f'Failed to extract DB error details: {e}')
         return str(exc).strip()
 
     def validateConfig(self):
@@ -167,8 +166,8 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             try:
                 if engine:
                     engine.dispose()
-            except Exception:
-                pass
+            except Exception as e:
+                warning(f'Failed to dispose validation engine: {e}')
 
     # ------------------------------------------------------------------
     # Table / schema helpers
@@ -322,7 +321,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             # ------------------------------------------------------------------
             pk_col = Column('id', Integer, primary_key=True, autoincrement=True)
             metadata = MetaData()
-            _sql_table = SQLTable(table, metadata, pk_col, *columns)  # noqa: F841
+            SQLTable(table, metadata, pk_col, *columns)
             metadata.create_all(self.engine)
 
             # Populate the schema cache with data columns only.  The 'id' PK

@@ -448,6 +448,8 @@ class ChatBase:
             # And return it
             return answer
 
+        return None
+
 
 def getChat(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> ChatBase:
     """

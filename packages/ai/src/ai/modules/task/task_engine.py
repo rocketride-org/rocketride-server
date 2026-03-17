@@ -42,7 +42,6 @@ import re
 from typing import TYPE_CHECKING, Dict, Any, List, Optional
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from rocketlib import debug
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS,
