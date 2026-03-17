@@ -69,7 +69,7 @@ class _AgentAsToolProvider(ToolsBase):
             return self._tools_available
         try:
             host = AgentHostServices(self._pSelf)
-            tools = self._agent._discover_tools(host=host)
+            tools = self._agent.discover_tools(host=host)
             tools_available = []
             for t in tools:
                 name = t.get('name', '')

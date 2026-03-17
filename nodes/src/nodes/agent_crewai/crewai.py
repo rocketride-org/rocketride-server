@@ -173,10 +173,10 @@ class CrewDriver(AgentBase):
 
         from crewai import Agent, Crew, Task  # type: ignore
 
-        tool_descriptors = self._discover_tools(host=host)
+        tool_descriptors = self.discover_tools(host=host)
 
         def _call_llm_text(messages: Any, stop_words: Any = None) -> str:
-            return self._call_host_llm(
+            return self.call_host_llm(
                 host=host,
                 messages=messages,
                 question_role='You are a helpful assistant.',
@@ -184,7 +184,7 @@ class CrewDriver(AgentBase):
             )
 
         def _invoke_tool(tool_name: str, input: Any = None, kwargs: Optional[Dict[str, Any]] = None) -> Any:  # noqa: A002
-            return self._invoke_host_tool(host=host, tool_name=tool_name, input=input, kwargs=kwargs)
+            return self.invoke_host_tool(host=host, tool_name=tool_name, input=input, kwargs=kwargs)
 
         llm = self._bind_framework_llm(host=host, call_llm_text=_call_llm_text, ctx=ctx)
         tools_for_agent = self._bind_framework_tools(
