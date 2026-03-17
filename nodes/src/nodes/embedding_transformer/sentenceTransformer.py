@@ -75,7 +75,7 @@ class Embedding(EmbeddingBase):
 
         # Get the model from our section
         self._model = config.get('model')
-        self._truncateDim = config.get('truncate_dim', None)
+        self._truncateDim = config.get('truncate_dim', None) or None
         self._document_prefix = config.get('document_prefix', '')
         self._query_prefix = config.get('query_prefix', '')
 
