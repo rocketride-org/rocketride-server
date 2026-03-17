@@ -2,7 +2,7 @@
 
 Python SDK for the RocketRide Engine - build, run, and manage AI pipelines from Python.
 
-> [RocketRide](https://rocketride.org) is an open source, developer-native AI pipeline platform.
+> [RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline platform.
 > This package lets you connect to a RocketRide engine, start pipelines, send data, stream results,
 > and build conversational AI - all from async Python.
 
@@ -29,14 +29,14 @@ asyncio.run(main())
 
 ## What is RocketRide?
 
-[RocketRide](https://rocketride.org) is an open source, developer-native AI pipeline platform.
-It lets you build, debug, and deploy production AI workflows without leaving your IDE -
+[RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline platform.
+It lets you build, debug, and deploy production AI workflows without leaving your IDE --
 using a visual drag-and-drop canvas or code-first with TypeScript and Python SDKs.
 
 - **50+ ready-to-use nodes** - 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more
 - **High-performance C++ engine** - production-grade speed and reliability
 - **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
-- **MIT licensed** - fully open source, OSI-compliant
+- **MIT licensed** - fully open-source, OSI-compliant
 
 ## Features
 
@@ -183,14 +183,14 @@ if client.did_fail(res):
 result = await client.send(token, "Hello, pipeline!", objinfo={"name": "greeting.txt"}, mimetype="text/plain")
 ```
 
-**Example - stream with a pipe (context manager):**
+**Example - stream with a pipe:**
 
 ```python
 pipe = await client.pipe(token, mime_type="application/json")
-async with pipe:
-    await pipe.write(b'{"key": "value1"}')
-    await pipe.write(b'{"key": "value2"}')
-result = await pipe.close()  # result available after context
+await pipe.open()
+await pipe.write(b'{"key": "value1"}')
+await pipe.write(b'{"key": "value2"}')
+result = await pipe.close()
 ```
 
 ### Events
@@ -440,13 +440,13 @@ async def main():
         result = await client.use(filepath="ingest.json")
         token = result["token"]
         pipe = await client.pipe(token, objinfo={"name": "large.csv"}, mime_type="text/csv")
-        async with pipe:
-            with open("large.csv", "rb") as f:
-                while True:
-                    chunk = f.read(64 * 1024)
-                    if not chunk:
-                        break
-                    await pipe.write(chunk)
+        await pipe.open()
+        with open("large.csv", "rb") as f:
+            while True:
+                chunk = f.read(64 * 1024)
+                if not chunk:
+                    break
+                await pipe.write(chunk)
         result = await pipe.close()
         print(result)
         await client.terminate(token)
