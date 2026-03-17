@@ -183,9 +183,7 @@ function makeCreateNpmPackageAction() {
             const { changed } = await checkSourceChanged();
 
             // Check if package already exists
-            const files = await exists(PACKAGE_DIST)
-                        ? glob('*.tgz', { cwd: PACKAGE_DIST, nodir: true, absolute: true })
-                        : [];
+            const files = await glob('*.tgz', { cwd: PACKAGE_DIST, nodir: true });
 
             if (!changed && files.length > 0) {
                 task.output = 'No changes detected';
