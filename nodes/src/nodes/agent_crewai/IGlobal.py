@@ -88,7 +88,7 @@ class IGlobal(IGlobalBase):
         # Build driver instance (framework-specific logic lives in crewai.py).
         from .crewai import CrewDriver
 
-        self.agent = CrewDriver(process=self.process)
+        self.agent = CrewDriver(self, process=self.process)
 
     def validateConfig(self):
         """

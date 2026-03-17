@@ -36,8 +36,9 @@ from ai.common.tools import ToolsBase
 class LangChainDriver(AgentBase):
     FRAMEWORK = 'langchain'
 
-    def __init__(self) -> None:
+    def __init__(self, iGlobal: Any) -> None:
         """Initialize the LangChain driver."""
+        super().__init__(iGlobal)
 
     # ------------------------------------------------------------------
     # Bindings
@@ -242,7 +243,7 @@ class LangChainDriver(AgentBase):
         try:
             agent = create_agent(model=llm, tools=tools_for_agent, system_prompt=system_message, debug=False)
             stage = 'invoke'
-            state = agent.invoke({'messages': [HumanMessage(content=_safe_str(agent_input.prompt or ''))]})
+            state = agent.invoke({'messages': [HumanMessage(content=_safe_str(agent_input.question.getPrompt() or ''))]})
         except Exception as e:
             raise RuntimeError('LangChain agent {} failed: {}: {}'.format(stage, type(e).__name__, _safe_str(e))) from e
 

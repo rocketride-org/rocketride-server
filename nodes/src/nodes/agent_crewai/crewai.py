@@ -40,10 +40,11 @@ from ai.common.tools import ToolsBase
 class CrewDriver(AgentBase):
     FRAMEWORK = 'crewai'
 
-    def __init__(self, *, process: Any = None):
+    def __init__(self, iGlobal: Any, *, process: Any = None):
         """
         Initialize the CrewDriver.
         """
+        super().__init__(iGlobal)
         self._process = process
 
     def _bind_framework_llm(
@@ -91,8 +92,10 @@ class CrewDriver(AgentBase):
             model_config = ConfigDict(extra='allow')
 
         def _make_args_schema(input_schema: Optional[Dict[str, Any]]) -> type[BaseModel]:
-            """Build a dynamic Pydantic model from a JSON Schema so that
-            CrewAI's argument filter preserves real tool parameters."""
+            """
+            Build a dynamic Pydantic model from a JSON Schema so that
+            CrewAI's argument filter preserves real tool parameters.
+            """
             if not isinstance(input_schema, dict):
                 return _ToolInput
             props = input_schema.get('properties', {})
@@ -166,7 +169,7 @@ class CrewDriver(AgentBase):
         ctx: Dict[str, Any],
     ) -> AgentRunResult:
         run_id = ctx.get('run_id', '')
-        debug('agent_crewai driver _run start run_id={} prompt_len={}'.format(run_id, len(agent_input.prompt or '')))
+        debug('agent_crewai driver _run start run_id={} prompt_len={}'.format(run_id, len(agent_input.question.getPrompt() or '')))
 
         from crewai import Agent, Crew, Task  # type: ignore
 
@@ -211,7 +214,7 @@ class CrewDriver(AgentBase):
             'Use tools when needed (and only those available to you).',
             '',
             'User request:',
-            _safe_str(agent_input.prompt or ''),
+            _safe_str(agent_input.question.getPrompt() or ''),
         ]
         desc = '\n'.join(desc_parts).strip()
 
