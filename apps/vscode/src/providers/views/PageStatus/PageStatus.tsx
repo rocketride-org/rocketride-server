@@ -174,7 +174,6 @@ export const PageStatus: React.FC = () => {
 							prev.forEach(v => { if (v.uri.startsWith('blob:')) URL.revokeObjectURL(v.uri); });
 							return blobVideos;
 						});
-						setActiveTab('results');
 						break;
 					}
 					case 'traceEvent': {
@@ -437,7 +436,6 @@ export const PageStatus: React.FC = () => {
 		{ id: 'tokens', label: 'Tokens' },
 		{ id: 'flow', label: 'Flow' },
 		{ id: 'trace', label: 'Trace' },
-		{ id: 'results', label: 'Results', badge: videos.length > 0 ? <span className="results-badge">{videos.length}</span> : undefined },
 		{ id: 'errors', label: 'Errors', badge: errorCount > 0 ? <WarningIcon size={14} /> : undefined }
 	];
 
@@ -538,37 +536,10 @@ export const PageStatus: React.FC = () => {
 							traceIdRef.current = 0;
 							setTraceRows([]);
 						}}
+						videos={videos}
 					/>
 				</div>
 				<div
-					className={activeTab === 'results' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
-					role="tabpanel"
-					aria-hidden={activeTab !== 'results'}
-				>
-					{videos.length === 0 ? (
-						<section className="status-section">
-							<header className="section-header">Results</header>
-							<div className="section-content">
-								<div className="no-data">No results yet</div>
-							</div>
-						</section>
-					) : (
-						<section className="status-section">
-							<header className="section-header">Results</header>
-							<div className="results-video-list">
-								{videos.map((v, i) => (
-									<div key={i} className="results-video-item">
-										<video controls preload="metadata" className="results-video-player">
-											<source src={v.uri} type={v.mimeType} />
-										</video>
-										<div className="results-video-meta">{v.sizeMB} MB</div>
-									</div>
-								))}
-							</div>
-						</section>
-					)}
-				</div>
-								<div
 					className={activeTab === 'errors' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
 					role="tabpanel"
 					aria-hidden={activeTab !== 'errors'}
