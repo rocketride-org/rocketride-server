@@ -113,6 +113,46 @@
 				"min_seconds": 240,
 				"max_seconds": 300,
 				"vad_level": 1
+			},
+			"tiny": {
+				"mode": "tiny",
+				"language": "en",
+				"silence_threshold": 0.25,
+				"min_seconds": 240,
+				"max_seconds": 300,
+				"vad_level": 1
+			},
+			"base": {
+				"mode": "base",
+				"language": "en",
+				"silence_threshold": 0.25,
+				"min_seconds": 240,
+				"max_seconds": 300,
+				"vad_level": 1
+			},
+			"small": {
+				"mode": "small",
+				"language": "en",
+				"silence_threshold": 0.25,
+				"min_seconds": 240,
+				"max_seconds": 300,
+				"vad_level": 1
+			},
+			"medium": {
+				"mode": "medium",
+				"language": "en",
+				"silence_threshold": 0.25,
+				"min_seconds": 240,
+				"max_seconds": 300,
+				"vad_level": 1
+			},
+			"large-v3": {
+				"mode": "large-v3",
+				"language": "en",
+				"silence_threshold": 0.25,
+				"min_seconds": 240,
+				"max_seconds": 300,
+				"vad_level": 1
 			}
 		}
 	},
@@ -126,7 +166,7 @@
 			{
 				"video": "video/BBC - Tear down this wall.mp4",
 				"expect": {
-					"text": { 
+					"text": {
                         "beginsWith": "Where East meets West in the divided",
                         "contains": "Mr Gorbachev, open this gate.\nMr Gorbachev, tear down this wall.\n",
                         "endsWith": "as many again were arrested.\n\n\n" }
@@ -134,6 +174,27 @@
 			}
 		]
 	},
+	//
+	//	Full test configuration - tests all Whisper model sizes.
+	//	Run via: builder model_server:fulltest
+	//
+	"fulltest": [
+		{
+			"profiles": ["tiny", "base", "small", "medium", "large-v3"],
+			"outputs": ["text"],
+			"timeout": 300,
+			"cases": [
+				{
+					"video": "video/BBC - Tear down this wall.mp4",
+					"expect": {
+						"text": {
+							"contains": "Mr Gorbachev, tear down this wall."
+						}
+					}
+				}
+			]
+		}
+	],
 	//
 	// Optional:
 	//		Local fields defintions - these define fields only for the
@@ -163,8 +224,8 @@
 					"Medium - Slower, high accuracy"
 				],
 				[
-					"large",
-					"Large - Slowest, Highest accuracy"
+					"large-v3",
+					"Large v3 - Slowest, Highest accuracy"
 				]
 			],
 			"default": "base"

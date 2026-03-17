@@ -212,47 +212,58 @@ def _infer_outputs_from_cases(cases: List[TestCase]) -> List[str]:
     return sorted(outputs)
 
 
-def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], test_key: str = 'test') -> Optional[NodeTestConfig]:
-    """Parse a test key (e.g. 'test' or 'fulltest') from a service.json into NodeTestConfig."""
+def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], test_key: str = 'test') -> List[NodeTestConfig]:
+    """Parse a test key (e.g. 'test' or 'fulltest') from a service.json into a list of NodeTestConfig.
+
+    The value may be a single object or an array of objects (array format allows
+    different profiles/cases per group within the same service file).
+    """
     test_data = data.get(test_key)
     if not test_data:
-        return None
-    
+        return []
+
     # Only test Python nodes
     if data.get('node') != 'python':
-        return None
-    
-    # Parse test cases using new format
-    cases = []
-    for case_data in test_data.get('cases', []):
-        case = _parse_test_case(case_data)
-        cases.append(case)
-    
+        return []
+
     # Get provider from protocol (strip the :// suffix)
     protocol = data.get('protocol', '')
     if not protocol:
         raise ValueError(f"Node {node_name} missing required 'protocol' field in {service_file}")
     provider = protocol.replace('://', '')
-    
-    # Infer outputs from expect keys only when outputs key is not present
-    outputs = test_data.get('outputs')
-    if outputs is None:
-        outputs = _infer_outputs_from_cases(cases)
-    
-    return NodeTestConfig(
-        node_name=node_name,
-        provider=provider,
-        service_file=service_file,
-        requires=test_data.get('requires', []),
-        profiles=test_data.get('profiles', []),
-        controls=test_data.get('controls', []),
-        chain=test_data.get('chain', ['*']),
-        outputs=outputs,
-        timeout=test_data.get('timeout', 60),
-        cases=cases,
-        preconfig=data.get('preconfig', {}),
-        lanes=data.get('lanes', {})
-    )
+
+    # Support both a single object and an array of objects
+    groups = test_data if isinstance(test_data, list) else [test_data]
+
+    configs = []
+    for group in groups:
+        # Parse test cases using new format
+        cases = []
+        for case_data in group.get('cases', []):
+            case = _parse_test_case(case_data)
+            cases.append(case)
+
+        # Infer outputs from expect keys only when outputs key is not present
+        outputs = group.get('outputs')
+        if outputs is None:
+            outputs = _infer_outputs_from_cases(cases)
+
+        configs.append(NodeTestConfig(
+            node_name=node_name,
+            provider=provider,
+            service_file=service_file,
+            requires=group.get('requires', []),
+            profiles=group.get('profiles', []),
+            controls=group.get('controls', []),
+            chain=group.get('chain', ['*']),
+            outputs=outputs,
+            timeout=group.get('timeout', 60),
+            cases=cases,
+            preconfig=data.get('preconfig', {}),
+            lanes=data.get('lanes', {})
+        ))
+
+    return configs
 
 
 def discover_testable_nodes(nodes_src_dir: str = None, test_key: str = 'test') -> List[NodeTestConfig]:
@@ -284,9 +295,8 @@ def discover_testable_nodes(nodes_src_dir: str = None, test_key: str = 'test') -
             if data is None:
                 continue
 
-            config = _parse_test_config(node_name, str(service_file), data, test_key=test_key)
-            if config:
-                testable_nodes.append(config)
+            configs = _parse_test_config(node_name, str(service_file), data, test_key=test_key)
+            testable_nodes.extend(configs)
 
     return testable_nodes
 
