@@ -51,6 +51,11 @@ from ai.common.schema import Doc, Question
 monitorStatus('Loading transformers complete')
 
 
+TRUSTED_REMOTE_CODE_PROVIDERS = [
+    'nomic-ai',
+]
+
+
 class Embedding(EmbeddingBase):
     """The embedding class controls the conversion of a piece of text into a vector.
 
@@ -76,7 +81,11 @@ class Embedding(EmbeddingBase):
 
         # Create one
         monitorStatus('Loading model', self._model)
-        self._embedding = SentenceTransformer(model_name_or_path=self._model)
+        trust_remote = any(self._model.startswith(p + '/') for p in TRUSTED_REMOTE_CODE_PROVIDERS)
+        self._embedding = SentenceTransformer(
+            model_name_or_path=self._model,
+            trust_remote_code=trust_remote,
+        )
 
         # Check it
         if self._embedding is None:
