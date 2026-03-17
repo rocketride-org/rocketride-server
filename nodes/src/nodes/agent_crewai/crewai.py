@@ -228,7 +228,62 @@ class CrewDriver(AgentBase):
         )
 
         crew = Crew(agents=[agent_obj], tasks=[task_obj], process=self._process)
-        result = crew.kickoff()
+
+        from crewai.events.base_events import BaseEvent
+        from crewai.events.event_bus import crewai_event_bus
+        from crewai.events.types.llm_events import LLMStreamChunkEvent
+        from crewai.events.types.logging_events import AgentLogsExecutionEvent, AgentLogsStartedEvent
+
+        _SKIP_EVENT_TYPES = {LLMStreamChunkEvent, AgentLogsStartedEvent, AgentLogsExecutionEvent}
+
+        _EVENT_LABELS: Dict[str, str] = {
+            'crew_kickoff_started': 'Crew started',
+            'crew_kickoff_completed': 'Crew completed',
+            'crew_kickoff_failed': 'Crew failed',
+            'task_started': 'Task started',
+            'task_completed': 'Task completed',
+            'task_failed': 'Task failed',
+            'agent_execution_started': 'Agent thinking...',
+            'agent_execution_completed': 'Agent done',
+            'agent_execution_error': 'Agent error',
+            'tool_usage_finished': 'Tool complete',
+            'tool_usage_error': 'Tool error',
+            'tool_execution_error': 'Tool execution error',
+            'tool_selection_error': 'Tool selection error',
+            'tool_validate_input_error': 'Tool input error',
+            'llm_call_started': 'LLM call started',
+            'llm_call_completed': 'LLM call completed',
+            'llm_call_failed': 'LLM call failed',
+        }
+
+        self.sendSSE('thinking', 'Starting CrewAI agent...')
+
+        def _all_event_types(base):
+            result = []
+            for cls in base.__subclasses__():
+                result.append(cls)
+                result.extend(_all_event_types(cls))
+            return result
+
+        def _on_any_event(source, event):
+            if event.type == 'tool_usage_started':
+                tool_name = getattr(event, 'tool_name', '') or 'tool'
+                message = f'Calling {tool_name}...'
+            else:
+                message = _EVENT_LABELS.get(event.type) or event.type.replace('_', ' ').capitalize()
+            try:
+                data = event.to_json(exclude={'timestamp', 'source_fingerprint', 'fingerprint_metadata', 'source_type'})
+            except Exception:
+                data = None
+            self.sendSSE('thinking', message, data)
+
+        with crewai_event_bus.scoped_handlers():
+            for event_cls in _all_event_types(BaseEvent):
+                if event_cls in _SKIP_EVENT_TYPES:
+                    continue
+                crewai_event_bus.register_handler(event_cls, _on_any_event)
+
+            result = crew.kickoff()
 
         final_text = ''
         if hasattr(result, 'raw'):
