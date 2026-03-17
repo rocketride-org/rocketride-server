@@ -19,7 +19,6 @@
 
 import * as net from 'net';
 import { getLogger } from '../shared/util/output';
-import { icons } from '../shared/util/icons';
 
 export const SERVICE_NAME = 'RocketRide';
 export const SERVICE_DISPLAY_NAME = 'RocketRide Engine';
