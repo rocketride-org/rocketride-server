@@ -1,4 +1,4 @@
-# rocketride-mcp
+# RocketRide MCP
 
 Model Context Protocol (MCP) integration for the RocketRide Engine -- let AI assistants run your pipelines.
 

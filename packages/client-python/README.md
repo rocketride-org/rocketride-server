@@ -1,4 +1,4 @@
-# rocketride
+# RocketRide
 
 Python SDK for the RocketRide Engine -- build, run, and manage AI pipelines from Python.
 

@@ -1,4 +1,4 @@
-# rocketride
+# RocketRide
 
 TypeScript/JavaScript SDK for the RocketRide Engine -- build, run, and manage AI pipelines from Node.js or the browser.
 
