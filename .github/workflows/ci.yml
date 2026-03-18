@@ -13,7 +13,7 @@ on:
   merge_group:
     types: [checks_requested]
   schedule:
-    - cron: '17 4 * * 1'  # Weekly Monday 4:17 UTC
+    - cron: '17 4 * * 1' # Weekly Monday 4:17 UTC
   workflow_dispatch:
 
 permissions:
@@ -124,10 +124,11 @@ jobs:
         run: ${{ matrix.builder_cmd }} test --verbose
 
   # ---------------------------------------------------------------------------
-  #  CodeQL
+  #  CodeQL — scheduled + push only (not on PRs to avoid blocking releases)
   # ---------------------------------------------------------------------------
   codeql:
     name: CodeQL / ${{ matrix.language }}
+    if: github.event_name == 'schedule' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -155,7 +156,7 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
         with:
-          category: "/language:${{ matrix.language }}"
+          category: '/language:${{ matrix.language }}'
 
   codeql-cpp:
     name: CodeQL / cpp
@@ -215,7 +216,7 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
         with:
-          category: "/language:cpp"
+          category: '/language:cpp'
 
   # ---------------------------------------------------------------------------
   #  Container scan

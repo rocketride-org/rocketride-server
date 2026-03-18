@@ -1,0 +1,64 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+
+reviews:
+  profile: assertive
+  auto_review:
+    enabled: true
+    base_branches:
+      - develop
+      - release/.*
+    drafts: false
+    ignore_title_keywords:
+      - '[bot]'
+      - 'renovate'
+      - 'dependabot'
+      - 'release'
+      - 'chore(release)'
+  path_filters:
+    - '!dist/**'
+    - '!build/**'
+    - '!node_modules/**'
+    - '!pnpm-lock.yaml'
+    - '!vcpkg/**'
+  path_instructions:
+    - path: '**/*.{ts,tsx,js,jsx,mjs,cjs}'
+      instructions: |
+        TypeScript/JavaScript: strict mode, ES2022 target, ESNext modules.
+        Unused variables must be prefixed with underscore (_).
+        Follow eslint flat config in eslint.config.mjs and prettier formatting.
+    - path: 'nodes/**/*.py'
+      instructions: |
+        Python pipeline nodes: use single quotes, ruff for linting/formatting,
+        PEP 257 docstrings, target Python 3.10+.
+    - path: 'packages/server/**/*.{cpp,h,hpp}'
+      instructions: |
+        C++ code: C++17 standard. This is the core engine — review for
+        memory safety, thread safety, and performance.
+  tools:
+    eslint:
+      enabled: true
+    ruff:
+      enabled: true
+    cppcheck:
+      enabled: true
+    markdownlint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    gitleaks:
+      enabled: true
+    yamllint:
+      enabled: true
+
+knowledge_base:
+  learnings:
+    scope: auto
+  issues:
+    scope: auto
+  jira:
+    project_keys: []
+  linear:
+    team_keys: []
+  pull_requests:
+    scope: auto

@@ -31,6 +31,9 @@
 		"nodes",
 		"pipeline"
 	],
+	"scripts": {
+		"prepare": "lefthook install --force"
+	},
 	"engines": {
 		"node": ">=18.0.0",
 		"pnpm": ">=8.0.0"
@@ -84,6 +87,7 @@
 		"prettier": "^3.3.3",
 		"rimraf": "^5.0.5",
 		"tar": "^7.5.8",
+		"lefthook": "^2.1.4",
 		"typescript": "^5.3.3",
 		"typescript-eslint": "^8.15.0"
 	}
