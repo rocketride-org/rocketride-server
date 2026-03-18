@@ -318,12 +318,13 @@ export class PageDeployProvider {
 	// =========================================================================
 
 	/**
-	 * Polls service status until it reaches 'running' state, sending
-	 * live progress updates to the UI. Times out after 60 seconds.
+	 * Polls service status until the endpoint is ready ('running').
+	 * Fails immediately if the service process has stopped or was never installed.
+	 * Does not time out while the process is alive — startup may take a long time
+	 * (e.g. downloading models on first run).
 	 */
-	private async waitForServiceRunning(timeoutMs: number = 60000): Promise<void> {
-		const start = Date.now();
-		while (Date.now() - start < timeoutMs) {
+	private async waitForServiceRunning(): Promise<void> {
+		while (true) {
 			this.postMessage({ type: 'serviceProgress', message: 'Starting service...' });
 			const status = await this.serviceManager.getStatus();
 			const config = this.readServiceConfig();
@@ -334,9 +335,15 @@ export class PageDeployProvider {
 			this.postMessage({ type: 'serviceStatus', status });
 
 			if (status.state === 'running') return;
-			await new Promise(r => setTimeout(r, 1000));
+
+			// Process has stopped or was never started — surface the failure immediately.
+			if (status.state === 'stopped' || status.state === 'not-installed') {
+				throw new Error(`Service failed to start (state: ${status.state})`);
+			}
+
+			// 'starting' or 'stopping' — process is alive, keep waiting.
+			await new Promise(r => setTimeout(r, 2000));
 		}
-		this.logger.output(`${icons.warning} Service did not reach running state within ${timeoutMs / 1000}s`);
 	}
 
 	private async sendServiceStatus(): Promise<void> {
@@ -516,7 +523,7 @@ export class PageDeployProvider {
 
 		// Check if already on this version
 		const currentConfig = this.readDockerConfig();
-		if (currentConfig && currentConfig.imageTag === imageTag) {
+		if (currentConfig && currentConfig.imageTag === imageTag && imageTag !== 'latest') {
 			this.postMessage({ type: 'dockerProgress', message: 'Already up to date' });
 			await this.sendDockerStatus();
 			this.postMessage({ type: 'dockerComplete' });
@@ -565,9 +572,13 @@ export class PageDeployProvider {
 		}
 	}
 
-	private async waitForDockerRunning(timeoutMs: number = 60000): Promise<void> {
-		const start = Date.now();
-		while (Date.now() - start < timeoutMs) {
+	/**
+	 * Polls Docker container status until the endpoint is ready ('running').
+	 * Fails immediately if the container has stopped or is not installed.
+	 * Does not time out while the container is alive.
+	 */
+	private async waitForDockerRunning(): Promise<void> {
+		while (true) {
 			this.postMessage({ type: 'dockerProgress', message: 'Starting container...' });
 			const status = await this.dockerManager.getStatus();
 			const config = this.readDockerConfig();
@@ -577,9 +588,15 @@ export class PageDeployProvider {
 			this.postMessage({ type: 'dockerStatus', status });
 
 			if (status.state === 'running') return;
-			await new Promise(r => setTimeout(r, 1000));
+
+			// Container has stopped or is not installed — surface the failure immediately.
+			if (status.state === 'stopped' || status.state === 'not-installed') {
+				throw new Error(`Docker container failed to start (state: ${status.state})`);
+			}
+
+			// 'starting' or 'stopping' — keep waiting.
+			await new Promise(r => setTimeout(r, 2000));
 		}
-		this.logger.output(`${icons.warning} Docker container did not reach running state within ${timeoutMs / 1000}s`);
 	}
 
 	// =========================================================================

@@ -61,11 +61,15 @@ export class MacServiceManager extends ServiceManager {
 
 	public async install(executablePath: string, engineDir: string): Promise<void> {
 		const plistContent = this.buildPlist(executablePath, engineDir);
-		const tmpPlist = path.join(os.tmpdir(), 'rocketride.plist.tmp');
-		fs.writeFileSync(tmpPlist, plistContent, 'utf8');
+		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rocketride-'));
+		const tmpPlist = path.join(tmpDir, 'rocketride.plist');
+		fs.writeFileSync(tmpPlist, plistContent, { encoding: 'utf8', mode: 0o600 });
 
-		await this.runSudo('cp', [tmpPlist, PLIST_PATH]);
-		fs.unlinkSync(tmpPlist);
+		try {
+			await this.runSudo('cp', [tmpPlist, PLIST_PATH]);
+		} finally {
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		}
 
 		await this.runSudo('launchctl', ['load', PLIST_PATH]);
 
@@ -87,10 +91,14 @@ export class MacServiceManager extends ServiceManager {
 		await this.runSudo('launchctl', ['unload', PLIST_PATH]);
 
 		const plistContent = this.buildPlist(executablePath, engineDir);
-		const tmpPlist = path.join(os.tmpdir(), 'rocketride.plist.tmp');
-		fs.writeFileSync(tmpPlist, plistContent, 'utf8');
-		await this.runSudo('cp', [tmpPlist, PLIST_PATH]);
-		fs.unlinkSync(tmpPlist);
+		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rocketride-'));
+		const tmpPlist = path.join(tmpDir, 'rocketride.plist');
+		fs.writeFileSync(tmpPlist, plistContent, { encoding: 'utf8', mode: 0o600 });
+		try {
+			await this.runSudo('cp', [tmpPlist, PLIST_PATH]);
+		} finally {
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		}
 
 		await this.runSudo('launchctl', ['load', PLIST_PATH]);
 
@@ -129,22 +137,32 @@ export class MacServiceManager extends ServiceManager {
 		return { state, version: null, publishedAt: null, installPath: INSTALL_ROOT };
 	}
 
+	private static escapeXml(s: string): string {
+		return s
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&apos;');
+	}
+
 	private buildPlist(executablePath: string, workingDir: string): string {
+		const x = MacServiceManager.escapeXml;
 		return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>${PLIST_LABEL}</string>
+	<string>${x(PLIST_LABEL)}</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>${executablePath}</string>
+		<string>${x(executablePath)}</string>
 		<string>./ai/eaas.py</string>
-		<string>--host=0.0.0.0</string>
-		<string>--port=${SERVICE_PORT}</string>
+		<string>--host=127.0.0.1</string>
+		<string>--port=${x(String(SERVICE_PORT))}</string>
 	</array>
 	<key>WorkingDirectory</key>
-	<string>${workingDir}</string>
+	<string>${x(workingDir)}</string>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
@@ -155,9 +173,9 @@ export class MacServiceManager extends ServiceManager {
 	<key>ThrottleInterval</key>
 	<integer>5</integer>
 	<key>StandardOutPath</key>
-	<string>${path.join(LOGS_DIR, 'stdout.log')}</string>
+	<string>${x(path.join(LOGS_DIR, 'stdout.log'))}</string>
 	<key>StandardErrorPath</key>
-	<string>${path.join(LOGS_DIR, 'stderr.log')}</string>
+	<string>${x(path.join(LOGS_DIR, 'stderr.log'))}</string>
 </dict>
 </plist>
 `;
@@ -174,6 +192,7 @@ export class MacServiceManager extends ServiceManager {
 			}
 			child.stdin!.end();
 
+			child.stdout!.on('data', () => { /* drain stdout to prevent pipe buffer from blocking */ });
 			let stderr = '';
 			child.stderr!.on('data', (d: Buffer) => { stderr += d.toString(); });
 			child.on('close', (code: number | null) => {

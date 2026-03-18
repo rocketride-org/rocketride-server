@@ -73,10 +73,11 @@ export const IntegrationSettings: React.FC<IntegrationSettingsProps> = ({
 										type="checkbox"
 										checked={!!settings[key]}
 										onChange={(e) => onSettingsChange({ [key]: e.target.checked })}
+										aria-describedby={`${key}-help`}
 									/>
 									<span>{label}</span>
 								</label>
-								<div className="help-text">{description}</div>
+								<div id={`${key}-help`} className="help-text">{description}</div>
 							</React.Fragment>
 						))}
 					</div>

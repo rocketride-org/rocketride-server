@@ -159,7 +159,9 @@ body.vscode-high-contrast .welcome-logo .logo-dark {
 	font-size: 12px;
 }
 
-.welcome-links a:hover {
+.welcome-links a:hover,
+.welcome-links a:focus,
+.welcome-links a:focus-visible {
 	color: #ffffff;
 	text-decoration: underline;
 }

@@ -210,11 +210,27 @@ export class EngineInstaller {
 
 	/**
 	 * Removes all engine directories and pointer files.
+	 * Uses the same cross-process lock as install() to prevent races.
 	 */
-	public uninstall(): void {
-		if (fs.existsSync(this.enginesRoot)) {
-			fs.rmSync(this.enginesRoot, { recursive: true, force: true });
-			this.logger.output(`${icons.info} All engines uninstalled from ${this.enginesRoot}`);
+	public async uninstall(): Promise<void> {
+		this.ensureLockFileExists();
+		let release: (() => Promise<void>) | undefined;
+		try {
+			release = await lockfile.lock(this.lockFilePath(), {
+				stale: 120000,
+				retries: { retries: 5, minTimeout: 1000, maxTimeout: 3000 }
+			});
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			throw new Error(`Failed to acquire engine lock for uninstall: ${msg}`);
+		}
+		try {
+			if (fs.existsSync(this.enginesRoot)) {
+				fs.rmSync(this.enginesRoot, { recursive: true, force: true });
+				this.logger.output(`${icons.info} All engines uninstalled from ${this.enginesRoot}`);
+			}
+		} finally {
+			try { await release(); } catch { /* ignore stale lock */ }
 		}
 	}
 

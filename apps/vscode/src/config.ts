@@ -496,9 +496,9 @@ export class ConfigManager {
 		if (config.connectionMode === 'cloud' || config.connectionMode === 'onprem') {
 			return config.hostUrl;
 		}
-		// Local mode — actual URL is determined at runtime by ConnectionManager
-		// (dynamic port assigned by OS). This static value is used only for .env sync.
-		return config.hostUrl || 'http://localhost:5565';
+		// Local mode — always return the loopback fallback for .env sync;
+		// runtime resolution is handled by ConnectionManager.
+		return 'http://localhost:5565';
 	}
 
 	/**

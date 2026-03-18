@@ -17,6 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as https from 'https';
 import * as http from 'http';
+import * as crypto from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import {
@@ -35,8 +36,9 @@ const NSSM_DIR = path.join(INSTALL_ROOT, 'tools');
 const NSSM_PATH = path.join(NSSM_DIR, 'nssm.exe');
 const LOGS_DIR = path.join(INSTALL_ROOT, 'logs');
 
-// NSSM download URL (64-bit)
+// NSSM download URL and pinned SHA-256 (64-bit)
 const NSSM_DOWNLOAD_URL = 'https://nssm.cc/release/nssm-2.24.zip';
+const NSSM_SHA256 = '727d1e42275c605e0f04aba98095c38a8e1e46def453cdffce42869428aa6743';
 
 /** Escape a string for use inside PowerShell single quotes */
 function psEscape(s: string): string {
@@ -70,7 +72,7 @@ export class WindowsServiceManager extends ServiceManager {
 
 		// Register and configure the service (single UAC prompt)
 		await this.runElevatedScript('install.ps1', [
-			psCmd(NSSM_PATH, 'install', SERVICE_NAME, executablePath, './ai/eaas.py', `--host=0.0.0.0`, `--port=${SERVICE_PORT}`),
+			psCmd(NSSM_PATH, 'install', SERVICE_NAME, executablePath, './ai/eaas.py', '--host=127.0.0.1', `--port=${SERVICE_PORT}`),
 			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppDirectory', engineDir),
 			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'DisplayName', SERVICE_DISPLAY_NAME),
 			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'Description', 'RocketRide pipeline execution engine'),
@@ -111,7 +113,15 @@ export class WindowsServiceManager extends ServiceManager {
 			`Remove-Item -Recurse -Force '${LOGS_DIR.replace(/'/g, "''")}'`,
 		].join('\n');
 
-		await this.runElevatedScript('remove.ps1', script).catch(() => { /* service may not be installed */ });
+		try {
+			await this.runElevatedScript('remove.ps1', script);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			if (!/not installed|service does not exist|does not exist as an installed|1060/i.test(msg)) {
+				throw err;
+			}
+			// Service was not installed — nothing to unregister, proceed with cleanup
+		}
 
 		// Clean up the rest (config, tools, scripts) — owned by current user
 		if (fs.existsSync(INSTALL_ROOT)) {
@@ -129,7 +139,7 @@ export class WindowsServiceManager extends ServiceManager {
 		await this.runElevatedScript('update.ps1', [
 			psCmd(NSSM_PATH, 'stop', SERVICE_NAME),
 			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'Application', executablePath),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppParameters', `./ai/eaas.py --host=0.0.0.0 --port=${SERVICE_PORT}`),
+			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppParameters', `./ai/eaas.py --host=127.0.0.1 --port=${SERVICE_PORT}`),
 			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppDirectory', engineDir),
 			psCmd(NSSM_PATH, 'start', SERVICE_NAME),
 		].join('\n'));
@@ -223,6 +233,14 @@ export class WindowsServiceManager extends ServiceManager {
 			}
 		}
 
+		// Verify ZIP integrity before extraction
+		const zipBuffer = fs.readFileSync(zipPath);
+		const zipHash = crypto.createHash('sha256').update(zipBuffer).digest('hex');
+		if (zipHash !== NSSM_SHA256) {
+			try { fs.unlinkSync(zipPath); } catch { /* ignore */ }
+			throw new Error('NSSM integrity check failed — expected ' + NSSM_SHA256 + ', got ' + zipHash);
+		}
+
 		const AdmZip = require('adm-zip');
 		const zip = new AdmZip(zipPath);
 		const entries = zip.getEntries();
@@ -286,7 +304,7 @@ export class WindowsServiceManager extends ServiceManager {
 
 			this.logger.output(`${icons.info} Wrote ${scriptPath}`);
 
-			const psCommand = `Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${scriptPath}' -Verb RunAs -Wait -WindowStyle Hidden`;
+			const psCommand = `$p = Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${scriptPath}' -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode`;
 
 			execFile('powershell.exe', ['-NoProfile', '-Command', psCommand], (error, _stdout, stderr) => {
 				if (error) {

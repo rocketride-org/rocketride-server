@@ -90,6 +90,7 @@ export const PageDeploy: React.FC = () => {
 	const [serviceProgress, setServiceProgress] = useState<string | null>(null);
 	const [serviceError, setServiceError] = useState<string | null>(null);
 	const [serviceBusy, setServiceBusy] = useState(false);
+	const [serviceAction, setServiceAction] = useState<'install' | 'update' | 'remove' | 'start' | 'stop' | null>(null);
 	const [sudoPromptVisible, setSudoPromptVisible] = useState(false);
 	const [sudoPasswordInput, setSudoPasswordInput] = useState('');
 
@@ -100,6 +101,7 @@ export const PageDeploy: React.FC = () => {
 	const [dockerProgress, setDockerProgress] = useState<string | null>(null);
 	const [dockerError, setDockerError] = useState<string | null>(null);
 	const [dockerBusy, setDockerBusy] = useState(false);
+	const [dockerAction, setDockerAction] = useState<'install' | 'update' | 'remove' | 'start' | 'stop' | null>(null);
 
 	// Service version state
 	const [versions, setVersions] = useState<VersionItem[]>([]);
@@ -132,6 +134,7 @@ export const PageDeploy: React.FC = () => {
 					break;
 				case 'serviceComplete':
 					setServiceBusy(false);
+					setServiceAction(null);
 					setServiceProgress(null);
 					setSudoPromptVisible(false);
 					setSudoPasswordInput('');
@@ -139,6 +142,7 @@ export const PageDeploy: React.FC = () => {
 				case 'serviceError':
 					setServiceError(message.message);
 					setServiceBusy(false);
+					setServiceAction(null);
 					setServiceProgress(null);
 					setSudoPromptVisible(false);
 					setSudoPasswordInput('');
@@ -154,11 +158,13 @@ export const PageDeploy: React.FC = () => {
 					break;
 				case 'dockerComplete':
 					setDockerBusy(false);
+					setDockerAction(null);
 					setDockerProgress(null);
 					break;
 				case 'dockerError':
 					setDockerError(message.message);
 					setDockerBusy(false);
+					setDockerAction(null);
 					setDockerProgress(null);
 					break;
 				// Version lists
@@ -243,20 +249,34 @@ export const PageDeploy: React.FC = () => {
 					type="button"
 					className={`split-button-arrow ${btnClass}`}
 					disabled={isDisabled}
+					aria-label="Select version"
+					aria-expanded={isOpen}
+					aria-haspopup="menu"
+					aria-controls={`split-button-dropdown-${id}`}
 					onClick={(e) => { e.stopPropagation(); setDropdownOpen(isOpen ? null : id); }}
 				>
 					&#9662;
 				</button>
 				{isOpen && (
-					<div className="split-button-dropdown">
+					<div
+						id={`split-button-dropdown-${id}`}
+						role="menu"
+						className="split-button-dropdown"
+					>
 						{options.map((opt) => (
-							<div
+							<button
+								type="button"
 								key={opt.value}
+								role="menuitem"
 								className={`split-button-option ${opt.value === currentVersion ? 'selected' : ''}`}
 								onClick={() => { onVersionChange(opt.value); setDropdownOpen(null); }}
+								onKeyDown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') { onVersionChange(opt.value); setDropdownOpen(null); }
+									if (e.key === 'Escape') { setDropdownOpen(null); }
+								}}
 							>
 								{opt.label}
-							</div>
+							</button>
 						))}
 					</div>
 				)}
@@ -289,23 +309,23 @@ export const PageDeploy: React.FC = () => {
 	};
 
 	const handleServiceInstall = () => {
-		setServiceBusy(true); setServiceError(null);
+		setServiceBusy(true); setServiceAction('install'); setServiceError(null);
 		sendMessage({ type: 'serviceInstall', version: selectedVersion });
 	};
 	const handleServiceUpdate = () => {
-		setServiceBusy(true); setServiceError(null);
+		setServiceBusy(true); setServiceAction('update'); setServiceError(null);
 		sendMessage({ type: 'serviceUpdate', version: selectedVersion });
 	};
 	const handleServiceRemove = () => {
-		setServiceBusy(true); setServiceError(null);
+		setServiceBusy(true); setServiceAction('remove'); setServiceError(null);
 		sendMessage({ type: 'serviceRemove' });
 	};
 	const handleServiceStart = () => {
-		setServiceBusy(true); setServiceError(null);
+		setServiceBusy(true); setServiceAction('start'); setServiceError(null);
 		sendMessage({ type: 'serviceStart' });
 	};
 	const handleServiceStop = () => {
-		setServiceBusy(true); setServiceError(null);
+		setServiceBusy(true); setServiceAction('stop'); setServiceError(null);
 		sendMessage({ type: 'serviceStop' });
 	};
 
@@ -314,23 +334,23 @@ export const PageDeploy: React.FC = () => {
 	// =========================================================================
 
 	const handleDockerInstall = () => {
-		setDockerBusy(true); setDockerError(null);
+		setDockerBusy(true); setDockerAction('install'); setDockerError(null);
 		sendMessage({ type: 'dockerInstall', version: dockerSelectedVersion });
 	};
 	const handleDockerUpdate = () => {
-		setDockerBusy(true); setDockerError(null);
+		setDockerBusy(true); setDockerAction('update'); setDockerError(null);
 		sendMessage({ type: 'dockerUpdate', version: dockerSelectedVersion });
 	};
 	const handleDockerRemove = () => {
-		setDockerBusy(true); setDockerError(null);
+		setDockerBusy(true); setDockerAction('remove'); setDockerError(null);
 		sendMessage({ type: 'dockerRemove' });
 	};
 	const handleDockerStart = () => {
-		setDockerBusy(true); setDockerError(null);
+		setDockerBusy(true); setDockerAction('start'); setDockerError(null);
 		sendMessage({ type: 'dockerStart' });
 	};
 	const handleDockerStop = () => {
-		setDockerBusy(true); setDockerError(null);
+		setDockerBusy(true); setDockerAction('stop'); setDockerError(null);
 		sendMessage({ type: 'dockerStop' });
 	};
 
@@ -433,7 +453,7 @@ export const PageDeploy: React.FC = () => {
 								<p className="deploy-panel-description docker-unavailable">
 									Docker is not installed or the Docker daemon is not running.
 								</p>
-							) : dockerStatus.state === 'not-installed' ? (
+							) : dockerStatus.state === 'not-installed' && !(dockerBusy && dockerAction === 'remove') ? (
 								renderSplitButton(
 									'docker-install', 'Install', 'Installing...',
 									handleDockerInstall, dockerBusy, false,
@@ -520,7 +540,7 @@ export const PageDeploy: React.FC = () => {
 
 						{/* Actions */}
 						<div className="deploy-panel-actions">
-							{serviceStatus.state === 'not-installed' ? (
+							{serviceStatus.state === 'not-installed' && !(serviceBusy && serviceAction === 'remove') ? (
 								renderSplitButton(
 									'service-install', 'Install', 'Installing...',
 									handleServiceInstall, serviceBusy, false,

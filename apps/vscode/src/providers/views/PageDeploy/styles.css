@@ -289,6 +289,14 @@ body.vscode-high-contrast .logo-dark {
 }
 
 .split-button-option {
+	/* Reset browser button defaults */
+	appearance: none;
+	background: none;
+	border: none;
+	width: 100%;
+	text-align: left;
+	/* Layout */
+	display: block;
 	padding: 6px 12px;
 	font-size: 13px;
 	cursor: pointer;

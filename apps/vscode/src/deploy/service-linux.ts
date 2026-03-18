@@ -66,11 +66,15 @@ export class LinuxServiceManager extends ServiceManager {
 		await this.runSudo('mkdir', ['-p', INSTALL_ROOT]);
 
 		const unitContent = this.buildUnitFile(executablePath, engineDir);
-		const tmpUnit = path.join(os.tmpdir(), 'rocketride.service.tmp');
-		fs.writeFileSync(tmpUnit, unitContent, 'utf8');
+		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rocketride-'));
+		const tmpUnit = path.join(tmpDir, 'rocketride.service');
+		fs.writeFileSync(tmpUnit, unitContent, { encoding: 'utf8', mode: 0o600 });
 
-		await this.runSudo('cp', [tmpUnit, UNIT_PATH]);
-		fs.unlinkSync(tmpUnit);
+		try {
+			await this.runSudo('cp', [tmpUnit, UNIT_PATH]);
+		} finally {
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		}
 
 		await this.runSudo('systemctl', ['daemon-reload']);
 		await this.runSudo('systemctl', ['enable', UNIT_NAME]);
@@ -95,10 +99,14 @@ export class LinuxServiceManager extends ServiceManager {
 		await this.runSudo('systemctl', ['stop', UNIT_NAME]);
 
 		const unitContent = this.buildUnitFile(executablePath, engineDir);
-		const tmpUnit = path.join(os.tmpdir(), 'rocketride.service.tmp');
-		fs.writeFileSync(tmpUnit, unitContent, 'utf8');
-		await this.runSudo('cp', [tmpUnit, UNIT_PATH]);
-		fs.unlinkSync(tmpUnit);
+		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rocketride-'));
+		const tmpUnit = path.join(tmpDir, 'rocketride.service');
+		fs.writeFileSync(tmpUnit, unitContent, { encoding: 'utf8', mode: 0o600 });
+		try {
+			await this.runSudo('cp', [tmpUnit, UNIT_PATH]);
+		} finally {
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		}
 
 		await this.runSudo('systemctl', ['daemon-reload']);
 		await this.runSudo('systemctl', ['start', UNIT_NAME]);
@@ -144,7 +152,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=${workingDir}
-ExecStart=${executablePath} ./ai/eaas.py --host=0.0.0.0 --port=${SERVICE_PORT}
+ExecStart=${executablePath} ./ai/eaas.py --host=127.0.0.1 --port=${SERVICE_PORT}
 Restart=always
 RestartSec=5
 
@@ -166,6 +174,7 @@ WantedBy=multi-user.target
 			}
 			child.stdin!.end();
 
+			child.stdout!.on('data', () => { /* drain stdout to prevent pipe buffer from blocking */ });
 			let stderr = '';
 			child.stderr!.on('data', (d: Buffer) => { stderr += d.toString(); });
 			child.on('close', (code: number | null) => {

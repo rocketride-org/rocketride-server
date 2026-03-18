@@ -1458,7 +1458,7 @@ class Task(DAPBase):
                     try:
                         child_args.extend(shlex.split(arg))
                     except ValueError as e:
-                        logger.warning(f"Failed to parse engine arg {arg!r}: {e}, using as-is")
+                        self.debug_message(f"Failed to parse engine arg {arg!r}: {e}, using as-is")
                         child_args.append(arg)
                 else:
                     child_args.append(arg)
