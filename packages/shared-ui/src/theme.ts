@@ -324,15 +324,6 @@ export const createVSCodeTheme = () => {
 						: {},
 				},
 			},
-			MuiInputLabel: {
-				styleOverrides: {
-					root: inVSCode
-						? {
-								fontSize: `${baseFontSize * 0.75}px`,
-							}
-						: {},
-				},
-			},
 			MuiInputBase: {
 				styleOverrides: {
 					root: inVSCode
