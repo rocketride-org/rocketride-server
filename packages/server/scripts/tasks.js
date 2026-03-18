@@ -34,7 +34,7 @@ const {
     removeDirs, syncDir, syncFile, removeFiles,
     formatSyncStats,
     execCommand, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, isWindows, isMac, isLinux,
-    exists, readFile, readJson, mkdir, copyFile, removeFile,
+    exists, readFile, readJson, writeJson, mkdir, copyFile, removeFile,
     loadPackageJson, downloadGitHubFile, createArchive, extractArchive,
     parallel, whenNot, fingerprint, contentHash,
     taskDebug,
@@ -429,13 +429,26 @@ function makeDownloadAction(options = {}) {
             if (options.force) {
                 task.output = 'Force rebuild requested';
                 await setState('server.contentHash', null);
+                await setState('server.downloaded', false);
                 ctx.downloaded = false;
                 return;
             }
 
             if (options.nodownload) {
                 task.output = 'Download skipped (--nodownload)';
+                await setState('server.downloaded', false);
                 ctx.downloaded = false;
+                return;
+            }
+
+            // Get local vcpkg version
+            const { getVcpkgVersion } = require('../../vcpkg/scripts/tasks');
+            const localVcpkgVersion = await getVcpkgVersion();
+
+            if (!await getState('server.downloaded')
+                && await getState('server.contentHash') === localHash
+                && await getState('vcpkg.version') === localVcpkgVersion) {
+                task.output = 'Server already built';
                 return;
             }
 
@@ -445,29 +458,40 @@ function makeDownloadAction(options = {}) {
 
             // Try stable release first, then prerelease
             const tagsToTry = [releaseTag, prereleaseTag];
+            let releaseAvailable = false;
             let matchedTag = null;
 
             for (const tag of tagsToTry) {
-                try {
-                    task.output = `Checking ${tag}...`;
-                    const manifestPath = await downloadGitHubFile(tag, manifestFilename, task);
-                    if (manifestPath) {
-                        const manifest = await readJson(manifestPath);
-                        if (manifest?.vcpkg?.version !== require('../../vcpkg/scripts/tasks').VCPKG_VERSION) {
-                            task.output = 'Download skipped: vcpkg version mismatch';
-                            ctx.downloaded = false;
-                            return;
-                        }
-                        const serverHash = manifest?.server?.contentHash;
-                        if (localHash === serverHash) {
-                            await setState('server.releaseManifest', manifest);
-                            matchedTag = tag;
-                            break;
-                        }
-                    }
-                } catch {
-                    // Manifest not available for this tag — try next
+                task.output = `Checking release ${tag}...`;
+
+                let manifest = null;
+                const manifestPath = await downloadGitHubFile(tag, manifestFilename, task);
+                if (manifestPath) {
+                    manifest = await readJson(manifestPath);
                 }
+
+                if (manifest) {
+                    task.output = `Release ${tag} available`;
+                    releaseAvailable = true;
+                } else {
+                    task.output = `Release ${tag} not available`;
+                    continue;
+                }
+
+                const serverHash = manifest?.server?.contentHash;
+                const serverVcpkgVersion = manifest?.vcpkg?.version;
+                if (localHash === serverHash && localVcpkgVersion === serverVcpkgVersion) {
+                    matchedTag = tag;
+                    break;
+                }
+            }
+
+            if (!releaseAvailable) {
+                task.output = 'No releases available - will compile';
+                await setState('server.contentHash', null);
+                await setState('server.downloaded', false);
+                ctx.downloaded = false;
+                return;
             }
 
             if (!matchedTag) {
@@ -511,13 +535,11 @@ function makeDownloadAction(options = {}) {
                     task.output = `Extracted ${symDistFilename}`;
                 }
 
-                await setState('server.contentHash', localHash);
                 await setState('server.downloaded', true);
                 ctx.downloaded = true;
                 task.output = `Downloaded server from ${matchedTag}`;
 
             } catch {
-                await setState('server.contentHash', null);
                 await setState('server.downloaded', false);
                 ctx.downloaded = false;
                 task.output = `Release ${matchedTag} download failed: Will compile from source`;
@@ -1096,8 +1118,10 @@ function makePackageAction(options = {}) {
 
                 await setState('server.pkgHash', sourceHash);
 
-                // Copy state.json as build manifest for download validation
-                await copyFile(STATE_FILE, path.join(DIST_ARTIFACTS_DIR, manifestFilename));
+                // Copy state.json without releases as build manifest for download validation
+                const state = await readJson(STATE_FILE);
+                delete state.server.releases;
+                await writeJson(path.join(DIST_ARTIFACTS_DIR, manifestFilename), state);
 
             } catch (err) {
                 await removeFile(distFile);

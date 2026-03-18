@@ -38,14 +38,12 @@ const VCPKG_DIR = path.join(BUILD_ROOT, 'vcpkg');
 const VCPKG_INSTALLED_DIR = path.join(BUILD_ROOT, 'vcpkg_installed');
 
 // Read vcpkg version from package.json (loaded async in tasks)
-let VCPKG_VERSION = '2024.11.16';
-let packageJsonLoaded = false;
+let VCPKG_VERSION = null;
 
-async function loadPackageJson() {
-    if (!packageJsonLoaded) {
+async function getVcpkgVersion() {
+    if (!VCPKG_VERSION) {
         const packageJson = await readJson(path.join(PROJECT_ROOT, 'package.json'));
         VCPKG_VERSION = packageJson.vcpkg?.version || '2024.11.16';
-        packageJsonLoaded = true;
     }
     return VCPKG_VERSION;
 }
@@ -71,7 +69,7 @@ function makeCloneVcpkgAction(options = {}) {
         locks: ['vcpkg'],
         outputLines: 1,
         run: async (ctx, task) => {
-            const version = await loadPackageJson();
+            const version = await getVcpkgVersion();
             const vcpkgVersion = await getState('vcpkg.version');
 
             // Skip if already cloned
@@ -167,3 +165,4 @@ module.exports = {
 
 // Export for direct use
 module.exports.VCPKG_DIR = VCPKG_DIR;
+module.exports.getVcpkgVersion = getVcpkgVersion;

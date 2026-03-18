@@ -12,7 +12,6 @@ const path = require('path');
 const https = require('https');
 const AdmZip = require('adm-zip');
 const tar = require('tar');
-const { execCommand } = require('./exec');
 const { exists, rm, mkdir, unlink, isFile, isDirectory, createWriteStream, writeFile, readJson } = require('./fs');
 const { getState, setState } = require('./state');
 
@@ -48,12 +47,10 @@ async function loadPackageJson() {
  */
 async function downloadFile(url, filename, task) {
     const destPath = path.join(DOWNLOADS_DIR, filename);
-    // Escape dots in filename to prevent state key path issues (e.g., "maven-3.9.6.tar.gz" → "maven-3_9_6_tar_gz")
-    const safeFilename = filename.replace(/\./g, '_');
-    const stateKey = `downloads.${safeFilename}`;
+    const stateKey = ['downloads', url];
     
     // Check if already downloaded (atomic read)
-    if (await getState(stateKey) === true && await exists(destPath)) {
+    if (await getState(stateKey) && await exists(destPath)) {
         return destPath;
     }
     
@@ -64,35 +61,31 @@ async function downloadFile(url, filename, task) {
     await _download(url, destPath, task);
     
     // Mark as downloaded (atomic write)
-    await setState(stateKey, true);
+    await setState(stateKey, filename);
     
     return destPath;
 }
 
 async function downloadGitHubFile(releaseTag, filename, task) {
     const { repo } = await loadPackageJson();
-
-    try {
-        await execCommand('gh', [
-            'release', 'download', releaseTag,
-            '--repo', repo,
-            '--pattern', filename,
-            '--dir', DOWNLOADS_DIR,
-            '--clobber'
-        ], { task, silent: true});
-        return path.join(DOWNLOADS_DIR, filename);
-    } catch (err) {
-        task.output = `GitHub CLI download failed ${releaseTag}/${filename}: ${err.message.trim().replace(/\n/g, ' ')}`;
-    }
-
     const fileurl = `https://github.com/${repo}/releases/download/${releaseTag}/${filename}`;
     try {
-        return await downloadFile(fileurl, filename, task);
+        let downloadName = null;
+        if (releaseTag.endsWith('-prerelease')) {
+            // Add tag and timestamp to the pre-release file name to update pre-releases daily
+            const { name, ext } = path.parse(filename);
+            const today = new Date().toISOString().split('T')[0].replace(/-/g, ''); // 'yyyyMMdd'
+            downloadName = `${releaseTag}_${name}-${today}${ext}`;
+        } else {
+            // Add tag to the release filename
+            downloadName = `${releaseTag}_${filename}`;
+        }
+        return await downloadFile(fileurl, downloadName, task);
     } catch (err) {
-        task.output = `GitHub API download failed ${fileurl}: ${err.message.trim().replace(/\n/g, ' ')}`;
+        if (err.message && err.message.includes('HTTP 404'))
+            return null;
+        throw err;
     }
-
-    return null;
 }
 
 /**
