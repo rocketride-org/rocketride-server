@@ -217,7 +217,7 @@ class AgentBase(ABC):
     # ---------------------------------------------------------------------
     # Framework-facing host operations
     # ---------------------------------------------------------------------
-    def _discover_tools(self, *, host: AgentHost) -> List[ToolsBase.ToolDescriptor]:
+    def discover_tools(self, *, host: AgentHost) -> List[ToolsBase.ToolDescriptor]:
         """
         Discover available tools for framework drivers to expose.
 
@@ -237,7 +237,7 @@ class AgentBase(ABC):
             return catalog
         return []
 
-    def _invoke_host_tool(
+    def invoke_host_tool(
         self,
         *,
         host: AgentHost,
@@ -260,7 +260,7 @@ class AgentBase(ABC):
         payload = normalize_invocation_payload(input=input, kwargs=kwargs)
         return host.tools.invoke(tool_name, payload)
 
-    def _call_host_llm(
+    def call_host_llm(
         self,
         *,
         host: AgentHost,
