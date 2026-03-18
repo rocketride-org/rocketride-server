@@ -520,6 +520,10 @@ class IFilterInstance(IServiceFilterInstance, Protocol):
         """
         ...
 
+    def sendSSE(self, type: str, **data) -> None:
+        """Send a real-time SSE event to the UI for this pipe."""
+        ...
+
 
 class IInstanceBase:
     """
@@ -677,17 +681,26 @@ Monkey patch the C++ methods as needed
 
 
 def _patch_classes():
-    """Add Python methods to C++ classes."""
+    """Add Python methods to C++ classes.
+    
+    These are monkey patched on to the C++ so we can maintain our 
+    pattern of calling into the engine's self.instance.*.
+    """
 
     def invoke(self, classType: str, *args, nodeId: str = "", **kwargs) -> Any:
         control = IInvoke(args=args, kwargs=kwargs, result=None)
         self.control(classType, control, nodeId=nodeId)
         return control.result
 
+    def sendSSE(self, type: str, **data) -> None:
+        from .engine import monitorSSE
+        monitorSSE(self.pipeId, type, data or None)
+
     # Add to the actual C++ class
     from engLib import IFilterInstance as Impl_IFilterInstance
 
     Impl_IFilterInstance.invoke = invoke
+    Impl_IFilterInstance.sendSSE = sendSSE
 
 
 # Apply patches

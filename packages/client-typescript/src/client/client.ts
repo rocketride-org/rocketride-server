@@ -63,7 +63,7 @@ export class DataPipe {
 	private _pipeId?: number;
 	private _opened = false;
 	private _closed = false;
-	private _onSSE?: (body: Record<string, unknown>) => Promise<void>;
+	private _onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
 
 	/**
 	 * Creates a new DataPipe instance.
@@ -82,7 +82,7 @@ export class DataPipe {
 		objinfo: Record<string, unknown> = {},
 		mimeType = 'application/octet-stream',
 		provider?: string,
-		onSSE?: (body: Record<string, unknown>) => Promise<void>
+		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>
 	) {
 		this._client = client;
 		this._token = token;
@@ -267,7 +267,7 @@ export class RocketRideClient extends DAPClient {
 	private _dapSend?: (event: unknown) => void;
 	private _nextChatId = 1;
 	/** Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch. */
-	readonly _ssePipeCallbacks = new Map<number, (body: Record<string, unknown>) => Promise<void>>();
+	readonly _ssePipeCallbacks = new Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>();
 
 	// Persistence properties for automatic reconnection
 	private _persist: boolean = false;
@@ -540,9 +540,27 @@ export class RocketRideClient extends DAPClient {
 	 * Must be called before executing pipelines or other operations.
 	 * In persist mode, enables automatic reconnection on disconnect and on initial failure
 	 * (calls onConnectError on each failed attempt and keeps retrying).
-	 * @param timeout - Optional overall timeout in ms for the connect + auth handshake.
+	 * @param options - Optional timeout (number) or connection parameters object with uri, auth, and timeout.
 	 */
-	async connect(timeout?: number): Promise<void> {
+	async connect(options?: number | { uri?: string; auth?: string; timeout?: number }): Promise<void> {
+		let uri: string | undefined;
+		let auth: string | undefined;
+		let timeout: number | undefined;
+
+		if (typeof options === 'number') {
+			timeout = options;
+		} else if (options) {
+			({ uri, auth, timeout } = options);
+		}
+
+		// Apply optional overrides so they're used for this connect
+		if (uri !== undefined) {
+			this._setUri(uri);
+		}
+		if (auth !== undefined) {
+			this._setAuth(auth);
+		}
+
 		this._manualDisconnect = false;
 		this._currentReconnectDelay = 250;
 		this._retryStartTime = undefined;
@@ -977,9 +995,10 @@ export class RocketRideClient extends DAPClient {
 		token: string,
 		objinfo: Record<string, unknown> = {},
 		mimeType?: string,
-		provider?: string
+		provider?: string,
+		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>
 	): Promise<DataPipe> {
-		return new DataPipe(this, token, objinfo, mimeType, provider);
+		return new DataPipe(this, token, objinfo, mimeType, provider, onSSE);
 	}
 
 	/**
@@ -989,7 +1008,8 @@ export class RocketRideClient extends DAPClient {
 		token: string,
 		data: string | Uint8Array,
 		objinfo: Record<string, unknown> = {},
-		mimetype?: string
+		mimetype?: string,
+		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>
 	): Promise<PIPELINE_RESULT | undefined> {
 		// Convert string to bytes if needed
 		let buffer: Uint8Array;
@@ -1002,7 +1022,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Create and use a temporary pipe for the data
-		const pipe = await this.pipe(token, this._objinfoWithSize(objinfo, buffer.length), mimetype);
+		const pipe = await this.pipe(token, this._objinfoWithSize(objinfo, buffer.length), mimetype, undefined, onSSE);
 
 		try {
 			await pipe.open();
@@ -1202,7 +1222,7 @@ export class RocketRideClient extends DAPClient {
 	async chat(options: {
 		token: string;
 		question: Question;
-		onSSE?: (body: Record<string, unknown>) => Promise<void>;
+		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
 	}): Promise<PIPELINE_RESULT> {
 		const { token, question, onSSE } = options;
 
@@ -1217,14 +1237,7 @@ export class RocketRideClient extends DAPClient {
 			this._nextChatId += 1;
 
 			// Create pipe instance
-			const pipe = new DataPipe(
-				this,
-				token,
-				objinfo,
-				'application/rocketride-question',
-				'chat',
-				onSSE
-			);
+			const pipe = await this.pipe(token, objinfo, 'application/rocketride-question', 'chat', onSSE);
 
 			try {
 				// Open the communication channel to the AI
@@ -1318,7 +1331,10 @@ export class RocketRideClient extends DAPClient {
 				const cb = this._ssePipeCallbacks.get(pipeId);
 				if (cb) {
 					try {
-						await cb(eventBody as Record<string, unknown>);
+						const body = eventBody as Record<string, unknown>;
+						const type = (body.type as string) ?? '';
+						const data = (body.data as Record<string, unknown>) ?? {};
+						await cb(type, data);
 					} catch (error) {
 						this.debugMessage(`Error in SSE callback for pipe ${pipeId}: ${error}`);
 					}
