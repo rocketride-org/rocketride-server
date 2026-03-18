@@ -7,12 +7,14 @@ reviews:
     enabled: true
     base_branches:
       - develop
-      - main
       - release/.*
+    drafts: false
     ignore_title_keywords:
       - '[bot]'
       - 'renovate'
       - 'dependabot'
+      - 'release'
+      - 'chore(release)'
   path_filters:
     - '!dist/**'
     - '!build/**'
