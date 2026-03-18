@@ -58,7 +58,7 @@ constexpr Size operator"" _b(unsigned long long count) noexcept {
 }
 
 // Url literals
-inline Url operator"" _url(const char* str, std::size_t count) noexcept {
+inline Url operator"" _url(const char *str, std::size_t count) noexcept {
     return {TextView{str, count}};
 }
 

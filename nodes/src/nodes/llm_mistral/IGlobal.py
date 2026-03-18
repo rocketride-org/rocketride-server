@@ -51,7 +51,7 @@ class IGlobal(IGlobalBase):
 
         try:
             # Import Mistral SDK after dependencies are loaded
-            from mistralai import Mistral
+            from mistralai.client import Mistral
 
             try:
                 from mistralai.exceptions import MistralException  # type: ignore

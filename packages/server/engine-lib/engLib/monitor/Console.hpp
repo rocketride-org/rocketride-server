@@ -46,7 +46,7 @@ public:
     ///	@param[in]
     ///		Error code to output
     //-----------------------------------------------------------------
-    virtual Error warning(Error&& ccode) noexcept override {
+    virtual Error warning(Error &&ccode) noexcept override {
         auto mon = ccode;
         Monitor::warning(_mv(mon));
 
@@ -59,7 +59,7 @@ public:
     /// @param[in] data
     ///   JSON object describing the current status
     //-----------------------------------------------------------------
-    virtual void dependencyDownload(const json::Value& data) noexcept override {
+    virtual void dependencyDownload(const json::Value &data) noexcept override {
         auto str = data.stringify(false);
         Monitor::dependencyDownload(data);
 
@@ -72,7 +72,7 @@ public:
     ///	@param[in]
     ///		Error code to output
     //-----------------------------------------------------------------
-    virtual Error error(Error&& ccode) noexcept override {
+    virtual Error error(Error &&ccode) noexcept override {
         auto mon = ccode;
         Monitor::error(_mv(mon));
 
@@ -85,7 +85,7 @@ public:
     ///	@param[in]
     ///		Error code to output
     //-----------------------------------------------------------------
-    virtual Error exit(Error&& ccode) noexcept override {
+    virtual Error exit(Error &&ccode) noexcept override {
         auto mon = ccode;
         Monitor::exit(_mv(mon));
 
@@ -111,7 +111,7 @@ public:
     ///		Path to the crash dump file
     //-----------------------------------------------------------------
     void onCrashDumpCreated(Location location,
-                            const file::Path& path) noexcept override {
+                            const file::Path &path) noexcept override {
         Monitor::onCrashDumpCreated(location, path);
 
         // Only report the dump name-- the directory is configured by the app
@@ -124,7 +124,7 @@ public:
     ///	@param[in]	info
     ///		Info to output
     //-----------------------------------------------------------------
-    void info(const json::Value& info) noexcept override {
+    void info(const json::Value &info) noexcept override {
         Monitor::info(info);
 
         // Use an empty format specifier as the first argument to force
@@ -139,7 +139,7 @@ public:
     ///	@param[in]	info
     ///		Info to output
     //-----------------------------------------------------------------
-    virtual void metrics(const json::Value& metrics) noexcept override {
+    virtual void metrics(const json::Value &metrics) noexcept override {
         Monitor::metrics(metrics);
 
         LOGL(Lvl::Always, _location, "{}",
@@ -234,7 +234,7 @@ private:
     ///	@param[in]	error
     ///		The error/warning to output
     //-----------------------------------------------------------------
-    Error outputWarningOrError(TextView tag, Error&& ccode) noexcept {
+    Error outputWarningOrError(TextView tag, Error &&ccode) noexcept {
         LOGL(Lvl::Always, ccode.location(), _ts(Color::Red, tag, " ", ccode));
         return _mv(ccode);
     }

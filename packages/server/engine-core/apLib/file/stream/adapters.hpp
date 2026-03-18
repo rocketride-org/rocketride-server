@@ -31,7 +31,7 @@ class Input<file::stream::Stream<StreamT>, AlwaysT> {
 public:
     using BackingT = file::stream::Stream<StreamT>;
 
-    Input(const BackingT& backing, Opt<file::Path> path = {}) noexcept
+    Input(const BackingT &backing, Opt<file::Path> path = {}) noexcept
         : m_backing(backing), m_path(_mv(path)) {}
 
     void setOffset(uint64_t offset) const noexcept(false) {
@@ -52,7 +52,7 @@ public:
     }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         return _tsb(buff,
                     "[Input FileStream offset:", string::toHumanSize(offset()),
                     "]");
@@ -75,7 +75,7 @@ class Output<file::stream::Stream<StreamT>, AlwaysT> {
 public:
     using BackingT = file::stream::Stream<StreamT>;
 
-    Output(BackingT& backing, Opt<file::Path> path = {}) noexcept
+    Output(BackingT &backing, Opt<file::Path> path = {}) noexcept
         : m_backing(backing), m_path(_mv(path)) {}
 
     uint64_t offset() const noexcept(false) { return m_backing.get().offset(); }
@@ -93,7 +93,7 @@ public:
     }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         return _tsb(buff,
                     "[Output FileStream offset:", string::toHumanSize(offset()),
                     "]");

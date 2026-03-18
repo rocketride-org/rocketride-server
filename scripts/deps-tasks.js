@@ -8,7 +8,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { 
     execCommand, getState, setState, PROJECT_ROOT,
-    readDir, readFile
+    readDir, readFile, exists
 } = require('./lib');
 
 // ============================================================================
@@ -58,12 +58,12 @@ async function hashDependencies(filePath) {
     }
 }
 
-async function getPackageJsonHashes() {
-    const files = await findPackageJsonFiles(PROJECT_ROOT);
+async function getPackageJsonHashes(root) {
+    const files = await findPackageJsonFiles(root);
     const hashes = {};
     
     for (const file of files) {
-        const relativePath = path.relative(PROJECT_ROOT, file);
+        const relativePath = path.relative(root, file);
         hashes[relativePath] = await hashDependencies(file);
     }
     
@@ -79,8 +79,12 @@ async function getPackageJsonHashes() {
  * Silent if no changes, outputs only when installing.
  * @returns {Promise<boolean>} true if install was run, false if up to date
  */
-async function checkDependencies() {
-    const currentHashes = await getPackageJsonHashes();
+async function checkDependencies(options) {
+    const root = options.overlayRoot && await exists(path.join(options.overlayRoot, 'package.json'))
+               ? options.overlayRoot
+               : PROJECT_ROOT;
+
+    const currentHashes = await getPackageJsonHashes(root);
     const storedHashes = await getState('packageJsonHashes') || {};
     
     // Check if any package.json has changed
@@ -109,7 +113,7 @@ async function checkDependencies() {
     console.log(`Dependencies changed: ${changedFiles.slice(0, 3).join(', ')}${changedFiles.length > 3 ? ` (+${changedFiles.length - 3} more)` : ''}`);
     console.log('Installing dependencies...');
     
-    await execCommand('pnpm', ['install'], { cwd: PROJECT_ROOT, stdio: 'inherit' });
+    await execCommand('pnpm', ['install'], { cwd: root, stdio: 'inherit' });
     
     // Update stored hashes after successful install
     await setState('packageJsonHashes', currentHashes);

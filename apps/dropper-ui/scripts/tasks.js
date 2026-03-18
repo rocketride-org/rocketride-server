@@ -10,16 +10,16 @@
  * React-based file dropper/uploader interface application.
  */
 const path = require('path');
-const { 
-    execCommand, syncDir, formatSyncStats, removeDir, PROJECT_ROOT,
+const {
+    execCommand, syncDir, formatSyncStats, removeDir, BUILD_ROOT, DIST_ROOT,
     hasSourceChanged, saveSourceHash, setState, exists
 } = require('../../../scripts/lib');
 
 // Paths
 const APP_ROOT = path.join(__dirname, '..');
 const SRC_DIR = path.join(APP_ROOT, 'src');
-const BUILD_DIR = path.join(PROJECT_ROOT, 'build', 'dropper-ui');
-const SERVER_STATIC_DIR = path.join(PROJECT_ROOT, 'dist', 'server', 'static', 'dropper');
+const BUILD_DIR = path.join(BUILD_ROOT, 'dropper-ui');
+const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'dropper');
 
 // State key for source fingerprint
 const SRC_HASH_KEY = 'dropper-ui.srcHash';
@@ -34,14 +34,14 @@ function makeBuildDropperUiAction() {
             // Check if source changed
             const { changed, hash } = await hasSourceChanged(SRC_DIR, SRC_HASH_KEY);
             const outputExists = await exists(BUILD_DIR);
-            
+
             if (!changed && outputExists) {
                 task.output = 'No changes detected';
                 return;
             }
-            
+
             await execCommand('npx', ['rsbuild', 'build'], { task, cwd: APP_ROOT });
-            
+
             // Save hash after successful build
             await saveSourceHash(SRC_HASH_KEY, hash);
         }
@@ -51,7 +51,7 @@ function makeBuildDropperUiAction() {
 function makeCopyDropperUiAction() {
     return {
         run: async (ctx, task) => {
-            const stats = await syncDir(BUILD_DIR, SERVER_STATIC_DIR);
+            const stats = await syncDir(BUILD_DIR, SERVER_STATIC_DIR, { package: true });
             task.output = formatSyncStats(stats);
         }
     };
@@ -64,12 +64,12 @@ function makeCopyDropperUiAction() {
 module.exports = {
     name: 'dropper-ui',
     description: 'File Dropper Application',
-    
+
     actions: [
         // Internal actions
         { name: 'dropper-ui:bundle', action: makeBuildDropperUiAction },
         { name: 'dropper-ui:copy', action: makeCopyDropperUiAction },
-        
+
         // Public actions (have descriptions)
         { name: 'dropper-ui:build', action: () => ({
             description: 'Build dropper UI',

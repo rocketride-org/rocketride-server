@@ -1,6 +1,6 @@
 {
 	"name": "rocketride",
-	"version": "1.0.2",
+	"version": "1.0.4",
 	"author": "RocketRide, Inc.",
 	"license": "MIT",
 	"description": "TypeScript client for RocketRide data processing and AI services",

@@ -42,7 +42,7 @@ namespace engine::store::filter::baseObjectStore {
 ///             false if entry exists is a file
 //---------------------------------------------------------------------
 
-ErrorOr<bool> IBaseInstance::stat(Entry& entry) noexcept {
+ErrorOr<bool> IBaseInstance::stat(Entry &entry) noexcept {
     Error ccode;
     // Get the path from URL
     Text path;

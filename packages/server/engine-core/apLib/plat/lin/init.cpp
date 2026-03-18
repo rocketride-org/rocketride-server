@@ -28,7 +28,7 @@ namespace ap::plat::lin {
 void init() noexcept {
     minidumpRegister();
     dev::registerCrashDumpLocationChangedHandler(
-        [](const file::Path&) noexcept {
+        [](const file::Path &) noexcept {
             minidumpDeregister();
             minidumpRegister();
         });

@@ -50,7 +50,7 @@ Usage:
 """
 
 import sys
-from typing import Dict, Any, Optional, List
+from typing import Callable, Dict, Any, Optional, List
 from ..core import DAPClient
 from ..types import EventCallback, ConnectCallback, ConnectErrorCallback, DisconnectCallback
 
@@ -99,6 +99,8 @@ class EventMixin(DAPClient):
         self._caller_on_connect_error: Optional[ConnectErrorCallback] = kwargs.get('on_connect_error', None)
         self._caller_on_protocol_message: Optional[Any] = kwargs.get('on_protocol_message', None)
         self._caller_on_debug_message: Optional[Any] = kwargs.get('on_debug_message', None)
+        # Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch
+        self._sse_pipe_callbacks: Dict[int, Callable] = {}
 
     def debug_message(self, msg: str) -> None:
         """Forward debug messages to the user callback (if set) after internal logging."""
@@ -288,6 +290,16 @@ class EventMixin(DAPClient):
         # Forward to VS Code debugger if available
         self._send_vscode_event(event_type=event_type, body=event_body)
 
+        # Dispatch pipe-scoped SSE events to the registered DataPipe callback
+        if event_type == 'apaevt_sse':
+            pipe_id = event_body.get('pipe_id')
+            callback = self._sse_pipe_callbacks.get(pipe_id)
+            if callback is not None:
+                try:
+                    await callback(event_body.get('type', ''), event_body.get('data', {}))
+                except Exception as e:
+                    self.debug_message(f'Error in SSE callback for pipe {pipe_id}: {e}')
+
         # Call user-provided event handler if available
         if self._caller_on_event is not None:
             try:
@@ -296,7 +308,15 @@ class EventMixin(DAPClient):
                 # Log errors but don't let user code break the connection
                 self.debug_message(f'Error in user event handler for {event_type} (seq {seq_num}): {e}')
 
-    async def set_events(self, token: str, event_types: List[str]) -> None:
+    def _register_sse_pipe(self, pipe_id: int, callback: Callable) -> None:
+        """Register a pipe-scoped SSE callback. Called by DataPipe after open()."""
+        self._sse_pipe_callbacks[pipe_id] = callback
+
+    def _unregister_sse_pipe(self, pipe_id: int) -> None:
+        """Remove a pipe-scoped SSE callback. Called by DataPipe after close()."""
+        self._sse_pipe_callbacks.pop(pipe_id, None)
+
+    async def set_events(self, token: str, event_types: List[str], pipe_id: int = None) -> None:
         """
         Subscribe to specific types of events from the server.
 
@@ -337,9 +357,12 @@ class EventMixin(DAPClient):
             ])
         """
         # Build event subscription request
+        arguments: Dict[str, Any] = {'types': event_types}
+        if pipe_id is not None:
+            arguments['pipeId'] = pipe_id
         request = self.build_request(
             command='rrext_monitor',
-            arguments={'types': event_types},
+            arguments=arguments,
             token=token,
         )
 

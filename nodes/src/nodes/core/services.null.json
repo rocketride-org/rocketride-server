@@ -68,7 +68,6 @@
 			"title": "Null Source",
 			"properties": [
 				"type",
-				"name",
 				"actions",
 				"source.mode",
 				"null.source.parameters"

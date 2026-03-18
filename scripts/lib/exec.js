@@ -1,6 +1,6 @@
 /**
  * Shared Execution Utilities
- *
+ * 
  * Helper functions for executing shell commands.
  * On Windows, resolves commands without extension (e.g. "mvn", "vsvars") using a fixed
  * extension order and runs .cmd/.bat via cmd /c, .ps1 via PowerShell -File, .exe/.com directly.
@@ -79,7 +79,7 @@ function resolveWindowsCommand(command, cwd, env) {
 -- * Execute a command with streaming output to a Listr task.
  * On Windows, resolves bare names (e.g. "mvn", "npx") and paths without extension using
  * .com, .exe, .bat, .cmd, .ps1; runs .cmd/.bat via cmd /c, .ps1 via PowerShell -File, others directly.
- *
+ * 
  * @param {string} command - Command to run (path or name; extension optional on Windows)
  * @param {string[]} args - Command arguments
  * @param {Object} options - Options

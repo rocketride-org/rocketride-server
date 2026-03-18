@@ -30,7 +30,7 @@ namespace engine::config {
 // its path value
 struct Paths {
     // Lookup a path by its logical name
-    file::Path& lookup(TextView name) noexcept {
+    file::Path &lookup(TextView name) noexcept {
         if (name == "data")
             return data;
         else if (name == "cache")
@@ -46,7 +46,7 @@ struct Paths {
         return control && log && cache && data;
     }
 
-    decltype(auto) operator=(const file::Path& base) noexcept {
+    decltype(auto) operator=(const file::Path &base) noexcept {
         control = base / "control";
         log = base / "logs";  // Yes, this is confusing, but it matches the
                               // app's behavior
@@ -63,7 +63,7 @@ struct Paths {
                file::mkdir(cache);
     }
 
-    static auto __fromJson(Paths& paths, const json::Value& val) noexcept {
+    static auto __fromJson(Paths &paths, const json::Value &val) noexcept {
         file::Path base;
         auto ccode = val.lookupAssign("base", base) ||
                      val.lookupAssign("data", paths.data) ||

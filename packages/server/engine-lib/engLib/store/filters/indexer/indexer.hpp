@@ -61,16 +61,16 @@
 //			When an open function is called, we obtain a shared lock
 //			on the currently open database. This ensures that while the document
 //			is being processed, the database will not be switched due to
-//capacity 			limits.
+// capacity 			limits.
 //
 //			As text enters via the writeText method, it is sent to the wordDb
 //			addWord function, a wordId is assigned and added to the document
-//word 			list.
+// word 			list.
 //
 //			Once the closing function is called, the document is committed
 //			into the wordDb index. Once this is completed, the shared lock is
 //			released which allow the underlying wordDb to be switched by the
-//global 			process if it has exceeded its threshholds
+// global 			process if it has exceeded its threshholds
 //
 //			It is important that both the addWords and commits, which modify the
 //			structures within the wordDb are protected via the wordLock mutex.

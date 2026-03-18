@@ -28,21 +28,21 @@ namespace ap::memory {
 namespace {
 
 template <typename T, typename Output, typename Value = traits::ValueT<T>>
-inline void packContainerData(Output& out, const T& entry) noexcept(false) {
+inline void packContainerData(Output &out, const T &entry) noexcept(false) {
     // Since we're not writing this as a raw pod, just store the number of
     // entries rather then the byte size
     auto count = entry.size();
     *_tdb(out, PackHdr{count});
 
     // Now write each type out
-    for (auto& item : entry) *_tdb(out, item);
+    for (auto &item : entry) *_tdb(out, item);
 
     LOG(Data, "{} Packed {,c} elements for non pod container", out,
         entry.size());
 }
 
 template <typename T, typename Output, typename Value = traits::ValueT<T>>
-inline void packPodVector(Output& out, const T& entry) noexcept(false) {
+inline void packPodVector(Output &out, const T &entry) noexcept(false) {
     // This is a pod type so its size is directly known
     auto size = entry.size() * sizeof(Value);
 
@@ -51,14 +51,14 @@ inline void packPodVector(Output& out, const T& entry) noexcept(false) {
 
     // And now the data in the vector (if its not empty anyway)
     if (!entry.empty())
-        out.write({_reCast<const uint8_t*>(&entry.front()), size});
+        out.write({_reCast<const uint8_t *>(&entry.front()), size});
 
     LOG(Data, "{} Packed {} pod vector elements totaling {,s}", out,
         entry.size(), size);
 }
 
 template <typename T, typename Output, typename Value = traits::ValueT<T>>
-inline void packContainer(Output& out, const T& entry) noexcept(false) {
+inline void packContainer(Output &out, const T &entry) noexcept(false) {
     static_assert(!traits::IsArrayV<T>, "Arrays are not supported");
 
     // Limit the scope for now
@@ -90,7 +90,7 @@ inline void packContainer(Output& out, const T& entry) noexcept(false) {
 }
 
 template <typename Output, typename T>
-inline auto pack(Output& out, const T& entry) noexcept
+inline auto pack(Output &out, const T &entry) noexcept
     -> adapter::concepts::IfOutput<Output, Error> {
     // Member versions
     if constexpr (traits::IsDetectedExact<Error, traits::DetectDataPackMethod,
@@ -111,8 +111,9 @@ inline auto pack(Output& out, const T& entry) noexcept
     else if constexpr (traits::IsPairV<T>) {
         if constexpr (traits::IsPodV<typename T::first_type> &&
                       traits::IsPodV<typename T::second_type>)
-            return _callChk(
-                [&] { return out.write({(const uint8_t*)&entry, sizeof(T)}); });
+            return _callChk([&] {
+                return out.write({(const uint8_t *)&entry, sizeof(T)});
+            });
         else
             return _callChk([&] {
                 pack(out, entry.first);
@@ -130,7 +131,7 @@ inline auto pack(Output& out, const T& entry) noexcept
 }
 
 template <typename Output, typename T>
-inline auto pack(Output& _out, const T& entry) noexcept
+inline auto pack(Output &_out, const T &entry) noexcept
     -> adapter::concepts::IfNotOutput<Output, Error> {
     auto out = adapter::makeOutput(_out);
     return pack(out, entry);
@@ -139,14 +140,14 @@ inline auto pack(Output& _out, const T& entry) noexcept
 }  // namespace
 
 template <typename Output, typename... Args>
-inline Error toDataEx(Output& out, const Args&... args) noexcept {
+inline Error toDataEx(Output &out, const Args &...args) noexcept {
     Error ccode;
-    ([&](auto& arg) { ccode = pack(out, arg) || ccode; }(args), ...);
+    ([&](auto &arg) { ccode = pack(out, arg) || ccode; }(args), ...);
     return ccode;
 }
 
 template <typename... Args>
-inline ErrorOr<Buffer> toData(const Args&... args) noexcept {
+inline ErrorOr<Buffer> toData(const Args &...args) noexcept {
     Buffer out;
     if (auto ccode = toDataEx(out, args...)) return ccode;
     return out;

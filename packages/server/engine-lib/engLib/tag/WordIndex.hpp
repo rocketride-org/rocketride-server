@@ -38,7 +38,7 @@ struct WordIndex {
         uint64_t size{0};    // total byte size of the reserved area
 
         template <typename Buffer>
-        auto __toString(Buffer& buff) const noexcept {
+        auto __toString(Buffer &buff) const noexcept {
             buff << "Offset: " << Size(offset).toString(true)
                  << " Count: " << Count(count)
                  << " Size: " << Size(size).toString(true);
@@ -66,7 +66,7 @@ struct WordIndex {
         Entry wordNoCaseIndex;
 
         template <typename Buffer>
-        auto __toString(Buffer& buff) const noexcept {
+        auto __toString(Buffer &buff) const noexcept {
             buff << "\n";
             buff << "DocWordIdLists" << docWordIdLists << "\n";
             buff << "DocWordIdListIndex" << docWordIdListIndex << "\n";
@@ -84,15 +84,15 @@ struct WordIndex {
     auto __validate() const noexcept(false) { hdr.__validate(); }
 
     operator InputData() const noexcept {
-        return {_reCast<const uint8_t*>(this), sizeof(WordIndex)};
+        return {_reCast<const uint8_t *>(this), sizeof(WordIndex)};
     }
 
     operator OutputData() noexcept {
-        return {_reCast<uint8_t*>(this), sizeof(WordIndex)};
+        return {_reCast<uint8_t *>(this), sizeof(WordIndex)};
     }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         buff << offsets;
     }
 

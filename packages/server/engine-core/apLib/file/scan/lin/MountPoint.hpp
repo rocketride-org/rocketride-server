@@ -51,10 +51,10 @@ public:
         return {};
     }
 
-    Error read(StrType& name) noexcept {
+    Error read(StrType &name) noexcept {
         if (!m_mntent) return APERRT(Ec::InvalidState, "Not open");
 
-        struct mntent* ent = getmntent(m_mntent);
+        struct mntent *ent = getmntent(m_mntent);
         if (!ent) return APERRT(Ec::End, "End of scan");
 
         Text fsName = ent->mnt_fsname;
@@ -88,12 +88,12 @@ public:
     }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         buff << "MountPointScanner";
     }
 
 private:
-    FILE* m_mntent = nullptr;
+    FILE *m_mntent = nullptr;
     std::set<Text> m_fsUsed;
     std::set<Text> m_mountDirUsed;
 };

@@ -1,0 +1,85 @@
+{
+	"title": "RocketRide Wave",
+	"protocol": "agent_rocketride://",
+	"classType": ["agent", "tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.agent_rocketride",
+	"prefix": "agent",
+	"description": [
+		"Wave-planning agent built natively on the RocketRide architecture.",
+		"Plans each step as a wave of parallel tool calls, uses keyed memory to stay token-efficient,",
+		"and requests tool schemas on demand instead of loading them all upfront.",
+		"Can be invoked as a tool (`<nodeId>.run_agent`) for hierarchical agent orchestration."
+	],
+	"icon": "rocketride.svg",
+	"invoke": {
+		"llm": {
+			"description": "LLM used by the agent for planning and synthesis",
+			"min": 1,
+			"max": 1
+		},
+		"tool": {
+			"description": "Tools available to the agent (via control-plane invoke)",
+			"min": 0
+		},
+		"memory": {
+			"description": "Keyed memory for the agent (via control-plane invoke)",
+			"min": 1,
+			"max": 1
+		}
+	},
+	"lanes": {
+		"questions": ["answers"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [{ "lane": "answers" }]
+		}
+	],
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"instructions": [],
+				"max_waves": 10
+			}
+		}
+	},
+	"fields": {
+		"instructions": {
+			"type": "array",
+			"title": "Instructions",
+			"description": "Additional instructions to guide the agent's planning and responses.",
+			"items": {
+				"type": "string",
+				"format": "textarea"
+			}
+		},
+		"max_waves": {
+			"type": "integer",
+			"title": "Max Waves",
+			"description": "Maximum number of planning iterations before the synthesis fallback fires.",
+			"default": 10,
+			"minimum": 1,
+			"maximum": 50
+		},
+		"agent_rocketride.default": { "object": "default", "properties": ["instructions", "max_waves"] },
+		"agent_rocketride.profile": {
+			"title": "Profile",
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [{ "value": "default", "properties": ["agent_rocketride.default"] }]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "RocketRide Wave",
+			"properties": ["instructions", "max_waves"]
+		}
+	]
+}

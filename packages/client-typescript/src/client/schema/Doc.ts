@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import { DocMetadata } from './DocMetadata';
+import { DocMetadata } from './DocMetadata.js';
 
 /**
  * Represents a document returned from RocketRide operations like search, AI chat, or data processing.

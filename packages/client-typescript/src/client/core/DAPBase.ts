@@ -22,8 +22,8 @@
  * SOFTWARE.
  */
 
-import { DAPMessage, RocketRideClientConfig } from '../types';
-import { TransportBase } from './TransportBase';
+import { DAPMessage, RocketRideClientConfig } from '../types/index.js';
+import { TransportBase } from './TransportBase.js';
 
 /**
  * Base class for DAP (Debug Adapter Protocol) components.

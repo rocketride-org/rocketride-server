@@ -30,40 +30,40 @@ namespace ap::async {
 // deletion when the thread exits
 template <typename T>
 template <typename... Args>
-inline Tls<T>::Tls(Location location, Args&&... args) noexcept(false)
+inline Tls<T>::Tls(Location location, Args &&...args) noexcept(false)
     : m_data(ThreadApi::thisCtx()->template allocateTlsData<T>(
           location, std::forward<Args>(args)...)) {}
 
 // Casting operator casts to the callers type
 template <typename T>
-inline T& Tls<T>::operator*() noexcept {
+inline T &Tls<T>::operator*() noexcept {
     return m_data.get();
 }
 
 template <typename T>
-inline const T& Tls<T>::operator*() const noexcept {
+inline const T &Tls<T>::operator*() const noexcept {
     return m_data.get();
 }
 
 // Deref operator accesses the held type as a ptr
 template <typename T>
-inline T* Tls<T>::operator->() noexcept {
+inline T *Tls<T>::operator->() noexcept {
     return &m_data.get();
 }
 
 template <typename T>
-inline const T* Tls<T>::operator->() const noexcept {
+inline const T *Tls<T>::operator->() const noexcept {
     return &m_data.get();
 }
 
 // Address-of operator; accesses the held type as a ptr
 template <typename T>
-inline T* Tls<T>::operator&() noexcept {
+inline T *Tls<T>::operator&() noexcept {
     return &m_data.get();
 }
 
 template <typename T>
-inline const T* Tls<T>::operator&() const noexcept {
+inline const T *Tls<T>::operator&() const noexcept {
     return &m_data.get();
 }
 

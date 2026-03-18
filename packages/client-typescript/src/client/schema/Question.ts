@@ -22,8 +22,8 @@
  * SOFTWARE.
  */
 
-import { Doc } from './Doc';
-import { DocFilter } from './DocFilter';
+import { Doc } from './Doc.js';
+import { DocFilter } from './DocFilter.js';
 
 /**
  * Defines different types of questions and queries you can ask.
@@ -90,44 +90,6 @@ export class Answer {
 	}
 
 	/**
-	 * Parse AI response text into JSON structure.
-	 */
-	static parseJson(value: string): unknown {
-		// Clean up the response text
-		let cleanValue = value.trim()
-			.replace(/\r/g, '')
-			.replace(/\n/g, '')
-			.replace(/\t/g, ' ');
-
-		// Remove JSON code block markers if present
-		let offset = cleanValue.indexOf('```json');
-		if (offset >= 0) {
-			cleanValue = cleanValue.substring(offset + 7).trim();
-			offset = cleanValue.lastIndexOf('```');
-			if (offset >= 0) {
-				cleanValue = cleanValue.substring(0, offset).trim();
-			}
-		}
-
-		// Remove generic code block markers
-		offset = cleanValue.indexOf('```');
-		if (offset >= 0) {
-			cleanValue = cleanValue.substring(offset + 3).trim();
-			offset = cleanValue.lastIndexOf('```');
-			if (offset >= 0) {
-				cleanValue = cleanValue.substring(0, offset).trim();
-			}
-		}
-
-		// Remove AI thinking steps (common with some models)
-		// Use a more compatible approach instead of the 's' flag
-		cleanValue = cleanValue.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-
-		// Parse the cleaned JSON
-		return JSON.parse(cleanValue);
-	}
-
-	/**
 	 * Extract Python code from AI response.
 	 */
 	static parsePython(value: string): string {
@@ -153,7 +115,7 @@ export class Answer {
 			}
 			if (typeof value === 'string') {
 				try {
-					this.answer = Answer.parseJson(value) as object | unknown[];
+					this.answer = JSON.parse(value) as object | unknown[];
 					return;
 				} catch {
 					throw new Error('Expected a JSON-compatible answer (object or array).');
@@ -223,6 +185,7 @@ export class Question {
 	history: QuestionHistory[] = [];
 	examples: QuestionExample[] = [];
 	context: string[] = [];
+	goals: string[] = [];
 	documents: Doc[] = [];
 	questions: QuestionText[] = [];
 
@@ -293,6 +256,13 @@ export class Question {
 	 */
 	addHistory(item: QuestionHistory): void {
 		this.history.push(item);
+	}
+
+	/**
+	 * Add a high-level goal or objective for the AI to work towards.
+	 */
+	addGoal(goal: string): void {
+		this.goals.push(goal);
 	}
 
 	/**
@@ -406,7 +376,7 @@ export class Question {
 			addPromptInstruction({
 				subtitle: 'JSON Response Format',
 				instructions: `
-                    - Respond **only** with a valid JSON structure.
+                    - Respond **only** with a fenced, valid JSON structure.
                     - Properly escape all quotes within content strings
                     - No additional text, comments, or explanations.
                     - Ensure your answer is strictly valid JSON format.
@@ -443,6 +413,14 @@ export class Question {
 			for (const item of this.history) {
 				prompt += `    ${item.role}: ${item.content}` + crlf;
 			}
+		}
+
+		// Add goals
+		if (this.goals.length > 0) {
+			prompt += '### Goal:' + crlf;
+			this.goals.forEach((goal, index) => {
+				prompt += `    ${index + 1}) ${goal.trim()}` + crlf;
+			});
 		}
 
 		// Add questions
@@ -482,6 +460,7 @@ export class Question {
 			history: this.history,
 			examples: this.examples,
 			context: this.context,
+			goals: this.goals,
 			documents: this.documents,
 			questions: this.questions
 		};
@@ -502,6 +481,7 @@ export class Question {
 		question.history = (data.history || []) as QuestionHistory[];
 		question.examples = (data.examples || []) as QuestionExample[];
 		question.context = (data.context || []) as string[];
+		question.goals = (data.goals || []) as string[];
 		question.documents = (data.documents || []) as Doc[];
 		question.questions = (data.questions || []) as QuestionText[];
 

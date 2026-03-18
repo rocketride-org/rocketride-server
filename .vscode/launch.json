@@ -28,6 +28,7 @@
 			"subProcess": true,
 			"program": "${workspaceFolder}/dist/server/ai/eaas.py",
 			"args": [
+				"--trace=servicePython"
 				// "--trace=debugOut,debugProtocol,servicePython"
 			]
 		},

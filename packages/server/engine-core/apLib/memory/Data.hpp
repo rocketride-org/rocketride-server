@@ -74,37 +74,37 @@ public:
     using Parent::size;
     using Parent::swap;
 
-    Data(const DataView<const DataT>& data,
-         const allocator_type& alloc = {}) noexcept
+    Data(const DataView<const DataT> &data,
+         const allocator_type &alloc = {}) noexcept
         : Parent(alloc) {
         append(data);
     }
 
-    Data(const DataView<DataT>& data, const allocator_type& alloc = {}) noexcept
+    Data(const DataView<DataT> &data, const allocator_type &alloc = {}) noexcept
         : Parent(alloc) {
         append(data);
     }
 
-    Data(const value_type* const data, size_t len,
-         const allocator_type& alloc = {}) noexcept
+    Data(const value_type *const data, size_t len,
+         const allocator_type &alloc = {}) noexcept
         : Parent(alloc) {
         append(data, len * sizeof(DataT));
     }
 
-    Data(Data&& data, size_t len) noexcept : Parent(_mv(data)) { resize(len); }
+    Data(Data &&data, size_t len) noexcept : Parent(_mv(data)) { resize(len); }
 
-    Data& operator=(const DataView<const DataT>& data) noexcept {
+    Data &operator=(const DataView<const DataT> &data) noexcept {
         clear();
         return append(data);
     }
 
-    Data& operator=(const DataView<DataT>& data) noexcept {
+    Data &operator=(const DataView<DataT> &data) noexcept {
         clear();
         return append(data);
     }
 
     template <typename T>
-    bool operator==(const DataView<T>& other) const noexcept {
+    bool operator==(const DataView<T> &other) const noexcept {
         return size() == other.size() &&
                std::memcmp(data(), other.data(), size()) == 0;
     }
@@ -115,12 +115,12 @@ public:
         return len;
     }
 
-    operator value_type*() noexcept {
+    operator value_type *() noexcept {
         if (empty()) return nullptr;
         return data();
     }
 
-    operator const value_type*() const noexcept {
+    operator const value_type *() const noexcept {
         if (empty()) return nullptr;
         return data();
     }
@@ -158,30 +158,30 @@ public:
         if (size() < newSize) resize(newSize);
     }
 
-    value_type& operator*() noexcept { return data(); }
+    value_type &operator*() noexcept { return data(); }
 
     template <typename T = value_type,
               typename = std::enable_if_t<std::is_standard_layout_v<T> ||
                                           std::is_void_v<T>>>
-    decltype(auto) append(const T* data, size_t length = sizeof(T)) noexcept {
+    decltype(auto) append(const T *data, size_t length = sizeof(T)) noexcept {
         if (!length) return *this;
 
         auto oldPos = size();
         resize(size() + length);
-        std::memcpy(&at(oldPos), _reCast<const void*>(data), length);
+        std::memcpy(&at(oldPos), _reCast<const void *>(data), length);
         return *this;
     }
 
-    decltype(auto) append(const Data& data) noexcept {
+    decltype(auto) append(const Data &data) noexcept {
         return append(data.data(), data.size());
     }
 
     template <typename T = value_type,
               typename = std::enable_if_t<std::is_standard_layout_v<T> ||
                                           std::is_void_v<T>>>
-    decltype(auto) append(const void* data,
+    decltype(auto) append(const void *data,
                           size_t length = sizeof(T)) noexcept {
-        return append(_reCast<const uint8_t*>(data), length);
+        return append(_reCast<const uint8_t *>(data), length);
     }
 
     decltype(auto) append(DataView<const DataT> data) noexcept {
@@ -198,7 +198,7 @@ public:
     decltype(auto) castAt(size_t offset,
                           size_t expectedLength = sizeof(T)) noexcept {
         ASSERT(availAt(offset) >= expectedLength);
-        return _reCast<T*>(&at(offset));
+        return _reCast<T *>(&at(offset));
     }
 
     template <typename T = value_type,
@@ -207,24 +207,24 @@ public:
     decltype(auto) castAt(size_t offset,
                           size_t expectedLength = sizeof(T)) const noexcept {
         ASSERT(availAt(offset) >= expectedLength);
-        return _reCast<const T*>(&at(offset));
+        return _reCast<const T *>(&at(offset));
     }
 
     template <typename T = value_type,
               typename = std::enable_if_t<std::is_standard_layout_v<T> ||
                                           std::is_void_v<T>>>
-    T* tryCastAt(size_t offset, size_t expectedLength = sizeof(T)) noexcept {
+    T *tryCastAt(size_t offset, size_t expectedLength = sizeof(T)) noexcept {
         if (availAt(offset) < expectedLength) return nullptr;
-        return _reCast<T*>(&at(offset));
+        return _reCast<T *>(&at(offset));
     }
 
     template <typename T = value_type,
               typename = std::enable_if_t<std::is_standard_layout_v<T> ||
                                           std::is_void_v<T>>>
-    const T* tryCastAt(size_t offset,
+    const T *tryCastAt(size_t offset,
                        size_t expectedLength = sizeof(T)) const noexcept {
         if (availAt(offset) < expectedLength) return nullptr;
-        return _reCast<const T*>(&at(offset));
+        return _reCast<const T *>(&at(offset));
     }
 
     template <typename T = value_type,
@@ -243,26 +243,26 @@ public:
 
     template <typename T = value_type,
               typename = std::enable_if_t<std::is_class_v<T>>>
-    const T* operator->() const noexcept {
+    const T *operator->() const noexcept {
         return castAt<const T>(0);
     }
 
     template <typename T = value_type,
               typename = std::enable_if_t<std::is_class_v<T>>>
-    T* operator->() noexcept {
+    T *operator->() noexcept {
         return castAt<const T>(0);
     }
 
-    auto copyAt(size_t offset, const void* data, size_t length) noexcept {
+    auto copyAt(size_t offset, const void *data, size_t length) noexcept {
         std::memcpy(castAt(offset, length), data, length);
     }
 
-    auto copy(const void* data, size_t length) noexcept {
+    auto copy(const void *data, size_t length) noexcept {
         copyAt(0, data, length);
     }
 
     template <typename T, typename A>
-    auto copyAt(size_t offset, const Data<T, A>& data,
+    auto copyAt(size_t offset, const Data<T, A> &data,
                 Opt<size_t> length = {}) noexcept {
         const auto requested = length.value_or(data.size());
         std::memcpy(castAt(offset, requested), data.cast(requested), requested);
@@ -344,11 +344,11 @@ public:
             "Cannot cast to TextView with fundamentally different type size");
         auto slice = sliceAt(offset, length);
         return string::StrView<ChrT, TraitsT>(
-            _reCast<const ChrT*>(slice.data()), slice.size());
+            _reCast<const ChrT *>(slice.data()), slice.size());
     }
 
     template <typename Buffer>
-    decltype(auto) __toString(Buffer& buff) const noexcept {
+    decltype(auto) __toString(Buffer &buff) const noexcept {
         buff << toView();
     }
 };

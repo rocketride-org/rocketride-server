@@ -59,7 +59,7 @@ public:
      * @brief Get the classification API
      * @return Pointer to API table, or nullptr if not loaded
      */
-    const ClassifyApi* api() const noexcept { return m_api; }
+    const ClassifyApi *api() const noexcept { return m_api; }
 
     /**
      * @brief Get the DLL library path
@@ -73,21 +73,21 @@ public:
     Text getLastError() const noexcept;
 
 private:
-    const ClassifyApi* m_api = nullptr;
+    const ClassifyApi *m_api = nullptr;
     Text m_dllPath;
 };
 
 /**
  * @brief Convenience accessor for the DLL loader
  */
-inline ClassifyDllLoader& classifyDll() noexcept {
+inline ClassifyDllLoader &classifyDll() noexcept {
     return ClassifyDllLoader::get();
 }
 
 /**
  * @brief Convenience accessor for the classification API
  */
-inline const ClassifyApi* classifyApi() noexcept {
+inline const ClassifyApi *classifyApi() noexcept {
     return ClassifyDllLoader::get().api();
 }
 

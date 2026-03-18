@@ -134,11 +134,29 @@
 			"maxLength": 32,
 			"description": "Hugging face model to use for embedding"
 		},
+		"embedding.truncate_dim": {
+			"type": "number",
+			"title": "Truncate dimensions",
+			"description": "Truncate embeddings to this dimensionality (0 = use model default)"
+		},
+		"embedding.document_prefix": {
+			"type": "string",
+			"title": "Document prefix",
+			"description": "Prefix prepended to document text before encoding (e.g. 'search_document: ', 'passage: ')"
+		},
+		"embedding.query_prefix": {
+			"type": "string",
+			"title": "Query prefix",
+			"description": "Prefix prepended to query text before encoding (e.g. 'search_query: ', 'query: ')"
+		},
 		"embedding.custom": {
 			"object": "custom",
 			"title": "",
 			"properties": [
-				"embedding.model"
+				"embedding.model",
+				"embedding.truncate_dim",
+				"embedding.document_prefix",
+				"embedding.query_prefix"
 			]
 		},
 		"embedding.profile": {
@@ -178,8 +196,52 @@
 			]
 		}
 	],
+	//
+	//	Test configuration for automated node testing
+	//
 	"test": {
 		"profiles": ["miniLM"],
+		"outputs": ["documents", "questions"],
+		"cases": [
+			{
+				"name": "Embed text chunks",
+				"documents": [
+					{"page_content": "Hello world, this is a test document."},
+					{"page_content": "Second chunk for embedding."}
+				],
+				"expect": {
+					"documents": {
+						"notEmpty": true
+					}
+				}
+			},
+			{
+				"name": "Embed single question (flat vector for Qdrant)",
+				"questions": "What is the capital of France?",
+				"expect": {
+					"questions": {
+						"notEmpty": true,
+						"property": [
+							{
+								"path": "[0].questions[0].embedding",
+								"minLength": 384
+							}
+						]
+					}
+				}
+			}
+		]
+	},
+	//
+	//	Full test configuration - tests all sentence-transformer profiles.
+	//	Run via: builder model_server:fulltest
+	//
+	"fulltest": {
+		"profiles": [
+			"miniLM",
+			"miniAll",
+			"mpnet"
+		],
 		"outputs": ["documents", "questions"],
 		"cases": [
 			{

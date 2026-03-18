@@ -63,7 +63,7 @@ export const useChatMessages = () => {
 		userMessage: string,
 		client: any,
 		authToken: string
-	): Promise<string[]> => {
+	): Promise<ReturnType<typeof extractTextFromResult>> => {
 		try {
 			if (!client || !authToken) {
 				throw new Error('Not connected to RocketRide. Please refresh the page.');
@@ -78,24 +78,36 @@ export const useChatMessages = () => {
 			question.addQuestion(userMessage);
 
 			// Include last 6 messages for context - helps AI maintain conversation flow
-			// Filter out system messages (UI-only greetings/notifications) to avoid priming the LLM
-			messages.filter(msg => msg.sender !== 'system').slice(-6).forEach(msg => {
+			// Filter out system/status messages (UI-only) to avoid priming the LLM
+			messages.filter(msg => msg.sender !== 'system' && msg.sender !== 'status').slice(-6).forEach(msg => {
 				question.addHistory({
 					role: msg.sender === 'user' ? 'user' : 'assistant',
 					content: msg.text
 				});
 			});
 
-			// Send to RocketRide using authToken
+			// Send to RocketRide; onSSE adds real-time status messages to the chat
 			const result: PIPELINE_RESULT = await client.chat({
 				token: authToken,
-				question: question
+				question: question,
+				onSSE: async (type: string, data: Record<string, unknown>) => {
+					const text = data.message as string | undefined;
+					if (text) {
+						setMessages(prev => [...prev, {
+							id: Date.now(),
+							text,
+							sender: 'status',
+							sseType: type,
+							timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+						}]);
+					}
+				}
 			});
 
 			// Extract text responses from result
 			const textResponses = extractTextFromResult(result);
 
-			return textResponses.length > 0 ? textResponses : ['No valid response received'];
+			return textResponses.length > 0 ? textResponses : [{ text: 'No valid response received', key: '' }];
 
 		} catch (error) {
 			console.error('Error sending message via SDK:', error);
@@ -136,9 +148,10 @@ export const useChatMessages = () => {
 			// Add bot response(s) to chat
 			const botResponses: Message[] = answers.map((answer, index) => ({
 				id: Date.now() + index + 1,
-				text: answer,
-				sender: 'bot',
-				timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+				text: answer.text,
+				sender: 'bot' as const,
+				timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+				...(answer.key ? { resultKey: answer.key } : {})
 			}));
 
 			setMessages(prev => [...prev, ...botResponses]);

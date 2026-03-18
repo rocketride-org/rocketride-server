@@ -65,7 +65,7 @@ class Chat(ChatBase):
             raise ValueError('Invalid DeepSeek API key format, please check your API key.')
 
         # Get the llm
-        self._llm = ChatOpenAI(model=self._model, base_url=serverbase, api_key=apikey, temperature=0)
+        self._llm = ChatOpenAI(model=self._model, base_url=serverbase, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens)
 
         # Save our chat class into the bag
         bag['chat'] = self

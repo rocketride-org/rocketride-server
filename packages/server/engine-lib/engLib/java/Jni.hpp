@@ -45,18 +45,18 @@ public:
     //-----------------------------------------------------------------
     //	Contstuctor/desctructor
     //-----------------------------------------------------------------
-    Jni(JNIEnv* jni) noexcept : m_env(jni) { assert(m_env); }
+    Jni(JNIEnv *jni) noexcept : m_env(jni) { assert(m_env); }
 
     ~Jni() noexcept = default;
     Jni() noexcept {};
-    Jni(const Jni&) noexcept = default;
-    Jni(Jni&&) noexcept = default;
+    Jni(const Jni &) noexcept = default;
+    Jni(Jni &&) noexcept = default;
 
     //-----------------------------------------------------------------
     ///	@details
     ///		Set a new env after the fact
     //-----------------------------------------------------------------
-    void setEnv(JNIEnv* jni) noexcept {
+    void setEnv(JNIEnv *jni) noexcept {
         ASSERT_MSG(!m_env, "Invalid JNIEnv");
         m_env = jni;
     }
@@ -65,7 +65,7 @@ public:
     ///	@details
     ///		Set a new env after the fact
     //-----------------------------------------------------------------
-    JNIEnv* getEnv() noexcept { return m_env; }
+    JNIEnv *getEnv() noexcept { return m_env; }
 
     //-----------------------------------------------------------------
     ///	@details
@@ -92,7 +92,7 @@ public:
     ///	@param[in] string
     ///		The java string
     //-----------------------------------------------------------------
-    Text toText(const jstring& string) const noexcept {
+    Text toText(const jstring &string) const noexcept {
         if (!string) return {};
 
         auto length = m_env->GetStringUTFLength(string);
@@ -122,9 +122,9 @@ public:
     ///	@param[in] object
     ///		The java object
     //-----------------------------------------------------------------
-    Text toText(const jobject& object) const noexcept {
+    Text toText(const jobject &object) const noexcept {
         // Doesn't appear to be a safer way of doing this
-        return toText(_reCast<const jstring&>(object));
+        return toText(_reCast<const jstring &>(object));
     }
 
     //-----------------------------------------------------------------
@@ -133,7 +133,7 @@ public:
     ///	@param[in] string
     ///		The java string
     //-----------------------------------------------------------------
-    Utf16 toUtf16(const jstring& string) const noexcept {
+    Utf16 toUtf16(const jstring &string) const noexcept {
         if (!string) return {};
 
         auto length = m_env->GetStringLength(string);
@@ -162,9 +162,9 @@ public:
     ///	@param[in] string
     ///		The java string
     //-----------------------------------------------------------------
-    Utf16 toUtf16(const jobject& object) const noexcept {
+    Utf16 toUtf16(const jobject &object) const noexcept {
         // Doesn't appear to be a safer way of doing this
-        return toUtf16(_reCast<const jstring&>(object));
+        return toUtf16(_reCast<const jstring &>(object));
     }
 
     //-----------------------------------------------------------------
@@ -173,7 +173,7 @@ public:
     ///	@param[in] name
     ///		Name of the class
     //-----------------------------------------------------------------
-    jclass getClass(const char* name) const noexcept(false) {
+    jclass getClass(const char *name) const noexcept(false) {
         // Always return a global reference to a class so that the reference
         // persists even if the class is unloaded. The class reference will be
         // of static duration and will outlive the JVM itself, so don't worry
@@ -194,8 +194,8 @@ public:
     ///	@param[in] signature
     ///		The calling/return signature of the method
     //-----------------------------------------------------------------
-    jmethodID getMethodId(jclass clazz, const char* name,
-                          const char* signature) const noexcept(false) {
+    jmethodID getMethodId(jclass clazz, const char *name,
+                          const char *signature) const noexcept(false) {
         if (auto methodId = m_env->GetMethodID(clazz, name, signature))
             return methodId;
 
@@ -213,8 +213,8 @@ public:
     ///	@param[in] signature
     ///		The type signature of the field
     //-----------------------------------------------------------------
-    jfieldID getFieldId(jclass clazz, const char* name,
-                        const char* signature) const noexcept(false) {
+    jfieldID getFieldId(jclass clazz, const char *name,
+                        const char *signature) const noexcept(false) {
         if (auto fieldId = m_env->GetFieldID(clazz, name, signature))
             return fieldId;
 
@@ -231,7 +231,7 @@ public:
     ///		The type signature of the constructor
     //-----------------------------------------------------------------
     jmethodID getConstructorMethodId(jclass clazz,
-                                     const char* signature = "()V") const
+                                     const char *signature = "()V") const
         noexcept(false) {
         return getMethodId(clazz, "<init>", signature);
     }
@@ -267,8 +267,8 @@ public:
     ///	@param[in] signature
     ///		The calling/return signature of the method
     //-----------------------------------------------------------------
-    jmethodID getStaticMethodId(jclass clazz, const char* name,
-                                const char* signature) const noexcept(false) {
+    jmethodID getStaticMethodId(jclass clazz, const char *name,
+                                const char *signature) const noexcept(false) {
         if (auto methodId = m_env->GetStaticMethodID(clazz, name, signature))
             return methodId;
 
@@ -286,8 +286,8 @@ public:
     ///	@param[in] signature
     ///		The signature of the field
     //-----------------------------------------------------------------
-    jfieldID getStaticFieldId(jclass clazz, const char* name,
-                              const char* signature) const noexcept(false) {
+    jfieldID getStaticFieldId(jclass clazz, const char *name,
+                              const char *signature) const noexcept(false) {
         if (auto fieldId = m_env->GetStaticFieldID(clazz, name, signature))
             return fieldId;
 
@@ -347,7 +347,7 @@ public:
     ///	@param[in]	message
     ///		The message assocated with the exception (cause/why)
     //-----------------------------------------------------------------
-    void raiseError(const char* exceptionClass, const char* message) const
+    void raiseError(const char *exceptionClass, const char *message) const
         noexcept(false) {
         // Check for a Java exception first
         checkError();
@@ -364,7 +364,7 @@ public:
     ///	@param[in]	message
     ///		The message assocated with the exception (cause/why)
     //-----------------------------------------------------------------
-    void raiseError(const char* message) const noexcept(false) {
+    void raiseError(const char *message) const noexcept(false) {
         raiseError(ExceptionClassName, message);
     }
 
@@ -374,7 +374,7 @@ public:
     ///	@param[in]	message
     ///		The message assocated with the exception (cause/why)
     //-----------------------------------------------------------------
-    void raiseNativeError(const char* message) const noexcept(false) {
+    void raiseNativeError(const char *message) const noexcept(false) {
         raiseError(NativeErrorClassName, message);
     }
 
@@ -384,7 +384,7 @@ public:
     ///	@param[in]	message
     ///		The error code
     //-----------------------------------------------------------------
-    void raiseNativeError(const Error& ccode) const noexcept(false) {
+    void raiseNativeError(const Error &ccode) const noexcept(false) {
         raiseNativeError(_fmt("Native callback failed: {}", ccode));
     }
 
@@ -606,7 +606,7 @@ public:
     //-----------------------------------------------------------------
     template <typename T>
     void setStaticField(jclass clazz, jfieldID fieldId,
-                        const T& value) const noexcept {
+                        const T &value) const noexcept {
         if constexpr (traits::IsSameTypeV<T, jboolean>)
             m_env->SetStaticBooleanField(clazz, fieldId, value);
         else if constexpr (traits::IsSameTypeV<T, jbyte>)
@@ -693,7 +693,7 @@ public:
     //-----------------------------------------------------------------
     template <typename T>
     void setObjectField(jobject object, jfieldID fieldId,
-                        const T& value) const noexcept {
+                        const T &value) const noexcept {
         if constexpr (traits::IsSameTypeV<T, jboolean>)
             m_env->SetBooleanField(object, fieldId, value);
         else if constexpr (traits::IsSameTypeV<T, jbyte>)
@@ -745,7 +745,7 @@ public:
     ///	@param[in]	text
     ///		Text of the string
     //-----------------------------------------------------------------
-    jstring createString(const Text& text) const noexcept(false) {
+    jstring createString(const Text &text) const noexcept(false) {
         auto result = m_env->NewStringUTF(text);
 
         checkError();  // Will only throw on out of memory
@@ -760,7 +760,7 @@ public:
     ///	@param[in]	fieldId
     ///		The field id to set
     //-----------------------------------------------------------------
-    jobjectArray createStringArray(TextVector& strings) const noexcept {
+    jobjectArray createStringArray(TextVector &strings) const noexcept {
         // Create a string array
         auto jArray = m_env->NewObjectArray(
             (jsize)strings.size(), m_env->FindClass("java/lang/String"),
@@ -852,6 +852,6 @@ protected:
     ///	@details
     ///		The bound env context this jni is connected to
     //-----------------------------------------------------------------
-    JNIEnv* m_env = nullptr;
+    JNIEnv *m_env = nullptr;
 };
 }  // namespace engine::java

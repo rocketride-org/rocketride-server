@@ -48,7 +48,7 @@ struct PacketHdr {
 
     // Convert this hdr to a string, this creates the wire protocol format
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         if (auto ccode =
                 _tsbo(buff, {Format::HEX | Format::FILL, {}, ':'}, "@PDU", type,
                       _cast<uint32_t>(id), _cast<uint32_t>(length),
@@ -60,7 +60,7 @@ struct PacketHdr {
 
     // Parse the wire protocol format string
     template <typename Buffer>
-    static Error __fromString(PacketHdr& hdr, const Buffer& buff) noexcept {
+    static Error __fromString(PacketHdr &hdr, const Buffer &buff) noexcept {
         auto str = buff.toView();
         if (str.size() != PacketHdrSize || !str.startsWith("@PDU:") ||
             !str.endsWith('@'))
@@ -151,12 +151,12 @@ public:
 
     Packet() = default;
 
-    Packet(HeaderType hdr, PacketType&& cmd, DataType&& data) noexcept
+    Packet(HeaderType hdr, PacketType &&cmd, DataType &&data) noexcept
         : Parent(_mv(hdr)), m_cmd(_mv(cmd)), m_data(_mv(data)) {}
 
-    Packet(PacketType&& cmd) noexcept : m_cmd(_mv(cmd)) {}
+    Packet(PacketType &&cmd) noexcept : m_cmd(_mv(cmd)) {}
 
-    Packet(PacketType&& cmd, DataType&& data) noexcept
+    Packet(PacketType &&cmd, DataType &&data) noexcept
         : m_cmd(_mv(cmd)), m_data(_mv(data)) {}
 
     decltype(auto) operator->() const noexcept { return &m_cmd; }
@@ -201,7 +201,7 @@ public:
 
     // Render a packet as a stirng, forward the render to render the command
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         Parent::__toString(buff);
         _tsbo(buff, Format::JSONOK, m_cmd);
         _tsb(buff, m_data);

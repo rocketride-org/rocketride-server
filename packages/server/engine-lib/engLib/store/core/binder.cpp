@@ -90,7 +90,8 @@ Error Binder::bind(const std::string &methodName,
 Error Binder::callMethods(
     Binder *pThis, const std::string &methodName,
     std::function<Error(IServiceFilterInstance *)> callback,
-    const json::Value &traceData) noexcept {
+    std::function<void(PIPELINE_TRACE_LEVEL, json::Value &)>
+        serializeTrace) noexcept {
     Error ccode;
 
     // Ensure the instance is operating in target mode
@@ -108,17 +109,16 @@ Error Binder::callMethods(
         return {};  // No bound instances, return success
 
     // Get the trace level
-    auto traceLevel =
-        pThis->m_pInstance->endpoint->config.pipelineTraceLevel;
+    auto traceLevel = pThis->m_pInstance->endpoint->config.pipelineTraceLevel;
 
     // Iterate over bound instances and invoke the callback
     for (auto *pInstance : *(it->second)) {
-        // Build enter trace if tracing is enabled
+        // Build enter trace
         json::Value enterTrace;
-        if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA)
+        if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
             enterTrace["lane"] = methodName.c_str();
-        if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL && !traceData.isNull())
-            enterTrace["data"] = traceData;
+            serializeTrace(traceLevel, enterTrace["data"]);
+        }
 
         // Signal to the debugger we are entering a level
         pThis->m_pInstance->pipe->debugger.debugEnter(pInstance, enterTrace);
@@ -133,13 +133,14 @@ Error Binder::callMethods(
             pThis->m_pInstance->pipe->debugger.debugError(
                 pThis->m_pInstance, pInstance, methodName, ccode);
 
-            // Build leave trace with error result
+            // Build leave trace with error/skip result
             json::Value leaveTrace;
             if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
                 leaveTrace["lane"] = methodName.c_str();
 
                 if (ccode.code() == Ec::PreventDefault) {
                     leaveTrace["result"] = "skip";
+                    serializeTrace(traceLevel, leaveTrace["data"]);
                 } else {
                     leaveTrace["result"] = "error";
                     leaveTrace["error"] = ccode.message();
@@ -158,6 +159,7 @@ Error Binder::callMethods(
             if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
                 leaveTrace["lane"] = methodName.c_str();
                 leaveTrace["result"] = "continue";
+                serializeTrace(traceLevel, leaveTrace["data"]);
             }
 
             // Signal to the debugger we are leaving a level
@@ -226,13 +228,13 @@ bool Binder::hasListener(const std::string &methodName) noexcept {
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
 Error Binder::open(Entry &entry) noexcept {
-    // Define the servicing function
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->open(entry);
     };
 
-    // Call the methods
-    return callMethods(this, "open", call);
+    auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
+
+    return callMethods(this, "open", call, serializeTrace);
 }
 
 /**
@@ -242,10 +244,13 @@ Error Binder::open(Entry &entry) noexcept {
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
 Error Binder::writeTag(const TAG *pTag) noexcept {
-    // Call the methods
-    return callMethods(
-        this, "tags",
-        localfcn(auto pInstance)->Error { return pInstance->writeTag(pTag); });
+    auto call = localfcn(auto pInstance)->Error {
+        return pInstance->writeTag(pTag);
+    };
+
+    auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
+
+    return callMethods(this, "tags", call, serializeTrace);
 }
 
 /**
@@ -258,16 +263,15 @@ Error Binder::writeText(const Utf16View &text) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeText(text);
     };
-    json::Value data;
 
-    auto traceLevel = m_pInstance->endpoint->config.pipelineTraceLevel;
-    
-    if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA)
-        data["length"] = (int)text.length();
-    if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL) 
-        data["text"] = _tr<Text>(text).substr(0, 2000);
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::METADATA)
+            out["length"] = (int)text.length();
+        if (level >= PIPELINE_TRACE_LEVEL::FULL)
+            out["text"] = _tr<Text>(text).substr(0, 2000);
+    };
 
-    return callMethods(this, "text", call, data);
+    return callMethods(this, "text", call, serializeTrace);
 }
 
 /**
@@ -280,15 +284,15 @@ Error Binder::writeTable(const Utf16View &text) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeTable(text);
     };
-    json::Value data;
 
-    auto traceLevel = m_pInstance->endpoint->config.pipelineTraceLevel;
-    if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA)
-        data["length"] = (int)text.length();
-    if (traceLevel >= PIPELINE_TRACE_LEVEL::FULL)
-        data["table"] = _tr<Text>(text).substr(0, 2000);
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::METADATA)
+            out["length"] = (int)text.length();
+        if (level >= PIPELINE_TRACE_LEVEL::FULL)
+            out["table"] = _tr<Text>(text).substr(0, 2000);
+    };
 
-    return callMethods(this, "table", call, data);
+    return callMethods(this, "table", call, serializeTrace);
 }
 
 /**
@@ -298,11 +302,13 @@ Error Binder::writeTable(const Utf16View &text) noexcept {
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
 Error Binder::writeWords(const WordVector &textWords) noexcept {
-    // Call the methods
-    return callMethods(
-        this, "words", localfcn(auto pInstance)->Error {
-            return pInstance->writeWords(textWords);
-        });
+    auto call = localfcn(auto pInstance)->Error {
+        return pInstance->writeWords(textWords);
+    };
+
+    auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
+
+    return callMethods(this, "words", call, serializeTrace);
 }
 
 /**
@@ -318,17 +324,18 @@ Error Binder::writeAudio(const AVI_ACTION action, Text &mimeType,
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeAudio(action, mimeType, streamData);
     };
-    json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
-        data["action"] = (int)action;
-        data["mimeType"] = mimeType;
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::METADATA) {
+            out["action"] = (int)action;
+            out["mimeType"] = mimeType;
 
-        engine::python::LockPython lock;
-        data["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
-    }
+            engine::python::LockPython lock;
+            out["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
+        }
+    };
 
-    return callMethods(this, "audio", call, data);
+    return callMethods(this, "audio", call, serializeTrace);
 }
 
 /**
@@ -344,17 +351,18 @@ Error Binder::writeVideo(const AVI_ACTION action, Text &mimeType,
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeVideo(action, mimeType, streamData);
     };
-    json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
-        data["action"] = (int)action;
-        data["mimeType"] = mimeType;
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::METADATA) {
+            out["action"] = (int)action;
+            out["mimeType"] = mimeType;
 
-        engine::python::LockPython lock;
-        data["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
-    }
+            engine::python::LockPython lock;
+            out["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
+        }
+    };
 
-    return callMethods(this, "video", call, data);
+    return callMethods(this, "video", call, serializeTrace);
 }
 
 /**
@@ -370,17 +378,18 @@ Error Binder::writeImage(const AVI_ACTION action, Text &mimeType,
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeImage(action, mimeType, streamData);
     };
-    json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
-        data["action"] = (int)action;
-        data["mimeType"] = mimeType;
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::METADATA) {
+            out["action"] = (int)action;
+            out["mimeType"] = mimeType;
 
-        engine::python::LockPython lock;
-        data["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
-    }
+            engine::python::LockPython lock;
+            out["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
+        }
+    };
 
-    return callMethods(this, "image", call, data);
+    return callMethods(this, "image", call, serializeTrace);
 }
 
 /**
@@ -393,14 +402,16 @@ Error Binder::writeQuestions(const pybind11::object &question) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeQuestions(question);
     };
-    json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::FULL) {
-        engine::python::LockPython lock;
-        data["questions"] = engine::python::pyjson::dictToJson(question.attr("model_dump")());
-    }
-    
-    return callMethods(this, "questions", call, data);
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::FULL) {
+            engine::python::LockPython lock;
+            out["questions"] = engine::python::pyjson::dictToJson(
+                question.attr("model_dump")());
+        }
+    };
+
+    return callMethods(this, "questions", call, serializeTrace);
 }
 
 /**
@@ -413,13 +424,16 @@ Error Binder::writeAnswers(const pybind11::object &answers) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeAnswers(answers);
     };
-    json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::FULL) {
-        engine::python::LockPython lock;
-        data["answers"] = engine::python::pyjson::dictToJson(answers.attr("model_dump")());
-    }
-    return callMethods(this, "answers", call, data);
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::FULL) {
+            engine::python::LockPython lock;
+            out["answers"] = engine::python::pyjson::dictToJson(
+                answers.attr("model_dump")());
+        }
+    };
+
+    return callMethods(this, "answers", call, serializeTrace);
 }
 
 /**
@@ -436,12 +450,12 @@ Error Binder::writeClassifications(
             classifications, classificationPolicy, classificationRules);
     };
 
-    json::Value data;
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::SUMMARY) {
-        data["count"] = (int)classifications.size();
-    }
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::SUMMARY)
+            out["count"] = (int)classifications.size();
+    };
 
-    return callMethods(this, "classifications", call, data);
+    return callMethods(this, "classifications", call, serializeTrace);
 }
 
 /**
@@ -455,13 +469,13 @@ Error Binder::writeClassificationContext(
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeClassificationContext(classifications);
     };
-    json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::SUMMARY) {
-        data["count"] = (int)classifications.size();
-    }
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::SUMMARY)
+            out["count"] = (int)classifications.size();
+    };
 
-    return callMethods(this, "classificationContext", call, data);
+    return callMethods(this, "classificationContext", call, serializeTrace);
 }
 
 /**
@@ -474,22 +488,25 @@ Error Binder::writeDocuments(const pybind11::object &documents) noexcept {
     auto call = localfcn(auto pInstance)->Error {
         return pInstance->writeDocuments(documents);
     };
-    json::Value data;
 
-    if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
-        try {
-            engine::python::LockPython lock;
-            data["count"] = (int)py::len(documents);
-            if (m_pInstance->endpoint->config.pipelineTraceLevel >= PIPELINE_TRACE_LEVEL::FULL) {
-                py::list docDicts;
-                for (auto doc : documents)
-                    docDicts.append(doc.attr("toDict")());
-                data["documents"] = engine::python::pyjson::dictToJson(docDicts);
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::METADATA) {
+            try {
+                engine::python::LockPython lock;
+                out["count"] = (int)py::len(documents);
+                if (level >= PIPELINE_TRACE_LEVEL::FULL) {
+                    py::list docDicts;
+                    for (auto doc : documents)
+                        docDicts.append(doc.attr("toDict")());
+                    out["documents"] =
+                        engine::python::pyjson::dictToJson(docDicts);
+                }
+            } catch (...) {
             }
-        } catch (...) {}
-    }
+        }
+    };
 
-    return callMethods(this, "documents", call, data);
+    return callMethods(this, "documents", call, serializeTrace);
 }
 
 /**
@@ -498,10 +515,13 @@ Error Binder::writeDocuments(const pybind11::object &documents) noexcept {
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
 Error Binder::closing() noexcept {
-    // Call the methods
-    return callMethods(
-        this, "closing",
-        localfcn(auto pInstance)->Error { return pInstance->closing(); });
+    auto call = localfcn(auto pInstance)->Error {
+        return pInstance->closing();
+    };
+
+    auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
+
+    return callMethods(this, "closing", call, serializeTrace);
 }
 
 /**
@@ -510,10 +530,13 @@ Error Binder::closing() noexcept {
  * @return Error Returns an error code if any instance fails, otherwise success.
  */
 Error Binder::close() noexcept {
-    // Call the methods
-    return callMethods(
-        this, "close",
-        localfcn(auto pInstance)->Error { return pInstance->close(); });
+    auto call = localfcn(auto pInstance)->Error {
+        return pInstance->close();
+    };
+
+    auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
+
+    return callMethods(this, "close", call, serializeTrace);
 }
 
 }  // namespace engine::store

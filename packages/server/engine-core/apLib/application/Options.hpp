@@ -29,12 +29,12 @@ inline void Options::add(Ref<Opt> opt) noexcept { m_opts.push_back(opt); }
 
 inline void Options::remove(Ref<Opt> opt) noexcept {
     _removeIf(m_opts,
-              [&](const auto& _opt) { return &_opt.get() == &opt.get(); });
+              [&](const auto &_opt) { return &_opt.get() == &opt.get(); });
 }
 
 inline void Options::init() noexcept {
-    auto& cmdline = application::cmdline();
-    for (auto& opt : m_opts) {
+    auto &cmdline = application::cmdline();
+    for (auto &opt : m_opts) {
         if (auto val = cmdline.option(opt.get().key(), true, false)) {
             if (val->find('=') != string::npos)
                 opt.get().val() =

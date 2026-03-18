@@ -62,6 +62,8 @@ class Embedding(EmbeddingBase):
     _vectorSize: int = 0
     _tokenSize: int = 0
     _embedding: SentenceTransformer | None = None
+    _document_prefix: str = ''
+    _query_prefix: str = ''
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """Initialize the Embedding instance with provider configuration."""
@@ -73,10 +75,16 @@ class Embedding(EmbeddingBase):
 
         # Get the model from our section
         self._model = config.get('model')
+        self._truncateDim = config.get('truncate_dim', None) or None
+        self._document_prefix = config.get('document_prefix', '')
+        self._query_prefix = config.get('query_prefix', '')
 
         # Create one
         monitorStatus('Loading model', self._model)
-        self._embedding = SentenceTransformer(model_name_or_path=self._model)
+        self._embedding = SentenceTransformer(
+            model_name_or_path=self._model,
+            truncate_dim=self._truncateDim,
+        )
 
         # Check it
         if self._embedding is None:
@@ -113,7 +121,7 @@ class Embedding(EmbeddingBase):
         # Encode all questions in one batch; encode(list) returns (N, dim), assign vectors[i] per question
         if not question.questions:
             return
-        texts = [q.text for q in question.questions]
+        texts = [f'{self._query_prefix}{q.text}' for q in question.questions] if self._query_prefix else [q.text for q in question.questions]
         # Get the vectors
         vectors = self._embedding.encode(texts, show_progress_bar=False)
         # Check the return type
@@ -136,7 +144,7 @@ class Embedding(EmbeddingBase):
         # For each document, if specified
         embeddings: List[str] = []
         for chunk in chunks:
-            embeddings.append(chunk.page_content)
+            embeddings.append(f'{self._document_prefix}{chunk.page_content}' if self._document_prefix else chunk.page_content)
 
         # Get the vectors
         array_vectors = self._embedding.encode(embeddings, show_progress_bar=False)

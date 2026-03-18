@@ -28,6 +28,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { ChartJsRenderer } from './ChartJsRenderer';
 
 interface MarkdownRendererProps {
 	content: string;
@@ -39,7 +40,7 @@ const HTML_WRAPPER_TEMPLATE = (bodyContent: string) => `<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    body { margin: 0; padding: 16px; font-family: system-ui, sans-serif; }
+    body { margin: 0; padding: 16px; font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif); font-size: var(--vscode-font-size, 13px); }
   </style>
 </head>
 <body>
@@ -53,6 +54,17 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 			remarkPlugins={[remarkGfm]}
 			rehypePlugins={[rehypeRaw]}
 			components={{
+				pre: ({ children, ...rest }: any) => {
+					// When the code renderer returns a non-code element (chart, iframe),
+					// skip the <pre> wrapper so it doesn't break layout.
+					if (React.isValidElement(children)) {
+						const child = children as React.ReactElement<any>;
+						if (child.type !== 'code') {
+							return <>{children}</>;
+						}
+					}
+					return <pre {...rest}>{children}</pre>;
+				},
 				code: (props: any) => {
 					const { inline, className, children, ...rest } = props;
 					const match = /language-(\w+)/.exec(className || '');
@@ -73,6 +85,10 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 						);
 					}
 
+					if (!inline && match && match[1] === 'chartjs') {
+						return <ChartJsRenderer config={codeContent} />;
+					}
+
 					return !inline && match ? (
 						<SyntaxHighlighter
 							style={oneDark}
@@ -81,7 +97,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 							customStyle={{
 								margin: 0,
 								borderRadius: '6px',
-								fontSize: '14px'
+								fontSize: 'var(--vscode-editor-font-size, 13px)'
 							}}
 						>
 							{codeContent}

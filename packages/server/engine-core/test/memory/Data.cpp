@@ -94,14 +94,14 @@ TEST_CASE("memory::Data") {
             REQUIRE(slice1.size() == 256);
             REQUIRE(slice2.size() == 256);
 
-            REQUIRE(util::allOf(slice1, [](auto& chr) { return chr == 'A'; }));
-            REQUIRE(util::allOf(slice2, [](auto& chr) { return chr == 'B'; }));
+            REQUIRE(util::allOf(slice1, [](auto &chr) { return chr == 'A'; }));
+            REQUIRE(util::allOf(slice2, [](auto &chr) { return chr == 'B'; }));
 
             std::fill(slice1.begin(), slice1.end(), 'C');
             std::fill(slice2.begin(), slice2.end(), 'D');
 
-            REQUIRE(util::allOf(slice1, [](auto& chr) { return chr == 'C'; }));
-            REQUIRE(util::allOf(slice2, [](auto& chr) { return chr == 'D'; }));
+            REQUIRE(util::allOf(slice1, [](auto &chr) { return chr == 'C'; }));
+            REQUIRE(util::allOf(slice2, [](auto &chr) { return chr == 'D'; }));
 
             REQUIRE(std::all_of(data.begin(), data.begin() + 256,
                                 [](auto chr) { return chr == 'C'; }));
@@ -146,7 +146,7 @@ TEST_CASE("memory::Data") {
             Buffer data;
             data.resize(1024);
             LOG(Test, "Printing random", data);
-            for (auto& chr : data) {
+            for (auto &chr : data) {
                 chr = 'a';
             }
             LOG(Test, "Printing a", data);

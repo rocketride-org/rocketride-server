@@ -373,12 +373,15 @@ export class PageStatusProvider {
 		}
 
 		// Create a meaningful title for the panel
-		const fileName = path.basename(fileUri.fsPath);
+		const isUnknownTask = fileUri.scheme === 'rocketride';
+		const panelTitle = isUnknownTask
+			? `${displayName} (${projectId.substring(0, 8)}…)`
+			: `${displayName} (${path.basename(fileUri.fsPath)})`;
 
 		// Create new webview panel
 		const panel = vscode.window.createWebviewPanel(
 			'rocketride.pageStatus',
-			`${displayName} (${fileName})`,
+			panelTitle,
 			vscode.ViewColumn.One,
 			{
 				enableScripts: true,
@@ -716,6 +719,9 @@ export class PageStatusProvider {
 									if (event.data.type === 'requestPaste') {
 										vscode.postMessage({ type: 'requestPaste' });
 									}
+									if (event.data.type === 'copyText' && event.data.text) {
+										vscode.postMessage({ type: 'copyText', text: event.data.text });
+									}
 								}
 							});
 
@@ -741,12 +747,15 @@ export class PageStatusProvider {
 			`;
 
 			// Handle messages from the webview
-			const messageDisposable = panel.webview.onDidReceiveMessage(async (msg: { type: string }) => {
+			const messageDisposable = panel.webview.onDidReceiveMessage(async (msg: { type: string; text?: string }) => {
 				if (msg.type === 'requestPaste') {
 					const text = await vscode.env.clipboard.readText();
 					if (text) {
 						panel.webview.postMessage({ type: 'pasteContent', text });
 					}
+				}
+				if (msg.type === 'copyText' && msg.text) {
+					await vscode.env.clipboard.writeText(msg.text);
 				}
 			});
 
@@ -852,7 +861,7 @@ export class PageStatusProvider {
 							source: viewState.sourceId,
 							pipeline: pipelineTransformed,
 							...(tracing ? { pipelineTraceLevel: 'full' } : {}),
-							args: ConfigManager.getInstance().getConfig().engineArgs
+							args: ConfigManager.getInstance().getEffectiveEngineArgs()
 						});
 					} catch (error: unknown) {
 						this.logger.error(`Unable to execute pipeline: ${error}`);

@@ -22,13 +22,13 @@
  * SOFTWARE.
  */
 
-import { TransportWebSocket } from './core/TransportWebSocket';
-import { DAPClient } from './core/DAPClient';
-import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback } from './types';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig } from './types';
-import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants';
-import { Question } from './schema/Question';
-import { AuthenticationException } from './exceptions';
+import { TransportWebSocket } from './core/TransportWebSocket.js';
+import { DAPClient } from './core/DAPClient.js';
+import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig } from './types/index.js';
+import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
+import { Question } from './schema/Question.js';
+import { AuthenticationException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
 let clientId = 0;
@@ -63,28 +63,33 @@ export class DataPipe {
 	private _pipeId?: number;
 	private _opened = false;
 	private _closed = false;
+	private _onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
 
 	/**
 	 * Creates a new DataPipe instance.
-	 * 
+	 *
 	 * @param client - The RocketRideClient instance managing this pipe
 	 * @param token - Task token for the pipeline receiving the data
 	 * @param objinfo - Metadata about the object being sent (e.g., filename, size)
 	 * @param mimeType - MIME type of the data being sent (default: 'application/octet-stream')
 	 * @param provider - Optional provider name for the data source
+	 * @param onSSE - Optional async callback invoked for each SSE event emitted by
+	 *                the pipeline node for this specific pipe
 	 */
 	constructor(
 		client: RocketRideClient,
 		token: string,
 		objinfo: Record<string, unknown> = {},
 		mimeType = 'application/octet-stream',
-		provider?: string
+		provider?: string,
+		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>
 	) {
 		this._client = client;
 		this._token = token;
 		this._objinfo = objinfo;
 		this._mimeType = mimeType;
 		this._provider = provider;
+		this._onSSE = onSSE;
 	}
 
 	/**
@@ -141,6 +146,13 @@ export class DataPipe {
 
 		this._pipeId = response.body?.pipe_id as number | undefined;
 		this._opened = true;
+
+		// If an SSE callback was provided, subscribe and register for this pipe
+		if (this._onSSE !== undefined && this._pipeId !== undefined) {
+			await this._client.setEvents(this._token, ['SSE'], this._pipeId);
+			this._client._ssePipeCallbacks.set(this._pipeId, this._onSSE);
+		}
+
 		return this;
 	}
 
@@ -211,6 +223,16 @@ export class DataPipe {
 			return response.body as PIPELINE_RESULT;
 		} finally {
 			this._closed = true;
+
+			// Unregister SSE callback and scoped monitor subscription
+			if (this._onSSE !== undefined && this._pipeId !== undefined) {
+				this._client._ssePipeCallbacks.delete(this._pipeId);
+				try {
+					await this._client.setEvents(this._token, [], this._pipeId);
+				} catch {
+					// Best-effort cleanup
+				}
+			}
 		}
 	}
 }
@@ -244,6 +266,8 @@ export class RocketRideClient extends DAPClient {
 	private _dapAttempted = false;
 	private _dapSend?: (event: unknown) => void;
 	private _nextChatId = 1;
+	/** Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch. */
+	readonly _ssePipeCallbacks = new Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>();
 
 	// Persistence properties for automatic reconnection
 	private _persist: boolean = false;
@@ -304,49 +328,17 @@ export class RocketRideClient extends DAPClient {
 		const isBrowser = typeof window !== 'undefined';
 
 		// Build environment variables dictionary
-		// Priority: provided env > .env file
+		// Priority: provided env > process.env (Node.js only)
 		let clientEnv: Record<string, string> = {};
 
 		if (config.env) {
 			// Use provided env dictionary
 			clientEnv = { ...config.env };
-		} else {
-			// Load from .env file only (Node.js only)
-			if (!isBrowser) {
-				try {
-					const fs = require('fs');
-					const path = require('path');
-					const envPath = path.join(process.cwd(), '.env');
-
-					if (fs.existsSync(envPath)) {
-						const content = fs.readFileSync(envPath, 'utf-8');
-
-						// Parse each line
-						for (const line of content.split('\n')) {
-							const trimmed = line.trim();
-							// Skip comments and empty lines
-							if (!trimmed || trimmed.startsWith('#')) {
-								continue;
-							}
-
-							// Parse KEY=VALUE format
-							const match = trimmed.match(/^([^=]+)=(.*)$/);
-							if (match) {
-								const key = match[1].trim();
-								let value = match[2].trim();
-
-								// Remove quotes if present
-								if ((value.startsWith('"') && value.endsWith('"')) ||
-									(value.startsWith("'") && value.endsWith("'"))) {
-									value = value.slice(1, -1);
-								}
-
-								clientEnv[key] = value;
-							}
-						}
-					}
-				} catch {
-					// File doesn't exist or can't be read - that's okay
+		} else if (!isBrowser && typeof process !== 'undefined' && process.env) {
+			// In Node.js, copy process.env values that are strings
+			for (const [key, value] of Object.entries(process.env)) {
+				if (typeof value === 'string') {
+					clientEnv[key] = value;
 				}
 			}
 		}
@@ -548,9 +540,27 @@ export class RocketRideClient extends DAPClient {
 	 * Must be called before executing pipelines or other operations.
 	 * In persist mode, enables automatic reconnection on disconnect and on initial failure
 	 * (calls onConnectError on each failed attempt and keeps retrying).
-	 * @param timeout - Optional overall timeout in ms for the connect + auth handshake.
+	 * @param options - Optional timeout (number) or connection parameters object with uri, auth, and timeout.
 	 */
-	async connect(timeout?: number): Promise<void> {
+	async connect(options?: number | { uri?: string; auth?: string; timeout?: number }): Promise<void> {
+		let uri: string | undefined;
+		let auth: string | undefined;
+		let timeout: number | undefined;
+
+		if (typeof options === 'number') {
+			timeout = options;
+		} else if (options) {
+			({ uri, auth, timeout } = options);
+		}
+
+		// Apply optional overrides so they're used for this connect
+		if (uri !== undefined) {
+			this._setUri(uri);
+		}
+		if (auth !== undefined) {
+			this._setAuth(auth);
+		}
+
 		this._manualDisconnect = false;
 		this._currentReconnectDelay = 250;
 		this._retryStartTime = undefined;
@@ -689,6 +699,42 @@ export class RocketRideClient extends DAPClient {
 		return obj;
 	}
 
+	/**
+	 * Load Node.js fs/promises at runtime without static imports.
+	 * This keeps browser bundles free of Node built-ins while preserving Node features.
+	 */
+	private async _loadNodeFsPromises(): Promise<{
+		readFile: (path: string, encoding: string) => Promise<string>;
+		stat: (path: string) => Promise<{ size: number }>;
+	}> {
+		if (typeof window !== 'undefined') {
+			throw new Error('Node.js filesystem APIs are not available in browser environment.');
+		}
+
+		try {
+			const req = (0, eval)('require') as undefined | ((moduleName: string) => any);
+			if (typeof req === 'function') {
+				const fsPromises = req('fs/promises');
+				if (fsPromises) {
+					return fsPromises as {
+						readFile: (path: string, encoding: string) => Promise<string>;
+						stat: (path: string) => Promise<{ size: number }>;
+					};
+				}
+			}
+		} catch {
+			// Fall through to runtime dynamic import
+		}
+
+		// Use Function to avoid bundlers statically resolving Node built-ins.
+		const dynamicImport = new Function('specifier', 'return import(specifier);') as (specifier: string) => Promise<any>;
+		const fsPromises = await dynamicImport('fs/promises');
+		return fsPromises as {
+			readFile: (path: string, encoding: string) => Promise<string>;
+			stat: (path: string) => Promise<{ size: number }>;
+		};
+	}
+
 	// ============================================================================
 	// VALIDATION METHODS
 	// ============================================================================
@@ -751,34 +797,42 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * This method loads and executes a pipeline configuration. It automatically performs
 	 * environment variable substitution on the pipeline config, replacing ${ROCKETRIDE_*}
-	 * placeholders with values from the .env file.
-	 * 
+	 * placeholders with values from the .env file or the `env` dictionary passed to the constructor.
+	 *
+	 * When loading from a file via `filepath`, the client automatically unwraps `.pipe` files
+	 * that use the `{ "pipeline": { ... } }` wrapper format. If the file contains a top-level
+	 * `pipeline` key, the inner object is extracted; otherwise the file content is used as-is.
+	 *
+	 * When passing a `pipeline` object directly, provide a flat `PipelineConfig` with
+	 * `components`, `source`, and `project_id` at the top level — do NOT wrap it in
+	 * `{ pipeline: { ... } }`.
+	 *
 	 * @param options - Pipeline execution options
 	 * @param options.token - Custom token for the pipeline (auto-generated if not provided)
-	 * @param options.filepath - Path to JSON file containing pipeline configuration
-	 * @param options.pipeline - Pipeline configuration object (alternative to filepath)
+	 * @param options.filepath - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only)
+	 * @param options.pipeline - Flat PipelineConfig object (alternative to filepath)
 	 * @param options.source - Override pipeline source
 	 * @param options.threads - Number of threads for execution (default: 1)
 	 * @param options.useExisting - Use existing pipeline instance
 	 * @param options.args - Command line arguments to pass to pipeline
 	 * @param options.ttl - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
-	 * 
+	 * @param options.pipelineTraceLevel - Trace level: 'none' | 'metadata' | 'summary' | 'full'. When set, captures every lane write and invoke call in the response under '_trace'.
+	 *
 	 * @returns Promise resolving to an object containing the task token and other metadata
 	 * @throws Error if neither pipeline nor filepath is provided
-	 * 
+	 *
 	 * @example
 	 * ```typescript
-	 * // Using pipeline file
-	 * const result = await client.use({ filepath: './pipeline.json' });
-	 * 
-	 * // Using pipeline object
+	 * // Using a .pipe file (wrapper is automatically unwrapped)
+	 * const result = await client.use({ filepath: './chat.pipe' });
+	 *
+	 * // Using a flat pipeline config object
 	 * const result = await client.use({
-	 *   pipeline: { name: 'My Pipeline', components: [...], source: 'local', project_id: '123' }
+	 *   pipeline: { components: [...], source: 'chat_1', project_id: '...' }
 	 * });
-	 * 
-	 * // With environment variable substitution
-	 * // Pipeline config: { "endpoint": "${ROCKETRIDE_URI}/api" }
-	 * // Will be replaced with actual ROCKETRIDE_URI value from .env
+	 *
+	 * // Reuse an existing pipeline
+	 * const result = await client.use({ filepath: './chat.pipe', useExisting: true });
 	 * ```
 	 */
 	async use(options: {
@@ -819,10 +873,12 @@ export class RocketRideClient extends DAPClient {
 				throw new Error('File loading not available in browser environment. Please provide pipeline object directly.');
 			}
 
-			// Load file in Node.js
-			const fs = require('fs');
-			const fileContent = fs.readFileSync(filepath, 'utf-8');
-			pipelineConfig = JSON.parse(fileContent);
+			// Load file in Node.js without static fs imports (browser-safe bundle)
+			const fsPromises = await this._loadNodeFsPromises();
+			const fileContent = await fsPromises.readFile(filepath, 'utf-8');
+			const parsed = JSON.parse(fileContent);
+			// .pipe files wrap the config in { "pipeline": { ... } } — unwrap if present
+			pipelineConfig = parsed.pipeline ?? parsed;
 		} else {
 			pipelineConfig = pipeline!;
 		}
@@ -939,9 +995,10 @@ export class RocketRideClient extends DAPClient {
 		token: string,
 		objinfo: Record<string, unknown> = {},
 		mimeType?: string,
-		provider?: string
+		provider?: string,
+		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>
 	): Promise<DataPipe> {
-		return new DataPipe(this, token, objinfo, mimeType, provider);
+		return new DataPipe(this, token, objinfo, mimeType, provider, onSSE);
 	}
 
 	/**
@@ -951,7 +1008,8 @@ export class RocketRideClient extends DAPClient {
 		token: string,
 		data: string | Uint8Array,
 		objinfo: Record<string, unknown> = {},
-		mimetype?: string
+		mimetype?: string,
+		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>
 	): Promise<PIPELINE_RESULT | undefined> {
 		// Convert string to bytes if needed
 		let buffer: Uint8Array;
@@ -964,7 +1022,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Create and use a temporary pipe for the data
-		const pipe = await this.pipe(token, this._objinfoWithSize(objinfo, buffer.length), mimetype);
+		const pipe = await this.pipe(token, this._objinfoWithSize(objinfo, buffer.length), mimetype, undefined, onSSE);
 
 		try {
 			await pipe.open();
@@ -1063,8 +1121,8 @@ export class RocketRideClient extends DAPClient {
 			let fileSize = file.size;
 			if (typeof window === 'undefined' && objinfo?.filepath && typeof objinfo.filepath === 'string') {
 				try {
-					const fs = require('fs');
-					fileSize = fs.statSync(objinfo.filepath as string).size;
+					const fsPromises = await this._loadNodeFsPromises();
+					fileSize = (await fsPromises.stat(objinfo.filepath as string)).size;
 				} catch {
 					// fallback to file.size
 				}
@@ -1164,8 +1222,9 @@ export class RocketRideClient extends DAPClient {
 	async chat(options: {
 		token: string;
 		question: Question;
+		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
 	}): Promise<PIPELINE_RESULT> {
-		const { token, question } = options;
+		const { token, question, onSSE } = options;
 
 		try {
 			// Validate that we have a question to ask
@@ -1178,13 +1237,7 @@ export class RocketRideClient extends DAPClient {
 			this._nextChatId += 1;
 
 			// Create pipe instance
-			const pipe = new DataPipe(
-				this,
-				token,
-				objinfo,
-				'application/rocketride-question',
-				'chat'
-			);
+			const pipe = await this.pipe(token, objinfo, 'application/rocketride-question', 'chat', onSSE);
 
 			try {
 				// Open the communication channel to the AI
@@ -1271,6 +1324,24 @@ export class RocketRideClient extends DAPClient {
 		// Forward to debugging interface if available
 		this._sendVSCodeEvent(eventType, eventBody);
 
+		// Dispatch pipe-scoped SSE events to the registered DataPipe callback
+		if (eventType === 'apaevt_sse') {
+			const pipeId = (eventBody as Record<string, unknown>)?.pipe_id as number | undefined;
+			if (pipeId !== undefined) {
+				const cb = this._ssePipeCallbacks.get(pipeId);
+				if (cb) {
+					try {
+						const body = eventBody as Record<string, unknown>;
+						const type = (body.type as string) ?? '';
+						const data = (body.data as Record<string, unknown>) ?? {};
+						await cb(type, data);
+					} catch (error) {
+						this.debugMessage(`Error in SSE callback for pipe ${pipeId}: ${error}`);
+					}
+				}
+			}
+		}
+
 		// Call user-provided event handler if available
 		if (this._callerOnEvent) {
 			try {
@@ -1351,10 +1422,12 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Subscribe to specific types of events from the server.
 	 */
-	async setEvents(token: string, eventTypes: string[]): Promise<void> {
+	async setEvents(token: string, eventTypes: string[], pipeId?: number): Promise<void> {
 		// Build event subscription request
+		const args: Record<string, unknown> = { types: eventTypes };
+		if (pipeId !== undefined) args.pipeId = pipeId;
 		const request = this.buildRequest('rrext_monitor', {
-			arguments: { types: eventTypes },
+			arguments: args,
 			token,
 		});
 

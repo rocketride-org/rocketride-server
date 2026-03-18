@@ -27,9 +27,10 @@
  * RocketRide extension for Visual Studio Code.
  */
 const path = require('path');
-const { 
-    execCommand, syncDir, removeDirs, removeMatching, PROJECT_ROOT,
-    hasSourceChanged, saveSourceHash, setState, exists, copyFile, readDir, mkdir, rm,
+const { glob } = require('glob');
+const {
+    execCommand, syncDir, removeDirs, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT,
+    hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm,
     readFile, writeFile
 } = require('../../../scripts/lib');
 
@@ -37,6 +38,9 @@ const {
 const APP_ROOT = path.join(__dirname, '..');
 const SRC_DIR = path.join(APP_ROOT, 'src');
 const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src');
+const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
+const README_SRC = path.join(DOCS_DIR, 'README-vscode.md');
+const README_DEST = path.join(APP_ROOT, 'README.md');
 
 // State keys for source fingerprints (webview bundles shared-ui via Canvas)
 const SRC_HASH_KEY = 'vscode.srcHash';
@@ -44,11 +48,11 @@ const BUNDLE_HASH_KEY = 'vscode.bundleHash';
 const SHARED_UI_HASH_KEY = 'vscode.sharedUiHash';
 
 // All extension build output goes here (bundle, webview, manifest for vsce and F5)
-const BUILD_DIR = path.join(PROJECT_ROOT, 'build', 'vscode');
+const BUILD_DIR = path.join(BUILD_ROOT, 'vscode');
 const BUILD_WEBVIEW_DIR = path.join(BUILD_DIR, 'webview');
 
 // .vsix output directory
-const VSCODE_DIST_DIR = path.join(PROJECT_ROOT, 'dist', 'vscode');
+const VSCODE_DIST_DIR = path.join(DIST_ROOT, 'vscode');
 
 // =============================================================================
 // Helpers: change detection (vscode src + shared-ui, which webview bundles)
@@ -80,14 +84,14 @@ function makeBuildWebviewAction() {
         run: async (ctx, task) => {
             const { changed, srcHash, sharedUiHash } = await hasVscodeOrSharedUiChanged();
             const outputExists = await exists(BUILD_WEBVIEW_DIR);
-            
+
             if (!changed && outputExists) {
                 task.output = 'No changes detected';
                 return;
             }
-            
-            await execCommand('npx', ['rsbuild', 'build'], { task, cwd: APP_ROOT });
-            
+
+            await execCommand('pnpm', ['exec', 'rsbuild', 'build'], { task, cwd: APP_ROOT });
+
             await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash);
         }
     };
@@ -100,14 +104,15 @@ function makeCompileTypescriptAction() {
             const { changed, hash } = await hasSourceChanged(SRC_DIR, SRC_HASH_KEY);
             // Output goes to build/vscode/out per tsconfig.json
             const outputExists = await exists(path.join(BUILD_DIR, 'out'));
-            
+
             if (!changed && outputExists) {
                 task.output = 'No changes detected';
                 return;
             }
-            
-            await execCommand('npx', ['tsc', '-p', './'], { task, cwd: APP_ROOT });
-            
+
+            const outDir = path.join(BUILD_DIR, 'out');
+            await execCommand('npx', ['tsc', '-p', './', '--outDir', outDir], { task, cwd: APP_ROOT });
+
             // Save hash after successful compile
             await saveSourceHash(SRC_HASH_KEY, hash);
         }
@@ -140,15 +145,15 @@ function makeStageFilesAction() {
         run: async (ctx, task) => {
             const { changed, srcHash, sharedUiHash } = await hasVscodeOrSharedUiChanged();
             const buildHasManifest = await exists(path.join(BUILD_DIR, 'package.json'));
-            
+
             if (!changed && buildHasManifest) {
                 task.output = 'No changes detected';
                 return;
             }
-            
+
             // Ensure build dir exists (bundle and webview already there from esbuild/rsbuild)
             await mkdir(BUILD_DIR);
-            
+
             // Copy manifest and assets so build/vscode is a complete extension
             task.output = 'Staging manifest and assets to build/vscode...';
             const pkgPath = path.join(APP_ROOT, 'package.json');
@@ -192,22 +197,31 @@ function makePackageVsixAction() {
     return {
         run: async (ctx, task) => {
             const { changed } = await hasVscodeOrSharedUiChanged();
-            
+
             // Check if .vsix already exists
-            const vsixFiles = await exists(VSCODE_DIST_DIR) 
-                ? (await readDir(VSCODE_DIST_DIR)).filter(f => f.endsWith('.vsix'))
+            const vsixFiles = (await exists(VSCODE_DIST_DIR))
+                ? await glob('*.vsix', { cwd: VSCODE_DIST_DIR, nodir: true, absolute: true })
                 : [];
-            
+
             if (!changed && vsixFiles.length > 0) {
                 task.output = 'No changes detected';
                 return;
             }
-            
+
             await mkdir(VSCODE_DIST_DIR);
             const vsceOut = path.relative(BUILD_DIR, VSCODE_DIST_DIR);
             await execCommand('npx', ['vsce', 'package', '--no-dependencies', '-o', vsceOut], { task, cwd: BUILD_DIR });
-            
+
             task.output = `Package created in ${VSCODE_DIST_DIR}`;
+        }
+    };
+}
+
+function makeCopyReadmeAction() {
+    return {
+        run: async (ctx, task) => {
+            await copyFile(README_SRC, README_DEST);
+            task.output = 'Copied README from docs/';
         }
     };
 }
@@ -230,16 +244,17 @@ function makeCleanStagingAction() {
 module.exports = {
     name: 'vscode',
     description: 'RocketRide VSCode Extension',
-    
+
     actions: [
         // Internal actions
+        { name: 'vscode:copy-readme', action: makeCopyReadmeAction },
         { name: 'vscode:build-webview', action: makeBuildWebviewAction },
         { name: 'vscode:compile-typescript', action: makeCompileTypescriptAction },
         { name: 'vscode:bundle-extension', action: makeBundleExtensionAction },
         { name: 'vscode:stage-files', action: makeStageFilesAction },
         { name: 'vscode:package-vsix', action: makePackageVsixAction },
         { name: 'vscode:clean-staging', action: makeCleanStagingAction },
-        
+
         // Public actions (have descriptions)
         { name: 'vscode:compile', action: () => ({
             description: 'Compile VSCode extension',
@@ -254,6 +269,7 @@ module.exports = {
             description: 'Build VSCode extension',
             steps: [
                 'client-typescript:build',
+                'vscode:copy-readme',
                 'vscode:build-webview',
                 'vscode:compile-typescript',
                 'vscode:bundle-extension',

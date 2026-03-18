@@ -32,10 +32,10 @@ namespace engine::store::filter::azure {
 
 // Short hand to transform a type to a utility string
 template <typename T>
-inline ::utility::string_t toStr(T&& arg) noexcept {
+inline ::utility::string_t toStr(T &&arg) noexcept {
     if constexpr (traits::IsSameTypeV<T, Text>)
 #if ROCKETRIDE_PLAT_WIN
-        return ::utility::string_t{_cast<const wchar_t*>(arg)};
+        return ::utility::string_t{_cast<const wchar_t *>(arg)};
 #else
         return ::utility::string_t{arg.c_str()};
 #endif
@@ -47,7 +47,7 @@ inline ::utility::string_t toStr(T&& arg) noexcept {
 
 // Short hand to transform a type to a web json value
 template <typename T>
-inline ::web::json::value toVal(T&& arg) noexcept {
+inline ::web::json::value toVal(T &&arg) noexcept {
     return ::web::json::value{toStr(arg)};
 }
 

@@ -30,7 +30,7 @@ namespace {
 // Internal version takes a specific instantiated dataview type which must
 // be explicitly instantiated by an intermediary call below
 template <typename DataT>
-inline Error putInternal(const Path& path,
+inline Error putInternal(const Path &path,
                          memory::DataView<const DataT> data) noexcept {
     FileStream stream;
     if (auto ccode = stream.open(path, Mode::WRITE)) return ccode;
@@ -49,7 +49,7 @@ inline Error putInternal(const Path& path,
 // Put the contents of a data type to a file, overwrites/creates the file as
 // needed
 template <typename DataT>
-inline Error put(const Path& path, const DataT& data) noexcept {
+inline Error put(const Path &path, const DataT &data) noexcept {
     if (auto ccode = mkdir(path.parent())) return ccode;
 
     return putInternal(path, memory::viewCast<uint8_t>(data));
@@ -57,7 +57,7 @@ inline Error put(const Path& path, const DataT& data) noexcept {
 
 // Specialize for utf16 character casting
 template <>
-inline Error put(const Path& path, const Utf16& data) noexcept {
+inline Error put(const Path &path, const Utf16 &data) noexcept {
     if (auto ccode = mkdir(path.parent())) return ccode;
 
     return putInternal(path, memory::viewCast<Utf16Chr>(data));
@@ -65,7 +65,7 @@ inline Error put(const Path& path, const Utf16& data) noexcept {
 
 // Specialize for utf16 character casting
 template <>
-inline Error put(const Path& path, const Utf16View& data) noexcept {
+inline Error put(const Path &path, const Utf16View &data) noexcept {
     if (auto ccode = mkdir(path.parent())) return ccode;
 
     return putInternal(path, memory::viewCast<Utf16Chr>(data));
@@ -74,7 +74,7 @@ inline Error put(const Path& path, const Utf16View& data) noexcept {
 // Convert the type to data, then put the contents of a data type to a file,
 // overwrites/creates the file as needed
 template <typename DataT>
-inline Error putToData(const Path& path, const DataT& data) noexcept {
+inline Error putToData(const Path &path, const DataT &data) noexcept {
     auto _data = _td(data);
     if (!_data) return _data.ccode();
     return put(path, *_data);
@@ -84,7 +84,7 @@ inline Error putToData(const Path& path, const DataT& data) noexcept {
 // below)
 template <typename DataT, typename AllocT>
 inline ErrorOr<memory::Data<DataT, AllocT>> fetch(
-    const FileStream& stream, size_t length, const AllocT& allocator) noexcept {
+    const FileStream &stream, size_t length, const AllocT &allocator) noexcept {
     memory::Data<DataT, AllocT> data(allocator);
     data.resize(length);
     auto sizeRead = stream.read({data.template cast<uint8_t>(), length});
@@ -105,7 +105,7 @@ inline ErrorOr<memory::Data<DataT, AllocT>> fetch(
 // Fetch the entire contents of a file
 template <typename DataT, typename AllocT>
 inline ErrorOr<memory::Data<DataT, AllocT>> fetch(
-    const Path& path, const AllocT& allocator) noexcept {
+    const Path &path, const AllocT &allocator) noexcept {
     Path resolvedPath = file::realpath(path);
 
     FileStream stream;
@@ -125,7 +125,7 @@ inline ErrorOr<memory::Data<DataT, AllocT>> fetch(
 // Fetch the contents of a file up to max length
 template <typename DataT, typename AllocT>
 inline ErrorOr<memory::Data<DataT, AllocT>> fetchEx(
-    const Path& path, size_t maxLength, const AllocT& allocator) noexcept {
+    const Path &path, size_t maxLength, const AllocT &allocator) noexcept {
     FileStream stream;
     if (auto ccode = stream.open(path, Mode::READ)) return ccode;
 
@@ -136,11 +136,11 @@ inline ErrorOr<memory::Data<DataT, AllocT>> fetchEx(
 // from below)
 template <typename ChrT, typename TraitsT, typename AllocT>
 inline ErrorOr<string::Str<ChrT, TraitsT, AllocT>> fetchString(
-    const FileStream& stream, size_t length, const AllocT& allocator) noexcept {
+    const FileStream &stream, size_t length, const AllocT &allocator) noexcept {
     string::Str<ChrT, TraitsT, AllocT> str(allocator);
     str.resize(length);
     auto sizeRead = stream.read(
-        {_reCast<uint8_t*>(_constCast<ChrT*>(str.c_str())), length});
+        {_reCast<uint8_t *>(_constCast<ChrT *>(str.c_str())), length});
     if (sizeRead.check()) return sizeRead.ccode();
 
     // Check for truncated characters
@@ -158,15 +158,15 @@ inline ErrorOr<string::Str<ChrT, TraitsT, AllocT>> fetchString(
 // Fetch the entire contents of a file as text
 template <typename ChrT, typename TraitsT, typename AllocT>
 inline ErrorOr<string::Str<ChrT, TraitsT, AllocT>> fetchString(
-    const Path& path, const AllocT& allocator) noexcept {
+    const Path &path, const AllocT &allocator) noexcept {
     return fetchStringEx<ChrT, TraitsT, AllocT>(path, 1_kb, allocator);
 }
 
 // Fetch the contents of a file up to max length as text
 template <typename ChrT, typename TraitsT, typename AllocT>
 inline ErrorOr<string::Str<ChrT, TraitsT, AllocT>> fetchStringEx(
-    const Path& path, size_t defaultReadSize,
-    const AllocT& allocator) noexcept {
+    const Path &path, size_t defaultReadSize,
+    const AllocT &allocator) noexcept {
     Opt<FileStream> stream{std::in_place_t{}};
     if (auto ccode = stream->open(path, Mode::READ)) return ccode;
 
@@ -205,7 +205,7 @@ inline ErrorOr<string::Str<ChrT, TraitsT, AllocT>> fetchStringEx(
 
 // Fetch file contents and convert it to a type using the fromData suite
 template <typename DataT>
-inline ErrorOr<DataT> fetchFromData(const Path& path) noexcept {
+inline ErrorOr<DataT> fetchFromData(const Path &path) noexcept {
     memory::SmallArena<uint8_t> arena;
     auto res = fetch<uint8_t, memory::SmallAllocator<uint8_t>>(path, arena);
     if (res) return _fd<DataT>(*res);
@@ -215,14 +215,14 @@ inline ErrorOr<DataT> fetchFromData(const Path& path) noexcept {
 // Fetch and resize to the callers string type
 template <typename ChrT, typename TraitsT, typename AllocT>
 inline ErrorOr<size_t> fetch(
-    const Path& path, string::Str<ChrT, TraitsT, AllocT>& data) noexcept {
+    const Path &path, string::Str<ChrT, TraitsT, AllocT> &data) noexcept {
     FileStream stream;
     if (auto ccode = stream.open(path, Mode::READ)) return ccode;
     return stream.read(data);
 }
 
 // Copies a file from a source path (complete) to a target dir
-inline Error copy(const Path& src, const Path& dst) noexcept {
+inline Error copy(const Path &src, const Path &dst) noexcept {
     ErrorCode ec;
     if (isFile(src)) {
         if (auto ccode = mkdir(dst.parent())) return ccode;
@@ -233,7 +233,7 @@ inline Error copy(const Path& src, const Path& dst) noexcept {
 }
 
 // Renames a file
-inline Error rename(const Path& src, const Path& dst) noexcept {
+inline Error rename(const Path &src, const Path &dst) noexcept {
     ErrorCode ec;
     if (isFile(src)) {
         if (auto ccode = mkdir(dst.parent())) return ccode;
@@ -244,21 +244,21 @@ inline Error rename(const Path& src, const Path& dst) noexcept {
 }
 
 // Is file a file
-inline bool isFile(const Path& path) noexcept {
+inline bool isFile(const Path &path) noexcept {
     auto info = stat(path);
     if (!info) return false;
     return !info->isDir;
 }
 
 // Is file a dir
-inline bool isDir(const Path& path) noexcept {
+inline bool isDir(const Path &path) noexcept {
     auto info = stat(path);
     if (!info) return false;
     return info->isDir;
 }
 
 // Create one or more directories
-inline Error mkdir(const Path& path) noexcept {
+inline Error mkdir(const Path &path) noexcept {
     // Does the directory already exist?
     if (isDir(path)) return {};
 
@@ -278,7 +278,7 @@ inline Error mkdir(const Path& path) noexcept {
         for (auto dir = path; dir.valid() && !isDir(dir); dir = dir.parent())
             dirs.push(dir);
         while (!dirs.empty()) {
-            const auto& dir = dirs.top();
+            const auto &dir = dirs.top();
             ccode = smb::client().createDirectory(dir);
             // check for EEXIST - another thread may create the same folder
             // meanwhile
@@ -298,14 +298,14 @@ inline Error mkdir(const Path& path) noexcept {
 inline Path cwd() noexcept { return std::filesystem::current_path(); }
 
 // Get the length of a file
-inline ErrorOr<uint64_t> length(const Path& path) noexcept {
+inline ErrorOr<uint64_t> length(const Path &path) noexcept {
     auto info = stat(path);
     if (!info) return info.ccode();
     return info->size;
 }
 
 // Count number of matching files
-inline ErrorOr<size_t> count(const Path& path) noexcept {
+inline ErrorOr<size_t> count(const Path &path) noexcept {
     // If the caller didn't specify a wildcard (*) in the path, add one for them
     file::Path filter{path};
     if (!filter.fileName().contains("*")) filter = filter / "*";

@@ -38,16 +38,16 @@ public:
 public:
     // rule of file + destructor
     virtual ~PaginatedVectorDataSupplierFromVector() override {}
-    PaginatedVectorDataSupplierFromVector(const std::vector<Type>& data)
+    PaginatedVectorDataSupplierFromVector(const std::vector<Type> &data)
         : m_data{data} {}
     PaginatedVectorDataSupplierFromVector(
-        const PaginatedVectorDataSupplierFromVector<Type>&) = default;
+        const PaginatedVectorDataSupplierFromVector<Type> &) = default;
     PaginatedVectorDataSupplierFromVector(
-        PaginatedVectorDataSupplierFromVector<Type>&&) = default;
-    PaginatedVectorDataSupplierFromVector& operator=(
-        const PaginatedVectorDataSupplierFromVector&) = default;
-    PaginatedVectorDataSupplierFromVector& operator=(
-        PaginatedVectorDataSupplierFromVector&&) = default;
+        PaginatedVectorDataSupplierFromVector<Type> &&) = default;
+    PaginatedVectorDataSupplierFromVector &operator=(
+        const PaginatedVectorDataSupplierFromVector &) = default;
+    PaginatedVectorDataSupplierFromVector &operator=(
+        PaginatedVectorDataSupplierFromVector &&) = default;
 
 public:
     // interface implementation
@@ -70,7 +70,7 @@ public:
      * @return true if load was successful, false otherwise
      */
     virtual bool loadPage(size_t pageSize, size_t pageNumber,
-                          typename parent::value_type* data) override {
+                          typename parent::value_type *data) override {
         if (pageSize == 0) return false;
 
         size_t maxIndex = (pageSize * (pageNumber + 1) > m_data.size()

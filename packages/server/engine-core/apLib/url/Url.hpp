@@ -80,33 +80,33 @@ public:
 
         // Creates a url from a non-prefixed path
         std::function<Error(const iTextView fromProtocol,
-                            const file::Path& fromPath, Url& toUrl)>
+                            const file::Path &fromPath, Url &toUrl)>
             toUrl;
 
         // Removes any prefixes that may be preset
-        std::function<Error(const Url& fromUrl, file::Path& toPath)> toPath;
+        std::function<Error(const Url &fromUrl, file::Path &toPath)> toPath;
 
         // Creates the OS path
-        std::function<Error(const Url& fromUrl, Text& toPath)> osPath;
+        std::function<Error(const Url &fromUrl, Text &toPath)> osPath;
 
         // Validate the url
-        std::function<Error(const Url& url)> validate;
+        std::function<Error(const Url &url)> validate;
     };
 
     //-----------------------------------------------------------------
     /// @details
     /// 	Declare a Ptr to a mapper
     //-----------------------------------------------------------------
-    using MapperPtr = Mapper*;
+    using MapperPtr = Mapper *;
     using Mappers = std::map<iText, Mapper>;
 
     //-----------------------------------------------------------------
     /// @details
     /// 	Adds a new protocol type - usually a static declaration
     //-----------------------------------------------------------------
-    UrlConfig(const Mapper& mapper) { m_UrlConfig[mapper.protocol] = mapper; }
+    UrlConfig(const Mapper &mapper) { m_UrlConfig[mapper.protocol] = mapper; }
 
-    static Error registerMapper(UrlConfig::Mapper& mapper) {
+    static Error registerMapper(UrlConfig::Mapper &mapper) {
         m_UrlConfig[mapper.protocol] = _mv(mapper);
         return {};
     }
@@ -114,12 +114,12 @@ public:
     //-----------------------------------------------------------------
     // Public API
     //-----------------------------------------------------------------
-    static Error getCaps(const iTextView protocol, uint32_t& caps);
-    static Error toPath(const Url& fromUrl, file::Path& toPath);
-    static Error toUrl(const iTextView fromProtocol, const file::Path& fromPath,
-                       Url& toUrl);
-    static Error osPath(const Url& fromUrl, Text& toPath);
-    static Error validate(const Url& url);
+    static Error getCaps(const iTextView protocol, uint32_t &caps);
+    static Error toPath(const Url &fromUrl, file::Path &toPath);
+    static Error toUrl(const iTextView fromProtocol, const file::Path &fromPath,
+                       Url &toUrl);
+    static Error osPath(const Url &fromUrl, Text &toPath);
+    static Error validate(const Url &url);
     static ErrorOr<UrlConfig::MapperPtr> getMapper(const iTextView type);
 
 private:
@@ -171,38 +171,38 @@ public:
     // Construct from another url
     //-------------------------------------------------------------
     Url() = default;
-    Url(const Url& url) noexcept { copy(url); }
-    Url(Url&& url) noexcept { move(_mv(url)); }
+    Url(const Url &url) noexcept { copy(url); }
+    Url(Url &&url) noexcept { move(_mv(url)); }
 
     //-------------------------------------------------------------
     // Construct from a text string
     //-------------------------------------------------------------
     Url(TextView url) noexcept { setUrl(url); }
-    Url(const char* url) noexcept { setUrl(url); }
-    Url(const Text& url) noexcept { setUrl(url); }
-    Url(Text&& url) noexcept { setUrl(url); }
+    Url(const char *url) noexcept { setUrl(url); }
+    Url(const Text &url) noexcept { setUrl(url); }
+    Url(Text &&url) noexcept { setUrl(url); }
 
-    Url(const Builder& builder) noexcept : Url(builder.finalize()) {}
-    Url& operator=(const Builder& builder) noexcept {
+    Url(const Builder &builder) noexcept : Url(builder.finalize()) {}
+    Url &operator=(const Builder &builder) noexcept {
         return move(builder.finalize());
     }
 
     //-------------------------------------------------------------
     // Set a url
     //-------------------------------------------------------------
-    Url& operator=(const Url& url) noexcept { return copy(url); }
-    Url& operator=(Url&& url) noexcept { return move(_mv(url)); }
-    Url& operator=(const TextView& url) noexcept { return copy(url); }
-    Url& operator=(const char* url) noexcept { return copy(TextView(url)); }
-    Url& operator=(const Text& url) noexcept { return copy(url.toView()); }
-    Url& operator=(Text&& url) noexcept { return move(_mv(url)); }
+    Url &operator=(const Url &url) noexcept { return copy(url); }
+    Url &operator=(Url &&url) noexcept { return move(_mv(url)); }
+    Url &operator=(const TextView &url) noexcept { return copy(url); }
+    Url &operator=(const char *url) noexcept { return copy(TextView(url)); }
+    Url &operator=(const Text &url) noexcept { return copy(url.toView()); }
+    Url &operator=(Text &&url) noexcept { return move(_mv(url)); }
 
     //-------------------------------------------------------------
     // Block conversion from raw path to Url
     //-------------------------------------------------------------
-    Url(const file::Path&) = delete;
-    Url(file::Path&&) = delete;
-    Url& operator=(const file::Path&) = delete;
+    Url(const file::Path &) = delete;
+    Url(file::Path &&) = delete;
+    Url &operator=(const file::Path &) = delete;
 
     //-------------------------------------------------------------
     /// @details
@@ -215,7 +215,7 @@ public:
     ///		Gets the path (no protocol, no query string). This
     ///		returns the complete path with prefix if it has one.
     //-------------------------------------------------------------
-    const auto& fullpath() const noexcept { return buildFullPath(); }
+    const auto &fullpath() const noexcept { return buildFullPath(); }
 
     //-------------------------------------------------------------
     /// @details
@@ -227,7 +227,7 @@ public:
     ///	@param[out]	toPath
     ///		Recieves the path
     //-------------------------------------------------------------
-    const auto& path() const { return buildRelativePath(); }
+    const auto &path() const { return buildRelativePath(); }
 
     //-------------------------------------------------------------
     /// @details
@@ -239,7 +239,7 @@ public:
     //-------------------------------------------------------------
     auto subpath(size_t startingIndex,
                  ap::Opt<size_t> size = {}) const noexcept {
-        auto& fullPath = buildFullPath();
+        auto &fullPath = buildFullPath();
         return fullPath.subpth(startingIndex, size);
     }
 
@@ -250,7 +250,7 @@ public:
     ///		Component to retrieve
     //-------------------------------------------------------------
     auto pathComp(size_t index) const noexcept {
-        auto& fullPath = buildFullPath();
+        auto &fullPath = buildFullPath();
         return fullPath.at(index);
     }
 
@@ -259,7 +259,7 @@ public:
     ///		Gets the number of components in the path
     //-------------------------------------------------------------
     auto pathCompCount() const noexcept {
-        auto& fullPath = buildFullPath();
+        auto &fullPath = buildFullPath();
         return fullPath.count();
     }
 
@@ -280,7 +280,7 @@ public:
     ///	@param[in]	path
     ///		Path for the file
     //-------------------------------------------------------------
-    Url setPath(const file::Path& path) const noexcept {
+    Url setPath(const file::Path &path) const noexcept {
         return Url{m_protocol, path.str(), m_queryString};
     }
 
@@ -311,7 +311,7 @@ public:
     ///		required to be present in the url
     //-------------------------------------------------------------
     Url expandRequired(iTextView key, iTextView value) noexcept {
-        auto& thisPath = buildFullPath();
+        auto &thisPath = buildFullPath();
         Text expandedPath =
             util::Vars::expandRequired(thisPath.str(), key, value);
         return Url{m_protocol, expandedPath, m_queryString};
@@ -401,8 +401,8 @@ public:
     /// @details
     ///		Returns a case sensitive version of the url string
     //-------------------------------------------------------------
-    explicit operator std::string&() const noexcept {
-        return (std::string&)m_url;
+    explicit operator std::string &() const noexcept {
+        return (std::string &)m_url;
     }
 
     //-------------------------------------------------------------
@@ -411,7 +411,7 @@ public:
     ///	@param[in]	other
     ///		Other url to compare with
     //-------------------------------------------------------------
-    bool operator!=(const Url& other) const noexcept {
+    bool operator!=(const Url &other) const noexcept {
         return m_url != other.m_url;
     }
 
@@ -421,7 +421,7 @@ public:
     ///	@param[in]	other
     ///		Other url to compare with
     //-------------------------------------------------------------
-    bool operator<(const Url& other) const noexcept {
+    bool operator<(const Url &other) const noexcept {
         return m_url < other.m_url;
     }
 
@@ -431,7 +431,7 @@ public:
     ///	@param[in]	other
     ///		Other url to compare with
     //-------------------------------------------------------------
-    bool operator==(const Url& other) const noexcept {
+    bool operator==(const Url &other) const noexcept {
         return m_url == other.m_url;
     }
 
@@ -455,7 +455,7 @@ public:
     ///	@param[in]	val
     ///		The json value - string
     //-------------------------------------------------------------
-    static Error __fromJson(Url& url, const json::Value& val) noexcept {
+    static Error __fromJson(Url &url, const json::Value &val) noexcept {
         auto urlStr = _fjc<Text>(val);
         if (!urlStr) return urlStr.ccode();
         url = Url(_mv(*urlStr));
@@ -468,14 +468,14 @@ public:
     ///	@param[out]	val
     ///		Receives the json value
     //-------------------------------------------------------------
-    auto __toJson(json::Value& val) const noexcept { val = TextView{m_url}; }
+    auto __toJson(json::Value &val) const noexcept { val = TextView{m_url}; }
 
     //-------------------------------------------------------------
     /// @details
     ///		Stringify the url
     //-------------------------------------------------------------
     template <typename Buffer>
-    auto __toString(Buffer& buff, const FormatOptions& opts) const noexcept {
+    auto __toString(Buffer &buff, const FormatOptions &opts) const noexcept {
         // Hide the query if logging
         if (opts.logging())
             buff << protocol() << delim << fullpath();
@@ -493,7 +493,7 @@ public:
     //-------------------------------------------------------------
     // Looks up query value by its key
     template <typename T = Text>
-    auto lookup(TextView path, T&& def = {}) const noexcept {
+    auto lookup(TextView path, T &&def = {}) const noexcept {
         return m_queryParams.lookup(path, std::forward<T>(def));
     }
 
@@ -523,7 +523,7 @@ public:
     ///	@param[out]	caps
     ///		Receives the flags
     //-------------------------------------------------------------
-    static Error getCaps(const TextView protocol, uint32_t& caps) {
+    static Error getCaps(const TextView protocol, uint32_t &caps) {
         return UrlConfig::getCaps(protocol, caps);
     }
 
@@ -536,7 +536,7 @@ public:
     ///	@param[out]	caps
     ///		Receives the flags
     //-------------------------------------------------------------
-    static Error getCaps(const Url& url, uint32_t& caps) {
+    static Error getCaps(const Url &url, uint32_t &caps) {
         return UrlConfig::getCaps(url.protocol(), caps);
     }
 
@@ -550,7 +550,7 @@ public:
     ///	@param[out]	toPath
     ///		Recieves the path
     //-------------------------------------------------------------
-    static Error toPath(const Url& fromUrl, file::Path& toPath) {
+    static Error toPath(const Url &fromUrl, file::Path &toPath) {
         return UrlConfig::toPath(fromUrl, toPath);
     }
 
@@ -564,7 +564,7 @@ public:
     ///	@param[out]	toPath
     ///		Recieves the path
     //-------------------------------------------------------------
-    static Error toPath(const Url& fromUrl, Text& toPath) {
+    static Error toPath(const Url &fromUrl, Text &toPath) {
         file::Path path;
 
         // Map it
@@ -587,8 +587,8 @@ public:
     ///	@param[out]	toUrl
     ///		Receives the url
     //-------------------------------------------------------------
-    static Error toUrl(const TextView fromProtocol, const file::Path& fromPath,
-                       Url& toUrl) {
+    static Error toUrl(const TextView fromProtocol, const file::Path &fromPath,
+                       Url &toUrl) {
         return UrlConfig::toUrl(fromProtocol, fromPath, toUrl);
     }
 
@@ -603,7 +603,7 @@ public:
     ///	@param[out]	toPath
     ///		Recieves the path
     //-------------------------------------------------------------
-    static Error osPath(const Url& fromUrl, Text& toPath) {
+    static Error osPath(const Url &fromUrl, Text &toPath) {
         return UrlConfig::osPath(fromUrl, toPath);
     }
 
@@ -613,7 +613,7 @@ public:
     ///	@param[in]	url
     ///		The url to validate
     //-------------------------------------------------------------
-    static Error validate(const Url& url) { return UrlConfig::validate(url); }
+    static Error validate(const Url &url) { return UrlConfig::validate(url); }
 
 private:
     //-------------------------------------------------------------
@@ -621,7 +621,7 @@ private:
     ///		Build the full path from the url... done only when
     ///		the path is required
     //-------------------------------------------------------------
-    const file::Path& buildFullPath() const {
+    const file::Path &buildFullPath() const {
         // If we don't have it yet
         if (!m_hasFullPath) {
             // We really want to get rid of the const here since we
@@ -631,7 +631,7 @@ private:
             //		of Url so it can build the path here, which is
             //		a really bad idea or
             //	2.	Get rid of const here
-            auto& self = (Url&)*this;
+            auto &self = (Url &)*this;
 
             // Build it
             self.m_fullPath = file::Path(m_fullPathView);
@@ -647,7 +647,7 @@ private:
     ///		Build the relative path (without the prefix, protocol
     ///		or query)
     //-------------------------------------------------------------
-    const file::Path& buildRelativePath() const {
+    const file::Path &buildRelativePath() const {
         // If we don't have it yet
         if (!m_hasRelativePath) {
             // We really want to get rid of the const here since we
@@ -657,7 +657,7 @@ private:
             //		of Url so it can build the path here, which is
             //		a really bad idea or
             //	2.	Get rid of const here
-            auto& self = (Url&)*this;
+            auto &self = (Url &)*this;
 
             // Build it
             if (auto ccode = UrlConfig::toPath(self, self.m_relativePath))
@@ -679,7 +679,7 @@ private:
     ///	@param[in]	query
     ///		The new query
     //-------------------------------------------------------------
-    Url& setUrl(TextView protocol, TextView path, TextView query) {
+    Url &setUrl(TextView protocol, TextView path, TextView query) {
         // Setup the new url
         m_url = _ts(protocol, delim, path);
         if (query) m_url += _ts("?", query);
@@ -698,7 +698,7 @@ private:
     ///	@param[in]	query
     ///		The new query
     //-------------------------------------------------------------
-    Url& setUrl(TextView url) {
+    Url &setUrl(TextView url) {
         // Set the new url
         m_url = _ts(url);
 
@@ -711,7 +711,7 @@ private:
     ///		Construct our url by find where the positions are
     ///		are creating string views for the substrings
     //-------------------------------------------------------------
-    Url& construct() noexcept {
+    Url &construct() noexcept {
         // Force these to reconstruct as needed
         m_hasFullPath = {};
         m_fullPathView = {};
@@ -758,22 +758,22 @@ private:
     ///		optimizations our views may not be valid so we only
     ///		move the string itself and do a construct on it
     //-------------------------------------------------------------
-    Url& copy(TextView url) noexcept {
+    Url &copy(TextView url) noexcept {
         m_url = url;
         return construct();
     }
 
-    Url& copy(const Url& url) noexcept {
+    Url &copy(const Url &url) noexcept {
         if (this != &url) return copy(url.m_url);
         return *this;
     }
 
-    Url& move(Text&& url) noexcept {
+    Url &move(Text &&url) noexcept {
         m_url = _mv(url);
         return construct();
     }
 
-    Url& move(Url&& url) noexcept {
+    Url &move(Url &&url) noexcept {
         if (this != &url) return move(_mv(url.m_url));
         return *this;
     }
@@ -784,7 +784,7 @@ private:
     //-------------------------------------------------------------
     void parseQuery() noexcept {
         // Split the query string and walk it
-        for (auto&& comp : string::split(m_queryString, "&")) {
+        for (auto &&comp : string::split(m_queryString, "&")) {
             // Get the key/value pairs
             auto [key, val] = string::slice<iText, Text>(comp, "=");
 

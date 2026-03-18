@@ -25,7 +25,7 @@
 
 namespace ap::file::snap {
 
-ErrorOr<Context> create(const std::vector<Path>& path, bool persist) noexcept {
+ErrorOr<Context> create(const std::vector<Path> &path, bool persist) noexcept {
     return APERR(Ec::NotSupported);
 }
 
@@ -35,14 +35,14 @@ ErrorOr<Context> create(bool persist) noexcept {
 
 ErrorOr<Context> list(bool persist) noexcept { return APERR(Ec::NotSupported); }
 
-Error buildMaps(const SnapMap& snaps, VolMap& vols, MountMap& mounts) noexcept {
+Error buildMaps(const SnapMap &snaps, VolMap &vols, MountMap &mounts) noexcept {
     return APERR(Ec::NotSupported);
 }
 
-Path map(const Context& ctx, const file::Path& path) noexcept { return path; }
+Path map(const Context &ctx, const file::Path &path) noexcept { return path; }
 
-void detach(Context& ctx) noexcept {}
+void detach(Context &ctx) noexcept {}
 
-Error destroy(Context& ctx) noexcept { return APERR(Ec::NotSupported); }
+Error destroy(Context &ctx) noexcept { return APERR(Ec::NotSupported); }
 
 }  // namespace ap::file::snap

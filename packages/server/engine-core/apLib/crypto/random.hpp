@@ -28,7 +28,7 @@ namespace ap::crypto {
 // Creates the random generator, this is a separate template so we only
 // instantiate it once per thread (not once per thread, per integer type), as
 // the construction costs of these is high, and they consume ~5KB on the stack.
-inline auto& randomGenerator() noexcept {
+inline auto &randomGenerator() noexcept {
     _thread_local async::Tls<std::mt19937> g(_location, std::random_device{}());
     return *g;
 }

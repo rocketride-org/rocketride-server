@@ -52,7 +52,7 @@ public:
     ///	@param[in]	value
     ///		The value to set
     //-----------------------------------------------------------------
-    T& operator()(const T& value) noexcept {
+    T &operator()(const T &value) noexcept {
         m_value = value;
         m_hasValue = true;
         return m_value;
@@ -64,7 +64,7 @@ public:
     ///	@param[in]	value
     ///		The value to set
     //-----------------------------------------------------------------
-    T& operator()(T&& value) noexcept {
+    T &operator()(T &&value) noexcept {
         m_value = _mv(value);
         m_hasValue = true;
         return m_value;
@@ -84,13 +84,13 @@ public:
     ///	@details
     ///		Gets the value
     //-----------------------------------------------------------------
-    const T& operator()() const noexcept { return m_value; }
+    const T &operator()() const noexcept { return m_value; }
 
     //-----------------------------------------------------------------
     ///	@details
     ///		Use only to geta writable copy for json::Values
     //-----------------------------------------------------------------
-    T& value() noexcept { return m_value; }
+    T &value() noexcept { return m_value; }
 
     //=================================================================
     // Misc
@@ -236,7 +236,7 @@ public:
     ///	@details
     ///		Get the actual hash directly
     //-----------------------------------------------------------------
-    const crypto::Sha512Hash& hash() const { return Parent::operator()(); }
+    const crypto::Sha512Hash &hash() const { return Parent::operator()(); }
 };
 
 //-------------------------------------------------------------------------
@@ -255,8 +255,8 @@ public:
     ///	@param[in]	value
     ///		The direct value
     //-----------------------------------------------------------------
-    void set(const json::Value& value) noexcept {
-        _cast<json::Value&>(*this) = value;
+    void set(const json::Value &value) noexcept {
+        _cast<json::Value &>(*this) = value;
     }
 
     //-----------------------------------------------------------------
@@ -265,8 +265,8 @@ public:
     ///	@param[in]	value
     ///		The direct value
     //-----------------------------------------------------------------
-    void set(json::Value&& value) noexcept {
-        _cast<json::Value&>(*this) = _mv(value);
+    void set(json::Value &&value) noexcept {
+        _cast<json::Value &>(*this) = _mv(value);
     }
 
     //-----------------------------------------------------------------
@@ -275,7 +275,7 @@ public:
     ///	@param[in]	value
     ///		The value to set
     //-----------------------------------------------------------------
-    json::Value& operator()(const json::Value& value) noexcept {
+    json::Value &operator()(const json::Value &value) noexcept {
         set(value);
         return *this;
     }
@@ -286,7 +286,7 @@ public:
     ///	@param[in]	value
     ///		The value to set
     //-----------------------------------------------------------------
-    json::Value& operator()(json::Value&& value) noexcept {
+    json::Value &operator()(json::Value &&value) noexcept {
         set(_mv(value));
         return *this;
     }
@@ -299,25 +299,25 @@ public:
     ///	@details
     ///		Gets the value (const)
     //-----------------------------------------------------------------
-    const json::Value& get() const noexcept { return *this; }
+    const json::Value &get() const noexcept { return *this; }
 
     //-----------------------------------------------------------------
     ///	@details
     ///		Gets the value (non-const)
     //-----------------------------------------------------------------
-    json::Value& get() noexcept { return *this; }
+    json::Value &get() noexcept { return *this; }
 
     //-----------------------------------------------------------------
     ///	@details
     ///		Gets the value
     //-----------------------------------------------------------------
-    const json::Value& operator()() const noexcept { return get(); }
+    const json::Value &operator()() const noexcept { return get(); }
 
     //-----------------------------------------------------------------
     ///	@details
     ///		Gets the value (non-const)
     //-----------------------------------------------------------------
-    json::Value& operator()() noexcept { return get(); }
+    json::Value &operator()() noexcept { return get(); }
 
     //=================================================================
     // Misc
@@ -348,8 +348,8 @@ struct ENTRY_OPERATION {
 
     ENTRY_OPERATION() = delete;
     ~ENTRY_OPERATION() = delete;
-    ENTRY_OPERATION(const ENTRY_OPERATION&) = delete;
-    void operator=(const ENTRY_OPERATION&) = delete;
+    ENTRY_OPERATION(const ENTRY_OPERATION &) = delete;
+    void operator=(const ENTRY_OPERATION &) = delete;
 };
 
 //------------------------------------------------------------------------
@@ -457,9 +457,9 @@ public:
     //-----------------------------------------------------------------
     ~Entry() {}
     Entry() noexcept {}
-    Entry(Url& url_) noexcept { url(url_); }
+    Entry(Url &url_) noexcept { url(url_); }
 
-    Entry(Url&& url_) noexcept { url(url_); }
+    Entry(Url &&url_) noexcept { url(url_); }
 
     //-----------------------------------------------------------------
     /// @details
@@ -639,8 +639,8 @@ public:
     ///	@param[in]	allFields
     ///		Read all fields (used for reading output pipes)
     //-----------------------------------------------------------------
-    static ErrorOr<Entry> makeEntry(const Url& parentUrl,
-                                    const json::Value& val,
+    static ErrorOr<Entry> makeEntry(const Url &parentUrl,
+                                    const json::Value &val,
                                     bool allFields = false) noexcept {
         // Get the name
         Text name;
@@ -701,7 +701,7 @@ public:
     ///	@param[in]	allFields
     ///		Read all fields (used for reading output pipes)
     //-----------------------------------------------------------------
-    static Error __fromJson(Entry& entry, const json::Value& val,
+    static Error __fromJson(Entry &entry, const json::Value &val,
                             bool allFields) noexcept {
         // Get the caps of the protocol
         uint32_t caps = 0;
@@ -788,7 +788,7 @@ public:
     ///	@param[in]	val
     ///		The json value to set
     //-----------------------------------------------------------------
-    Error __toJson(json::Value& val) const noexcept {
+    Error __toJson(json::Value &val) const noexcept {
         // Output isContainer only if it it really a container
         if (isContainer()) val["isContainer"] = true;
 

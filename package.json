@@ -1,11 +1,11 @@
 {
 	"name": "rocketride-server",
-	"version": "3.1.0",
+	"version": "3.1.1",
 	"description": "RocketRide Server - A high-performance data processing engine with modular nodes, AI capabilities, and cross-platform clients",
 	"private": true,
 	"license": "MIT",
 	"vcpkg": {
-		"version": "2025.08.27"
+		"version": "2026.02.27"
 	},
 	"java": {
 		"jdkVersion": "17",
@@ -55,15 +55,19 @@
 			"qs": ">=6.14.1"
 		},
 		"supportedArchitectures": {
-			"os": ["current"],
-			"cpu": ["current"]
+			"os": [
+				"current"
+			],
+			"cpu": [
+				"current"
+			]
 		}
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.15.0",
-		"adm-zip": "^0.5.16",
 		"@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
 		"@types/node": "^20.0.0",
+		"adm-zip": "^0.5.16",
 		"concurrently": "^8.2.2",
 		"dotenv": "^16.4.5",
 		"eslint": "^9.15.0",
@@ -72,6 +76,8 @@
 		"eslint-plugin-react-hooks": "^5.0.0",
 		"eslint-plugin-react-refresh": "^0.4.14",
 		"execa": "^9.6.1",
+		"gitignore-globs": "^0.1.1",
+		"glob": "^11.0.0",
 		"globals": "^15.12.0",
 		"listr2": "^9.0.5",
 		"npm-run-all": "^4.1.5",

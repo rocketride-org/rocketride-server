@@ -16,8 +16,8 @@ class flat_map_base : public flat_container_base<D, Key, Container, Compare> {
 #include "impl/container_traits.hpp"
     using mapped_type = typename value_type::second_type;
     using B = flat_container_base<D, Key, Container, Compare>;
-    D const* self() const { return static_cast<D const*>(this); }
-    D* self() { return static_cast<D*>(this); }
+    D const *self() const { return static_cast<D const *>(this); }
+    D *self() { return static_cast<D *>(this); }
 
 public:
     using value_compare = first_compare<value_type, Compare>;
@@ -28,41 +28,41 @@ public:
 
     // Element access
 
-    mapped_type const* has(key_type const& key) const {
+    mapped_type const *has(key_type const &key) const {
         const_iterator it = self()->find(key);
         return it == self()->end() ? nullptr : &it.underlying->second;
     }
 
-    mapped_type* has(key_type const& key) {
+    mapped_type *has(key_type const &key) {
         iterator it = self()->find(key);
         return it == self()->end() ? nullptr : &it.underlying->second;
     }
 
-    mapped_type const& at(key_type const& key) const {
-        if (mapped_type const* ptr = has(key)) return *ptr;
+    mapped_type const &at(key_type const &key) const {
+        if (mapped_type const *ptr = has(key)) return *ptr;
         throw std::out_of_range("flat_map::at");
     }
 
-    mapped_type& at(key_type const& key) {
-        if (mapped_type* ptr = has(key)) return *ptr;
+    mapped_type &at(key_type const &key) {
+        if (mapped_type *ptr = has(key)) return *ptr;
         throw std::out_of_range("flat_map::at");
     }
 
-    mapped_type& operator[](key_type const& key) {
+    mapped_type &operator[](key_type const &key) {
         return self()->try_emplace(key).first.underlying->second;
     }
 
-    mapped_type& operator[](key_type&& key) {
+    mapped_type &operator[](key_type &&key) {
         return self()->try_emplace(std::move(key)).first.underlying->second;
     }
 
     // Modifiers
 
-    std::pair<iterator, bool> insert(value_type const& value) {
+    std::pair<iterator, bool> insert(value_type const &value) {
         return insert_(value);
     }
 
-    std::pair<iterator, bool> insert(value_type&& value) {
+    std::pair<iterator, bool> insert(value_type &&value) {
         return insert_(std::move(value));
     }
 
@@ -76,49 +76,49 @@ public:
     }
 
     template <typename M>
-    std::pair<iterator, bool> insert_or_assign(key_type const& key, M&& obj) {
+    std::pair<iterator, bool> insert_or_assign(key_type const &key, M &&obj) {
         return insert_or_assign_(key, std::forward<M>(obj));
     }
 
     template <typename M>
-    std::pair<iterator, bool> insert_or_assign(key_type&& key, M&& obj) {
+    std::pair<iterator, bool> insert_or_assign(key_type &&key, M &&obj) {
         return insert_or_assign_(std::move(key), std::forward<M>(obj));
     }
 
     template <typename M>
     std::pair<iterator, bool> insert_or_assign(const_iterator hint,
-                                               key_type const& key, M&& obj) {
+                                               key_type const &key, M &&obj) {
         return insert_or_assign(key, std::forward<M>(obj));
     }
 
     template <typename M>
     std::pair<iterator, bool> insert_or_assign(const_iterator hint,
-                                               key_type&& key, M&& obj) {
+                                               key_type &&key, M &&obj) {
         return insert_or_assign(std::move(key), std::forward<M>(obj));
     }
 
     template <typename... Args>
-    std::pair<iterator, bool> try_emplace(key_type const& key, Args&&... args) {
+    std::pair<iterator, bool> try_emplace(key_type const &key, Args &&...args) {
         return try_emplace_(key, std::forward<Args>(args)...);
     }
 
     template <typename... Args>
-    std::pair<iterator, bool> try_emplace(key_type&& key, Args&&... args) {
+    std::pair<iterator, bool> try_emplace(key_type &&key, Args &&...args) {
         return try_emplace_(std::move(key), std::forward<Args>(args)...);
     }
 
     template <typename... Args>
-    iterator try_emplace(const_iterator hint, key_type const& key,
-                         Args&&... args) {
+    iterator try_emplace(const_iterator hint, key_type const &key,
+                         Args &&...args) {
         return try_emplace_(key, std::forward<Args>(args)...).first;
     }
 
     template <typename... Args>
-    iterator try_emplace(const_iterator hint, key_type&& key, Args&&... args) {
+    iterator try_emplace(const_iterator hint, key_type &&key, Args &&...args) {
         return try_emplace_(std::move(key), std::forward<Args>(args)...).first;
     }
 
-    size_type erase(key_type const& key) {
+    size_type erase(key_type const &key) {
         const_iterator it = self()->find(key);
         if (it == self()->end()) return 0;
         self()->container.erase(it.underlying);
@@ -127,13 +127,13 @@ public:
 
     // Lookup
 
-    size_type count(key_type const& key) const {
+    size_type count(key_type const &key) const {
         return self()->find(key) != self()->end();
     }
 
 private:
     template <typename V>
-    std::pair<iterator, bool> insert_(V&& value) {
+    std::pair<iterator, bool> insert_(V &&value) {
         iterator it = self()->lower_bound(value.first);
         if (it == self()->end() || self()->value_comp()(value, *it)) {
             it =
@@ -144,7 +144,7 @@ private:
     }
 
     template <typename K, typename M>
-    std::pair<iterator, bool> insert_or_assign_(K&& key, M&& obj) {
+    std::pair<iterator, bool> insert_or_assign_(K &&key, M &&obj) {
         iterator it = self()->lower_bound(key);
         if (it == self()->end() || self()->key_comp()(key, it->first)) {
             it = self()->container.insert(
@@ -157,7 +157,7 @@ private:
     }
 
     template <typename K, typename... Args>
-    std::pair<iterator, bool> try_emplace_(K&& key, Args&&... args) {
+    std::pair<iterator, bool> try_emplace_(K &&key, Args &&...args) {
         iterator it = self()->lower_bound(key);
         if (it == self()->end() || self()->key_comp()(key, it->first)) {
             it = self()->container.emplace(
@@ -178,8 +178,8 @@ class flat_map_base<D, Key, Container, Compare,
 #include "impl/container_traits.hpp"
     using mapped_type = typename value_type::second_type;
     using B = flat_map_base<D, Key, Container, Compare, int>;
-    D const* self() const { return static_cast<D const*>(this); }
-    D* self() { return static_cast<D*>(this); }
+    D const *self() const { return static_cast<D const *>(this); }
+    D *self() { return static_cast<D *>(this); }
 
 public:
     using B::count;
@@ -188,7 +188,7 @@ public:
     // Modifiers
 
     template <class P>
-    std::pair<iterator, bool> insert(P&& value) {
+    std::pair<iterator, bool> insert(P &&value) {
         iterator it = self()->lower_bound(value.first);
         if (it == self()->end() || self()->value_comp()(value, *it)) {
             it =
@@ -201,7 +201,7 @@ public:
     // Lookup
 
     template <typename K>
-    size_type count(K const& key) const {
+    size_type count(K const &key) const {
         return self()->find(key) != self()->end();
     }
 };
@@ -224,13 +224,13 @@ template <typename Key, typename T, typename Compare = std::less<void>>
 using vector_map = flat_map<std::vector<std::pair<Key, T>>, Compare>;
 
 template <typename Container, typename Compare>
-inline bool operator==(const flat_map<Container, Compare>& lhs,
-                       const flat_map<Container, Compare>& rhs) {
+inline bool operator==(const flat_map<Container, Compare> &lhs,
+                       const flat_map<Container, Compare> &rhs) {
     return lhs.container == rhs.container;
 }
 template <typename Container, typename Compare>
-inline bool operator!=(const flat_map<Container, Compare>& lhs,
-                       const flat_map<Container, Compare>& rhs) {
+inline bool operator!=(const flat_map<Container, Compare> &lhs,
+                       const flat_map<Container, Compare> &rhs) {
     return lhs.container != rhs.container;
 }
 

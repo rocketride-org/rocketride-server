@@ -40,10 +40,11 @@ from ai.common.tools import ToolsBase
 class CrewDriver(AgentBase):
     FRAMEWORK = 'crewai'
 
-    def __init__(self, *, process: Any = None):
+    def __init__(self, iGlobal: Any, *, process: Any = None):
         """
         Initialize the CrewDriver.
         """
+        super().__init__(iGlobal)
         self._process = process
 
     def _bind_framework_llm(
@@ -91,8 +92,10 @@ class CrewDriver(AgentBase):
             model_config = ConfigDict(extra='allow')
 
         def _make_args_schema(input_schema: Optional[Dict[str, Any]]) -> type[BaseModel]:
-            """Build a dynamic Pydantic model from a JSON Schema so that
-            CrewAI's argument filter preserves real tool parameters."""
+            """
+            Build a dynamic Pydantic model from a JSON Schema so that
+            CrewAI's argument filter preserves real tool parameters.
+            """
             if not isinstance(input_schema, dict):
                 return _ToolInput
             props = input_schema.get('properties', {})
@@ -110,7 +113,7 @@ class CrewDriver(AgentBase):
             try:
                 return create_model(
                     '_DynToolInput',
-                    __config__=ConfigDict(extra='allow'),
+                    __config__=ConfigDict(extra='ignore'),
                     **field_defs,
                 )
             except Exception:
@@ -145,7 +148,7 @@ class CrewDriver(AgentBase):
                 continue
             if not desc:
                 desc = f'Invoke host tool: {name}'
-            input_schema = td.get('input_schema') if isinstance(td, dict) else None
+            input_schema = (td.get('input_schema') or td.get('inputSchema')) if isinstance(td, dict) else None
             if isinstance(input_schema, dict):
                 try:
                     schema_text = json.dumps(input_schema, ensure_ascii=False)
@@ -166,14 +169,14 @@ class CrewDriver(AgentBase):
         ctx: Dict[str, Any],
     ) -> AgentRunResult:
         run_id = ctx.get('run_id', '')
-        debug('agent_crewai driver _run start run_id={} prompt_len={}'.format(run_id, len(agent_input.prompt or '')))
+        debug('agent_crewai driver _run start run_id={} prompt_len={}'.format(run_id, len(agent_input.question.getPrompt() or '')))
 
         from crewai import Agent, Crew, Task  # type: ignore
 
-        tool_descriptors = self._discover_tools(host=host)
+        tool_descriptors = self.discover_tools(host=host)
 
         def _call_llm_text(messages: Any, stop_words: Any = None) -> str:
-            return self._call_host_llm(
+            return self.call_host_llm(
                 host=host,
                 messages=messages,
                 question_role='You are a helpful assistant.',
@@ -181,7 +184,7 @@ class CrewDriver(AgentBase):
             )
 
         def _invoke_tool(tool_name: str, input: Any = None, kwargs: Optional[Dict[str, Any]] = None) -> Any:  # noqa: A002
-            return self._invoke_host_tool(host=host, tool_name=tool_name, input=input, kwargs=kwargs)
+            return self.invoke_host_tool(host=host, tool_name=tool_name, input=input, kwargs=kwargs)
 
         llm = self._bind_framework_llm(host=host, call_llm_text=_call_llm_text, ctx=ctx)
         tools_for_agent = self._bind_framework_tools(
@@ -211,7 +214,7 @@ class CrewDriver(AgentBase):
             'Use tools when needed (and only those available to you).',
             '',
             'User request:',
-            _safe_str(agent_input.prompt or ''),
+            _safe_str(agent_input.question.getPrompt() or ''),
         ]
         desc = '\n'.join(desc_parts).strip()
 
@@ -225,7 +228,62 @@ class CrewDriver(AgentBase):
         )
 
         crew = Crew(agents=[agent_obj], tasks=[task_obj], process=self._process)
-        result = crew.kickoff()
+
+        from crewai.events.base_events import BaseEvent
+        from crewai.events.event_bus import crewai_event_bus
+        from crewai.events.types.llm_events import LLMStreamChunkEvent
+        from crewai.events.types.logging_events import AgentLogsExecutionEvent, AgentLogsStartedEvent
+
+        _SKIP_EVENT_TYPES = {LLMStreamChunkEvent, AgentLogsStartedEvent, AgentLogsExecutionEvent}
+
+        _EVENT_LABELS: Dict[str, str] = {
+            'crew_kickoff_started': 'Crew started',
+            'crew_kickoff_completed': 'Crew completed',
+            'crew_kickoff_failed': 'Crew failed',
+            'task_started': 'Task started',
+            'task_completed': 'Task completed',
+            'task_failed': 'Task failed',
+            'agent_execution_started': 'Agent thinking...',
+            'agent_execution_completed': 'Agent done',
+            'agent_execution_error': 'Agent error',
+            'tool_usage_finished': 'Tool complete',
+            'tool_usage_error': 'Tool error',
+            'tool_execution_error': 'Tool execution error',
+            'tool_selection_error': 'Tool selection error',
+            'tool_validate_input_error': 'Tool input error',
+            'llm_call_started': 'LLM call started',
+            'llm_call_completed': 'LLM call completed',
+            'llm_call_failed': 'LLM call failed',
+        }
+
+        self.sendSSE('thinking', message='Starting CrewAI agent...')
+
+        def _all_event_types(base):
+            result = []
+            for cls in base.__subclasses__():
+                result.append(cls)
+                result.extend(_all_event_types(cls))
+            return result
+
+        def _on_any_event(source, event):
+            if event.type == 'tool_usage_started':
+                tool_name = getattr(event, 'tool_name', '') or 'tool'
+                message = f'Calling {tool_name}...'
+            else:
+                message = _EVENT_LABELS.get(event.type) or event.type.replace('_', ' ').capitalize()
+            try:
+                data = event.to_json(exclude={'timestamp', 'source_fingerprint', 'fingerprint_metadata', 'source_type'})
+            except Exception:
+                data = None
+            self.sendSSE('thinking', message=message, **(data or {}))
+
+        with crewai_event_bus.scoped_handlers():
+            for event_cls in _all_event_types(BaseEvent):
+                if event_cls in _SKIP_EVENT_TYPES:
+                    continue
+                crewai_event_bus.register_handler(event_cls, _on_any_event)
+
+            result = crew.kickoff()
 
         final_text = ''
         if hasattr(result, 'raw'):

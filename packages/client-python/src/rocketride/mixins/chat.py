@@ -88,6 +88,7 @@ class ChatMixin(DAPClient):
         *,
         token: str,
         question: Question,
+        on_sse=None,
     ) -> PIPELINE_RESULT:
         """
         Ask a question to RocketRide's AI and get an intelligent response.
@@ -164,7 +165,7 @@ class ChatMixin(DAPClient):
             self._next_chat_id += 1
 
             # Set up a data pipe to send the question to the AI system
-            pipe = await self.pipe(token, objinfo, 'application/rocketride-question', provider='chat')
+            pipe = await self.pipe(token, objinfo, 'application/rocketride-question', provider='chat', on_sse=on_sse)
 
             try:
                 # Open the communication channel to the AI

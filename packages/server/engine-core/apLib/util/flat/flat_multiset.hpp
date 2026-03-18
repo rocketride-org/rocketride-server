@@ -16,8 +16,8 @@ class flat_multiset_base
     : public flat_container_base<D, Key, Container, Compare> {
 #include "impl/container_traits.hpp"
     using B = flat_container_base<D, Key, Container, Compare>;
-    D const* self() const { return static_cast<D const*>(this); }
-    D* self() { return static_cast<D*>(this); }
+    D const *self() const { return static_cast<D const *>(this); }
+    D *self() { return static_cast<D *>(this); }
 
 public:
     using value_compare = Compare;
@@ -28,12 +28,12 @@ public:
 
     // Modifiers
 
-    iterator insert(value_type const& value) {
+    iterator insert(value_type const &value) {
         iterator it = self()->upper_bound(value);
         return self()->container.insert(it.underlying, value);
     }
 
-    iterator insert(value_type&& value) {
+    iterator insert(value_type &&value) {
         iterator it = self()->upper_bound(value);
         return self()->container.insert(it.underlying, std::move(value));
     }
@@ -43,7 +43,7 @@ public:
         this->ds_insert_(first, last);
     }
 
-    size_type erase(key_type const& key) {
+    size_type erase(key_type const &key) {
         auto it_pair = self()->equal_range(key);
         std::size_t ret = std::distance(it_pair.first, it_pair.second);
         self()->container.erase(it_pair.first.underlying,
@@ -53,7 +53,7 @@ public:
 
     // Lookup
 
-    size_type count(key_type const& key) const {
+    size_type count(key_type const &key) const {
         auto it_pair = self()->equal_range(key);
         return std::distance(it_pair.first, it_pair.second);
     }
@@ -65,8 +65,8 @@ class flat_multiset_base<D, Key, Container, Compare,
     : public flat_multiset_base<D, Key, Container, Compare, int> {
 #include "impl/container_traits.hpp"
     using B = flat_multiset_base<D, Key, Container, Compare, int>;
-    D const* self() const { return static_cast<D const*>(this); }
-    D* self() { return static_cast<D*>(this); }
+    D const *self() const { return static_cast<D const *>(this); }
+    D *self() { return static_cast<D *>(this); }
 
 public:
     using B::count;
@@ -74,7 +74,7 @@ public:
     // Lookup
 
     template <typename K>
-    size_type count(K const& key) const {
+    size_type count(K const &key) const {
         auto it_pair = self()->equal_range(key);
         return std::distance(it_pair.first, it_pair.second);
     }
@@ -98,13 +98,13 @@ template <typename T, typename Compare = std::less<void>>
 using vector_multiset = flat_multiset<std::vector<T>, Compare>;
 
 template <typename Container, typename Compare>
-inline bool operator==(const flat_multiset<Container, Compare>& lhs,
-                       const flat_multiset<Container, Compare>& rhs) {
+inline bool operator==(const flat_multiset<Container, Compare> &lhs,
+                       const flat_multiset<Container, Compare> &rhs) {
     return lhs.container == rhs.container;
 }
 template <typename Container, typename Compare>
-inline bool operator!=(const flat_multiset<Container, Compare>& lhs,
-                       const flat_multiset<Container, Compare>& rhs) {
+inline bool operator!=(const flat_multiset<Container, Compare> &lhs,
+                       const flat_multiset<Container, Compare> &rhs) {
     return lhs.container != rhs.container;
 }
 

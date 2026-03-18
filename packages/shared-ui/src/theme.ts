@@ -324,6 +324,15 @@ export const createVSCodeTheme = () => {
 						: {},
 				},
 			},
+			MuiInputLabel: {
+				styleOverrides: {
+					root: inVSCode
+						? {
+								fontSize: `${baseFontSize * 0.75}rem`,
+							}
+						: {},
+				},
+			},
 			MuiInputBase: {
 				styleOverrides: {
 					root: inVSCode
@@ -333,7 +342,6 @@ export const createVSCodeTheme = () => {
 								lineHeight: 1.4,
 								'& .MuiInputBase-input': {
 									fontSize: `${baseFontSize}px`,
-									padding: '4px 8px',
 									minHeight: '22px',
 								},
 							}

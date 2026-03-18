@@ -7,14 +7,6 @@
 		//
 		// Basic fields
 		//
-		"name": {
-			"type": "string",
-			"title": "Data Catalog Name",
-			"minLength": 2,
-			"maxLength": 32,
-			"description": "Use a unique name to identify this data set inside of RocketRide.",
-			"readonly": true
-		},
 		"storePath": {
 			"type": "string",
 			"title": "Store path",

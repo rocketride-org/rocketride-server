@@ -1,11 +1,15 @@
 import argparse
 import sys
+import os
 import asyncio
 import threading
 
 # Remove auto-added script directory to avoid import conflicts with the ai package
 if sys.path and (sys.path[0].endswith('ai') or sys.path[0].endswith('ai\\') or sys.path[0].endswith('ai/')):
     sys.path.pop(0)
+
+# Suppress debugpy frozen modules warning (Python 3.12+)
+os.environ['PYDEVD_DISABLE_FILE_VALIDATION'] = '1'
 
 # Import directly from C++
 from engLib import debug
@@ -26,20 +30,18 @@ def _create_loop():
 
     thread = threading.Thread(target=run_loop, daemon=True, name='GlobalEventLoop')
     thread.start()
-    debug(f'[NODE] Created server_loop at module import: {loop}')
     return loop
 
 
 # Initialize at module import time
 server_loop = _create_loop()
-debug(f'[NODE] server_loop initialized: {server_loop}')
 _loop_thread = None
 _loop_ready = threading.Event()
 
 
 def _start_event_loop():
     """Log that event loop is ready (already started at import time)."""
-    debug(f'[NODE] Global event loop ready: {server_loop}')
+    pass
 
 
 def _stop_event_loop():
@@ -52,7 +54,6 @@ def _stop_event_loop():
             _loop_thread.join(timeout=5)
         server_loop = None
         _loop_thread = None
-        debug('[NODE] Stopped global event loop')
 
 
 def run():
@@ -84,7 +85,6 @@ def run():
             debug_host = parsed_args.debug_host
             debug_port = parsed_args.debug_port
 
-            debug(f'[NODE] Listening for debugger at {debug_host}:{debug_port}')
             debugpy.listen(
                 (
                     debug_host,
@@ -98,17 +98,11 @@ def run():
 
             # If we are supposed to wait for the client attach, do so
             if parsed_args.wait_for_client:
-                debug('[NODE] Waiting for client to attach...')
                 debugpy.wait_for_client()
-                debug('[NODE] Client attached...')
 
         except Exception as e:
-            debug(f'[NODE] Failed to listen for parent debugger: {e}')
-    else:
-        debug('[NODE] No debugger connection arguments provided, running standalone')
-
-    # Output a debug message indicating the server is initialized
-    debug('[NODE] NodeServer initialized')
+            import logging
+            logging.getLogger(__name__).warning("Failed to initialize debugpy: %s", e)
 
     # Start the global event loop for async operations
     _start_event_loop()

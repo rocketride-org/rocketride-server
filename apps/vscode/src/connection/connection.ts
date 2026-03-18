@@ -45,7 +45,8 @@ export class ConnectionManager extends EventEmitter {
 	// Core connection components
 	private client?: RocketRideClient;
 	private manager?: BaseManager;
-	private extensionPath?: string;
+	private enginesRoot?: string;
+	private localEnginePort?: number;
 	private configManager = ConfigManager.getInstance();
 	private logger = getLogger();
 
@@ -58,9 +59,9 @@ export class ConnectionManager extends EventEmitter {
 		maxRetryAttempts: 120
 	};
 
-	// Reconnection management (exponential backoff: 1s -> 15s cap)
+	// Reconnection management (exponential backoff: 1s -> 5s cap)
 	private static readonly BACKOFF_MIN_MS = 1000;
-	private static readonly BACKOFF_MAX_MS = 15000;
+	private static readonly BACKOFF_MAX_MS = 5000;
 	private reconnectTimeout?: NodeJS.Timeout;
 	private retryingMessageShown = false;
 	private isManualDisconnect = false;
@@ -93,8 +94,8 @@ export class ConnectionManager extends EventEmitter {
 		return ConnectionManager.instance;
 	}
 
-	public setExtensionPath(extensionPath: string): void {
-		this.extensionPath = extensionPath;
+	public setEnginesRoot(enginesRoot: string): void {
+		this.enginesRoot = enginesRoot;
 	}
 
 	private setupConfigurationListener(): void {
@@ -205,10 +206,16 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	public getHttpUrl(): string {
+		if (this.connectionStatus.connectionMode === 'local' && this.localEnginePort) {
+			return `http://localhost:${this.localEnginePort}`;
+		}
 		return this.configManager.getHttpUrl();
 	}
 
 	public getWebSocketUrl(): string {
+		if (this.connectionStatus.connectionMode === 'local' && this.localEnginePort) {
+			return `ws://localhost:${this.localEnginePort}/task/service`;
+		}
 		return this.configManager.getWebSocketUrl();
 	}
 
@@ -267,6 +274,11 @@ export class ConnectionManager extends EventEmitter {
 			await this.manager!.start(config, this.engineCts.token);
 			this.updateConnectionStatus({ progressMessage: undefined });
 
+			// Capture the dynamically assigned port from the engine
+			if (config.connectionMode === 'local' && this.manager instanceof EngineManager) {
+				this.localEnginePort = this.manager.getActualPort();
+			}
+
 			// Connect the WebSocket client
 			if (config.connectionMode === 'local') {
 				await this._connectClientWithRetries();
@@ -283,10 +295,10 @@ export class ConnectionManager extends EventEmitter {
 	 */
 	private createManager(connectionMode: string): void {
 		if (connectionMode === 'local') {
-			if (!this.extensionPath) {
-				throw new Error('Extension path not set. Cannot create EngineManager.');
+			if (!this.enginesRoot) {
+				throw new Error('Engines root path not set. Cannot create EngineManager.');
 			}
-			this.manager = new EngineManager(this.extensionPath);
+			this.manager = new EngineManager(this.enginesRoot);
 		} else {
 			this.manager = new CloudManager();
 		}
@@ -306,7 +318,9 @@ export class ConnectionManager extends EventEmitter {
 	private createClient(): RocketRideClient {
 		const config = this.configManager.getConfig();
 		const auth = (config.connectionMode === 'cloud' || config.connectionMode === 'onprem') ? config.apiKey : 'MYAPIKEY';
-		const uri = this.configManager.getHttpUrl();
+		const uri = (config.connectionMode === 'local' && this.localEnginePort)
+			? `http://localhost:${this.localEnginePort}`
+			: this.configManager.getHttpUrl();
 
 		const client = new RocketRideClient({
 			auth,
@@ -417,7 +431,7 @@ export class ConnectionManager extends EventEmitter {
 		this.logger.output(`${icons.success} Connected to RocketRide server`);
 		this.emit('connected');
 
-		// Register global monitors for task lifecycle and output events
+		// Register global monitors for task lifecycle, output, and SSE events
 		this.request('rrext_monitor', {
 			types: ['task', 'output']
 		}, '*').catch(err => {
@@ -566,9 +580,12 @@ export class ConnectionManager extends EventEmitter {
 			return undefined;
 		}
 		try {
+			this.logger.output(`${icons.send} ${command} ${JSON.stringify(args ?? {})}`);
 			const response = await this.client.dapRequest(command, args, token);
+			this.logger.output(`${icons.receive} ${command} ${JSON.stringify(response ?? {})}`);
 			return response as unknown as GenericResponse;
-		} catch {
+		} catch (err) {
+			this.logger.output(`${icons.error} ${command} failed: ${err}`);
 			return undefined;
 		}
 	}
@@ -685,6 +702,7 @@ export class ConnectionManager extends EventEmitter {
 
 		this.cleanupClient();
 		await this.stopManager();
+		this.localEnginePort = undefined;
 		this.clearServicesCache();
 	}
 

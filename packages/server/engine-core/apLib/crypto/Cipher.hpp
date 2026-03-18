@@ -37,8 +37,8 @@ public:
             APERRT_THROW(Ec::InvalidCipher, "Invalid cipher algorithm", m_name);
     }
 
-    Cipher(const Cipher&) = default;
-    Cipher(Cipher&&) = default;
+    Cipher(const Cipher &) = default;
+    Cipher(Cipher &&) = default;
 
     iTextView name() const noexcept { return m_name; }
 
@@ -69,32 +69,32 @@ public:
     }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         buff << m_name;
     }
 
     // For bridging into OpenSSL API's
-    operator const EVP_CIPHER*() const noexcept { return m_hCipher; }
+    operator const EVP_CIPHER *() const noexcept { return m_hCipher; }
 
     // @@TODO Replace with defaulted operator = when we update Clang
-    bool equals(const Cipher& compare) const noexcept {
+    bool equals(const Cipher &compare) const noexcept {
         return name() == compare.name();
     }
 
-    bool operator==(const Cipher& compare) const noexcept {
+    bool operator==(const Cipher &compare) const noexcept {
         return equals(compare);
     }
-    bool operator!=(const Cipher& compare) const noexcept {
+    bool operator!=(const Cipher &compare) const noexcept {
         return !equals(compare);
     }
 
 protected:
     const iText m_name;
-    const EVP_CIPHER* m_hCipher = nullptr;
+    const EVP_CIPHER *m_hCipher = nullptr;
 };
 
 // Non-throwing Cipher init
-inline ErrorOr<Cipher> getCipher(const char* name) noexcept {
+inline ErrorOr<Cipher> getCipher(const char *name) noexcept {
     return _call([&] { return Cipher(name); });
 }
 

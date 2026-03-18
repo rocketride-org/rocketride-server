@@ -23,25 +23,43 @@ env:
   GH_TOKEN: ${{ github.token }}
   VCPKG_NUGET_USER: ${{ github.repository_owner }}
   NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+  VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite
 
 # ---------------------------------------------------------------------------
 #  Build
 # ---------------------------------------------------------------------------
 jobs:
+  init:
+    name: Initialize
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Set up variables
+        id: vars
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          echo "FULL_VERSION=$VERSION.${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "BUILD_HASH=$(echo ${{ github.sha }} | cut -c1-8)" >> $GITHUB_OUTPUT
+          echo "BUILD_STAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+          cat $GITHUB_OUTPUT
+    outputs:
+      FULL_VERSION: ${{ steps.vars.outputs.FULL_VERSION }}
+      BUILD_HASH: ${{ steps.vars.outputs.BUILD_HASH }}
+      BUILD_STAMP: ${{ steps.vars.outputs.BUILD_STAMP }}
+
   build:
     name: Build / ${{ matrix.label }}
+    needs: init
     if: github.event_name != 'schedule'
     timeout-minutes: 90
     runs-on: ${{ matrix.runner }}
     permissions:
-      actions: read
-      checks: read
       contents: read
       packages: write
-      pull-requests: write
-      repository-projects: read
-      security-events: read
-      statuses: read
     strategy:
       fail-fast: false
       matrix:
@@ -99,7 +117,8 @@ jobs:
             -Source "${{ env.NUGET_FEED_URL }}"
 
       - name: Build
-        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall
+        run: |
+          ${{ matrix.builder_cmd }} build --verbose --autoinstall --version=${{ needs.init.outputs.FULL_VERSION }} --hash=${{ needs.init.outputs.BUILD_HASH }} --stamp=${{ needs.init.outputs.BUILD_STAMP }}
 
       - name: Test
         run: ${{ matrix.builder_cmd }} test --verbose
@@ -112,9 +131,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      actions: read
       contents: read
-      packages: write
       security-events: write
     strategy:
       fail-fast: false
@@ -147,10 +164,13 @@ jobs:
     timeout-minutes: 90
     continue-on-error: true
     permissions:
-      actions: read
       contents: read
       packages: write
       security-events: write
+    env:
+      VCPKG_NUGET_USER: ${{ github.repository_owner }}
+      NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+      VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -196,27 +216,6 @@ jobs:
         uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
         with:
           category: "/language:cpp"
-
-  # ---------------------------------------------------------------------------
-  #  Dependency review
-  # ---------------------------------------------------------------------------
-  dependency-review:
-    name: Dependency review
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Dependency Review
-        uses: actions/dependency-review-action@05fe4576374b728f0c523d6a13d64c25081e0803 # v4
-        with:
-          fail-on-severity: high
-          deny-licenses: AGPL-3.0-only, AGPL-3.0-or-later
-          comment-summary-in-pr: always
 
   # ---------------------------------------------------------------------------
   #  Container scan

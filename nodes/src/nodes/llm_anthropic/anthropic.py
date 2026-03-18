@@ -107,7 +107,7 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Get the LLM
-        self._llm = ChatAnthropic(model=model, api_key=apikey, temperature=0)
+        self._llm = ChatAnthropic(model=model, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens)
 
         # Save our chat class into the bag
         bag['chat'] = self

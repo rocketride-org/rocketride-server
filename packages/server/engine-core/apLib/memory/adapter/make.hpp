@@ -26,7 +26,7 @@
 namespace ap::memory::adapter {
 
 template <typename T>
-inline auto makeInput(T&& in, Opt<file::Path> path = {}) noexcept {
+inline auto makeInput(T &&in, Opt<file::Path> path = {}) noexcept {
     if constexpr (concepts::IsInputV<T>) {
         if (!path || in.path() == path.value()) return in;
         if constexpr (traits::IsDetectedExact<
@@ -39,7 +39,7 @@ inline auto makeInput(T&& in, Opt<file::Path> path = {}) noexcept {
 }
 
 template <typename T>
-inline auto makeOutput(T&& out, Opt<file::Path> path = {}) noexcept {
+inline auto makeOutput(T &&out, Opt<file::Path> path = {}) noexcept {
     if constexpr (concepts::IsOutputV<T>) {
         if (!path || out.path() == path.value()) return out;
         if constexpr (traits::IsDetectedExact<T, concepts::DetectMakeMethod,

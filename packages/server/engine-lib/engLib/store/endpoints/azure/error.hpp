@@ -27,12 +27,12 @@ namespace engine::store::filter::azure {
 
 //// Bridge the azure namespace
 template <typename Call, typename... Args>
-inline Error callAndCatch(Location location, TextView desc, const Call& call,
-                          Args&... args) noexcept {
+inline Error callAndCatch(Location location, TextView desc, const Call &call,
+                          Args &...args) noexcept {
     try {
         std::invoke(call, args...);
         return {};
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
         return APERRLL(Error, Ec::Exception, location, desc, e);
     }
 }

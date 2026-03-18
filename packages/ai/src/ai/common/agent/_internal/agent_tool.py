@@ -68,8 +68,8 @@ class _AgentAsToolProvider(ToolsBase):
         if self._tools_available is not None:
             return self._tools_available
         try:
-            host = AgentHostServices(self._pSelf.instance.invoke)
-            tools = self._agent._discover_tools(host=host)
+            host = AgentHostServices(self._pSelf)
+            tools = self._agent.discover_tools(host=host)
             tools_available = []
             for t in tools:
                 name = t.get('name', '')
@@ -125,7 +125,7 @@ class _AgentAsToolProvider(ToolsBase):
         descriptor = {
             'name': self._full_name,
             'description': desc,
-            'input_schema': {
+            'inputSchema': {
                 'type': 'object',
                 'properties': {
                     'query': {'type': 'string', 'description': 'Query string for the agent (required)'},
@@ -133,7 +133,7 @@ class _AgentAsToolProvider(ToolsBase):
                 },
                 'required': ['query'],
             },
-            'output_schema': {
+            'outputSchema': {
                 'type': 'object',
                 'description': 'Agent answer JSON payload',
                 'properties': {

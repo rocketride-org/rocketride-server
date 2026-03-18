@@ -27,11 +27,11 @@ namespace ap {
 // Define the rocketride error category, representing rocketride
 // error codes
 struct RocketRideErrorCategory : std::error_category {
-    const char* name() const noexcept override;
+    const char *name() const noexcept override;
     std::string message(int ev) const override;
 };
 
-const char* RocketRideErrorCategory::name() const noexcept { return "ap"; }
+const char *RocketRideErrorCategory::name() const noexcept { return "ap"; }
 
 std::string RocketRideErrorCategory::message(int ev) const {
     return _ts(EnumFrom<Ec>(ev));

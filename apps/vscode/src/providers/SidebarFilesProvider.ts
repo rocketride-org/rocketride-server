@@ -162,7 +162,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					if (unknownTask) {
 						projectId = unknownTask.projectId;
 						source = unknownTask.sourceId;
-						displayName = unknownTask.displayName || `${projectId.substring(0, 8)}.../${source}`;
+						displayName = unknownTask.displayName || source;
 					} else {
 						// Parse the pipeline file to get the project_id (for known tasks)
 						const parsedPipeline = this.getParsedPipeline(resourceUri);
@@ -230,7 +230,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					projectId: projectId,
 					source: sourceId,
 					pipeline: pipelineTransformed,
-					args: ConfigManager.getInstance().getConfig().engineArgs
+					args: ConfigManager.getInstance().getEffectiveEngineArgs()
 				});
 			} catch (error) {
 				vscode.window.showErrorMessage(`Failed to run pipeline: ${error}`);
@@ -956,11 +956,11 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 		// Return unknown tasks for expanded "Other" item
 		if (element.contextValue === 'otherTasksRoot') {
 			const children = Array.from(this.unknownTasks.values()).map(task => {
-				const displayName = task.displayName || `${task.projectId.substring(0, 8)}.../${task.sourceId}`;
-				
+				const displayName = task.displayName || task.sourceId;
+
 				return {
 					label: displayName,
-					description: '(Running)',
+					description: `${task.projectId.substring(0, 8)}… (Running)`,
 					resourceUri: vscode.Uri.parse(`rocketride:unknown:${task.projectId}:${task.sourceId}`),
 					contextValue: 'unknownTask',
 					iconPath: new vscode.ThemeIcon('pulse', new vscode.ThemeColor('charts.red')),

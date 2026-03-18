@@ -6,8 +6,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 on:
   push:
@@ -19,6 +18,8 @@ jobs:
   init:
     name: Initialize versions
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       server_version: ${{ steps.init.outputs.server_version }}
       vscode_version: ${{ steps.init.outputs.vscode_version }}
@@ -57,10 +58,14 @@ jobs:
     needs: init
     timeout-minutes: 90
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
     env:
       GH_TOKEN: ${{ github.token }}
       VCPKG_NUGET_USER: ${{ github.repository_owner }}
       NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+      VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite
     strategy:
       fail-fast: false
       matrix:
@@ -361,6 +366,9 @@ jobs:
     needs: [init, publish]
     if: needs.init.outputs.server_tag_exists == 'false'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

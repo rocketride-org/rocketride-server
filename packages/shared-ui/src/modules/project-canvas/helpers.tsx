@@ -52,6 +52,17 @@ import {
 import { IControl, IInputLane, INodeData, IProject, IProjectComponent, LaneObject } from './types';
 
 /**
+ * Ensures a project has top-level name and description fields set.
+ * Templates loaded from storage may lack these fields; this guarantees
+ * a consistent shape matching what {@link objectToProperty} produces.
+ */
+export const normalizeProject = (project: IProject): IProject => ({
+	...project,
+	name: project.name || '',
+	description: project.description || '',
+});
+
+/**
  * Generates an ID for a new component based on a class type
  *
  * @param {Node[]} nodes
@@ -356,7 +367,7 @@ export const computeEdgesFromNodes = (nodes: Node[]): Edge[] => {
 					id: uuid(),
 					source: control.from,
 					target: node.id,
-					sourceHandle: 'invoke-source',
+					sourceHandle: `invoke-source-${control.classType}`,
 					targetHandle: `invoke-target-${control.classType}`,
 				});
 			});

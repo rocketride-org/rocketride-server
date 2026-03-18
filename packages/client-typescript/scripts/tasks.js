@@ -1,18 +1,18 @@
 /**
  * MIT License
- *
+ * 
  * Copyright (c) 2026 Aparavi Software AG
- *
+ * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- *
+ * 
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- *
+ * 
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -31,9 +31,10 @@
  *   test  - Run tests
  */
 const path = require('path');
+const { glob } = require('glob');
 const {
-    execCommand, removeDirs, removeDirAndParents, PROJECT_ROOT,
-    exists, mkdir, readDir, writeFile, copyFile,
+    execCommand, removeDirs, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT,
+    exists, mkdir, syncDir, formatSyncStats, writeFile, copyFile,
     startServer, stopServer,
     bracket, parallel,
     hasSourceChanged, saveSourceHash, setState
@@ -42,8 +43,8 @@ const {
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src');
 const LOCAL_DIST = path.join(PACKAGE_DIR, 'dist');
-const PACKAGE_DIST = path.join(PROJECT_ROOT, 'dist', 'clients', 'typescript');
-const SERVER_STATIC_DIR = path.join(PROJECT_ROOT, 'dist', 'server', 'static', 'clients', 'typescript');
+const PACKAGE_DIST = path.join(DIST_ROOT, 'clients', 'typescript');
+const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'clients', 'typescript');
 
 // State key for source fingerprint
 const SRC_HASH_KEY = 'client-typescript.srcHash';
@@ -169,7 +170,7 @@ function makePostBuildAction() {
 
             // Save source hash for future builds
             await saveCompileHash();
-            
+
             task.output = 'Created module type markers';
         }
     };
@@ -180,16 +181,15 @@ function makeCreateNpmPackageAction() {
         run: async (ctx, task) => {
             // Check if source changed (reuse same hash as compile)
             const { changed } = await checkSourceChanged();
-            
+
             // Check if package already exists
-            const files = await exists(PACKAGE_DIST) ? await readDir(PACKAGE_DIST) : [];
-            const hasPackage = files.some(f => f.endsWith('.tgz'));
-            
-            if (!changed && hasPackage) {
+            const files = await glob('*.tgz', { cwd: PACKAGE_DIST, nodir: true });
+
+            if (!changed && files.length > 0) {
                 task.output = 'No changes detected';
                 return;
             }
-            
+
             await mkdir(PACKAGE_DIST);
             await execCommand('npm', ['pack', '--pack-destination', PACKAGE_DIST], { task, cwd: PACKAGE_DIR });
         }
@@ -199,20 +199,8 @@ function makeCreateNpmPackageAction() {
 function makeCopyToServerStaticAction() {
     return {
         run: async (ctx, task) => {
-            await mkdir(SERVER_STATIC_DIR);
-
-            const files = await readDir(PACKAGE_DIST);
-            let copied = 0;
-            for (const file of files) {
-                if (file.endsWith('.tgz')) {
-                    await copyFile(
-                        path.join(PACKAGE_DIST, file),
-                        path.join(SERVER_STATIC_DIR, file)
-                    );
-                    copied++;
-                }
-            }
-            task.output = `Copied ${copied} files to server static`;
+            const stats = await syncDir(PACKAGE_DIST, SERVER_STATIC_DIR, { pattern: '*.tgz', package: true });
+            task.output = formatSyncStats(stats);
         }
     };
 }
@@ -352,7 +340,7 @@ module.exports = {
                 await removeDirAndParents(PROJECT_ROOT, [
                     PACKAGE_DIST,
                     SERVER_STATIC_DIR,
-                    path.join(PROJECT_ROOT, 'build', 'clients', 'typescript')
+                    path.join(BUILD_ROOT, 'clients', 'typescript')
                 ]);
                 await setState(SRC_HASH_KEY, null);
                 task.output = 'Cleaned client-typescript';

@@ -43,6 +43,7 @@ import LoginWithGoogleButton from './social-buttons/LoginWithGoogleButton';
 import LoginWithSlackButton from './social-buttons/LoginWithSlackButton';
 import GoogleDrivePickerWidget from './google-drive-picker-widget/GoogleDrivePickerWidget';
 import ApiKeyWidget from './api-key-widget/ApiKeyWidget';
+import TextareaWidget from './textarea-widget/TextareaWidget';
 
 /** Stub component that renders nothing. Classifications widget and classification node have been removed. */
 // eslint-disable-next-line react-refresh/only-export-components
@@ -86,6 +87,8 @@ const ThemeObject: ThemeProps = {
 		GoogleDrivePickerWidget,
 		classifications: ClassificationsWidgetStub,
 		ApiKeyWidget: ApiKeyWidget,
+		TextareaWidget,
+		textarea: TextareaWidget,
 		FileWidget,
 	},
 };

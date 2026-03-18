@@ -203,8 +203,11 @@ user.json
 # Build version info (generated)
 version.json
 
-# TypeScript client README (copied from docs/ by build; npm pack requires it here)
+# Package READMEs (copied from docs/ by build; packaging requires them here)
 packages/client-typescript/README.md
+packages/client-python/README.md
+packages/client-mcp/README.md
+apps/vscode/README.md
 
 downloads/jdk-17.zip
 downloads/jre-17.zip

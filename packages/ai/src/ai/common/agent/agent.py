@@ -18,14 +18,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 from rocketlib import debug, error
 from ai.common.schema import Answer, Question
+from ai.common.config import Config
 
 from .types import AgentHost, AgentInput
 from ._internal.host import AgentHostServices
 from ._internal.agent_tool import handle_agent_tool_invoke
-from ._internal.trace import make_tracing_invoker
 from ._internal.utils import (
-    apply_node_instructions,
-    extract_prompt,
     extract_text,
     messages_to_transcript,
     now_iso,
@@ -47,14 +45,40 @@ class AgentBase(ABC):
     FRAMEWORK: str = 'unknown'
     _AGENT_TOOL_NAME: str = 'run_agent'
 
+    _host: Optional[AgentHostServices] = None
+    _invoker: Any = None
+
+    def __init__(
+        self,
+        iGlobal: Any,
+    ):
+        """
+        Initialize be saving containing IInstance, and gathering tools
+        """
+        # Save the containing IInstance
+        self._iGlobal = iGlobal
+
+        # Get the logical type (nodeId) of our invoker
+        self._node_id = self._iGlobal.glb.logicalType
+
+        # Retrieve node-specific configuration by using the logical type and
+        # the connection configuration from the global context.
+        # Config.getNodeConfig likely returns structured config data tailored
+        # for this node instance.
+        config = Config.getNodeConfig(self._iGlobal.glb.logicalType, self._iGlobal.glb.connConfig)
+
+        # And save any specific instructions
+        self._instructions = config.get('instructions', [])
+
     # ---------------------------------------------------------------------
     # Pipeline-facing entrypoint
     # ---------------------------------------------------------------------
     def run_agent(
         self,
-        pSelf: Any,
+        iInstance,
         question: Question,
         *,
+        host: Optional[AgentHostServices] = None,
         emit_answers_lane: bool = True,
     ) -> Any:
         """
@@ -64,7 +88,7 @@ class AgentBase(ABC):
         writes a single JSON payload to the answers lane (`Answer(expectJson=True)`).
 
         Args:
-            pSelf: Node instance (`IInstance`) provided by the engine.
+            iInstance: Node instance (`IInstance`) provided by the engine.
             question: Incoming question object from the questions lane.
             emit_answers_lane: If True, write the answer JSON to the answers lane.
 
@@ -75,7 +99,12 @@ class AgentBase(ABC):
         run_id = new_run_id()
         debug(f'agent base run_agent run_id={run_id} framework={self.FRAMEWORK}')
 
-        invoker, tool_calls = make_tracing_invoker(pSelf.instance.invoke)
+        # Use provided host (per-instance, e.g. from IInstance.beginInstance),
+        # or create one lazily if not provided.
+        if host is not None:
+            self._host = host
+        elif not self._host:
+            self._host = AgentHostServices(iInstance)
 
         def _json_safe(value: Any) -> Any:
             """
@@ -86,32 +115,47 @@ class AgentBase(ABC):
             except Exception:
                 return safe_str(value)
 
+        task_id = None
         try:
-            apply_node_instructions(question, pSelf)
-            prompt = extract_prompt(question)
-            task_id = self._get_task_id(pSelf)
+            # Add any global instructions from the config
+            for inst in self._instructions:
+                question.addInstruction('Additional Instruction', inst.strip())
 
+            # Get the jobs taskId
+            task_id = iInstance.IEndpoint.endpoint.jobConfig['taskId']
+
+            # Create the input we will send to the agent
             agent_input = AgentInput(
-                prompt=prompt,
                 question=question,
                 run_id=run_id,
                 task_id=task_id,
                 started_at=started_at,
             )
 
-            host = AgentHostServices(invoker)
-            runtime_ctx = {'run_id': run_id, 'task_id': task_id, 'framework': self.FRAMEWORK}
+            # Save the invoker so sendSSE() can delegate to self.instance.sendSSE()
+            self._invoker = iInstance
 
-            content, raw = self._run(agent_input=agent_input, host=host, ctx=runtime_ctx)
+            # Build up the context so we know what we are doing
+            pipe_id = iInstance.instance.pipeId if iInstance and iInstance.instance else 0
+            runtime_ctx = {'run_id': run_id, 'task_id': task_id, 'framework': self.FRAMEWORK, 'pipe_id': pipe_id}
+
+            # And execute
+            content, raw = self._run(
+                agent_input=agent_input,
+                host=self._host,
+                ctx=runtime_ctx,
+            )
+
             if not isinstance(content, str):
                 content = safe_str(content)
 
             ended_at = now_iso()
+
             answer_payload: Dict[str, Any] = {
                 'content': content,
                 'meta': {
                     'framework': self.FRAMEWORK,
-                    'agent_id': self._agent_id(pSelf),
+                    'agent_id': self._agent_id(iInstance),
                     'run_id': run_id,
                     'started_at': started_at,
                     'ended_at': ended_at,
@@ -122,14 +166,6 @@ class AgentBase(ABC):
                 answer_payload['meta']['task_id'] = task_id
 
             stack: List[Dict[str, Any]] = []
-            if tool_calls:
-                stack.append(
-                    {
-                        'kind': 'RocketRide.agent.tool_calls.v1',
-                        'name': 'host.tools',
-                        'payload': _json_safe(tool_calls),
-                    }
-                )
             stack.append({'kind': 'RocketRide.agent.raw.v1', 'name': 'framework.output', 'payload': _json_safe(raw)})
             answer_payload['stack'] = stack
 
@@ -140,12 +176,11 @@ class AgentBase(ABC):
             error_message = str(e)
             error(f'agent base _run failed run_id={run_id} type={error_type} message={error_message}')
             ended_at = now_iso()
-            task_id = safe_str(self._get_task_id(pSelf)) or None
             answer_payload = {
                 'content': error_message or f'{error_type} (no message)',
                 'meta': {
                     'framework': self.FRAMEWORK,
-                    'agent_id': self._agent_id(pSelf),
+                    'agent_id': self._agent_id(iInstance),
                     'run_id': run_id,
                     'started_at': started_at,
                     'ended_at': ended_at,
@@ -154,23 +189,14 @@ class AgentBase(ABC):
                 'stack': [],
             }
             stack = []
-            if tool_calls:
-                stack.append(
-                    {'kind': 'RocketRide.agent.tool_calls.v1', 'name': 'host.tools', 'payload': _json_safe(tool_calls)}
-                )
-            stack.append(
-                {'kind': 'RocketRide.agent.error.v1', 'name': 'exception', 'payload': {'type': error_type, 'message': error_message}}
-            )
+            stack.append({'kind': 'RocketRide.agent.error.v1', 'name': 'exception', 'payload': {'type': error_type, 'message': error_message}})
             answer_payload['stack'] = stack
 
         if emit_answers_lane:
-            debug(
-                'agent base emitting answer'
-                f' run_id={answer_payload.get("meta", {}).get("run_id")} framework={answer_payload.get("meta", {}).get("framework")}'
-            )
+            debug(f'agent base emitting answer run_id={answer_payload.get("meta", {}).get("run_id")} framework={answer_payload.get("meta", {}).get("framework")}')
             answer = Answer(expectJson=False)
             answer.setAnswer(answer_payload.get('content', ''))
-            pSelf.instance.writeAnswers(answer)
+            iInstance.instance.writeAnswers(answer)
 
         return answer_payload
 
@@ -191,7 +217,7 @@ class AgentBase(ABC):
     # ---------------------------------------------------------------------
     # Framework-facing host operations
     # ---------------------------------------------------------------------
-    def _discover_tools(self, *, host: AgentHost) -> List[ToolsBase.ToolDescriptor]:
+    def discover_tools(self, *, host: AgentHost) -> List[ToolsBase.ToolDescriptor]:
         """
         Discover available tools for framework drivers to expose.
 
@@ -211,7 +237,7 @@ class AgentBase(ABC):
             return catalog
         return []
 
-    def _invoke_host_tool(
+    def invoke_host_tool(
         self,
         *,
         host: AgentHost,
@@ -234,7 +260,7 @@ class AgentBase(ABC):
         payload = normalize_invocation_payload(input=input, kwargs=kwargs)
         return host.tools.invoke(tool_name, payload)
 
-    def _call_host_llm(
+    def call_host_llm(
         self,
         *,
         host: AgentHost,
@@ -303,6 +329,21 @@ class AgentBase(ABC):
     # ---------------------------------------------------------------------
     # Engine utilities
     # ---------------------------------------------------------------------
+    def sendSSE(self, type: str, **data) -> None:
+        """
+        Send a real-time SSE status update to the UI for this agent's pipe.
+
+        Delegates to ``self._invoker.instance.sendSSE()`` using the invoker
+        captured at the start of the current ``run_agent`` invocation.
+        Safe to call from ``_run`` or any helper it delegates to.
+
+        Args:
+            type:    Event type string (e.g. 'thinking', 'acting', 'confirm').
+            **data:  Keyword arguments included as the event data payload.
+        """
+        if self._invoker and self._invoker.instance:
+            self._invoker.instance.sendSSE(type, **data)
+
     def _agent_id(self, pSelf: Any) -> str:
         """Return the logical agent identifier used in answer metadata."""
         try:
@@ -312,16 +353,3 @@ class AgentBase(ABC):
         except Exception:
             pass
         return self.__class__.__name__
-
-    def _get_task_id(self, pSelf: Any) -> Optional[str]:
-        """Return the engine taskId if present in job configuration."""
-        try:
-            endpoint = getattr(pSelf, 'IEndpoint', None)
-            eng = getattr(endpoint, 'endpoint', None)
-            job_cfg = getattr(eng, 'jobConfig', None)
-            if isinstance(job_cfg, dict):
-                task_id = job_cfg.get('taskId')
-                return str(task_id) if task_id else None
-        except Exception:
-            return None
-        return None

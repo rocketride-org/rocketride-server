@@ -81,7 +81,7 @@ void Monitor::startCounters() noexcept { Parent::startCounters(); }
 ///	@param[in]
 ///		Error code to output
 //-----------------------------------------------------------------
-Error Monitor::warning(Error&& ccode) noexcept {
+Error Monitor::warning(Error &&ccode) noexcept {
     // Lock this
     auto guard = lock();
 
@@ -95,7 +95,7 @@ Error Monitor::warning(Error&& ccode) noexcept {
 ///	@param[in]
 ///		Error code to output
 //-----------------------------------------------------------------
-Error Monitor::error(Error&& ccode) noexcept {
+Error Monitor::error(Error &&ccode) noexcept {
     // Lock this
     auto guard = lock();
 
@@ -109,7 +109,7 @@ Error Monitor::error(Error&& ccode) noexcept {
 ///	@param[in]
 ///		Error code to output
 //-----------------------------------------------------------------
-Error Monitor::exit(Error&& ccode) noexcept { return ccode; }
+Error Monitor::exit(Error &&ccode) noexcept { return ccode; }
 
 //-----------------------------------------------------------------
 ///	@details
@@ -120,7 +120,7 @@ Error Monitor::exit(Error&& ccode) noexcept { return ccode; }
 ///		Path to the crash dump file
 //-----------------------------------------------------------------
 void Monitor::onCrashDumpCreated(Location location,
-                                 const file::Path& path) noexcept {
+                                 const file::Path &path) noexcept {
     return;
 }
 
@@ -130,7 +130,7 @@ void Monitor::onCrashDumpCreated(Location location,
 ///	@param[in]	info
 ///		Info to output
 //-----------------------------------------------------------------
-void Monitor::info(const json::Value& info) noexcept {
+void Monitor::info(const json::Value &info) noexcept {
     // Lock this
     auto guard = lock();
 
@@ -143,7 +143,7 @@ void Monitor::info(const json::Value& info) noexcept {
 ///	@param[in]	info
 ///		Info to output
 //-----------------------------------------------------------------
-void Monitor::metrics(const json::Value& metrics) noexcept {
+void Monitor::metrics(const json::Value &metrics) noexcept {
     // Lock this
     auto guard = lock();
 
@@ -193,11 +193,11 @@ bool Monitor::isAppMonitor() noexcept { return false; }
 //-----------------------------------------------------------------
 ///	@details
 ///		Output an object from Dependency Download - this is used to output an
-///object
+/// object
 ///	@param[in]	status
 ///		The status info
 //-----------------------------------------------------------------
-void Monitor::dependencyDownload(const json::Value& data) noexcept {
+void Monitor::dependencyDownload(const json::Value &data) noexcept {
     // No-op base implementation
 }
 

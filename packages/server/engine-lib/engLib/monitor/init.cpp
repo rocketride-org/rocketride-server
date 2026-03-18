@@ -80,7 +80,7 @@ Error init() noexcept {
     config::monitor() = _mv(*monitor);
 
     // Notify the monitor of any crash dump created
-    dev::crashDumpCreatedCallback() = [](const file::Path& dumpPath) noexcept {
+    dev::crashDumpCreatedCallback() = [](const file::Path &dumpPath) noexcept {
         if (config::monitor()) MONITOR(onCrashDumpCreated, _location, dumpPath);
     };
 

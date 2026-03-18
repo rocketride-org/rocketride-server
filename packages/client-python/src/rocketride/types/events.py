@@ -168,9 +168,10 @@ class EVENT_TYPE(Flag):
     OUTPUT = 1 << 3  # Standard output and logging messages from task execution
     FLOW = 1 << 4  # Pipeline flow events - component execution tracking and data flow visualization
     TASK = 1 << 5  # Task lifecycle events - start, stop, state changes, and task management
+    SSE = 1 << 6  # Real-time node-to-UI messages emitted via monitorSSE() during pipeline execution
 
     # Convenience combination - ALL events except NONE for comprehensive monitoring
-    ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK
+    ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK | SSE
 
 
 class EVENT_STATUS_UPDATE(TypedDict, total=False):

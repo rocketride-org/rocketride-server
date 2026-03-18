@@ -101,14 +101,9 @@
     //		itself
     //
     "preconfig": {
-        // Define the values that will be merged into any profile configuration
-        // specified, unless the profile is 'absolute'
         "default": "default",
-        // Defines profiles used with the "profile": key
         "profiles": {
-            "default": {
-                "question": ""
-            }
+            "default": {}
         }
     },
     //
@@ -136,39 +131,7 @@
     //		current service. You may specify them here, or directly
     //		in the shape
     //
-    "fields": {
-        "question": {
-            "type": "string",
-            "title": "Question",
-			"description": "Pipeline text query",
-			"optional": true
-        },
-        "question.default": {
-            "object": "default",
-            "properties": [
-                "question"
-            ]
-        },
-        "question.profile": {
-            "hidden": true,
-            "type": "string",
-            "default": "default",
-            "enum": [
-                [
-                    "default",
-                    "Default"
-                ]
-            ],
-            "conditional": [
-                {
-                    "value": "default",
-                    "properties": [
-                        "question.default"
-                    ]
-                }
-            ]
-        }
-    },
+    "fields": {},
     //
     // Required:
     //		Defines the fields (shape) of the service. Either source or target
@@ -179,7 +142,7 @@
             "section": "Pipe",
             "title": "Question",
             "properties": [
-                "question.profile"
+                "type"
             ]
         }
     ]

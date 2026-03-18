@@ -26,14 +26,14 @@
 namespace ap::string::internal {
 
 template <typename ArgType, typename BufferType>
-inline Error packSelector(const ArgType& arg, FormatOptions opts,
-                          PackAdapter<BufferType>& buff) noexcept {
+inline Error packSelector(const ArgType &arg, FormatOptions opts,
+                          PackAdapter<BufferType> &buff) noexcept {
     return pack(arg, opts, buff, detectPackTag<ArgType, decltype(buff)>());
 }
 
 template <typename ArgType, typename BufferType>
-inline Error unpackSelector(ArgType& arg, FormatOptions opts,
-                            const PackAdapter<BufferType>& buff) noexcept {
+inline Error unpackSelector(ArgType &arg, FormatOptions opts,
+                            const PackAdapter<BufferType> &buff) noexcept {
     return unpack(arg, opts, buff, detectUnpackTag<ArgType, decltype(buff)>());
 }
 

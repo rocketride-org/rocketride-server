@@ -41,7 +41,7 @@ from typing import Any, Dict, Tuple
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from mistralai import Mistral
+from mistralai.client import Mistral
 
 
 class Chat(ChatBase):

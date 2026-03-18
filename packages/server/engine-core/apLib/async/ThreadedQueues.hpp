@@ -38,18 +38,18 @@ public:
 
     ~ThreadedQueues() noexcept {
         // First cancel the queues
-        for (auto& queue : m_queues) queue.cancel();
+        for (auto &queue : m_queues) queue.cancel();
 
         // Now stop the threads
-        for (auto& thread : m_threads) thread.stop();
+        for (auto &thread : m_threads) thread.stop();
 
         // Clear memory
-        for (auto& queue : m_queues) queue.reset();
+        for (auto &queue : m_queues) queue.reset();
     }
 
     // Starts the thread count requested, assigns each a queue
     Error start(Location location, TextView namePrefix, uint32_t threadCount,
-                size_t queueDepth, CallbackType&& callback) noexcept {
+                size_t queueDepth, CallbackType &&callback) noexcept {
         // Stop if we are already started
         stop();
 
@@ -58,13 +58,13 @@ public:
 
         // First setup the queues so we can hand the threads references to them
         for (unsigned i = 0; i < threadCount; i++) {
-            auto& queue = m_queues.emplace_back(queueDepth);
+            auto &queue = m_queues.emplace_back(queueDepth);
             m_threads.emplace_back(location, _ts(namePrefix, "-", i), callback,
                                    queue);
         }
 
         // Now start them
-        for (auto& thread : m_threads) {
+        for (auto &thread : m_threads) {
             if (auto ccode = thread.start())
                 return APERRT(ccode, "Failed to start thread for", namePrefix);
         }
@@ -77,13 +77,13 @@ public:
     // Force stops all the threads and deinits the queues
     void stop() noexcept {
         // Cancel each queue
-        for (auto& queue : m_queues) queue.cancel();
+        for (auto &queue : m_queues) queue.cancel();
 
         // Stop each thread
-        for (auto& thread : m_threads) thread.stop();
+        for (auto &thread : m_threads) thread.stop();
 
         // Clear the queues
-        for (auto& queue : m_queues) queue.reset();
+        for (auto &queue : m_queues) queue.reset();
     }
 
     // Waits for all the queues to empty, operates in two mode,
@@ -97,15 +97,15 @@ public:
         // First mark all the queues complete if requested, this is important as
         // we need all our queues to operate as one
         if (complete) {
-            for (auto& queue : m_queues) queue.complete();
+            for (auto &queue : m_queues) queue.complete();
         }
 
         // Drain the queues next
-        for (auto& queue : m_queues) ccode = queue.flush(false) || ccode;
+        for (auto &queue : m_queues) ccode = queue.flush(false) || ccode;
 
         if (complete) {
             // If this is the end, join on the threads
-            for (auto& thread : m_threads) {
+            for (auto &thread : m_threads) {
                 if (auto joinCode = thread.join())
                     ccode = APERRT(joinCode, "Failed to join on thread",
                                    thread.name()) ||
@@ -113,14 +113,14 @@ public:
             }
             m_threads.clear();
 
-            for (auto& queue : m_queues) queue.reset();
+            for (auto &queue : m_queues) queue.reset();
             m_queues.clear();
         } else {
             // Not the end, wait until our pop count == the therad count, this
             // indicates the threads are doing no work (but we'll still wake up
             // if someone sets the global cancel flag ala sleepCheck)
             while (popWaitCount() != m_threads.size()) {
-                for (auto&& thread : m_threads) {
+                for (auto &&thread : m_threads) {
                     if (thread.running()) continue;
                     return thread.join();
                 }
@@ -134,11 +134,11 @@ public:
     }
 
     // Return the queue with the most pending entries
-    auto& max() noexcept {
+    auto &max() noexcept {
         ASSERTD_MSG(!m_queues.empty(), "Queues not started");
 
         Opt<Ref<async::Queue<EntryT>>> fullest{m_queues.front()};
-        for (auto& q : m_queues) {
+        for (auto &q : m_queues) {
             if (q.size() > fullest->get().size()) fullest = q;
         }
         return fullest->get();
@@ -146,7 +146,7 @@ public:
 
     // Callers queue will be checked if its empty before we go looking for
     // another queue
-    auto& max(async::Queue<EntryT>& check) noexcept {
+    auto &max(async::Queue<EntryT> &check) noexcept {
         ASSERTD_MSG(!m_queues.empty(), "Queues not started");
 
         if (check.size()) return check;
@@ -155,37 +155,37 @@ public:
     }
 
     // Return the queue with the least pending entries
-    auto& min() noexcept {
+    auto &min() noexcept {
         ASSERTD_MSG(m_queues.empty() == false, "Queues not started");
 
         // Place the dir in the queue with the least number of entries
         Opt<Ref<async::Queue<EntryT>>> emptiest{m_queues.front()};
-        for (auto& q : m_queues) {
+        for (auto &q : m_queues) {
             if (q.size() < emptiest->get().size()) emptiest = q;
         }
         return emptiest->get();
     }
 
-    auto cancel(const Error& ccode) noexcept {
+    auto cancel(const Error &ccode) noexcept {
         for (auto queue : m_queues) queue.cancel(ccode);
         return ccode;
     }
 
     size_t pushWaitCount() const noexcept {
         size_t count = {};
-        for (const auto& queue : m_queues) count += queue.pushWaitCount();
+        for (const auto &queue : m_queues) count += queue.pushWaitCount();
         return count;
     }
 
     size_t popWaitCount() const noexcept {
         size_t count = {};
-        for (const auto& queue : m_queues) count += queue.popWaitCount();
+        for (const auto &queue : m_queues) count += queue.popWaitCount();
         return count;
     }
 
     size_t size() const noexcept {
         size_t s = {};
-        for (const auto& queue : m_queues) s += queue.size();
+        for (const auto &queue : m_queues) s += queue.size();
         return s;
     }
 

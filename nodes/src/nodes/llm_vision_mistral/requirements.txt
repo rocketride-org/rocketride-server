@@ -1,2 +1,2 @@
-mistralai
+mistralai>=2.0.0
 mistral-common[sentencepiece]

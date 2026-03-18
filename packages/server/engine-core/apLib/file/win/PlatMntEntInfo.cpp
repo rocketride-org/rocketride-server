@@ -30,7 +30,7 @@ namespace {
 _const auto MountBufferLength{1024_b};
 
 // Obtain removable drive information given a path.
-ErrorOr<bool> getMountInfo(const Path& path, wchar_t* const buffer,
+ErrorOr<bool> getMountInfo(const Path &path, wchar_t *const buffer,
                            size_t bufferLength) noexcept {
     if (GetVolumePathNameW(path.str(), buffer, _cast<DWORD>(bufferLength)) ==
         0) {
@@ -101,7 +101,7 @@ ErrorOr<bool> getMountInfo(const Path& path, wchar_t* const buffer,
 namespace ap::file {
 
 // Returns drive information given a path.
-ErrorOr<MntEntInfo> getMntEntInfo(const Path& path) noexcept {
+ErrorOr<MntEntInfo> getMntEntInfo(const Path &path) noexcept {
     StackUtf16 buffer;
     buffer.reserve(MountBufferLength);
     auto info = getMountInfo(path, buffer.data(), buffer.capacity());
@@ -117,7 +117,7 @@ ErrorOr<MntEntInfo> getMntEntInfo(const Path& path) noexcept {
 }
 
 // Returns true if path is on a removable drive.
-bool isOnRemovableDrive(const Path& path) noexcept {
+bool isOnRemovableDrive(const Path &path) noexcept {
     if (path.isUnc()) return false;
     StackUtf16 buffer;
     buffer.reserve(MountBufferLength);

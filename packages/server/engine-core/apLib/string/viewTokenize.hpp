@@ -41,14 +41,14 @@ struct SplitResult {
 };
 
 template <typename ChrT, typename TraitsT = std::char_traits<ChrT>>
-constexpr bool operator==(const SplitResult<ChrT, TraitsT>& lhs,
-                          const SplitResult<ChrT, TraitsT>& rhs) noexcept {
+constexpr bool operator==(const SplitResult<ChrT, TraitsT> &lhs,
+                          const SplitResult<ChrT, TraitsT> &rhs) noexcept {
     return lhs.left == rhs.left && lhs.right == rhs.right;
 }
 
 template <typename ChrT, typename TraitsT = std::char_traits<ChrT>>
-inline std::ostream& operator<<(
-    std::ostream& os, const SplitResult<ChrT, TraitsT>& splitted) noexcept {
+inline std::ostream &operator<<(
+    std::ostream &os, const SplitResult<ChrT, TraitsT> &splitted) noexcept {
     return os << splitted.left << " " << splitted.right;
 }
 
@@ -128,7 +128,7 @@ public:
     using ViewType = StrView<ChrT, TraitsT>;
     using value_type = ViewType;
     using difference_type = std::ptrdiff_t;
-    using pointer = const ViewType*;
+    using pointer = const ViewType *;
     using reference = ViewType;
     using iterator_category = std::forward_iterator_tag;
     using StateType = detail::TokenState<ChrT, TraitsT, SplitterT>;
@@ -142,7 +142,7 @@ public:
 
     constexpr reference operator*() const noexcept { return m_state.token(); }
 
-    constexpr TokenIter& operator++() noexcept {
+    constexpr TokenIter &operator++() noexcept {
         advance();
         return *this;
     }
@@ -153,7 +153,7 @@ public:
         return tmp;
     }
 
-    constexpr bool operator==(const TokenIter& rhs) const noexcept {
+    constexpr bool operator==(const TokenIter &rhs) const noexcept {
         return (!m_state.empty() && !rhs.m_state.empty())
                    ? (m_state.remainder().data() ==
                           rhs.m_state.remainder().data() &&
@@ -162,7 +162,7 @@ public:
                    : (m_state.empty() == rhs.m_state.empty());
     }
 
-    constexpr bool operator!=(const TokenIter& rhs) const noexcept {
+    constexpr bool operator!=(const TokenIter &rhs) const noexcept {
         return !(*this == rhs);
     }
 
@@ -269,7 +269,7 @@ auto tokenizeVector(StrView<ChrT, TraitsT> view, ChrT delimiter,
                     StrView<ChrT, TraitsT> trimChars = {}) noexcept {
     std::vector<StrView<ChrT, TraitsT>> result;
 
-    auto loadResults = [&](auto&& range) {
+    auto loadResults = [&](auto &&range) {
         for (auto str : range) result.push_back({str.data(), str.size()});
     };
 
@@ -334,14 +334,14 @@ constexpr auto tokenizeArrayTrim(
 namespace detail {
 constexpr bool isDigit(char c) noexcept { return c <= '9' && c >= '0'; }
 
-constexpr int toInt(const char* str, int value = 0) noexcept {
+constexpr int toInt(const char *str, int value = 0) noexcept {
     if (!*str) return value;
     if (isDigit(*str)) return toInt(str + 1, (*str - '0') + value * 10);
     return value;
 }
 }  // namespace detail
 
-constexpr int toInt(const char* str) {
+constexpr int toInt(const char *str) {
     // Hand off to the recursion version in the detail space
     return detail::toInt(str);
 }
@@ -350,10 +350,10 @@ constexpr int toInt(const char* str) {
 // so we can plug into the _tr macro
 template <typename ChrT, typename TraitsT, typename SplitT>
 inline void __transform(TokenRange<ChrT, TraitsT, SplitT> range,
-                        std::vector<StrView<ChrT, TraitsT>>& target) noexcept {
+                        std::vector<StrView<ChrT, TraitsT>> &target) noexcept {
     target.clear();
     std::transform(range.begin(), range.end(), std::back_inserter(target),
-                   [&](const auto& ti) { return ti; });
+                   [&](const auto &ti) { return ti; });
 }
 
 // This is a special use case for tokenization of inline macros that
@@ -408,7 +408,7 @@ constexpr auto tokenizeEnum(StrView<ChrT, TraitsT> view) noexcept {
 // StrView, which when given a string view consider _any_ of the individual
 // characters and not the string as a whole
 template <template <typename ChrT> typename TraitsT = Case>
-inline StrView<char> extractNext(size_t& cursor, StrView<char> _str,
+inline StrView<char> extractNext(size_t &cursor, StrView<char> _str,
                                  char firstDelim,
                                  StrView<char> secondDelim) noexcept {
     // Wrap the callers view in another, with their requested trait
@@ -489,7 +489,7 @@ inline StrView<char> extractNext(size_t& cursor, StrView<char> _str,
 }
 
 template <template <typename ChrT> typename TraitsT = Case>
-inline StrView<char> extractNext(size_t& cursor, StrView<char> _str,
+inline StrView<char> extractNext(size_t &cursor, StrView<char> _str,
                                  char firstDelim,
                                  Opt<char> secondDelim = {}) noexcept {
     auto second = secondDelim.value_or(firstDelim);

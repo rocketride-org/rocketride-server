@@ -32,12 +32,12 @@ struct MyCommandParams {
         Text arg1;
         Size arg2;
 
-        static auto __fromJson(Request& rqu, const json::Value& val) noexcept {
+        static auto __fromJson(Request &rqu, const json::Value &val) noexcept {
             rqu.arg1 = _fj<decltype(rqu.arg1)>(val["arg1"]);
             rqu.arg2 = _fj<decltype(rqu.arg2)>(val["arg2"]);
         }
 
-        auto __toJson(json::Value& val) const noexcept {
+        auto __toJson(json::Value &val) const noexcept {
             val["arg1"] = _tj(arg1);
             val["arg2"] = _tj(arg2);
         }
@@ -47,12 +47,12 @@ struct MyCommandParams {
         Text arg1;
         Size arg2;
 
-        static auto __fromJson(Reply& rpl, const json::Value& val) noexcept {
+        static auto __fromJson(Reply &rpl, const json::Value &val) noexcept {
             rpl.arg1 = _fj<decltype(rpl.arg1)>(val["arg1"]);
             rpl.arg2 = _fj<decltype(arg2)>(val["arg2"]);
         }
 
-        auto __toJson(json::Value& val) const noexcept {
+        auto __toJson(json::Value &val) const noexcept {
             val["arg1"] = _tj(arg1);
             val["arg2"] = _tj(arg2);
         }

@@ -61,7 +61,7 @@ export default defineConfig({
 
 	output: {
 		distPath: {
-			root: '../../build/vscode/webview'
+			root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'vscode/webview')
 		},
 		filename: {
 			js: '[name].js'

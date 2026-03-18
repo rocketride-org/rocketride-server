@@ -79,7 +79,7 @@ public:
     ///		Helper function to output named JSON object to
     ///		info (e.g. "{sysinfo: {...}}")
     //-----------------------------------------------------------------
-    void info(TextView name, const json::Value& object) noexcept {
+    void info(TextView name, const json::Value &object) noexcept {
         ASSERT(!name.empty());
         json::Value json;
         json[name] = object;
@@ -90,25 +90,25 @@ public:
     ///	@details
     ///		Retrieve the info we stored
     //-----------------------------------------------------------------
-    json::Value& info() { return m_info; }
+    json::Value &info() { return m_info; }
 
     //-----------------------------------------------------------------
     ///	@details
     ///		Retrieve the info we stored
     //-----------------------------------------------------------------
-    json::Value& metrics() { return m_metrics; }
+    json::Value &metrics() { return m_metrics; }
 
     //-----------------------------------------------------------------
     ///	@details
     ///		Retrieve our saved errors
     //-----------------------------------------------------------------
-    std::vector<Error>& errors() { return m_errors; }
+    std::vector<Error> &errors() { return m_errors; }
 
     //-----------------------------------------------------------------
     ///	@details
     ///		Retrieve our saved warnings
     //-----------------------------------------------------------------
-    std::vector<Error>& warnings() { return m_warnings; }
+    std::vector<Error> &warnings() { return m_warnings; }
 
     //-----------------------------------------------------------------
     ///	@details
@@ -141,7 +141,7 @@ public:
     ///		Parameter arguments to format
     //-----------------------------------------------------------------
     template <typename... Args>
-    void infoFmt(TextView fmt, Args&&... args) noexcept {
+    void infoFmt(TextView fmt, Args &&...args) noexcept {
         auto infoMsg = _fmt(fmt, std::forward<Args>(args)...);
         auto val = json::parse(infoMsg);
         ASSERTD_MSG(val, "Failed to parse info object format", infoMsg);
@@ -153,18 +153,18 @@ public:
     //-----------------------------------------------------------------
     virtual void startMonitor() noexcept;
     virtual void startCounters() noexcept;
-    virtual Error warning(Error&& ccode) noexcept;
-    virtual Error error(Error&& ccode) noexcept;
-    virtual Error exit(Error&& ccode) noexcept;
+    virtual Error warning(Error &&ccode) noexcept;
+    virtual Error error(Error &&ccode) noexcept;
+    virtual Error exit(Error &&ccode) noexcept;
     virtual void onCrashDumpCreated(Location location,
-                                    const file::Path& path) noexcept;
-    virtual void info(const json::Value& info) noexcept;
-    virtual void metrics(const json::Value& metrics) noexcept;
+                                    const file::Path &path) noexcept;
+    virtual void info(const json::Value &info) noexcept;
+    virtual void metrics(const json::Value &metrics) noexcept;
     virtual void status(TextView status) noexcept;
     virtual void service(bool status) noexcept;
     virtual void other(TextView key, TextView param) noexcept;
     virtual void object(TextView object, uint64_t size) noexcept;
-    virtual void dependencyDownload(const json::Value& data) noexcept;
+    virtual void dependencyDownload(const json::Value &data) noexcept;
     virtual void stopCounters() noexcept;
     virtual void stopMonitor() noexcept;
     virtual bool isAppMonitor() noexcept;

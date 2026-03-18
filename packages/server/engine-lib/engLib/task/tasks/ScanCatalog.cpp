@@ -216,8 +216,11 @@ Error Task::ScanCatalog::addBatch(ScanContext &context, Text &line) noexcept {
         // Log it
         LOGT("Adding batch flushing buffer");
 
-        // Flush the context
-        if ((ccode = flushContext(context))) return ccode;
+        _block() {
+            auto guard = m_lock.acquire();
+            // Flush the context
+            if ((ccode = flushContext(context))) return ccode;
+        }
 
         // Starting a new context, so add the path again
         if ((ccode = writeBatchPath(context))) return ccode;

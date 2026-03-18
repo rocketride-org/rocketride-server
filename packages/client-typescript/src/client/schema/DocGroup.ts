@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import { Doc, DocHelper } from './Doc';
+import { Doc, DocHelper } from './Doc.js';
 
 /**
  * Groups related document chunks that come from the same source file.

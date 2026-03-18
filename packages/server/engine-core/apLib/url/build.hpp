@@ -48,8 +48,8 @@ inline decltype(auto) parameter(Text key, T val) noexcept {
 
 // Make an parameter value with a definition
 template <typename T, typename V>
-inline decltype(auto) parameter(const ParameterDefinition<T>& def,
-                                const V& val) noexcept {
+inline decltype(auto) parameter(const ParameterDefinition<T> &def,
+                                const V &val) noexcept {
     if constexpr (traits::IsOptionalV<V>)
         return ParameterValue<Text>{.key = def.key,
                                     .val = _ts(val.value_or(def.def))};
@@ -78,7 +78,7 @@ inline decltype(auto) protocolWithoutAuthority(Text name) noexcept {
 }
 
 template <typename T = file::Path>
-inline decltype(auto) path(T&& p) noexcept {
+inline decltype(auto) path(T &&p) noexcept {
     if constexpr (traits::IsOptionalV<T>)
         return file::Path{p.value_or("")};
     else

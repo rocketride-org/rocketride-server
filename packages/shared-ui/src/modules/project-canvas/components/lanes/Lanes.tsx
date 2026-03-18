@@ -83,7 +83,7 @@ const RedAsterisk = (
  * @param props - The node ID, lane definitions, layout direction, and node data.
  * @returns The rendered lanes section with handles, labels, inside lines, and invoke handles.
  */
-export default function Lanes({ nodeId, lanes, layout, data }: IProps): ReactElement {
+export default function Lanes({ nodeId, lanes, layout, data }: IProps): ReactElement | null {
 	// Destructure node data fields needed for lane rendering and invoke logic
 	const { title, tile } = data;
 
@@ -209,11 +209,14 @@ export default function Lanes({ nodeId, lanes, layout, data }: IProps): ReactEle
 
 			// --- Invoke edge validation ---
 			if (
-				edge.sourceHandle === 'invoke-source' &&
+				edge.sourceHandle?.startsWith('invoke-source') &&
 				edge.targetHandle?.indexOf('invoke-target') !== -1
 			) {
 				// Extract the invoked class type from the target handle ID (last segment)
 				const invokeType = edge?.targetHandle?.split('-').at(-1);
+				// Ensure the source invoke key matches the target class type
+				const sourceKey = edge.sourceHandle?.split('-').slice(2).join('-');
+				if (sourceKey && invokeType && sourceKey !== invokeType) return false;
 
 				const sourceNode = nodeMap?.[edge.source];
 				const targetNode = nodeMap?.[edge.target];
@@ -231,7 +234,7 @@ export default function Lanes({ nodeId, lanes, layout, data }: IProps): ReactEle
 				// Count existing invoke edges of the same type from this source to enforce max
 				const _edges = edges.filter(
 					(e: Edge) =>
-						e.sourceHandle === 'invoke-source' &&
+						e.sourceHandle?.startsWith('invoke-source') &&
 						e.source === edge.source &&
 						e.targetHandle === edge.targetHandle
 				);
@@ -288,6 +291,10 @@ export default function Lanes({ nodeId, lanes, layout, data }: IProps): ReactEle
 		}));
 	 
 	}, [uniqueOutputLanes, isOutputConnected]);
+
+	// If there are no visible input or output lanes, render nothing — avoids an empty strip with a border
+	const hasVisibleLanes = inputLanes.some((lane) => !lane.type.startsWith('_')) || uniqueOutputLanes.length > 0;
+	if (!hasVisibleLanes) return null;
 
 	return (
 		<>

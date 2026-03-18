@@ -88,18 +88,18 @@ inline iTextView colorName(Color color) noexcept {
     }
 }
 
-inline std::ostream& operator<<(std::ostream& stream, Color color) {
+inline std::ostream &operator<<(std::ostream &stream, Color color) {
     return stream << colorCode(color);
 }
 
 template <typename BufferT>
-inline void __toString(Color color, BufferT& buff,
+inline void __toString(Color color, BufferT &buff,
                        FormatOptions opts) noexcept {
     if (!opts.noColors()) buff << colorCode(color);
 }
 
 template <typename JsonT>
-inline Error __fromJson(Color& color, const JsonT& val) noexcept {
+inline Error __fromJson(Color &color, const JsonT &val) noexcept {
     if (!val.isString())
         return APERR(Ec::InvalidJson, "Color type must be string", val);
     iText name = val.asString();
@@ -115,7 +115,7 @@ inline Error __fromJson(Color& color, const JsonT& val) noexcept {
 }
 
 template <typename JsonT>
-inline Error __toJson(const Color& color, JsonT& val) noexcept {
+inline Error __toJson(const Color &color, JsonT &val) noexcept {
     return _tja(colorName(color), val);
 }
 

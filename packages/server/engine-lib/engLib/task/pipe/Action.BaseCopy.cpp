@@ -58,7 +58,7 @@ Error Task::beginTask() noexcept {
 /// @param[in] parent
 ///		The current parent
 //-----------------------------------------------------------------
-ErrorOr<Entry> Task::processLine(TextView line, const Url& parent) noexcept {
+ErrorOr<Entry> Task::processLine(TextView line, const Url &parent) noexcept {
     // Process for A*{...} lines
     return Parent::processLine("A"_tv, line, parent);
 }

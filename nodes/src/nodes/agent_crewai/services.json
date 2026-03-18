@@ -1,5 +1,5 @@
 {
-	"title": "Agent - CrewAI",
+	"title": "CrewAI",
 	"protocol": "agent_crewai://",
 	"classType": ["agent", "tool"],
 	"capabilities": ["invoke"],
@@ -20,6 +20,11 @@
 		"tool": {
 			"description": "Tools available to the agent (via control-plane invoke)",
 			"min": 0
+		},
+		"memory": {
+			"description": "Keyed memory for the agent (via control-plane invoke)",
+			"min": 0,
+			"max": 1
 		}
 	},
 	"lanes": {
@@ -61,7 +66,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Agent - CrewAI",
+			"title": "CrewAI",
 			"properties": ["instructions"]
 		}
 	]

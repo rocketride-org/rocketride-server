@@ -27,11 +27,11 @@ namespace ap::memory {
 
 template <typename Callback>
 struct OutputStreamBuf : public std::streambuf {
-    OutputStreamBuf(Callback&& cb) noexcept
+    OutputStreamBuf(Callback &&cb) noexcept
         : m_cb(std::forward<Callback>(cb)) {}
 
 protected:
-    std::streamsize xsputn(const char_type* s, std::streamsize n) override {
+    std::streamsize xsputn(const char_type *s, std::streamsize n) override {
         return m_cb(
             s, n);  // returns the number of characters successfully written.
     };

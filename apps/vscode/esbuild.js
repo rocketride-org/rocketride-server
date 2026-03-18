@@ -22,8 +22,10 @@
 // =============================================================================
 
 const esbuild = require('esbuild');
+const path = require('path');
 
 const production = process.argv.includes('--production');
+const outfile = path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'vscode/rocketride.js');
 
 esbuild.build({
 	entryPoints: ['src/extension.ts'],
@@ -33,8 +35,13 @@ esbuild.build({
 	sourcemap: true,
 	platform: 'node',
 	target: 'node16',
-	outfile: '../../build/vscode/rocketride.js',
+	outfile,
 	external: ['vscode'],
+	alias: {
+		// docker-modem requires ssh2 at load time, but we only use local socket.
+		// Stub it out so no native .node binaries are needed.
+		'ssh2': path.resolve(__dirname, 'src/stubs/ssh2.js'),
+	},
 	mainFields: ['main'],
 	resolveExtensions: ['.ts', '.js', '.json'],
 	logLevel: 'info',

@@ -56,22 +56,22 @@ public:
 
         explicit operator bool() const noexcept { return loaded; }
 
-        const auto* operator->() const noexcept {
+        const auto *operator->() const noexcept {
             ASSERT(container);
             return &*container;
         }
 
-        auto* operator->() noexcept {
+        auto *operator->() noexcept {
             ASSERT(container);
             return &*container;
         }
 
-        T& operator*() noexcept {
+        T &operator*() noexcept {
             ASSERT(container);
             return *container;
         }
 
-        const T& operator*() const noexcept {
+        const T &operator*() const noexcept {
             ASSERT(container);
             return *container;
         }
@@ -109,7 +109,7 @@ public:
         return {};
     }
 
-    TextView lookupWord(const ProxyWord& addr) const noexcept {
+    TextView lookupWord(const ProxyWord &addr) const noexcept {
         *loadContainer(m_wordStrings);
         ASSERT_MSG(m_wordStrings->size() >= addr.offset + addr.size,
                    "Invalid proxy word address", addr);
@@ -155,13 +155,13 @@ public:
 
     template <typename ContainerT,
               typename = std::enable_if<traits::IsContainerV<ContainerT>>>
-    void lookupDocIds(WordId wordId, ContainerT& out) const noexcept {
+    void lookupDocIds(WordId wordId, ContainerT &out) const noexcept {
         auto docIds = lookupDocIds(wordId);
 
         if (!docIds.empty()) _addTo(out, docIds);
     }
 
-    DocId lookupDocId(const DocHash& hash) const noexcept {
+    DocId lookupDocId(const DocHash &hash) const noexcept {
         *loadContainer(m_docHashIndex);
         if (auto iter = m_docHashIndex->find(hash);
             iter != m_docHashIndex->end())
@@ -238,7 +238,7 @@ public:
     }
 
     template <typename T>
-    void lookupDocMetadataWordIds(DocId id, T& cnt) const noexcept {
+    void lookupDocMetadataWordIds(DocId id, T &cnt) const noexcept {
         cnt.clear();
 
         // Are the metadata words for this document already cached?
@@ -255,7 +255,7 @@ public:
         auto metadataStart =
             std::find(docWordIds.rbegin(), docWordIds.rend(),
                       EnumIndex(ReservedWordId::MetadataBlockStart));
-        auto& cachedMetadataWordIds = m_docMetadataWordIds[id];
+        auto &cachedMetadataWordIds = m_docMetadataWordIds[id];
 
         // No metadata start found-- the empty set is already cached, so just
         // bail
@@ -294,7 +294,7 @@ public:
     auto docWordCount() const noexcept {
         *loadContainer(m_docWordIdListIndex);
         size_t count = {};
-        for (auto& [docId, wordIdListAddr] : *m_docWordIdListIndex)
+        for (auto &[docId, wordIdListAddr] : *m_docWordIdListIndex)
             count += wordIdListAddr.count;
         return count;
     }
@@ -321,34 +321,34 @@ public:
         return m_wordStrings->size();
     }
 
-    auto& wordIdIndex() const noexcept {
+    auto &wordIdIndex() const noexcept {
         *loadContainer(m_wordIdIndex);
         return *m_wordIdIndex;
     }
 
 #ifdef KEEP_CASE_INDEX
-    auto& wordCaseIndex() const noexcept {
+    auto &wordCaseIndex() const noexcept {
         *loadContainer(m_wordCaseIndex);
         return *m_wordCaseIndex;
     }
 #endif
 
-    auto& wordNoCaseIndex() const noexcept {
+    auto &wordNoCaseIndex() const noexcept {
         *loadContainer(m_wordNoCaseIndex);
         return *m_wordNoCaseIndex;
     }
 
-    auto& docIdIndex() const noexcept {
+    auto &docIdIndex() const noexcept {
         *loadContainer(m_docIdIndex);
         return *m_docIdIndex;
     }
 
-    auto& wordDocIdSetIndex() const noexcept {
+    auto &wordDocIdSetIndex() const noexcept {
         *loadContainer(m_wordDocIdSetIndex);
         return *m_wordDocIdSetIndex;
     }
 
-    size_t docWordIdListCount(const DocHash& docHash) const noexcept {
+    size_t docWordIdListCount(const DocHash &docHash) const noexcept {
         if (auto docId = lookupDocId(docHash)) return docWordCount(docId);
         return 0;
     }
@@ -406,15 +406,15 @@ public:
     }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         buff << "index::WordDbRead";
     }
 
 private:
     template <typename Index>
     std::vector<uint32_t> lookupIds(
-        bool isDoc, uint32_t id, const Index& index,
-        const std::vector<uint32_t, memory::ViewAllocator<uint32_t>>& ids)
+        bool isDoc, uint32_t id, const Index &index,
+        const std::vector<uint32_t, memory::ViewAllocator<uint32_t>> &ids)
         const noexcept {
         auto iter = index.find(id);
         if (iter == index.end()) return {};
@@ -517,7 +517,7 @@ private:
 
     template <typename Type, typename Index>
     PaginatedVector<Type> lookupIdsPaginated(
-        uint32_t id, const Index& index) const noexcept {
+        uint32_t id, const Index &index) const noexcept {
         auto iter = index.find(id);
         if (iter == index.end()) return {};
 
@@ -526,7 +526,7 @@ private:
         auto lock = m_mutex->lock();
 
         // Grab the offset info from the header for this section
-        auto& info = offsetFromSection<Section::DocWordIdLists>();
+        auto &info = offsetFromSection<Section::DocWordIdLists>();
 
         if (!info.size) {
             LOGT("Container is empty");
@@ -553,7 +553,7 @@ private:
             chunkLeadingBlock.resize(chunkLeadingBlockSize);
 
             auto outView =
-                OutputData{_reCast<uint8_t*>(chunkLeadingBlock.data()),
+                OutputData{_reCast<uint8_t *>(chunkLeadingBlock.data()),
                            chunkLeadingBlock.size() * sizeof(WordId)};
 
             _forever() {
@@ -611,7 +611,7 @@ private:
                 pages.begin(),
                 pages.end() - 1,  // consider all pages except the last one - it
                                   // might have different size
-                [](const auto& l, const auto& r) -> bool {
+                [](const auto &l, const auto &r) -> bool {
                     return l.uncompressedSize < r.uncompressedSize;
                 });
             size_t minPageSize = minPageSizeIt->uncompressedSize;
@@ -637,7 +637,7 @@ private:
         LOGT("Loaded offsets", m_hdr);
     }
 
-    TextView lookupWordString(const ProxyWord& addr) const noexcept {
+    TextView lookupWordString(const ProxyWord &addr) const noexcept {
         ASSERT_MSG(m_wordStrings->size() >= addr.offset + addr.size,
                    "Invalid proxy word address", addr);
         ASSERT_MSG(addr.size != 0, "Invalid proxy word address length", addr);
@@ -645,7 +645,7 @@ private:
     }
 
     template <typename ContainerT, Section SecT>
-    Error loadContainer(Container<ContainerT, SecT>& cnt) const noexcept {
+    Error loadContainer(Container<ContainerT, SecT> &cnt) const noexcept {
         // Check if already loaded
         if (cnt) return {};
 
@@ -656,7 +656,7 @@ private:
         if (cnt) return {};
 
         // Grab the offset info from the header for this section
-        auto& info = offsetFromSection<SecT>();
+        auto &info = offsetFromSection<SecT>();
 
         LOGT("Loading", cnt.Section, info);
         auto start = time::now();
@@ -722,7 +722,7 @@ private:
 
     // Fetch the offset for a section type
     template <Section SecT>
-    const tag::WordIndex::Entry& offsetFromSection() const noexcept {
+    const tag::WordIndex::Entry &offsetFromSection() const noexcept {
         // Got an exclusive lock now load it
         switch (SecT) {
             case Section::DocWordIdLists:

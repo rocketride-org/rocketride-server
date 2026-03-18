@@ -32,12 +32,12 @@ class DirectorySearch {
 public:
     _const auto LogLevel = Lvl::Permissions;
 
-    DirectorySearch(const Text& ldapPath, const Text& filter) noexcept(false)
+    DirectorySearch(const Text &ldapPath, const Text &filter) noexcept(false)
         : m_ldapPath{ldapPath}, m_filter{filter} {
         // Open searcher object for the LDAP path
         if (HRESULT hr =
                 ADsGetObject(ldapPath.ptr<WCHAR>(), IID_IDirectorySearch,
-                             _reCast<void**>(&m_searcher));
+                             _reCast<void **>(&m_searcher));
             FAILED(hr))
             APERRT_THROW(hr);
 
@@ -45,13 +45,13 @@ public:
         LPCWSTR attributes[] = {L"objectSid"};
         if (HRESULT hr = m_searcher->ExecuteSearch(
                 const_cast<LPWSTR>(filter.ptr<WCHAR>()),
-                const_cast<LPWSTR*>(attributes),
+                const_cast<LPWSTR *>(attributes),
                 _cast<DWORD>(std::size(attributes)), &m_hSearch))
             APERRT_THROW(hr);
     }
 
-    DirectorySearch(const DirectorySearch&) = delete;
-    DirectorySearch(DirectorySearch&&) = delete;
+    DirectorySearch(const DirectorySearch &) = delete;
+    DirectorySearch(DirectorySearch &&) = delete;
 
     ~DirectorySearch() noexcept {
         // Close the search
@@ -97,7 +97,7 @@ public:
     TextView filter() const noexcept { return m_filter; }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         buff << ldapPath() << ": " << filter();
     }
 

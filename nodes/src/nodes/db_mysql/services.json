@@ -14,7 +14,8 @@
 	//		Class type of the node - what it does
 	//
 	"classType": [
-		"database"
+		"database",
+		"tool"
 	],
 	//
 	// Required:
@@ -22,7 +23,8 @@
 	//		engine
 	//
 	"capabilities": [
-      "noremote"
+      "noremote",
+      "invoke"
 	],
 	//
 	// Optional:
@@ -170,14 +172,33 @@
 			"default": "table",
 			"description": "Name of table"
 		},
+		"mysql.db_description": {
+			"type": "string",
+			"title": "Database description",
+			"default": "",
+			"description": "What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"mysql.max_attempts": {
+			"type": "integer",
+			"title": "Max validation attempts",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 20,
+			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL"
+		},
 		"mysql.default": {
 			"object": "default",
 			"properties": [
+				"mysql.db_description",
 				"mysql.host",
 				"mysql.user",
 				"mysql.password",
 				"mysql.database",
-				"mysql.table"
+				"mysql.table",
+				"mysql.max_attempts"
 			]
 		},
 		"mysql.profile": {

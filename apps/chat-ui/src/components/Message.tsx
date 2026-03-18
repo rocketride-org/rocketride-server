@@ -32,22 +32,33 @@ interface MessageProps {
 
 /**
  * Individual message bubble component
- * 
+ *
  * Displays a single message with appropriate styling based on sender.
  * Bot messages use markdown rendering, user messages display as plain text.
- * 
+ *
  * @param message - Message data to display
  */
 export const Message: React.FC<MessageProps> = ({ message }) => {
+	if (message.sender === 'status') {
+		return (
+			<div className="message-status">
+				<span className="message-status-dot" />
+				<span className="message-status-text">{message.text}</span>
+			</div>
+		);
+	}
+
 	if (message.sender === 'bot' || message.sender === 'system') {
+		const hasChart = message.text.includes('```chartjs');
 		return (
 			<div className="message-wrapper bot">
-				<div className="message-bubble bot">
+				<div className={`message-bubble bot${hasChart ? ' has-chart' : ''}`}>
 					<div className="markdown-content">
 						<MarkdownRenderer content={message.text} />
 					</div>
 					<div className="message-timestamp">
 						{message.timestamp}
+						{message.resultKey && <span className="message-result-key">{message.resultKey}</span>}
 					</div>
 				</div>
 			</div>

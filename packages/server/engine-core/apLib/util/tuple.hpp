@@ -93,17 +93,15 @@ constexpr auto zero_or_one_val(std::false_type, const T &t) {
 template <typename... Es, size_t... Is>
 constexpr auto just_evens_impl(const std::tuple<Es...> &input,
                                std::index_sequence<Is...>) {
-    return std::tuple_cat(zero_or_one_val(std::integral_constant < bool,
-                                          Is % 2 == 0 > {},
-                                          std::get<Is>(input))...);
+    return std::tuple_cat(zero_or_one_val(
+        std::integral_constant<bool, Is % 2 == 0>{}, std::get<Is>(input))...);
 };
 
 template <typename... Es, size_t... Is>
 constexpr auto just_odds_impl(const std::tuple<Es...> &input,
                               std::index_sequence<Is...>) {
-    return std::tuple_cat(zero_or_one_val(std::integral_constant < bool,
-                                          Is % 2 != 0 > {},
-                                          std::get<Is>(input))...);
+    return std::tuple_cat(zero_or_one_val(
+        std::integral_constant<bool, Is % 2 != 0>{}, std::get<Is>(input))...);
 };
 
 }  // namespace

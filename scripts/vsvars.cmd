@@ -14,8 +14,8 @@ if defined VSINSTALLDIR (
 )
 
 if "%~1"=="" (
-  echo vsvars.cmd: missing VS installation path
-  exit /b 1
+  call :vsvars
+  exit /b
 )
 
 set "VSROOT=%~1"
@@ -36,3 +36,31 @@ if exist "%VSDEVCMD%" (
 
 echo No vcvars64.bat or VsDevCmd.bat found under: %VSROOT%
 exit /b 1
+
+:vsvars
+set VSWHERE="%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\vswhere.exe"
+if not exist %VSWHERE% (
+  echo Visual Studio Installer not found
+  exit /b 1
+)
+
+call :vswhere -version 16.7 -property installationPath && exit /b
+
+call :vswhere -products Microsoft.VisualStudio.Product.BuildTools -version 16.7 -property installationPath && exit /b
+
+echo Visual Studio 2019 not found
+exit /b 1
+
+
+:vswhere
+for /f "usebackq delims=" %%i in (`%VSWHERE% %*`) do (
+  set "VSROOT=%%i"
+)
+
+if "%VSROOT%" == "" (
+  exit /b 1
+)
+
+echo Using "%VSROOT%"
+call "%VSROOT%\VC\Auxiliary\Build\vcvarsall.bat" amd64
+exit /b

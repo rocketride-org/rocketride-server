@@ -29,32 +29,32 @@ class Group final {
 public:
     Group() = default;
 
-    Group(Group&& grp) noexcept : m_items(_mv(grp.m_items)) {}
+    Group(Group &&grp) noexcept : m_items(_mv(grp.m_items)) {}
 
-    Group& operator=(Group&& grp) noexcept {
+    Group &operator=(Group &&grp) noexcept {
         if (this == &grp) return *this;
         m_items = _mv(grp.m_items);
         return *this;
     }
 
     template <typename... ItemsT>
-    Group(ItemsT&&... items) noexcept {
+    Group(ItemsT &&...items) noexcept {
         add(_mv(items)...);
     }
 
-    Group(Item&& item) noexcept { add(_mv(item)); }
+    Group(Item &&item) noexcept { add(_mv(item)); }
 
     ~Group() noexcept { waitForAll(true); }
 
     template <typename... ItemsT>
-    Group& add(ItemsT&&... items) noexcept {
+    Group &add(ItemsT &&...items) noexcept {
         auto guard = m_lock.acquire();
-        ([&](auto& i) noexcept { m_items.emplace_back(i.detach()); }(items),
+        ([&](auto &i) noexcept { m_items.emplace_back(i.detach()); }(items),
          ...);
         return *this;
     }
 
-    decltype(auto) operator<<(Item&& item) noexcept { return add(_mv(item)); }
+    decltype(auto) operator<<(Item &&item) noexcept { return add(_mv(item)); }
 
     auto size() const noexcept {
         auto guard = m_lock.acquire();
@@ -65,7 +65,7 @@ public:
 
     auto cancel() noexcept {
         auto guard = m_lock.acquire();
-        for (auto& item : m_items) item->cancel();
+        for (auto &item : m_items) item->cancel();
     }
 
     auto stop() noexcept { return waitForAll(true); }
@@ -73,7 +73,7 @@ public:
     auto executing(bool includePending = true, bool any = true) const noexcept {
         auto guard = m_lock.acquire();
         size_t count = 0;
-        for (auto& task : m_items) {
+        for (auto &task : m_items) {
             count += task->executing(includePending);
             if (count && any) return count;
         }
@@ -83,7 +83,7 @@ public:
     explicit operator bool() const noexcept {
         auto guard = m_lock.acquire();
         return _anyOf(m_items,
-                      [&](auto& item) { return item->executing(true); });
+                      [&](auto &item) { return item->executing(true); });
     }
 
     auto begin() noexcept { return m_items.begin(); }

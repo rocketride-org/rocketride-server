@@ -53,8 +53,7 @@ APUTIL_DEFINE_ENUM(
     JobResidentProcess,
 
     // engLib
-    Azure,
-    Classify,
+    Azure, Classify,
     ClassifyContext,    // Classification evaluation contexts
     ClassifyDetails,    // Classify logging
     ClassifyDoc,        // Classified document text

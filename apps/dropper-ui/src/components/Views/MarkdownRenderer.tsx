@@ -94,7 +94,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 							customStyle={{
 								margin: 0,
 								borderRadius: '6px',
-								fontSize: '14px'
+								fontSize: 'var(--vscode-editor-font-size, 13px)'
 							}}
 						>
 							{codeContent}

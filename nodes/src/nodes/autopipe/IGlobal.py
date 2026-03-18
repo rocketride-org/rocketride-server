@@ -149,9 +149,25 @@ class IGlobal(IGlobalBase):
             if isSet('ocr'):
                 pushLocal(getFilter('ocr_1', 'ocr'))
 
-            # If indexer is enbabled
+            # If indexer is enabled
             if isSet('index') and not isTransform:
                 pushLocal(getFilter('indexer_1', 'indexer'))
+
+            # If autopipe has a preprocessor, push it to chunk the text
+            if 'preprocessor' in autopipeConfig:
+                providerPreprocessor, configPreprocessor = Config.getMultiProviderConfig('preprocessor', autopipeConfig)
+                pushLocal(getFilter('preprocessor_1', providerPreprocessor, configPreprocessor))
+
+            # If autopipe has an embedding, push it to vectorize the chunks
+            if 'embedding' in autopipeConfig:
+                providerEmbedding, configEmbedding = Config.getMultiProviderConfig('embedding', autopipeConfig)
+                pushLocal(getFilter('embedding_1', providerEmbedding, configEmbedding))
+
+            # If autopipe has a store, push it to save to the vector db
+            if 'store' in autopipeConfig:
+                providerStore, configStore = Config.getMultiProviderConfig('store', autopipeConfig)
+                pushLocal(getFilter('vector_1', providerStore, configStore))
+
 
             pass
 

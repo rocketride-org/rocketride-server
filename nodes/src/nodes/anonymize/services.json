@@ -52,7 +52,7 @@
 	//		Description to of this driver
 	//
 	"description": [
-		"A filter component that, in combination with the classification component, ",
+		"A filter component that ",
 		"identifies and masks sensitive information in text data. It can be configured ",
 		"to detect and redact personally identifiable information (PII), maintaining ",
 		"data privacy while preserving document context.</br>",
@@ -77,8 +77,7 @@
 	"lanes": {
 		"text": [
 			"text"
-		],
-		"classifications": []
+		]
 	},
 	"input": [
 		{
@@ -98,6 +97,41 @@
 	//
 	"test": {
 		"profiles": ["glinerSmall"],
+		"cases": [
+			{
+				"text": "My name is John Smith and my email is john.smith@example.com. Please contact me at 555-123-4567.",
+				"expect": {
+					"text": {
+						"contains": "█"
+					}
+				}
+			}
+		]
+	},
+	//
+	//	Full test configuration - tests all available profiles.
+	//	Run via: builder model_server:fulltest
+	//
+	"fulltest": {
+		"profiles": [
+			"glinerSmall",
+			"glinerMedium",
+			"glinerLarge",
+			"glinerMultiPII",
+			"glinerPIILarge",
+			"glinerMergedLarge",
+			"glinerMulti",
+			"gretelSmall",
+			"gretelLarge",
+			"glinerKo",
+			"glinerIt",
+			"glinerAr",
+			"glinerCommunitySmall",
+			"glinerCommunityMedium",
+			"glinerCommunityLarge",
+			"glinerBiomedSmall",
+			"glinerBiomedLarge"
+		],
 		"cases": [
 			{
 				"text": "My name is John Smith and my email is john.smith@example.com. Please contact me at 555-123-4567.",
@@ -185,7 +219,7 @@
 			},
 			"glinerIt": {
 				"title": "GLiNER Italian - For Italian entity extraction",
-				"model": "DeepMount00/GLiNER_ITA_LARGE",
+				"model": "DeepMount00/GLiNER_PII_ITA",
 				"anonymizeChar": "\u2588",
 				"anonymizeAll": false
 			},
