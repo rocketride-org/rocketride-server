@@ -219,31 +219,31 @@ class LangChainDriver(AgentBase):
 
             def on_tool_start(self, serialized: Any, input_str: Any, **kwargs: Any) -> None:
                 tool_name = (serialized or {}).get('name', '') or 'tool'
-                self._send_sse('thinking', f'Calling {tool_name}...', {'tool': tool_name, 'input': input_str})
+                self._send_sse('thinking', message=f'Calling {tool_name}...', tool=tool_name, input=input_str)
 
             def on_tool_end(self, output: Any, **kwargs: Any) -> None:
-                self._send_sse('thinking', 'Tool complete')
+                self._send_sse('thinking', message='Tool complete')
 
             def on_tool_error(self, error: Any, **kwargs: Any) -> None:
-                self._send_sse('thinking', f'Tool error: {_safe_str(error)}')
+                self._send_sse('thinking', message=f'Tool error: {_safe_str(error)}')
 
             def on_agent_action(self, action: Any, **kwargs: Any) -> None:
-                self._send_sse('thinking', 'Agent thinking...')
+                self._send_sse('thinking', message='Agent thinking...')
 
             def on_agent_finish(self, finish: Any, **kwargs: Any) -> None:
-                self._send_sse('thinking', 'Agent done')
+                self._send_sse('thinking', message='Agent done')
 
             def on_llm_start(self, serialized: Any, prompts: Any, **kwargs: Any) -> None:
-                self._send_sse('thinking', 'LLM call started')
+                self._send_sse('thinking', message='LLM call started')
 
             def on_chat_model_start(self, serialized: Any, messages: Any, **kwargs: Any) -> None:
-                self._send_sse('thinking', 'LLM call started')
+                self._send_sse('thinking', message='LLM call started')
 
             def on_llm_end(self, response: Any, **kwargs: Any) -> None:
-                self._send_sse('thinking', 'LLM call completed')
+                self._send_sse('thinking', message='LLM call completed')
 
             def on_llm_error(self, error: Any, **kwargs: Any) -> None:
-                self._send_sse('thinking', f'LLM error: {_safe_str(error)}')
+                self._send_sse('thinking', message=f'LLM error: {_safe_str(error)}')
 
         tool_descriptors = self.discover_tools(host=host)
 
@@ -273,7 +273,7 @@ class LangChainDriver(AgentBase):
         ]
         system_message = SystemMessage(content='\n'.join(system_parts).strip())
 
-        self.sendSSE('thinking', 'Starting LangChain agent...')
+        self.sendSSE('thinking', message='Starting LangChain agent...')
         stage = 'create_agent'
         try:
             agent = create_agent(model=llm, tools=tools_for_agent, system_prompt=system_message, debug=False)

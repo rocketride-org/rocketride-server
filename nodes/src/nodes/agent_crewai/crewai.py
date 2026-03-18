@@ -256,7 +256,7 @@ class CrewDriver(AgentBase):
             'llm_call_failed': 'LLM call failed',
         }
 
-        self.sendSSE('thinking', 'Starting CrewAI agent...')
+        self.sendSSE('thinking', message='Starting CrewAI agent...')
 
         def _all_event_types(base):
             result = []
@@ -275,7 +275,7 @@ class CrewDriver(AgentBase):
                 data = event.to_json(exclude={'timestamp', 'source_fingerprint', 'fingerprint_metadata', 'source_type'})
             except Exception:
                 data = None
-            self.sendSSE('thinking', message, data)
+            self.sendSSE('thinking', message=message, **(data or {}))
 
         with crewai_event_bus.scoped_handlers():
             for event_cls in _all_event_types(BaseEvent):
