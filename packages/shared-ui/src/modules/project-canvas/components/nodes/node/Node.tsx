@@ -233,7 +233,7 @@ export default function Node({
 				</Box>
 				<Lanes nodeId={id} lanes={lanes as Record<string, Lane>} layout={layout} data={data} />
 				<NodeFooter
-					componentProvider={provider ?? ''}
+					componentProvider={id}
 					isSourceNode={isSourceNode}
 					taskStatus={taskStatus}
 					componentPipeCounts={componentPipeCounts}

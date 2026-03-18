@@ -144,7 +144,6 @@
 			"title": "File System",
 			"properties": [
 				"type",
-				"name",
 				"actions",
 				"source.mode",
 				"filesys.source.parameters",

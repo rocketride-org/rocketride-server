@@ -146,7 +146,7 @@
 			"title": "MCP Client",
 			"properties": [
 				"type",
-				"name",
+				"mcp_client.serverName",
 				"mcp_client.transport"
 			]
 		}

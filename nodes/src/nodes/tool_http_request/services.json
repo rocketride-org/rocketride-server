@@ -102,7 +102,6 @@
 			"title": "HTTP Request",
 			"properties": [
 				"type",
-				"name",
 				"http_request.allowGET",
 				"http_request.allowPOST",
 				"http_request.allowPUT",
