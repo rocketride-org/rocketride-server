@@ -12,6 +12,7 @@
 
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { createServiceManager, ServiceManager } from '../deploy/service-manager';
 import { DockerManager } from '../deploy/docker-manager';
@@ -28,6 +29,7 @@ export class PageDeployProvider {
 	private logger = getLogger();
 	private statusPollInterval?: NodeJS.Timeout;
 	private ghcrTags: string[] = [];
+	private pendingSudoPassword: ((pw: string) => void) | null = null;
 
 	constructor(private context: vscode.ExtensionContext) {
 		this.serviceManager = createServiceManager();
@@ -88,6 +90,12 @@ export class PageDeployProvider {
 							break;
 						case 'fetchVersions':
 							await this.fetchVersions();
+							break;
+						case 'sudoPassword':
+							if (this.pendingSudoPassword) {
+								this.pendingSudoPassword(message.password as string);
+								this.pendingSudoPassword = null;
+							}
 							break;
 						// Service operations
 						case 'serviceInstall':
@@ -152,11 +160,31 @@ export class PageDeployProvider {
 		return new EngineInstaller(this.serviceManager.getInstallPath());
 	}
 
+	private requestSudoPassword(): Promise<string> {
+		return new Promise((resolve) => {
+			this.pendingSudoPassword = resolve;
+			this.postMessage({ type: 'serviceNeedsSudo' });
+		});
+	}
+
+	private async ensureSudoCredentials(): Promise<void> {
+		if (!await this.serviceManager.needsElevation()) return;
+		const password = await this.requestSudoPassword();
+		this.serviceManager.setElevationPassword(password);
+	}
+
 	private async serviceInstall(versionSpec: string): Promise<void> {
 		const githubToken = await this.getGithubToken();
 		const installer = this.getInstaller();
 
-		// Step 1: Download engine
+		// Step 1: Request sudo credentials if needed (before any elevated operation)
+		await this.ensureSudoCredentials();
+
+		// Step 2: Create install root with elevated privileges so EngineInstaller can write to it
+		this.postMessage({ type: 'serviceProgress', message: 'Preparing install directory...' });
+		await this.serviceManager.prepareInstallRoot();
+
+		// Step 3: Download engine
 		const progress = {
 			report: (value: { message?: string }) => {
 				if (value.message) this.postMessage({ type: 'serviceProgress', message: value.message });
@@ -165,11 +193,11 @@ export class PageDeployProvider {
 		const executablePath = await installer.install(versionSpec, progress, undefined, githubToken);
 		const engineDir = path.dirname(executablePath);
 
-		// Step 2: Register and start the service
+		// Step 3: Register and start the service
 		this.postMessage({ type: 'serviceProgress', message: 'Registering service...' });
 		await this.serviceManager.install(executablePath, engineDir);
 
-		// Step 3: Write config with version info
+		// Step 4: Write config with version info
 		const channel = versionSpec === 'prerelease' ? 'pre' as const : 'stable' as const;
 		this.writeServiceConfig({
 			versionSpec,
@@ -177,12 +205,13 @@ export class PageDeployProvider {
 			publishedAt: installer.getInstalledPublishedAt(channel) ?? '',
 		});
 
-		// Step 4: Wait for service to be fully running
+		// Step 5: Wait for service to be fully running
 		await this.waitForServiceRunning();
 		this.postMessage({ type: 'serviceComplete' });
 	}
 
 	private async serviceRemove(): Promise<void> {
+		await this.ensureSudoCredentials();
 		this.postMessage({ type: 'serviceProgress', message: 'Removing service...' });
 		await this.serviceManager.remove();
 		await this.sendServiceStatus();
@@ -190,6 +219,7 @@ export class PageDeployProvider {
 	}
 
 	private async serviceUpdate(versionSpec: string): Promise<void> {
+		await this.ensureSudoCredentials();
 		const githubToken = await this.getGithubToken();
 		const installer = this.getInstaller();
 
@@ -235,6 +265,7 @@ export class PageDeployProvider {
 	}
 
 	private async serviceStart(): Promise<void> {
+		await this.ensureSudoCredentials();
 		this.postMessage({ type: 'serviceProgress', message: 'Starting service...' });
 		await this.serviceManager.start();
 		await this.waitForServiceRunning();
@@ -242,6 +273,7 @@ export class PageDeployProvider {
 	}
 
 	private async serviceStop(): Promise<void> {
+		await this.ensureSudoCredentials();
 		this.postMessage({ type: 'serviceProgress', message: 'Stopping service...' });
 		await this.serviceManager.stop();
 		await this.sendServiceStatus();
@@ -383,7 +415,7 @@ export class PageDeployProvider {
 	// =========================================================================
 
 	private static readonly CONFIG_PATH = path.join(
-		process.env.PROGRAMDATA || (process.platform === 'darwin' ? '/Library/Application Support' : '/etc'),
+		process.env.PROGRAMDATA || (process.platform === 'darwin' ? '/Library/Application Support' : path.join(os.homedir(), '.config')),
 		'RocketRide', 'config.json'
 	);
 
@@ -522,7 +554,7 @@ export class PageDeployProvider {
 	// =========================================================================
 
 	private static readonly DOCKER_CONFIG_PATH = path.join(
-		process.env.PROGRAMDATA || (process.platform === 'darwin' ? '/Library/Application Support' : '/etc'),
+		process.env.PROGRAMDATA || (process.platform === 'darwin' ? '/Library/Application Support' : path.join(os.homedir(), '.config')),
 		'RocketRide', 'docker-config.json'
 	);
 

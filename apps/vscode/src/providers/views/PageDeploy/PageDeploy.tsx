@@ -41,6 +41,7 @@ type IncomingMessage =
 	| { type: 'serviceProgress'; message: string }
 	| { type: 'serviceComplete' }
 	| { type: 'serviceError'; message: string }
+	| { type: 'serviceNeedsSudo' }
 	| { type: 'dockerProgress'; message: string }
 	| { type: 'dockerComplete' }
 	| { type: 'dockerError'; message: string };
@@ -54,6 +55,7 @@ type OutgoingMessage =
 	| { type: 'serviceUpdate'; version: string }
 	| { type: 'serviceStart' }
 	| { type: 'serviceStop' }
+	| { type: 'sudoPassword'; password: string }
 	| { type: 'dockerInstall'; version: string }
 	| { type: 'dockerRemove' }
 	| { type: 'dockerUpdate'; version: string }
@@ -88,6 +90,8 @@ export const PageDeploy: React.FC = () => {
 	const [serviceProgress, setServiceProgress] = useState<string | null>(null);
 	const [serviceError, setServiceError] = useState<string | null>(null);
 	const [serviceBusy, setServiceBusy] = useState(false);
+	const [sudoPromptVisible, setSudoPromptVisible] = useState(false);
+	const [sudoPasswordInput, setSudoPasswordInput] = useState('');
 
 	// Docker state
 	const [dockerStatus, setDockerStatus] = useState<DockerStatus>({
@@ -119,6 +123,9 @@ export const PageDeploy: React.FC = () => {
 					setServiceStatus(message.status);
 					if (!serviceBusy) setServiceProgress(null);
 					break;
+				case 'serviceNeedsSudo':
+					setSudoPromptVisible(true);
+					break;
 				case 'serviceProgress':
 					setServiceProgress(message.message);
 					setServiceError(null);
@@ -126,11 +133,15 @@ export const PageDeploy: React.FC = () => {
 				case 'serviceComplete':
 					setServiceBusy(false);
 					setServiceProgress(null);
+					setSudoPromptVisible(false);
+					setSudoPasswordInput('');
 					break;
 				case 'serviceError':
 					setServiceError(message.message);
 					setServiceBusy(false);
 					setServiceProgress(null);
+					setSudoPromptVisible(false);
+					setSudoPasswordInput('');
 					break;
 				// Docker messages
 				case 'dockerStatus':
@@ -269,6 +280,13 @@ export const PageDeploy: React.FC = () => {
 	// =========================================================================
 	// Service handlers
 	// =========================================================================
+
+	const handleSudoSubmit = () => {
+		const password = sudoPasswordInput;
+		setSudoPasswordInput('');
+		setSudoPromptVisible(false);
+		sendMessage({ type: 'sudoPassword', password });
+	};
 
 	const handleServiceInstall = () => {
 		setServiceBusy(true); setServiceError(null);
@@ -466,12 +484,38 @@ export const PageDeploy: React.FC = () => {
 							</div>
 						)}
 
-						{/* Progress / Error */}
-						{serviceProgress && (
-							<div className="service-progress">{serviceProgress}</div>
-						)}
-						{serviceError && (
-							<div className="service-error">{serviceError}</div>
+						{/* Progress / Error / Sudo prompt */}
+						{sudoPromptVisible ? (
+							<div className="sudo-prompt">
+								<label className="sudo-prompt-label">Enter your sudo password:</label>
+								<div className="sudo-prompt-row">
+									<input
+										type="password"
+										className="sudo-prompt-input"
+										value={sudoPasswordInput}
+										onChange={e => setSudoPasswordInput(e.target.value)}
+										onKeyDown={e => { if (e.key === 'Enter' && sudoPasswordInput) handleSudoSubmit(); }}
+										autoFocus
+									/>
+									<button
+										type="button"
+										className="split-button-main deploy-panel-btn-primary"
+										onClick={handleSudoSubmit}
+										disabled={!sudoPasswordInput}
+									>
+										Continue
+									</button>
+								</div>
+							</div>
+						) : (
+							<>
+								{serviceProgress && (
+									<div className="service-progress">{serviceProgress}</div>
+								)}
+								{serviceError && (
+									<div className="service-error">{serviceError}</div>
+								)}
+							</>
 						)}
 
 						{/* Actions */}

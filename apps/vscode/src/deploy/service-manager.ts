@@ -66,6 +66,31 @@ export abstract class ServiceManager {
 	abstract getInstallPath(): string;
 
 	/**
+	 * Creates the install root and makes it writable by the current user.
+	 * Must be called before EngineInstaller writes to the install path.
+	 * Default is a no-op for platforms where the install path is already user-writable.
+	 */
+	prepareInstallRoot(): Promise<void> {
+		return Promise.resolve();
+	}
+
+	/**
+	 * Returns true if elevated credentials are required for service operations.
+	 * Default returns false for platforms where no credential prompt is needed.
+	 */
+	needsElevation(): Promise<boolean> {
+		return Promise.resolve(false);
+	}
+
+	/**
+	 * Provides the password used for privilege elevation (e.g. sudo -S).
+	 * Default is a no-op for platforms that don't need it.
+	 */
+	setElevationPassword(_password: string): void {
+		// no-op
+	}
+
+	/**
 	 * Checks if the service port is accepting connections.
 	 */
 	protected isPortOpen(port: number = SERVICE_PORT): Promise<boolean> {

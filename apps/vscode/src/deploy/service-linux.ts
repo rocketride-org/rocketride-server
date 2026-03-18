@@ -12,7 +12,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import {
 	ServiceManager,
@@ -30,8 +30,35 @@ const UNIT_PATH = `/etc/systemd/system/${UNIT_NAME}.service`;
 
 export class LinuxServiceManager extends ServiceManager {
 
+	private sudoPassword: string | undefined;
+
 	public getInstallPath(): string {
 		return INSTALL_ROOT;
+	}
+
+	public setElevationPassword(password: string): void {
+		this.sudoPassword = password;
+	}
+
+	public async needsElevation(): Promise<boolean> {
+		try {
+			await execFileAsync('sudo', ['-n', 'true']);
+			return false;
+		} catch {
+			return true;
+		}
+	}
+
+	// Runtime dependencies required by the engine binary
+	private static readonly ENGINE_DEPS = ['ca-certificates', 'libc++1', 'libc++abi1', 'libgomp1'];
+
+	public async prepareInstallRoot(): Promise<void> {
+		await this.runSudo('apt-get', ['install', '-y', '--no-install-recommends', ...LinuxServiceManager.ENGINE_DEPS]);
+
+		const enginesDir = path.join(INSTALL_ROOT, 'engines');
+		await this.runSudo('mkdir', ['-p', enginesDir]);
+		const username = os.userInfo().username;
+		await this.runSudo('chown', ['-R', username, INSTALL_ROOT]);
 	}
 
 	public async install(executablePath: string, engineDir: string): Promise<void> {
@@ -58,13 +85,8 @@ export class LinuxServiceManager extends ServiceManager {
 		try { await this.runSudo('rm', ['-f', UNIT_PATH]); } catch { /* ignore */ }
 		try { await this.runSudo('systemctl', ['daemon-reload']); } catch { /* ignore */ }
 
-		// Delete SYSTEM-owned dirs
-		try { await this.runSudo('rm', ['-rf', path.join(INSTALL_ROOT, 'engines')]); } catch { /* ignore */ }
-
-		// Clean up the rest
-		if (fs.existsSync(INSTALL_ROOT)) {
-			fs.rmSync(INSTALL_ROOT, { recursive: true, force: true });
-		}
+		// Remove the entire install root
+		try { await this.runSudo('rm', ['-rf', INSTALL_ROOT]); } catch { /* ignore */ }
 
 		this.logger.output(`${icons.success} Service removed`);
 	}
@@ -133,12 +155,27 @@ WantedBy=multi-user.target
 
 	private runSudo(command: string, args: string[]): Promise<void> {
 		return new Promise((resolve, reject) => {
-			execFile('pkexec', [command, ...args], (error, _stdout, stderr) => {
-				if (error) {
-					reject(new Error(stderr?.trim() || error.message));
-					return;
+			// -S reads password from stdin; -k forces re-authentication each call
+			// so the cached timestamp does not silently skip a wrong password.
+			const child = spawn('sudo', ['-S', command, ...args], {
+				stdio: ['pipe', 'pipe', 'pipe']
+			});
+
+			if (this.sudoPassword !== undefined) {
+				child.stdin!.write(this.sudoPassword + '\n');
+			}
+			child.stdin!.end();
+
+			let stderr = '';
+			child.stderr!.on('data', (d: Buffer) => { stderr += d.toString(); });
+			child.on('close', (code: number | null) => {
+				if (code === 0) {
+					resolve();
+				} else {
+					// Strip the password-prompt line from the error message
+					const clean = stderr.replace(/^\[sudo\] password.*\n?/m, '').trim();
+					reject(new Error(clean || `sudo exited with code ${code}`));
 				}
-				resolve();
 			});
 		});
 	}

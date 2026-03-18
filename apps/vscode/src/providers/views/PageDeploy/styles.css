@@ -320,3 +320,32 @@ body.vscode-high-contrast .logo-dark {
 	color: var(--vscode-errorForeground);
 	margin-top: 4px;
 }
+
+.sudo-prompt {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 4px;
+}
+
+.sudo-prompt-label {
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.sudo-prompt-row {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+}
+
+.sudo-prompt-input {
+	flex: 1;
+	padding: 5px 8px;
+	font-size: 13px;
+	border: 1px solid var(--vscode-input-border);
+	background-color: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border-radius: 4px;
+	min-width: 0;
+}
