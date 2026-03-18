@@ -658,32 +658,27 @@ export class PageStatusProvider {
 							const vscode = acquireVsCodeApi();
 							const iframe = document.getElementById('app-iframe');
 							const envVars = ${JSON.stringify(env)};
+							let iframeOrigin = '*';
+							try { iframeOrigin = new URL(iframe.src).origin; } catch(e) {}
 
-							// Bridge drag-and-drop from parent webview to iframe (macOS fix)
-							// On macOS, Finder drag-and-drop events don't reach cross-origin
-							// iframes inside Electron webviews. Native NSDraggingSession events
-							// are intercepted at the Cocoa layer before becoming HTML5 drag
-							// events, and synthetic event coordinates don't map reliably to
-							// the iframe's viewport. So we intercept all drops at the parent
-							// level and forward the files to the iframe, which does its own
-							// hit-testing against the drop zone element.
+							// macOS fix: Finder drag events don't reach cross-origin iframes
+							// in Electron webviews, so we bridge them to the iframe via postMessage.
 							['dragenter', 'dragover'].forEach(eventName => {
 								document.addEventListener(eventName, (e) => {
 									e.preventDefault();
 									e.stopPropagation();
-									try { iframe.contentWindow.postMessage({ type: 'dragHover', x: e.clientX, y: e.clientY }, '*'); } catch(err) {}
+									try { iframe.contentWindow.postMessage({ type: 'dragHover', x: e.clientX, y: e.clientY }, iframeOrigin); } catch(err) {}
 								});
 							});
 							document.addEventListener('dragleave', (e) => {
 								if (e.relatedTarget === null) {
-									try { iframe.contentWindow.postMessage({ type: 'dragLeave' }, '*'); } catch(err) {}
+									try { iframe.contentWindow.postMessage({ type: 'dragLeave' }, iframeOrigin); } catch(err) {}
 								}
 							});
 
 							document.addEventListener('drop', async (e) => {
 								e.preventDefault();
 								e.stopPropagation();
-								try { iframe.contentWindow.postMessage({ type: 'dragLeave' }, '*'); } catch(err) {}
 								const files = e.dataTransfer && e.dataTransfer.files;
 								if (!files || files.length === 0) return;
 
@@ -704,7 +699,8 @@ export class PageStatusProvider {
 									iframe.contentWindow.postMessage({
 										type: 'bridgedFileDrop',
 										files: fileDataArray
-									}, '*', fileDataArray.map(f => f.buffer));
+									}, iframeOrigin, fileDataArray.map(f => f.buffer));
+									iframe.contentWindow.postMessage({ type: 'dragLeave' }, iframeOrigin);
 								} catch (err) {
 									console.error('[Parent] Error bridging file drop to iframe:', err);
 								}
@@ -754,7 +750,7 @@ export class PageStatusProvider {
 										type: 'vscodeData',
 										env: envVars,
 										theme: colors
-									}, '*');
+									}, iframeOrigin);
 								} catch (error) {
 									console.error('[Parent] Error sending data to iframe:', error);
 								}
@@ -788,7 +784,7 @@ export class PageStatusProvider {
 									iframe.contentWindow.postMessage({
 										type: 'paste',
 										text: msg.text
-									}, '*');
+									}, iframeOrigin);
 								}
 							});
 						})();

@@ -54,6 +54,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 
 	// Whether files are being dragged over the drop zone
 	const [isDragOver, setIsDragOver] = useState<boolean>(false);
+	const isDragOverRef = useRef<boolean>(false);
 
 	// Filename to scroll to in results (for file list click synchronization)
 	const [scrollToFilename, setScrollToFilename] = useState<string | null>(null);
@@ -108,65 +109,42 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 		clearAll
 	} = useFileProcessing(client, authToken);
 
-	/**
-	 * Listen for bridged file drops from the parent VS Code webview (macOS fix).
-	 *
-	 * On macOS, native NSDraggingSession events from Finder are intercepted at
-	 * the Cocoa layer before they become HTML5 drag events, so they never reach
-	 * cross-origin iframes inside Electron/VS Code webviews. The parent webview
-	 * intercepts all drops and forwards the file data here via postMessage.
-	 *
-	 * We only accept the drop when the DropZone is actually visible (connected
-	 * and not processing) — mirroring the same guards the native drop path uses.
-	 */
+	// macOS fix: Finder drag events don't reach cross-origin iframes in Electron
+	// webviews, so the parent intercepts and bridges them here via postMessage.
 	useEffect(() => {
-		const isTrustedOrigin = (event: MessageEvent): boolean => {
-			try {
-				// In a VS Code webview or browser, we expect messages only from our own origin.
-				return typeof event.origin === 'string' && typeof window.origin === 'string' && event.origin === window.origin;
-			} catch {
-				// If for some reason origin is not accessible, fail closed.
-				return false;
-			}
-		};
+		const isFromParent = (event: MessageEvent) => event.source === window.parent;
 
 		const handleBridgedDrop = (event: MessageEvent) => {
-			if (!isTrustedOrigin(event)) return;
-			if (event.data?.type !== 'bridgedFileDrop' || !event.data.files) return;
-
+			if (!isFromParent(event)) return;
+			if (event.data?.type !== 'bridgedFileDrop' || !Array.isArray(event.data.files)) return;
 			if (!isConnected) {
 				setStatusMessage('Please wait for connection before uploading files');
 				return;
 			}
-
-			// Only accept when the drop zone is visible (not processing)
 			if (isProcessing) return;
+			if (!isDragOverRef.current) return;
 
-			const fileObjects = event.data.files.map((f: { buffer: ArrayBuffer; name: string; type: string; lastModified: number }) =>
-				new File([f.buffer], f.name, { type: f.type, lastModified: f.lastModified })
-			);
-
-			// Build a FileList-like object using a DataTransfer
 			const dt = new DataTransfer();
-			fileObjects.forEach((file: File) => dt.items.add(file));
+			event.data.files.forEach((f: { buffer: ArrayBuffer; name: string; type: string; lastModified: number }) =>
+				dt.items.add(new File([f.buffer], f.name, { type: f.type, lastModified: f.lastModified }))
+			);
 			addFiles(dt.files);
 		};
 
-		/**
-		 * Also listen for drag hover coordinates from the parent webview (macOS fix).
-		 * Native drag events don't reach the iframe, so the parent forwards
-		 * cursor position. We hit-test against the .drop-zone element to only
-		 * highlight when the cursor is actually over it.
-		 */
 		const handleDragHover = (event: MessageEvent) => {
-			if (!isTrustedOrigin(event)) return;
+			if (!isFromParent(event)) return;
 			if (event.data?.type === 'dragLeave') {
+				isDragOverRef.current = false;
 				setIsDragOver(false);
 				return;
 			}
 			if (event.data?.type !== 'dragHover') return;
-			const el = document.elementFromPoint(event.data.x, event.data.y);
-			setIsDragOver(el?.closest('.drop-zone') !== null);
+			const { x, y } = event.data;
+			if (typeof x !== 'number' || typeof y !== 'number') return;
+			const el = document.elementFromPoint(x, y);
+			const over = el?.closest('.drop-zone') !== null;
+			isDragOverRef.current = over;
+			setIsDragOver(over);
 		};
 
 		window.addEventListener('message', handleBridgedDrop);
