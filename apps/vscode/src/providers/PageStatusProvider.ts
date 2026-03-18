@@ -44,7 +44,7 @@ import { getLogger } from '../shared/util/output';
 import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
 import { ConnectionStatus, ConnectionState } from '../shared/types';
-import type { PageStatusIncomingMessage, PageStatusOutgoingMessage, VideoResultEntry } from '../shared/types/pageStatus';
+import type { PageStatusIncomingMessage, PageStatusOutgoingMessage } from '../shared/types/pageStatus';
 import { getPipelineFilesTreeProvider } from '../extension';
 
 /**
@@ -66,7 +66,6 @@ interface ViewMonitoringState {
 export class PageStatusProvider {
 	private webviewPanels: Map<string, ViewMonitoringState> = new Map();
 	private taskStatusData: Map<string, TaskStatus | undefined> = new Map();
-	private videoBuffers: Map<string, { mimeType: string; chunks: string[]; createdAt: number }> = new Map();
 	private disposables: vscode.Disposable[] = [];
 	private logger = getLogger();               // Handles output logging to VS Code channels
 
@@ -235,50 +234,6 @@ export class PageStatusProvider {
 							undefined,
 							(error: unknown) => this.logger.error(`Posting trace event: ${error}`)
 						);
-					}
-				}
-				break;
-			}
-
-			case 'apaevt_sse': {
-				const body = event.body;
-				const sseType = body?.type as string | undefined;
-				const pipeId = body?.pipe_id as string | number | undefined;
-				const projectId = (body?.project_id as string | undefined) ?? 'default';
-				const sourceId = (body?.source as string | undefined) ?? 'default';
-				const bufKey = `${projectId}.${sourceId}.${pipeId}`;
-				const viewKey = `${projectId}.${sourceId}`;
-
-				// Purge buffers older than 5 minutes to prevent unbounded growth
-				const staleThreshold = Date.now() - 5 * 60 * 1000;
-				for (const [k, v] of this.videoBuffers) {
-					if (v.createdAt < staleThreshold) this.videoBuffers.delete(k);
-				}
-
-				if (sseType === 'video.begin' && pipeId !== undefined) {
-					this.videoBuffers.set(bufKey, { mimeType: (body?.data?.mimeType as string) ?? 'video/mp4', chunks: [], createdAt: Date.now() });
-
-				} else if (sseType === 'video.buffer' && pipeId !== undefined) {
-					const buf = this.videoBuffers.get(bufKey);
-					if (buf && body?.data?.data) {
-						buf.chunks.push(body.data.data as string);
-					}
-
-				} else if (sseType === 'video.end' && pipeId !== undefined) {
-					const buf = this.videoBuffers.get(bufKey);
-					if (buf) {
-						this.videoBuffers.delete(bufKey);
-						const base64Data = buf.chunks.join('');
-						const sizeMB = Math.round(base64Data.length * 0.75 / 1024 / 1024 * 100) / 100;
-						const videos: VideoResultEntry[] = [{ uri: `data:${buf.mimeType};base64,${base64Data}`, mimeType: buf.mimeType, sizeMB }];
-						const msg: PageStatusIncomingMessage = { type: 'videoResult', videos };
-						const viewState = this.webviewPanels.get(viewKey);
-						if (viewState && !viewState.isDisposed) {
-							viewState.panel.webview.postMessage(msg).then(
-								undefined,
-								(error: unknown) => this.logger.error(`Posting video result: ${error}`)
-							);
-						}
 					}
 				}
 				break;

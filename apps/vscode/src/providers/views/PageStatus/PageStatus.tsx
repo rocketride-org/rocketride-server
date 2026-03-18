@@ -30,7 +30,6 @@ import { StatusSection, StatusHeader, StatusElapsed } from '../../components/Sta
 import { TokenSection } from '../../components/TokenSection';
 import { TabPanel } from '../../components/TabPanel';
 import { TraceSection, TraceRow } from '../../components/TraceSection';
-import type { VideoResultEntry } from '../../../shared/types/pageStatus';
 import { EndpointInfoModal, EndpointInfo } from '../../components/EndpointInfoModal';
 import { WarningIcon } from '../../components/icons/WarningIcon';
 
@@ -102,18 +101,7 @@ export const PageStatus: React.FC = () => {
 	const [currentElapsed, setCurrentElapsed] = useState<number>(0);
 	const [tracingEnabled, setTracingEnabled] = useState(false);
 	const [traceRows, setTraceRows] = useState<TraceRow[]>([]);
-	const [videos, setVideos] = useState<VideoResultEntry[]>([]);
 	const [scrollToSectionTarget, setScrollToSectionTarget] = useState<'errors' | 'warnings' | null>(null);
-
-	// Revoke blob URLs on unmount to avoid memory leaks
-	useEffect(() => {
-		return () => {
-			setVideos(prev => {
-				prev.forEach(v => { if (v.uri.startsWith('blob:')) URL.revokeObjectURL(v.uri); });
-				return prev;
-			});
-		};
-	}, []);
 
 	// Refs for elapsed timer
 	const intervalRef = useRef<number | null>(null);
@@ -162,28 +150,6 @@ export const PageStatus: React.FC = () => {
 					case 'scrollToSection': {
 						setActiveTab('errors');
 						setScrollToSectionTarget(message.section);
-						break;
-					}
-					case 'videoResult': {
-						const blobVideos = message.videos.map(v => {
-							if (v.uri.startsWith('data:')) {
-								try {
-									const [, base64] = v.uri.split(',', 2);
-									const binary = atob(base64);
-									const bytes = new Uint8Array(binary.length);
-									for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-									const blob = new Blob([bytes], { type: v.mimeType });
-									return { ...v, uri: URL.createObjectURL(blob) };
-								} catch {
-									return v;
-								}
-							}
-							return v;
-						});
-						setVideos(prev => {
-							prev.forEach(v => { if (v.uri.startsWith('blob:')) URL.revokeObjectURL(v.uri); });
-							return blobVideos;
-						});
 						break;
 					}
 					case 'traceEvent': {
@@ -546,7 +512,6 @@ export const PageStatus: React.FC = () => {
 							traceIdRef.current = 0;
 							setTraceRows([]);
 						}}
-						videos={videos}
 					/>
 				</div>
 				<div

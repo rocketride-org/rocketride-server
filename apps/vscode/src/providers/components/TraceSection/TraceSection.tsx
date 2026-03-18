@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import type { VideoResultEntry } from '../../../shared/types/pageStatus';
 
 // ============================================================================
 // TYPES
@@ -23,7 +22,6 @@ export interface TraceRow {
 
 interface TraceSectionProps {
 	rows: TraceRow[];
-	videos: VideoResultEntry[];
 	onClear: () => void;
 }
 
@@ -406,29 +404,14 @@ const TraceNodeRow: React.FC<{
 
 const TraceDetailPanel: React.FC<{
 	node: TraceTreeNode | null;
-	videos: VideoResultEntry[];
-}> = ({ node, videos }) => {
+}> = ({ node }) => {
 	const [inputExpanded, setInputExpanded] = useState(true);
 	const [outputExpanded, setOutputExpanded] = useState(false);
 
 	if (!node) {
 		return (
 			<div className="trace-detail-panel">
-				{videos.length > 0 ? (
-					<div className="trace-dp-sect">
-						<h3>Video Result</h3>
-						{videos.map((v, i) => (
-							<div key={i} className="trace-video-player">
-								<video controls preload="metadata">
-									<source src={v.uri} type={v.mimeType} />
-								</video>
-								<div className="trace-video-meta">{v.sizeMB} MB</div>
-							</div>
-						))}
-					</div>
-				) : (
-					<div className="trace-dp-empty">Click a row to view details</div>
-				)}
+				<div className="trace-dp-empty">Click a row to view details</div>
 			</div>
 		);
 	}
@@ -553,7 +536,6 @@ const TraceDetailPanel: React.FC<{
 
 export const TraceSection: React.FC<TraceSectionProps> = ({
 	rows,
-	videos,
 	onClear
 }) => {
 	const [expandedObjects, setExpandedObjects] = useState<Set<number>>(new Set());
@@ -757,7 +739,7 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 								onMouseDown={handleResizeStart}
 								aria-label="Resize detail panel"
 							/>
-							<TraceDetailPanel node={selectedNode} videos={videos} />
+							<TraceDetailPanel node={selectedNode} />
 						</div>
 					</div>
 				)}

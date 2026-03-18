@@ -49,17 +49,7 @@ export type PageStatusIncomingMessage
 	| {
 		type: 'scrollToSection';
 		section: 'errors' | 'warnings';
-	}
-	| {
-		type: 'videoResult';
-		videos: VideoResultEntry[];
 	};
-
-export interface VideoResultEntry {
-	uri: string;
-	mimeType: string;
-	sizeMB: number;
-}
 
 export type PageStatusOutgoingMessage
 	= {
