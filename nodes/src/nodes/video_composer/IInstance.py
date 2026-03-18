@@ -21,31 +21,41 @@
 # SOFTWARE.
 # =============================================================================
 
+import logging
 import os
 import shutil
 import subprocess
 import tempfile
-import time
 
 from rocketlib import IInstanceBase, AVI_ACTION, Entry
 
 from .IGlobal import IGlobal
 
-_LOG = open('/tmp/vcomp_debug.log', 'w', buffering=1)
+_logger = logging.getLogger(__name__)
 
 
 def _log(msg: str):
-    _LOG.write(f'[{time.strftime("%H:%M:%S")}] {msg}\n')
+    _logger.debug(msg)
 
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
+
+    _MIME_EXT = {
+        'image/jpeg': '.jpg',
+        'image/jpg': '.jpg',
+        'image/webp': '.webp',
+        'image/gif': '.gif',
+        'image/bmp': '.bmp',
+        'image/tiff': '.tiff',
+    }
 
     def beginInstance(self):
         self._frames_dir = None
         self._frame_count = 0
         self._image_buf = bytearray()
         self._image_mime = 'image/png'
+        self._frame_ext = '.png'
 
         cfg = self.IGlobal.config
         self._fps = cfg.get('fps', 1.0)
@@ -74,7 +84,7 @@ class IInstance(IInstanceBase):
             try:
                 os.remove(output_path)
             except OSError:
-                pass
+                pass  # best-effort cleanup; file will be swept by OS on reboot
         else:
             _log(f'close: encode failed, output_path={output_path}')
 
@@ -88,6 +98,7 @@ class IInstance(IInstanceBase):
         if action == AVI_ACTION.BEGIN:
             self._image_buf = bytearray()
             self._image_mime = mimeType
+            self._frame_ext = self._MIME_EXT.get(mimeType, '.png')
 
         elif action == AVI_ACTION.WRITE:
             if buffer:
@@ -95,7 +106,7 @@ class IInstance(IInstanceBase):
 
         elif action == AVI_ACTION.END:
             if self._frames_dir and self._image_buf:
-                fname = f'frame_{self._frame_count:06d}.png'
+                fname = f'frame_{self._frame_count:06d}{self._frame_ext}'
                 fpath = os.path.join(self._frames_dir, fname)
                 with open(fpath, 'wb') as f:
                     f.write(self._image_buf)
@@ -113,12 +124,10 @@ class IInstance(IInstanceBase):
         except Exception:
             ffmpeg = 'ffmpeg'
 
-        output_path = os.path.join(
-            tempfile.gettempdir(),
-            f'vcomp_output_{int(time.time())}.mp4',
-        )
+        fd, output_path = tempfile.mkstemp(suffix='.mp4', prefix='vcomp_output_')
+        os.close(fd)
 
-        input_pattern = os.path.join(self._frames_dir, 'frame_%06d.png')
+        input_pattern = os.path.join(self._frames_dir, f'frame_%06d{self._frame_ext}')
         cmd = [
             ffmpeg,
             '-y',
@@ -169,6 +178,6 @@ class IInstance(IInstanceBase):
             try:
                 shutil.rmtree(self._frames_dir)
             except OSError:
-                pass
+                pass  # best-effort cleanup; frames dir will be swept by OS
         self._frames_dir = None
         self._frame_count = 0
