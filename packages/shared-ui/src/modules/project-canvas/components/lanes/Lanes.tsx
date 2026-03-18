@@ -83,7 +83,7 @@ const RedAsterisk = (
  * @param props - The node ID, lane definitions, layout direction, and node data.
  * @returns The rendered lanes section with handles, labels, inside lines, and invoke handles.
  */
-export default function Lanes({ nodeId, lanes, layout, data }: IProps): ReactElement {
+export default function Lanes({ nodeId, lanes, layout, data }: IProps): ReactElement | null {
 	// Destructure node data fields needed for lane rendering and invoke logic
 	const { title, tile } = data;
 
@@ -291,6 +291,10 @@ export default function Lanes({ nodeId, lanes, layout, data }: IProps): ReactEle
 		}));
 	 
 	}, [uniqueOutputLanes, isOutputConnected]);
+
+	// If there are no visible input or output lanes, render nothing — avoids an empty strip with a border
+	const hasVisibleLanes = inputLanes.some((lane) => !lane.type.startsWith('_')) || uniqueOutputLanes.length > 0;
+	if (!hasVisibleLanes) return null;
 
 	return (
 		<>

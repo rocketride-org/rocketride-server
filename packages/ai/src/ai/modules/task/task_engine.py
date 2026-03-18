@@ -1303,6 +1303,8 @@ class Task(DAPBase):
 
             # Update internal task configuration
             self._pipeline = pipeline
+            self._pipeline['source'] = source
+            self._pipeline['project_id'] = project_id
             self.project_id = project_id
             self.source = source
             self._provider = provider

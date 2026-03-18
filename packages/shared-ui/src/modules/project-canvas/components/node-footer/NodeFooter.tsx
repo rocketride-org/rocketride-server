@@ -62,7 +62,7 @@ const formatElapsedTime = (seconds: number): string => {
  * a canvas node.
  */
 interface NodeFooterProps {
-	/** Component provider name to match against pipeflow data. */
+	/** Unique node ID to match against pipeflow data (e.g. "agent_rocketride_1"). */
 	componentProvider: string;
 
 	/** Whether this is a source node (has Run button). */
@@ -71,7 +71,7 @@ interface NodeFooterProps {
 	/** Task status data from DAP events. */
 	taskStatus: TaskStatus | undefined;
 
-	/** Map of component provider to pipe count for progress tracking. */
+	/** Map of node ID to pipe count for progress tracking. */
 	componentPipeCounts?: Record<string, number>;
 
 	/** Total number of pipes in the pipeline (for progress calculation). */

@@ -45,7 +45,7 @@
 		{
 			"section": "Pipe",
 			"title": "Chart (Chart.js)",
-			"properties": ["type", "name"]
+			"properties": ["type"]
 		}
 	]
 }
