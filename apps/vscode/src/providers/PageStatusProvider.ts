@@ -658,7 +658,58 @@ export class PageStatusProvider {
 							const vscode = acquireVsCodeApi();
 							const iframe = document.getElementById('app-iframe');
 							const envVars = ${JSON.stringify(env)};
-							
+
+							// Bridge drag-and-drop from parent webview to iframe (macOS fix)
+							// On macOS, Finder drag-and-drop events don't reach cross-origin
+							// iframes inside Electron webviews. Native NSDraggingSession events
+							// are intercepted at the Cocoa layer before becoming HTML5 drag
+							// events, and synthetic event coordinates don't map reliably to
+							// the iframe's viewport. So we intercept all drops at the parent
+							// level and forward the files to the iframe, which does its own
+							// hit-testing against the drop zone element.
+							['dragenter', 'dragover'].forEach(eventName => {
+								document.addEventListener(eventName, (e) => {
+									e.preventDefault();
+									e.stopPropagation();
+									try { iframe.contentWindow.postMessage({ type: 'dragHover', x: e.clientX, y: e.clientY }, '*'); } catch(err) {}
+								});
+							});
+							document.addEventListener('dragleave', (e) => {
+								if (e.relatedTarget === null) {
+									try { iframe.contentWindow.postMessage({ type: 'dragLeave' }, '*'); } catch(err) {}
+								}
+							});
+
+							document.addEventListener('drop', async (e) => {
+								e.preventDefault();
+								e.stopPropagation();
+								try { iframe.contentWindow.postMessage({ type: 'dragLeave' }, '*'); } catch(err) {}
+								const files = e.dataTransfer && e.dataTransfer.files;
+								if (!files || files.length === 0) return;
+
+								const fileDataArray = [];
+								for (let i = 0; i < files.length; i++) {
+									const file = files[i];
+									const buffer = await file.arrayBuffer();
+									fileDataArray.push({
+										name: file.name,
+										type: file.type || 'application/octet-stream',
+										size: file.size,
+										lastModified: file.lastModified,
+										buffer: buffer
+									});
+								}
+
+								try {
+									iframe.contentWindow.postMessage({
+										type: 'bridgedFileDrop',
+										files: fileDataArray
+									}, '*', fileDataArray.map(f => f.buffer));
+								} catch (err) {
+									console.error('[Parent] Error bridging file drop to iframe:', err);
+								}
+							});
+
 							// Extract VSCode theme colors
 							function getVSCodeThemeColors() {
 								const style = getComputedStyle(document.body);

@@ -109,6 +109,63 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 	} = useFileProcessing(client, authToken);
 
 	/**
+	 * Listen for bridged file drops from the parent VS Code webview (macOS fix).
+	 *
+	 * On macOS, native NSDraggingSession events from Finder are intercepted at
+	 * the Cocoa layer before they become HTML5 drag events, so they never reach
+	 * cross-origin iframes inside Electron/VS Code webviews. The parent webview
+	 * intercepts all drops and forwards the file data here via postMessage.
+	 *
+	 * We only accept the drop when the DropZone is actually visible (connected
+	 * and not processing) — mirroring the same guards the native drop path uses.
+	 */
+	useEffect(() => {
+		const handleBridgedDrop = (event: MessageEvent) => {
+			if (event.data?.type !== 'bridgedFileDrop' || !event.data.files) return;
+
+			if (!isConnected) {
+				setStatusMessage('Please wait for connection before uploading files');
+				return;
+			}
+
+			// Only accept when the drop zone is visible (not processing)
+			if (isProcessing) return;
+
+			const fileObjects = event.data.files.map((f: { buffer: ArrayBuffer; name: string; type: string; lastModified: number }) =>
+				new File([f.buffer], f.name, { type: f.type, lastModified: f.lastModified })
+			);
+
+			// Build a FileList-like object using a DataTransfer
+			const dt = new DataTransfer();
+			fileObjects.forEach((file: File) => dt.items.add(file));
+			addFiles(dt.files);
+		};
+
+		/**
+		 * Also listen for drag hover coordinates from the parent webview (macOS fix).
+		 * Native drag events don't reach the iframe, so the parent forwards
+		 * cursor position. We hit-test against the .drop-zone element to only
+		 * highlight when the cursor is actually over it.
+		 */
+		const handleDragHover = (event: MessageEvent) => {
+			if (event.data?.type === 'dragLeave') {
+				setIsDragOver(false);
+				return;
+			}
+			if (event.data?.type !== 'dragHover') return;
+			const el = document.elementFromPoint(event.data.x, event.data.y);
+			setIsDragOver(el?.closest('.drop-zone') !== null);
+		};
+
+		window.addEventListener('message', handleBridgedDrop);
+		window.addEventListener('message', handleDragHover);
+		return () => {
+			window.removeEventListener('message', handleBridgedDrop);
+			window.removeEventListener('message', handleDragHover);
+		};
+	}, [addFiles, isConnected, isProcessing]);
+
+	/**
 	 * Auto-switch to the most relevant tab when results are available
 	 * Priority: text > tables > images > results
 	 */
