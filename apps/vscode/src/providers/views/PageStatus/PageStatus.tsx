@@ -30,7 +30,7 @@ import { StatusSection, StatusHeader, StatusElapsed } from '../../components/Sta
 import { TokenSection } from '../../components/TokenSection';
 import { TabPanel } from '../../components/TabPanel';
 import { TraceSection, TraceRow } from '../../components/TraceSection';
-import type { VideoResultEntry } from '../../shared/types/pageStatus';
+import type { VideoResultEntry } from '../../../shared/types/pageStatus';
 import { EndpointInfoModal, EndpointInfo } from '../../components/EndpointInfoModal';
 import { WarningIcon } from '../../components/icons/WarningIcon';
 
@@ -104,6 +104,16 @@ export const PageStatus: React.FC = () => {
 	const [traceRows, setTraceRows] = useState<TraceRow[]>([]);
 	const [videos, setVideos] = useState<VideoResultEntry[]>([]);
 	const [scrollToSectionTarget, setScrollToSectionTarget] = useState<'errors' | 'warnings' | null>(null);
+
+	// Revoke blob URLs on unmount to avoid memory leaks
+	useEffect(() => {
+		return () => {
+			setVideos(prev => {
+				prev.forEach(v => { if (v.uri.startsWith('blob:')) URL.revokeObjectURL(v.uri); });
+				return prev;
+			});
+		};
+	}, []);
 
 	// Refs for elapsed timer
 	const intervalRef = useRef<number | null>(null);

@@ -209,24 +209,24 @@ class IInstance(IInstanceBase):
 
     def writeVideo(self, aviAction: int, mimeType: str, data: bytes):
         if aviAction == AVI_ACTION.BEGIN:
-            self.video = bytearray()
             self.video_mime = mimeType
+            key = self._getkey('video')
+            if key not in self.instance.currentObject.response:
+                self.instance.currentObject.response[key] = []
+            self.instance.currentObject.response[key].append({
+                'mime_type': mimeType,
+                'data': [],
+            })
 
         elif aviAction == AVI_ACTION.WRITE:
             if data:
-                self.video += data
+                key = self._getkey('video')
+                entries = self.instance.currentObject.response.get(key)
+                if entries:
+                    entries[-1]['data'].append(base64.b64encode(data).decode())
 
         elif aviAction == AVI_ACTION.END:
-            key = self._getkey('video')
-
-            if key not in self.instance.currentObject.response:
-                self.instance.currentObject.response[key] = []
-
-            self.instance.currentObject.response[key].append({
-                'mime_type': self.video_mime,
-                'data': base64.b64encode(bytes(self.video)).decode(),
-            })
-            self.video = bytearray()
+            pass  # entry already populated chunk-by-chunk in WRITE
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Handle AVI_BEGIN action

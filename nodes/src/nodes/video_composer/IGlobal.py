@@ -32,6 +32,11 @@ class IGlobal(IGlobalBase):
     def beginGlobal(self):
         self.device_lock = threading.Lock()
         self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        if self.config is None:
+            raise RuntimeError(
+                f'getNodeConfig returned None for logicalType={self.glb.logicalType!r} '
+                f'connConfig={self.glb.connConfig!r}'
+            )
         self.config['type'] = self.glb.connConfig.get('profile', 'standard')
 
     def endGlobal(self):
