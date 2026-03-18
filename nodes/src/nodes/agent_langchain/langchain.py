@@ -149,7 +149,7 @@ class LangChainDriver(AgentBase):
             try:
                 return create_model(
                     '_DynToolInput',
-                    __config__=ConfigDict(extra='allow'),
+                    __config__=ConfigDict(extra='ignore'),
                     **field_defs,
                 )
             except Exception:

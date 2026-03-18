@@ -113,7 +113,7 @@ class CrewDriver(AgentBase):
             try:
                 return create_model(
                     '_DynToolInput',
-                    __config__=ConfigDict(extra='allow'),
+                    __config__=ConfigDict(extra='ignore'),
                     **field_defs,
                 )
             except Exception:
@@ -148,7 +148,7 @@ class CrewDriver(AgentBase):
                 continue
             if not desc:
                 desc = f'Invoke host tool: {name}'
-            input_schema = td.get('input_schema') if isinstance(td, dict) else None
+            input_schema = (td.get('input_schema') or td.get('inputSchema')) if isinstance(td, dict) else None
             if isinstance(input_schema, dict):
                 try:
                     schema_text = json.dumps(input_schema, ensure_ascii=False)
