@@ -34,6 +34,7 @@ When neither is configured all frames pass through.
 
 import base64
 import io
+import threading
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -52,9 +53,10 @@ class FrameEmbedder:
     is_match() to test whether a frame is visually similar to the reference.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], lock: threading.Lock):
         from transformers import CLIPModel, CLIPProcessor
 
+        self._device_lock = lock
         model_name = config.get('embedding_model') or 'openai/clip-vit-base-patch32'
         self._model: Any = CLIPModel.from_pretrained(model_name)
         self._processor: Any = CLIPProcessor.from_pretrained(model_name)
@@ -126,7 +128,7 @@ class FrameEmbedder:
 
         image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
         inputs = self._processor(images=image, return_tensors='pt')
-        with torch.no_grad():
+        with self._device_lock, torch.no_grad():
             features = self._model.get_image_features(**inputs)
         emb = features.squeeze().cpu().numpy()
         norm = np.linalg.norm(emb)
@@ -137,7 +139,7 @@ class FrameEmbedder:
         import numpy as np
 
         inputs = self._processor(text=[text], return_tensors='pt', padding=True)
-        with torch.no_grad():
+        with self._device_lock, torch.no_grad():
             features = self._model.get_text_features(**inputs)
         emb = features.squeeze().cpu().numpy()
         norm = np.linalg.norm(emb)

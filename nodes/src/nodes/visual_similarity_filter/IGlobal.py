@@ -46,7 +46,7 @@ class IGlobal(IGlobalBase):
             return
 
         from .embedder import FrameEmbedder
-        self.embedder = FrameEmbedder(self.config)
+        self.embedder = FrameEmbedder(self.config, self.device_lock)
 
     def endGlobal(self):
         self.embedder = None
