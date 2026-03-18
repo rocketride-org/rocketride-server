@@ -22,6 +22,7 @@
 # =============================================================================
 
 from collections import deque
+from typing import Any, Optional
 
 from rocketlib import IInstanceBase, AVI_ACTION, Entry
 from ai.common.table import Table
@@ -49,6 +50,7 @@ class IInstance(IInstanceBase):
         self._ring = deque(maxlen=self._pre_roll) if self._pre_roll > 0 else None
         self._forwarding = False
         self._post_remaining = 0
+        self._text_embedding: Optional[Any] = None
 
     def endInstance(self):
         pass
@@ -63,6 +65,7 @@ class IInstance(IInstanceBase):
         self._post_remaining = 0
         if self._ring is not None:
             self._ring.clear()
+        self._text_embedding = None
 
     def close(self):
         if self.instance.hasListener('table') and self._match_rows:
@@ -78,8 +81,8 @@ class IInstance(IInstanceBase):
 
     def writeText(self, text: str):
         prompt = text.strip()
-        if prompt and self.IGlobal.embedder is not None:
-            self.IGlobal.embedder.set_text_prompt(prompt)
+        if self.IGlobal.embedder is not None:
+            self._text_embedding = self.IGlobal.embedder.embed_text(prompt) if prompt else None
         self.preventDefault()
 
     # ------------------------------------------------------------------
@@ -113,8 +116,8 @@ class IInstance(IInstanceBase):
         timestamp = idx / self._fps if self._fps > 0 else float(idx)
 
         try:
-            is_match, similarity = self.IGlobal.embedder.is_match(image_bytes)
-        except Exception:
+            is_match, similarity = self.IGlobal.embedder.is_match(image_bytes, text_embedding=self._text_embedding)
+        except (ValueError, OSError, RuntimeError):
             is_match, similarity = False, 0.0
 
         if is_match:
