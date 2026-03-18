@@ -35,7 +35,7 @@ export interface Message {
 	sender: 'user' | 'bot' | 'system' | 'status';
 	timestamp: string;
 	resultKey?: string | undefined;
-	sseType?: 'thinking' | 'acting' | 'confirm';
+	sseType?: string;
 }
 
 /**

@@ -90,15 +90,14 @@ export const useChatMessages = () => {
 			const result: PIPELINE_RESULT = await client.chat({
 				token: authToken,
 				question: question,
-				onSSE: async (body: Record<string, unknown>) => {
-					const text = body.message as string | undefined;
-					const sseType = (body.type as string | undefined) ?? 'thinking';
+				onSSE: async (type: string, data: Record<string, unknown>) => {
+					const text = data.message as string | undefined;
 					if (text) {
 						setMessages(prev => [...prev, {
 							id: Date.now(),
 							text,
 							sender: 'status',
-							sseType: sseType as 'thinking' | 'acting' | 'confirm',
+							sseType: type,
 							timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 						}]);
 					}

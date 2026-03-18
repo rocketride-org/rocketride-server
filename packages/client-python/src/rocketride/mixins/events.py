@@ -296,7 +296,7 @@ class EventMixin(DAPClient):
             callback = self._sse_pipe_callbacks.get(pipe_id)
             if callback is not None:
                 try:
-                    await callback(event_body)
+                    await callback(event_body.get('type', ''), event_body.get('data', {}))
                 except Exception as e:
                     self.debug_message(f'Error in SSE callback for pipe {pipe_id}: {e}')
 

@@ -16,7 +16,7 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional
 
-from rocketlib import debug, error, monitorSSE
+from rocketlib import debug, error
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 
@@ -46,7 +46,7 @@ class AgentBase(ABC):
     _AGENT_TOOL_NAME: str = 'run_agent'
 
     _host: Optional[AgentHostServices] = None
-    _pipe_id: int = 0
+    _invoker: Any = None
 
     def __init__(
         self,
@@ -132,14 +132,12 @@ class AgentBase(ABC):
                 started_at=started_at,
             )
 
-            # Capture pipe_id from the instance so sendSSE() can use it
-            try:
-                self._pipe_id = iInstance.instance.pipeId
-            except Exception:
-                self._pipe_id = 0
+            # Save the invoker so sendSSE() can delegate to self.instance.sendSSE()
+            self._invoker = iInstance
 
             # Build up the context so we know what we are doing
-            runtime_ctx = {'run_id': run_id, 'task_id': task_id, 'framework': self.FRAMEWORK, 'pipe_id': self._pipe_id}
+            pipe_id = iInstance.instance.pipeId if iInstance and iInstance.instance else 0
+            runtime_ctx = {'run_id': run_id, 'task_id': task_id, 'framework': self.FRAMEWORK, 'pipe_id': pipe_id}
 
             # And execute
             content, raw = self._run(
@@ -331,20 +329,20 @@ class AgentBase(ABC):
     # ---------------------------------------------------------------------
     # Engine utilities
     # ---------------------------------------------------------------------
-    def sendSSE(self, type: str, message: str, data: Optional[Dict[str, Any]] = None) -> None:
+    def sendSSE(self, type: str, **data) -> None:
         """
         Send a real-time SSE status update to the UI for this agent's pipe.
 
-        Wraps ``monitorSSE`` using the ``pipe_id`` captured at the start of
-        the current ``run_agent`` invocation.  Safe to call from ``_run`` or
-        any helper it delegates to.
+        Delegates to ``self._invoker.instance.sendSSE()`` using the invoker
+        captured at the start of the current ``run_agent`` invocation.
+        Safe to call from ``_run`` or any helper it delegates to.
 
         Args:
-            type:    Event type ('thinking', 'acting', 'confirm').
-            message: Human-readable status string shown in the chat UI.
-            data:    Optional structured payload included in the event body.
+            type:    Event type string (e.g. 'thinking', 'acting', 'confirm').
+            **data:  Keyword arguments included as the event data payload.
         """
-        monitorSSE(self._pipe_id, type, message, data)
+        if self._invoker and self._invoker.instance:
+            self._invoker.instance.sendSSE(type, **data)
 
     def _agent_id(self, pSelf: Any) -> str:
         """Return the logical agent identifier used in answer metadata."""

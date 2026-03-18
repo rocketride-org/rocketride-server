@@ -101,7 +101,7 @@ class RocketRideDriver(AgentBase):
         """
         run_id = ctx.get('run_id', '')
         debug(f'rocketride wave _run start run_id={run_id}')
-        self.sendSSE('thinking', 'Analyzing your request...')
+        self.sendSSE('thinking', message='Analyzing your request...')
 
         # waves accumulates the full history of every tool call and its result
         # summary.  It is passed to plan_wave() each iteration so the planner
@@ -120,7 +120,7 @@ class RocketRideDriver(AgentBase):
 
         for wave_num in range(self._max_waves):
             debug(f'rocketride wave wave_num={wave_num} run_id={run_id}')
-            self.sendSSE('thinking', f'Planning step {wave_num + 1}...')
+            self.sendSSE('thinking', message=f'Planning step {wave_num + 1}...')
 
             # Run the planner — one LLM call with all tool descriptions.
             # Returns either {"done": true, "answer": "..."} or {"tool_calls": [...]}
@@ -169,14 +169,14 @@ class RocketRideDriver(AgentBase):
             # what the agent is doing this turn.  Shown in the "thinking" panel.
             thought = safe_str(result.get('thought', ''))
             if thought:
-                self.sendSSE('thinking', thought)
+                self.sendSSE('thinking', message=thought)
 
             # ------------------------------------------------------------------
             # Done — resolve answer refs and return
             # ------------------------------------------------------------------
 
             if result.get('done'):
-                self.sendSSE('thinking', 'Generating final answer...')
+                self.sendSSE('thinking', message='Generating final answer...')
                 answer = safe_str(result.get('answer', ''))
 
                 # Resolve {{memory.ref:key:format:path}} references in the answer.
@@ -203,7 +203,7 @@ class RocketRideDriver(AgentBase):
 
             # Inform the UI which tools are about to run this wave
             tool_names = [c.get('tool', '?') for c in tool_calls]
-            self.sendSSE('thinking', f'Running: {", ".join(tool_names)}', {'wave': wave_num + 1, 'tools': tool_names})
+            self.sendSSE('thinking', message=f'Running: {", ".join(tool_names)}', wave=wave_num + 1, tools=tool_names)
 
             # Execute all tool calls in this wave concurrently.  Each result is
             # stored in memory under "wave-N.rM" and a structural summary is
@@ -211,7 +211,7 @@ class RocketRideDriver(AgentBase):
             # as context; the full result stays in memory for later peek access.
             results = execute_wave(tool_calls, host=host, wave_name=f'wave-{wave_num}')
             waves.append({'wave_num': wave_num, 'calls': tool_calls, 'results': results})
-            self.sendSSE('thinking', f'Step {wave_num + 1} complete', {'results': len(results)})
+            self.sendSSE('thinking', message=f'Step {wave_num + 1} complete', results=len(results))
 
         # ------------------------------------------------------------------
         # Synthesis fallback — max waves reached without done=true
@@ -222,7 +222,7 @@ class RocketRideDriver(AgentBase):
         # from everything that was gathered.  This prevents the agent from
         # silently returning nothing after a long run.
         debug(f'rocketride wave max waves reached run_id={run_id}, synthesizing final answer')
-        self.sendSSE('thinking', 'Synthesizing final answer...')
+        self.sendSSE('thinking', message='Synthesizing final answer...')
         return self._synthesize(agent_input=agent_input, waves=waves, host=host), trace
 
     # ------------------------------------------------------------------

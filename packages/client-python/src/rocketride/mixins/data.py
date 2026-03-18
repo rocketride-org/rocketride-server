@@ -116,8 +116,8 @@ class DataMixin(DAPClient):
                 objinfo: Optional metadata about the data
                 mime_type: MIME type of data (e.g., "text/csv", "application/json")
                 provider: Optional provider specification
-                on_sse: Optional async callback(body: dict) called for each SSE event
-                        emitted by the pipeline node for this specific pipe
+                on_sse: Optional async callback(type: str, data: dict) called for each SSE
+                        event emitted by the pipeline node for this specific pipe
             """
             self._client = client
             self._token = token
@@ -334,6 +334,7 @@ class DataMixin(DAPClient):
         data: Union[str, bytes],
         objinfo: Dict[str, Any] = None,
         mimetype: str = None,
+        on_sse=None,
     ) -> PIPELINE_RESULT:
         """
         Send data to a running pipeline.
@@ -386,7 +387,7 @@ class DataMixin(DAPClient):
             raise ValueError('data must be either a string or bytes')
 
         # Create and use a temporary pipe for the data
-        pipe = await self.pipe(token, self._objinfo_with_size(objinfo, len(buffer)), mimetype)
+        pipe = await self.pipe(token, self._objinfo_with_size(objinfo, len(buffer)), mimetype, on_sse=on_sse)
 
         try:
             await pipe.open()
