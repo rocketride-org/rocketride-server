@@ -82,7 +82,7 @@ class IGlobal(IGlobalBase):
 
         from .langchain import LangChainDriver
 
-        self.agent = LangChainDriver()
+        self.agent = LangChainDriver(self)
 
     def validateConfig(self):
         raw_conn = getattr(getattr(self, 'glb', None), 'connConfig', None)

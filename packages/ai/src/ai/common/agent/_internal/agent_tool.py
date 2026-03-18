@@ -68,7 +68,7 @@ class _AgentAsToolProvider(ToolsBase):
         if self._tools_available is not None:
             return self._tools_available
         try:
-            host = AgentHostServices(self._pSelf.instance.invoke)
+            host = AgentHostServices(self._pSelf)
             tools = self._agent._discover_tools(host=host)
             tools_available = []
             for t in tools:
