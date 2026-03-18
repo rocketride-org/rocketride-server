@@ -56,9 +56,6 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 				updates.hostUrl = '';
 			}
 		} else if (mode === 'local') {
-			if (!settings.hostUrl || !settings.hostUrl.startsWith('http://localhost')) {
-				updates.hostUrl = 'http://localhost:5565';
-			}
 			updates.autoConnect = true;
 		}
 
@@ -68,25 +65,6 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 	const handleHostUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		onSettingsChange({ hostUrl: e.target.value });
 	};
-
-	const handleLocalPortChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-		const port = e.target.value.trim();
-		if (port === '' || /^\d+$/.test(port)) {
-			onSettingsChange({ hostUrl: port ? `http://localhost:${port}` : 'http://localhost:5565' });
-		}
-	};
-
-	// Derive local port from hostUrl for display (e.g. http://localhost:5565 -> 5565)
-	const localPort = (() => {
-		if (settings.connectionMode !== 'local' || !settings.hostUrl) return '5565';
-		try {
-			const u = new URL(settings.hostUrl);
-			if (u.hostname === 'localhost' && u.port) return u.port;
-			return u.port || '5565';
-		} catch {
-			return '5565';
-		}
-	})();
 
 	const handleAutoConnectChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		onSettingsChange({ autoConnect: e.target.checked });
@@ -101,23 +79,6 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 		return tagName.replace(/^server-/, '');
 	};
 
-	const handleArgChange = (index: number, value: string) => {
-		const newArgs = [...settings.localEngineArgs];
-		newArgs[index] = value;
-		onSettingsChange({ localEngineArgs: newArgs });
-	};
-
-	const addArgument = () => {
-		onSettingsChange({
-			localEngineArgs: [...settings.localEngineArgs, '']
-		});
-	};
-
-	const removeArgument = (index: number) => {
-		const newArgs = settings.localEngineArgs.filter((_, i) => i !== index);
-		onSettingsChange({ localEngineArgs: newArgs });
-	};
-
 	const handleApiKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		onSettingsChange({
 			apiKey: e.target.value,
@@ -129,59 +90,15 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 		setShowApiKey(!showApiKey);
 	};
 
-	const needsApiKey = settings.connectionMode === 'cloud' || settings.connectionMode === 'onprem';
-	const showAccountWarning = needsApiKey && !settings.apiKey.trim();
+	const showAccountWarning = settings.connectionMode === 'onprem' && !settings.apiKey.trim();
 
 	return (
 		<>
-			{/* RocketRide account – one login for development (cloud) and deployment */}
-			<div className={`section ${showAccountWarning ? 'warning' : ''}`} id="accountSection">
-				<div className="section-title">RocketRide account</div>
-				<div className="section-description">
-					Log in to your RocketRide.ai account. This key is used for development (Cloud and On-prem) and for deployment.
-				</div>
-				<div className="form-grid">
-					<div className="form-group" id="apiKeyGroup">
-						<label htmlFor="apiKey">API Key</label>
-						<div className="password-input-container">
-							<input
-								type={showApiKey ? 'text' : 'password'}
-								id="apiKey"
-								placeholder="Enter your API key"
-								value={settings.apiKey}
-								onChange={handleApiKeyChange}
-							/>
-							<button
-								type="button"
-								className="password-toggle"
-								onClick={toggleApiKeyVisibility}
-								title={showApiKey ? 'Hide API key' : 'Show API key'}
-							>
-								{showApiKey ? '🙈' : '🔍'}
-							</button>
-							{settings.apiKey.trim() && (
-								<button
-									type="button"
-									onClick={onClearCredentials}
-									className="small"
-									title="Clear stored API key"
-								>
-									Clear
-								</button>
-							)}
-						</div>
-						<div className="help-text">
-							API key is saved securely when you save settings. Required for cloud development and for deployment.
-						</div>
-					</div>
-				</div>
-			</div>
-
 			{/* Development – where you run and debug (local or remote) */}
-			<div className="section" id="developmentSection">
+			<div className={`section ${showAccountWarning ? 'warning' : ''}`} id="developmentSection">
 				<div className="section-title">Development connection</div>
 				<div className="section-description">
-					Where the extension connects to run and debug pipelines. Can be a local engine or a remote RocketRide server.
+					Where the extension connects to run and debug pipelines. Cloud and On-prem modes require a RocketRide API key.
 				</div>
 				<div className="form-grid">
 					<div className="form-group">
@@ -195,124 +112,166 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = ({
 							<option value="onprem">On-prem (your own hosted server)</option>
 							<option value="local">Local (your local machine)</option>
 						</select>
-						<div className="help-text">Choose where your engine runs for development</div>
+						<div className="help-text">Choose where your server runs for development</div>
 					</div>
+
+					{/* Config box — description + mode-specific fields */}
+					<div className="mode-config-box">
+
+						{/* Cloud — Coming Soon */}
+						{settings.connectionMode === 'cloud' && (
+							<>
+								<div className="mode-config-desc">Connect to RocketRide.ai cloud. Requires an API key from your account dashboard.</div>
+								<div className="mode-coming-soon">
+									<div className="mode-coming-soon-icon">&#9729;</div>
+									<div className="mode-coming-soon-title">Coming Soon</div>
+									<div className="mode-coming-soon-text">
+										RocketRide Cloud is under active development.<br />
+										Stay tuned for managed cloud hosting with zero setup.
+									</div>
+								</div>
+							</>
+						)}
+
+						{/* On-prem */}
 						{settings.connectionMode === 'onprem' && (
-						<div className="form-group">
-							<label htmlFor="hostUrl">Host URL</label>
-							<input
-								type="text"
-								id="hostUrl"
-								placeholder="your-server:5565"
-								value={settings.hostUrl}
-								onChange={handleHostUrlChange}
-							/>
-							<div className="help-text">Base URL of your hosted RocketRide server (e.g. myserver:5565)</div>
-						</div>
-					)}
-					{settings.connectionMode === 'local' && (
-						<>
-							<div className="form-group">
-								<label htmlFor="localPort">Port</label>
-								<input
-									type="text"
-									inputMode="numeric"
-									id="localPort"
-									placeholder="5565"
-									value={localPort}
-									onChange={handleLocalPortChange}
-								/>
-								<div className="help-text">Port to connect to on your local machine (e.g. 5565)</div>
-							</div>
-							<div className="form-group">
-								<label htmlFor="engineVersion">Engine Version</label>
-								<select
-									id="engineVersion"
-									value={settings.localEngineVersion}
-									onChange={handleVersionChange}
-									disabled={engineVersionsLoading}
-								>
-									<option value="latest">&lt;Latest&gt;</option>
-									<option value="prerelease">&lt;Prerelease&gt;</option>
-									{engineVersions.length > 0 && (
-										<option disabled>{'────────────────'}</option>
-									)}
-									{engineVersionsLoading && (
-										<option disabled>Loading versions...</option>
-									)}
-									{engineVersions.map(v => (
-										<option key={v.tag_name} value={v.tag_name}>
-											{displayVersion(v.tag_name)}
-										</option>
-									))}
-								</select>
-								<div className="help-text">Choose which engine version to download. &lt;Latest&gt; gets the newest stable release.</div>
-							</div>
-							<div className="form-group">
-								<label>Engine Arguments</label>
-								<div className="args-container">
-									{settings.localEngineArgs.map((arg, index) => (
-										<div key={index} className="arg-item">
-											<input
-												type="text"
-												value={arg}
-												placeholder="--argument"
-												onChange={(e) => handleArgChange(index, e.target.value)}
-											/>
+							<>
+								<div className="mode-config-desc">Connect to your own hosted RocketRide server.</div>
+								<div className="form-group" id="apiKeyGroup">
+									<label htmlFor="apiKey">API Key</label>
+									<div className="password-input-container">
+										<input
+											type={showApiKey ? 'text' : 'password'}
+											id="apiKey"
+											placeholder="Enter your API key"
+											value={settings.apiKey}
+											onChange={handleApiKeyChange}
+										/>
+										<button
+											type="button"
+											className="password-toggle"
+											onClick={toggleApiKeyVisibility}
+											title={showApiKey ? 'Hide API key' : 'Show API key'}
+										>
+											{showApiKey ? '🙈' : '🔍'}
+										</button>
+										{settings.apiKey.trim() && (
 											<button
 												type="button"
-												className="secondary small"
-												onClick={() => removeArgument(index)}
+												onClick={onClearCredentials}
+												className="small"
+												title="Clear stored API key"
 											>
-												Remove
+												Clear
 											</button>
-										</div>
-									))}
+										)}
+									</div>
+									<div className="help-text">
+										API key is saved securely when you save settings. Required for cloud development and for deployment.
+									</div>
 								</div>
-								<button
-									onClick={addArgument}
-									className="secondary small"
-								>
-									Add Argument
-								</button>
-								<div className="help-text">Additional command-line arguments for the engine</div>
+								<div className="form-group">
+									<label htmlFor="hostUrl">Host URL</label>
+									<input
+										type="text"
+										id="hostUrl"
+										placeholder="your-server:5565"
+										value={settings.hostUrl}
+										onChange={handleHostUrlChange}
+									/>
+									<div className="help-text">Base URL of your hosted RocketRide server (e.g. myserver:5565)</div>
+								</div>
+								<div className="form-group">
+									<label htmlFor="autoConnect">Auto-connect on startup</label>
+									<div>
+										<input
+											type="checkbox"
+											id="autoConnect"
+											checked={settings.autoConnect}
+											onChange={handleAutoConnectChange}
+										/>
+										<label htmlFor="autoConnect">Automatically connect when extension starts</label>
+									</div>
+									<div className="help-text">Enable to connect automatically on startup</div>
+								</div>
+								<div className="form-group form-group-test">
+									<button
+										type="button"
+										className="secondary"
+										onClick={onTestDevelopmentConnection}
+										title="Test connection to the development server"
+									>
+										Test connection
+									</button>
+									<div className="help-text">Verify the development server URL and credentials</div>
+								</div>
+								{developmentTestMessage && (
+									<div className={`message message-inline ${developmentTestMessage.level}`}>
+										{developmentTestMessage.message}
+									</div>
+								)}
+							</>
+						)}
+
+						{/* Local */}
+						{settings.connectionMode === 'local' && (
+							<>
+								<div className="mode-config-desc">Run the server locally on your machine. The extension will download and manage the server for you.</div>
+								<div className="form-group">
+									<label htmlFor="serverVersion">Server Version</label>
+									<select
+										id="serverVersion"
+										value={settings.localEngineVersion}
+										onChange={handleVersionChange}
+										disabled={engineVersionsLoading}
+									>
+										<optgroup label="Recommended">
+											<option value="latest">&lt;Latest&gt;</option>
+											<option value="prerelease">&lt;Prerelease&gt;</option>
+										</optgroup>
+										<optgroup label={engineVersionsLoading ? 'Loading versions...' : 'All versions'}>
+											{engineVersions.map(v => (
+												<option key={v.tag_name} value={v.tag_name}>
+													{displayVersion(v.tag_name)}
+												</option>
+											))}
+										</optgroup>
+									</select>
+									<div className="help-text">Choose which server version to download. &lt;Latest&gt; gets the newest stable release.</div>
+								</div>
+								</>
+						)}
+					</div>
+
+					{/* Debug — shown for local and on-prem modes */}
+					{(settings.connectionMode === 'local' || settings.connectionMode === 'onprem') && (
+						<div className="mode-config-box">
+							<div className="form-group">
+								<div>
+									<input
+										type="checkbox"
+										id="localDebugOutput"
+										checked={settings.localDebugOutput}
+										onChange={(e) => onSettingsChange({ localDebugOutput: e.target.checked })}
+									/>
+									<label htmlFor="localDebugOutput">Full debug output</label>
+								</div>
+								<div className="help-text">Enable detailed server trace logging (see Output&#8594;RocketRide: Console)</div>
 							</div>
-						</>
-					)}
-					{settings.connectionMode !== 'local' && (
-						<div className="form-group">
-							<label htmlFor="autoConnect">Auto-connect on startup</label>
-							<div>
-								<input
-									type="checkbox"
-									id="autoConnect"
-									checked={settings.autoConnect}
-									onChange={handleAutoConnectChange}
-								/>
-								<label htmlFor="autoConnect">Automatically connect when VS Code starts</label>
-							</div>
-							<div className="help-text">Enable to connect automatically on startup</div>
-						</div>
-					)}
-					{settings.connectionMode !== 'local' && (
-						<>
-							<div className="form-group form-group-test">
-								<button
-									type="button"
-									className="secondary"
-									onClick={onTestDevelopmentConnection}
-									title="Test connection to the development server"
-								>
-									Test connection
-								</button>
-								<div className="help-text">Verify the development server URL and credentials</div>
-							</div>
-							{developmentTestMessage && (
-								<div className={`message message-inline ${developmentTestMessage.level}`}>
-									{developmentTestMessage.message}
+							{settings.connectionMode === 'local' && (
+								<div className="form-group">
+									<label htmlFor="engineArgs">Server Arguments</label>
+									<input
+										type="text"
+										id="engineArgs"
+										value={settings.localEngineArgs}
+										placeholder="--option=value --flag"
+										onChange={(e) => onSettingsChange({ localEngineArgs: e.target.value })}
+									/>
+									<div className="help-text">Additional command-line arguments passed to the server</div>
 								</div>
 							)}
-						</>
+						</div>
 					)}
 				</div>
 			</div>

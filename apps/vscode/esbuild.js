@@ -37,6 +37,11 @@ esbuild.build({
 	target: 'node16',
 	outfile,
 	external: ['vscode'],
+	alias: {
+		// docker-modem requires ssh2 at load time, but we only use local socket.
+		// Stub it out so no native .node binaries are needed.
+		'ssh2': path.resolve(__dirname, 'src/stubs/ssh2.js'),
+	},
 	mainFields: ['main'],
 	resolveExtensions: ['.ts', '.js', '.json'],
 	logLevel: 'info',

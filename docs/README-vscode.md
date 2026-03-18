@@ -52,6 +52,10 @@ Need inspiration? Check out our [example pipelines](https://docs.rocketride.org/
 | `rocketride.autoConnect` | `boolean` | `true` | Automatically connect to RocketRide server when extension activates |
 | `rocketride.pipelineRestartBehavior` | `string` | `"prompt"` | Behavior when a `.pipe` file changes while the pipeline is running: `"auto"`, `"manual"`, or `"prompt"` |
 | `rocketride.oauth2RootUrl` | `string` | `"https://oauth2.rocketride.ai"` | Root OAuth2 URL for the refresh path passed to the services OAuth2 endpoint |
+| `rocketride.integrations.copilot` | `boolean` | `false` | Enable RocketRide integration with GitHub Copilot |
+| `rocketride.integrations.claudeCode` | `boolean` | `false` | Enable RocketRide integration with Claude Code |
+| `rocketride.integrations.cursor` | `boolean` | `false` | Enable RocketRide integration with Cursor |
+| `rocketride.integrations.windsurf` | `boolean` | `false` | Enable RocketRide integration with Windsurf |
 
 ## Commands
 

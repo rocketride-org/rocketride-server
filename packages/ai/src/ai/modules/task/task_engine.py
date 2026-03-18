@@ -37,12 +37,13 @@ import aiofiles
 import time
 import socket
 import hashlib
+import shlex
 import shutil
 import re
 from typing import TYPE_CHECKING, Dict, Any, List, Optional
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from rocketlib import debug
+from rocketlib import args as startup_args
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS,
@@ -1452,7 +1453,22 @@ class Task(DAPBase):
                 child_args.append(f'--modelserver={modelserver}')
 
             user_args = self._launch_args.get('args', [])
-            child_args.extend(user_args)
+            for arg in user_args:
+                if ' ' in arg:
+                    try:
+                        child_args.extend(shlex.split(arg))
+                    except ValueError as e:
+                        self.debug_message(f"Failed to parse engine arg {arg!r}: {e}, using as-is")
+                        child_args.append(arg)
+                else:
+                    child_args.append(arg)
+
+            # Inherit parent engine's --trace setting if not explicitly provided
+            if not any(a.startswith('--trace=') for a in child_args):
+                for arg in startup_args():
+                    if arg.startswith('--trace='):
+                        child_args.append(arg)
+                        break
 
             await self._send_status_update()
 

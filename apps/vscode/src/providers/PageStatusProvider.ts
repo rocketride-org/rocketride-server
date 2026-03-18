@@ -861,7 +861,7 @@ export class PageStatusProvider {
 							source: viewState.sourceId,
 							pipeline: pipelineTransformed,
 							...(tracing ? { pipelineTraceLevel: 'full' } : {}),
-							args: ConfigManager.getInstance().getConfig().engineArgs
+							args: ConfigManager.getInstance().getEffectiveEngineArgs()
 						});
 					} catch (error: unknown) {
 						this.logger.error(`Unable to execute pipeline: ${error}`);

@@ -25,16 +25,21 @@
  * engine-manager.ts - Local Engine Backend Manager
  *
  * Manages the local backend: installs the engine binary (via EngineInstaller)
- * and runs the engine child process. Emits 'status' events for UI progress
- * and 'terminated' when the engine process dies unexpectedly.
+ * and runs the engine child process. Each VS Code window gets its own engine
+ * on a dynamically assigned port (--port=0). PID files track running engines
+ * for safe cleanup of old version directories.
+ *
+ * Emits 'status' events for UI progress and 'terminated' when the engine
+ * process dies unexpectedly.
  */
 
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import * as path from 'path';
 import { ChildProcess, spawn } from 'child_process';
 import { BaseManager, ManagerInfo } from './base-manager';
 import { EngineInstaller } from './engine-installer';
-import { ConfigManagerInfo } from '../config';
+import { ConfigManager, ConfigManagerInfo } from '../config';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 
@@ -43,10 +48,12 @@ export class EngineManager extends BaseManager {
 	private readonly logger = getLogger();
 	private child?: ChildProcess;
 	private started = false;
+	private actualPort?: number;
+	private pidFilePath?: string;
 
-constructor(extensionPath: string) {
+	constructor(enginesRoot: string) {
 		super();
-		this.installer = new EngineInstaller(extensionPath);
+		this.installer = new EngineInstaller(enginesRoot);
 	}
 
 	/**
@@ -54,6 +61,13 @@ constructor(extensionPath: string) {
 	 */
 	public getInstaller(): EngineInstaller {
 		return this.installer;
+	}
+
+	/**
+	 * Returns the actual port the engine is listening on (assigned by OS).
+	 */
+	public getActualPort(): number | undefined {
+		return this.actualPort;
 	}
 
 	/**
@@ -84,8 +98,9 @@ constructor(extensionPath: string) {
 			}
 		};
 
+		let executablePath: string;
 		try {
-			await this.installer.install(versionSpec, progress, token, githubToken);
+			executablePath = await this.installer.install(versionSpec, progress, token, githubToken);
 		} catch (error: unknown) {
 			if (error instanceof vscode.CancellationError) {
 				this.logger.output(`${icons.info} Engine download cancelled`);
@@ -99,7 +114,7 @@ constructor(extensionPath: string) {
 					const session = await vscode.authentication.getSession('github', [], { createIfNone: true });
 					if (session?.accessToken) {
 						githubToken = session.accessToken;
-						await this.installer.install(versionSpec, progress, token, githubToken);
+						executablePath = await this.installer.install(versionSpec, progress, token, githubToken);
 						// Fall through to start phase
 					} else {
 						throw new Error('GitHub API rate limit exceeded. Sign into GitHub (via Accounts menu) to increase the limit, then reconnect.');
@@ -118,8 +133,7 @@ constructor(extensionPath: string) {
 		// --- Phase 2: Start process ---
 		this.emit('status', 'Starting server...');
 
-		const executablePath = this.installer.getExecutablePath();
-		this.logger.output(`${icons.launch} Starting local server at ${config.local.host}:${config.local.port}`);
+		this.logger.output(`${icons.launch} Starting local server (dynamic port)`);
 
 		// Stop any existing process
 		if (this.child) {
@@ -127,16 +141,24 @@ constructor(extensionPath: string) {
 			await this.stopProcess();
 		}
 
+		const effectiveArgs = ConfigManager.getInstance().getEffectiveEngineArgs();
+
 		const args = [
 			'--autoterm',  // Exit when VS Code closes (stdin monitoring)
 			'./ai/eaas.py',
-			`--host=${config.local.host}`,
-			`--port=${config.local.port}`,
-			...config.engineArgs
+			'--host=localhost',
+			'--port=0',
+			...effectiveArgs
 		];
 
 		await this.startProcess(executablePath, args);
-		this.logger.output(`${icons.success} Local server started`);
+		this.logger.output(`${icons.success} Local server started on port ${this.actualPort}`);
+
+		// Fire-and-forget cleanup of old version directories
+		const currentDir = path.dirname(executablePath);
+		this.installer.cleanupOldVersions(currentDir).catch(err => {
+			this.logger.output(`${icons.warning} Failed to clean up old engines: ${err}`);
+		});
 	}
 
 	/**
@@ -151,8 +173,10 @@ constructor(extensionPath: string) {
 	 * Returns installed engine version info, or null if not installed.
 	 */
 	public getInfo(): ManagerInfo | null {
-		const version = this.installer.getInstalledVersion();
-		const publishedAt = this.installer.getInstalledPublishedAt();
+		const versionSpec = ConfigManager.getInstance().getConfig().local.engineVersion || 'latest';
+		const channel = versionSpec === 'prerelease' ? 'pre' as const : 'stable' as const;
+		const version = this.installer.getInstalledVersion(channel);
+		const publishedAt = this.installer.getInstalledPublishedAt(channel);
 		if (!version) {
 			return null;
 		}
@@ -160,11 +184,12 @@ constructor(extensionPath: string) {
 	}
 
 	// =========================================================================
-	// Process management (from former EngineServer)
+	// Process management
 	// =========================================================================
 
 	/**
 	 * Spawns the engine process and waits for the "Uvicorn running" ready message.
+	 * Parses the actual port from the Uvicorn output line.
 	 */
 	private startProcess(executablePath: string, args: string[]): Promise<void> {
 		this.logger.output(`${icons.launch} Starting DAP server: ${executablePath} ${args.join(' ')}`);
@@ -178,16 +203,35 @@ constructor(extensionPath: string) {
 			let processReady = false;
 			let processErrored = false;
 
+			// Write PID file for in-use detection by cleanup.
+			// Capture the path in a local so async handlers only remove *their own*
+			// PID file — not one belonging to a newly started child.
+			const myPidFile = this.child.pid
+				? path.join(path.dirname(executablePath), `engine-${this.child.pid}.pid`)
+				: undefined;
+
+			if (myPidFile) {
+				this.pidFilePath = myPidFile;
+				try {
+					fs.writeFileSync(myPidFile, String(this.child.pid));
+				} catch {
+					// Non-fatal — cleanup will use OS-level checks as fallback
+				}
+			}
+
 			this.child.on('error', (err) => {
 				if (!processReady && !processErrored) {
 					processErrored = true;
 					this.logger.output(`${icons.error} DAP server failed to launch: ${err.message}`);
-					this.cleanupProcess();
+					this.cleanupProcess(myPidFile);
 					reject(err);
 				}
 			});
 
 			this.child.on('exit', (code, signal) => {
+				// Clean up PID file on exit — only if it's still ours
+				this.removePidFile(myPidFile);
+
 				if (!processReady && !processErrored) {
 					processErrored = true;
 					this.logger.output(`${icons.error} DAP server exited during startup (code=${code}, signal=${signal})`);
@@ -203,12 +247,18 @@ constructor(extensionPath: string) {
 				this.emit('terminated', { code, signal });
 			});
 
-			const tryResolveReady = (): void => {
+			const portRegex = /Uvicorn running on https?:\/\/[\w.]+:(\d+)/;
+
+			const tryResolveReady = (msg: string): void => {
 				if (!processReady && !processErrored) {
-					processReady = true;
-					this.started = true;
-					this.logger.output(`${icons.success} DAP server is ready`);
-					resolve();
+					const match = msg.match(portRegex);
+					if (match) {
+						this.actualPort = parseInt(match[1], 10);
+						processReady = true;
+						this.started = true;
+						this.logger.output(`${icons.success} DAP server is ready (port ${this.actualPort})`);
+						resolve();
+					}
 				}
 			};
 
@@ -218,9 +268,9 @@ constructor(extensionPath: string) {
 				for (const message of output.split('\n')) {
 					const msg = message.trim();
 					if (msg) {
-						this.logger.console(msg.trim());
-						if (message.trim().includes('Uvicorn running')) {
-							tryResolveReady();
+						this.logger.console(msg);
+						if (msg.includes('Uvicorn running')) {
+							tryResolveReady(msg);
 						}
 					}
 				}
@@ -232,9 +282,9 @@ constructor(extensionPath: string) {
 				for (const message of output.split('\n')) {
 					const msg = message.trim();
 					if (msg) {
-						this.logger.console(msg.trim());
-						if (message.trim().includes('Uvicorn running')) {
-							tryResolveReady();
+						this.logger.console(msg);
+						if (msg.includes('Uvicorn running')) {
+							tryResolveReady(msg);
 						}
 					}
 				}
@@ -251,19 +301,23 @@ constructor(extensionPath: string) {
 			return Promise.resolve();
 		}
 		const child = this.child;
+		const pidFileToRemove = this.pidFilePath;
 		this.started = false;
 		this.child = undefined;
+		this.actualPort = undefined;
 
 		return new Promise<void>((resolve) => {
 			const timeout = setTimeout(() => {
 				if (!child.killed) {
 					child.kill('SIGKILL');
 				}
+				this.removePidFile(pidFileToRemove);
 				resolve();
 			}, 5000);
 
 			child.once('exit', () => {
 				clearTimeout(timeout);
+				this.removePidFile(pidFileToRemove);
 				resolve();
 			});
 
@@ -277,11 +331,30 @@ constructor(extensionPath: string) {
 		});
 	}
 
-	private cleanupProcess(): void {
+	private cleanupProcess(pidFile?: string): void {
 		this.started = false;
+		this.actualPort = undefined;
 		if (this.child && !this.child.killed) {
 			this.child.kill();
 		}
 		this.child = undefined;
+		this.removePidFile(pidFile);
+	}
+
+	/**
+	 * Removes a PID file only if it still matches the current this.pidFilePath.
+	 * This prevents a stale async handler from deleting a PID file that belongs
+	 * to a newly started child process.
+	 */
+	private removePidFile(expectedPath?: string): void {
+		if (!this.pidFilePath) return;
+		if (expectedPath && this.pidFilePath !== expectedPath) return;
+
+		try {
+			fs.unlinkSync(this.pidFilePath);
+		} catch {
+			// Ignore — file may already be gone
+		}
+		this.pidFilePath = undefined;
 	}
 }
