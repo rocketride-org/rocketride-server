@@ -2,7 +2,7 @@
 	"name": "rocketride",
 	"displayName": "RocketRide",
 	"description": "RocketRide extension for Visual Studio Code",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"publisher": "rocketride",
 	"repository": {
 		"type": "git",
@@ -439,6 +439,7 @@
 		"tar": "^7.5.8"
 	},
 	"files": [
+		"README.md",
 		"rocketride-dark-icon.png",
 		"rocketride-light-icon.png",
 		"rocketride.js",
