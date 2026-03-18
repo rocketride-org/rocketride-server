@@ -2,10 +2,6 @@
 
 Python SDK for the RocketRide Engine - build, run, and manage AI pipelines from Python.
 
-> [RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline platform.
-> This package lets you connect to a RocketRide engine, start pipelines, send data, stream results,
-> and build conversational AI - all from async Python.
-
 ## Quick Start
 
 ```bash
@@ -18,7 +14,7 @@ from rocketride import RocketRideClient
 
 async def main():
     async with RocketRideClient(uri="https://cloud.rocketride.ai", auth="my-key") as client:
-        result = await client.use(filepath="pipeline.json")
+        result = await client.use(filepath="pipeline.pipe")
         token = result["token"]
         out = await client.send(token, "Hello, pipeline!", objinfo={"name": "input.txt"}, mimetype="text/plain")
         print(out)
@@ -26,6 +22,12 @@ async def main():
 
 asyncio.run(main())
 ```
+
+Don't have a pipeline yet? Visit [RocketRide on GitHub](https://github.com/rocketride-org/rocketride-server) or download the extension directly in your IDE.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/install.png" alt="Install RocketRide extension" width="600">
+</p>
 
 ## What is RocketRide?
 
@@ -37,6 +39,10 @@ using a visual drag-and-drop canvas or code-first with TypeScript and Python SDK
 - **High-performance C++ engine** - production-grade speed and reliability
 - **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
 - **MIT licensed** - fully open-source, OSI-compliant
+
+You build your `.pipe` - and you run it against the fastest AI runtime available.
+
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/docs/images/canvas.png" alt="RocketRide visual canvas builder" width="800">
 
 ## Features
 
