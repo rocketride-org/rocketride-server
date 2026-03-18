@@ -120,7 +120,18 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 	 * and not processing) — mirroring the same guards the native drop path uses.
 	 */
 	useEffect(() => {
+		const isTrustedOrigin = (event: MessageEvent): boolean => {
+			try {
+				// In a VS Code webview or browser, we expect messages only from our own origin.
+				return typeof event.origin === 'string' && typeof window.origin === 'string' && event.origin === window.origin;
+			} catch {
+				// If for some reason origin is not accessible, fail closed.
+				return false;
+			}
+		};
+
 		const handleBridgedDrop = (event: MessageEvent) => {
+			if (!isTrustedOrigin(event)) return;
 			if (event.data?.type !== 'bridgedFileDrop' || !event.data.files) return;
 
 			if (!isConnected) {
@@ -148,6 +159,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 		 * highlight when the cursor is actually over it.
 		 */
 		const handleDragHover = (event: MessageEvent) => {
+			if (!isTrustedOrigin(event)) return;
 			if (event.data?.type === 'dragLeave') {
 				setIsDragOver(false);
 				return;
