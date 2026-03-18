@@ -2,10 +2,6 @@
 
 TypeScript/JavaScript SDK for the RocketRide Engine - build, run, and manage AI pipelines from Node.js or the browser.
 
-> [RocketRide](https://rocketride.org) is an open source, developer-native AI pipeline platform.
-> This package lets you connect to a RocketRide engine, start pipelines, send data, stream results,
-> and build conversational AI - all with full TypeScript support.
-
 ## Quick Start
 
 ```bash
@@ -25,21 +21,18 @@ const client = new RocketRideClient({
   uri: 'https://cloud.rocketride.ai',
 });
 await client.connect();
-const { token } = await client.use({ filepath: './pipeline.json' });
+const { token } = await client.use({ filepath: './pipeline.pipe' });
 const result = await client.send(token, 'Hello, pipeline!', { name: 'input.txt' }, 'text/plain');
 console.log(result);
 await client.terminate(token);
 await client.disconnect();
 ```
 
-## Features
+Don't have a pipeline yet? Visit [RocketRide on GitHub](https://github.com/rocketride-org/rocketride-server) or download the extension directly in your IDE.
 
-- **Pipeline execution** - Start with `use()`, send data via `send()`, `sendFiles()`, or `pipe()`
-- **Chat** - Conversational AI via `chat()` and `Question`
-- **Event streaming** - Real-time events via `onEvent` and `setEvents()`
-- **File upload** - `sendFiles()` with progress; streaming with `pipe()`
-- **Connection lifecycle** - Optional persist mode, reconnection, and callbacks (`onConnected`, `onDisconnected`, `onConnectError`)
-- **Full TypeScript support** - Complete type definitions
+<p align="center">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/install.png" alt="Install RocketRide extension" width="600">
+</p>
 
 ## What is RocketRide?
 
@@ -51,6 +44,19 @@ using a visual drag-and-drop canvas or code-first with TypeScript and Python SDK
 - **High-performance C++ engine** - production-grade speed and reliability
 - **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
 - **MIT licensed** - fully open source, OSI-compliant
+
+You build your `.pipe` - and you run it against the fastest AI runtime available.
+
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/docs/images/canvas.png" alt="RocketRide visual canvas builder" width="800">
+
+## Features
+
+- **Pipeline execution** - Start with `use()`, send data via `send()`, `sendFiles()`, or `pipe()`
+- **Chat** - Conversational AI via `chat()` and `Question`
+- **Event streaming** - Real-time events via `onEvent` and `setEvents()`
+- **File upload** - `sendFiles()` with progress; streaming with `pipe()`
+- **Connection lifecycle** - Optional persist mode, reconnection, and callbacks (`onConnected`, `onDisconnected`, `onConnectError`)
+- **Full TypeScript support** - Complete type definitions
 
 ---
 
