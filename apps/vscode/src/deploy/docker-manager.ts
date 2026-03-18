@@ -43,6 +43,10 @@ export class DockerManager {
 	private docker: Docker;
 	private readonly logger = getLogger();
 
+	// ARM Macs need to pull amd64 images since GHCR may not have arm64 builds
+	private readonly needsPlatformOverride =
+		process.platform === 'darwin' && process.arch === 'arm64';
+
 	constructor() {
 		this.docker = this.createClient();
 	}
@@ -118,6 +122,7 @@ export class DockerManager {
 		const container = await this.docker.createContainer({
 			name: CONTAINER_NAME,
 			Image: fullImage,
+			...(this.needsPlatformOverride ? { platform: 'linux/amd64' } : {}),
 			ExposedPorts: { [`${CONTAINER_PORT}/tcp`]: {} },
 			HostConfig: {
 				PortBindings: {
@@ -211,6 +216,7 @@ export class DockerManager {
 		const container = await this.docker.createContainer({
 			name: CONTAINER_NAME,
 			Image: fullImage,
+			...(this.needsPlatformOverride ? { platform: 'linux/amd64' } : {}),
 			ExposedPorts: { [`${CONTAINER_PORT}/tcp`]: {} },
 			HostConfig: {
 				PortBindings: {
@@ -275,9 +281,10 @@ export class DockerManager {
 
 	private pullImage(fullImage: string, onProgress?: ProgressCallback): Promise<void> {
 		return new Promise((resolve, reject) => {
-			this.docker.pull(fullImage, (err: Error | null, stream: NodeJS.ReadableStream) => {
-				if (err) {
-					reject(this.mapError(err));
+			const opts = this.needsPlatformOverride ? { platform: 'linux/amd64' } : {};
+			this.docker.pull(fullImage, opts, (err: Error | null, stream?: NodeJS.ReadableStream) => {
+				if (err || !stream) {
+					reject(this.mapError(err ?? new Error('No stream returned from pull')));
 					return;
 				}
 				this.docker.modem.followProgress(

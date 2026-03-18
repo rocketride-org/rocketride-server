@@ -20,6 +20,8 @@ import { EngineInstaller } from '../connection/engine-installer';
 
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
+import { getConnectionManager, getConfigManager } from '../extension';
+import { SERVICE_PORT } from '../deploy/service-manager';
 
 export class PageDeployProvider {
 	private webviewPanel?: vscode.WebviewPanel;
@@ -173,6 +175,30 @@ export class PageDeployProvider {
 		this.serviceManager.setElevationPassword(password);
 	}
 
+	/**
+	 * Stops the locally-managed engine (if running) so the service can bind the port.
+	 */
+	private async stopLocalEngine(): Promise<void> {
+		const cm = getConnectionManager();
+		if (cm) {
+			this.postMessage({ type: 'serviceProgress', message: 'Stopping local engine...' });
+			await cm.disconnect();
+		}
+	}
+
+	/**
+	 * Switches the extension connection to point at the deployed service.
+	 */
+	private async connectToService(): Promise<void> {
+		const configMgr = getConfigManager();
+		if (!configMgr) return;
+
+		this.postMessage({ type: 'serviceProgress', message: 'Connecting to service...' });
+		await configMgr.updateHostUrl(`http://localhost:${SERVICE_PORT}`);
+		await configMgr.updateConnectionMode('onprem');
+		// ConnectionManager picks up the config change automatically and reconnects
+	}
+
 	private async serviceInstall(versionSpec: string): Promise<void> {
 		const githubToken = await this.getGithubToken();
 		const installer = this.getInstaller();
@@ -180,11 +206,14 @@ export class PageDeployProvider {
 		// Step 1: Request sudo credentials if needed (before any elevated operation)
 		await this.ensureSudoCredentials();
 
-		// Step 2: Create install root with elevated privileges so EngineInstaller can write to it
+		// Step 2: Stop local engine so the service can bind the port
+		await this.stopLocalEngine();
+
+		// Step 3: Create install root with elevated privileges so EngineInstaller can write to it
 		this.postMessage({ type: 'serviceProgress', message: 'Preparing install directory...' });
 		await this.serviceManager.prepareInstallRoot();
 
-		// Step 3: Download engine
+		// Step 4: Download engine
 		const progress = {
 			report: (value: { message?: string }) => {
 				if (value.message) this.postMessage({ type: 'serviceProgress', message: value.message });
@@ -207,6 +236,7 @@ export class PageDeployProvider {
 
 		// Step 5: Wait for service to be fully running
 		await this.waitForServiceRunning();
+		await this.connectToService();
 		this.postMessage({ type: 'serviceComplete' });
 	}
 
@@ -261,14 +291,17 @@ export class PageDeployProvider {
 
 		// Step 6: Wait for service to be fully running
 		await this.waitForServiceRunning();
+		await this.connectToService();
 		this.postMessage({ type: 'serviceComplete' });
 	}
 
 	private async serviceStart(): Promise<void> {
 		await this.ensureSudoCredentials();
+		await this.stopLocalEngine();
 		this.postMessage({ type: 'serviceProgress', message: 'Starting service...' });
 		await this.serviceManager.start();
 		await this.waitForServiceRunning();
+		await this.connectToService();
 		this.postMessage({ type: 'serviceComplete' });
 	}
 
@@ -415,7 +448,7 @@ export class PageDeployProvider {
 	// =========================================================================
 
 	private static readonly CONFIG_PATH = path.join(
-		process.env.PROGRAMDATA || (process.platform === 'darwin' ? '/Library/Application Support' : path.join(os.homedir(), '.config')),
+		process.env.PROGRAMDATA || (process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support') : path.join(os.homedir(), '.config')),
 		'RocketRide', 'config.json'
 	);
 
@@ -554,7 +587,7 @@ export class PageDeployProvider {
 	// =========================================================================
 
 	private static readonly DOCKER_CONFIG_PATH = path.join(
-		process.env.PROGRAMDATA || (process.platform === 'darwin' ? '/Library/Application Support' : path.join(os.homedir(), '.config')),
+		process.env.PROGRAMDATA || (process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support') : path.join(os.homedir(), '.config')),
 		'RocketRide', 'docker-config.json'
 	);
 
