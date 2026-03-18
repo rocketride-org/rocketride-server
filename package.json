@@ -1,6 +1,6 @@
 {
 	"name": "rocketride-server",
-	"version": "3.1.0",
+	"version": "3.1.1",
 	"description": "RocketRide Server - A high-performance data processing engine with modular nodes, AI capabilities, and cross-platform clients",
 	"private": true,
 	"license": "MIT",
