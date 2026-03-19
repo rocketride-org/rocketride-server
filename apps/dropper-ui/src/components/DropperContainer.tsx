@@ -155,6 +155,29 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 		};
 	}, [addFiles, isConnected, isProcessing]);
 
+	// Handle files selected via VS Code's native file dialog (fallback for
+	// Cursor on macOS where drag-and-drop doesn't work).
+	useEffect(() => {
+		const handleNativeFiles = (event: MessageEvent) => {
+			if (event.source !== window.parent) return;
+			if (event.data?.type !== 'nativeFilesSelected' || !Array.isArray(event.data.files)) return;
+			if (!isConnected) {
+				setStatusMessage('Please wait for connection before uploading files');
+				return;
+			}
+			if (isProcessing) return;
+
+			const dt = new DataTransfer();
+			event.data.files.forEach((f: { buffer: number[]; name: string; type: string; lastModified: number }) =>
+				dt.items.add(new File([new Uint8Array(f.buffer)], f.name, { type: f.type, lastModified: f.lastModified }))
+			);
+			addFiles(dt.files);
+		};
+
+		window.addEventListener('message', handleNativeFiles);
+		return () => window.removeEventListener('message', handleNativeFiles);
+	}, [addFiles, isConnected, isProcessing]);
+
 	/**
 	 * Auto-switch to the most relevant tab when results are available
 	 * Priority: text > tables > images > results
@@ -229,6 +252,17 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 	}, [addFiles, isConnected]);
 
 	/**
+	 * Opens VS Code's native file dialog via the extension host.
+	 * Primary upload method for Cursor on macOS where drag-and-drop
+	 * is intercepted by the Cocoa layer before reaching the webview.
+	 */
+	const isVSCode = window.parent !== window;
+	const requestNativeFileDialog = useCallback(() => {
+		if (!isVSCode) return;
+		window.parent.postMessage({ type: 'requestFileDialog' }, '*');
+	}, [isVSCode]);
+
+	/**
 	 * Clears all uploaded files and resets state
 	 * Returns to default results tab and disables compare mode
 	 */
@@ -284,6 +318,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 								onDragLeave={handleDragLeave}
 								onDrop={handleDrop}
 								disabled={!isConnected}
+								onBrowse={isVSCode ? requestNativeFileDialog : undefined}
 							/>
 
 							{/* List of uploaded files */}

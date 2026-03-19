@@ -345,6 +345,23 @@ body {
 	margin: 0;
 }
 
+.browse-files-btn {
+	margin-top: 8px;
+	padding: 8px 20px;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--bg-primary);
+	background: var(--accent-primary);
+	border: none;
+	border-radius: 6px;
+	cursor: pointer;
+	transition: background 0.15s, opacity 0.15s;
+}
+
+.browse-files-btn:hover {
+	opacity: 0.85;
+}
+
 /* Animated spinner for loading states */
 @keyframes spin {
 	from {

@@ -769,6 +769,9 @@ export class PageStatusProvider {
 									if (event.data.type === 'copyText' && event.data.text) {
 										vscode.postMessage({ type: 'copyText', text: event.data.text });
 									}
+									if (event.data.type === 'requestFileDialog') {
+										vscode.postMessage({ type: 'requestFileDialog' });
+									}
 								}
 							});
 
@@ -784,6 +787,12 @@ export class PageStatusProvider {
 									iframe.contentWindow.postMessage({
 										type: 'paste',
 										text: msg.text
+									}, iframeOrigin);
+								}
+								if (msg.type === 'nativeFilesSelected' && iframe.contentWindow) {
+									iframe.contentWindow.postMessage({
+										type: 'nativeFilesSelected',
+										files: msg.files
 									}, iframeOrigin);
 								}
 							});
@@ -803,6 +812,33 @@ export class PageStatusProvider {
 				}
 				if (msg.type === 'copyText' && msg.text) {
 					await vscode.env.clipboard.writeText(msg.text);
+				}
+				if (msg.type === 'requestFileDialog') {
+					const uris = await vscode.window.showOpenDialog({
+						canSelectMany: true,
+						canSelectFiles: true,
+						canSelectFolders: false,
+						title: 'Select files to upload'
+					});
+					if (uris && uris.length > 0) {
+						const fs = await import('fs');
+						const path = await import('path');
+						const fileDataArray: { name: string; type: string; size: number; lastModified: number; buffer: number[] }[] = [];
+						for (const uri of uris) {
+							const buffer = fs.readFileSync(uri.fsPath);
+							fileDataArray.push({
+								name: path.basename(uri.fsPath),
+								type: 'application/octet-stream',
+								size: buffer.length,
+								lastModified: Date.now(),
+								buffer: Array.from(buffer)
+							});
+						}
+						panel.webview.postMessage({
+							type: 'nativeFilesSelected',
+							files: fileDataArray
+						});
+					}
 				}
 			});
 
