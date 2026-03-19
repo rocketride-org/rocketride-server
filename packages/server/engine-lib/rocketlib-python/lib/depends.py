@@ -457,7 +457,6 @@ def _compile_constraints(constraints_path: str):
             '--emit-index-url',  # Preserve --extra-index-url etc. so install/dry-run can find packages (e.g. torch+cu128)
         ]
     )
-    print(f'Running: {cmd}')
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=False, stdin=subprocess.PIPE, encoding='utf-8', errors='replace', cwd=exe_dir)
 
     if result.returncode != 0:
@@ -674,7 +673,6 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
 
     cmd = _build_cmd(args)
     debug(f'Dry-run: {cmd}')
-    print(f'Running: {cmd}')
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=False, stdin=subprocess.PIPE, cwd=exe_dir)
 
     # Check if dry-run failed (e.g., dependency resolution error)
@@ -754,7 +752,6 @@ def _install_requirements(requirements_path: str, constraints_path: str):
 
     # Run uv and stream output
     cmd = _build_cmd(uv_args)
-    print(f'Running: {cmd}')
     proc = subprocess.Popen(
         cmd,
         shell=True,
@@ -889,7 +886,6 @@ def main():
 
             # Run uv
             cmd = _build_cmd(uv_args)
-            print(f'Running: {cmd}')
             result = subprocess.run(cmd, shell=True, cwd=exe_dir)
             sys.exit(result.returncode)
 
