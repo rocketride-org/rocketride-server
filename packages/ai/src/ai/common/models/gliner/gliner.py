@@ -65,6 +65,7 @@ class GLiNERLoader(BaseLoader):
             Tuple of (model_object, metadata_dict, gpu_index)
         """
         GLiNERLoader._ensure_dependencies()
+        GLiNERLoader._patch_mecab()
 
         from gliner import GLiNER as GLiNERModel
 
@@ -109,6 +110,53 @@ class GLiNERLoader(BaseLoader):
         }
 
         return model, metadata, gpu_index
+
+    @staticmethod
+    def _patch_mecab() -> None:
+        """
+        Patch python-mecab-ko to avoid pybind11::stop_iteration crash on Python 3.12 / Linux.
+
+        python-mecab-ko 1.3.7 iterates over the MeCab lattice via `for span, node in lattice`,
+        which triggers a pybind11::stop_iteration C++ exception that escapes and terminates
+        the process on Python 3.12/Linux. The fix replaces the iteration with bos_node().next
+        traversal that computes spans from node.rlength / node.length directly.
+        """
+        import sys
+
+        if sys.platform == 'win32':
+            return  # Windows is not affected; its MSVC C++ runtime handles this correctly
+
+        # On Linux and macOS, python-mecab-ko 1.3.7 crashes with:
+        #   libc++abi: terminating due to uncaught exception of type pybind11::stop_iteration
+        # The culprit is `for span, node in lattice` in mecab/mecab.py — pybind11's stop_iteration
+        # C++ exception escapes to the runtime and calls std::terminate() instead of being
+        # translated to Python StopIteration. Replace it with bos_node()+.next traversal.
+        try:
+            import mecab as _mecab_pkg
+            from mecab.types import Morpheme
+
+            def _patched_parse(self, sentence: str):
+                from mecab.utils import create_lattice
+                from mecab.mecab import MeCabError
+
+                lattice = create_lattice(sentence)
+                if not self._tagger.parse(lattice):
+                    raise MeCabError(self._tagger.what())
+                morphemes = []
+                node = lattice.bos_node()
+                pos = 0
+                while node is not None:
+                    rl = node.rlength
+                    if node.surface:
+                        start = pos + (rl - node.length)
+                        morphemes.append(Morpheme._from_node((start, pos + rl), node))
+                    pos += rl
+                    node = node.next
+                return morphemes
+
+            _mecab_pkg.MeCab.parse = _patched_parse
+        except Exception:
+            pass  # mecab not installed; gliner_ko won't work but won't crash
 
     @staticmethod
     def preprocess(model: Any, inputs: List[Dict], metadata: Optional[Dict] = None) -> Dict[str, Any]:
@@ -244,7 +292,7 @@ class GLiNER:
     """
     User-facing GLiNER API with automatic local/remote detection.
 
-    Used by connectors like anonymize. Automatically routes to model server 
+    Used by connectors like anonymize. Automatically routes to model server
     if available, otherwise runs locally using GLiNERLoader.
 
     Usage:
@@ -433,4 +481,3 @@ class GLiNER:
     def metadata(self) -> Dict:
         """Get model metadata."""
         return self._metadata
-
