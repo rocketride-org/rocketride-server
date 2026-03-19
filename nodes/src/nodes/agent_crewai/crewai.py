@@ -22,7 +22,12 @@
 # =============================================================================
 
 """
-CrewAI driver implementing the shared `ai.common.agent.AGENT` interface.
+CrewAI drivers implementing the shared `ai.common.agent.AGENT` interface.
+
+Contains:
+  - CrewAgentBase: shared LLM/tool-binding logic
+  - CrewDriver:    sub-agent mode / standalone single-agent Crew
+  - OrchestratorDriver: hierarchical multi-agent Crew
 """
 
 from __future__ import annotations
@@ -36,52 +41,38 @@ from ai.common.agent import AgentBase
 from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
 from rocketlib import ToolDescriptor
 
-_DEFAULT_GOAL = 'Complete the assigned task using available tools.'
+
+# ── Shared utilities ──────────────────────────────────────────────────────────
+
+def _safe_str(v: Any) -> str:
+    try:
+        return '' if v is None else str(v)
+    except Exception:
+        return ''
+
+
+_DEFAULT_GOAL = (
+    'Complete the assigned task using the minimum tool calls needed. '
+    'Once you have sufficient information to answer, stop immediately and return your Final Answer.'
+)
 _DEFAULT_BACKSTORY = (
     'You are a specialized agent in a multi-agent pipeline. '
-    'Use the tools available to you and complete your assigned task thoroughly.'
+    'Use tools when necessary. As soon as you have enough information to answer, stop and provide your Final Answer. '
+    'Do not make additional tool calls beyond what is needed.'
 )
-_DEFAULT_EXPECTED_OUTPUT = 'A thorough, accurate result for the assigned task.'
+_DEFAULT_EXPECTED_OUTPUT = 'A clear, direct answer to the assigned task.'
 
 
-class CrewDriver(AgentBase):
-    FRAMEWORK = 'crewai'
+# ── CrewAgentBase ─────────────────────────────────────────────────────────────
 
-    def __init__(self, iGlobal: Any, *, process: Any = None, role: str = 'Assistant', task_description: str = ''):
-        """
-        Initialize the CrewDriver.
-
-        iGlobal is passed to AgentBase so it can load config/instructions.
-        """
-        super().__init__(iGlobal)
-        self._process = process
-        self._role = role
-        self._task_description = task_description
-
-    def describe(self, pSelf: Any) -> Any:
-        """
-        Return a DescribeResponse for crewai.describe fan-out.
-
-        Called by IInstance.invoke() when the orchestrator fans out crewai.describe.
-        Stores the full pSelf IInstance in `invoke` so AgentHostServices(d.invoke)
-        can call d.invoke.instance.* correctly.
-        """
-        from rocketlib.types import IInvokeCrew
-
-        pipe_type = pSelf.instance.pipeType
-        node_id = str(pipe_type.get('id') if isinstance(pipe_type, dict) else getattr(pipe_type, 'id', '')) or ''
-        return IInvokeCrew.DescribeResponse(
-            role=self._role,
-            task_description=self._task_description,
-            node_id=node_id,
-            invoke=pSelf,
-        )
+class CrewAgentBase(AgentBase):
+    """Shared base for CrewDriver and OrchestratorDriver."""
 
     def _bind_framework_llm(
         self,
         *,
         host: AgentHost,
-        call_llm: Callable[..., str],
+        call_llm_text: Callable[..., str],
         ctx: Dict[str, Any],
     ) -> Any:
 
@@ -100,7 +91,7 @@ class CrewDriver(AgentBase):
                 **kwargs: Any,
             ) -> Union[str, Any]:
                 stop_words = getattr(self, 'stop', None)
-                return call_llm(messages, stop_words=stop_words)
+                return call_llm_text(messages, stop_words=stop_words)
 
         return HostInvokeLLM()
 
@@ -110,12 +101,11 @@ class CrewDriver(AgentBase):
         host: AgentHost,
         tool_descriptors: List[ToolDescriptor],
         invoke_tool: Callable[..., Any],
-        log_tool_call: Callable[..., None],
         ctx: Dict[str, Any],
     ) -> List[Any]:
 
         from crewai.tools import BaseTool
-        from pydantic import BaseModel, ConfigDict, Field, create_model  # noqa: E501
+        from pydantic import BaseModel, ConfigDict, Field, create_model
 
         class _ToolInput(BaseModel):
             input: Any = Field(default=None, description='Tool input payload')
@@ -161,11 +151,6 @@ class CrewDriver(AgentBase):
                     out = {'error': str(e), 'type': type(e).__name__}
 
                 try:
-                    log_tool_call(tool_name=self.name, input={'input': input, **kwargs}, output=out)
-                except Exception:
-                    pass
-
-                try:
                     return json.dumps(out, default=str) if isinstance(out, (dict, list)) else _safe_str(out)
                 except Exception:
                     return _safe_str(out)
@@ -191,6 +176,38 @@ class CrewDriver(AgentBase):
             tools.append(HostTool(name=name, description=desc, args_schema=schema_cls))
         return tools
 
+
+# ── CrewDriver ────────────────────────────────────────────────────────────────
+
+class CrewDriver(CrewAgentBase):
+    """Sub-agent mode / standalone single-agent Crew."""
+
+    FRAMEWORK = 'crewai'
+
+    def __init__(self, iGlobal: Any, *, process: Any = None, role: str = 'Assistant', task_description: str = ''):
+        super().__init__(iGlobal)
+        self._process = process
+        self._role = role
+        self._task_description = task_description
+
+    def describe(self, pSelf: Any) -> Any:
+        """Return a DescribeResponse for crewai.describe fan-out.
+
+        Called by IInstance.invoke() when the orchestrator fans out crewai.describe.
+        Stores the full pSelf IInstance in `invoke` so AgentHostServices(d.invoke)
+        can call d.invoke.instance.* correctly.
+        """
+        from rocketlib.types import IInvokeCrew
+
+        pipe_type = pSelf.instance.pipeType
+        node_id = str(pipe_type.get('id') if isinstance(pipe_type, dict) else getattr(pipe_type, 'id', '')) or ''
+        return IInvokeCrew.DescribeResponse(
+            role=self._role,
+            task_description=self._task_description,
+            node_id=node_id,
+            invoke=pSelf,
+        )
+
     def _run(
         self,
         *,
@@ -201,7 +218,7 @@ class CrewDriver(AgentBase):
         run_id = ctx.get('run_id', '')
         debug('agent_crewai driver _run start run_id={}'.format(run_id))
 
-        from crewai import Agent, Crew, Task  # type: ignore
+        from crewai import Agent, Crew, Task
 
         tool_descriptors = self.discover_tools(host=host)
 
@@ -216,12 +233,11 @@ class CrewDriver(AgentBase):
         def _invoke_tool(tool_name: str, input: Any = None, kwargs: Optional[Dict[str, Any]] = None) -> Any:  # noqa: A002
             return self.invoke_host_tool(host=host, tool_name=tool_name, input=input, kwargs=kwargs)
 
-        llm = self._bind_framework_llm(host=host, call_llm=_call_llm_text, ctx=ctx)
+        llm = self._bind_framework_llm(host=host, call_llm_text=_call_llm_text, ctx=ctx)
         tools_for_agent = self._bind_framework_tools(
             host=host,
             tool_descriptors=tool_descriptors,
             invoke_tool=_invoke_tool,
-            log_tool_call=lambda **_: None,
             ctx=ctx,
         )
 
@@ -234,7 +250,6 @@ class CrewDriver(AgentBase):
             verbose=False,
         )
 
-        # Use configured task_description if set, otherwise fall back to the incoming prompt
         from ai.common.agent._internal.utils import extract_prompt
         prompt = extract_prompt(agent_input.question) if hasattr(agent_input, 'question') else ''
         task_text = self._task_description or prompt or ''
@@ -318,8 +333,194 @@ class CrewDriver(AgentBase):
         return final_text, result
 
 
-def _safe_str(v: Any) -> str:
-    try:
-        return '' if v is None else str(v)
-    except Exception:
-        return ''
+# ── OrchestratorDriver ────────────────────────────────────────────────────────
+
+_MGR_ROLE = 'Orchestrator'
+_MGR_GOAL = (
+    'Coordinate the team to complete the user request. '
+    'Delegate to each available agent exactly once.'
+    'Accept their first response without asking for revisions or improvements. '
+    'When all agents have responded, synthesize and return the final answer.'
+)
+_MGR_BACKSTORY = (
+    'You are a senior orchestrator managing a team of specialized agents. '
+    'Delegate tasks to the right agent and synthesize their outputs into a final answer.'
+)
+
+
+class OrchestratorDriver(CrewAgentBase):
+    """Hierarchical multi-agent Crew.
+
+    Fans out `crewai.describe` to all nodes on the 'crewai' invoke channel,
+    assembles each into a CrewAI Agent + Task, and kicks off a hierarchical
+    Crew with this node acting as the manager.
+
+    Does NOT implement `describe()` — orchestrators cannot be used as sub-agents.
+    """
+
+    FRAMEWORK = 'crewai_orchestrator'
+
+    def __init__(self, iGlobal: Any):
+        super().__init__(iGlobal)
+        # Stash for pSelf — needed in _run() to call pSelf.instance.invoke('crewai', ...).
+        # Not thread-safe; safe because pipeline runs are sequential per node instance.
+        self._current_pSelf: Any = None
+
+    def run_agent(self, pSelf: Any, question: Any, *, emit_answers_lane: bool = True) -> Any:
+        """Override to stash pSelf before delegating to AgentBase.run_agent()."""
+        self._current_pSelf = pSelf
+        try:
+            return super().run_agent(pSelf, question, emit_answers_lane=emit_answers_lane)
+        finally:
+            self._current_pSelf = None
+
+    def _run(
+        self,
+        *,
+        agent_input: AgentInput,
+        host: AgentHost,
+        ctx: Dict[str, Any],
+    ) -> AgentRunResult:
+        from crewai import Agent, Crew, Process, Task
+        from rocketlib.types import IInvokeCrew
+        from ai.common.agent._internal.host import AgentHostServices
+
+        run_id = ctx.get('run_id', '')
+        prompt = _safe_str(agent_input.question.getPrompt() if hasattr(agent_input, 'question') else '')
+        debug('agent_crewai_orchestrator _run start run_id={} prompt_len={}'.format(run_id, len(prompt)))
+
+        pSelf = self._current_pSelf
+
+        # 1. Discover all connected sub-agents via per-node invoke (mirrors the tool
+        #    discovery pattern in AgentHostServices.Tools.__init__).
+        #    A no-nodeId invoke stops at the first successful handler, so we iterate
+        #    each crewai node individually with nodeId= to reach all of them.
+        crewai_node_ids = pSelf.instance.getControllerNodeIds('crewai')
+        if not crewai_node_ids:
+            raise RuntimeError('CrewAI Orchestrator: no sub-agents connected on the crewai channel')
+
+        descriptors = []
+        for node_id in crewai_node_ids:
+            req = IInvokeCrew.Describe()
+            try:
+                pSelf.instance.invoke('crewai', req, nodeId=node_id)
+            except Exception:
+                pass
+            for agent_desc in req.agents:
+                if agent_desc is not None:
+                    descriptors.append(agent_desc)
+
+        if not descriptors:
+            raise RuntimeError('CrewAI Orchestrator: no sub-agents responded to crewai.describe')
+
+        # 2. Build the manager's LLM (uses this orchestrator's own llm channel).
+        def _mgr_call_llm_text(messages: Any, stop_words: Any = None, _h: AgentHost = host) -> str:
+            return self.call_host_llm(
+                host=_h,
+                messages=messages,
+                question_role=_MGR_ROLE,
+                stop_words=stop_words,
+            )
+
+        manager_llm = self._bind_framework_llm(host=host, call_llm_text=_mgr_call_llm_text, ctx=ctx)
+
+        # 3. Build per-sub-agent Agent + Task.
+        # d.invoke is the sub-agent's full pSelf IInstance.
+        # Default-arg capture (_h, _role) prevents closure-in-loop bugs.
+        sub_agents: List[Any] = []
+        sub_tasks: List[Any] = []
+
+        for d in descriptors:
+            sub_host = AgentHostServices(d.invoke)
+
+            def _sub_call_llm_text(
+                messages: Any,
+                stop_words: Any = None,
+                _h: Any = sub_host,
+                _role: str = d.role,
+            ) -> str:
+                return self.call_host_llm(
+                    host=_h,
+                    messages=messages,
+                    question_role=_role,
+                    stop_words=stop_words,
+                )
+
+            def _sub_invoke_tool(
+                tool_name: str,
+                input: Any = None,  # noqa: A002
+                kwargs: Optional[Dict[str, Any]] = None,
+                _h: Any = sub_host,
+            ) -> Any:
+                return self.invoke_host_tool(host=_h, tool_name=tool_name, input=input, kwargs=kwargs)
+
+            sub_tool_descs = self.discover_tools(host=sub_host)
+            sub_llm = self._bind_framework_llm(host=sub_host, call_llm_text=_sub_call_llm_text, ctx=ctx)
+            sub_tools = self._bind_framework_tools(
+                host=sub_host,
+                tool_descriptors=sub_tool_descs,
+                invoke_tool=_sub_invoke_tool,
+                ctx=ctx,
+            )
+
+            agent_obj = Agent(
+                role=d.role,
+                goal=_DEFAULT_GOAL,
+                backstory=_DEFAULT_BACKSTORY,
+                tools=sub_tools,
+                llm=sub_llm,
+                verbose=False,
+                max_iter=3,
+                allow_delegation=False,
+            )
+
+            task_text = d.task_description or ''
+            if not task_text:
+                task_text = prompt or 'Complete the user request.'
+            elif prompt:
+                task_text = f'{task_text}\n\nUser request: {prompt}'
+            task_desc = task_text.replace('{', '{{').replace('}', '}}')
+
+            task_obj = Task(
+                description=task_desc,
+                expected_output=_DEFAULT_EXPECTED_OUTPUT,
+                agent=agent_obj,
+            )
+
+            sub_agents.append(agent_obj)
+            sub_tasks.append(task_obj)
+
+        # 4. Build manager agent. The user's prompt goes into backstory (background context)
+        #    rather than the goal so it doesn't drive active reasoning on every LLM call.
+        #    The goal stays generic: delegate once, return the result.
+        manager_backstory = _MGR_BACKSTORY
+        if prompt:
+            escaped_prompt = prompt.replace('{', '{{').replace('}', '}}')
+            manager_backstory = f'{_MGR_BACKSTORY}\n\nBackground context — user request: {escaped_prompt}'
+
+        manager_agent = Agent(
+            role=_MGR_ROLE,
+            goal=_MGR_GOAL,
+            backstory=manager_backstory,
+            llm=manager_llm,
+            verbose=False,
+            allow_delegation=True,
+            max_iter=len(descriptors) + 2,
+        )
+
+        # 5. Assemble and kick off the hierarchical Crew.
+        crew = Crew(
+            agents=sub_agents,
+            tasks=sub_tasks,
+            process=Process.hierarchical,
+            manager_agent=manager_agent,
+            planning=True,
+            planning_llm=manager_llm,
+            verbose=False,
+        )
+
+        debug('agent_crewai_orchestrator kicking off crew with {} sub-agents run_id={}'.format(len(sub_agents), run_id))
+        result = crew.kickoff(inputs={'user_request': prompt} if prompt else {})
+
+        final_text = _safe_str(getattr(result, 'raw', None)) or _safe_str(result)
+        return final_text, result

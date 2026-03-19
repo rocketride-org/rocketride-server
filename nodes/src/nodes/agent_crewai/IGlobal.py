@@ -52,7 +52,7 @@ class IGlobal(IGlobalBase):
         conn_config = conn_config if isinstance(conn_config, dict) else {}
 
         if self.glb.logicalType == 'agent_crewai_orchestrator':
-            from .orchestrator_driver import OrchestratorDriver
+            from .crewai import OrchestratorDriver
             self.agent = OrchestratorDriver(self)
         else:
             self.role = str(conn_config.get('role') or 'Assistant').strip() or 'Assistant'
