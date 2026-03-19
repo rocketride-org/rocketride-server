@@ -821,17 +821,16 @@ export class PageStatusProvider {
 						title: 'Select files to upload'
 					});
 					if (uris && uris.length > 0) {
-						const fs = await import('fs');
 						const path = await import('path');
 						const fileDataArray: { name: string; type: string; size: number; lastModified: number; buffer: number[] }[] = [];
 						for (const uri of uris) {
-							const buffer = fs.readFileSync(uri.fsPath);
+							const bytes = await vscode.workspace.fs.readFile(uri);
 							fileDataArray.push({
 								name: path.basename(uri.fsPath),
 								type: 'application/octet-stream',
-								size: buffer.length,
+								size: bytes.length,
 								lastModified: Date.now(),
-								buffer: Array.from(buffer)
+								buffer: Array.from(bytes)
 							});
 						}
 						panel.webview.postMessage({
