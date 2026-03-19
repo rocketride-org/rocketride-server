@@ -658,7 +658,54 @@ export class PageStatusProvider {
 							const vscode = acquireVsCodeApi();
 							const iframe = document.getElementById('app-iframe');
 							const envVars = ${JSON.stringify(env)};
-							
+							let iframeOrigin = '*';
+							try { iframeOrigin = new URL(iframe.src).origin; } catch(e) {}
+
+							// macOS fix: Finder drag events don't reach cross-origin iframes
+							// in Electron webviews, so we bridge them to the iframe via postMessage.
+							['dragenter', 'dragover'].forEach(eventName => {
+								document.addEventListener(eventName, (e) => {
+									e.preventDefault();
+									e.stopPropagation();
+									try { iframe.contentWindow.postMessage({ type: 'dragHover', x: e.clientX, y: e.clientY }, iframeOrigin); } catch(err) {}
+								});
+							});
+							document.addEventListener('dragleave', (e) => {
+								if (e.relatedTarget === null) {
+									try { iframe.contentWindow.postMessage({ type: 'dragLeave' }, iframeOrigin); } catch(err) {}
+								}
+							});
+
+							document.addEventListener('drop', async (e) => {
+								e.preventDefault();
+								e.stopPropagation();
+								const files = e.dataTransfer && e.dataTransfer.files;
+								if (!files || files.length === 0) return;
+
+								const fileDataArray = [];
+								for (let i = 0; i < files.length; i++) {
+									const file = files[i];
+									const buffer = await file.arrayBuffer();
+									fileDataArray.push({
+										name: file.name,
+										type: file.type || 'application/octet-stream',
+										size: file.size,
+										lastModified: file.lastModified,
+										buffer: buffer
+									});
+								}
+
+								try {
+									iframe.contentWindow.postMessage({
+										type: 'bridgedFileDrop',
+										files: fileDataArray
+									}, iframeOrigin, fileDataArray.map(f => f.buffer));
+									iframe.contentWindow.postMessage({ type: 'dragLeave' }, iframeOrigin);
+								} catch (err) {
+									console.error('[Parent] Error bridging file drop to iframe:', err);
+								}
+							});
+
 							// Extract VSCode theme colors
 							function getVSCodeThemeColors() {
 								const style = getComputedStyle(document.body);
@@ -703,7 +750,7 @@ export class PageStatusProvider {
 										type: 'vscodeData',
 										env: envVars,
 										theme: colors
-									}, '*');
+									}, iframeOrigin);
 								} catch (error) {
 									console.error('[Parent] Error sending data to iframe:', error);
 								}
@@ -722,6 +769,9 @@ export class PageStatusProvider {
 									if (event.data.type === 'copyText' && event.data.text) {
 										vscode.postMessage({ type: 'copyText', text: event.data.text });
 									}
+									if (event.data.type === 'requestFileDialog') {
+										vscode.postMessage({ type: 'requestFileDialog' });
+									}
 								}
 							});
 
@@ -737,7 +787,13 @@ export class PageStatusProvider {
 									iframe.contentWindow.postMessage({
 										type: 'paste',
 										text: msg.text
-									}, '*');
+									}, iframeOrigin);
+								}
+								if (msg.type === 'nativeFilesSelected' && iframe.contentWindow) {
+									iframe.contentWindow.postMessage({
+										type: 'nativeFilesSelected',
+										files: msg.files
+									}, iframeOrigin);
 								}
 							});
 						})();
@@ -756,6 +812,32 @@ export class PageStatusProvider {
 				}
 				if (msg.type === 'copyText' && msg.text) {
 					await vscode.env.clipboard.writeText(msg.text);
+				}
+				if (msg.type === 'requestFileDialog') {
+					const uris = await vscode.window.showOpenDialog({
+						canSelectMany: true,
+						canSelectFiles: true,
+						canSelectFolders: false,
+						title: 'Select files to upload'
+					});
+					if (uris && uris.length > 0) {
+						const path = await import('path');
+						const fileDataArray: { name: string; type: string; size: number; lastModified: number; buffer: number[] }[] = [];
+						for (const uri of uris) {
+							const bytes = await vscode.workspace.fs.readFile(uri);
+							fileDataArray.push({
+								name: path.basename(uri.fsPath),
+								type: 'application/octet-stream',
+								size: bytes.length,
+								lastModified: Date.now(),
+								buffer: Array.from(bytes)
+							});
+						}
+						panel.webview.postMessage({
+							type: 'nativeFilesSelected',
+							files: fileDataArray
+						});
+					}
 				}
 			});
 
