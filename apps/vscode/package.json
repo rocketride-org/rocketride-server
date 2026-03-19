@@ -342,7 +342,9 @@
 					"type": "webview",
 					"id": "rocketride.provider.connection",
 					"name": "Connection Manager"
-				},
+				}
+			],
+			"explorer": [
 				{
 					"type": "tree",
 					"id": "rocketride.provider.files",
