@@ -84,7 +84,7 @@ export const DropZone: React.FC<DropZoneProps> = ({
 	/**
 	 * Handles file input change event when files are selected via dialog
 	 * Validates that files exist before invoking callback
-	 *
+	 * 
 	 * @param e - Change event from file input element
 	 */
 	const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
