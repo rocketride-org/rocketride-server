@@ -54,7 +54,6 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 
 	// Whether files are being dragged over the drop zone
 	const [isDragOver, setIsDragOver] = useState<boolean>(false);
-	const isDragOverRef = useRef<boolean>(false);
 
 	// Filename to scroll to in results (for file list click synchronization)
 	const [scrollToFilename, setScrollToFilename] = useState<string | null>(null);
@@ -108,52 +107,6 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 		removeFile,
 		clearAll
 	} = useFileProcessing(client, authToken);
-
-	// macOS fix: Finder drag events don't reach cross-origin iframes in Electron
-	// webviews, so the parent intercepts and bridges them here via postMessage.
-	useEffect(() => {
-		const isFromParent = (event: MessageEvent) => event.source === window.parent;
-
-		const handleBridgedDrop = (event: MessageEvent) => {
-			if (!isFromParent(event)) return;
-			if (event.data?.type !== 'bridgedFileDrop' || !Array.isArray(event.data.files)) return;
-			if (!isConnected) {
-				setStatusMessage('Please wait for connection before uploading files');
-				return;
-			}
-			if (isProcessing) return;
-			if (!isDragOverRef.current) return;
-
-			const dt = new DataTransfer();
-			event.data.files.forEach((f: { buffer: ArrayBuffer; name: string; type: string; lastModified: number }) =>
-				dt.items.add(new File([f.buffer], f.name, { type: f.type, lastModified: f.lastModified }))
-			);
-			addFiles(dt.files);
-		};
-
-		const handleDragHover = (event: MessageEvent) => {
-			if (!isFromParent(event)) return;
-			if (event.data?.type === 'dragLeave') {
-				isDragOverRef.current = false;
-				setIsDragOver(false);
-				return;
-			}
-			if (event.data?.type !== 'dragHover') return;
-			const { x, y } = event.data;
-			if (typeof x !== 'number' || typeof y !== 'number') return;
-			const el = document.elementFromPoint(x, y);
-			const over = el?.closest('.drop-zone') !== null;
-			isDragOverRef.current = over;
-			setIsDragOver(over);
-		};
-
-		window.addEventListener('message', handleBridgedDrop);
-		window.addEventListener('message', handleDragHover);
-		return () => {
-			window.removeEventListener('message', handleBridgedDrop);
-			window.removeEventListener('message', handleDragHover);
-		};
-	}, [addFiles, isConnected, isProcessing]);
 
 	/**
 	 * Auto-switch to the most relevant tab when results are available
