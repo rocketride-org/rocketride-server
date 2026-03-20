@@ -25,6 +25,7 @@
 # frame_count × frame_size. Acceptable for <500 frames at typical resolutions.
 # For larger workloads, revisit with PyAV (Option 2) or object store (Option 3).
 
+import base64
 import logging
 import subprocess
 
@@ -44,11 +45,11 @@ class IInstance(IInstanceBase):
 
     # Maps MIME type to the FFmpeg image2pipe input codec name
     _MIME_CODEC = {
-        'image/png':  'png',
+        'image/png': 'png',
         'image/jpeg': 'mjpeg',
-        'image/jpg':  'mjpeg',
+        'image/jpg': 'mjpeg',
         'image/webp': 'webp',
-        'image/bmp':  'bmp',
+        'image/bmp': 'bmp',
         'image/tiff': 'tiff',
     }
 
@@ -56,6 +57,7 @@ class IInstance(IInstanceBase):
         self._frames: list[bytes] = []
         self._image_buf = bytearray()
         self._image_mime = 'image/png'
+        self._filename = 'output.mp4'
 
         cfg = self.IGlobal.config
         self._fps = cfg.get('fps', 1.0)
@@ -67,6 +69,7 @@ class IInstance(IInstanceBase):
 
     def open(self, obj: Entry):
         self._frames = []
+        self._filename = (obj.name if obj.hasName else None) or 'output.mp4'
         _log('open: in-memory frame buffer initialised')
 
     def close(self):
@@ -110,6 +113,7 @@ class IInstance(IInstanceBase):
     def _encode_video(self) -> bytes | None:
         try:
             import imageio_ffmpeg as iff
+
             ffmpeg = iff.get_ffmpeg_exe()
         except Exception:
             ffmpeg = 'ffmpeg'
@@ -119,17 +123,26 @@ class IInstance(IInstanceBase):
         cmd = [
             ffmpeg,
             '-y',
-            '-f', 'image2pipe',
-            '-framerate', str(self._fps),
-            '-vcodec', input_codec,
-            '-i', 'pipe:0',
-            '-c:v', self._codec,
-            '-crf', str(self._crf),
-            '-pix_fmt', 'yuv420p',
+            '-f',
+            'image2pipe',
+            '-framerate',
+            str(self._fps),
+            '-vcodec',
+            input_codec,
+            '-i',
+            'pipe:0',
+            '-c:v',
+            self._codec,
+            '-crf',
+            str(self._crf),
+            '-pix_fmt',
+            'yuv420p',
             # frag_keyframe+empty_moov allows MP4 to be written to a
             # non-seekable stdout without needing to rewrite the moov atom.
-            '-movflags', 'frag_keyframe+empty_moov',
-            '-f', 'mp4',
+            '-movflags',
+            'frag_keyframe+empty_moov',
+            '-f',
+            'mp4',
             'pipe:1',
         ]
 
@@ -158,13 +171,26 @@ class IInstance(IInstanceBase):
 
     def _output_video(self, video_data: bytes):
         chunk_size = 48 * 1024
+        total_chunks = (len(video_data) + chunk_size - 1) // chunk_size
+
         self.instance.writeVideo(AVI_ACTION.BEGIN, 'video/mp4', b'')
         offset = 0
+        chunk_index = 0
         while offset < len(video_data):
-            chunk = video_data[offset:offset + chunk_size]
+            chunk = video_data[offset : offset + chunk_size]
             self.instance.writeVideo(AVI_ACTION.WRITE, 'video/mp4', chunk)
+            self.instance.sendSSE(
+                'video_chunk',
+                filename=self._filename,
+                chunk_index=chunk_index,
+                total_chunks=total_chunks,
+                mime_type='video/mp4',
+                data=base64.b64encode(chunk).decode('ascii'),
+            )
             offset += chunk_size
+            chunk_index += 1
         self.instance.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
+        self.instance.sendSSE('video_complete', filename=self._filename)
 
     # ------------------------------------------------------------------
     # Cleanup
@@ -172,3 +198,4 @@ class IInstance(IInstanceBase):
 
     def _cleanup(self):
         self._frames = []
+        self._filename = 'output.mp4'
