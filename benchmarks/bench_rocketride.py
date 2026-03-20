@@ -72,6 +72,7 @@ def native_chunk_text(text_bytes, chunk_size=512, overlap=50):
 
 
 def native_search(query, max_results=1000):
+    """Search the native C++ index. Returns match count (IDs allocated but discarded for benchmarking)."""
     q_bytes = query.encode("utf-8")
     out_ids = (c_uint32 * max_results)()
     n = _indexer.index_search(q_bytes, len(q_bytes), out_ids, max_results)
@@ -313,7 +314,7 @@ def run(root_dir):
     print(f"  Index (C++):    {t_index:>10.2f}s")
     print(f"  Search (100q):  {t_search_100:>10.4f}s")
     print(f"  {'-' * 45}")
-    print(f"  TOTAL:          {t_total:>10.2f}s")
+    print(f"  TOTAL (pipeline):{t_total:>9.2f}s")
     print(f"  Throughput:     {text_mb / t_total:>10.1f} MB/sec")
     print(f"  Memory peak:    {mem_index:>10.0f} MB")
     print(f"  Index C++ mem:  {idx_mem_mb:>10.0f} MB")
@@ -323,4 +324,7 @@ def run(root_dir):
 
 if __name__ == "__main__":
     root = sys.argv[1] if len(sys.argv) > 1 else "/tmp/linux-kernel"
+    if not os.path.isdir(root):
+        print(f"ERROR: {root} not found")
+        sys.exit(1)
     run(root)

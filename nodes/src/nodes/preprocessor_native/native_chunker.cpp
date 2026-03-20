@@ -89,6 +89,9 @@ int32_t batch_chunk(
     int32_t* out_lengths,    // length of chunk
     int32_t max_total_chunks
 ) {
+    if (chunk_size <= 0 || overlap >= chunk_size || max_total_chunks <= 0)
+        return 0;
+
     int32_t total = 0;
 
     for (int32_t doc = 0; doc < n_docs && total < max_total_chunks; doc++) {

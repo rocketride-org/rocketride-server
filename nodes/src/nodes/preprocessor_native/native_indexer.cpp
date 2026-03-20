@@ -31,10 +31,11 @@ extern "C" {
 
 /**
  * Reset/clear the index.
+ * reserve_hint: expected number of unique terms (0 = use default 6M, tuned for Linux kernel).
  */
-void index_reset() {
+void index_reset(uint32_t reserve_hint = 0) {
     g_index.clear();
-    g_index.reserve(6000000);
+    g_index.reserve(reserve_hint > 0 ? reserve_hint : 6000000);
     g_total_terms = 0;
 }
 

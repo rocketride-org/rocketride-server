@@ -72,7 +72,7 @@ def generate_documents(output_dir: str, count: int) -> None:
         full_content += "\n\n".join([content] * repeats)
 
         filepath = os.path.join(output_dir, f"doc_{i:05d}.txt")
-        with open(filepath, "w") as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(full_content)
         generated_files.append(filepath)
 
