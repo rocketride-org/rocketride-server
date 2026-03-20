@@ -63,73 +63,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   prerelease:
-    name: Prerelease / ${{ matrix.name }}
+    name: Prerelease
     needs: [init, build, cleanup-prereleases]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - type: server
-            name: Server
-            version: ${{ needs.init.outputs.server_version }}
-            tag_name: server-v${{ needs.init.outputs.server_version }}-prerelease
-            download_pattern: server-artifacts-*
-          - type: client-typescript
-            name: TypeScript Client
-            version: ${{ needs.init.outputs.client_typescript_version }}
-            tag_name: client-typescript-v${{ needs.init.outputs.client_typescript_version }}-prerelease
-            download_pattern: typescript-client-artifacts
-          - type: client-python
-            name: Python Client
-            version: ${{ needs.init.outputs.client_python_version }}
-            tag_name: client-python-v${{ needs.init.outputs.client_python_version }}-prerelease
-            download_pattern: python-client-artifacts
-          - type: client-mcp
-            name: MCP Client
-            version: ${{ needs.init.outputs.client_mcp_version }}
-            tag_name: client-mcp-v${{ needs.init.outputs.client_mcp_version }}-prerelease
-            download_pattern: mcp-client-artifacts
-          - type: vscode
-            name: VS Code Extension
-            version: ${{ needs.init.outputs.vscode_version }}
-            tag_name: vscode-v${{ needs.init.outputs.vscode_version }}-prerelease
-            download_pattern: vscode-artifacts
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: ${{ matrix.download_pattern }}
-          merge-multiple: true
-          path: release-assets
-
-      - name: List artifacts
-        run: find release-assets -type f | sort
-
-      - name: Create or update prerelease tag
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -f "${{ matrix.tag_name }}"
-          git push -f origin "${{ matrix.tag_name }}"
-
-      - name: Create GitHub prerelease
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
-        with:
-          tag_name: ${{ matrix.tag_name }}
-          name: RocketRide ${{ matrix.name }} v${{ matrix.version }} (prerelease)
-          prerelease: true
-          generate_release_notes: false
-          body: |
-            Automated nightly prerelease from `develop`.
-
-            **${{ matrix.name }}** v${{ matrix.version }}
-          files: release-assets/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/_release.yaml
+    with:
+      prerelease: true
+      server_version: ${{ needs.init.outputs.server_version }}
+      vscode_version: ${{ needs.init.outputs.vscode_version }}
+      client_mcp_version: ${{ needs.init.outputs.client_mcp_version }}
+      client_python_version: ${{ needs.init.outputs.client_python_version }}
+      client_typescript_version: ${{ needs.init.outputs.client_typescript_version }}
+    secrets: inherit
 
   docker:
     name: Publish Docker prerelease image
