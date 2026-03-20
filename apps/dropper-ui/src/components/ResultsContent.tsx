@@ -14,6 +14,7 @@ import { JsonView } from './Views/JsonView';
 import { DocumentsView } from './Views/DocumentsView';
 import { QuestionsView } from './Views/QuestionsView';
 import { AnswersView } from './Views/AnswersView';
+import { VideosView } from './Views/VideosView';
 
 interface ResultsContentProps {
 	activeTab: TabType;
@@ -22,12 +23,7 @@ interface ResultsContentProps {
 	compareMode?: boolean;
 }
 
-export const ResultsContent: React.FC<ResultsContentProps> = ({
-	activeTab,
-	results,
-	scrollToFilename,
-	compareMode = false
-}) => {
+export const ResultsContent: React.FC<ResultsContentProps> = ({ activeTab, results, scrollToFilename, compareMode = false }) => {
 	const contentRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
 	useEffect(() => {
@@ -60,58 +56,25 @@ export const ResultsContent: React.FC<ResultsContentProps> = ({
 			return <JsonView rawJson={results.rawJson} />;
 
 		case 'text':
-			return (
-				<TextView
-					textContent={results.textContent}
-					compareMode={compareMode}
-					setRef={setRef}
-				/>
-			);
+			return <TextView textContent={results.textContent} compareMode={compareMode} setRef={setRef} />;
 
 		case 'documents':
-			return (
-				<DocumentsView
-					documents={results.documents}
-					compareMode={compareMode}
-					setRef={setRef}
-				/>
-			);
+			return <DocumentsView documents={results.documents} compareMode={compareMode} setRef={setRef} />;
 
 		case 'tables':
-			return (
-				<TablesView
-					tables={results.tables}
-					compareMode={compareMode}
-					setRef={setRef}
-				/>
-			);
+			return <TablesView tables={results.tables} compareMode={compareMode} setRef={setRef} />;
 
 		case 'images':
-			return (
-				<ImagesView
-					images={results.images}
-					compareMode={compareMode}
-					setRef={setRef}
-				/>
-			);
+			return <ImagesView images={results.images} compareMode={compareMode} setRef={setRef} />;
+
+		case 'videos':
+			return <VideosView videos={results.videos} compareMode={compareMode} setRef={setRef} />;
 
 		case 'questions':
-			return (
-				<QuestionsView
-					questions={results.questions}
-					compareMode={compareMode}
-					setRef={setRef}
-				/>
-			);
+			return <QuestionsView questions={results.questions} compareMode={compareMode} setRef={setRef} />;
 
 		case 'answers':
-			return (
-				<AnswersView
-					answers={results.answers}
-					compareMode={compareMode}
-					setRef={setRef}
-				/>
-			);
+			return <AnswersView answers={results.answers} compareMode={compareMode} setRef={setRef} />;
 
 		default:
 			return null;
