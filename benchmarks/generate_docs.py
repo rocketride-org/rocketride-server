@@ -60,6 +60,7 @@ def generate_documents(output_dir: str, count: int) -> None:
     os.makedirs(output_dir, exist_ok=True)
     random.seed(42)
 
+    generated_files = []
     start = time.perf_counter()
     for i in range(count):
         topic = random.choice(TOPICS)
@@ -73,11 +74,10 @@ def generate_documents(output_dir: str, count: int) -> None:
         filepath = os.path.join(output_dir, f"doc_{i:05d}.txt")
         with open(filepath, "w") as f:
             f.write(full_content)
+        generated_files.append(filepath)
 
     elapsed = time.perf_counter() - start
-    total_size = sum(
-        os.path.getsize(os.path.join(output_dir, f)) for f in os.listdir(output_dir)
-    )
+    total_size = sum(os.path.getsize(f) for f in generated_files)
     print(f"Generated {count} documents in {elapsed:.2f}s")
     print(f"Total size: {total_size / 1024 / 1024:.1f} MB")
     print(f"Avg size: {total_size / count / 1024:.1f} KB")

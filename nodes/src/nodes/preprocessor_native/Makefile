@@ -1,4 +1,4 @@
-CXX = clang++
+CXX ?= clang++
 CXXFLAGS = -std=c++20 -O2 -shared -fPIC
 
 UNAME_S := $(shell uname -s)

@@ -21,7 +21,9 @@
 #include <algorithm>
 #include <cctype>
 
-// Global index state (single instance, reset between runs)
+// Global index state (single instance, reset between runs).
+// NOTE: Not thread-safe — designed for single-threaded benchmark use.
+// For concurrent access, wrap calls in a mutex or use per-instance state.
 static std::unordered_map<std::string, std::vector<uint32_t>> g_index;
 static uint32_t g_total_terms = 0;
 
@@ -116,12 +118,12 @@ int32_t index_search(
 ) {
     if (!query || query_len <= 0 || !out_ids || max_results <= 0) return 0;
 
-    // Tokenize query
+    // Tokenize query (must match indexing: alnum + underscore)
     std::vector<std::string> words;
     std::string word;
     for (int32_t i = 0; i < query_len; i++) {
         unsigned char c = static_cast<unsigned char>(query[i]);
-        if (std::isalnum(c)) {
+        if (std::isalnum(c) || c == '_') {
             word += static_cast<char>(std::tolower(c));
         } else {
             if (word.size() >= 2) words.push_back(std::move(word));
@@ -166,14 +168,14 @@ int32_t index_search(
                 }
             }
         }
-        // Sort by score descending
+        // Sort by score descending, then by chunk_id ascending for deterministic order
         std::vector<std::pair<int, uint32_t>> scored;
         scored.reserve(scores.size());
         for (auto& [id, score] : scores) {
             scored.push_back({score, id});
         }
         std::sort(scored.begin(), scored.end(), [](auto& a, auto& b) {
-            return a.first > b.first;
+            return a.first != b.first ? a.first > b.first : a.second < b.second;
         });
         result.reserve(scored.size());
         for (auto& [score, id] : scored) {

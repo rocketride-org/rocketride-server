@@ -15,6 +15,7 @@ import time
 from ctypes import c_char_p, c_int32, c_uint32, c_uint64, POINTER
 
 import pathlib
+import platform
 
 import psutil
 
@@ -27,8 +28,9 @@ def get_mem_mb():
     return psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
 
 
-# Load native libs
-_chunker = ctypes.CDLL(os.path.join(NATIVE_DIR, "libnative_chunker.dylib"))
+# Load native libs (platform-aware extension)
+_LIB_EXT = "dylib" if platform.system() == "Darwin" else "so"
+_chunker = ctypes.CDLL(os.path.join(NATIVE_DIR, f"libnative_chunker.{_LIB_EXT}"))
 _chunker.chunk_text.argtypes = [
     c_char_p,
     c_int32,
@@ -39,7 +41,7 @@ _chunker.chunk_text.argtypes = [
 ]
 _chunker.chunk_text.restype = c_int32
 
-_indexer = ctypes.CDLL(os.path.join(NATIVE_DIR, "libnative_indexer.dylib"))
+_indexer = ctypes.CDLL(os.path.join(NATIVE_DIR, f"libnative_indexer.{_LIB_EXT}"))
 _indexer.index_reset.argtypes = []
 _indexer.index_reset.restype = None
 _indexer.index_add_chunk.argtypes = [c_uint32, c_char_p, c_int32]

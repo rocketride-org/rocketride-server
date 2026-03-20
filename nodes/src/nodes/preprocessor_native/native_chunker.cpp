@@ -31,7 +31,7 @@ int32_t chunk_text(
     int32_t* offsets,      // output: pairs of (start, length)
     int32_t max_chunks     // max chunks to write
 ) {
-    if (!text || text_len <= 0 || chunk_size <= 0 || !offsets || max_chunks <= 0)
+    if (!text || text_len <= 0 || chunk_size <= 0 || !offsets || max_chunks <= 0 || overlap >= chunk_size)
         return 0;
 
     int32_t count = 0;
