@@ -35,6 +35,15 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      server_version: ${{ steps.vars.outputs.server_version }}
+      vscode_version: ${{ steps.vars.outputs.vscode_version }}
+      client_mcp_version: ${{ steps.vars.outputs.client_mcp_version }}
+      client_python_version: ${{ steps.vars.outputs.client_python_version }}
+      client_typescript_version: ${{ steps.vars.outputs.client_typescript_version }}
+      full_server_version: ${{ steps.vars.outputs.full_server_version }}
+      build_hash: ${{ steps.vars.outputs.build_hash }}
+      build_stamp: ${{ steps.vars.outputs.build_stamp }}
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -42,15 +51,15 @@ jobs:
         id: vars
         run: |
           VERSION=$(jq -r '.version' package.json)
-          echo "FULL_VERSION=$VERSION.${{ github.run_number }}" >> $GITHUB_OUTPUT
-          echo "BUILD_HASH=$(echo ${{ github.sha }} | cut -c1-8)" >> $GITHUB_OUTPUT
-          echo "BUILD_STAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+          echo "server_version=$VERSION" >> $GITHUB_OUTPUT
+          echo "vscode_version=$(jq -r '.version' apps/vscode/package.json)" >> $GITHUB_OUTPUT
+          echo "client_mcp_version=$(yq -r '.project.version' packages/client-mcp/pyproject.toml)" >> $GITHUB_OUTPUT
+          echo "client_python_version=$(yq -r '.project.version' packages/client-python/pyproject.toml)" >> $GITHUB_OUTPUT
+          echo "client_typescript_version=$(jq -r '.version' packages/client-typescript/package.json)" >> $GITHUB_OUTPUT
+          echo "full_server_version=$VERSION.${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "build_hash=$(echo ${{ github.sha }} | cut -c1-8)" >> $GITHUB_OUTPUT
+          echo "build_stamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
           cat $GITHUB_OUTPUT
-    outputs:
-      FULL_VERSION: ${{ steps.vars.outputs.FULL_VERSION }}
-      BUILD_HASH: ${{ steps.vars.outputs.BUILD_HASH }}
-      BUILD_STAMP: ${{ steps.vars.outputs.BUILD_STAMP }}
-
   build:
     name: Build / ${{ matrix.label }}
     needs: init
@@ -117,8 +126,7 @@ jobs:
             -Source "${{ env.NUGET_FEED_URL }}"
 
       - name: Build
-        run: |
-          ${{ matrix.builder_cmd }} build --verbose --autoinstall --version=${{ needs.init.outputs.FULL_VERSION }} --hash=${{ needs.init.outputs.BUILD_HASH }} --stamp=${{ needs.init.outputs.BUILD_STAMP }}
+        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version=${{ needs.init.outputs.full_server_version }} --build-hash=${{ needs.init.outputs.build_hash }} --build-stamp=${{ needs.init.outputs.build_stamp }}
 
       - name: Test
         run: ${{ matrix.builder_cmd }} test --verbose

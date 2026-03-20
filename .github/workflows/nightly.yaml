@@ -24,20 +24,25 @@ jobs:
       client_mcp_version: ${{ steps.init.outputs.client_mcp_version }}
       client_python_version: ${{ steps.init.outputs.client_python_version }}
       client_typescript_version: ${{ steps.init.outputs.client_typescript_version }}
+      full_server_version: ${{ steps.init.outputs.full_server_version }}
+      build_hash: ${{ steps.init.outputs.build_hash }}
+      build_stamp: ${{ steps.init.outputs.build_stamp }}
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Extract versions
         id: init
         run: |
-          echo "server_version=$(jq -r '.version' package.json)" >> $GITHUB_OUTPUT
+          VERSION=$(jq -r '.version' package.json)
+          echo "server_version=$VERSION" >> $GITHUB_OUTPUT
           echo "vscode_version=$(jq -r '.version' apps/vscode/package.json)" >> $GITHUB_OUTPUT
           echo "client_mcp_version=$(yq -r '.project.version' packages/client-mcp/pyproject.toml)" >> $GITHUB_OUTPUT
           echo "client_python_version=$(yq -r '.project.version' packages/client-python/pyproject.toml)" >> $GITHUB_OUTPUT
           echo "client_typescript_version=$(jq -r '.version' packages/client-typescript/package.json)" >> $GITHUB_OUTPUT
-
+          echo "full_server_version=$VERSION.${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "build_hash=$(echo ${{ github.sha }} | cut -c1-8)" >> $GITHUB_OUTPUT
+          echo "build_stamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
           cat $GITHUB_OUTPUT
-
   build:
     name: Build / ${{ matrix.label }}
     needs: init
@@ -105,7 +110,7 @@ jobs:
             -Source "${{ env.NUGET_FEED_URL }}"
 
       - name: Build
-        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall
+        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version=${{ needs.init.outputs.full_server_version }} --hash=${{ needs.init.outputs.build_hash }} --stamp=${{ needs.init.outputs.build_stamp }}
 
       - name: Test
         run: ${{ matrix.builder_cmd }} test --verbose
