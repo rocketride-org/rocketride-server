@@ -69,13 +69,19 @@ def process_video(api_key: str, video_path: str, instructions: List[str]) -> str
             task = client.tasks.create(index_id=index.id, video_file=video_file)
         debug(f'    TwelveLabs: started task {task.id}')
 
-        task.wait_for_done(sleep_interval=5, callback=lambda t: debug(f'    TwelveLabs: task status={t.status}'))
+        import time
 
-        if task.status != 'ready':
-            raise RuntimeError(f'TwelveLabs task ended with status: {task.status}')
+        while True:
+            task = client.tasks.retrieve(task.id)
+            debug(f'    TwelveLabs: task status={task.status}')
+            if task.status == 'ready':
+                break
+            if task.status == 'failed':
+                raise RuntimeError('TwelveLabs task failed')
+            time.sleep(5)
 
         debug(f'    TwelveLabs: generating text, video_id={task.video_id}')
-        result = client.generate.text(video_id=task.video_id, prompt=prompt)
+        result = client.analyze(video_id=task.video_id, prompt=prompt)
         debug(f'    TwelveLabs: generated text is "{result.data}"')
         return result.data
 
