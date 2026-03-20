@@ -28,7 +28,7 @@ import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, Dis
 import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
-import { AuthenticationException, ConnectionException } from './exceptions/index.js';
+import { AuthenticationException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
 let clientId = 0;
@@ -378,17 +378,7 @@ export class RocketRideClient extends DAPClient {
 		try {
 			const url = new URL(normalized);
 
-			// The URL API silently strips ports that are default-for-scheme
-			// (e.g. :443 on https, :80 on http), so url.port alone cannot
-			// distinguish "no port given" from "scheme-default port given".
-			// Check the raw input for an explicit `:digits` after the scheme.
-			const withoutScheme = normalized.replace(/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//, '');
-			const authority = withoutScheme.split(/[/?#]/, 1)[0] ?? '';
-			const hasExplicitPort = authority.startsWith('[')
-				? /\]:\d+$/.test(authority) // IPv6 literal with explicit port
-				: /:\d+$/.test(authority); // hostname/IPv4 with explicit port
-
-			if (!url.port && !hasExplicitPort && !url.hostname.includes('rocketride.ai')) {
+			if (!url.port && !url.hostname.includes('rocketride.ai')) {
 				url.port = CONST_DEFAULT_WEB_PORT;
 			}
 
@@ -1052,7 +1042,8 @@ export class RocketRideClient extends DAPClient {
 			objinfo?: Record<string, unknown>;
 			mimetype?: string;
 		}>,
-		token: string
+		token: string,
+		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>
 	): Promise<UPLOAD_RESULT[]> {
 		const results: UPLOAD_RESULT[] = new Array(files.length);
 
@@ -1099,7 +1090,7 @@ export class RocketRideClient extends DAPClient {
 
 			try {
 				// Step 1: Create and open pipe (waits for server to allocate)
-				pipe = await this.pipe(token, this._objinfoWithSize({ name: file.name, ...objinfo }, fileSize), finalMimetype);
+				pipe = await this.pipe(token, this._objinfoWithSize({ name: file.name, ...objinfo }, fileSize), finalMimetype, undefined, onSSE);
 				await pipe.open();
 
 				// Step 2: Send status update AFTER we have the pipe
@@ -1320,8 +1311,7 @@ export class RocketRideClient extends DAPClient {
 	async onConnectError(error: Error): Promise<void> {
 		if (this._callerOnConnectError) {
 			try {
-				const connectionError = error instanceof ConnectionException ? error : new ConnectionException({ message: String(error) });
-				await this._callerOnConnectError(connectionError);
+				await this._callerOnConnectError(error instanceof Error ? error.message : String(error));
 			} catch (e) {
 				this.debugMessage(`Error in user onConnectError handler: ${e}`);
 			}
@@ -1387,7 +1377,6 @@ export class RocketRideClient extends DAPClient {
 		// Build event subscription request
 		const args: Record<string, unknown> = { types: eventTypes };
 		if (pipeId !== undefined) args.pipeId = pipeId;
-
 		const request = this.buildRequest('rrext_monitor', {
 			arguments: args,
 			token,
@@ -1407,332 +1396,602 @@ export class RocketRideClient extends DAPClient {
 	// PROJECT STORAGE MANAGEMENT
 	// ============================================================================
 
-	/** Save or update a project pipeline configuration. */
-	async saveProject(options: { projectId: string; pipeline: Record<string, any> }): Promise<void> {
-		this.validateId(options.projectId, 'projectId');
-		if (!options.pipeline || typeof options.pipeline !== 'object') throw new Error('pipeline must be a non-empty object');
-
-		await this.fsWriteJson(`.projects/${options.projectId}.json`, options.pipeline);
-	}
-
-	async getProject(options: { projectId: string }): Promise<Record<string, any>> {
-		this.validateId(options.projectId, 'projectId');
-
-		return this.fsReadJson(`.projects/${options.projectId}.json`);
-	}
-
-	async deleteProject(options: { projectId: string }): Promise<void> {
-		this.validateId(options.projectId, 'projectId');
-
-		await this.fsDelete(`.projects/${options.projectId}.json`);
-	}
-
-	async getAllProjects(): Promise<Array<{ id: string; name: string; sources: any[]; totalComponents: number }>> {
-		const dir = await this.fsListDir('.projects');
-		const projects: Array<{ id: string; name: string; sources: any[]; totalComponents: number }> = [];
-
-		for (const entry of dir.entries) {
-			if (entry.type !== 'file' || !entry.name.endsWith('.json')) continue;
-			try {
-				const id = entry.name.slice(0, -5);
-				const pipeline = await this.fsReadJson(`.projects/${entry.name}`);
-				const sources = (pipeline.components || []).filter((c: any) => c.config?.mode === 'Source').map((c: any) => ({ id: c.id, provider: c.provider, name: c.config?.name || c.id }));
-				projects.push({ id, name: pipeline.name || 'Untitled', sources, totalComponents: (pipeline.components || []).length });
-			} catch (err) {
-				console.debug(`[RocketRideClient] Failed to read .projects/${entry.name}:`, err);
-				continue;
-			}
-		}
-
-		return projects;
-	}
-
-	// ============================================================================
-	// TEMPLATE STORAGE MANAGEMENT (convenience wrappers using fsReadJson/fsWriteJson)
-	// ============================================================================
-
-	async saveTemplate(options: { templateId: string; pipeline: Record<string, any> }): Promise<void> {
-		this.validateId(options.templateId, 'templateId');
-		if (!options.pipeline || typeof options.pipeline !== 'object') throw new Error('pipeline must be a non-empty object');
-
-		await this.fsWriteJson(`.templates/${options.templateId}.json`, options.pipeline);
-	}
-
-	async getTemplate(options: { templateId: string }): Promise<Record<string, any>> {
-		this.validateId(options.templateId, 'templateId');
-
-		return this.fsReadJson(`.templates/${options.templateId}.json`);
-	}
-
-	async deleteTemplate(options: { templateId: string }): Promise<void> {
-		this.validateId(options.templateId, 'templateId');
-
-		await this.fsDelete(`.templates/${options.templateId}.json`);
-	}
-
-	async getAllTemplates(): Promise<Array<{ id: string; name: string; sources: any[]; totalComponents: number }>> {
-		const dir = await this.fsListDir('.templates');
-		const templates: Array<{ id: string; name: string; sources: any[]; totalComponents: number }> = [];
-
-		for (const entry of dir.entries) {
-			if (entry.type !== 'file' || !entry.name.endsWith('.json')) continue;
-			try {
-				const id = entry.name.slice(0, -5);
-				const pipeline = await this.fsReadJson(`.templates/${entry.name}`);
-				const sources = (pipeline.components || []).filter((c: any) => c.config?.mode === 'Source').map((c: any) => ({ id: c.id, provider: c.provider, name: c.config?.name || c.id }));
-				templates.push({ id, name: pipeline.name || 'Untitled', sources, totalComponents: (pipeline.components || []).length });
-			} catch (err) {
-				console.debug(`[RocketRideClient] Failed to read .templates/${entry.name}:`, err);
-				continue;
-			}
-		}
-
-		return templates;
-	}
-
-	// ============================================================================
-	// LOG STORAGE MANAGEMENT (convenience wrappers using fsReadJson/fsWriteJson)
-	// ============================================================================
-
-	async saveLog(options: { projectId: string; source: string; contents: Record<string, any> }): Promise<string> {
-		this.validateId(options.projectId, 'projectId');
-		this.validateId(options.source, 'source');
-		if (!options.contents || typeof options.contents !== 'object') throw new Error('contents must be a non-empty object');
-
-		const startTime = options.contents?.body?.startTime;
-		if (startTime === undefined) throw new Error('contents must contain body.startTime');
-
-		const filename = `${options.source}-${startTime}.log`;
-		await this.fsWriteJson(`.logs/${options.projectId}/${filename}`, options.contents);
-		return filename;
-	}
-
-	async getLog(options: { projectId: string; name: string }): Promise<Record<string, any>> {
-		this.validateId(options.projectId, 'projectId');
-		if (!options.name) throw new Error('name is required');
-
-		return this.fsReadJson(`.logs/${options.projectId}/${options.name}`);
-	}
-
-	async deleteLog(options: { projectId: string; name: string }): Promise<void> {
-		this.validateId(options.projectId, 'projectId');
-		if (!options.name) throw new Error('name is required');
-
-		await this.fsDelete(`.logs/${options.projectId}/${options.name}`);
-	}
-
-	async listLogs(options: { projectId: string; source?: string }): Promise<Array<{ name: string; modified?: number }>> {
-		this.validateId(options.projectId, 'projectId');
-		if (options.source) this.validateId(options.source, 'source');
-
-		const dir = await this.fsListDir(`.logs/${options.projectId}`);
-		let logs = dir.entries.filter((e) => e.type === 'file' && e.name.endsWith('.log')).map((e) => ({ name: e.name, modified: e.modified }));
-
-		if (options.source) {
-			logs = logs.filter((l) => l.name.startsWith(`${options.source}-`));
-		}
-
-		logs.sort((a, b) => (a.modified || 0) - (b.modified || 0));
-		return logs;
-	}
-
-	// ============================================================================
-	// HANDLE-BASED FILE STORE OPERATIONS
-	// ============================================================================
-
 	/**
-	 * Open a file handle for reading or writing.
+	 * Save or update a project pipeline.
 	 *
-	 * @param path - Relative path within the account store
-	 * @param mode - 'r' for read, 'w' for write (default: 'r')
-	 * @param offset - Initial byte offset (read mode only)
-	 * @returns Object with 'handle' (string). Read mode also includes 'size' (number).
+	 * Stores a project pipeline configuration on the server. If the project
+	 * already exists, it will be updated. Use expectedVersion to ensure
+	 * you're updating the version you expect (prevents conflicts).
+	 *
+	 * @param options - Save project options
+	 * @param options.projectId - Unique identifier for the project
+	 * @param options.pipeline - Pipeline configuration object
+	 * @param options.expectedVersion - Expected current version for atomic updates (optional)
+	 * @returns Promise resolving to save result with success status, projectId, and new version
+	 * @throws Error if save fails due to version mismatch, storage error, or invalid input
+	 *
+	 * @example
+	 * ```typescript
+	 * // Save a new project
+	 * const result = await client.saveProject({
+	 *   projectId: 'proj-123',
+	 *   pipeline: {
+	 *     name: 'Data Processor',
+	 *     source: 'source_1',
+	 *     components: [...]
+	 *   }
+	 * });
+	 * console.log(`Saved version: ${result.version}`);
+	 *
+	 * // Update existing project with version check
+	 * const existing = await client.getProject({ projectId: 'proj-123' });
+	 * existing.name = 'Updated Name';
+	 * const updated = await client.saveProject({
+	 *   projectId: 'proj-123',
+	 *   pipeline: existing,
+	 *   expectedVersion: existing.version
+	 * });
+	 * ```
 	 */
-	async fsOpen(path: string, mode: 'r' | 'w' = 'r'): Promise<{ handle: string; size?: number }> {
-		this.validateStorePath(path);
-		const args: Record<string, unknown> = { subcommand: 'fs_open', path, mode };
+	async saveProject(options: { projectId: string; pipeline: Record<string, any>; expectedVersion?: string }): Promise<{
+		success: boolean;
+		project_id: string;
+		version: string;
+	}> {
+		const { projectId, pipeline, expectedVersion } = options;
+
+		// Validate inputs
+		if (!projectId) {
+			throw new Error('projectId is required');
+		}
+		if (!pipeline || typeof pipeline !== 'object') {
+			throw new Error('pipeline must be a non-empty object');
+		}
+
+		// Build request arguments
+		const args: any = {
+			subcommand: 'save_project',
+			projectId,
+			pipeline,
+		};
+
+		// Add optional version for atomic updates
+		if (expectedVersion !== undefined) {
+			args.expectedVersion = expectedVersion;
+		}
+
+		// Send request to server
 		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to open file');
-		return response.body as { handle: string; size?: number };
-	}
 
-	/**
-	 * Read data from an open read handle.
-	 *
-	 * @param handle - Handle ID returned by fsOpen
-	 * @param offset - Byte offset to read from
-	 * @param length - Max bytes to read (default 4 MB). Empty Uint8Array indicates EOF.
-	 * @returns The bytes read
-	 */
-	async fsRead(handle: string, offset: number = 0, length: number = 4_194_304): Promise<Uint8Array> {
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_read', handle, offset, length } });
-		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to read from handle');
-		return ((response.arguments as any)?.data as Uint8Array) || new Uint8Array(0);
-	}
+		// Check for errors
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Unknown error saving project';
+			this.debugMessage(`Project save failed: ${errorMsg}`);
+			throw new Error(errorMsg);
+		}
 
-	/**
-	 * Write data to an open write handle.
-	 *
-	 * @param handle - Handle ID returned by fsOpen
-	 * @param data - Raw bytes to write
-	 * @returns Number of bytes written
-	 */
-	async fsWrite(handle: string, data: Uint8Array): Promise<number> {
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_write', handle, data } });
-		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to write to handle');
-		return (response.body as any)?.bytesWritten ?? 0;
-	}
-
-	/**
-	 * Close a file handle.
-	 *
-	 * @param handle - Handle ID returned by fsOpen
-	 * @param mode - 'r' or 'w' (must match the mode used in fsOpen)
-	 */
-	async fsClose(handle: string, mode: 'r' | 'w'): Promise<void> {
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_close', handle, mode } });
-		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to close handle');
-	}
-
-	/**
-	 * Delete a file.
-	 *
-	 * @param path - Relative path within the account store
-	 * @throws Error if file does not exist or delete fails
-	 */
-	async fsDelete(path: string): Promise<void> {
-		this.validateStorePath(path);
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_delete', path } });
-		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to delete file');
-	}
-
-	/**
-	 * List immediate children of a directory.
-	 *
-	 * @param path - Relative directory path (default: account root)
-	 * @returns Directory entries with name and type (file or dir)
-	 */
-	async fsListDir(path: string = ''): Promise<{ entries: Array<{ name: string; type: 'file' | 'dir'; size?: number; modified?: number }>; count: number }> {
-		if (path) this.validateStorePath(path);
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_list_dir', path } });
-		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to list directory');
+		// Extract and return response
+		this.debugMessage(`Project saved successfully: ${projectId}, version: ${response.body?.version}`);
 		return response.body as any;
 	}
 
 	/**
-	 * Create a directory.
+	 * Retrieve a project by its ID.
 	 *
-	 * @param path - Relative directory path
+	 * Fetches the complete pipeline configuration and current version for
+	 * the specified project. Use this before updating to get the current
+	 * version for atomic updates.
+	 *
+	 * @param options - Get project options
+	 * @param options.projectId - Unique identifier of the project to retrieve
+	 * @returns Promise resolving to project data with success status, pipeline, and version
+	 * @throws Error if project doesn't exist or retrieval fails
+	 *
+	 * @example
+	 * ```typescript
+	 * // Get a project
+	 * try {
+	 *   const project = await client.getProject({ projectId: 'proj-123' });
+	 *   console.log(`Project: ${project.name}`);
+	 *   console.log(`Version: ${project.version}`);
+	 * } catch (error) {
+	 *   if (error.message.includes('NOT_FOUND')) {
+	 *     console.log("Project doesn't exist");
+	 *   }
+	 * }
+	 *
+	 * // Before updating - get current version
+	 * const project = await client.getProject({ projectId: 'proj-123' });
+	 * project.name = 'Updated';
+	 * await client.saveProject({
+	 *   projectId: 'proj-123',
+	 *   pipeline: project,
+	 *   expectedVersion: project.version
+	 * });
+	 * ```
 	 */
-	async fsMkdir(path: string): Promise<void> {
-		this.validateStorePath(path);
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_mkdir', path } });
+	async getProject(options: { projectId: string }): Promise<{
+		success: boolean;
+		pipeline: Record<string, any>;
+		version: string;
+	}> {
+		const { projectId } = options;
+
+		// Validate inputs
+		if (!projectId) {
+			throw new Error('projectId is required');
+		}
+
+		// Build request
+		const args = {
+			subcommand: 'get_project',
+			projectId,
+		};
+
+		// Send request to server
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to create directory');
+
+		// Check for errors
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Unknown error retrieving project';
+			this.debugMessage(`Project retrieval failed: ${errorMsg}`);
+			throw new Error(errorMsg);
+		}
+
+		// Extract and return response
+		this.debugMessage(`Project retrieved successfully: ${projectId}`);
+		return response.body as any;
 	}
 
 	/**
-	 * Get file or directory metadata.
+	 * Delete a project by its ID.
 	 *
-	 * @param path - Relative path within the account store
-	 * @returns Metadata including existence, type, size (bytes), and modified epoch timestamp (for files)
+	 * Permanently removes a project from storage. Optionally verify the
+	 * version before deletion to ensure you're deleting the version you
+	 * expect (prevents accidental deletion of modified projects).
+	 *
+	 * @param options - Delete project options
+	 * @param options.projectId - Unique identifier of the project to delete
+	 * @param options.expectedVersion - Expected current version for atomic deletion (required)
+	 * @returns Promise resolving to deletion result with success status and message
+	 * @throws Error if project doesn't exist, version mismatch, or deletion fails
+	 *
+	 * @example
+	 * ```typescript
+	 * // Safe deletion with version check
+	 * const project = await client.getProject({ projectId: 'proj-123' });
+	 * try {
+	 *   const result = await client.deleteProject({
+	 *     projectId: 'proj-123',
+	 *     expectedVersion: project.version
+	 *   });
+	 *   console.log('Project deleted successfully');
+	 * } catch (error) {
+	 *   if (error.message.includes('CONFLICT')) {
+	 *     console.log('Project was modified, deletion cancelled');
+	 *   }
+	 * }
+	 * ```
 	 */
-	async fsStat(path: string): Promise<{ exists: boolean; type?: 'file' | 'dir'; size?: number; modified?: number }> {
-		this.validateStorePath(path);
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_stat', path } });
+	async deleteProject(options: { projectId: string; expectedVersion?: string }): Promise<{
+		success: boolean;
+		message: string;
+	}> {
+		const { projectId, expectedVersion } = options;
+
+		// Validate inputs
+		if (!projectId) {
+			throw new Error('projectId is required');
+		}
+
+		// Build request
+		const args: any = {
+			subcommand: 'delete_project',
+			projectId,
+		};
+
+		// Add optional version for atomic deletion
+		if (expectedVersion !== undefined) {
+			args.expectedVersion = expectedVersion;
+		}
+
+		// Send request to server
+		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
-		if (this.didFail(response)) throw new Error(response.message || 'Failed to stat path');
+
+		// Check for errors
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Unknown error deleting project';
+			this.debugMessage(`Project deletion failed: ${errorMsg}`);
+			throw new Error(errorMsg);
+		}
+
+		// Extract and return response
+		this.debugMessage(`Project deleted successfully: ${projectId}`);
+		return response.body as any;
+	}
+
+	/**
+	 * List all projects for the current user.
+	 *
+	 * Retrieves a summary of all projects stored for the authenticated user.
+	 * Each project summary includes the ID, name, list of data sources, and total component count.
+	 *
+	 * @returns Promise resolving to list result with success status, projects array, and count
+	 * @throws Error if retrieval fails
+	 *
+	 * @example
+	 * ```typescript
+	 * // List all projects
+	 * const result = await client.getAllProjects();
+	 * console.log(`Found ${result.count} projects:`);
+	 * for (const project of result.projects) {
+	 *   console.log(`- ${project.id}: ${project.name} (${project.totalComponents} components)`);
+	 *   for (const source of project.sources) {
+	 *     console.log(`  * ${source.name} (${source.provider})`);
+	 *   }
+	 * }
+	 *
+	 * // Find specific project
+	 * const result = await client.getAllProjects();
+	 * const myProject = result.projects.find(p => p.id === 'proj-123');
+	 * ```
+	 */
+	async getAllProjects(): Promise<{
+		success: boolean;
+		projects: Array<{
+			id: string;
+			name: string;
+			sources: Array<{
+				id: string;
+				provider: string;
+				name: string;
+			}>;
+			totalComponents: number;
+		}>;
+		count: number;
+	}> {
+		// Build request
+		const args = {
+			subcommand: 'get_all_projects',
+		};
+
+		// Send request to server
+		const request = this.buildRequest('rrext_store', { arguments: args });
+		const response = await this.request(request);
+
+		// Check for errors
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Unknown error listing projects';
+			this.debugMessage(`Project list retrieval failed: ${errorMsg}`);
+			throw new Error(errorMsg);
+		}
+
+		// Extract and return response
+		const projectCount = response.body?.count || 0;
+		this.debugMessage(`Projects retrieved successfully: ${projectCount} projects`);
 		return response.body as any;
 	}
 
 	// ============================================================================
-	// CONVENIENCE WRAPPERS (text/JSON over binary, handle open/close internally)
+	// TEMPLATE STORAGE MANAGEMENT (System-wide templates)
 	// ============================================================================
 
-	/** Read a file as a UTF-8 string. */
-	async fsReadString(path: string): Promise<string> {
-		const { handle } = await this.fsOpen(path, 'r');
-		try {
-			const chunks: Uint8Array[] = [];
-			let offset = 0;
-			while (true) {
-				const chunk = await this.fsRead(handle, offset);
-				if (chunk.length === 0) break;
-				chunks.push(chunk);
-				offset += chunk.length;
-			}
-			const total = new Uint8Array(offset);
-			let pos = 0;
-			for (const chunk of chunks) {
-				total.set(chunk, pos);
-				pos += chunk.length;
-			}
-			return new TextDecoder().decode(total);
-		} finally {
-			await this.fsClose(handle, 'r');
+	/**
+	 * Save or update a template pipeline.
+	 *
+	 * Stores a template pipeline configuration on the server. Templates are system-wide
+	 * and accessible to all users. If the template already exists, it will be updated.
+	 * Use expectedVersion to ensure you're updating the version you expect.
+	 *
+	 * @param options - Save template options
+	 * @param options.templateId - Unique identifier for the template
+	 * @param options.pipeline - Pipeline configuration object
+	 * @param options.expectedVersion - Expected current version for atomic updates (optional)
+	 * @returns Promise resolving to save result with success status, templateId, and new version
+	 * @throws Error if save fails due to version mismatch, storage error, or invalid input
+	 */
+	async saveTemplate(options: { templateId: string; pipeline: Record<string, any>; expectedVersion?: string }): Promise<{
+		success: boolean;
+		template_id: string;
+		version: string;
+	}> {
+		const { templateId, pipeline, expectedVersion } = options;
+
+		// Validate inputs
+		if (!templateId) {
+			throw new Error('templateId is required');
 		}
-	}
-
-	/** Write a UTF-8 string to a file. */
-	async fsWriteString(path: string, text: string): Promise<void> {
-		const { handle } = await this.fsOpen(path, 'w');
-		try {
-			await this.fsWrite(handle, new TextEncoder().encode(text));
-			await this.fsClose(handle, 'w');
-		} catch (err) {
-			try {
-				await this.fsClose(handle, 'w');
-			} catch {
-				/* best-effort */
-			}
-			throw err;
+		if (!pipeline || typeof pipeline !== 'object') {
+			throw new Error('pipeline must be a non-empty object');
 		}
+
+		// Build request arguments
+		const args: any = {
+			subcommand: 'save_template',
+			templateId,
+			pipeline,
+		};
+
+		// Add optional version for atomic updates
+		if (expectedVersion !== undefined) {
+			args.expectedVersion = expectedVersion;
+		}
+
+		// Send request to server
+		const request = this.buildRequest('rrext_store', { arguments: args });
+		const response = await this.request(request);
+
+		// Check for errors
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Unknown error saving template';
+			this.debugMessage(`Template save failed: ${errorMsg}`);
+			throw new Error(errorMsg);
+		}
+
+		// Extract and return response
+		this.debugMessage(`Template saved successfully: ${templateId}, version: ${response.body?.version}`);
+		return response.body as any;
 	}
 
-	/** Read a JSON file. */
-	async fsReadJson<T = any>(path: string): Promise<T> {
-		const text = await this.fsReadString(path);
-		return JSON.parse(text);
+	/**
+	 * Retrieve a template by its ID.
+	 */
+	async getTemplate(options: { templateId: string }): Promise<{
+		success: boolean;
+		pipeline: Record<string, any>;
+		version: string;
+	}> {
+		const { templateId } = options;
+
+		// Validate inputs
+		if (!templateId) {
+			throw new Error('templateId is required');
+		}
+
+		// Build request
+		const args = {
+			subcommand: 'get_template',
+			templateId,
+		};
+
+		// Send request to server
+		const request = this.buildRequest('rrext_store', { arguments: args });
+		const response = await this.request(request);
+
+		// Check for errors
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Unknown error retrieving template';
+			this.debugMessage(`Template retrieval failed: ${errorMsg}`);
+			throw new Error(errorMsg);
+		}
+
+		// Extract and return response
+		this.debugMessage(`Template retrieved successfully: ${templateId}`);
+		return response.body as any;
 	}
 
-	/** Write an object as JSON. */
-	async fsWriteJson(path: string, obj: any): Promise<void> {
-		await this.fsWriteString(path, JSON.stringify(obj, null, 2));
+	/**
+	 * Delete a template by its ID.
+	 */
+	async deleteTemplate(options: { templateId: string; expectedVersion?: string }): Promise<{
+		success: boolean;
+		message: string;
+	}> {
+		const { templateId, expectedVersion } = options;
+
+		// Validate inputs
+		if (!templateId) {
+			throw new Error('templateId is required');
+		}
+
+		// Build request
+		const args: any = {
+			subcommand: 'delete_template',
+			templateId,
+		};
+
+		// Add optional version for atomic deletion
+		if (expectedVersion !== undefined) {
+			args.expectedVersion = expectedVersion;
+		}
+
+		// Send request to server
+		const request = this.buildRequest('rrext_store', { arguments: args });
+		const response = await this.request(request);
+
+		// Check for errors
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Unknown error deleting template';
+			this.debugMessage(`Template deletion failed: ${errorMsg}`);
+			throw new Error(errorMsg);
+		}
+
+		// Extract and return response
+		this.debugMessage(`Template deleted successfully: ${templateId}`);
+		return response.body as any;
+	}
+
+	/**
+	 * List all templates.
+	 */
+	async getAllTemplates(): Promise<{
+		success: boolean;
+		templates: Array<{
+			id: string;
+			name: string;
+			sources: Array<{
+				id: string;
+				provider: string;
+				name: string;
+			}>;
+			totalComponents: number;
+		}>;
+		count: number;
+	}> {
+		// Build request
+		const args = {
+			subcommand: 'get_all_templates',
+		};
+
+		// Send request to server
+		const request = this.buildRequest('rrext_store', { arguments: args });
+		const response = await this.request(request);
+
+		// Check for errors
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Unknown error listing templates';
+			this.debugMessage(`Template list retrieval failed: ${errorMsg}`);
+			throw new Error(errorMsg);
+		}
+
+		// Extract and return response
+		const templateCount = response.body?.count || 0;
+		this.debugMessage(`Templates retrieved successfully: ${templateCount} templates`);
+		return response.body as any;
 	}
 
 	// ============================================================================
-	// PATH AND ID VALIDATION
+	// LOG STORAGE MANAGEMENT (Per-project log files for historical tracking)
 	// ============================================================================
 
-	private static readonly INVALID_PATH_CHARS = new Set(['*', '?', '<', '>', '|', '"', '\x00']);
+	/**
+	 * Save a log file for a source run.
+	 */
+	async saveLog(options: { projectId: string; source: string; contents: Record<string, any> }): Promise<{
+		success: boolean;
+		filename: string;
+	}> {
+		const { projectId, source, contents } = options;
 
-	private validateStorePath(path: string): void {
-		for (const segment of path.replace(/\\/g, '/').split('/')) {
-			if (segment === '..') throw new Error(`Path traversal not allowed: ${path}`);
-			if (segment) {
-				for (const ch of segment) {
-					if (RocketRideClient.INVALID_PATH_CHARS.has(ch) || ch.charCodeAt(0) < 0x20) {
-						throw new Error(`Path contains invalid characters: ${path}`);
-					}
-				}
-			}
+		// Validate inputs
+		if (!projectId) {
+			throw new Error('projectId is required');
 		}
+		if (!source) {
+			throw new Error('source is required');
+		}
+		if (!contents || typeof contents !== 'object') {
+			throw new Error('contents must be a non-empty object');
+		}
+
+		// Build request arguments
+		const args = {
+			subcommand: 'save_log',
+			projectId,
+			source,
+			contents,
+		};
+
+		// Send request to server
+		const request = this.buildRequest('rrext_store', { arguments: args });
+		const response = await this.request(request);
+
+		// Check for errors
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Unknown error saving log';
+			this.debugMessage(`Log save failed: ${errorMsg}`);
+			throw new Error(errorMsg);
+		}
+
+		// Extract and return response
+		this.debugMessage(`Log saved successfully: ${response.body?.filename}`);
+		return response.body as any;
 	}
 
-	private validateId(value: string, name: string): void {
-		if (!value) throw new Error(`${name} is required`);
-		if (value.includes('/') || value.includes('\\')) throw new Error(`${name} must not contain path separators`);
-		for (const ch of value) {
-			if (RocketRideClient.INVALID_PATH_CHARS.has(ch) || ch.charCodeAt(0) < 0x20) {
-				throw new Error(`${name} contains invalid characters: ${value}`);
-			}
+	/**
+	 * Get a log file by source name and start time.
+	 */
+	async getLog(options: { projectId: string; source: string; startTime: number }): Promise<{
+		success: boolean;
+		contents: Record<string, any>;
+	}> {
+		const { projectId, source, startTime } = options;
+
+		// Validate inputs
+		if (!projectId) {
+			throw new Error('projectId is required');
 		}
+		if (!source) {
+			throw new Error('source is required');
+		}
+		if (startTime === undefined || startTime === null) {
+			throw new Error('startTime is required');
+		}
+
+		// Build request
+		const args = {
+			subcommand: 'get_log',
+			projectId,
+			source,
+			startTime,
+		};
+
+		// Send request to server
+		const request = this.buildRequest('rrext_store', { arguments: args });
+		const response = await this.request(request);
+
+		// Check for errors
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Unknown error retrieving log';
+			this.debugMessage(`Log retrieval failed: ${errorMsg}`);
+			throw new Error(errorMsg);
+		}
+
+		// Extract and return response
+		this.debugMessage(`Log retrieved successfully: ${projectId}/${source}`);
+		return response.body as any;
+	}
+
+	/**
+	 * List log files for a project.
+	 */
+	async listLogs(options: { projectId: string; source?: string; page?: number }): Promise<{
+		success: boolean;
+		logs: string[];
+		count: number;
+		total_count: number;
+		page: number;
+		total_pages: number;
+	}> {
+		const { projectId, source, page } = options;
+
+		// Validate inputs
+		if (!projectId) {
+			throw new Error('projectId is required');
+		}
+
+		// Build request
+		const args: any = {
+			subcommand: 'list_logs',
+			projectId,
+		};
+
+		// Add optional parameters
+		if (source !== undefined) {
+			args.source = source;
+		}
+		if (page !== undefined) {
+			args.page = page;
+		}
+
+		// Send request to server
+		const request = this.buildRequest('rrext_store', { arguments: args });
+		const response = await this.request(request);
+
+		// Check for errors
+		if (this.didFail(response)) {
+			const errorMsg = response.message || 'Unknown error listing logs';
+			this.debugMessage(`Log list retrieval failed: ${errorMsg}`);
+			throw new Error(errorMsg);
+		}
+
+		// Extract and return response
+		const logCount = response.body?.total_count || 0;
+		this.debugMessage(`Logs retrieved successfully: ${logCount} logs`);
+		return response.body as any;
 	}
 
 	// ============================================================================
@@ -1758,22 +2017,6 @@ export class RocketRideClient extends DAPClient {
 			token,
 		});
 		return await this.request(message, timeout);
-	}
-
-	// ============================================================================
-	// DASHBOARD METHODS
-	// ============================================================================
-
-	/**
-	 * Retrieve a server dashboard snapshot.
-	 *
-	 * Returns the current state of all connections, tasks, and aggregate
-	 * metrics from the server. Requires 'task.monitor' permission.
-	 *
-	 * @returns DAPMessage with body containing overview, connections, and tasks
-	 */
-	async getDashboard(): Promise<DAPMessage> {
-		return this.dapRequest('rrext_dashboard', {});
 	}
 
 	// ============================================================================

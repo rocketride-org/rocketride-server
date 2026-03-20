@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { Database, FileText, Table, Image, File, HelpCircle, MessageSquare } from 'lucide-react';
+import { Database, FileText, Table, Image, Video, File, HelpCircle, MessageSquare } from 'lucide-react';
 import { TabType, ProcessedResults } from '../types/dropper.types';
 
 interface ResultsTabsProps {
@@ -16,13 +16,7 @@ interface ResultsTabsProps {
 	onCompareModeChange: (enabled: boolean) => void;
 }
 
-export const ResultsTabs: React.FC<ResultsTabsProps> = ({
-	activeTab,
-	onTabChange,
-	results,
-	compareMode,
-	onCompareModeChange
-}) => {
+export const ResultsTabs: React.FC<ResultsTabsProps> = ({ activeTab, onTabChange, results, compareMode, onCompareModeChange }) => {
 	if (!results) {
 		return null;
 	}
@@ -30,17 +24,19 @@ export const ResultsTabs: React.FC<ResultsTabsProps> = ({
 	const hasMultipleBlocks = () => {
 		switch (activeTab) {
 			case 'text':
-				return results.textContent.some(group => group.contents.length > 1);
+				return results.textContent.some((group) => group.contents.length > 1);
 			case 'tables':
-				return results.tables.some(group => group.contents.length > 1);
+				return results.tables.some((group) => group.contents.length > 1);
 			case 'images':
-				return results.images.some(group => group.contents.length > 1);
+				return results.images.some((group) => group.contents.length > 1);
+			case 'videos':
+				return results.videos.some((group) => group.contents.length > 1);
 			case 'documents':
-				return results.documents.some(group => group.contents.length > 1);
+				return results.documents.some((group) => group.contents.length > 1);
 			case 'questions':
-				return results.questions.some(group => group.contents.length > 1);
+				return results.questions.some((group) => group.contents.length > 1);
 			case 'answers':
-				return results.answers.some(group => group.contents.length > 1);
+				return results.answers.some((group) => group.contents.length > 1);
 			default:
 				return false;
 		}
@@ -52,11 +48,7 @@ export const ResultsTabs: React.FC<ResultsTabsProps> = ({
 		<div className="tab-nav">
 			{/* Text Tab */}
 			{results.textContent.length > 0 && (
-				<button
-					onClick={() => onTabChange('text')}
-					className={`tab-btn ${activeTab === 'text' ? 'active' : ''}`}
-					type="button"
-				>
+				<button onClick={() => onTabChange('text')} className={`tab-btn ${activeTab === 'text' ? 'active' : ''}`} type="button">
 					<FileText className="w-4 h-4" />
 					<span>Text</span>
 					<span className="tab-badge">{results.textContent.length}</span>
@@ -65,11 +57,7 @@ export const ResultsTabs: React.FC<ResultsTabsProps> = ({
 
 			{/* Documents Tab */}
 			{results.documents.length > 0 && (
-				<button
-					onClick={() => onTabChange('documents')}
-					className={`tab-btn ${activeTab === 'documents' ? 'active' : ''}`}
-					type="button"
-				>
+				<button onClick={() => onTabChange('documents')} className={`tab-btn ${activeTab === 'documents' ? 'active' : ''}`} type="button">
 					<File className="w-4 h-4" />
 					<span>Documents</span>
 					<span className="tab-badge">{results.documents.length}</span>
@@ -78,11 +66,7 @@ export const ResultsTabs: React.FC<ResultsTabsProps> = ({
 
 			{/* Tables Tab */}
 			{results.tables.length > 0 && (
-				<button
-					onClick={() => onTabChange('tables')}
-					className={`tab-btn ${activeTab === 'tables' ? 'active' : ''}`}
-					type="button"
-				>
+				<button onClick={() => onTabChange('tables')} className={`tab-btn ${activeTab === 'tables' ? 'active' : ''}`} type="button">
 					<Table className="w-4 h-4" />
 					<span>Tables</span>
 					<span className="tab-badge">{results.tables.length}</span>
@@ -91,24 +75,25 @@ export const ResultsTabs: React.FC<ResultsTabsProps> = ({
 
 			{/* Images Tab */}
 			{results.images.length > 0 && (
-				<button
-					onClick={() => onTabChange('images')}
-					className={`tab-btn ${activeTab === 'images' ? 'active' : ''}`}
-					type="button"
-				>
+				<button onClick={() => onTabChange('images')} className={`tab-btn ${activeTab === 'images' ? 'active' : ''}`} type="button">
 					<Image className="w-4 h-4" />
 					<span>Images</span>
 					<span className="tab-badge">{results.images.length}</span>
 				</button>
 			)}
 
+			{/* Videos Tab */}
+			{results.videos.length > 0 && (
+				<button onClick={() => onTabChange('videos')} className={`tab-btn ${activeTab === 'videos' ? 'active' : ''}`} type="button">
+					<Video className="w-4 h-4" />
+					<span>Videos</span>
+					<span className="tab-badge">{results.videos.length}</span>
+				</button>
+			)}
+
 			{/* Questions Tab */}
 			{results.questions.length > 0 && (
-				<button
-					onClick={() => onTabChange('questions')}
-					className={`tab-btn ${activeTab === 'questions' ? 'active' : ''}`}
-					type="button"
-				>
+				<button onClick={() => onTabChange('questions')} className={`tab-btn ${activeTab === 'questions' ? 'active' : ''}`} type="button">
 					<HelpCircle className="w-4 h-4" />
 					<span>Questions</span>
 					<span className="tab-badge">{results.questions.length}</span>
@@ -117,11 +102,7 @@ export const ResultsTabs: React.FC<ResultsTabsProps> = ({
 
 			{/* Answers Tab */}
 			{results.answers.length > 0 && (
-				<button
-					onClick={() => onTabChange('answers')}
-					className={`tab-btn ${activeTab === 'answers' ? 'active' : ''}`}
-					type="button"
-				>
+				<button onClick={() => onTabChange('answers')} className={`tab-btn ${activeTab === 'answers' ? 'active' : ''}`} type="button">
 					<MessageSquare className="w-4 h-4" />
 					<span>Answers</span>
 					<span className="tab-badge">{results.answers.length}</span>
@@ -129,11 +110,7 @@ export const ResultsTabs: React.FC<ResultsTabsProps> = ({
 			)}
 
 			{/* Results Tab */}
-			<button
-				onClick={() => onTabChange('results')}
-				className={`tab-btn ${activeTab === 'results' ? 'active' : ''}`}
-				type="button"
-			>
+			<button onClick={() => onTabChange('results')} className={`tab-btn ${activeTab === 'results' ? 'active' : ''}`} type="button">
 				<Database className="w-4 h-4" />
 				<span>JSON</span>
 			</button>
@@ -142,12 +119,7 @@ export const ResultsTabs: React.FC<ResultsTabsProps> = ({
 			{showCompareCheckbox && (
 				<div className="compare-checkbox-wrapper">
 					<label className="compare-checkbox-label">
-						<input
-							type="checkbox"
-							checked={compareMode}
-							onChange={(e) => onCompareModeChange(e.target.checked)}
-							className="compare-checkbox"
-						/>
+						<input type="checkbox" checked={compareMode} onChange={(e) => onCompareModeChange(e.target.checked)} className="compare-checkbox" />
 						<span>Compare</span>
 					</label>
 				</div>
