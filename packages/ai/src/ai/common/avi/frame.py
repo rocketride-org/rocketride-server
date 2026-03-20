@@ -45,7 +45,7 @@ class VideoFrameExtractor(AVIReader):
         self._duration = config.get('duration', 0.0)
 
         # Determine fps setting
-        self._fps = config.get('fps', 24.0)
+        self._fps = config.get('fps', 1.0)
         if self._fps >= 1:
             fps_string = f'fps={int(self._fps)}'
         else:
