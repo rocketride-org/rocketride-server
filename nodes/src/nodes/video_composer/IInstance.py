@@ -21,11 +21,12 @@
 # SOFTWARE.
 # =============================================================================
 
+# NOTE: Frames are buffered in memory (self._frames). Peak RAM is roughly
+# frame_count × frame_size. Acceptable for <500 frames at typical resolutions.
+# For larger workloads, revisit with PyAV (Option 2) or object store (Option 3).
+
 import logging
-import os
-import shutil
 import subprocess
-import tempfile
 
 from rocketlib import IInstanceBase, AVI_ACTION, Entry
 
@@ -41,21 +42,20 @@ def _log(msg: str):
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
-    _MIME_EXT = {
-        'image/jpeg': '.jpg',
-        'image/jpg': '.jpg',
-        'image/webp': '.webp',
-        'image/gif': '.gif',
-        'image/bmp': '.bmp',
-        'image/tiff': '.tiff',
+    # Maps MIME type to the FFmpeg image2pipe input codec name
+    _MIME_CODEC = {
+        'image/png':  'png',
+        'image/jpeg': 'mjpeg',
+        'image/jpg':  'mjpeg',
+        'image/webp': 'webp',
+        'image/bmp':  'bmp',
+        'image/tiff': 'tiff',
     }
 
     def beginInstance(self):
-        self._frames_dir = None
-        self._frame_count = 0
+        self._frames: list[bytes] = []
         self._image_buf = bytearray()
         self._image_mime = 'image/png'
-        self._frame_ext = '.png'
 
         cfg = self.IGlobal.config
         self._fps = cfg.get('fps', 1.0)
@@ -66,90 +66,88 @@ class IInstance(IInstanceBase):
         self._cleanup()
 
     def open(self, obj: Entry):
-        self._frames_dir = tempfile.mkdtemp(prefix='vcomp_frames_')
-        self._frame_count = 0
-        _log(f'open: frames_dir={self._frames_dir}')
+        self._frames = []
+        _log('open: in-memory frame buffer initialised')
 
     def close(self):
-        _log(f'close: frame_count={self._frame_count}')
-        if self._frame_count == 0:
+        frame_count = len(self._frames)
+        _log(f'close: frame_count={frame_count}')
+        if frame_count == 0:
             self._cleanup()
             return
 
-        output_path = self._encode_video()
-        if output_path and os.path.exists(output_path):
-            size = os.path.getsize(output_path)
-            _log(f'close: encoded ok size={size} bytes, streaming')
-            self._output_video(output_path)
-            try:
-                os.remove(output_path)
-            except OSError:
-                pass  # best-effort cleanup; file will be swept by OS on reboot
+        mp4_bytes = self._encode_video()
+        if mp4_bytes:
+            _log(f'close: encoded ok size={len(mp4_bytes)} bytes, streaming')
+            self._output_video(mp4_bytes)
         else:
-            _log(f'close: encode failed, output_path={output_path}')
+            _log('close: encode failed')
 
         self._cleanup()
 
     # ------------------------------------------------------------------
-    # Image stream handling -- buffer each frame as a numbered PNG
+    # Image stream handling -- accumulate each frame in memory
     # ------------------------------------------------------------------
 
     def writeImage(self, action: AVI_ACTION, mimeType: str, buffer: bytes):
         if action == AVI_ACTION.BEGIN:
             self._image_buf = bytearray()
             self._image_mime = mimeType
-            self._frame_ext = self._MIME_EXT.get(mimeType, '.png')
 
         elif action == AVI_ACTION.WRITE:
             if buffer:
                 self._image_buf.extend(buffer)
 
         elif action == AVI_ACTION.END:
-            if self._frames_dir and self._image_buf:
-                fname = f'frame_{self._frame_count:06d}{self._frame_ext}'
-                fpath = os.path.join(self._frames_dir, fname)
-                with open(fpath, 'wb') as f:
-                    f.write(self._image_buf)
-                self._frame_count += 1
+            if self._image_buf:
+                self._frames.append(bytes(self._image_buf))
             self._image_buf = bytearray()
 
     # ------------------------------------------------------------------
-    # FFmpeg encoding
+    # FFmpeg encoding via stdin/stdout pipe -- no temp files
     # ------------------------------------------------------------------
 
-    def _encode_video(self) -> str | None:
+    def _encode_video(self) -> bytes | None:
         try:
             import imageio_ffmpeg as iff
             ffmpeg = iff.get_ffmpeg_exe()
         except Exception:
             ffmpeg = 'ffmpeg'
 
-        fd, output_path = tempfile.mkstemp(suffix='.mp4', prefix='vcomp_output_')
-        os.close(fd)
+        input_codec = self._MIME_CODEC.get(self._image_mime, 'png')
 
-        input_pattern = os.path.join(self._frames_dir, f'frame_%06d{self._frame_ext}')
         cmd = [
             ffmpeg,
             '-y',
+            '-f', 'image2pipe',
             '-framerate', str(self._fps),
-            '-i', input_pattern,
+            '-vcodec', input_codec,
+            '-i', 'pipe:0',
             '-c:v', self._codec,
             '-crf', str(self._crf),
             '-pix_fmt', 'yuv420p',
-            '-movflags', '+faststart',
-            output_path,
+            # frag_keyframe+empty_moov allows MP4 to be written to a
+            # non-seekable stdout without needing to rewrite the moov atom.
+            '-movflags', 'frag_keyframe+empty_moov',
+            '-f', 'mp4',
+            'pipe:1',
         ]
 
-        _log(f'_encode_video: frame_count={self._frame_count} cmd={" ".join(cmd)}')
+        stdin_data = b''.join(self._frames)
+        _log(f'_encode_video: frame_count={len(self._frames)} input_codec={input_codec} cmd={" ".join(cmd)}')
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=300,
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
-            _log(f'_encode_video: returncode={result.returncode}')
-            if result.returncode != 0:
-                _log(f'_encode_video: stderr={result.stderr[-500:]}')
+            stdout, stderr = proc.communicate(input=stdin_data, timeout=300)
+            _log(f'_encode_video: returncode={proc.returncode}')
+            if proc.returncode != 0:
+                _log(f'_encode_video: stderr={stderr.decode(errors="replace")[-500:]}')
                 return None
-            return output_path
+            return stdout
         except (subprocess.TimeoutExpired, Exception) as e:
             _log(f'_encode_video: exception={e}')
             return None
@@ -158,15 +156,14 @@ class IInstance(IInstanceBase):
     # Write the encoded video to downstream nodes via the engine AVI mechanism
     # ------------------------------------------------------------------
 
-    def _output_video(self, video_path: str):
+    def _output_video(self, video_data: bytes):
         chunk_size = 48 * 1024
         self.instance.writeVideo(AVI_ACTION.BEGIN, 'video/mp4', b'')
-        with open(video_path, 'rb') as fh:
-            while True:
-                chunk = fh.read(chunk_size)
-                if not chunk:
-                    break
-                self.instance.writeVideo(AVI_ACTION.WRITE, 'video/mp4', chunk)
+        offset = 0
+        while offset < len(video_data):
+            chunk = video_data[offset:offset + chunk_size]
+            self.instance.writeVideo(AVI_ACTION.WRITE, 'video/mp4', chunk)
+            offset += chunk_size
         self.instance.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
 
     # ------------------------------------------------------------------
@@ -174,10 +171,4 @@ class IInstance(IInstanceBase):
     # ------------------------------------------------------------------
 
     def _cleanup(self):
-        if self._frames_dir and os.path.isdir(self._frames_dir):
-            try:
-                shutil.rmtree(self._frames_dir)
-            except OSError:
-                pass  # best-effort cleanup; frames dir will be swept by OS
-        self._frames_dir = None
-        self._frame_count = 0
+        self._frames = []
