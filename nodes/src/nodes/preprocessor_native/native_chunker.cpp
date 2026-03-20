@@ -99,6 +99,7 @@ int32_t batch_chunk(
     for (int32_t doc = 0; doc < n_docs && total < max_total_chunks; doc++) {
         const char* text = doc_texts[doc];
         int32_t text_len = doc_lens[doc];
+        if (!text || text_len <= 0) continue;  // skip invalid entries
         int32_t pos = 0;
 
         while (pos < text_len && total < max_total_chunks) {
