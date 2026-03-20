@@ -84,62 +84,18 @@ jobs:
   codeql-cpp:
     name: CodeQL / cpp
     if: github.event_name == 'schedule'
-    runs-on: ubuntu-22.04
-    timeout-minutes: 90
-    continue-on-error: true
+    needs: init
+    uses: ./.github/workflows/_build.yaml
     permissions:
       contents: read
       packages: write
       security-events: write
-    env:
-      VCPKG_NUGET_USER: ${{ github.repository_owner }}
-      NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
-      VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: recursive
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
-        with:
-          version: 10
-
-      - name: Bootstrap vcpkg
-        run: ./builder vcpkg:build
-
-      - name: Configure vcpkg NuGet cache
-        run: |
-          NUGET_EXE=$(./build/vcpkg/vcpkg fetch nuget | tail -n1)
-          mono $NUGET_EXE sources add \
-            -Source "${{ env.NUGET_FEED_URL }}" \
-            -StorePasswordInClearText \
-            -Name GitHubPackages \
-            -UserName "${{ env.VCPKG_NUGET_USER }}" \
-            -Password "${{ secrets.GITHUB_TOKEN }}" || true
-          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
-            -Source "${{ env.NUGET_FEED_URL }}"
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
-        with:
-          languages: cpp
-          build-mode: manual
-          queries: security-and-quality
-
-      - name: Skip prebuilt download
-        run: |
-          mkdir -p build
-          echo '{"server":{"compiledVersion":"codeql"}}' > build/state.json
-
-      - name: Build C++
-        run: ./builder server:build --verbose --autoinstall
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
-        with:
-          category: '/language:cpp'
+    with:
+      codeql: true
+      full_version: ${{ needs.init.outputs.full_server_version }}
+      build_hash: ${{ needs.init.outputs.build_hash }}
+      build_stamp: ${{ needs.init.outputs.build_stamp }}
+    secrets: inherit
 
   # ---------------------------------------------------------------------------
   #  Container scan

@@ -15,6 +15,11 @@ on:
         description: Build timestamp (ISO 8601 UTC)
         required: true
         type: string
+      codeql:
+        description: Run CodeQL C++ analysis (ubuntu only)
+        required: false
+        type: boolean
+        default: false
       package:
         description: Run the package step and upload artifacts
         required: false
@@ -95,11 +100,26 @@ jobs:
           & $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" `
             -Source "${{ env.NUGET_FEED_URL }}"
 
+      - name: Initialize CodeQL
+        if: inputs.codeql && matrix.platform == 'ubuntu'
+        uses: github/codeql-action/init@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
+        with:
+          languages: cpp
+          build-mode: manual
+          queries: security-and-quality
+
       - name: Build
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version=${{ inputs.full_version }} --hash=${{ inputs.build_hash }} --stamp=${{ inputs.build_stamp }}
 
       - name: Test
+        if: inputs.codeql == false
         run: ${{ matrix.builder_cmd }} test --verbose
+
+      - name: Perform CodeQL Analysis
+        if: inputs.codeql && matrix.platform == 'ubuntu'
+        uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
+        with:
+          category: /language:cpp
 
       - name: Package
         if: inputs.package
