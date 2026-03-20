@@ -34,10 +34,7 @@ def generate_chunks(n):
         'One key challenge is scaling algorithms to handle large datasets. '
         'Recent papers propose novel approaches achieving state of the art. '
     )
-    chunks = []
-    for i in range(n):
-        chunks.append(f'Document {i}: {base} Section {i % 100} discusses advanced topics.')
-    return chunks
+    return [f'Document {i}: {base} Section {i % 100} discusses advanced topics.' for i in range(n)]
 
 
 # ---------------------------------------------------------------------------
@@ -224,76 +221,6 @@ def cosine_similarity(a, b):
 
 
 # ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-def run(n_chunks):
-    """Run all benchmarks."""
-    print(f'Generating {n_chunks:,} test chunks...')
-    chunks = generate_chunks(n_chunks)
-
-    print(f'\n{"=" * 70}')
-    print(f'  EMBEDDING BENCHMARK: {n_chunks:,} chunks (MiniLM-L6-v2)')
-    print(f'  Hardware: {os.cpu_count()} CPU cores')
-    print(f'{"=" * 70}')
-
-    results = []
-
-    # Warm up and test sentence-transformers
-    print('\n[1/3] sentence-transformers (PyTorch)...')
-    r1 = bench_sentence_transformers(chunks, batch_size=64)
-    results.append(r1)
-    print(f'      Load: {r1["load_time"]:.2f}s | Embed: {r1["embed_time"]:.2f}s | {r1["throughput"]:.0f} chunks/sec | +{r1["memory_delta"]:.0f} MB')
-
-    # ONNX FP32
-    print('\n[2/3] ONNX Runtime (FP32, optimized)...')
-    r2 = bench_onnx_fp32(chunks, batch_size=64)
-    results.append(r2)
-    if 'error' not in r2:
-        print(f'      Load: {r2["load_time"]:.2f}s | Embed: {r2["embed_time"]:.2f}s | {r2["throughput"]:.0f} chunks/sec | +{r2["memory_delta"]:.0f} MB')
-
-    # ONNX INT8
-    print('\n[3/3] ONNX Runtime (INT8 quantized)...')
-    r3 = bench_onnx_int8(chunks, batch_size=64)
-    results.append(r3)
-    if 'error' not in r3:
-        print(f'      Load: {r3["load_time"]:.2f}s | Embed: {r3["embed_time"]:.2f}s | {r3["throughput"]:.0f} chunks/sec | +{r3["memory_delta"]:.0f} MB')
-
-    # Quality check
-    if all('sample' in r for r in results):
-        sim_fp32 = cosine_similarity(
-            np.array(r1['sample']),
-            np.array(r2['sample']),
-        )
-        sim_int8 = cosine_similarity(
-            np.array(r1['sample']),
-            np.array(r3['sample']),
-        )
-        print('\n  Quality check (cosine sim vs PyTorch):')
-        print(f'    ONNX FP32: {sim_fp32:.6f}')
-        print(f'    ONNX INT8: {sim_int8:.6f}')
-
-    # Summary
-    baseline = r1['embed_time']
-    print(f'\n{"=" * 70}')
-    print(f'  RESULTS: {n_chunks:,} chunks')
-    print(f'{"=" * 70}')
-    print(f'  {"Method":<35} {"Time":>8} {"Chunks/s":>10} {"Speedup":>8} {"Mem":>8}')
-    print(f'  {"-" * 69}')
-    for r in results:
-        if 'error' in r:
-            print(f'  {r["method"]:<35} {"ERROR":>8}')
-            continue
-        speedup = baseline / r['embed_time']
-        print(f'  {r["method"]:<35} {r["embed_time"]:>7.2f}s {r["throughput"]:>9.0f} {speedup:>7.1f}x {r["memory_delta"]:>+7.0f} MB')
-    print()
-
-
-if __name__ == '__main__':
-    n = int(sys.argv[1]) if len(sys.argv) > 1 else 10000
-    run(n)
-
-
-# ---------------------------------------------------------------------------
 # Method 4: MLX (Apple Silicon native)
 # ---------------------------------------------------------------------------
 def bench_mlx(chunks, batch_size=256):
@@ -327,3 +254,56 @@ def bench_mlx(chunks, batch_size=256):
         'embedding_shape': emb_array.shape,
         'sample': emb_array[0][:5].tolist(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def run(n_chunks):
+    """Run all benchmarks."""
+    print(f'Generating {n_chunks:,} test chunks...')
+    chunks = generate_chunks(n_chunks)
+
+    print(f'\n{"=" * 70}')
+    print(f'  EMBEDDING BENCHMARK: {n_chunks:,} chunks (MiniLM-L6-v2)')
+    print(f'  Hardware: {os.cpu_count()} CPU cores')
+    print(f'{"=" * 70}')
+
+    results = []
+
+    # Warm up and test sentence-transformers
+    methods = [
+        ('[1/4] sentence-transformers (PyTorch)', lambda: bench_sentence_transformers(chunks, batch_size=64)),
+        ('[2/4] ONNX Runtime (FP32, optimized)', lambda: bench_onnx_fp32(chunks, batch_size=64)),
+        ('[3/4] ONNX Runtime (INT8 quantized)', lambda: bench_onnx_int8(chunks, batch_size=64)),
+        ('[4/4] MLX (Apple Silicon)', lambda: bench_mlx(chunks, batch_size=256)),
+    ]
+
+    for label, fn in methods:
+        print(f'\n{label}...')
+        r = fn()
+        results.append(r)
+        if 'error' not in r:
+            print(f'      Load: {r["load_time"]:.2f}s | Embed: {r["embed_time"]:.2f}s | {r["throughput"]:.0f} chunks/sec | +{r["memory_delta"]:.0f} MB')
+        else:
+            print(f'      Skipped: {r["error"]}')
+
+    # Summary
+    baseline = results[0]['embed_time']
+    print(f'\n{"=" * 70}')
+    print(f'  RESULTS: {n_chunks:,} chunks')
+    print(f'{"=" * 70}')
+    print(f'  {"Method":<35} {"Time":>8} {"Chunks/s":>10} {"Speedup":>8} {"Mem":>8}')
+    print(f'  {"-" * 69}')
+    for r in results:
+        if 'error' in r:
+            print(f'  {r["method"]:<35} {"ERROR":>8}')
+            continue
+        speedup = baseline / r['embed_time']
+        print(f'  {r["method"]:<35} {r["embed_time"]:>7.2f}s {r["throughput"]:>9.0f} {speedup:>7.1f}x {r["memory_delta"]:>+7.0f} MB')
+    print()
+
+
+if __name__ == '__main__':
+    n = int(sys.argv[1]) if len(sys.argv) > 1 else 10000
+    run(n)

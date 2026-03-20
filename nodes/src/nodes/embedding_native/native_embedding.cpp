@@ -21,10 +21,13 @@
 #include <string>
 #include <algorithm>
 #include <numeric>
+#include <unordered_map>
 
 #include <onnxruntime_c_api.h>
 
-// Global state
+// Global state.
+// NOTE: Not thread-safe — designed for single-threaded benchmark/node use.
+// For concurrent access, wrap calls in a mutex or use per-instance state.
 static const OrtApi* g_ort = nullptr;
 static OrtEnv* g_env = nullptr;
 static OrtSession* g_session = nullptr;
@@ -192,8 +195,10 @@ int32_t embedding_init(
         return -1;
 
     // Create session options
-    if (g_ort->CreateSessionOptions(&g_session_options) != nullptr)
+    if (g_ort->CreateSessionOptions(&g_session_options) != nullptr) {
+        g_ort->ReleaseEnv(g_env); g_env = nullptr;
         return -1;
+    }
 
     if (num_threads > 0)
         g_ort->SetIntraOpNumThreads(g_session_options, num_threads);
@@ -205,12 +210,19 @@ int32_t embedding_init(
         "session.use_env_allocators", "1");
 
     // Create session
-    if (g_ort->CreateSession(g_env, model_path, g_session_options, &g_session) != nullptr)
+    if (g_ort->CreateSession(g_env, model_path, g_session_options, &g_session) != nullptr) {
+        g_ort->ReleaseSessionOptions(g_session_options); g_session_options = nullptr;
+        g_ort->ReleaseEnv(g_env); g_env = nullptr;
         return -1;
+    }
 
     // Create memory info
-    if (g_ort->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &g_memory_info) != nullptr)
+    if (g_ort->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &g_memory_info) != nullptr) {
+        g_ort->ReleaseSession(g_session); g_session = nullptr;
+        g_ort->ReleaseSessionOptions(g_session_options); g_session_options = nullptr;
+        g_ort->ReleaseEnv(g_env); g_env = nullptr;
         return -1;
+    }
 
     g_initialized = true;
     return 0;
@@ -264,17 +276,29 @@ int32_t embedding_batch(
     OrtValue* attention_mask_tensor = nullptr;
     OrtValue* token_type_ids_tensor = nullptr;
 
-    g_ort->CreateTensorWithDataAsOrtValue(
-        g_memory_info, input_ids.data(), input_ids.size() * sizeof(int64_t),
-        input_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &input_ids_tensor);
+    auto release_tensors = [&]() {
+        if (input_ids_tensor) g_ort->ReleaseValue(input_ids_tensor);
+        if (attention_mask_tensor) g_ort->ReleaseValue(attention_mask_tensor);
+        if (token_type_ids_tensor) g_ort->ReleaseValue(token_type_ids_tensor);
+    };
 
-    g_ort->CreateTensorWithDataAsOrtValue(
-        g_memory_info, attention_mask.data(), attention_mask.size() * sizeof(int64_t),
-        input_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &attention_mask_tensor);
+    if (g_ort->CreateTensorWithDataAsOrtValue(
+            g_memory_info, input_ids.data(), input_ids.size() * sizeof(int64_t),
+            input_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &input_ids_tensor) != nullptr) {
+        release_tensors(); return -1;
+    }
 
-    g_ort->CreateTensorWithDataAsOrtValue(
-        g_memory_info, token_type_ids.data(), token_type_ids.size() * sizeof(int64_t),
-        input_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &token_type_ids_tensor);
+    if (g_ort->CreateTensorWithDataAsOrtValue(
+            g_memory_info, attention_mask.data(), attention_mask.size() * sizeof(int64_t),
+            input_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &attention_mask_tensor) != nullptr) {
+        release_tensors(); return -1;
+    }
+
+    if (g_ort->CreateTensorWithDataAsOrtValue(
+            g_memory_info, token_type_ids.data(), token_type_ids.size() * sizeof(int64_t),
+            input_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &token_type_ids_tensor) != nullptr) {
+        release_tensors(); return -1;
+    }
 
     // Run inference
     const char* input_names[] = {"input_ids", "attention_mask", "token_type_ids"};
@@ -297,7 +321,11 @@ int32_t embedding_batch(
 
     // Get output data (shape: [batch, seq_len, hidden_dim])
     float* hidden_states = nullptr;
-    g_ort->GetTensorMutableData(output_tensor, (void**)&hidden_states);
+    if (g_ort->GetTensorMutableData(output_tensor, (void**)&hidden_states) != nullptr) {
+        g_ort->ReleaseValue(output_tensor);
+        release_tensors();
+        return -1;
+    }
 
     // Mean pooling with attention mask (CRITICAL: must mask padding!)
     for (int32_t i = 0; i < n_texts; i++) {
@@ -337,9 +365,7 @@ int32_t embedding_batch(
 
     // Cleanup
     g_ort->ReleaseValue(output_tensor);
-    g_ort->ReleaseValue(input_ids_tensor);
-    g_ort->ReleaseValue(attention_mask_tensor);
-    g_ort->ReleaseValue(token_type_ids_tensor);
+    release_tensors();
 
     return n_texts;
 }
@@ -359,6 +385,8 @@ void embedding_cleanup() {
     if (g_session_options) { g_ort->ReleaseSessionOptions(g_session_options); g_session_options = nullptr; }
     if (g_memory_info) { g_ort->ReleaseMemoryInfo(g_memory_info); g_memory_info = nullptr; }
     if (g_env) { g_ort->ReleaseEnv(g_env); g_env = nullptr; }
+    g_vocab.clear();
+    g_vocab_map.clear();
     g_initialized = false;
 }
 
