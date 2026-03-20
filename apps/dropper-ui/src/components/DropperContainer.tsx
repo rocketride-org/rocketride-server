@@ -18,26 +18,26 @@ import { TabType } from '../types/dropper.types';
 
 /**
  * DropperContainer - Main container component for the RocketRide Dropper application
- * 
+ *
  * This component orchestrates the entire file upload and processing workflow:
  * - Handles file uploads via drag-and-drop or file selection
  * - Tracks upload progress and processing status
  * - Displays results in multiple formats (text, tables, images)
  * - Provides file management (add, remove, clear all)
- * 
+ *
  * State Management:
  * - Connection status and status messages
  * - Active tab for results display
  * - Drag-over state for drop zone
  * - File scroll synchronization
  * - Compare mode for side-by-side viewing
- * 
+ *
  * Component Layout:
  * - Header: Branding, connection status, and actions
  * - Left Panel: Drop zone and file list (when not processing)
  * - Right Panel: Results tabs and content (when results available)
  * - Processing View: Upload progress and completion status
- * 
+ *
  * @component
  * @example
  * ```tsx
@@ -68,7 +68,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 	/**
 	 * Handler called when RocketRide client successfully connects
 	 * Clears any status messages - ready to go!
-	 * 
+	 *
 	 * @param _client - Connected RocketRide client instance (unused)
 	 */
 	const handleConnected = useCallback(async (_client: RocketRideClient) => {
@@ -83,7 +83,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 	 */
 	const handleDisconnected = useCallback(async (reason: string, hasError: boolean) => {
 		connectionAttemptsRef.current++;
-		setConnectionErrorMessage((prev) => (hasError ? (reason || null) : prev));
+		setConnectionErrorMessage((prev) => (hasError ? reason || null : prev));
 		if (connectionAttemptsRef.current < 5) {
 			setStatusMessage(null);
 		} else {
@@ -92,22 +92,10 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 	}, []);
 
 	// Initialize RocketRide client with connection handlers
-	const { isConnected, client } = useRocketRideClient(
-		handleConnected,
-		handleDisconnected,
-		setStatusMessage
-	);
+	const { isConnected, client } = useRocketRideClient(handleConnected, handleDisconnected, setStatusMessage);
 
 	// Initialize file processing hook with client and auth token
-	const {
-		uploadedFiles,
-		results,
-		uploadProgress,
-		isProcessing,
-		addFiles,
-		removeFile,
-		clearAll
-	} = useFileProcessing(client, authToken);
+	const { uploadedFiles, results, uploadProgress, isProcessing, addFiles, removeFile, clearAll } = useFileProcessing(client, authToken);
 
 	// macOS fix: Finder drag events don't reach cross-origin iframes in Electron
 	// webviews, so the parent intercepts and bridges them here via postMessage.
@@ -125,9 +113,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 			if (!isDragOverRef.current) return;
 
 			const dt = new DataTransfer();
-			event.data.files.forEach((f: { buffer: ArrayBuffer; name: string; type: string; lastModified: number }) =>
-				dt.items.add(new File([f.buffer], f.name, { type: f.type, lastModified: f.lastModified }))
-			);
+			event.data.files.forEach((f: { buffer: ArrayBuffer; name: string; type: string; lastModified: number }) => dt.items.add(new File([f.buffer], f.name, { type: f.type, lastModified: f.lastModified })));
 			addFiles(dt.files);
 		};
 
@@ -168,9 +154,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 			if (isProcessing) return;
 
 			const dt = new DataTransfer();
-			event.data.files.forEach((f: { buffer: number[]; name: string; type: string; lastModified: number }) =>
-				dt.items.add(new File([new Uint8Array(f.buffer)], f.name, { type: f.type, lastModified: f.lastModified }))
-			);
+			event.data.files.forEach((f: { buffer: number[]; name: string; type: string; lastModified: number }) => dt.items.add(new File([new Uint8Array(f.buffer)], f.name, { type: f.type, lastModified: f.lastModified })));
 			addFiles(dt.files);
 		};
 
@@ -190,6 +174,8 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 				setActiveTab('tables');
 			} else if (results.images.length > 0) {
 				setActiveTab('images');
+			} else if (results.videos.length > 0) {
+				setActiveTab('videos');
 			} else {
 				setActiveTab('results');
 			}
@@ -220,36 +206,42 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 	 * Handles file drop event
 	 * Validates connection status and processes dropped files
 	 */
-	const handleDrop = useCallback((e: React.DragEvent) => {
-		e.preventDefault();
-		e.stopPropagation();
-		setIsDragOver(false);
+	const handleDrop = useCallback(
+		(e: React.DragEvent) => {
+			e.preventDefault();
+			e.stopPropagation();
+			setIsDragOver(false);
 
-		// Prevent uploads if not connected to RocketRide
-		if (!isConnected) {
-			setStatusMessage('Please wait for connection before uploading files');
-			return;
-		}
+			// Prevent uploads if not connected to RocketRide
+			if (!isConnected) {
+				setStatusMessage('Please wait for connection before uploading files');
+				return;
+			}
 
-		// Extract files from drop event and process them
-		const files = e.dataTransfer.files;
-		if (files.length > 0) {
-			addFiles(files);
-		}
-	}, [addFiles, isConnected]);
+			// Extract files from drop event and process them
+			const files = e.dataTransfer.files;
+			if (files.length > 0) {
+				addFiles(files);
+			}
+		},
+		[addFiles, isConnected]
+	);
 
 	/**
 	 * Handles files selected via file picker dialog
 	 * Validates connection status before processing
 	 */
-	const handleFilesSelected = useCallback((files: FileList) => {
-		if (!isConnected) {
-			setStatusMessage('Please wait for connection before uploading files');
-			return;
-		}
+	const handleFilesSelected = useCallback(
+		(files: FileList) => {
+			if (!isConnected) {
+				setStatusMessage('Please wait for connection before uploading files');
+				return;
+			}
 
-		addFiles(files);
-	}, [addFiles, isConnected]);
+			addFiles(files);
+		},
+		[addFiles, isConnected]
+	);
 
 	/**
 	 * Opens VS Code's native file dialog via the extension host.
@@ -275,7 +267,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 	/**
 	 * Handles file click in file list
 	 * Scrolls to corresponding content in results view
-	 * 
+	 *
 	 * @param filename - Name of file to scroll to
 	 */
 	const handleFileClick = useCallback((filename: string) => {
@@ -289,113 +281,80 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 	 * Count files that have reached 'completed' or 'error' status
 	 * Status is now updated in real-time as each file finishes
 	 */
-	const completedCount = uploadedFiles.filter(
-		f => f.status === 'completed' || f.status === 'error'
-	).length;
+	const completedCount = uploadedFiles.filter((f) => f.status === 'completed' || f.status === 'error').length;
 	const totalCount = uploadedFiles.length;
 
 	return (
 		<div className="dropper-container">
 			{/* Header with branding and actions */}
-			<DropperHeader
-				hasFiles={uploadedFiles.length > 0}
-				onClearAll={handleClearAll}
-				isConnected={isConnected}
-			/>
+			<DropperHeader hasFiles={uploadedFiles.length > 0} onClearAll={handleClearAll} isConnected={isConnected} />
 
-		<div className="dropper-main">
-			<div className="top-controls-section">
-				{/* Left panel: File upload and management - always visible */}
-				<div className="left-panel">
-					{!isProcessing ? (
-						<>
-							{/* Drop zone for file upload - always visible */}
-							<DropZone
-								onFilesSelected={handleFilesSelected}
-								isProcessing={isProcessing}
-								isDragOver={isDragOver}
-								onDragOver={handleDragOver}
-								onDragLeave={handleDragLeave}
-								onDrop={handleDrop}
-								disabled={!isConnected}
-								onBrowse={isVSCode ? requestNativeFileDialog : undefined}
-							/>
+			<div className="dropper-main">
+				<div className="top-controls-section">
+					{/* Left panel: File upload and management - always visible */}
+					<div className="left-panel">
+						{!isProcessing ? (
+							<>
+								{/* Drop zone for file upload - always visible */}
+								<DropZone onFilesSelected={handleFilesSelected} isProcessing={isProcessing} isDragOver={isDragOver} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} disabled={!isConnected} onBrowse={isVSCode ? requestNativeFileDialog : undefined} />
 
-							{/* List of uploaded files */}
-							<FileList
-								files={uploadedFiles}
-								isProcessing={isProcessing}
-								onRemoveFile={removeFile}
-								onFileClick={handleFileClick}
-							/>
-					</>
-				) : (
-					// Show processing indicator with real-time progress
-					<div className="processing-indicator">
-						<h3>Processing Files...</h3>
-						<p className="processing-progress">
-							{completedCount} of {totalCount} completed
-						</p>
+								{/* List of uploaded files */}
+								<FileList files={uploadedFiles} isProcessing={isProcessing} onRemoveFile={removeFile} onFileClick={handleFileClick} />
+							</>
+						) : (
+							// Show processing indicator with real-time progress
+							<div className="processing-indicator">
+								<h3>Processing Files...</h3>
+								<p className="processing-progress">
+									{completedCount} of {totalCount} completed
+								</p>
+							</div>
+						)}
 					</div>
-				)}
+
+					{/* Right panel: Status banner, Results, or Upload progress */}
+					{!isConnected && (statusMessage === 'CONNECTION_FAILED' || connectionErrorMessage) ? (
+						// Show detailed connection troubleshooting
+						<div className="connection-error-panel">
+							<div className="connection-error-icon">⚠️</div>
+							<h2 className="connection-error-title">Having Trouble Connecting</h2>
+							{connectionErrorMessage && <p className="connection-error-message">{connectionErrorMessage}</p>}
+							<p className="connection-error-subtitle">We can't reach your pipeline. Here's what to check:</p>
+							<div className="connection-error-checklist">
+								<div className="connection-error-item">
+									<span className="connection-error-bullet">✓</span>
+									<span className="connection-error-text">Make sure your pipeline is running</span>
+								</div>
+								<div className="connection-error-item">
+									<span className="connection-error-bullet">✓</span>
+									<span className="connection-error-text">Verify you are authorized to use this pipeline</span>
+								</div>
+								<div className="connection-error-item">
+									<span className="connection-error-bullet">✓</span>
+									<span className="connection-error-text">Check that your server is running and reachable</span>
+								</div>
+							</div>
+							<p className="connection-error-footer">We'll keep trying to connect automatically...</p>
+						</div>
+					) : !isProcessing && results ? (
+						// Show results when available
+						<div className="right-panel">
+							{/* Tabs for different result types */}
+							<ResultsTabs activeTab={activeTab} onTabChange={setActiveTab} results={results} compareMode={compareMode} onCompareModeChange={setCompareMode} />
+
+							{/* Content area for results */}
+							<div className="tab-content-wrapper">
+								<ResultsContent activeTab={activeTab} results={results} scrollToFilename={scrollToFilename} compareMode={compareMode} />
+							</div>
+						</div>
+					) : isProcessing ? (
+						// Show upload progress during processing
+						<div className="right-panel">
+							<UploadProgress uploadProgress={uploadProgress} />
+						</div>
+					) : null}
+				</div>
 			</div>
-
-		{/* Right panel: Status banner, Results, or Upload progress */}
-		{!isConnected && (statusMessage === 'CONNECTION_FAILED' || connectionErrorMessage) ? (
-			// Show detailed connection troubleshooting
-			<div className="connection-error-panel">
-				<div className="connection-error-icon">⚠️</div>
-				<h2 className="connection-error-title">Having Trouble Connecting</h2>
-				{connectionErrorMessage && (
-					<p className="connection-error-message">{connectionErrorMessage}</p>
-				)}
-				<p className="connection-error-subtitle">We can't reach your pipeline. Here's what to check:</p>
-				<div className="connection-error-checklist">
-					<div className="connection-error-item">
-						<span className="connection-error-bullet">✓</span>
-						<span className="connection-error-text">Make sure your pipeline is running</span>
-					</div>
-					<div className="connection-error-item">
-						<span className="connection-error-bullet">✓</span>
-						<span className="connection-error-text">Verify you are authorized to use this pipeline</span>
-					</div>
-					<div className="connection-error-item">
-						<span className="connection-error-bullet">✓</span>
-						<span className="connection-error-text">Check that your server is running and reachable</span>
-					</div>
-				</div>
-				<p className="connection-error-footer">We'll keep trying to connect automatically...</p>
-			</div>
-		) : !isProcessing && results ? (
-				// Show results when available
-				<div className="right-panel">
-					{/* Tabs for different result types */}
-					<ResultsTabs
-						activeTab={activeTab}
-						onTabChange={setActiveTab}
-						results={results}
-						compareMode={compareMode}
-						onCompareModeChange={setCompareMode}
-					/>
-
-					{/* Content area for results */}
-					<div className="tab-content-wrapper">
-						<ResultsContent
-							activeTab={activeTab}
-							results={results}
-							scrollToFilename={scrollToFilename}
-							compareMode={compareMode}
-						/>
-					</div>
-				</div>
-			) : isProcessing ? (
-				// Show upload progress during processing
-				<div className="right-panel">
-					<UploadProgress uploadProgress={uploadProgress} />
-				</div>
-			) : null}
 		</div>
-	</div>
-</div>
-);
+	);
 };

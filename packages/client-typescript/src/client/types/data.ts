@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,17 +24,41 @@
 
 /**
  * Response structures from RocketRide pipeline data processing operations.
- * 
- * These interfaces represent the different types of responses returned when data 
+ *
+ * These interfaces represent the different types of responses returned when data
  * is sent through pipelines, depending on the processing method and MIME type handling.
  */
 
 /**
+ * SSE event data for a single video chunk streamed during file processing.
+ */
+export interface VideoChunkSSEData {
+	/** Original filename this chunk belongs to */
+	filename: string;
+	/** Zero-based chunk index */
+	chunk_index: number;
+	/** Total number of chunks to expect */
+	total_chunks: number;
+	/** MIME type of the video (e.g. 'video/mp4') */
+	mime_type: string;
+	/** Base64-encoded binary chunk data */
+	data: string;
+}
+
+/**
+ * SSE event data signalling that all video chunks for a file have been sent.
+ */
+export interface VideoCompleteSSEData {
+	/** Original filename whose chunks are now complete */
+	filename: string;
+}
+
+/**
  * Pipeline response structure with optional processing information.
- * 
- * This is returned from all pipeline operations. When data is sent without 
- * MIME type specification, only basic fields are present. When MIME type 
- * is specified and processing occurs, additional result_types and dynamic 
+ *
+ * This is returned from all pipeline operations. When data is sent without
+ * MIME type specification, only basic fields are present. When MIME type
+ * is specified and processing occurs, additional result_types and dynamic
  * fields are included.
  */
 export interface PIPELINE_RESULT {
@@ -47,12 +71,12 @@ export interface PIPELINE_RESULT {
 	/** Unique object identifier for tracking processed items (UUID format) */
 	objectId: string;
 
-	/** 
+	/**
 	 * Map of field names to their data type identifiers.
-	 * 
+	 *
 	 * The key is the name of a field that exists in this response object.
 	 * The value indicates what type of data that field contains.
-	 * 
+	 *
 	 * Examples:
 	 * - { "text": "text" } → look for response.text containing string array
 	 * - { "my_text": "text", "my_answers": "answers" } → look for response.my_text and response.my_answers
@@ -60,14 +84,14 @@ export interface PIPELINE_RESULT {
 	 */
 	result_types?: Record<string, string>;
 
-	/** 
+	/**
 	 * Dynamic fields containing processed data based on result_types mapping.
-	 * 
+	 *
 	 * Field names and types are determined by the result_types object:
 	 * - Fields with type "text": string[] (array of text segments)
 	 * - Fields with type "answers": string[] (AI-generated chat responses)
 	 * - Other types: depends on pipeline configuration
-	 * 
+	 *
 	 * Common field names: "text", "output", "content", "data", "result", "answers"
 	 */
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Dynamic fields are runtime-determined by pipeline config
@@ -76,7 +100,7 @@ export interface PIPELINE_RESULT {
 
 /**
  * File upload result structure with processing outcome and metadata.
- * 
+ *
  * This represents the complete result of a file upload operation, including
  * upload statistics, processing results, and any error information.
  */
@@ -96,7 +120,7 @@ export interface UPLOAD_RESULT {
 	/** Time taken for the upload operation in seconds */
 	upload_time: number;
 
-	/** 
+	/**
 	 * Processing result from the pipeline after successful upload.
 	 * Contains the same structure as PIPELINE_RESULT with processed content.
 	 * Only present when action is 'complete' and processing succeeded.
