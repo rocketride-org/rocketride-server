@@ -21,7 +21,6 @@
 # SOFTWARE.
 # =============================================================================
 
-import base64
 import os
 from rocketlib import IInstanceBase
 from ai.common.schema import Doc, Question, Answer
@@ -29,6 +28,7 @@ from ai.common.image import ImageProcessor
 from rocketlib import AVI_ACTION, Entry, debug
 from typing import List
 from .IGlobal import IGlobal
+
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
@@ -77,8 +77,6 @@ class IInstance(IInstanceBase):
         """
         self.text = ''  # Reset the text buffer
         self.image = bytearray()
-        self.video = bytearray()
-        self.video_mime = 'video/mp4'
 
     def close(self):
         """
@@ -208,25 +206,18 @@ class IInstance(IInstanceBase):
         self.instance.currentObject.response[key].append(info)
 
     def writeVideo(self, aviAction: int, mimeType: str, data: bytes):
-        if aviAction == AVI_ACTION.BEGIN:
-            self.video_mime = mimeType
-            key = self._getkey('video')
-            if key not in self.instance.currentObject.response:
-                self.instance.currentObject.response[key] = []
-            self.instance.currentObject.response[key].append({
-                'mime_type': mimeType,
-                'data': [],
-            })
+        # Get the key to write to
+        key = self._getkey('video')
 
-        elif aviAction == AVI_ACTION.WRITE:
-            if data:
-                key = self._getkey('video')
-                entries = self.instance.currentObject.response.get(key)
-                if entries:
-                    entries[-1]['data'].append(base64.b64encode(data).decode())
+        # If it isn't there, create it
+        if key not in self.instance.currentObject.response:
+            self.instance.currentObject.response[key] = []
 
-        elif aviAction == AVI_ACTION.END:
-            pass  # entry already populated chunk-by-chunk in WRITE
+        # Create the tracking info
+        info = {'url': self.instance.currentObject.url, 'aviAction': str(aviAction), 'mimeType': mimeType, 'size': len(data)}
+
+        # Add the documents
+        self.instance.currentObject.response[key].append(info)
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Handle AVI_BEGIN action
