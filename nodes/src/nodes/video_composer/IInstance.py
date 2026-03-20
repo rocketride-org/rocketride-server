@@ -28,6 +28,7 @@
 import base64
 import logging
 import subprocess
+from typing import ClassVar
 
 from rocketlib import IInstanceBase, AVI_ACTION, Entry
 
@@ -36,15 +37,25 @@ from .IGlobal import IGlobal
 _logger = logging.getLogger(__name__)
 
 
-def _log(msg: str):
+def _log(msg: str) -> None:
     _logger.debug(msg)
 
 
 class IInstance(IInstanceBase):
+    """Pipeline instance for the video composer node.
+
+    Accumulates incoming image frames in memory and encodes them into an
+    MP4 video via FFmpeg when the object is closed. The encoded video is
+    streamed to downstream nodes via AVI and to the UI client via SSE chunks.
+
+    Attributes:
+        IGlobal: Shared global state providing FFmpeg encoding configuration.
+    """
+
     IGlobal: IGlobal
 
     # Maps MIME type to the FFmpeg image2pipe input codec name
-    _MIME_CODEC = {
+    _MIME_CODEC: ClassVar[dict[str, str]] = {
         'image/png': 'png',
         'image/jpeg': 'mjpeg',
         'image/jpg': 'mjpeg',
@@ -54,6 +65,7 @@ class IInstance(IInstanceBase):
     }
 
     def beginInstance(self):
+        """Initialise per-instance state and load encoding settings from IGlobal.config."""
         self._frames: list[bytes] = []
         self._image_buf = bytearray()
         self._image_mime = 'image/png'
@@ -65,14 +77,17 @@ class IInstance(IInstanceBase):
         self._crf = int(cfg.get('crf', 23))
 
     def endInstance(self):
+        """Release per-instance resources."""
         self._cleanup()
 
     def open(self, obj: Entry):
+        """Reset the frame buffer and capture the output filename from the entry."""
         self._frames = []
         self._filename = (obj.name if obj.hasName else None) or 'output.mp4'
         _log('open: in-memory frame buffer initialised')
 
     def close(self):
+        """Encode accumulated frames to MP4 and stream the result; no-op if no frames."""
         frame_count = len(self._frames)
         _log(f'close: frame_count={frame_count}')
         if frame_count == 0:
@@ -93,6 +108,7 @@ class IInstance(IInstanceBase):
     # ------------------------------------------------------------------
 
     def writeImage(self, action: AVI_ACTION, mimeType: str, buffer: bytes):
+        """Accumulate image data into a frame buffer; append completed frames on END."""
         if action == AVI_ACTION.BEGIN:
             self._image_buf = bytearray()
             self._image_mime = mimeType
@@ -110,13 +126,41 @@ class IInstance(IInstanceBase):
     # FFmpeg encoding via stdin/stdout pipe -- no temp files
     # ------------------------------------------------------------------
 
+    _ALLOWED_CODECS: ClassVar[frozenset[str]] = frozenset(
+        {
+            'libx264',
+            'libx265',
+            'libvpx',
+            'libvpx-vp9',
+            'libaom-av1',
+            'h264_nvenc',
+            'hevc_nvenc',
+            'h264_videotoolbox',
+            'hevc_videotoolbox',
+        }
+    )
+
     def _encode_video(self) -> bytes | None:
+        # Validate config values before building the subprocess command.
+        if self._codec not in self._ALLOWED_CODECS:
+            _log(f'_encode_video: unsupported codec={self._codec!r}')
+            return None
+        if not (0 <= self._crf <= 51):
+            _log(f'_encode_video: crf={self._crf} out of range [0, 51]')
+            return None
+        if not (0 < self._fps <= 240):
+            _log(f'_encode_video: fps={self._fps} out of valid range (0, 240]')
+            return None
+
         try:
             import imageio_ffmpeg as iff
-
-            ffmpeg = iff.get_ffmpeg_exe()
-        except Exception:
+        except ImportError:
             ffmpeg = 'ffmpeg'
+        else:
+            try:
+                ffmpeg = iff.get_ffmpeg_exe()
+            except AttributeError:
+                ffmpeg = 'ffmpeg'
 
         input_codec = self._MIME_CODEC.get(self._image_mime, 'png')
 
@@ -161,15 +205,23 @@ class IInstance(IInstanceBase):
                 _log(f'_encode_video: stderr={stderr.decode(errors="replace")[-500:]}')
                 return None
             return stdout
-        except (subprocess.TimeoutExpired, Exception) as e:
-            _log(f'_encode_video: exception={e}')
+        except subprocess.TimeoutExpired as e:
+            _log(f'_encode_video: timed out: {e}')
+            proc.kill()
+            proc.wait()
+            return None
+        except OSError as e:
+            _log(f'_encode_video: ffmpeg not found or not executable: {e}')
+            return None
+        except subprocess.SubprocessError as e:
+            _log(f'_encode_video: subprocess error: {e}')
             return None
 
     # ------------------------------------------------------------------
     # Write the encoded video to downstream nodes via the engine AVI mechanism
     # ------------------------------------------------------------------
 
-    def _output_video(self, video_data: bytes):
+    def _output_video(self, video_data: bytes) -> None:
         chunk_size = 48 * 1024
         total_chunks = (len(video_data) + chunk_size - 1) // chunk_size
 
@@ -196,6 +248,6 @@ class IInstance(IInstanceBase):
     # Cleanup
     # ------------------------------------------------------------------
 
-    def _cleanup(self):
+    def _cleanup(self) -> None:
         self._frames = []
         self._filename = 'output.mp4'

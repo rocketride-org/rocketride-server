@@ -21,23 +21,27 @@
 # SOFTWARE.
 # =============================================================================
 
-import threading
 from rocketlib import IGlobalBase
 from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
+    """Global state manager for the video composer node."""
+
     config = None
 
     def beginGlobal(self):
-        self.device_lock = threading.Lock()
+        """Load and validate node configuration.
+
+        Calls Config.getNodeConfig with glb.logicalType and glb.connConfig,
+        raises RuntimeError if None is returned, then sets config['type']
+        from the 'profile' key in glb.connConfig (defaults to 'standard').
+        """
         self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         if self.config is None:
-            raise RuntimeError(
-                f'getNodeConfig returned None for logicalType={self.glb.logicalType!r} '
-                f'connConfig={self.glb.connConfig!r}'
-            )
+            raise RuntimeError(f'getNodeConfig returned None for logicalType={self.glb.logicalType!r} connConfig={self.glb.connConfig!r}')
         self.config['type'] = self.glb.connConfig.get('profile', 'standard')
 
     def endGlobal(self):
-        self.device_lock = None
+        """Release global resources."""
+        pass
