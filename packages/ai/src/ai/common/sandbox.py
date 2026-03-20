@@ -64,52 +64,76 @@ _MAX_OUTPUT = 51200  # 50 KB
 
 # ── Default allowed modules ─────────────────────────────────────────────────
 # Safe, pure-computation modules with no filesystem, network, or OS access.
-_DEFAULT_ALLOWED_MODULES = frozenset({
-    'math',
-    'cmath',
-    'decimal',
-    'fractions',
-    'statistics',
-    'random',
-    'string',
-    'textwrap',
-    're',
-    'json',
-    'csv',
-    'collections',
-    'itertools',
-    'functools',
-    'operator',
-    'copy',
-    'dataclasses',
-    'enum',
-    'typing',
-    'datetime',
-    'time',
-    'calendar',
-    'base64',
-    'hashlib',
-    'hmac',
-    'struct',
-    'difflib',
-    'pprint',
-    'bisect',
-    'heapq',
-    'array',
-    'numbers',
-    'unicodedata',
-})
+_DEFAULT_ALLOWED_MODULES = frozenset(
+    {
+        'math',
+        'cmath',
+        'decimal',
+        'fractions',
+        'statistics',
+        'random',
+        'string',
+        'textwrap',
+        're',
+        'json',
+        'csv',
+        'collections',
+        'itertools',
+        'functools',
+        'operator',
+        'copy',
+        'dataclasses',
+        'enum',
+        'typing',
+        'datetime',
+        'time',
+        'calendar',
+        'base64',
+        'hashlib',
+        'hmac',
+        'struct',
+        'difflib',
+        'pprint',
+        'bisect',
+        'heapq',
+        'array',
+        'numbers',
+        'unicodedata',
+    }
+)
 
 
 # ── Extra builtins added on top of RestrictedPython's safe_builtins ───────
 # safe_builtins is intentionally minimal (no dict, list, enumerate, etc.).
 # These are non-dangerous builtins agents need for everyday data work.
-_EXTRA_SAFE_BUILTINS = frozenset({
-    'all', 'any', 'ascii', 'bin', 'bytearray', 'dict', 'enumerate',
-    'filter', 'format', 'frozenset', 'hasattr', 'iter', 'list', 'map',
-    'max', 'min', 'next', 'object', 'print', 'reversed', 'set',
-    'sum', 'super', 'type',
-})
+_EXTRA_SAFE_BUILTINS = frozenset(
+    {
+        'all',
+        'any',
+        'ascii',
+        'bin',
+        'bytearray',
+        'dict',
+        'enumerate',
+        'filter',
+        'format',
+        'frozenset',
+        'hasattr',
+        'iter',
+        'list',
+        'map',
+        'max',
+        'min',
+        'next',
+        'object',
+        'print',
+        'reversed',
+        'set',
+        'sum',
+        'super',
+        'type',
+    }
+)
 
 
 _INPLACE_OPS = {
@@ -138,6 +162,7 @@ def execute_sandboxed(
     code: str,
     *,
     allowed_modules: Set[str] | None = None,
+    timeout: int | None = None,
 ) -> Dict[str, Any]:
     """Run *code* in a RestrictedPython sandbox and return the result.
 
@@ -180,6 +205,7 @@ def execute_sandboxed(
     # We add back the ones that are safe for sandboxed computation.
     sandbox_builtins: Dict[str, Any] = dict(safe_builtins)
     import builtins as _builtins
+
     for _name in _EXTRA_SAFE_BUILTINS:
         sandbox_builtins[_name] = getattr(_builtins, _name)
 
@@ -189,10 +215,7 @@ def execute_sandboxed(
     def restricted_import(name: str, *args: Any, **kwargs: Any) -> Any:
         top_level = name.split('.')[0]
         if top_level not in allowlist:
-            raise ImportError(
-                f"Import of '{name}' is not allowed. "
-                f"Allowed modules: {', '.join(sorted(allowlist))}"
-            )
+            raise ImportError(f"Import of '{name}' is not allowed. Allowed modules: {', '.join(sorted(allowlist))}")
         try:
             return original_import(name, *args, **kwargs)
         except ModuleNotFoundError:
@@ -242,22 +265,22 @@ def execute_sandboxed(
             stderr = traceback.format_exc()
             exit_code = 1
 
+    effective_timeout = timeout if timeout is not None else _TIMEOUT
+
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
-    thread.join(timeout=_TIMEOUT)
+    thread.join(timeout=effective_timeout)
 
     if thread.is_alive():
         timed_out = True
-        stderr = f'[Execution timed out after {_TIMEOUT}s]'
+        stderr = f'[Execution timed out after {effective_timeout}s]'
         exit_code = -1
 
     # ── 6. Collect output ──────────────────────────────────────────────
     # RestrictedPython stores the PrintCollector instance as '_print';
     # calling it returns the collected text.
     _print_collector = sandbox_globals.get('_print')
-    stdout = _truncate(
-        _print_collector() if callable(_print_collector) else ''
-    )
+    stdout = _truncate(_print_collector() if callable(_print_collector) else '')
     stderr = _truncate(stderr)
 
     result_val = sandbox_globals.get('result')
@@ -270,11 +293,7 @@ def execute_sandboxed(
 
     if result_val is not None:
         try:
-            response['result'] = (
-                result_val
-                if isinstance(result_val, (str, int, float, bool, list, dict, type(None)))
-                else repr(result_val)
-            )
+            response['result'] = result_val if isinstance(result_val, (str, int, float, bool, list, dict, type(None))) else repr(result_val)
         except Exception:
             response['result'] = repr(result_val)
 
@@ -299,8 +318,4 @@ def _truncate(text: str, max_size: int = _MAX_OUTPUT) -> str:
         return text
     marker = f'\n\n... [truncated — {len(text)} chars total, limit {max_size}] ...\n\n'
     half = (max_size - len(marker)) // 2
-    return (
-        text[:half]
-        + marker
-        + text[-half:]
-    )
+    return text[:half] + marker + text[-half:]

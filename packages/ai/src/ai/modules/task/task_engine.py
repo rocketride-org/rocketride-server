@@ -1058,6 +1058,7 @@ class Task(DAPBase):
 
         # Handle real-time node-to-UI SSE messages (pass-through, no status tracking)
         elif event_type == 'apaevt_sse':
+            self.reset_idle_timer()
             await self._forward_task_event(EVENT_TYPE.SSE, message)
 
         # Handle debug output

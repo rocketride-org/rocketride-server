@@ -13,17 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"llm"
-	],
+	"classType": ["llm"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"invoke"
-	],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -51,14 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that integrates with locally-hosted language models through Ollama. ",
-		"It enables on-premise text generation, summarization, and question answering ",
-		"without relying on external APIs. Ideal for privacy-sensitive applications, the ",
-		"component offers low-latency inference and supports various open-source models. It ",
-		"allows organizations to leverage LLM capabilities while maintaining full control ",
-		"over data and infrastructure."
-	],
+	"description": ["A component that integrates with locally-hosted language models through Ollama. ", "It enables on-premise text generation, summarization, and question answering ", "without relying on external APIs. Ideal for privacy-sensitive applications, the ", "component offers low-latency inference and supports various open-source models. It ", "allows organizations to leverage LLM capabilities while maintaining full control ", "over data and infrastructure."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -74,18 +63,14 @@
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": [
-		"Model: ${parameters.llm_ollama.profile}"
-	],
+	"tile": ["Model: ${parameters.llm_ollama.profile}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"questions": [
-			"answers"
-		]
+		"questions": ["answers"]
 	},
 	"input": [
 		{
@@ -262,295 +247,204 @@
 		},
 		"modelTotalTokens": {
 			"type": "number",
-			"title": "Tokens",
-			"description": "Total Tokens"
+			"title": "Context Tokens",
+			"description": "Total context window size (input + output)"
+		},
+		"modelOutputTokens": {
+			"type": "number",
+			"title": "Max Output Tokens",
+			"description": "Maximum tokens the model can generate in a single response. Default is 4096."
 		},
 		"ollama.custom": {
 			"object": "custom",
-			"properties": [
-				"model",
-				"modelTotalTokens",
-				"llm.local.serverbase"
-			]
+			"properties": ["model", "modelTotalTokens", "modelOutputTokens", "llm.local.serverbase"]
 		},
 		"ollama.llama3_3": {
 			"object": "llama3_3",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.llama3_1-8b": {
 			"object": "llama3_1-8b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.llama3_1-70b": {
 			"object": "llama3_1-70b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.llama3_1-405b": {
 			"object": "llama3_1-405b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.phi4-14b": {
 			"object": "phi4-14b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.llama3_2-3b": {
 			"object": "llama3_2-3b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.llama3_2-1b": {
 			"object": "llama3_2-1b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.llama4-latest": {
 			"object": "llama4-latest",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.mistral-7b": {
 			"object": "mistral-7b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.qwen2_5-7b": {
 			"object": "qwen2_5-7b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.qwen2_5-0_5b": {
 			"object": "qwen2_5-0_5b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.qwen2_5-1_5b": {
 			"object": "qwen2_5-1_5b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.qwen2_5-3b": {
 			"object": "qwen2_5-3b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.qwen2_5-14b": {
 			"object": "qwen2_5-14b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.qwen2_5-32b": {
 			"object": "qwen2_5-32b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.qwen2_5-72b": {
 			"object": "qwen2_5-72b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.qwen3-latest": {
 			"object": "qwen3-latest",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.deepseek-r1-1_5b": {
 			"object": "deepseek-r1-1_5b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.deepseek-r1-7b": {
 			"object": "deepseek-r1-7b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.deepseek-r1-14b": {
 			"object": "deepseek-r1-14b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.deepseek-r1-32b": {
 			"object": "deepseek-r1-32b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.deepseek-r1-671b": {
 			"object": "deepseek-r1-671b",
-			"properties": [
-				"llm.local.serverbase"
-			]
+			"properties": ["llm.local.serverbase"]
 		},
 		"ollama.profile": {
 			"title": "Model",
 			"description": "LLM model",
 			"type": "string",
 			"default": "llama3_3",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": [
-						"ollama.custom"
-					]
+					"properties": ["ollama.custom"]
 				},
 				{
 					"value": "llama3_3",
-					"properties": [
-						"ollama.llama3_3"
-					]
+					"properties": ["ollama.llama3_3"]
 				},
 				{
 					"value": "llama3_1-8b",
-					"properties": [
-						"ollama.llama3_1-8b"
-					]
+					"properties": ["ollama.llama3_1-8b"]
 				},
 				{
 					"value": "llama3_1-70b",
-					"properties": [
-						"ollama.llama3_1-70b"
-					]
+					"properties": ["ollama.llama3_1-70b"]
 				},
 				{
 					"value": "llama3_1-405b",
-					"properties": [
-						"ollama.llama3_1-405b"
-					]
+					"properties": ["ollama.llama3_1-405b"]
 				},
 				{
 					"value": "llama4-latest",
-					"properties": [
-						"ollama.llama4-latest"
-					]
+					"properties": ["ollama.llama4-latest"]
 				},
 				{
 					"value": "phi4-14b",
-					"properties": [
-						"ollama.phi4-14b"
-					]
+					"properties": ["ollama.phi4-14b"]
 				},
 				{
 					"value": "llama3_2-3b",
-					"properties": [
-						"ollama.llama3_2-3b"
-					]
+					"properties": ["ollama.llama3_2-3b"]
 				},
 				{
 					"value": "llama3_2-1b",
-					"properties": [
-						"ollama.llama3_2-1b"
-					]
+					"properties": ["ollama.llama3_2-1b"]
 				},
 				{
 					"value": "mistral-7b",
-					"properties": [
-						"ollama.mistral-7b"
-					]
+					"properties": ["ollama.mistral-7b"]
 				},
 				{
 					"value": "qwen2_5-7b",
-					"properties": [
-						"ollama.qwen2_5-7b"
-					]
+					"properties": ["ollama.qwen2_5-7b"]
 				},
 				{
 					"value": "qwen2_5-0_5b",
-					"properties": [
-						"ollama.qwen2_5-0_5b"
-					]
+					"properties": ["ollama.qwen2_5-0_5b"]
 				},
 				{
 					"value": "qwen2_5-1_5b",
-					"properties": [
-						"ollama.qwen2_5-1_5b"
-					]
+					"properties": ["ollama.qwen2_5-1_5b"]
 				},
 				{
 					"value": "qwen2_5-3b",
-					"properties": [
-						"ollama.qwen2_5-3b"
-					]
+					"properties": ["ollama.qwen2_5-3b"]
 				},
 				{
 					"value": "qwen2_5-14b",
-					"properties": [
-						"ollama.qwen2_5-14b"
-					]
+					"properties": ["ollama.qwen2_5-14b"]
 				},
 				{
 					"value": "qwen2_5-32b",
-					"properties": [
-						"ollama.qwen2_5-32b"
-					]
+					"properties": ["ollama.qwen2_5-32b"]
 				},
 				{
 					"value": "qwen2_5-72b",
-					"properties": [
-						"ollama.qwen2_5-72b"
-					]
+					"properties": ["ollama.qwen2_5-72b"]
 				},
 				{
 					"value": "qwen3-latest",
-					"properties": [
-						"ollama.qwen3-latest"
-					]
+					"properties": ["ollama.qwen3-latest"]
 				},
 				{
 					"value": "deepseek-r1-1_5b",
-					"properties": [
-						"ollama.deepseek-r1-1_5b"
-					]
+					"properties": ["ollama.deepseek-r1-1_5b"]
 				},
 				{
 					"value": "deepseek-r1-7b",
-					"properties": [
-						"ollama.deepseek-r1-7b"
-					]
+					"properties": ["ollama.deepseek-r1-7b"]
 				},
 				{
 					"value": "deepseek-r1-14b",
-					"properties": [
-						"ollama.deepseek-r1-14b"
-					]
+					"properties": ["ollama.deepseek-r1-14b"]
 				},
 				{
 					"value": "deepseek-r1-32b",
-					"properties": [
-						"ollama.deepseek-r1-32b"
-					]
+					"properties": ["ollama.deepseek-r1-32b"]
 				},
 				{
 					"value": "deepseek-r1-671b",
-					"properties": [
-						"ollama.deepseek-r1-671b"
-					]
+					"properties": ["ollama.deepseek-r1-671b"]
 				}
 			]
 		}
@@ -564,9 +458,7 @@
 		{
 			"section": "Pipe",
 			"title": "Ollama",
-			"properties": [
-				"ollama.profile"
-			]
+			"properties": ["ollama.profile"]
 		}
 	],
 	"test": {

@@ -58,7 +58,17 @@ class Chat(ChatBase):
             serverbase = serverbase.rstrip('/') + '/v1'
 
         # Get the llm
-        self._llm = ChatOpenAI(model=self._model, base_url=serverbase, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens)
+        self._llm = ChatOpenAI(
+            model=self._model,
+            base_url=serverbase,
+            api_key=apikey,
+            temperature=0,
+            max_tokens=self._modelOutputTokens,
+            # Disable thinking/reasoning for models that support it (e.g. Qwen3, DeepSeek).
+            # Thinking tokens consume the output budget and break structured JSON responses.
+            # Hardcoded off until we have proper handling for thinking output.
+            extra_body={'think': False},
+        )
 
         # Save our chat class into the bag
         bag['chat'] = self

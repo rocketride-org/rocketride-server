@@ -67,7 +67,7 @@ class LangChainDriver(AgentBase):
             def _identifying_params(self) -> Dict[str, Any]:
                 return {'framework': 'rocketride', 'adapter': 'tool_calling_json'}
 
-            def bind_tools(self, tools: Any, **kwargs: Any) -> "RocketRideToolCallingChatModel":
+            def bind_tools(self, tools: Any, **kwargs: Any) -> 'RocketRideToolCallingChatModel':
                 try:
                     self._bound_tools = _normalize_bound_tools(tools)
                 except Exception:
@@ -79,14 +79,16 @@ class LangChainDriver(AgentBase):
                 tool_hint = _tool_call_protocol_prompt(self._bound_tools)
                 prompt = (tool_hint + '\n\n' + transcript).strip()
 
+                valid_names = {t.get('name', '') for t in self._bound_tools if isinstance(t, dict)}
                 raw = ''
                 for attempt in range(3):
                     raw = _safe_str(call_llm(prompt, stop_words=stop)).strip()
-                    msg = _parse_tool_call_envelope(raw)
+                    msg = _parse_tool_call_envelope(raw, valid_tool_names=valid_names)
                     if msg is not None:
                         return ChatResult(generations=[ChatGeneration(message=msg)])
                     if attempt < 2:
-                        prompt = prompt + '\n\nsystem: Your last output was invalid. Output ONLY a single JSON object per the schema.'
+                        valid_list = ', '.join(sorted(valid_names)) if valid_names else '(none discovered)'
+                        prompt = prompt + f'\n\nsystem: Your last output was invalid. You MUST use one of these exact tool names: [{valid_list}]. Output ONLY a single JSON object per the schema.'
 
                 return ChatResult(generations=[ChatGeneration(message=AIMessage(content=raw))])
 
@@ -245,7 +247,17 @@ class LangChainDriver(AgentBase):
             def on_llm_error(self, error: Any, **kwargs: Any) -> None:
                 self._send_sse('thinking', message=f'LLM error: {_safe_str(error)}')
 
-        tool_descriptors = self.discover_tools(host=host)
+        all_tool_descriptors = self.discover_tools(host=host)
+
+        # Separate agent tools (direct children) from internal sub-tools.
+        # Agent tools end with .run_agent; everything else (python.execute,
+        # http.http_request, sub-agent tools) belongs to child agents and
+        # should not be directly invoked by this orchestrator.
+        agent_tools = [t for t in all_tool_descriptors if isinstance(t, dict) and str(t.get('name', '')).endswith('.run_agent')]
+
+        # Use only agent tools for the orchestrator; child agents handle
+        # their own internal tools.
+        tool_descriptors = agent_tools if agent_tools else all_tool_descriptors
 
         def _call_llm(messages: Any, stop_words: Any = None) -> str:
             return self.call_host_llm(
@@ -267,13 +279,51 @@ class LangChainDriver(AgentBase):
             ctx=ctx,
         )
 
+        # Build a tool roster for the system prompt so the LLM knows exactly
+        # which tool name maps to which purpose.  Extract sub-tool lists from
+        # the description to give context about each agent's capabilities.
+        tool_roster_lines = []
+        for td in tool_descriptors:
+            if not isinstance(td, dict):
+                continue
+            name = td.get('name', '')
+            desc = td.get('description', '')
+            # Extract the "Tools available to this agent:" section if present
+            tools_section = ''
+            tools_marker = 'Tools available to this agent:'
+            idx = desc.find(tools_marker)
+            if idx >= 0:
+                tools_section = f' [{desc[idx:].strip()}]'
+            # Extract agent summary if present
+            summary_marker = 'This agent:'
+            sidx = desc.find(summary_marker)
+            if sidx >= 0:
+                end = desc.find(' Input:', sidx)
+                summary = desc[sidx:end].strip() if end > sidx else desc[sidx : sidx + 200].strip()
+                tool_roster_lines.append(f'  - {name}: {summary}{tools_section}')
+            else:
+                # Fallback: use first sentence of description
+                dot = desc.find('. ')
+                short_desc = desc[: dot + 1] if 0 < dot < 150 else desc[:150]
+                tool_roster_lines.append(f'  - {name}: {short_desc}{tools_section}')
+
+        roster = '\n'.join(tool_roster_lines) if tool_roster_lines else '  (no tools)'
+
         system_parts = [
             'You are an agent node in a tool-invocation hierarchy.',
-            'Use the provided tools when needed.',
+            'You MUST call tools using their EXACT names as listed below.',
+            '',
+            'Available tools:',
+            roster,
+            '',
+            'IMPORTANT: Each tool listed above is a DIFFERENT agent with different capabilities.',
+            'Match each step of your workflow to the correct tool based on the description above.',
+            'Do NOT call the same tool twice for different purposes.',
         ]
         system_message = SystemMessage(content='\n'.join(system_parts).strip())
 
-        self.sendSSE('thinking', message='Starting LangChain agent...')
+        tool_names = [td.get('name', '?') for td in tool_descriptors]
+        self.sendSSE('thinking', message=f'Starting LangChain agent with tools: {tool_names}')
         stage = 'create_agent'
         try:
             agent = create_agent(model=llm, tools=tools_for_agent, system_prompt=system_message, debug=False)
@@ -311,17 +361,31 @@ class LangChainDriver(AgentBase):
 # tool call or a final answer, then parse it into an `AIMessage` with `tool_calls`.
 # ------------------------------------------------------------------
 def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
+    # Build a concise tool roster with exact names prominently listed
+    tool_roster = []
+    for t in bound_tools:
+        if not isinstance(t, dict):
+            continue
+        name = t.get('name', '')
+        desc = t.get('description', '')
+        if name:
+            tool_roster.append(f'  - EXACT name: "{name}" — {desc[:200]}')
+
+    roster_text = '\n'.join(tool_roster) if tool_roster else '  (no tools available)'
     tools_json = json.dumps(bound_tools, ensure_ascii=False)
+
     return '\n'.join(
         [
             'system: You MUST respond with exactly one JSON object and nothing else.',
             'system: Allowed schemas:',
             'system: Tool call:',
-            'system: {"type":"tool_call","name":"server.tool","args":{...}}',
+            'system: {"type":"tool_call","name":"<exact tool name from list below>","args":{...}}',
             'system: Final answer:',
             'system: {"type":"final","content":"..."}',
+            'system: CRITICAL: The "name" field MUST be one of the exact tool names listed below. Do NOT invent or guess tool names.',
+            f'system: Available tools:\n{roster_text}',
             'system: Never wrap JSON in markdown. Never include extra keys unless required.',
-            f'system: Available tools (name + description + args schema): {tools_json}',
+            f'system: Full tool schemas: {tools_json}',
         ]
     ).strip()
 
@@ -400,7 +464,7 @@ def _langchain_messages_to_transcript(messages: Any) -> str:
     return '\n'.join(lines).strip()
 
 
-def _parse_tool_call_envelope(raw: str) -> Any:
+def _parse_tool_call_envelope(raw: str, *, valid_tool_names: set[str] | None = None) -> Any:
     try:
         obj = json.loads(raw)
     except Exception:
@@ -421,6 +485,10 @@ def _parse_tool_call_envelope(raw: str) -> Any:
     if msg_type == 'tool_call':
         name = _safe_str(obj.get('name', '')).strip()
         if not name:
+            return None
+        # Reject tool names not in the discovered tool list to prevent
+        # the LLM from hallucinating calls to unconnected nodes.
+        if valid_tool_names and name not in valid_tool_names:
             return None
         args = obj.get('args')
         if args is None:
@@ -448,4 +516,3 @@ def _safe_str(v: Any) -> str:
         return '' if v is None else str(v)
     except Exception:
         return ''
-

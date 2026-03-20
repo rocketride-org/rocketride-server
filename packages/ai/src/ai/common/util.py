@@ -34,6 +34,72 @@ def safeString(value: str) -> str:
     return str(value).strip().replace('"', "'")
 
 
+def _extract_wave_json(value: str) -> Any | None:
+    """Extract the valid wave-planning JSON object from a string with extra data.
+
+    Some models emit a stray JSON blob (e.g. just the tool args) before the
+    real response.  This scans for top-level JSON objects using the decoder
+    and returns the first one containing a wave-planning key.
+    """
+    decoder = json.JSONDecoder()
+    pos = 0
+    candidates = []
+    while pos < len(value):
+        # Skip whitespace / newlines between objects
+        while pos < len(value) and value[pos] in ' \t\r\n':
+            pos += 1
+        if pos >= len(value):
+            break
+        try:
+            obj, end = decoder.raw_decode(value, pos)
+            if isinstance(obj, dict):
+                # Prefer the object with wave-planning keys
+                if 'thought' in obj or 'done' in obj or 'tool_calls' in obj:
+                    return obj
+                candidates.append(obj)
+            pos = end
+        except json.JSONDecodeError:
+            pos += 1
+
+    # Fallback: return last candidate if no wave keys found
+    return candidates[-1] if candidates else None
+
+
+def _repair_json(value: str) -> str:
+    """Attempt to fix unbalanced braces/brackets in LLM-generated JSON.
+
+    Walks the string respecting JSON string literals (so braces inside
+    strings are not counted) and appends missing closing characters.
+    """
+    open_stack: list[str] = []
+    in_string = False
+    escape = False
+    match = {'{': '}', '[': ']'}
+
+    for ch in value:
+        if escape:
+            escape = False
+            continue
+        if ch == '\\' and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in match:
+            open_stack.append(match[ch])
+        elif ch in ('}', ']'):
+            if open_stack and open_stack[-1] == ch:
+                open_stack.pop()
+
+    if open_stack:
+        value += ''.join(reversed(open_stack))
+
+    return value
+
+
 def parseJson(value: str) -> Any:
     """
     Parse a string and return a json value.
@@ -58,9 +124,23 @@ def parseJson(value: str) -> Any:
         if value.endswith('```'):
             value = value[:-3].strip()
 
+        # Attempt to repair unbalanced braces/brackets — common with smaller
+        # local models that drop trailing closing characters.
+        value = _repair_json(value)
+
         # Now, parse the json
-        v = json.loads(value)
-        return v
+        try:
+            v = json.loads(value)
+            return v
+        except json.JSONDecodeError as e:
+            # "Extra data" — multiple JSON objects concatenated. Some models emit
+            # a stray partial object before the real response. Try to find the
+            # object that contains wave-planning keys (thought/done/tool_calls).
+            if 'Extra data' in str(e):
+                v = _extract_wave_json(value)
+                if v is not None:
+                    return v
+            raise
 
     except Exception as e:
         debug(f'Unable to parse json ${str(e)} ${str(value)}')

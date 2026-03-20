@@ -51,6 +51,29 @@ class _AgentAsToolProvider(ToolsBase):
         self._full_name = f'{self.unique_agent_tool_name()}.{getattr(self._agent, "_AGENT_TOOL_NAME", "run_agent")}'
         self._tools_available: Optional[List[Tuple[str, str]]] = None
 
+        # Build a human-readable summary from the agent's instructions so the
+        # tool descriptor is meaningful to LLMs and they can distinguish between
+        # multiple agent tools.
+        self._agent_summary: str = ''
+        try:
+            instructions = getattr(self._agent, '_instructions', None)
+            # instructions may be a Python list or an IJson C++ wrapper.
+            # Convert to a plain list to normalize access.
+            if instructions is not None and not isinstance(instructions, (list, str)):
+                try:
+                    instructions = list(instructions)
+                except Exception:
+                    instructions = [str(instructions)]
+            if isinstance(instructions, str):
+                instructions = [instructions]
+            if instructions:
+                first = str(instructions[0]).strip()
+                if first:
+                    dot = first.find('.')
+                    self._agent_summary = first[: dot + 1] if 0 < dot < 200 else first[:200]
+        except Exception:
+            pass
+
     def unique_agent_tool_name(self) -> str:
         """Return the unique tool namespace for this agent node instance."""
         inst = self._pSelf.instance
@@ -75,10 +98,18 @@ class _AgentAsToolProvider(ToolsBase):
                 name = t.get('name', '')
                 if not isinstance(name, str) or not name.strip():
                     continue
-                if name.strip() == 'run_agent' or name.strip().endswith('.run_agent'):
+                # Filter out this agent's own .run_agent entry (self-reference).
+                if name.strip() == self._full_name:
                     continue
                 desc = t.get('description', '')
-                tools_available.append((name, desc if isinstance(desc, str) else ''))
+                if not isinstance(desc, str):
+                    desc = ''
+                # Truncate description to first sentence to prevent recursive
+                # blowup — each agent's description can include sub-agent
+                # descriptions, which include their sub-agents, etc.
+                dot = desc.find('. ')
+                short_desc = desc[: dot + 1].strip() if 0 < dot < 120 else desc[:120].strip()
+                tools_available.append((name, short_desc))
         except Exception:
             tools_available = []
         self._tools_available = tools_available
@@ -94,14 +125,19 @@ class _AgentAsToolProvider(ToolsBase):
         payload = normalize_invocation_payload(input=input_obj)
         if not isinstance(payload, dict):
             raise ValueError('agent tool: input must be an object')
-        query = payload.get('query')
-        if not isinstance(query, str):
-            raise ValueError('agent tool: input.query must be a string')
-        ctx = payload.get('context')
-        if ctx is None:
-            return query, None
-        if not isinstance(ctx, dict):
-            raise ValueError('agent tool: input.context must be an object if provided')
+        # Accept common LLM variations for the query field
+        query = payload.get('query') or payload.get('content') or payload.get('input') or payload.get('message')
+        if isinstance(query, dict):
+            # LLM may have passed a JSON object as the query — serialize it
+            import json as _json
+
+            query = _json.dumps(query, default=str)
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError('agent tool: input.query must be a non-empty string')
+        # Accept common LLM variations for the context field
+        ctx = payload.get('context') or payload.get('meta') or payload.get('metadata')
+        if ctx is not None and not isinstance(ctx, dict):
+            ctx = None
         return query, ctx
 
     def _validate_request(self, *, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
@@ -115,7 +151,10 @@ class _AgentAsToolProvider(ToolsBase):
     def _tool_query(self) -> List[ToolsBase.ToolDescriptor]:
         """Return the single tool descriptor that exposes this agent."""
         tools_available = self._connected_tools_available()
-        desc = 'Invoke this agent as a tool. Input: {query: string, context?: object}. Output: {content, meta, stack}.'
+        # Build a meaningful description including a summary of the agent's
+        # instructions so LLMs can distinguish between multiple agent tools.
+        summary = f' This agent: {self._agent_summary}' if self._agent_summary else ''
+        desc = f'Invoke this agent as a tool.{summary} Input: {{query: string, context?: object}}. Output: {{content, meta, stack}}.'
         if tools_available:
             parts = [f'{n}: {d}' if d else n for n, d in tools_available]
             desc = f'{desc} Tools available to this agent: {"; ".join(parts)}.'
@@ -154,7 +193,7 @@ class _AgentAsToolProvider(ToolsBase):
                     'stack': {'type': 'array', 'items': {'type': 'object'}, 'description': 'Run trace stack'},
                 },
                 'required': ['content', 'meta', 'stack'],
-            }
+            },
         }
         return [descriptor]
 

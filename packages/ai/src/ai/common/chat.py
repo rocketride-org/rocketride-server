@@ -291,7 +291,7 @@ class ChatBase:
                       errors occur
         """
         from ai.constants import CONST_CHAT_MAX_RETRIES, CONST_CHAT_BASE_DELAY, CONST_CHAT_MAX_DELAY
-        
+
         max_network_retries = CONST_CHAT_MAX_RETRIES
         base_delay = CONST_CHAT_BASE_DELAY
         max_delay = CONST_CHAT_MAX_DELAY
@@ -415,7 +415,6 @@ class ChatBase:
         if question.expectJson:
             max_retries = 3
 
-
             for retry_count in range(max_retries):
                 try:
                     # Parse (and strip any markdown fences) — reuse the result below
@@ -426,20 +425,20 @@ class ChatBase:
                     answer.setAnswer(parsed_response)
                     return answer
 
-                except (json.JSONDecodeError, ValueError):
+                except (json.JSONDecodeError, ValueError) as parse_err:
                     # JSON parsing failed
+                    debug(f'JSON parse error on attempt {retry_count + 1}: {parse_err}')
+                    debug(f'Full LLM response ({len(response)} chars):\n{response}')
                     if retry_count < max_retries - 1:
-                        debug(f'JSON validation failed on attempt {retry_count + 1}, retrying...')
-
                         # Retry the chat with the additional instruction
                         # This will again use chat_string with full network retry logic
                         response = self.chat_string(question.getPrompt(has_previous_json_failed=True))
                     else:
                         # Max retries reached, raise ValueError
-                        error_msg = f'Failed to get valid JSON response after {max_retries + 1} attempts. Last response: {response[:200]}...'
+                        error_msg = f'Failed to get valid JSON response after {max_retries + 1} attempts. Parse error: {parse_err}. Response length: {len(response)} chars. Last response: {response[:2000]}'
                         debug(f'Error: {error_msg}')
                         raise ValueError(error_msg)
-                    
+
         else:
             # Create the answer and assign the text
             answer = Answer(expectJson=False)

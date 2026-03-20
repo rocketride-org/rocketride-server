@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from rocketlib.types import IInvokeLLM, IInvokeTool
 
+
 class AgentHostServices:
     class LLM:
         """LLM host interface backed by `invoke('llm', ...)`."""
@@ -45,12 +46,11 @@ class AgentHostServices:
     class Tools:
         """Tool host interface backed by `invoke('tool', ...)`."""
 
-        _tool_nodes: List[str] = []
-        _tool_list: Dict[Any] = {}
-
         def __init__(self, invoker):
             """Create a Tools host service wrapper bound to an engine invoker."""
             self._invoker = invoker
+            self._tool_nodes: List[str] = []
+            self._tool_list: Dict[str, Any] = {}
             self._tool_nodes = self._invoker.instance.getControllerNodeIds('tool')
 
             # For every tool node
@@ -151,6 +151,7 @@ class AgentHostServices:
         """Memory host interface — thin wrapper over the memory_internal node."""
 
         def __init__(self, invoker, node_id: str) -> None:
+            """Create a Memory host service wrapper bound to an engine invoker."""
             self._invoker = invoker
             self._node_id = node_id
 
@@ -176,6 +177,4 @@ class AgentHostServices:
         self.llm = AgentHostServices.LLM(invoker)
         self.tools = AgentHostServices.Tools(invoker)
         nodes = invoker.instance.getControllerNodeIds('memory')
-        self.memory: Optional[AgentHostServices.Memory] = (
-            AgentHostServices.Memory(invoker, nodes[0]) if nodes else None
-        )
+        self.memory: Optional[AgentHostServices.Memory] = AgentHostServices.Memory(invoker, nodes[0]) if nodes else None

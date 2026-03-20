@@ -50,11 +50,13 @@ class IGlobal(IGlobalBase):
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         server_name = str(cfg.get('serverName') or 'python').strip()
         allowed_modules = _parse_allowed_modules(cfg)
+        timeout = _parse_timeout(cfg)
 
         try:
             self.driver = PythonDriver(
                 server_name=server_name,
                 allowed_modules=allowed_modules,
+                timeout=timeout,
             )
         except Exception as e:
             warning(str(e))
@@ -62,6 +64,22 @@ class IGlobal(IGlobalBase):
 
     def endGlobal(self) -> None:
         self.driver = None
+
+
+def _parse_timeout(cfg: dict) -> int | None:
+    """Extract timeout override from config.
+
+    Returns ``None`` if the field is absent (use sandbox default),
+    or the integer value in seconds if present and valid.
+    """
+    raw = cfg.get('timeout')
+    if raw is None:
+        return None
+    try:
+        val = int(raw)
+        return val if val > 0 else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_allowed_modules(cfg: dict) -> Set[str] | None:
@@ -76,6 +94,7 @@ def _parse_allowed_modules(cfg: dict) -> Set[str] | None:
 
     if not isinstance(raw, list):
         import json
+
         try:
             raw = json.loads(str(raw))
         except (json.JSONDecodeError, TypeError, ValueError):

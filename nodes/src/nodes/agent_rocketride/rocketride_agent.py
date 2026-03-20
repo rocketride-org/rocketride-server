@@ -46,6 +46,7 @@ from .executor import execute_wave, resolve_answer_refs
 # Can be overridden via the ``max_waves`` node configuration field.
 _DEFAULT_MAX_WAVES = 10
 
+
 class RocketRideDriver(AgentBase):
     """
     RocketRide Wave framework driver.
@@ -176,6 +177,15 @@ class RocketRideDriver(AgentBase):
             # ------------------------------------------------------------------
 
             if result.get('done'):
+                # Reject done=true if no tools have been called yet.
+                # This prevents the LLM from hallucinating results without
+                # actually executing any tools.
+                if not waves:
+                    debug(f'rocketride wave rejecting done=true on wave {wave_num} with no tool calls run_id={run_id}')
+                    self.sendSSE('thinking', message='No tools called yet — must execute at least one tool before finishing.')
+                    # Force the LLM to try again by continuing the loop
+                    continue
+
                 self.sendSSE('thinking', message='Generating final answer...')
                 answer = safe_str(result.get('answer', ''))
 

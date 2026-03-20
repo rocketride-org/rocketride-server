@@ -56,7 +56,7 @@ CONST_READY_POLL_INTERVAL = 0.250  # seconds between readiness checks
 CONST_SUBPROCESS_BUFFER_LIMIT = 16 * 1024 * 1024  # bytes for subprocess stdin/stdout/stderr buffers (16MB)
 CONST_STATUS_UPDATE_CANCEL_TIMEOUT = 2.0  # seconds to wait for status update task cancellation
 CONST_DEFAULT_TTL = 15 * 60  # default time-to-live for idle tasks in seconds (15 minutes)
-CONST_TTL_CHECK = 60 # check for tasks to kill every 60 seconds
+CONST_TTL_CHECK = 60  # check for tasks to kill every 60 seconds
 
 # =============================================================================
 # Task Server Configuration
@@ -74,7 +74,7 @@ CONST_WEB_WS_MAX_SIZE = 250 * 1024 * 1024  # maximum WebSocket message size in b
 # =============================================================================
 # Data Connection Configuration
 # =============================================================================
-CONST_DATA_PIPE_TIMEOUT = 60.0  # seconds of inactivity before pipe is considered zombie
+CONST_DATA_PIPE_TIMEOUT = 900.0  # seconds of inactivity before pipe is considered zombie (15 min — matches task TTL)
 CONST_DATA_SHUTDOWN_TIMEOUT = 30.0  # seconds to wait for data connection shutdown
 
 # =============================================================================

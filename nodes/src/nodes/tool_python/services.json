@@ -8,13 +8,8 @@
 	"path": "nodes.tool_python",
 	"prefix": "python",
 	"icon": "python.svg",
-	"description": [
-		"Executes Python code in a restricted in-process sandbox via exec().",
-		"Only whitelisted modules can be imported. Dangerous builtins are removed."
-	],
-	"tile": [
-		"Tool: python.execute"
-	],
+	"description": ["Executes Python code in a restricted in-process sandbox via exec().", "Only whitelisted modules can be imported. Dangerous builtins are removed."],
+	"tile": ["Tool: python.execute"],
 	"lanes": {},
 	"preconfig": {
 		"default": "default",
@@ -33,6 +28,14 @@
 			"description": "Namespace prefix for the tool: <serverName>.execute",
 			"default": "python"
 		},
+		"tool_python.timeout": {
+			"type": "integer",
+			"title": "Execution Timeout (seconds)",
+			"description": "Maximum time in seconds a script is allowed to run before being killed. Default is 20s. Increase for long-running operations like network scans.",
+			"default": 20,
+			"minimum": 1,
+			"maximum": 600
+		},
 		"tool_python.moduleName": {
 			"type": "string",
 			"title": "Module name",
@@ -45,9 +48,7 @@
 			"minItems": 0,
 			"items": {
 				"type": "object",
-				"properties": [
-					"tool_python.moduleName"
-				]
+				"properties": ["tool_python.moduleName"]
 			}
 		}
 	},
@@ -55,10 +56,7 @@
 		{
 			"section": "Pipe",
 			"title": "Python",
-			"properties": [
-				"type",
-				"tool_python.allowedModules"
-			]
+			"properties": ["type", "tool_python.timeout", "tool_python.allowedModules"]
 		}
 	]
 }
