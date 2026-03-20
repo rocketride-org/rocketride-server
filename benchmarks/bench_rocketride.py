@@ -297,6 +297,7 @@ def run(root_dir):
     )
 
     mem_final = get_mem_mb()
+    mem_peak = max(mem_parse, mem_chunk, mem_index, mem_final)
     t_total = t_discover + t_parse + t_chunk + t_index
 
     print(f"\n{'=' * 70}")
@@ -316,7 +317,7 @@ def run(root_dir):
     print(f"  {'-' * 45}")
     print(f"  TOTAL (pipeline):{t_total:>9.2f}s")
     print(f"  Throughput:     {text_mb / t_total:>10.1f} MB/sec")
-    print(f"  Memory peak:    {mem_index:>10.0f} MB")
+    print(f"  Memory peak:    {mem_peak:>10.0f} MB")
     print(f"  Index C++ mem:  {idx_mem_mb:>10.0f} MB")
     print(f"  Mem delta:      {mem_final - mem_start:>+10.0f} MB")
     print()

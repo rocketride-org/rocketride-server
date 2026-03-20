@@ -30,10 +30,18 @@ static uint32_t g_total_terms = 0;
 extern "C" {
 
 /**
- * Reset/clear the index.
- * reserve_hint: expected number of unique terms (0 = use default 6M, tuned for Linux kernel).
+ * Reset/clear the index with default capacity (6M terms, tuned for Linux kernel).
  */
-void index_reset(uint32_t reserve_hint = 0) {
+void index_reset() {
+    g_index.clear();
+    g_index.reserve(6000000);
+    g_total_terms = 0;
+}
+
+/**
+ * Reset/clear the index with a custom capacity hint.
+ */
+void index_reset_with_hint(uint32_t reserve_hint) {
     g_index.clear();
     g_index.reserve(reserve_hint > 0 ? reserve_hint : 6000000);
     g_total_terms = 0;
@@ -80,6 +88,7 @@ void index_add_batch(
     int32_t n_chunks,
     uint32_t start_id
 ) {
+    if (!texts || !text_lens || n_chunks <= 0) return;
     for (int32_t i = 0; i < n_chunks; i++) {
         index_add_chunk(start_id + i, texts[i], text_lens[i]);
     }
