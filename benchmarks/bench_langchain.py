@@ -11,7 +11,7 @@ So LangChain must do the same:
 6. Progress monitoring/reporting
 
 Usage:
-    python bench_fair_v2.py /path/to/linux-kernel
+    python bench_langchain.py /path/to/linux-kernel
 """
 
 import gc
@@ -153,21 +153,21 @@ def parse_document(entry):
     """Parse a file — detect encoding, read text, compute hash (like RocketRide)."""
     fpath = entry["path"]
     try:
-        # Try UTF-8 first, fall back to latin-1
+        # Read raw bytes first for consistent hashing across benchmarks
+        with open(fpath, "rb") as f:
+            raw = f.read()
+
+        # Decode to text
         try:
-            with open(fpath, "r", encoding="utf-8") as f:
-                text = f.read()
+            text = raw.decode("utf-8")
         except UnicodeDecodeError:
-            with open(fpath, "r", encoding="latin-1") as f:
-                text = f.read()
+            text = raw.decode("latin-1")
 
         if not text.strip():
             return None
 
-        # Compute content hash (RocketRide does SHA512 hashing)
-        content_hash = hashlib.sha256(
-            text.encode("utf-8", errors="replace")
-        ).hexdigest()
+        # Hash raw bytes (matches bench_rocketride.py)
+        content_hash = hashlib.sha256(raw).hexdigest()
 
         return {
             "text": text,

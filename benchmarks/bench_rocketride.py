@@ -14,9 +14,13 @@ import sys
 import time
 from ctypes import c_char_p, c_int32, c_uint32, c_uint64, POINTER
 
+import pathlib
+
 import psutil
 
-NATIVE_DIR = "/Users/dmitriikarataev/coding/rocketride/rocketride-org/rocketride-server/nodes/src/nodes/preprocessor_native"
+# Resolve relative to this script's location (benchmarks/ -> repo root -> nodes/...)
+_SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+NATIVE_DIR = str(_SCRIPT_DIR.parent / "nodes" / "src" / "nodes" / "preprocessor_native")
 
 
 def get_mem_mb():
