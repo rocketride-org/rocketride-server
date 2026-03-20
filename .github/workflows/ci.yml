@@ -31,105 +31,20 @@ env:
 jobs:
   init:
     name: Initialize
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    outputs:
-      server_version: ${{ steps.vars.outputs.server_version }}
-      vscode_version: ${{ steps.vars.outputs.vscode_version }}
-      client_mcp_version: ${{ steps.vars.outputs.client_mcp_version }}
-      client_python_version: ${{ steps.vars.outputs.client_python_version }}
-      client_typescript_version: ${{ steps.vars.outputs.client_typescript_version }}
-      full_server_version: ${{ steps.vars.outputs.full_server_version }}
-      build_hash: ${{ steps.vars.outputs.build_hash }}
-      build_stamp: ${{ steps.vars.outputs.build_stamp }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - name: Set up variables
-        id: vars
-        run: |
-          VERSION=$(jq -r '.version' package.json)
-          echo "server_version=$VERSION" >> $GITHUB_OUTPUT
-          echo "vscode_version=$(jq -r '.version' apps/vscode/package.json)" >> $GITHUB_OUTPUT
-          echo "client_mcp_version=$(yq -r '.project.version' packages/client-mcp/pyproject.toml)" >> $GITHUB_OUTPUT
-          echo "client_python_version=$(yq -r '.project.version' packages/client-python/pyproject.toml)" >> $GITHUB_OUTPUT
-          echo "client_typescript_version=$(jq -r '.version' packages/client-typescript/package.json)" >> $GITHUB_OUTPUT
-          echo "full_server_version=$VERSION.${{ github.run_number }}" >> $GITHUB_OUTPUT
-          echo "build_hash=$(echo ${{ github.sha }} | cut -c1-8)" >> $GITHUB_OUTPUT
-          echo "build_stamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
-          cat $GITHUB_OUTPUT
+    uses: ./.github/workflows/_init.yaml
   build:
-    name: Build / ${{ matrix.label }}
+    name: Build
     needs: init
     if: github.event_name != 'schedule'
-    timeout-minutes: 90
-    runs-on: ${{ matrix.runner }}
+    uses: ./.github/workflows/_build.yaml
     permissions:
       contents: read
       packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: ubuntu
-            label: Ubuntu 22.04
-            runner: ubuntu-22.04
-            builder_cmd: ./builder
-            vcpkg_cmd: ./build/vcpkg/vcpkg
-          - platform: windows
-            label: Windows Server 2022
-            runner: windows-2022
-            builder_cmd: ./builder.cmd
-            vcpkg_cmd: ./build/vcpkg/vcpkg.exe
-          - platform: macos
-            label: macOS (ARM64)
-            runner: macos-14
-            builder_cmd: ./builder
-            vcpkg_cmd: ./build/vcpkg/vcpkg
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: recursive
-      - name: Set up pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
-        with:
-          version: 10
-      - name: Set up vcpkg
-        run: ${{ matrix.builder_cmd }} vcpkg:submodule-build
-      - name: Set up vcpkg nuget / Linux/macOS
-        if: matrix.platform != 'windows'
-        run: |
-          NUGET_EXE=$(${{ matrix.vcpkg_cmd }} fetch nuget | tail -n1)
-          mono $NUGET_EXE sources add \
-            -Source "${{ env.NUGET_FEED_URL }}" \
-            -StorePasswordInClearText \
-            -Name GitHubPackages \
-            -UserName "${{ env.VCPKG_NUGET_USER }}" \
-            -Password "${{ secrets.GITHUB_TOKEN }}" || true
-          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
-            -Source "${{ env.NUGET_FEED_URL }}"
-      - name: Set up vcpkg nuget / Windows
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          $NUGET_EXE = $(${{ matrix.vcpkg_cmd }} fetch nuget | Select-Object -Last 1)
-          & $NUGET_EXE sources add `
-            -Source "${{ env.NUGET_FEED_URL }}" `
-            -StorePasswordInClearText `
-            -Name GitHubPackages `
-            -UserName "${{ env.VCPKG_NUGET_USER }}" `
-            -Password "${{ secrets.GITHUB_TOKEN }}"
-          & $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" `
-            -Source "${{ env.NUGET_FEED_URL }}"
-
-      - name: Build
-        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version=${{ needs.init.outputs.full_server_version }} --build-hash=${{ needs.init.outputs.build_hash }} --build-stamp=${{ needs.init.outputs.build_stamp }}
-
-      - name: Test
-        run: ${{ matrix.builder_cmd }} test --verbose
+    with:
+      full_version: ${{ needs.init.outputs.full_server_version }}
+      build_hash: ${{ needs.init.outputs.build_hash }}
+      build_stamp: ${{ needs.init.outputs.build_stamp }}
+    secrets: inherit
 
   # ---------------------------------------------------------------------------
   #  CodeQL — scheduled + push only (not on PRs to avoid blocking releases)

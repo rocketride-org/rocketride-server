@@ -1,0 +1,76 @@
+name: Initialize
+
+on:
+  workflow_call:
+    inputs:
+      check_server_tag:
+        description: Check whether the server release tag already exists
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      server_version:
+        value: ${{ jobs.init.outputs.server_version }}
+      full_server_version:
+        value: ${{ jobs.init.outputs.full_server_version }}
+      vscode_version:
+        value: ${{ jobs.init.outputs.vscode_version }}
+      client_mcp_version:
+        value: ${{ jobs.init.outputs.client_mcp_version }}
+      client_python_version:
+        value: ${{ jobs.init.outputs.client_python_version }}
+      client_typescript_version:
+        value: ${{ jobs.init.outputs.client_typescript_version }}
+      build_hash:
+        value: ${{ jobs.init.outputs.build_hash }}
+      build_stamp:
+        value: ${{ jobs.init.outputs.build_stamp }}
+      server_tag_exists:
+        value: ${{ jobs.init.outputs.server_tag_exists }}
+
+jobs:
+  init:
+    name: Build variables
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      server_version: ${{ steps.vars.outputs.server_version }}
+      full_server_version: ${{ steps.vars.outputs.full_server_version }}
+      vscode_version: ${{ steps.vars.outputs.vscode_version }}
+      client_mcp_version: ${{ steps.vars.outputs.client_mcp_version }}
+      client_python_version: ${{ steps.vars.outputs.client_python_version }}
+      client_typescript_version: ${{ steps.vars.outputs.client_typescript_version }}
+      build_hash: ${{ steps.vars.outputs.build_hash }}
+      build_stamp: ${{ steps.vars.outputs.build_stamp }}
+      server_tag_exists: ${{ steps.server_tag_check.outputs.exists }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: ${{ inputs.check_server_tag && '0' || '1' }}
+      - name: Extract versions
+        id: vars
+        run: |
+          VERSION=$(jq -r '.version' package.json)
+          echo "server_version=$VERSION" >> $GITHUB_OUTPUT
+          echo "full_server_version=$VERSION.${{ github.run_number }}" >> $GITHUB_OUTPUT
+          echo "vscode_version=$(jq -r '.version' apps/vscode/package.json)" >> $GITHUB_OUTPUT
+          echo "client_mcp_version=$(yq -r '.project.version' packages/client-mcp/pyproject.toml)" >> $GITHUB_OUTPUT
+          echo "client_python_version=$(yq -r '.project.version' packages/client-python/pyproject.toml)" >> $GITHUB_OUTPUT
+          echo "client_typescript_version=$(jq -r '.version' packages/client-typescript/package.json)" >> $GITHUB_OUTPUT
+          echo "build_hash=$(echo ${{ github.sha }} | cut -c1-8)" >> $GITHUB_OUTPUT
+          echo "build_stamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+          cat $GITHUB_OUTPUT
+      - name: Check if server tag exists
+        id: server_tag_check
+        if: inputs.check_server_tag
+        run: |
+          TAG="server-v${{ steps.vars.outputs.server_version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag $TAG already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
