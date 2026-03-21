@@ -1,16 +1,17 @@
-# rocketride
+# RocketRide
 
-RocketRide TypeScript Client -- TypeScript/JavaScript SDK for the RocketRide Engine. Complete API reference below.
-
-## Installation
-
-```bash
-npm install rocketride
-# or
-pnpm add rocketride
-```
+TypeScript/JavaScript SDK for the RocketRide Engine - build, run, and manage AI pipelines from Node.js or the browser.
 
 ## Quick Start
+
+```bash
+# NPM
+npm install rocketride
+# Yarn
+yarn add rocketride
+# PNPM
+pnpm add rocketride
+```
 
 ```typescript
 import { RocketRideClient } from 'rocketride';
@@ -20,21 +21,42 @@ const client = new RocketRideClient({
   uri: 'https://cloud.rocketride.ai',
 });
 await client.connect();
-const { token } = await client.use({ filepath: './pipeline.json' });
+const { token } = await client.use({ filepath: './pipeline.pipe' });
 const result = await client.send(token, 'Hello, pipeline!', { name: 'input.txt' }, 'text/plain');
 console.log(result);
 await client.terminate(token);
 await client.disconnect();
 ```
 
+Don't have a pipeline yet? Visit [RocketRide on GitHub](https://github.com/rocketride-org/rocketride-server) or download the extension directly in your IDE.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/install.png" alt="Install RocketRide extension" width="600">
+</p>
+
+## What is RocketRide?
+
+[RocketRide](https://rocketride.org) is an open source, developer-native AI pipeline platform.
+It lets you build, debug, and deploy production AI workflows without leaving your IDE -
+using a visual drag-and-drop canvas or code-first with TypeScript and Python SDKs.
+
+- **50+ ready-to-use nodes** - 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more
+- **High-performance C++ engine** - production-grade speed and reliability
+- **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
+- **MIT licensed** - fully open source, OSI-compliant
+
+You build your `.pipe` - and you run it against the fastest AI runtime available.
+
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/docs/images/canvas.png" alt="RocketRide visual canvas builder" width="800">
+
 ## Features
 
-- **Pipeline execution** -- Start with `use()`, send data via `send()`, `sendFiles()`, or `pipe()`
-- **Chat** -- Conversational AI via `chat()` and `Question`
-- **Event streaming** -- Real-time events via `onEvent` and `setEvents()`
-- **File upload** -- `sendFiles()` with progress; streaming with `pipe()`
-- **Connection lifecycle** -- Optional persist mode, reconnection, and callbacks (`onConnected`, `onDisconnected`, `onConnectError`)
-- **Full TypeScript support** -- Complete type definitions
+- **Pipeline execution** - Start with `use()`, send data via `send()`, `sendFiles()`, or `pipe()`
+- **Chat** - Conversational AI via `chat()` and `Question`
+- **Event streaming** - Real-time events via `onEvent` and `setEvents()`
+- **File upload** - `sendFiles()` with progress; streaming with `pipe()`
+- **Connection lifecycle** - Optional persist mode, reconnection, and callbacks (`onConnected`, `onDisconnected`, `onConnectError`)
+- **Full TypeScript support** - Complete type definitions
 
 ---
 
@@ -53,14 +75,14 @@ Configuration object passed to `new RocketRideClient(config)`.
 | `maxRetryTime`      | `number`                                                | No       | Max time in ms to keep retrying connection. Default: no limit. **Use** (e.g. 300000 for 5 min) so you can show "gave up" after a bounded time instead of retrying forever. |
 | `requestTimeout`    | `number`                                                | No       | Default timeout in ms for each request; overridable per `request()` call. Prevents a single slow DAP call from hanging indefinitely. |
 | `onConnected`       | `(info?: string) => Promise<void>`                      | No       | Called when connection is established. **Use** to refresh UI, refetch services, or clear "connecting" state. |
-| `onDisconnected`    | `(reason?: string, hasError?: boolean) => Promise<void>` | No      | Called when connection is lost **only if** `onConnected` was already called. So "failed to connect in the first place" does *not* fire this -- use `onConnectError` for that. **Do not** call `client.disconnect()` here if you want the client to auto-reconnect in persist mode. |
+| `onDisconnected`    | `(reason?: string, hasError?: boolean) => Promise<void>` | No      | Called when connection is lost **only if** `onConnected` was already called. So "failed to connect in the first place" does *not* fire this - use `onConnectError` for that. **Do not** call `client.disconnect()` here if you want the client to auto-reconnect in persist mode. |
 | `onConnectError`    | `(message: string) => void \| Promise<void>`            | No       | Called on each failed connection attempt (e.g. while retrying in persist mode). **Use** to show "Connection failed: ..." or "Still connecting..."; on auth failure the client stops retrying, so you can prompt the user to fix credentials and call `connect()` again. |
 | `onEvent`           | `(event: DAPMessage) => Promise<void>`                  | No       | Called for each server event (e.g. upload progress, task status). **Use** to drive progress bars or status text; event type is `event.event`, payload in `event.body`. |
 | `onProtocolMessage` | `(message: string) => void`                             | No       | Optional; for logging raw DAP messages. Helpful when debugging protocol issues. |
 | `onDebugMessage`    | `(message: string) => void`                             | No       | Optional; for debug output. |
 | `module`            | `string`                                                | No       | Client name for logging. Default: `CLIENT-0`, `CLIENT-1`, ... |
 
-**Example -- long-lived app with persist and status:**
+**Example - long-lived app with persist and status:**
 
 ```typescript
 const client = new RocketRideClient({
@@ -97,10 +119,10 @@ await client.connect();
 
 | Method                | Signature | Returns | Description |
 | --------------------- | --------- | ------- | ----------- |
-| `connect`             | `connect(timeout?: number): Promise<void>` | -- | Opens the WebSocket and performs DAP auth. Optional `timeout` (ms) bounds the connect + auth handshake (non-persist only; in persist mode timeout is not applied). In **persist** mode, if this fails the client calls `onConnectError` and schedules retries (exponential backoff); on **auth** failure it does *not* retry so the app can fix credentials and call `connect()` again. |
-| `disconnect`          | `disconnect(): Promise<void>` | -- | Closes the connection and cancels any pending reconnection. Call when the user explicitly disconnects or the app is shutting down. |
+| `connect`             | `connect(timeout?: number): Promise<void>` | - | Opens the WebSocket and performs DAP auth. Optional `timeout` (ms) bounds the connect + auth handshake (non-persist only; in persist mode timeout is not applied). In **persist** mode, if this fails the client calls `onConnectError` and schedules retries (exponential backoff); on **auth** failure it does *not* retry so the app can fix credentials and call `connect()` again. |
+| `disconnect`          | `disconnect(): Promise<void>` | - | Closes the connection and cancels any pending reconnection. Call when the user explicitly disconnects or the app is shutting down. |
 | `isConnected`         | `isConnected(): boolean` | `boolean` | Whether the client is currently connected. Use before calling `use()` or `send()` to avoid confusing errors. |
-| `setConnectionParams` | `setConnectionParams(options: { uri?: string; auth?: string }): Promise<void>` | -- | Updates server URI and/or auth at runtime. If currently connected, disconnects and reconnects with the new params (in persist mode, reconnection is scheduled; otherwise reconnects once). Use when the user changes server or credentials without creating a new client. |
+| `setConnectionParams` | `setConnectionParams(options: { uri?: string; auth?: string }): Promise<void>` | - | Updates server URI and/or auth at runtime. If currently connected, disconnects and reconnects with the new params (in persist mode, reconnection is scheduled; otherwise reconnects once). Use when the user changes server or credentials without creating a new client. |
 
 **How to use:** For one-off scripts, call `connect()` once, do your work, then `disconnect()`. For UIs, use `persist: true` and rely on the client to reconnect; only call `disconnect()` when the user logs out or you are done with the client. The client supports `await using` (Symbol.asyncDispose) for automatic disconnect when exiting scope.
 
@@ -113,7 +135,7 @@ await client.connect();
 | `dapRequest`   | `dapRequest(command: string, args?: Record<string, unknown>, token?: string, timeout?: number): Promise<DAPMessage>` | `Promise<DAPMessage>` | Shorthand: builds a request and sends it in one call. Equivalent to `buildRequest()` + `request()`. |
 | `didFail`      | `didFail(response: DAPMessage): boolean` | `boolean` | Returns `true` when the server indicated failure (`success === false`). Use after `request()` to decide whether to use `body` or surface `message` as an error. |
 
-**Example -- custom DAP command:**
+**Example - custom DAP command:**
 
 ```typescript
 const req = client.buildRequest('rrext_monitor', { token, arguments: { types: ['apaevt_status_upload'] } });
@@ -127,12 +149,12 @@ if (client.didFail(res)) throw new Error(res.message);
 | --------------- | --------- | ------- | ----------- |
 | `use`           | `use(options?: { token?: string; filepath?: string; pipeline?: PipelineConfig; source?: string; threads?: number; useExisting?: boolean; args?: string[]; ttl?: number }): Promise<Record<string, any> & { token: string }>` | `Promise<{ token: string, ... }>` | Starts a pipeline. You must pass either `pipeline` (object) or `filepath` (path to a JSON file; Node only). The client substitutes `${ROCKETRIDE_*}` in the config from its `env` (or `.env`). Returns at least `token`; use that token for `send()`, `sendFiles()`, `pipe()`, `chat()`, `getTaskStatus()`, and `terminate()`. |
 | `validate`      | `validate(options: { pipeline: PipelineConfig \| Record<string, unknown>; source?: string }): Promise<Record<string, unknown>>` | `Promise<Record<string, unknown>>` | Validates a pipeline configuration without starting it. Returns validation results (e.g. errors, warnings). Use to check pipeline correctness before `use()`. |
-| `terminate`     | `terminate(token: string): Promise<void>` | -- | Stops the pipeline for that token and frees server resources. Call when the user cancels or when you are done sending data. |
+| `terminate`     | `terminate(token: string): Promise<void>` | - | Stops the pipeline for that token and frees server resources. Call when the user cancels or when you are done sending data. |
 | `getTaskStatus` | `getTaskStatus(token: string): Promise<TASK_STATUS>` | `Promise<TASK_STATUS>` | Returns current task status: e.g. `completedCount`, `totalCount`, `completed`, `state`, `exitCode`. Use to poll until `completed` is true or to show progress. |
 
 **Why `use()` returns a token:** The server runs each pipeline as a separate task. The token identifies that task so all subsequent operations (sending data, chat, status, terminate) target the right pipeline.
 
-**Example -- start from file and poll until done:**
+**Example - start from file and poll until done:**
 
 ```typescript
 const { token } = await client.use({ filepath: './pipeline.json', ttl: 3600 });
@@ -156,13 +178,13 @@ await client.terminate(token);
 
 **When to use `pipe` vs `send`:** Use `send()` when you have a single blob (e.g. a string or one `Uint8Array`) and don't need to stream. Use `pipe()` when you are reading a large file in chunks, or when data arrives incrementally (e.g. from a stream or multiple buffers).
 
-**Example -- send a string:**
+**Example - send a string:**
 
 ```typescript
 const result = await client.send(token, 'Hello, pipeline!', { name: 'greeting.txt' }, 'text/plain');
 ```
 
-**Example -- stream chunks with a pipe:**
+**Example - stream chunks with a pipe:**
 
 ```typescript
 const pipe = await client.pipe(token, { name: 'data.json' }, 'application/json');
@@ -175,7 +197,7 @@ const result = await pipe.close();
 
 | Method      | Signature | Returns | Description |
 | ----------- | --------- | ------- | ----------- |
-| `setEvents` | `setEvents(token: string, eventTypes: string[]): Promise<void>` | -- | Subscribes this task to the given event types (e.g. `apaevt_status_upload`, `apaevt_status_processing`). After this, those events are delivered to your `onEvent` callback. Call after `use()` and before or while sending data. |
+| `setEvents` | `setEvents(token: string, eventTypes: string[]): Promise<void>` | - | Subscribes this task to the given event types (e.g. `apaevt_status_upload`, `apaevt_status_processing`). After this, those events are delivered to your `onEvent` callback. Call after `use()` and before or while sending data. |
 
 ### Services, validation, and ping
 
@@ -183,7 +205,7 @@ const result = await pipe.close();
 | ------------- | --------- | ------- | ----------- |
 | `getServices` | `getServices(): Promise<Record<string, any>>` | `Promise<Record<string, any>>` | Returns all service/connector definitions from the server (schemas, UI schemas). Use to discover what pipelines or features the server supports. |
 | `getService`  | `getService(service: string): Promise<Record<string, any> \| undefined>` | `Promise<Record<string, any> \| undefined>` | Returns the definition for one service by name. Throws if the request fails. |
-| `ping`        | `ping(token?: string): Promise<void>` | -- | Lightweight liveness check. Throws if the server responds with an error. Optional `token` for task-scoped ping. |
+| `ping`        | `ping(token?: string): Promise<void>` | - | Lightweight liveness check. Throws if the server responds with an error. Optional `token` for task-scoped ping. |
 
 ### Chat
 
@@ -220,7 +242,7 @@ Returned by `client.pipe()`. Represents one streaming upload: **open** -> one or
 | Method  | Signature | Returns | Description |
 | ------- | --------- | ------- | ----------- |
 | `open`  | `open(): Promise<DataPipe>` | `Promise<DataPipe>` | Opens the pipe on the server. Must be called before `write()`. |
-| `write` | `write(buffer: Uint8Array): Promise<void>` | -- | Writes a chunk. Pipe must be open. |
+| `write` | `write(buffer: Uint8Array): Promise<void>` | - | Writes a chunk. Pipe must be open. |
 | `close` | `close(): Promise<PIPELINE_RESULT \| undefined>` | `Promise<PIPELINE_RESULT \| undefined>` | Closes the pipe and returns the processing result. No-op if already closed. |
 
 ---
@@ -432,27 +454,13 @@ await client.disconnect();
 
 ---
 
-## Directory Structure
+## Links
 
-Source location in the repository:
-
-```text
-packages/client-typescript/
-├── src/
-│   ├── client/           # Main client (RocketRideClient, DAP, transport)
-│   │   ├── core/         # DAPClient, DAPBase, TransportBase, TransportWebSocket
-│   │   ├── exceptions/
-│   │   ├── schema/       # Question, Doc, DocFilter, etc.
-│   │   └── types/
-│   └── cli/              # CLI (rocketride command)
-├── tests/
-├── package.json
-├── tsconfig.json
-└── README.md
-```
-
----
+- [Documentation](https://docs.rocketride.org/)
+- [GitHub](https://github.com/rocketride-org/rocketride-server)
+- [Discord](https://discord.gg/9hr3tdZmEG)
+- [Contributing](https://github.com/rocketride-org/rocketride-server/blob/develop/CONTRIBUTING.md)
 
 ## License
 
-MIT License -- see [LICENSE](../LICENSE).
+MIT - see [LICENSE](https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE).

@@ -37,6 +37,9 @@ const {
 const APP_ROOT = path.join(__dirname, '..');
 const SRC_DIR = path.join(APP_ROOT, 'src');
 const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src');
+const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
+const README_SRC = path.join(DOCS_DIR, 'README-vscode.md');
+const README_DEST = path.join(APP_ROOT, 'README.md');
 
 // State keys for source fingerprints (webview bundles shared-ui via Canvas)
 const SRC_HASH_KEY = 'vscode.srcHash';
@@ -212,6 +215,15 @@ function makePackageVsixAction() {
     };
 }
 
+function makeCopyReadmeAction() {
+    return {
+        run: async (ctx, task) => {
+            await copyFile(README_SRC, README_DEST);
+            task.output = 'Copied README from docs/';
+        }
+    };
+}
+
 function makeCleanStagingAction() {
     return {
         run: async (ctx, task) => {
@@ -233,6 +245,7 @@ module.exports = {
     
     actions: [
         // Internal actions
+        { name: 'vscode:copy-readme', action: makeCopyReadmeAction },
         { name: 'vscode:build-webview', action: makeBuildWebviewAction },
         { name: 'vscode:compile-typescript', action: makeCompileTypescriptAction },
         { name: 'vscode:bundle-extension', action: makeBundleExtensionAction },
@@ -254,6 +267,7 @@ module.exports = {
             description: 'Build VSCode extension',
             steps: [
                 'client-typescript:build',
+                'vscode:copy-readme',
                 'vscode:build-webview',
                 'vscode:compile-typescript',
                 'vscode:bundle-extension',
