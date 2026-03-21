@@ -9,8 +9,11 @@ surface is fixed.
 
 from __future__ import annotations
 
+import ipaddress
 import json
+import socket
 from typing import Any, Dict, List
+from urllib.parse import urlparse
 
 from rocketlib import warning
 
@@ -82,17 +85,37 @@ _TOOLS_BY_BARE_NAME: Dict[str, Dict[str, Any]] = {
 }
 
 
+def _is_private_ip(url: str) -> bool:
+    """Return True if *url* resolves to a private, loopback, or reserved IP.
+
+    Performs DNS resolution so that hostnames pointing to internal addresses
+    (e.g. DNS rebinding) are also caught.
+    """
+    try:
+        hostname = urlparse(url).hostname
+        if not hostname:
+            return True
+        for info in socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP):
+            addr = ipaddress.ip_address(info[4][0])
+            if addr.is_private or addr.is_loopback or addr.is_reserved or addr.is_link_local:
+                return True
+    except (socket.gaierror, OSError, ValueError):
+        return True  # unresolvable or malformed → block
+    return False
+
+
 class FirecrawlDriver(ToolsBase):
     """Tool provider for Firecrawl scrape_url and map_url."""
 
     def __init__(self, *, server_name: str, app: Any) -> None:
+        """Initialize the Firecrawl driver with a server name and SDK app."""
         self._server_name = (server_name or '').strip() or 'firecrawl'
         self._app = app
 
     def _bare_name(self, tool_name: str) -> str:
         """Strip server prefix, accepting both bare and namespaced tool names."""
         prefix = f'{self._server_name}.'
-        return tool_name[len(prefix):] if tool_name.startswith(prefix) else tool_name
+        return tool_name[len(prefix) :] if tool_name.startswith(prefix) else tool_name
 
     # ------------------------------------------------------------------
     # ToolsBase hooks
@@ -102,10 +125,7 @@ class FirecrawlDriver(ToolsBase):
         # Return namespaced descriptors (<server>.<tool>) so multiple Firecrawl nodes
         # do not produce colliding tool names. _tool_validate and _tool_invoke use
         # _bare_name() to strip the prefix when looking up _TOOLS_BY_BARE_NAME.
-        return [
-            {**tool, 'name': f'{self._server_name}.{tool["name"]}'}
-            for tool in _TOOLS_BY_BARE_NAME.values()
-        ]
+        return [{**tool, 'name': f'{self._server_name}.{tool["name"]}'} for tool in _TOOLS_BY_BARE_NAME.values()]
 
     def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
         tool = _TOOLS_BY_BARE_NAME.get(self._bare_name(tool_name))
@@ -142,12 +162,13 @@ class FirecrawlDriver(ToolsBase):
         if not url:
             raise ValueError('scrape_url requires a `url` parameter')
 
+        if _is_private_ip(url):
+            raise ValueError(f'URL "{url}" resolves to a private or reserved IP address. Requests to internal/cloud-metadata networks are blocked.')
+
         # v2 SDK: app.scrape(url) returns a Document Pydantic model
         result = firecrawl_wrapper(lambda: self._app.scrape(url))
 
-        content = getattr(result, 'markdown', None) \
-            or getattr(result, 'html', None) \
-            or ''
+        content = getattr(result, 'markdown', None) or getattr(result, 'html', None) or ''
         if not isinstance(content, str):
             content = json.dumps(content)
 
@@ -169,6 +190,9 @@ class FirecrawlDriver(ToolsBase):
         url = args.get('url')
         if not url:
             raise ValueError('map_url requires a `url` parameter')
+
+        if _is_private_ip(url):
+            raise ValueError(f'URL "{url}" resolves to a private or reserved IP address. Requests to internal/cloud-metadata networks are blocked.')
 
         # v2 SDK: app.map(url) returns a MapData with .links (list of LinkResult)
         result = firecrawl_wrapper(lambda: self._app.map(url))
@@ -212,6 +236,7 @@ def _normalize_tool_input(input_obj: Any) -> Dict[str, Any]:
     if isinstance(input_obj, str):
         try:
             import json as _json
+
             parsed = _json.loads(input_obj)
             if isinstance(parsed, dict):
                 input_obj = parsed
