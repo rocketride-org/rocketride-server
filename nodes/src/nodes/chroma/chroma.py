@@ -159,7 +159,7 @@ class Store(DocumentStoreBase):
         if docFilter.isDeleted is not None:
             filters.append({'isDeleted': {'$eq': docFilter.isDeleted}})
         if docFilter.chunkIds:
-            filters.append({'chunkId': {'$in': docFilter.objectIds}})
+            filters.append({'chunkId': {'$in': docFilter.chunkIds}})
         # If we are min chunk id, add a condition
         if docFilter.minChunkId is not None:
             filters.append({'chunkId': {'$gte': docFilter.minChunkId}})
@@ -367,10 +367,10 @@ class Store(DocumentStoreBase):
             nonlocal ids, embeddings, metadatas, documents
             if object_ids_to_delete:
                 if len(object_ids_to_delete) > 1:
-                    filter_condition = {'$or': [{'meta.objectId': object_id} for object_id in object_ids_to_delete]}
+                    filter_condition = {'$or': [{'objectId': object_id} for object_id in object_ids_to_delete]}
                     self.collectionObj.delete(where=filter_condition)
                 else:
-                    filter_condition = {'meta.objectId': list(object_ids_to_delete.keys())[0]}
+                    filter_condition = {'objectId': list(object_ids_to_delete.keys())[0]}
                     self.collectionObj.delete(where=filter_condition)
                 object_ids_to_delete.clear()
 

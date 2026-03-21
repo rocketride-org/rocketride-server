@@ -71,7 +71,7 @@ class OpenAIEmbeddingWrapper(EmbeddingBase):
 
         # Check it
         if self._embedding is None:
-            raise Exception(f'Could not instantiate embedding model ${self._model}')
+            raise Exception(f'Could not instantiate embedding model {self._model}')
 
         # Set the vector size
         self._updateVectorSize()
