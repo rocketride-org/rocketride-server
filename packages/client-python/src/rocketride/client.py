@@ -145,8 +145,8 @@ class RocketRideClient(
         # Get or load environment variables
         env = kwargs.get('env', None)
         if env is None:
-            # If not provided, load from .env file only
-            self._env = {}
+            # Start with process environment so ROCKETRIDE_* vars work out of the box.
+            self._env = dict(os.environ)
             
             # Try to load .env file
             try:
@@ -167,7 +167,8 @@ class RocketRideClient(
                                 if (value.startswith('"') and value.endswith('"')) or \
                                    (value.startswith("'") and value.endswith("'")):
                                     value = value[1:-1]
-                                self._env[key] = value
+                                # Preserve already-defined process env values.
+                                self._env.setdefault(key, value)
             except Exception:
                 # File doesn't exist or can't be read - that's okay
                 pass
