@@ -50,23 +50,7 @@ MIN_SIMILARITY_SCORE = 0.20
 # SQL Queries
 SQL_QUERIES = {
     'check_collection_exists': "SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = %s)",
-    'create_collection': (
-        'CREATE TABLE IF NOT EXISTS {collection} ('
-        'id bigserial PRIMARY KEY, '
-        'content text, '
-        'objectId text, '
-        'nodeId text, '
-        'parent text, '
-        'permissionId int, '
-        'isDeleted boolean, '
-        'chunkId int, '
-        'isTable boolean, '
-        'tableId int, '
-        'vectorSize int, '
-        'modelName text, '
-        'embedding vector({vector_size})'
-        ');'
-    ),
+    'create_collection': ('CREATE TABLE IF NOT EXISTS {collection} (id bigserial PRIMARY KEY, content text, objectId text, nodeId text, parent text, permissionId int, isDeleted boolean, chunkId int, isTable boolean, tableId int, vectorSize int, modelName text, embedding vector({vector_size}));'),
     'count_documents': 'SELECT COUNT(*) FROM {collection}',
     'search_keyword': 'SELECT * FROM {collection} WHERE content LIKE %s {where_clause} LIMIT %s',
     'get_documents': 'SELECT * FROM {collection} {where_clause} LIMIT %s',
@@ -107,13 +91,9 @@ class Store(DocumentStoreBase):
         config = Config.getNodeConfig(provider, connConfig)
 
         # Save our parameters — validate to prevent SQL injection via .format()
-        self.collection = config.get('collection')
+        self.collection = ((config.get('table') or config.get('collection')) or '').strip()
         if not self.collection or not VALID_TABLE.fullmatch(self.collection):
-            raise ValueError(
-                f'Invalid collection name: {self.collection!r}. '
-                'Must be a valid PostgreSQL identifier '
-                '(letters, digits, underscores; max 63 chars).'
-            )
+            raise ValueError(f'Invalid collection name: {self.collection!r}. Must be a valid PostgreSQL identifier (letters, digits, underscores; max 63 chars).')
 
         # Remove leading and trailing spaces, leading http/https and :// and trailing slashes
         self.host = config.get('host').strip()
