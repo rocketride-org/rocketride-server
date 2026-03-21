@@ -146,7 +146,7 @@ class Store(DocumentStoreBase):
         filters = []
         if docFilter.nodeId:
             filters.append({'nodeId': {'$eq': docFilter.nodeId}})
-        if docFilter.isTable:
+        if docFilter.isTable is not None:
             filters.append({'isTable': {'$eq': docFilter.isTable}})
         if docFilter.tableIds:
             filters.append({'tableId': {'$in': docFilter.tableIds}})
