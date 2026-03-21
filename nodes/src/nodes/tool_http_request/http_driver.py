@@ -31,9 +31,12 @@ guardrails (allowed methods + URL whitelist) are enforced before every request.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
+import socket
 from typing import Any, Dict, List, Set
+from urllib.parse import urlparse
 
 from ai.common.tools import ToolsBase
 
@@ -163,6 +166,25 @@ INPUT_SCHEMA: Dict[str, Any] = {
 }
 
 
+def _is_private_ip(url: str) -> bool:
+    """Return True if *url* resolves to a private, loopback, or reserved IP.
+
+    Performs DNS resolution so that hostnames pointing to internal addresses
+    (e.g. DNS rebinding) are also caught.
+    """
+    try:
+        hostname = urlparse(url).hostname
+        if not hostname:
+            return True
+        for info in socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP):
+            addr = ipaddress.ip_address(info[4][0])
+            if addr.is_private or addr.is_loopback or addr.is_reserved or addr.is_link_local:
+                return True
+    except (socket.gaierror, OSError, ValueError):
+        return True  # unresolvable or malformed → block
+    return False
+
+
 class HttpDriver(ToolsBase):
     def __init__(
         self,
@@ -255,10 +277,19 @@ class HttpDriver(ToolsBase):
                 f'Enabled methods: {", ".join(sorted(self._enabled_methods))}'
             )
 
-        # --- Guardrail: URL whitelist (empty list = allow all) ---
+        # --- Guardrail: URL validation ---
         url = input_obj.get('url')
         if not url or not isinstance(url, str):
             raise ValueError('url is required and must be a non-empty string')
+
+        # --- Guardrail: block private/internal IPs (SSRF protection) ---
+        if _is_private_ip(url):
+            raise ValueError(
+                f'URL "{url}" resolves to a private or reserved IP address. '
+                'Requests to internal/cloud-metadata networks are blocked.'
+            )
+
+        # --- Guardrail: URL whitelist (empty list = allow all) ---
         if self._url_patterns and not any(p.search(url) for p in self._url_patterns):
             raise ValueError(
                 f'URL "{url}" does not match any allowed URL pattern.'
