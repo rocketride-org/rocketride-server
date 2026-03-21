@@ -39,6 +39,7 @@ from pgvector.psycopg2 import register_vector
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
+from .IGlobal import VALID_TABLE
 
 # Default PostgreSQL port
 DEFAULT_POSTGRES_PORT = 5432
@@ -105,8 +106,14 @@ class Store(DocumentStoreBase):
         # Get our configuration
         config = Config.getNodeConfig(provider, connConfig)
 
-        # Save our parameters
+        # Save our parameters — validate to prevent SQL injection via .format()
         self.collection = config.get('collection')
+        if not self.collection or not VALID_TABLE.fullmatch(self.collection):
+            raise ValueError(
+                f'Invalid collection name: {self.collection!r}. '
+                'Must be a valid PostgreSQL identifier '
+                '(letters, digits, underscores; max 63 chars).'
+            )
 
         # Remove leading and trailing spaces, leading http/https and :// and trailing slashes
         self.host = config.get('host').strip()
