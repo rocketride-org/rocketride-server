@@ -33,16 +33,18 @@ from rocketride.mixins.connection import ConnectionMixin
 class TestRocketRideClientEnvLoading(unittest.TestCase):
     def test_uses_process_environment_when_env_argument_is_not_provided(self) -> None:
         """RocketRideClient should honor process env vars without requiring .env."""
-        with patch.dict(
-            os.environ,
-            {
-                'ROCKETRIDE_URI': 'http://127.0.0.1:8765',
-                'ROCKETRIDE_APIKEY': 'process-env-token',
-            },
-            clear=True,
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    'ROCKETRIDE_URI': 'http://127.0.0.1:8765',
+                    'ROCKETRIDE_APIKEY': 'process-env-token',
+                },
+                clear=True,
+            ),
+            patch('rocketride.client.os.path.exists', return_value=False),
         ):
-            with patch('rocketride.client.os.path.exists', return_value=False):
-                client = RocketRideClient()
+            client = RocketRideClient()
 
         self.assertEqual(client._uri, ConnectionMixin._get_websocket_uri('http://127.0.0.1:8765'))
         self.assertEqual(client._apikey, 'process-env-token')
