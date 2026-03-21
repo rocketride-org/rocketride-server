@@ -261,6 +261,9 @@ def bench_mlx(chunks, batch_size=256):
 # ---------------------------------------------------------------------------
 def run(n_chunks):
     """Run all benchmarks."""
+    if n_chunks <= 0:
+        print('ERROR: chunk count must be positive')
+        sys.exit(1)
     print(f'Generating {n_chunks:,} test chunks...')
     chunks = generate_chunks(n_chunks)
 

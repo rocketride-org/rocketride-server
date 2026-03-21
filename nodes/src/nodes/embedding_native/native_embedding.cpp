@@ -179,6 +179,7 @@ int32_t embedding_init(
     int32_t num_threads
 ) {
     if (g_initialized) return 0;
+    if (!model_path || !vocab_path || embedding_dim <= 0) return -1;
 
     g_ort = OrtGetApiBase()->GetApi(ORT_API_VERSION);
     if (!g_ort) return -1;
@@ -251,6 +252,7 @@ int32_t embedding_batch(
     all_tokens.reserve(n_texts);
 
     for (int32_t i = 0; i < n_texts; i++) {
+        if (!texts[i] || text_lens[i] <= 0) return -1;
         auto tokens = wordpiece_tokenize(texts[i], text_lens[i]);
         if (static_cast<int32_t>(tokens.size()) > batch_max_len)
             batch_max_len = static_cast<int32_t>(tokens.size());
