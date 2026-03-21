@@ -1,4 +1,5 @@
 import os
+import secrets
 import httpx
 import json
 import hashlib
@@ -52,13 +53,12 @@ class Account:
         # Retrieve the API key validation endpoint from the LS_APIKEY environment variable.
         self._endpoint_account: Optional[str] = os.environ.get('LS_APIKEY')
 
-        # The seed is used to create tokens. It is completely random and used to
-        # add to the token generation. This helps in the randomization of the
-        # token, and makes it almost impossible to reverse a token to its root values
+        # The seed is used to create tokens. A unique random seed is generated
+        # per process by default to prevent token prediction. Override via the
+        # ROCKETRIDE_TOKEN_SEED env var if tokens must be stable across restarts.
         #
-        # IF YOU CHANGE THIS, IT WILL INVALIDATE ALL TOKENS ISSUE ENMASS. SO,
-        # ONLY DO THIS IS ABSOLUTELY NECESSARY!!!
-        self._seed = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+        # NOTE: Changing the seed invalidates all previously issued tokens.
+        self._seed = os.environ.get('ROCKETRIDE_TOKEN_SEED') or secrets.token_hex(32)
 
     def generate_token(self, content: Dict[str, Any], prefix: str = ''):
         """
