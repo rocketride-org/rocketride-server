@@ -425,6 +425,7 @@ function makeDownloadAction(options = {}) {
             task.output = 'Computing source hash...';
             const localHash = await contentHash(SERVER_DIR, { log: (msg) => { task.output = msg; } });
             ctx.contentHash = localHash;
+            ctx.serverAlreadyBuilt = false;
 
             if (options.force) {
                 task.output = 'Force rebuild requested';
@@ -448,6 +449,7 @@ function makeDownloadAction(options = {}) {
             if (!await getState('server.downloaded')
                 && await getState('server.contentHash') === localHash
                 && await getState('vcpkg.version') === localVcpkgVersion) {
+                ctx.serverAlreadyBuilt = true;
                 task.output = 'Server already built';
                 return;
             }
@@ -537,11 +539,13 @@ function makeDownloadAction(options = {}) {
 
                 await setState('server.downloaded', true);
                 ctx.downloaded = true;
+                ctx.serverAlreadyBuilt = false;
                 task.output = `Downloaded server from ${matchedTag}`;
 
             } catch {
                 await setState('server.downloaded', false);
                 ctx.downloaded = false;
+                ctx.serverAlreadyBuilt = false;
                 task.output = `Release ${matchedTag} download failed: Will compile from source`;
             }
         }
@@ -931,7 +935,7 @@ function makeBuildCoreAction() {
             'server:download',
             whenNot({
                 name: 'downloaded',
-                condition: (ctx) => ctx.downloaded,
+                condition: (ctx) => ctx.downloaded || ctx.serverAlreadyBuilt,
                 then: [
                     parallel([
                         'server:setup-tools',
