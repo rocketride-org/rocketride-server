@@ -187,7 +187,7 @@ class Store(DocumentStoreBase):
             must_conditions.append(f"meta['nodeId'] == '{docFilter.nodeId}'")
 
         if docFilter.isTable is not None:
-            must_conditions.append(f"meta['isTable'] == '{docFilter.isTable}'")
+            must_conditions.append(f"meta['isTable'] == {docFilter.isTable}")
 
         if docFilter.tableIds is not None:
             table_ids = ', '.join(map(str, docFilter.tableIds))
