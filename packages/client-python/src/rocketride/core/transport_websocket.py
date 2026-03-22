@@ -120,12 +120,12 @@ class TransportWebSocket(TransportBase):
         self._auth = kwargs.get('auth', None)
         self._message_tasks: set = set()
 
-    def get_auth(self) -> str | None:
-        """Auth credential for use by connect flow (e.g. first DAP auth command)."""
+    def get_auth(self) -> Optional[str]:
+        """Return auth credential for use by connect flow (e.g. first DAP auth command)."""
         return self._auth
 
-    def get_connection_info(self) -> str | None:
-        """Connection info for the "connected" callback (URI)."""
+    def get_connection_info(self) -> Optional[str]:
+        """Return connection info for the "connected" callback (URI)."""
         return self._uri
 
     def set_auth(self, auth: str) -> None:
@@ -320,7 +320,7 @@ class TransportWebSocket(TransportBase):
 
         except Exception as e:
             self._debug_message(f'Failed to connect to {self._uri}: {e}')
-            
+
             # Clean up websocket if it was created
             if self._websocket:
                 try:
@@ -328,7 +328,7 @@ class TransportWebSocket(TransportBase):
                 except Exception:
                     pass
                 self._websocket = None
-            
+
             # Clean up receive task if started
             if self._receive_task and not self._receive_task.done():
                 self._receive_task.cancel()
@@ -337,9 +337,9 @@ class TransportWebSocket(TransportBase):
                 except Exception:
                     pass
                 self._receive_task = None
-            
+
             self._connected = False
-            
+
             # Always notify about disconnection to enable reconnection logic
             await self._transport_disconnected(f'{e}', has_error=True)
             raise ConnectionError(f'{e}')
