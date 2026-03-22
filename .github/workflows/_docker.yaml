@@ -1,0 +1,60 @@
+name: Docker
+
+on:
+  workflow_call:
+    inputs:
+      server_version:
+        required: true
+        type: string
+      prerelease:
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  docker:
+    name: ${{ inputs.prerelease && 'Publish Docker prerelease image' || 'Publish Docker image' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download server artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: server-artifacts-ubuntu
+          path: release-assets
+
+      - name: Extract server
+        run: |
+          mkdir -p dist/server
+          tar xf release-assets/rocketride-server-*-linux-x64.tar.gz -C dist/server
+          if [ ! -f dist/server/engine ]; then
+            echo "::error::Engine binary not found after extraction"
+            ls -la dist/server/
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile.engine
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/rocketride-engine:${{ inputs.server_version }}${{ inputs.prerelease && '-prerelease' || '' }}
+            ${{ inputs.prerelease == false && format('ghcr.io/{0}/rocketride-engine:latest', github.repository_owner) || '' }}
