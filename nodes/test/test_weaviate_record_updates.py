@@ -142,6 +142,17 @@ def _make_store(records: dict[str, dict]) -> tuple[object, object]:
 
 
 def _make_obj_records(object_id: str, count: int, *, is_deleted: bool) -> dict[str, dict]:
+    """
+    Create mock Weaviate records keyed by ``f'{object_id}-{index}'``.
+
+    Args:
+        object_id: Object ID used for each generated record and key prefix.
+        count: Number of records to generate.
+        is_deleted: Deletion state assigned to each record.
+
+    Returns:
+        A ``dict[str, dict]`` where each value contains ``properties`` and ``vector`` keys.
+    """
     return {
         f'{object_id}-{index}': {
             'properties': {'objectId': object_id, 'isDeleted': is_deleted},
