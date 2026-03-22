@@ -21,3 +21,8 @@ sys.modules['depends'] = mock_depends
 mock_rocketlib = MagicMock()
 mock_rocketlib.debug = MagicMock()
 sys.modules['rocketlib'] = mock_rocketlib
+
+# Mock rocketride module (provides core classes used by ai.web.server)
+mock_rocketride = MagicMock()
+sys.modules['rocketride'] = mock_rocketride
+sys.modules['rocketride.core'] = MagicMock()

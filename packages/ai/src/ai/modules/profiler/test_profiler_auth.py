@@ -3,10 +3,11 @@ Tests for profiler module security fixes.
 
 Verifies that:
 1. All profiler endpoints are registered WITHOUT public=True (require auth)
-2. The profile report HTML-escapes output to prevent XSS
+2. The /profile/report endpoint handler HTML-escapes output to prevent XSS
+3. Route methods match documentation (POST not PUT for start/stop)
 """
 
-import html as html_module
+import asyncio
 from unittest.mock import MagicMock
 
 from ai.modules.profiler.profile import WebServerProfiler
@@ -20,6 +21,23 @@ def _get_registered_routes():
     profiler = WebServerProfiler()
     _setup_profiling_endpoints(mock_server, profiler)
     return mock_server.add_route.call_args_list
+
+
+def _get_report_handler_and_profiler():
+    """Set up a mock server, return the /profile/report endpoint handler and profiler.
+
+    Extracts the actual async handler registered via add_route so tests can
+    invoke it directly and verify the HTMLResponse it returns.
+    """
+    mock_server = MagicMock()
+    mock_server.app.state = MagicMock()
+    profiler = WebServerProfiler()
+    _setup_profiling_endpoints(mock_server, profiler)
+    calls = mock_server.add_route.call_args_list
+    report_calls = [c for c in calls if c[0][0] == '/profile/report']
+    assert len(report_calls) == 1, "Expected exactly one /profile/report route"
+    handler = report_calls[0][0][1]
+    return handler, profiler
 
 
 class TestProfilerRoutesRequireAuth:
@@ -76,27 +94,87 @@ class TestProfilerRoutesRequireAuth:
 
 
 class TestProfilerReportXSSEscape:
-    """Verify that the profile report HTML-escapes output."""
+    """Verify that the /profile/report endpoint handler HTML-escapes output."""
 
-    def test_report_escapes_html_script_tags(self):
-        """Profile report containing script tags must be escaped."""
-        profiler = WebServerProfiler()
-        malicious = '<script>alert("xss")</script>'
-        profiler.current_profile_data = malicious
+    def test_endpoint_escapes_script_tags(self):
+        """The /profile/report handler must escape <script> tags in its HTML output."""
+        handler, profiler = _get_report_handler_and_profiler()
+        profiler.current_profile_data = '<script>alert("xss")</script>'
 
-        report = profiler.get_full_report()
-        escaped = html_module.escape(report)
+        mock_request = MagicMock()
+        response = asyncio.run(handler(mock_request))
 
-        assert '<script>' not in escaped
-        assert '&lt;script&gt;' in escaped
+        body = response.body.decode()
+        assert '<script>' not in body
+        assert '&lt;script&gt;' in body
 
-    def test_report_escapes_angle_brackets(self):
-        """Angle brackets in profiler output must be escaped."""
-        profiler = WebServerProfiler()
+    def test_endpoint_escapes_angle_brackets(self):
+        """The /profile/report handler must escape angle brackets in its HTML output."""
+        handler, profiler = _get_report_handler_and_profiler()
         profiler.current_profile_data = 'File <module> at line 42'
 
-        report = profiler.get_full_report()
-        escaped = html_module.escape(report)
+        mock_request = MagicMock()
+        response = asyncio.run(handler(mock_request))
 
-        assert '<module>' not in escaped
-        assert '&lt;module&gt;' in escaped
+        body = response.body.decode()
+        assert '<module>' not in body
+        assert '&lt;module&gt;' in body
+
+    def test_endpoint_wraps_report_in_pre_tag(self):
+        """The /profile/report handler must wrap escaped output in <pre> tags."""
+        handler, profiler = _get_report_handler_and_profiler()
+        profiler.current_profile_data = 'normal profiling output'
+
+        mock_request = MagicMock()
+        response = asyncio.run(handler(mock_request))
+
+        body = response.body.decode()
+        assert body.startswith('<pre>')
+        assert body.endswith('</pre>')
+        assert 'normal profiling output' in body
+
+    def test_endpoint_returns_html_response(self):
+        """The /profile/report handler must return an HTMLResponse with text/html media type."""
+        handler, profiler = _get_report_handler_and_profiler()
+        profiler.current_profile_data = 'some data'
+
+        mock_request = MagicMock()
+        response = asyncio.run(handler(mock_request))
+
+        from fastapi.responses import HTMLResponse
+        assert isinstance(response, HTMLResponse)
+        assert response.media_type == 'text/html'
+
+    def test_endpoint_escapes_ampersands_and_quotes(self):
+        """The /profile/report handler must escape ampersands and quotes."""
+        handler, profiler = _get_report_handler_and_profiler()
+        profiler.current_profile_data = 'a&b "c" <d>'
+
+        mock_request = MagicMock()
+        response = asyncio.run(handler(mock_request))
+
+        body = response.body.decode()
+        assert 'a&amp;b' in body
+        assert '&lt;d&gt;' in body
+        # Raw dangerous chars must not appear unescaped
+        assert '<d>' not in body
+
+
+class TestProfilerRouteMethodsMatchDocs:
+    """Verify that registered route HTTP methods match the module docstring."""
+
+    def test_start_route_uses_post(self):
+        """/profile/start must be registered as POST (not PUT)."""
+        calls = _get_registered_routes()
+        matches = [c for c in calls if c[0][0] == '/profile/start']
+        assert len(matches) == 1
+        methods = matches[0][0][2]
+        assert 'POST' in methods
+
+    def test_stop_route_uses_post(self):
+        """/profile/stop must be registered as POST (not PUT)."""
+        calls = _get_registered_routes()
+        matches = [c for c in calls if c[0][0] == '/profile/stop']
+        assert len(matches) == 1
+        methods = matches[0][0][2]
+        assert 'POST' in methods
