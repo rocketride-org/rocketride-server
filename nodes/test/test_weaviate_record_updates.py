@@ -141,7 +141,7 @@ def _make_store(records: dict[str, dict]) -> tuple[object, object]:
             sys.path.pop(0)
 
 
-def _make_obj_records(object_id: str, count: int, is_deleted: bool) -> dict[str, dict]:
+def _make_obj_records(object_id: str, count: int, *, is_deleted: bool) -> dict[str, dict]:
     return {
         f'{object_id}-{index}': {
             'properties': {'objectId': object_id, 'isDeleted': is_deleted},
