@@ -460,6 +460,9 @@ class Store(DocumentStoreBase):
         """
         Collect the ids of records in a list of objectIds to update or delete the records.
         """
+        if not objectIds:
+            return
+
         # By definition, if the collection does not exists, there
         # is nothing to update
         if not self.doesCollectionExist():
@@ -467,19 +470,51 @@ class Store(DocumentStoreBase):
 
         # Getting index
         index = self.client.Index(self.collection)
-        vector_size = int(index.describe_index_stats()['dimension'])
-
-        records = index.query(vector=[1] * vector_size, top_k=len(objectIds), filter={'objectId': {'$in': objectIds}}, include_metadata=False, include_values=False)['matches']
-        ids_to_update = [record['id'] for record in records]
+        object_ids_filter = {'objectId': {'$in': objectIds}}
 
         # Deleting if we need to fully remove documents
-        if ids_to_update and isDeleteOperation:
-            index.delete(ids_to_update)
+        if isDeleteOperation:
+            index.delete(filter=object_ids_filter)
             return
 
+        if not metadataUpdates:
+            return
+
+        vector_size = int(index.describe_index_stats()['dimension'])
+        batch_size = 1000
+
+        # For markDeleted/markActive, keep querying only records that still need mutation.
+        # This guarantees progress and avoids repeatedly updating the same batch.
+        pending_filter = object_ids_filter
+        has_is_deleted_target = len(metadataUpdates) == 1 and 'isDeleted' in metadataUpdates
+        if has_is_deleted_target:
+            pending_filter = {
+                '$and': [
+                    object_ids_filter,
+                    {'isDeleted': {'$eq': not metadataUpdates['isDeleted']}},
+                ]
+            }
+
         # Updating the metadata fields we want changed for the batch update
-        for id_to_update in ids_to_update:
-            index.update(id=id_to_update, set_metadata=metadataUpdates)
+        seen_ids = set()
+        while True:
+            records = index.query(vector=[1] * vector_size, top_k=batch_size, filter=pending_filter, include_metadata=False, include_values=False)['matches']
+            if not records:
+                break
+
+            batch_ids = [record['id'] for record in records]
+            for id_to_update in batch_ids:
+                index.update(id=id_to_update, set_metadata=metadataUpdates)
+
+            # Generic fallback: if we cannot construct a "pending only" filter,
+            # stop once the query repeats the same set to prevent infinite loops.
+            if not has_is_deleted_target:
+                new_ids = [record_id for record_id in batch_ids if record_id not in seen_ids]
+                if not new_ids:
+                    break
+                seen_ids.update(new_ids)
+                if len(batch_ids) < batch_size:
+                    break
         return
 
     def remove(self, objectIds: List[str]) -> None:
