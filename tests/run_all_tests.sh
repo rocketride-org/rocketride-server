@@ -46,9 +46,17 @@ if [ -f "$ENGINE" ]; then
         FAIL=$((FAIL + 1))
     fi
     echo ""
+
+    echo ">>> Python: API key redaction tests"
+    if "$ENGINE" -m pytest "$ROOT_DIR/nodes/test/test_redaction.py" -q 2>&1 | tail -1; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+    fi
+    echo ""
 else
     echo ">>> Python tests SKIPPED (engine not built)"
-    SKIP=$((SKIP + 3))
+    SKIP=$((SKIP + 4))
 fi
 
 # React tests (need pnpm)
