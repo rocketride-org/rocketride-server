@@ -398,6 +398,11 @@ class Task(DAPBase):
         """
         Write task configuration to temporary file.
 
+        Uses mkstemp for secure temporary file creation:
+        - Owner-only permissions (0o600) to protect API keys in pipeline config
+        - Unpredictable filename to prevent symlink attacks
+        - O_EXCL flag to prevent TOCTOU race conditions
+
         Returns:
             Path to temporary task configuration file
 
@@ -406,10 +411,12 @@ class Task(DAPBase):
         """
         pipeline_task = self._build_task()
         pipeline_str = json.dumps(pipeline_task, indent=2) + '\n\n'
-        taskpath = os.path.join(tempfile.gettempdir(), f'{self.id}.json')
 
-        async with aiofiles.open(taskpath, 'w', encoding='utf-8') as f:
-            await f.write(pipeline_str)
+        fd, taskpath = tempfile.mkstemp(suffix='.json', prefix=f'task-{self.id}-')
+        try:
+            await asyncio.to_thread(os.write, fd, pipeline_str.encode('utf-8'))
+        finally:
+            os.close(fd)
 
         return taskpath
 
