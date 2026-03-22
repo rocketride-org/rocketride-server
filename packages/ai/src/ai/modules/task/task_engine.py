@@ -300,9 +300,17 @@ class Task(DAPBase):
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
 
+    # Allowlist of environment variable prefixes that pipelines are permitted to resolve.
+    # All other env vars are blocked to prevent exfiltration of secrets via ${VAR} expansion.
+    ALLOWED_ENV_PREFIXES = ('ROCKETRIDE_', 'PIPELINE_', 'NODE_', 'ROCKET_')
+
     def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
         """
         Replace ${KEY} placeholders in a pipeline dictionary with environment variable values.
+
+        Only environment variables whose names start with an allowed prefix
+        (see ALLOWED_ENV_PREFIXES) are resolved. All other references are
+        replaced with a redacted placeholder to prevent secret exfiltration.
 
         Args:
             pipeline: Dictionary containing the pipeline configuration
@@ -313,10 +321,12 @@ class Task(DAPBase):
         # Convert dict to JSON string
         pipeline_str = json.dumps(pipeline)
 
-        # Replace ${VAR_NAME} with environment variable value
+        # Replace ${VAR_NAME} with environment variable value (if allowed)
         def replacer(match):
             env_var = match.group(1)
-            return os.environ.get(env_var, match.group(0))  # Keep original if not found
+            if env_var.startswith(self.ALLOWED_ENV_PREFIXES):
+                return os.environ.get(env_var, match.group(0))  # Keep original if not found
+            return '<REDACTED>'
 
         resolved_str = re.sub(r'\$\{([^}]+)\}', replacer, pipeline_str)
 
