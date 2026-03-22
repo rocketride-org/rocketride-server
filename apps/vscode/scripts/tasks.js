@@ -158,7 +158,7 @@ function makeStageFilesAction() {
             const pkg = JSON.parse(await readFile(pkgPath));
             pkg.main = './rocketride.js';
             pkg.icon = 'rocketride-dark-icon.png';
-            pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'docs/**'];
+            pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md', 'docs/**'];
             await writeFile(path.join(BUILD_DIR, 'package.json'), JSON.stringify(pkg, null, 2));
             const iconDark = path.join(APP_ROOT, 'rocketride-dark-icon.png');
             const iconLight = path.join(APP_ROOT, 'rocketride-light-icon.png');
