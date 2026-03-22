@@ -39,6 +39,32 @@ _VALID_LOCATIONS = frozenset({
 _LOCATION_RE = re.compile(r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?$')
 
 
+def _validate_location(location):
+    """Validate an IBM Cloud location string and return the service URL.
+
+    Args:
+        location: The location/region string to validate.
+
+    Returns:
+        str: The full Watson ML service URL for the given location.
+
+    Raises:
+        ValueError: If the location is empty/None, contains the UI
+            placeholder text, fails the format regex, or is not in the
+            known IBM Cloud region allowlist.
+    """
+    if not location or 'Select Location' in location:
+        raise ValueError('Please select a location.')
+    if not _LOCATION_RE.match(location):
+        raise ValueError(f'Invalid location format: {location!r}')
+    if location not in _VALID_LOCATIONS:
+        raise ValueError(
+            f'Unknown IBM Cloud location: {location!r}. '
+            f'Valid locations: {", ".join(sorted(_VALID_LOCATIONS))}'
+        )
+    return f'https://{location}.ml.cloud.ibm.com'
+
+
 class Chat(ChatBase):
     """
     IBM Watson chat class.
@@ -69,16 +95,7 @@ class Chat(ChatBase):
         config = Config.getNodeConfig(provider, connConfig)
 
         location = config.get('location')
-        if not location or 'Select Location' in location:
-            raise ValueError('Please select a location.')
-        if not _LOCATION_RE.match(location):
-            raise ValueError(f'Invalid location format: {location!r}')
-        if location not in _VALID_LOCATIONS:
-            raise ValueError(
-                f'Unknown IBM Cloud location: {location!r}. '
-                f'Valid locations: {", ".join(sorted(_VALID_LOCATIONS))}'
-            )
-        url = f'https://{location}.ml.cloud.ibm.com'
+        url = _validate_location(location)
 
         api_key = config.get('apikey')
         if not api_key:

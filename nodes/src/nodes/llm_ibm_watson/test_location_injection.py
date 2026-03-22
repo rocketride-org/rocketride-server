@@ -5,34 +5,64 @@ Verifies that the location allowlist and regex check prevent SSRF
 and credential exfiltration via crafted location values.
 """
 
-import re
+import importlib
+import importlib.util
+import os
+import sys
+import types
+
 import pytest
 
 # ---------------------------------------------------------------------------
-# Replicate the validation logic from ibm_watson.py so we can unit-test it
-# in isolation without needing the IBM SDK or RocketRide internals.
+# Import _validate_location from the actual ibm_watson module without
+# triggering its heavy runtime dependencies (IBM SDK, RocketRide internals).
+# We load the file as a standalone module and stub out unavailable imports.
 # ---------------------------------------------------------------------------
 
-_VALID_LOCATIONS = frozenset({
-    'us-south', 'us-east', 'eu-gb', 'eu-de', 'eu-es',
-    'jp-tok', 'jp-osa', 'au-syd', 'ca-tor', 'br-sao',
-})
-
-_LOCATION_RE = re.compile(r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?$')
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_MOD_PATH = os.path.join(_HERE, 'ibm_watson.py')
 
 
-def _validate_location(location):
-    """Mirror the validation logic from Chat.__init__."""
-    if not location or 'Select Location' in location:
-        raise ValueError('Please select a location.')
-    if not _LOCATION_RE.match(location):
-        raise ValueError(f'Invalid location format: {location!r}')
-    if location not in _VALID_LOCATIONS:
-        raise ValueError(
-            f'Unknown IBM Cloud location: {location!r}. '
-            f'Valid locations: {", ".join(sorted(_VALID_LOCATIONS))}'
-        )
-    return f'https://{location}.ml.cloud.ibm.com'
+def _load_validate_location():
+    """Load _validate_location from ibm_watson.py, stubbing runtime deps."""
+    # Create lightweight stubs for packages that are unavailable in tests
+    stub_names = [
+        'ai', 'ai.common', 'ai.common.chat', 'ai.common.config',
+        'ibm_watsonx_ai', 'ibm_watsonx_ai.foundation_models',
+        'ibm_watsonx_ai.foundation_models.schema',
+    ]
+    saved = {}
+    for name in stub_names:
+        saved[name] = sys.modules.get(name)
+        stub = types.ModuleType(name)
+        # Provide dummy classes that the module-level references need
+        if name == 'ai.common.chat':
+            stub.ChatBase = type('ChatBase', (), {})
+        if name == 'ai.common.config':
+            stub.Config = type('Config', (), {})
+        if name == 'ibm_watsonx_ai':
+            stub.Credentials = type('Credentials', (), {})
+        if name == 'ibm_watsonx_ai.foundation_models':
+            stub.ModelInference = type('ModelInference', (), {})
+        if name == 'ibm_watsonx_ai.foundation_models.schema':
+            stub.TextChatParameters = type('TextChatParameters', (), {})
+        sys.modules[name] = stub
+
+    try:
+        spec = importlib.util.spec_from_file_location('_ibm_watson', _MOD_PATH)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod._validate_location
+    finally:
+        # Restore original sys.modules state
+        for name in stub_names:
+            if saved[name] is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = saved[name]
+
+
+_validate_location = _load_validate_location()
 
 
 # ---- Tests for valid locations -------------------------------------------
@@ -40,7 +70,10 @@ def _validate_location(location):
 class TestValidLocations:
     """All known IBM Cloud regions must be accepted."""
 
-    @pytest.mark.parametrize('loc', sorted(_VALID_LOCATIONS))
+    @pytest.mark.parametrize('loc', [
+        'au-syd', 'br-sao', 'ca-tor', 'eu-de', 'eu-es',
+        'eu-gb', 'jp-osa', 'jp-tok', 'us-east', 'us-south',
+    ])
     def test_valid_location_accepted(self, loc):
         url = _validate_location(loc)
         assert url == f'https://{loc}.ml.cloud.ibm.com'
@@ -61,7 +94,7 @@ class TestSSRFInjection:
         'attacker.com\\@ibm.com',        # backslash injection
     ])
     def test_ssrf_payload_rejected(self, payload):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match='Invalid location format'):
             _validate_location(payload)
 
 
@@ -87,11 +120,11 @@ class TestEmptyAndPlaceholder:
     """Empty strings and the UI placeholder must be rejected."""
 
     def test_empty_string(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match='Please select a location'):
             _validate_location('')
 
     def test_none_value(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match='Please select a location'):
             _validate_location(None)
 
     def test_select_location_placeholder(self):
@@ -99,7 +132,7 @@ class TestEmptyAndPlaceholder:
             _validate_location('Select Location')
 
     def test_select_location_with_prefix(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match='Please select a location'):
             _validate_location('Please Select Location here')
 
 
@@ -118,5 +151,5 @@ class TestRegexEnforcement:
         'us--south',          # double hyphen (passes regex but not allowlist)
     ])
     def test_invalid_format_rejected(self, bad):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match='Invalid location format|Unknown IBM Cloud'):
             _validate_location(bad)
