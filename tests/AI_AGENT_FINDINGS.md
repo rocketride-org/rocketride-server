@@ -176,3 +176,15 @@ Key a11y gaps: missing aria-labels on chat input/send button, no keyboard activa
 | D2  | Non-root user (rocketride)            | OK       | Dockerfile.engine:10,16 |
 | D3  | Minimal apt packages, clean layer     | OK       | Dockerfile.engine:3-9   |
 | D4  | No secrets or env vars baked in       | OK       | Dockerfile.engine       |
+
+## Dependency Vulnerability Scan
+
+**pnpm audit: 38 vulnerabilities (1 low, 11 moderate, 26 high)**
+
+Key high-severity:
+
+- `flatted <=3.4.1` — Prototype Pollution via parse() (GHSA-rf6f-7fwh-wjgh)
+- `undici` in @vscode/vsce — multiple HTTP vulnerabilities
+- Most are in transitive dependencies of dev tools (eslint, vsce)
+
+Fix: `pnpm update` for direct deps, wait for upstream fixes for transitive deps.
