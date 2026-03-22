@@ -12,6 +12,10 @@ if str(src_path) not in sys.path:
 # Mock depends and rocketlib modules BEFORE anything else
 from unittest.mock import MagicMock
 
+# Mock depends module (provides dependency installation at import time)
+mock_depends = MagicMock()
+mock_depends.depends = MagicMock()
+sys.modules['depends'] = mock_depends
 
 # Mock rocketlib module
 mock_rocketlib = MagicMock()
