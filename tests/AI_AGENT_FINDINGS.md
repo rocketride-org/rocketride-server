@@ -1,6 +1,6 @@
 # AI Agent Testing Findings — March 22, 2026
 
-7 autonomous AI agents tested RocketRide in parallel using Playwright MCP + source code auditing.
+9 autonomous AI agents tested RocketRide in parallel using Playwright MCP + source code auditing.
 
 ## Critical Bugs
 
@@ -11,6 +11,15 @@
 | 3   | HIGH     | Security  | chat-ui MarkdownRenderer.tsx:28  | `rehypeRaw` enables raw HTML/XSS from pipeline responses     |
 | 4   | HIGH     | Security  | vscode PageStatusProvider.ts:627 | `openLink()` webview: no CSP, inline script, unsanitized URL |
 | 5   | HIGH     | Stability | Both React apps                  | No error boundaries — render crash kills entire app          |
+
+## Security Audit Findings (Python + TypeScript)
+
+| #   | Severity | Category      | Location                   | Description                                                         |
+| --- | -------- | ------------- | -------------------------- | ------------------------------------------------------------------- |
+| S1  | CRITICAL | Code Exec     | ai/common/sandbox.py:284   | Auto `pip install` of agent-requested packages — typosquatting risk |
+| S2  | HIGH     | SQL Injection | vectordb_postgres.py:53-79 | String formatting in SQL queries instead of parameterized           |
+| S3  | MEDIUM   | Dead Conn     | TransportWebSocket.ts:123  | Browser clients have no heartbeat — dead connections undetected     |
+| S4  | MEDIUM   | Reconnect     | client.ts:456              | Reconnection after error doesn't reset transport state              |
 
 ## Medium Bugs
 
