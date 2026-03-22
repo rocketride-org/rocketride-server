@@ -79,3 +79,22 @@ Key a11y gaps: missing aria-labels on chat input/send button, no keyboard activa
 | M4  | Trash icon present without context in connecting state     | MINOR    | UX       |
 | M5  | No connection failure state or retry button                | HIGH     | UX       |
 | M6  | Low contrast on secondary text (Connecting, Please wait)   | LOW      | A11y     |
+
+## Mariner Visual Agent Findings (chat-ui desktop 1280x720)
+
+| #   | Bug                                                             | Severity | Category  |
+| --- | --------------------------------------------------------------- | -------- | --------- |
+| C1  | Input placeholder contrast 3.31:1 — fails WCAG AA (needs 4.5:1) | HIGH     | A11y      |
+| C2  | "Connecting..." as input placeholder is misleading              | HIGH     | UX        |
+| C3  | Delete chat icon has no confirmation dialog                     | HIGH     | UX        |
+| C4  | Empty chat area shows no welcome/guidance message               | HIGH     | UX        |
+| C5  | Header elements vertically misaligned (right vs left)           | MEDIUM   | Layout    |
+| C6  | "Connecting..." status text not left-aligned with title         | MEDIUM   | Alignment |
+| C7  | No progress indicator during connection                         | MEDIUM   | UX        |
+| C8  | "Ocean" dropdown meaning unclear without context                | MEDIUM   | UX        |
+| C9  | No clear feedback on connection success                         | MEDIUM   | UX        |
+| C10 | Send button too close to bottom edge                            | LOW      | Layout    |
+| C11 | Send button vertically misaligned with placeholder              | LOW      | Alignment |
+| C12 | Blue separator line too subtle                                  | LOW      | Visual    |
+| C13 | Header "Connecting..." borderline contrast (5.45:1, AAA fail)   | LOW      | A11y      |
+| C14 | Empty chat state uninviting                                     | LOW      | UX        |
