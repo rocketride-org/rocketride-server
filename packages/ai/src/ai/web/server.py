@@ -137,6 +137,10 @@ class WebServer:
         cors_origins_env = os.environ.get('ROCKETRIDE_CORS_ORIGINS', '')
         if cors_origins_env:
             cors_origins = [o.strip() for o in cors_origins_env.split(',') if o.strip()]
+        else:
+            cors_origins = []
+
+        if cors_origins:
             allow_credentials = True
         else:
             cors_origins = ['*']
