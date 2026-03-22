@@ -17,7 +17,7 @@
 		"chart.js": "^4.4.0",
 		"react-chartjs-2": "^5.2.0",
 		"recharts": "^2.8.0",
-		"rehype-raw": "^7.0.0",
+		"rehype-sanitize": "^6.0.0",
 		"remark-gfm": "^4.0.1",
 		"web-vitals": "^5.1.0",
 		"ws": "^8.18.3"
