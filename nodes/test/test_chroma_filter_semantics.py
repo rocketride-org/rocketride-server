@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import sys
 from types import ModuleType, SimpleNamespace
 import pytest
@@ -16,6 +17,17 @@ from pathlib import Path
 from collections.abc import Iterator
 
 _MODULE_PREFIXES = ('chroma', 'chromadb')
+_STUB_MODULE_NAMES = (
+    'depends',
+    'rocketlib',
+    'ai',
+    'ai.common',
+    'ai.common.schema',
+    'ai.common.store',
+    'ai.common.config',
+    'ai.common.transform',
+    'numpy',
+)
 
 
 def _is_scoped_module(module_name: str) -> bool:
@@ -37,6 +49,7 @@ def _scoped_imports() -> Iterator[None]:
     """Temporarily prepend canonical Chroma mock paths and restore import state."""
     original_sys_path = list(sys.path)
     original_modules = _capture_scoped_modules()
+    original_stub_modules = {name: sys.modules.get(name) for name in _STUB_MODULE_NAMES}
 
     test_dir = Path(__file__).resolve().parent
     mock_path = test_dir / 'mocks'
@@ -44,6 +57,64 @@ def _scoped_imports() -> Iterator[None]:
 
     sys.path.insert(0, str(nodes_path))
     sys.path.insert(0, str(mock_path))
+    # `nodes/src/nodes/chroma/chroma.py` imports runtime dependencies at module
+    # import time; install lightweight stubs so tests stay hermetic.
+    depends_module = ModuleType('depends')
+    depends_module.depends = lambda *_a, **_kw: None  # type: ignore[attr-defined]
+    sys.modules['depends'] = depends_module
+
+    rocketlib_module = ModuleType('rocketlib')
+    rocketlib_module.debug = lambda *_a, **_kw: None  # type: ignore[attr-defined]
+    sys.modules['rocketlib'] = rocketlib_module
+
+    ai_module = ModuleType('ai')
+    ai_common_module = ModuleType('ai.common')
+    ai_common_module.__path__ = []  # type: ignore[attr-defined]
+    ai_schema_module = ModuleType('ai.common.schema')
+    ai_store_module = ModuleType('ai.common.store')
+    ai_config_module = ModuleType('ai.common.config')
+    ai_transform_module = ModuleType('ai.common.transform')
+    numpy_module = ModuleType('numpy')
+
+    class _Doc:
+        pass
+
+    class _DocFilter:
+        pass
+
+    class _DocMetadata:
+        pass
+
+    class _QuestionText:
+        pass
+
+    class _DocumentStoreBase:
+        def __init__(self, *_a: object, **_kw: object) -> None:
+            pass
+
+    class _Config:
+        @staticmethod
+        def getNodeConfig(_provider: object, _connConfig: object) -> dict[str, object]:
+            return {}
+
+    class _IEndpointTransform:
+        pass
+
+    ai_schema_module.Doc = _Doc
+    ai_schema_module.DocFilter = _DocFilter
+    ai_schema_module.DocMetadata = _DocMetadata
+    ai_schema_module.QuestionText = _QuestionText
+    ai_store_module.DocumentStoreBase = _DocumentStoreBase
+    ai_config_module.Config = _Config
+    ai_transform_module.IEndpointTransform = _IEndpointTransform
+
+    sys.modules['ai'] = ai_module
+    sys.modules['ai.common'] = ai_common_module
+    sys.modules['ai.common.schema'] = ai_schema_module
+    sys.modules['ai.common.store'] = ai_store_module
+    sys.modules['ai.common.config'] = ai_config_module
+    sys.modules['ai.common.transform'] = ai_transform_module
+    sys.modules['numpy'] = numpy_module
     importlib.invalidate_caches()
     try:
         yield
@@ -54,12 +125,21 @@ def _scoped_imports() -> Iterator[None]:
                 sys.modules.pop(module_name, None)
         for module_name, module in original_modules.items():
             sys.modules[module_name] = module
+        for module_name, module in original_stub_modules.items():
+            if module is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = module
 
 
 def _load_store_class() -> type:
-    """Load `Store` from `chroma.chroma` using scoped canonical test mocks."""
+    """Load `Store` from source using scoped canonical test mocks."""
     with _scoped_imports():
-        chroma_module = importlib.import_module('chroma.chroma')
+        chroma_file = Path(__file__).resolve().parent.parent / 'src' / 'nodes' / 'chroma' / 'chroma.py'
+        spec = importlib.util.spec_from_file_location('test_chroma_store_module', chroma_file)
+        assert spec is not None and spec.loader is not None
+        chroma_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(chroma_module)
         chromadb_module = importlib.import_module('chromadb')
 
         chromadb_file = getattr(chromadb_module, '__file__', None)
