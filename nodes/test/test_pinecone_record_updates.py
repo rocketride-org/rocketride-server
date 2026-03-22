@@ -14,6 +14,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
+
 _STUB_MODULE_NAMES = (
     'depends',
     'pinecone',
@@ -190,12 +192,29 @@ class _FakeIndex:
             value = metadata.get(field_name)
             if isinstance(condition, dict):
                 for operator, expected in condition.items():
-                    if operator == '$in' and value not in expected:
-                        return False
-                    if operator == '$eq' and value != expected:
-                        return False
-                    if operator == '$ne' and value == expected:
-                        return False
+                    if operator == '$in':
+                        if value not in expected:
+                            return False
+                    elif operator == '$eq':
+                        if value != expected:
+                            return False
+                    elif operator == '$ne':
+                        if value == expected:
+                            return False
+                    elif operator == '$gt':
+                        if value is None or value <= expected:
+                            return False
+                    elif operator == '$gte':
+                        if value is None or value < expected:
+                            return False
+                    elif operator == '$lt':
+                        if value is None or value >= expected:
+                            return False
+                    elif operator == '$lte':
+                        if value is None or value > expected:
+                            return False
+                    else:
+                        raise AssertionError(f'Unsupported operator in fake filter: {operator}')
             elif value != condition:
                 return False
 
@@ -288,3 +307,50 @@ def test_update_records_noop_for_empty_objectids() -> None:
     assert fake_index.query_calls == 0
     assert fake_index.delete_calls == 0
     assert fake_index.update_calls == 0
+
+
+def test_matches_filter_supports_numeric_comparison_operators() -> None:
+    """_matches_filter() should honor $gt/$gte/$lt/$lte for numeric metadata."""
+    fake_index = _FakeIndex({})
+    metadata = {'chunkId': 5, 'objectId': 'obj-1'}
+
+    assert fake_index._matches_filter(metadata, {'chunkId': {'$gt': 4}})
+    assert fake_index._matches_filter(metadata, {'chunkId': {'$gte': 5}})
+    assert fake_index._matches_filter(metadata, {'chunkId': {'$lt': 6}})
+    assert fake_index._matches_filter(metadata, {'chunkId': {'$lte': 5}})
+
+    assert not fake_index._matches_filter(metadata, {'chunkId': {'$gt': 5}})
+    assert not fake_index._matches_filter(metadata, {'chunkId': {'$gte': 6}})
+    assert not fake_index._matches_filter(metadata, {'chunkId': {'$lt': 5}})
+    assert not fake_index._matches_filter(metadata, {'chunkId': {'$lte': 4}})
+
+    assert not fake_index._matches_filter({'objectId': 'obj-1'}, {'chunkId': {'$gte': 0}})
+
+
+def test_matches_filter_supports_mixed_range_and_logical_conditions() -> None:
+    """_matches_filter() should compose numeric comparisons under $and/$or."""
+    fake_index = _FakeIndex({})
+    filter_expr = {
+        '$and': [
+            {'objectId': {'$eq': 'obj-1'}},
+            {
+                '$or': [
+                    {'chunkId': {'$lt': 3}},
+                    {'chunkId': {'$gt': 8}},
+                ]
+            },
+        ]
+    }
+
+    assert fake_index._matches_filter({'objectId': 'obj-1', 'chunkId': 2}, filter_expr)
+    assert fake_index._matches_filter({'objectId': 'obj-1', 'chunkId': 9}, filter_expr)
+    assert not fake_index._matches_filter({'objectId': 'obj-1', 'chunkId': 5}, filter_expr)
+    assert not fake_index._matches_filter({'objectId': 'obj-2', 'chunkId': 2}, filter_expr)
+
+
+def test_matches_filter_rejects_unknown_operator() -> None:
+    """_matches_filter() should fail loudly on unsupported operators."""
+    fake_index = _FakeIndex({})
+
+    with pytest.raises(AssertionError, match='Unsupported operator'):
+        fake_index._matches_filter({'chunkId': 5}, {'chunkId': {'$contains': 5}})
