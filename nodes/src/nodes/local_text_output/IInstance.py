@@ -51,6 +51,10 @@ class IInstance(IInstanceBase):
         Args:
             text: Text content to append to the current object's text buffer.
         """
+        if self.current_object is None:
+            return
+        if self.target_object_text is None:
+            self.target_object_text = ''
         self.target_object_text += text
 
     def open(self, object: Entry):
@@ -101,19 +105,13 @@ class IInstance(IInstanceBase):
                 # Create the full target path by joining with output directory
                 # e.g. /Users/username/Desktop/Hackathon/folder1/gradient_terms_of_use.txt
                 resolved_output = os.path.realpath(output_path)
-                candidate_path = os.path.realpath(
-                    os.path.join(resolved_output, file.lstrip('/\\'))
-                )
+                candidate_path = os.path.realpath(os.path.join(resolved_output, file.lstrip('/\\')))
                 try:
-                    is_within_output = (
-                        os.path.commonpath([resolved_output, candidate_path]) == resolved_output
-                    )
+                    is_within_output = os.path.commonpath([resolved_output, candidate_path]) == resolved_output
                 except ValueError:
                     is_within_output = False
                 if not is_within_output:
-                    raise ValueError(
-                        f'Path traversal detected: {file} resolves outside output directory'
-                    )
+                    raise ValueError(f'Path traversal detected: {file} resolves outside output directory')
                 file_path = candidate_path
 
                 # Create all necessary subdirectories
