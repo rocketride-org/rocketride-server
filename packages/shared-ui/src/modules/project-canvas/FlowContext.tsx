@@ -385,8 +385,7 @@ export const FlowProvider = ({ children, oauth2RootUrl, project: currentProject,
 				onContentChanged(project);
 			}, 50);
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [currentProject?.name, currentProject?.description, currentProject?.version, onContentChanged]);
+	}, [currentProject?.name, currentProject?.description, currentProject?.version, currentProject?.project_id, onContentChanged]);
 
 	const detectChange = useCallback(
 		(changes: NodeChange[]) => {
