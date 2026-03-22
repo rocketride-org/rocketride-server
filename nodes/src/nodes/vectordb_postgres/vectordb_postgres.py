@@ -36,9 +36,24 @@ import numpy as np
 import psycopg2
 from pgvector.psycopg2 import register_vector
 
+import re
+
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
+
+
+def _sanitize_identifier(name: str) -> str:
+    """Sanitize a SQL identifier (table/collection name) to prevent injection.
+
+    Only allows alphanumeric characters and underscores. Wraps in double quotes
+    for PostgreSQL identifier quoting. Raises ValueError for invalid names.
+    """
+    if not name or not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name):
+        raise ValueError(f'Invalid SQL identifier: {name!r}')
+    # Double-quote to handle reserved words and ensure safety
+    return f'"{name}"'
+
 
 # Default PostgreSQL port
 DEFAULT_POSTGRES_PORT = 5432
@@ -49,23 +64,7 @@ MIN_SIMILARITY_SCORE = 0.20
 # SQL Queries
 SQL_QUERIES = {
     'check_collection_exists': "SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = %s)",
-    'create_collection': (
-        'CREATE TABLE IF NOT EXISTS {collection} ('
-        'id bigserial PRIMARY KEY, '
-        'content text, '
-        'objectId text, '
-        'nodeId text, '
-        'parent text, '
-        'permissionId int, '
-        'isDeleted boolean, '
-        'chunkId int, '
-        'isTable boolean, '
-        'tableId int, '
-        'vectorSize int, '
-        'modelName text, '
-        'embedding vector({vector_size})'
-        ');'
-    ),
+    'create_collection': ('CREATE TABLE IF NOT EXISTS {collection} (id bigserial PRIMARY KEY, content text, objectId text, nodeId text, parent text, permissionId int, isDeleted boolean, chunkId int, isTable boolean, tableId int, vectorSize int, modelName text, embedding vector({vector_size}));'),
     'count_documents': 'SELECT COUNT(*) FROM {collection}',
     'search_keyword': 'SELECT * FROM {collection} WHERE content LIKE %s {where_clause} LIMIT %s',
     'get_documents': 'SELECT * FROM {collection} {where_clause} LIMIT %s',
@@ -106,7 +105,7 @@ class Store(DocumentStoreBase):
         config = Config.getNodeConfig(provider, connConfig)
 
         # Save our parameters
-        self.collection = config.get('collection')
+        self.collection = _sanitize_identifier(config.get('collection', 'ROCKETRIDE'))
 
         # Remove leading and trailing spaces, leading http/https and :// and trailing slashes
         self.host = config.get('host').strip()
