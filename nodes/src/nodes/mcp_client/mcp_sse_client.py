@@ -345,5 +345,11 @@ class McpSseClient:
             p2 = urllib.parse.urlparse('http://' + url)
             scheme = p2.scheme
             netloc = p2.netloc
+        # Normalize default ports so that e.g. https://host and https://host:443
+        # are treated as the same origin.
+        if scheme == 'https' and netloc.endswith(':443'):
+            netloc = netloc[:-4]
+        elif scheme == 'http' and netloc.endswith(':80'):
+            netloc = netloc[:-3]
         return f'{scheme}://{netloc}'
 

@@ -40,6 +40,30 @@ class TestEndpointRedirectValidation(unittest.TestCase):
             'https://legit-server.com/messages?session=abc123',
         )
 
+    def test_https_explicit_443_accepted(self):
+        """https://example.com/sse redirecting to https://example.com:443/messages is same origin."""
+        client = _make_client('https://example.com/sse')
+        client._handle_sse_event(
+            event='endpoint',
+            data='https://example.com:443/messages',
+        )
+        self.assertEqual(
+            client._endpoint_url,
+            'https://example.com:443/messages',
+        )
+
+    def test_http_explicit_80_accepted(self):
+        """http://example.com/sse redirecting to http://example.com:80/messages is same origin."""
+        client = _make_client('http://example.com/sse')
+        client._handle_sse_event(
+            event='endpoint',
+            data='http://example.com:80/messages',
+        )
+        self.assertEqual(
+            client._endpoint_url,
+            'http://example.com:80/messages',
+        )
+
     # ---- Cases that MUST be rejected (different origin) ----
 
     def test_different_host_absolute_url_rejected(self):
