@@ -26,6 +26,13 @@ from ai.common.reader import ReaderBase
 from ai.common.config import Config
 from rocketlib import debug
 
+_SENSITIVE_KEYS = ('api_key', 'apikey', 'secret', 'token', 'password', 'credential')
+
+
+def _redact_dict(d: dict) -> dict:
+    """Return a copy of *d* with sensitive values replaced by '***REDACTED***'."""
+    return {k: ('***REDACTED***' if any(p in k.lower() for p in _SENSITIVE_KEYS) else v) for k, v in d.items()}
+
 
 class Parser(ReaderBase):
     """Parser class for Reducto document processing.
@@ -57,7 +64,7 @@ class Parser(ReaderBase):
         if 'default' in self.config:
             debug('Reducto Parser: Found nested config structure, extracting from default profile')
             self.config = self.config.get('default', {})
-            debug(f'Reducto Parser: Extracted config: {self.config}')
+            debug(f'Reducto Parser: Extracted config: {_redact_dict(self.config)}')
 
         # Get configuration values
         self._api_key = self.config.get('api_key')

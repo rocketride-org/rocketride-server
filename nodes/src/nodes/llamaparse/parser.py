@@ -34,6 +34,13 @@ from ai.common.config import Config
 from ai.web.metrics import metrics
 from rocketlib import debug
 
+_SENSITIVE_KEYS = ('api_key', 'apikey', 'secret', 'token', 'password', 'credential')
+
+
+def _redact_dict(d: dict) -> dict:
+    """Return a copy of *d* with sensitive values replaced by '***REDACTED***'."""
+    return {k: ('***REDACTED***' if any(p in k.lower() for p in _SENSITIVE_KEYS) else v) for k, v in d.items()}
+
 
 class Parser(ReaderBase):
     # Configuration variables
@@ -56,7 +63,7 @@ class Parser(ReaderBase):
         self.bag = bag
 
         debug(f'LlamaParse Parser: Provider: {provider}')
-        debug(f'LlamaParse Parser: Raw connConfig: {connConfig}')
+        debug(f'LlamaParse Parser: Raw connConfig: {_redact_dict(connConfig)}')
 
         # Get the nodes configuration
         config = Config.getNodeConfig(provider, connConfig)

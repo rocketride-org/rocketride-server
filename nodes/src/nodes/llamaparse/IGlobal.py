@@ -27,6 +27,14 @@ from typing import TYPE_CHECKING
 from rocketlib import IGlobalBase, debug, warning
 from ai.common.config import Config
 
+_SENSITIVE_KEYS = ('api_key', 'apikey', 'secret', 'token', 'password', 'credential')
+
+
+def _redact_dict(d: dict) -> dict:
+    """Return a copy of *d* with sensitive values replaced by '***REDACTED***'."""
+    return {k: ('***REDACTED***' if any(p in k.lower() for p in _SENSITIVE_KEYS) else v) for k, v in d.items()}
+
+
 if TYPE_CHECKING:
     from .parser import Parser
     from llama_parse import LlamaParse
@@ -196,9 +204,9 @@ class IGlobal(IGlobalBase):
             if spreadsheet_extract_sub_tables:
                 parser_args['spreadsheet_extract_sub_tables'] = spreadsheet_extract_sub_tables
 
-        debug(f'LlamaParse Global: Creating LlamaParse instance with args: {parser_args}')
+        debug(f'LlamaParse Global: Creating LlamaParse instance with args: {_redact_dict(parser_args)}')
         try:
-            debug(f'LlamaParse Global: Creating LlamaParse instance with args: {parser_args}')
+            debug(f'LlamaParse Global: Creating LlamaParse instance with args: {_redact_dict(parser_args)}')
             self._llama_parse = LlamaParse(**parser_args)
             debug('LlamaParse Global: LlamaParse instance created successfully')
         except Exception as e:
