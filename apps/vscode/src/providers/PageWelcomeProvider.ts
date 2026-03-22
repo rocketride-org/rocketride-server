@@ -36,6 +36,7 @@ import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
 import { ConfigManager } from '../config';
 import { getConnectionManager } from '../extension';
+import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
 import { EngineInstaller } from '../connection/engine-installer';
 
 const DISMISSED_KEY = 'rocketride.welcomeDismissed';
@@ -75,16 +76,11 @@ export class PageWelcomeProvider {
 			return;
 		}
 
-		this.panel = vscode.window.createWebviewPanel(
-			'rocketrideWelcome',
-			'Welcome to RocketRide',
-			vscode.ViewColumn.One,
-			{
-				enableScripts: true,
-				localResourceRoots: [this.extensionUri],
-				retainContextWhenHidden: true
-			}
-		);
+		this.panel = vscode.window.createWebviewPanel('rocketrideWelcome', 'Welcome to RocketRide', vscode.ViewColumn.One, {
+			enableScripts: true,
+			localResourceRoots: [this.extensionUri],
+			retainContextWhenHidden: true,
+		});
 
 		this.panel.webview.html = this.getHtmlForWebview(this.panel.webview);
 
@@ -148,15 +144,15 @@ export class PageWelcomeProvider {
 
 		let apiKey = '';
 		if (this.configManager.hasApiKey()) {
-			try { apiKey = config.apiKey || ''; } catch { /* ignore */ }
+			try {
+				apiKey = config.apiKey || '';
+			} catch {
+				/* ignore */
+			}
 		}
 
-		const logoDarkUri = this.panel.webview.asWebviewUri(
-			vscode.Uri.joinPath(this.extensionUri, 'rocketride-dark-icon.png')
-		);
-		const logoLightUri = this.panel.webview.asWebviewUri(
-			vscode.Uri.joinPath(this.extensionUri, 'rocketride-light-icon.png')
-		);
+		const logoDarkUri = this.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'rocketride-dark-icon.png'));
+		const logoLightUri = this.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'rocketride-light-icon.png'));
 
 		this.panel.webview.postMessage({
 			type: 'settingsLoaded',
@@ -169,7 +165,7 @@ export class PageWelcomeProvider {
 				hasApiKey: this.configManager.hasApiKey(),
 				autoConnect: workspaceConfig.get('autoConnect', true),
 				localEngineVersion: workspaceConfig.get('local.engineVersion', 'latest'),
-			}
+			},
 		});
 	}
 
@@ -208,7 +204,7 @@ export class PageWelcomeProvider {
 
 			// Start connection
 			const connectionManager = getConnectionManager();
-			connectionManager?.initialize().catch(error => {
+			connectionManager?.initialize().catch((error) => {
 				console.error('[PageWelcomeProvider] Connection initialization failed:', error);
 			});
 		} catch (error) {
@@ -246,13 +242,13 @@ export class PageWelcomeProvider {
 				return;
 			}
 
-			const port = parsedUrl.port ? parseInt(parsedUrl.port, 10) : (parsedUrl.protocol === 'https:' ? 443 : 80);
+			const port = parsedUrl.port ? parseInt(parsedUrl.port, 10) : parsedUrl.protocol === 'https:' ? 443 : 80;
 			if (port < 1 || port > 65535) {
 				this.showMessage('error', `Invalid port number: ${port}. Port must be between 1 and 65535.`);
 				return;
 			}
 
-			const needsApiKey = connectionMode === 'cloud' || connectionMode === 'onprem';
+			const needsApiKey = connectionModeRequiresApiKey(connectionMode);
 			let apiKey = 'MYAPIKEY';
 			if (needsApiKey) {
 				apiKey = typeof formSettings.apiKey === 'string' ? formSettings.apiKey.trim() : '';
@@ -299,7 +295,7 @@ export class PageWelcomeProvider {
 				columnsStartAt1: true,
 				supportsVariableType: true,
 				supportsVariablePaging: true,
-				supportsRunInTerminalRequest: true
+				supportsRunInTerminalRequest: true,
 			};
 
 			let response;
@@ -324,7 +320,10 @@ export class PageWelcomeProvider {
 				this.showMessage('warning', 'Server responded with an unexpected format. Connection may still work.');
 			}
 		} catch (error) {
-			if (testClient) testClient.disconnect().catch(() => { /* ignore */ });
+			if (testClient)
+				testClient.disconnect().catch(() => {
+					/* ignore */
+				});
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			this.showMessage('error', `Connection test failed: ${errorMessage}`);
 		}
@@ -338,7 +337,9 @@ export class PageWelcomeProvider {
 			try {
 				const session = await vscode.authentication.getSession('github', [], { createIfNone: false });
 				githubToken = session?.accessToken;
-			} catch { /* ignore */ }
+			} catch {
+				/* ignore */
+			}
 
 			const versions = await this.engineInstaller.getReleases(undefined, githubToken);
 			this.panel.webview.postMessage({ type: 'engineVersionsLoaded', versions });
@@ -359,20 +360,13 @@ export class PageWelcomeProvider {
 		try {
 			let htmlContent = require('fs').readFileSync(htmlPath.fsPath, 'utf8');
 
-			htmlContent = htmlContent
-				.replace(/\{\{nonce\}\}/g, nonce)
-				.replace(/\{\{cspSource\}\}/g, webview.cspSource);
+			htmlContent = htmlContent.replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, webview.cspSource);
 
-			return htmlContent.replace(
-				/(?:src|href)="(\/static\/[^"]+)"/g,
-				(match: string, relativePath: string): string => {
-					const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
-					const resourceUri = webview.asWebviewUri(
-						vscode.Uri.joinPath(this.extensionUri, 'webview', cleanPath)
-					);
-					return match.replace(relativePath, resourceUri.toString());
-				}
-			);
+			return htmlContent.replace(/(?:src|href)="(\/static\/[^"]+)"/g, (match: string, relativePath: string): string => {
+				const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+				const resourceUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'webview', cleanPath));
+				return match.replace(relativePath, resourceUri.toString());
+			});
 		} catch (error) {
 			console.error('Error loading welcome HTML:', error);
 			return `<!DOCTYPE html>
@@ -401,7 +395,7 @@ export class PageWelcomeProvider {
 
 	public dispose(): void {
 		this.panel?.dispose();
-		this.disposables.forEach(d => d.dispose());
+		this.disposables.forEach((d) => d.dispose());
 		this.disposables = [];
 	}
 }
