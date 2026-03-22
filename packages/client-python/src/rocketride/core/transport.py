@@ -92,15 +92,31 @@ class TransportBase(ABC):
         if self._on_caller_debug_message:
             self._on_caller_debug_message(message)
 
+    @staticmethod
+    def _redact_sensitive(message: str) -> str:
+        """Redact API keys and auth tokens from debug messages."""
+        import re
+
+        return re.sub(
+            r"('(?:apikey|auth|token|password|secret)':\s*')[^']+(')",
+            r'\1[REDACTED]\2',
+            re.sub(
+                r'("(?:apikey|auth|token|password|secret)":\s*")[^"]+(")',
+                r'\1[REDACTED]\2',
+                message,
+            ),
+        )
+
     def _debug_protocol(self, message: str) -> None:
         """
         Send protocol debug message to callback if available.
+        Sensitive fields (apikey, auth, token) are redacted.
 
         Args:
             message: Protocol debug message to send
         """
         if self._on_caller_debug_protocol:
-            self._on_caller_debug_protocol(message)
+            self._on_caller_debug_protocol(self._redact_sensitive(message))
 
     async def _transport_receive(self, message: Dict[str, Any]) -> None:
         """
@@ -189,9 +205,7 @@ class TransportBase(ABC):
             self._on_caller_disconnected = on_disconnected
 
     def get_connection_info(self) -> Optional[str]:
-        """
-        Connection info for the "connected" callback (e.g. URI). Default none.
-        """
+        """Return connection info for the "connected" callback (e.g. URI)."""
         return None
 
     def set_auth(self, auth: str) -> None:
