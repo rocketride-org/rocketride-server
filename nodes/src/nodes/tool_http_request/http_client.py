@@ -17,7 +17,7 @@
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF OTHER DEALINGS IN THE
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
 
@@ -30,15 +30,50 @@ params) and returns a structured response dict.  Uses the ``requests`` library.
 
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
 import time
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 import requests
 from requests.auth import HTTPBasicAuth
 
 DEFAULT_TIMEOUT_SECONDS = 30
 MAX_TIMEOUT_SECONDS = 300
+
+# Known cloud metadata endpoints
+_BLOCKED_HOSTS = frozenset(
+    {
+        'metadata.google.internal',
+        'metadata.goog',
+    }
+)
+
+
+def _validate_url(url: str) -> None:
+    """Validate URL is not targeting internal/private networks (SSRF protection)."""
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+
+    if not hostname:
+        raise ValueError(f'Invalid URL: missing hostname in {url}')
+
+    # Block known cloud metadata hostnames
+    if hostname.lower() in _BLOCKED_HOSTS:
+        raise ValueError(f'Blocked request to internal metadata service: {hostname}')
+
+    # Resolve hostname and check IP
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return  # Let requests library handle DNS errors
+
+    for family, _, _, _, sockaddr in addr_info:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            raise ValueError(f'Blocked request to private/internal address: {hostname} resolves to {ip}')
 
 
 def execute_request(
@@ -56,6 +91,7 @@ def execute_request(
 
     Raises ``requests.RequestException`` on transport-level failures.
     """
+    _validate_url(url)
 
     resolved_url = _resolve_path_params(url, path_params)
 
@@ -94,6 +130,7 @@ def execute_request(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _resolve_path_params(url: str, path_params: Optional[Dict[str, str]]) -> str:
     """Replace ``:name`` placeholders in the URL with values from *path_params*."""
