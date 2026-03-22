@@ -7,125 +7,73 @@
 
 from __future__ import annotations
 
-import importlib.util
+import importlib
 import sys
-import types
+from types import ModuleType, SimpleNamespace
+import pytest
 from contextlib import contextmanager
 from pathlib import Path
 from collections.abc import Iterator
 
-_STUB_MODULE_NAMES = (
-    'depends',
-    'chromadb',
-    'chromadb.config',
-    'ai',
-    'ai.common',
-    'ai.common.schema',
-    'ai.common.store',
-    'ai.common.config',
-    'rocketlib',
-)
+_MODULE_PREFIXES = ('chroma', 'chromadb')
 
 
-def _install_stubs() -> None:
-    """Install lightweight stubs so chroma.py can be imported in isolation."""
-    mod_depends = types.ModuleType('depends')
-    mod_depends.depends = lambda *_args, **_kwargs: None
-    sys.modules['depends'] = mod_depends
+def _is_scoped_module(module_name: str) -> bool:
+    """Return whether a module should be isolated within scoped imports."""
+    return any(module_name == prefix or module_name.startswith(f'{prefix}.') for prefix in _MODULE_PREFIXES)
 
-    chromadb = types.ModuleType('chromadb')
 
-    class _HttpClient:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            pass
-
-    chromadb.HttpClient = _HttpClient
-    chromadb.Collection = object
-    sys.modules['chromadb'] = chromadb
-
-    chromadb_config = types.ModuleType('chromadb.config')
-
-    class Settings:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            pass
-
-    chromadb_config.Settings = Settings
-    sys.modules['chromadb.config'] = chromadb_config
-
-    ai_pkg = types.ModuleType('ai')
-    common_pkg = types.ModuleType('ai.common')
-    common_pkg.__path__ = []
-    schema_mod = types.ModuleType('ai.common.schema')
-    store_mod = types.ModuleType('ai.common.store')
-    config_mod = types.ModuleType('ai.common.config')
-
-    class Doc:
-        pass
-
-    class DocFilter:
-        pass
-
-    class DocMetadata:
-        pass
-
-    class QuestionText:
-        pass
-
-    class DocumentStoreBase:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            pass
-
-    class Config:
-        @staticmethod
-        def getNodeConfig(_provider: object, _connConfig: object) -> dict:
-            return {}
-
-    schema_mod.Doc = Doc
-    schema_mod.DocFilter = DocFilter
-    schema_mod.DocMetadata = DocMetadata
-    schema_mod.QuestionText = QuestionText
-    store_mod.DocumentStoreBase = DocumentStoreBase
-    config_mod.Config = Config
-
-    sys.modules['ai'] = ai_pkg
-    sys.modules['ai.common'] = common_pkg
-    sys.modules['ai.common.schema'] = schema_mod
-    sys.modules['ai.common.store'] = store_mod
-    sys.modules['ai.common.config'] = config_mod
-
-    rocketlib = types.ModuleType('rocketlib')
-    rocketlib.debug = lambda *_args, **_kwargs: None
-    sys.modules['rocketlib'] = rocketlib
+def _capture_scoped_modules() -> dict[str, ModuleType]:
+    """Capture currently loaded modules matching the scoped import prefixes."""
+    captured_modules: dict[str, ModuleType] = {}
+    for module_name, module in sys.modules.items():
+        if _is_scoped_module(module_name) and isinstance(module, ModuleType):
+            captured_modules[module_name] = module
+    return captured_modules
 
 
 @contextmanager
-def _scoped_stubs() -> Iterator[None]:
-    """Temporarily install stubs, restoring original modules on exit."""
-    original_modules = {module_name: sys.modules.get(module_name) for module_name in _STUB_MODULE_NAMES}
-    _install_stubs()
+def _scoped_imports() -> Iterator[None]:
+    """Temporarily prepend canonical Chroma mock paths and restore import state."""
+    original_sys_path = list(sys.path)
+    original_modules = _capture_scoped_modules()
+
+    test_dir = Path(__file__).resolve().parent
+    mock_path = test_dir / 'mocks'
+    nodes_path = test_dir.parent / 'src' / 'nodes'
+
+    sys.path.insert(0, str(nodes_path))
+    sys.path.insert(0, str(mock_path))
+    importlib.invalidate_caches()
     try:
         yield
     finally:
-        for module_name, module in original_modules.items():
-            if module is None:
+        sys.path[:] = original_sys_path
+        for module_name in list(sys.modules):
+            if _is_scoped_module(module_name) and module_name not in original_modules:
                 sys.modules.pop(module_name, None)
-            else:
-                sys.modules[module_name] = module
+        for module_name, module in original_modules.items():
+            sys.modules[module_name] = module
 
 
 def _load_store_class() -> type:
-    with _scoped_stubs():
-        root = Path(__file__).resolve().parents[2]
-        chroma_file = root / 'nodes' / 'src' / 'nodes' / 'chroma' / 'chroma.py'
-        spec = importlib.util.spec_from_file_location('test_chroma_store_module', chroma_file)
-        assert spec is not None
-        assert spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module.Store
+    """Load `Store` from `chroma.chroma` using scoped canonical test mocks."""
+    with _scoped_imports():
+        chroma_module = importlib.import_module('chroma.chroma')
+        chromadb_module = importlib.import_module('chromadb')
+
+        chromadb_file = getattr(chromadb_module, '__file__', None)
+        assert chromadb_file is not None
+
+        expected_mock_dir = (Path(__file__).resolve().parent / 'mocks' / 'chromadb').resolve()
+        loaded_chromadb_path = Path(chromadb_file).resolve()
+        assert expected_mock_dir in loaded_chromadb_path.parents
+
+        return chroma_module.Store
 
 
-def _doc_filter(**overrides: object) -> types.SimpleNamespace:
+def _doc_filter(**overrides: object) -> SimpleNamespace:
+    """Build a DocFilter-like namespace with optional field overrides."""
     values = {
         'nodeId': None,
         'isTable': None,
@@ -139,31 +87,26 @@ def _doc_filter(**overrides: object) -> types.SimpleNamespace:
         'maxChunkId': None,
     }
     values.update(overrides)
-    return types.SimpleNamespace(**values)
+    return SimpleNamespace(**values)
 
 
-def test_convert_filter_includes_is_table_false() -> None:
-    """`isTable=False` must produce an explicit false filter clause."""
+@pytest.mark.parametrize(
+    ('is_table', 'expected'),
+    [
+        pytest.param(False, {'isTable': {'$eq': False}}, id='is_table_false'),
+        pytest.param(True, {'isTable': {'$eq': True}}, id='is_table_true'),
+        pytest.param(None, None, id='is_table_none'),
+    ],
+)
+def test_convert_filter_handles_is_table_values(
+    is_table: bool | None,
+    expected: dict[str, dict[str, bool]] | None,
+) -> None:
+    """`isTable` should map to expected filter output for all supported values."""
     store_class = _load_store_class()
     store = store_class.__new__(store_class)
-    converted = store._convertFilter(_doc_filter(isTable=False))
-    assert converted == {'isTable': {'$eq': False}}
-
-
-def test_convert_filter_includes_is_table_true() -> None:
-    """`isTable=True` should keep the existing true-clause behavior."""
-    store_class = _load_store_class()
-    store = store_class.__new__(store_class)
-    converted = store._convertFilter(_doc_filter(isTable=True))
-    assert converted == {'isTable': {'$eq': True}}
-
-
-def test_convert_filter_omits_is_table_when_none() -> None:
-    """`isTable=None` should omit the isTable clause entirely."""
-    store_class = _load_store_class()
-    store = store_class.__new__(store_class)
-    converted = store._convertFilter(_doc_filter(isTable=None))
-    assert converted is None
+    converted = store._convertFilter(_doc_filter(isTable=is_table))
+    assert converted == expected
 
 
 def test_convert_filter_keeps_nodeid_and_is_table_false() -> None:
@@ -179,15 +122,13 @@ def test_convert_filter_keeps_nodeid_and_is_table_false() -> None:
     }
 
 
-def test_load_store_class_does_not_leak_stub_modules() -> None:
-    """Loading the store class should not leak temporary stubs in sys.modules."""
-    before = {name: sys.modules.get(name) for name in _STUB_MODULE_NAMES}
+def test_load_store_class_scopes_chroma_and_chromadb_modules() -> None:
+    """Loading store class should not leak scoped import modules across tests."""
+    before = _capture_scoped_modules()
 
     _load_store_class()
 
-    for name in _STUB_MODULE_NAMES:
-        module_before = before[name]
-        if module_before is None:
-            assert name not in sys.modules
-        else:
-            assert sys.modules.get(name) is module_before
+    after = _capture_scoped_modules()
+    assert set(after) == set(before)
+    for module_name, module_before in before.items():
+        assert after[module_name] is module_before
