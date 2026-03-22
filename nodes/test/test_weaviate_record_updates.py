@@ -14,6 +14,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
+
 _STUB_MODULE_NAMES = (
     'depends',
     'numpy',
@@ -162,77 +164,61 @@ def _make_obj_records(object_id: str, count: int, *, is_deleted: bool) -> dict[s
     }
 
 
-def test_remove_noop_for_empty_objectids() -> None:
-    """remove([]) should be a no-op."""
-    records = _make_obj_records('obj-1', 2, is_deleted=False)
-    records.update(_make_obj_records('obj-2', 1, is_deleted=False))
+@pytest.mark.parametrize(
+    ('method_name', 'initial_is_deleted'),
+    [
+        ('remove', False),
+        ('markDeleted', False),
+        ('markActive', True),
+    ],
+)
+def test_mutation_noop_for_empty_objectids(method_name: str, initial_is_deleted: bool) -> None:
+    """Mutation methods should be a no-op for empty objectIds."""
+    records = _make_obj_records('obj-1', 2, is_deleted=initial_is_deleted)
+    records.update(_make_obj_records('obj-2', 1, is_deleted=initial_is_deleted))
     store, collection = _make_store(records)
-    before = sorted(collection._storage.keys())
+    before_keys = sorted(collection._storage.keys())
+    before_is_deleted = [record['properties']['isDeleted'] for record in collection._storage.values()]
 
-    store.remove([])
+    getattr(store, method_name)([])
 
-    assert sorted(collection._storage.keys()) == before
-
-
-def test_mark_deleted_noop_for_empty_objectids() -> None:
-    """markDeleted([]) should be a no-op."""
-    records = _make_obj_records('obj-1', 2, is_deleted=False)
-    records.update(_make_obj_records('obj-2', 1, is_deleted=False))
-    store, collection = _make_store(records)
-
-    store.markDeleted([])
-
-    values = [record['properties']['isDeleted'] for record in collection._storage.values()]
-    assert values == [False, False, False]
+    assert sorted(collection._storage.keys()) == before_keys
+    after_is_deleted = [record['properties']['isDeleted'] for record in collection._storage.values()]
+    assert after_is_deleted == before_is_deleted
 
 
-def test_mark_active_noop_for_empty_objectids() -> None:
-    """markActive([]) should be a no-op."""
-    records = _make_obj_records('obj-1', 2, is_deleted=True)
-    records.update(_make_obj_records('obj-2', 1, is_deleted=True))
-    store, collection = _make_store(records)
-
-    store.markActive([])
-
-    values = [record['properties']['isDeleted'] for record in collection._storage.values()]
-    assert values == [True, True, True]
-
-
-def test_remove_deletes_only_matching_object_ids() -> None:
-    """remove([...]) should only delete matching objectId records."""
-    records = _make_obj_records('obj-1', 2, is_deleted=False)
-    records.update(_make_obj_records('obj-2', 1, is_deleted=False))
-    store, collection = _make_store(records)
-
-    store.remove(['obj-1'])
-
-    remaining = [record['properties']['objectId'] for record in collection._storage.values()]
-    assert remaining == ['obj-2']
-
-
-def test_mark_deleted_updates_only_matching_object_ids() -> None:
-    """markDeleted([...]) should only update matching objectId records."""
-    records = _make_obj_records('obj-1', 2, is_deleted=False)
-    records.update(_make_obj_records('obj-2', 1, is_deleted=False))
+@pytest.mark.parametrize(
+    (
+        'method_name',
+        'initial_is_deleted',
+        'expected_obj1_is_deleted',
+        'expected_obj2_is_deleted',
+        'expected_remaining_object_ids',
+    ),
+    [
+        ('remove', False, [], [False], ['obj-2']),
+        ('markDeleted', False, [True, True], [False], ['obj-1', 'obj-1', 'obj-2']),
+        ('markActive', True, [False, False], [True], ['obj-1', 'obj-1', 'obj-2']),
+    ],
+)
+def test_mutation_updates_only_matching_object_ids(
+    method_name: str,
+    initial_is_deleted: bool,
+    expected_obj1_is_deleted: list[bool],
+    expected_obj2_is_deleted: list[bool],
+    expected_remaining_object_ids: list[str],
+) -> None:
+    """Mutation methods should only affect records matching target objectIds."""
+    records = _make_obj_records('obj-1', 2, is_deleted=initial_is_deleted)
+    records.update(_make_obj_records('obj-2', 1, is_deleted=initial_is_deleted))
     store, collection = _make_store(records)
 
-    store.markDeleted(['obj-1'])
+    getattr(store, method_name)(['obj-1'])
+
+    remaining_object_ids = [record['properties']['objectId'] for record in collection._storage.values()]
+    assert remaining_object_ids == expected_remaining_object_ids
 
     obj1 = [record['properties']['isDeleted'] for record in collection._storage.values() if record['properties']['objectId'] == 'obj-1']
     obj2 = [record['properties']['isDeleted'] for record in collection._storage.values() if record['properties']['objectId'] == 'obj-2']
-    assert obj1 == [True, True]
-    assert obj2 == [False]
-
-
-def test_mark_active_updates_only_matching_object_ids() -> None:
-    """markActive([...]) should only update matching objectId records."""
-    records = _make_obj_records('obj-1', 2, is_deleted=True)
-    records.update(_make_obj_records('obj-2', 1, is_deleted=True))
-    store, collection = _make_store(records)
-
-    store.markActive(['obj-1'])
-
-    obj1 = [record['properties']['isDeleted'] for record in collection._storage.values() if record['properties']['objectId'] == 'obj-1']
-    obj2 = [record['properties']['isDeleted'] for record in collection._storage.values() if record['properties']['objectId'] == 'obj-2']
-    assert obj1 == [False, False]
-    assert obj2 == [True]
+    assert obj1 == expected_obj1_is_deleted
+    assert obj2 == expected_obj2_is_deleted
