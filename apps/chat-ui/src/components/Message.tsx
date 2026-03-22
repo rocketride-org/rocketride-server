@@ -25,6 +25,7 @@
 import React from 'react';
 import { Message as MessageType } from '../types/chat.types';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { ErrorBoundary } from './ErrorBoundary';
 
 interface MessageProps {
 	message: MessageType;
@@ -54,7 +55,9 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 			<div className="message-wrapper bot">
 				<div className={`message-bubble bot${hasChart ? ' has-chart' : ''}`}>
 					<div className="markdown-content">
-						<MarkdownRenderer content={message.text} />
+						<ErrorBoundary fallback={<pre className="text-xs whitespace-pre-wrap">{message.text}</pre>}>
+							<MarkdownRenderer content={message.text} />
+						</ErrorBoundary>
 					</div>
 					<div className="message-timestamp">
 						{message.timestamp}
@@ -72,9 +75,7 @@ export const Message: React.FC<MessageProps> = ({ message }) => {
 				<div className="user-bubble-content">
 					<p>{message.text}</p>
 				</div>
-				<div className="message-timestamp">
-					{message.timestamp}
-				</div>
+				<div className="message-timestamp">{message.timestamp}</div>
 			</div>
 		</div>
 	);

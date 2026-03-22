@@ -205,7 +205,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				setupConnectionEventHandlers();
 
 				// Add all providers to context subscriptions for proper cleanup
-				context.subscriptions.push(pageEditorRegistration, pageSettings, pageEditor, pageConnection, sidebarFiles, pageStatus, pageWelcome!);
+				context.subscriptions.push(pageEditorRegistration, pageSettings, pageEditor, pageConnection, sidebarFiles, pageStatus, pageWelcome!, pageDeploy);
 
 				//-------------------------------------
 				// Update tree providers with initial data
