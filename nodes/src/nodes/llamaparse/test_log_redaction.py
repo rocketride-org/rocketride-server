@@ -1,21 +1,16 @@
-"""Tests for the _redact_dict log-redaction helper used in LlamaParse and Reducto nodes.
+"""Tests for the redact_dict log-redaction helper used in LlamaParse and Reducto nodes."""
 
-This test is self-contained and does not require the full RocketRide runtime.
-It re-implements the same _redact_dict logic so the test can run standalone,
-then validates behaviour against the known contract.
-"""
+import importlib.util
+import os
 
-# ---------------------------------------------------------------------------
-# Reproduce the exact helper from the patched source files so we can test it
-# without importing the full node packages (which need the RocketRide runtime).
-# ---------------------------------------------------------------------------
-
-_SENSITIVE_KEYS = ('api_key', 'apikey', 'secret', 'token', 'password', 'credential')
-
-
-def _redact_dict(d: dict) -> dict:
-    """Return a copy of *d* with sensitive values replaced by '***REDACTED***'."""
-    return {k: ('***REDACTED***' if any(p in k.lower() for p in _SENSITIVE_KEYS) else v) for k, v in d.items()}
+# Direct-load the module to avoid pulling in the full RocketRide runtime.
+_spec = importlib.util.spec_from_file_location(
+    'redact',
+    os.path.join(os.path.dirname(__file__), '..', 'library', 'helpers', 'redact.py'),
+)
+_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)
+_redact_dict = _mod.redact_dict
 
 
 # ---------------------------------------------------------------------------

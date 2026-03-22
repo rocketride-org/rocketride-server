@@ -33,13 +33,7 @@ from ai.common.reader import ReaderBase
 from ai.common.config import Config
 from ai.web.metrics import metrics
 from rocketlib import debug
-
-_SENSITIVE_KEYS = ('api_key', 'apikey', 'secret', 'token', 'password', 'credential')
-
-
-def _redact_dict(d: dict) -> dict:
-    """Return a copy of *d* with sensitive values replaced by '***REDACTED***'."""
-    return {k: ('***REDACTED***' if any(p in k.lower() for p in _SENSITIVE_KEYS) else v) for k, v in d.items()}
+from library.helpers.redact import redact_dict as _redact_dict
 
 
 class Parser(ReaderBase):
