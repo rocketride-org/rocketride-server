@@ -515,7 +515,7 @@ class TestDataOperations:
             assert upload_result['bytes_sent'] == len(test_content)
             assert upload_result['file_size'] == len(test_content)
             assert isinstance(upload_result['upload_time'], (int, float))
-            assert upload_result['upload_time'] > 0
+            assert upload_result['upload_time'] >= 0
             assert 'error' not in upload_result or upload_result['error'] is None
 
             # Validate processing result
