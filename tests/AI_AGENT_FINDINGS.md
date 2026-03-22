@@ -127,3 +127,11 @@ Key a11y gaps: missing aria-labels on chat input/send button, no keyboard activa
 | MCP3 | SSE/HTTP clients connect to any user-specified URL without validation      | HIGH     | mcp_sse_client.py, mcp_streamable_http_client.py |
 | MCP4 | No MCP server authentication or identity verification                      | MEDIUM   | All transport clients                            |
 | MCP5 | Tool arguments from LLM passed directly to MCP server without sanitization | MEDIUM   | IInstance.py                                     |
+
+## Canvas Editor (shared-ui) Audit
+
+| #   | Bug                                                                               | Severity | Location            |
+| --- | --------------------------------------------------------------------------------- | -------- | ------------------- |
+| CV1 | updateNodeInternals never called — floating edges when handles change dynamically | MEDIUM   | Node.tsx, Lanes.tsx |
+| CV2 | ReactFlowProvider hierarchy                                                       | OK       | Correct wrapping    |
+| CV3 | No hardcoded secrets in codebase                                                  | OK       | Grep verified       |
