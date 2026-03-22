@@ -12,7 +12,7 @@ import sys
 import types
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from collections.abc import Iterator
 
 _STUB_MODULE_NAMES = (
     'depends',
@@ -181,22 +181,12 @@ def test_convert_filter_keeps_nodeid_and_is_table_false() -> None:
 
 def test_load_store_class_does_not_leak_stub_modules() -> None:
     """Loading the store class should not leak temporary stubs in sys.modules."""
-    stub_modules = [
-        'depends',
-        'chromadb',
-        'chromadb.config',
-        'ai',
-        'ai.common',
-        'ai.common.schema',
-        'ai.common.store',
-        'ai.common.config',
-        'rocketlib',
-    ]
-    before = {name: sys.modules.get(name) for name in stub_modules}
+    before = {name: sys.modules.get(name) for name in _STUB_MODULE_NAMES}
 
     _load_store_class()
 
-    for name, module_before in before.items():
+    for name in _STUB_MODULE_NAMES:
+        module_before = before[name]
         if module_before is None:
             assert name not in sys.modules
         else:
