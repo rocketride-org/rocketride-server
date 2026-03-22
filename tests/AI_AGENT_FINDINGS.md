@@ -1,69 +1,61 @@
 # AI Agent Testing Findings — March 22, 2026
 
-5 autonomous AI agents tested RocketRide in parallel using Playwright MCP.
+7 autonomous AI agents tested RocketRide in parallel using Playwright MCP + source code auditing.
 
-## Critical Bug Found
+## Critical Bugs
 
-**VS Code Marketplace README is EMPTY** — Overview tab shows "No overview has been entered by publisher". Version 1.0.3 published but README not included in vsix. Fix: PR #324 (v1.0.4) re-triggered.
+| #   | Severity | Category  | Location                         | Description                                                  |
+| --- | -------- | --------- | -------------------------------- | ------------------------------------------------------------ |
+| 1   | CRITICAL | Release   | VS Code Marketplace              | README empty — "No overview has been entered by publisher"   |
+| 2   | CRITICAL | Release   | Ubuntu CI                        | Missing `glob` dep breaks vscode build — no vsix produced    |
+| 3   | HIGH     | Security  | chat-ui MarkdownRenderer.tsx:28  | `rehypeRaw` enables raw HTML/XSS from pipeline responses     |
+| 4   | HIGH     | Security  | vscode PageStatusProvider.ts:627 | `openLink()` webview: no CSP, inline script, unsanitized URL |
+| 5   | HIGH     | Stability | Both React apps                  | No error boundaries — render crash kills entire app          |
 
-## All Agent Results
+## Medium Bugs
 
-### Agent 1: VS Code Marketplace
+| #   | Severity | Category   | Location                        | Description                                               |
+| --- | -------- | ---------- | ------------------------------- | --------------------------------------------------------- |
+| 6   | MEDIUM   | Security   | Both apps                       | `postMessage('*')` wildcard, no `event.origin` validation |
+| 7   | MEDIUM   | Stability  | chat-ui App.tsx:122             | `throw` in useEffect on missing auth crashes app          |
+| 8   | MEDIUM   | Disposable | vscode extension.ts:208         | `pageDeploy` not in `context.subscriptions`               |
+| 9   | MEDIUM   | Security   | chat-ui MarkdownRenderer.tsx:79 | iframe `sandbox="allow-scripts"` runs arbitrary JS        |
 
-- Extension name: "RocketRide" — correct
-- Version: 1.0.3
-- Install button: present and functional
-- Publisher: "rocketride" — correct
-- Icon: loads correctly
-- All 10 images: zero broken
-- Version History: 5 versions visible
-- **README: EMPTY** (critical bug)
-- No Changelog tab (expected)
+## Low Bugs (17 total)
 
-### Agent 2: npm + PyPI Packages
+Accessibility (8), memory leaks (3), disposable leaks (3), stability (2), activation delay (1).
 
-**npm (rocketride@1.0.4):**
+Key a11y gaps: missing aria-labels on chat input/send button, no keyboard activation on DropZone, no ARIA tabs pattern, no `role="log"` on messages container.
 
-- README fully rendered with Quick Start, Features
-- 177 weekly downloads
-- MIT License, TypeScript types included
+## Broken Links
 
-**PyPI (rocketride@1.0.4):**
+- `rocketride.ai/end-user-license-agreement/` — 404
+- `rocketride.ai/master-saas-agreement/` — 404
+- `rocketride.ai/privacy-policy` — 404
+- `youtube.com/@RocketRideAI` — 404
+- `docs.rocketride.ai/data-toolchain/source/google-drive` — 404
+- GitHub links point to `rocketride-ai` (private) instead of `rocketride-org` (public)
 
-- README displayed with Quick Start, code examples
-- Install command shown
+## What's Working
 
-**PyPI (rocketride-mcp@1.0.4):**
+- npm/PyPI packages: all READMEs displayed, verified
+- Python tests: 870 collected, 770 passed, 0 failed
+- docs.rocketride.ai: working, search works
+- OAuth flow: all 4 endpoints verified
+- GitHub repo: badges, releases, CI green on develop
 
-- Package exists, version correct
+## Fixes Applied in This PR
 
-### Agent 3: Python Node Tests
+- [x] ErrorBoundary added to chat-ui and dropper-ui
+- [x] `pageDeploy` added to `context.subscriptions`
+- [x] WebSocket close mock updated in test setup
+- [x] ErrorBoundary test (3 tests verifying crash recovery)
+- [x] PR #330 created for missing `glob` dependency
 
-- **870 collected, 770 passed, 100 skipped, 0 failed**
-- test_contracts.py: ~325 pass
-- test_smoke.py: ~239 pass
-- test_node_smoke.py: ~206 pass
-- test_dynamic.py: ~25 (3 pass, 22 skip — no server)
-- test_dynamic_fulltest.py: ~44 skip (no server)
-- 36 nodes missing test configurations in services.json
+## Remaining (for follow-up PRs)
 
-### Agent 4: GitHub Repo Health
-
-- README displays correctly with badges
-- 676 stars, 6 open issues, 29 open PRs
-- Latest release: vscode-v1.0.3 with vsix asset
-- All release assets present
-- CI status: green
-- Discord badge present
-
-### Agent 5: Documentation Links (pending)
-
-Still running at time of report.
-
-## Action Items
-
-1. [x] Re-trigger v1.0.4 release to fix Marketplace README
-2. [ ] Approve + publish v1.0.4 when build completes
-3. [ ] Add test configurations to 36 nodes missing them
-4. [ ] Clean up 29 open PRs
-5. [ ] Verify Marketplace README after v1.0.4 publishes
+- [ ] XSS via `rehypeRaw` — remove or add `rehype-sanitize`
+- [ ] CSP in `openLink()` — add CSP meta, sanitize URL
+- [ ] Broken docs/legal links — update URLs
+- [ ] GitHub org links — change `rocketride-ai` to `rocketride-org`
+- [ ] Accessibility fixes (8 issues)
