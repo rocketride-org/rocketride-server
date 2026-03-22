@@ -47,6 +47,7 @@ logo = r"""
                     All rights reserved
     """
 
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     # Call the startup method
@@ -200,11 +201,18 @@ class WebServer:
         # Decode the URL-encoded path
         decoded_path = urllib.parse.unquote(path)
 
+        # Normalize the path to resolve any '..' or '.' components
+        normalized_path = os.path.normpath(decoded_path)
+
+        # Reject paths that still contain traversal sequences after normalization
+        if '..' in normalized_path.split(os.sep):
+            raise ValueError(f'Path traversal detected in: {path}')
+
         # Return the valid file path if it exists
-        if os.path.exists(decoded_path):
-            return decoded_path
+        if os.path.exists(normalized_path):
+            return normalized_path
         elif os.path.exists(path):
-            return path
+            return os.path.normpath(path)
         else:
             raise FileNotFoundError(f'File {path} not found')
 
@@ -309,9 +317,7 @@ class WebServer:
         if self._user_shutdown is not None:
             await self._user_shutdown()
 
-    async def _authenticate_credential_inner(
-        self, authorization: str
-    ) -> Union[AccountInfo, Tuple[int, str]]:
+    async def _authenticate_credential_inner(self, authorization: str) -> Union[AccountInfo, Tuple[int, str]]:
         """
         Authenticate a normalized credential string (chain + account fallback).
         Returns AccountInfo on success, (error_code, error_message) on failure.
