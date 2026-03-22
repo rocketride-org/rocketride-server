@@ -15,7 +15,7 @@ from ai.common.schema import DocFilter
 from nodes.astra_db.astra_db import Store
 
 
-def _store():
+def _store() -> Store:
     """Bare Store instance; _convertFilter does not use initialized fields."""
     return Store.__new__(Store)
 
