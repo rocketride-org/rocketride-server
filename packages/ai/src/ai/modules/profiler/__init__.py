@@ -8,8 +8,8 @@ Usage:
     server.use('profiler')
 
     # Then access via:
-    # PUT /profile/start?session=test
-    # PUT /profile/stop
+    # POST /profile/start?session=test
+    # POST /profile/stop
     # GET /profile
     # GET /profile/status
     # GET /profile/report
@@ -170,8 +170,8 @@ def get_status() -> Dict[str, Any]:
         'module': 'profiler',
         'status': 'loaded',
         'endpoints': [
-            '/profile/start (PUT)',
-            '/profile/stop (PUT)',
+            '/profile/start (POST)',
+            '/profile/stop (POST)',
             '/profile (GET)',
             '/profile/status (GET)',
             '/profile/report (GET)',
