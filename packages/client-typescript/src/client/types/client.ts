@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,7 +24,7 @@
 
 /**
  * Type definitions for RocketRide client configuration and DAP communication.
- * 
+ *
  * This module defines the core types used for client-server communication
  * including DAP messages, callbacks, configuration options, and transport interfaces.
  */
@@ -80,7 +80,7 @@ export interface DAPMessage {
 
 /**
  * Callback functions for transport layer events and debugging.
- * 
+ *
  * These callbacks provide hooks for monitoring transport activity,
  * debugging protocol messages, and handling connection lifecycle events.
  */
@@ -114,7 +114,7 @@ export interface ConnectionInfo {
 
 /**
  * Callback function for handling real-time events from the server.
- * 
+ *
  * Events include pipeline status updates, processing progress,
  * error notifications, and system alerts.
  */
@@ -134,11 +134,11 @@ export type DisconnectCallback = (reason?: string, hasError?: boolean) => Promis
  * Callback when a connection attempt fails (e.g. auth or pipeline not ready).
  * Used in persist mode to inform the UI while the client keeps retrying.
  */
-export type ConnectErrorCallback = (message: string) => Promise<void>;
+export type ConnectErrorCallback = (error: Error | string) => void | Promise<void>;
 
 /**
  * Configuration options for creating an RocketRideClient instance.
- * 
+ *
  * Provides connection settings, authentication, and event handling
  * configuration for establishing and managing server connections.
  */
@@ -149,7 +149,7 @@ export interface RocketRideClientConfig {
 	/** Server URI (will be converted to WebSocket URI automatically) */
 	uri?: string;
 
-	/** 
+	/**
 	 * Environment variables dictionary for configuration and variable substitution.
 	 * If not provided, will load from .env file (Node.js only), then fall back to process.env
 	 */
@@ -185,5 +185,3 @@ export interface RocketRideClientConfig {
 	/** Client module name for debugging and identification */
 	module?: string;
 }
-
-
