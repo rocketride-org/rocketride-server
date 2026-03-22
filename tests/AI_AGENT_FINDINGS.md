@@ -98,3 +98,13 @@ Key a11y gaps: missing aria-labels on chat input/send button, no keyboard activa
 | C12 | Blue separator line too subtle                                  | LOW      | Visual    |
 | C13 | Header "Connecting..." borderline contrast (5.45:1, AAA fail)   | LOW      | A11y      |
 | C14 | Empty chat state uninviting                                     | LOW      | UX        |
+
+## Agent Loop Audit Findings
+
+| #   | Bug                                                          | Severity | Location                         |
+| --- | ------------------------------------------------------------ | -------- | -------------------------------- |
+| L1  | No timeout on CrewAI crew.kickoff() — blocks indefinitely    | HIGH     | agent_crewai/crewai.py:286       |
+| L2  | No timeout on LangChain agent.invoke() — blocks indefinitely | HIGH     | agent_langchain/langchain.py:281 |
+| L3  | No explicit max_iter on CrewAI Agent (relies on default 25)  | MEDIUM   | agent_crewai/crewai.py:198       |
+| L4  | No recursion_limit on LangGraph agent                        | MEDIUM   | agent_langchain/langchain.py:279 |
+| L5  | No depth guard against recursive agent-as-tool calls         | MEDIUM   | Both agent nodes                 |
