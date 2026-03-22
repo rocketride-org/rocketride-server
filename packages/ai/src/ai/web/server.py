@@ -28,6 +28,23 @@ from .denied import (
 
 __all__ = ['WebServer', 'AccountInfo']
 
+# Explicit allowlist of modules that can be loaded via the /use endpoint.
+# This prevents arbitrary module injection through importlib.import_module().
+ALLOWED_MODULES = frozenset(
+    {
+        'chat',
+        'clients',
+        'data',
+        'dropper',
+        'pipe',
+        'profiler',
+        'remote',
+        'services',
+        'task',
+        'task_http',
+    }
+)
+
 # Remove event loop - use default which should be ProactorEventLoop
 # # Check if running on Windows
 # if platform.system() == 'Windows':
@@ -729,6 +746,12 @@ class WebServer:
         """
         # Clean it up
         moduleName = moduleName.lower().strip()
+
+        # Validate against allowlist to prevent arbitrary module injection.
+        # Without this check, an attacker could load arbitrary Python modules
+        # via importlib.import_module(), leading to remote code execution.
+        if moduleName not in ALLOWED_MODULES:
+            raise ValueError(f'Module {moduleName!r} is not allowed. Permitted modules: {", ".join(sorted(ALLOWED_MODULES))}')
 
         # If it is already loaded, return success
         if moduleName in self.app.state.modules:
