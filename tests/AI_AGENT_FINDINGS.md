@@ -108,3 +108,12 @@ Key a11y gaps: missing aria-labels on chat input/send button, no keyboard activa
 | L3  | No explicit max_iter on CrewAI Agent (relies on default 25)  | MEDIUM   | agent_crewai/crewai.py:198       |
 | L4  | No recursion_limit on LangGraph agent                        | MEDIUM   | agent_langchain/langchain.py:279 |
 | L5  | No depth guard against recursive agent-as-tool calls         | MEDIUM   | Both agent nodes                 |
+
+## Python SDK Audit Findings
+
+| #   | Bug                                                   | Severity | Location                           |
+| --- | ----------------------------------------------------- | -------- | ---------------------------------- |
+| P1  | API key logged in plaintext via debug protocol logger | HIGH     | execution.py:280, transport.py:112 |
+| P2  | Auth credential logged in DAP auth request            | MEDIUM   | dap_client.py:322                  |
+| P3  | requires-python >=3.8 but project needs 3.10+         | LOW      | pyproject.toml                     |
+| P4  | Missing Python 3.13 classifier on PyPI                | LOW      | pyproject.toml                     |
