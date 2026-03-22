@@ -40,7 +40,10 @@ class MockWebSocket {
 	}
 
 	send = vi.fn();
-	close = vi.fn();
+	close = vi.fn(() => {
+		this.readyState = MockWebSocket.CLOSED;
+		this.onclose?.(new CloseEvent('close'));
+	});
 	addEventListener = vi.fn();
 	removeEventListener = vi.fn();
 }

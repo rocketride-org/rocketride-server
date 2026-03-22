@@ -57,7 +57,7 @@ describe('DropZone', () => {
 
 	it('has a file input element', () => {
 		render(<DropZone {...defaultProps} />);
-		const input = document.querySelector('input[type="file"]');
-		expect(input).toBeDefined();
+		const input = screen.queryByLabelText(/upload files/i);
+		expect(input).not.toBeNull();
 	});
 });
