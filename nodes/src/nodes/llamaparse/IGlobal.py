@@ -118,7 +118,7 @@ class IGlobal(IGlobalBase):
         # Get API key from user configuration
         api_key = config.get('api_key')
         if api_key:
-            debug(f'LlamaParse Global: Using user-provided API key: {api_key[:10]}...')
+            debug('LlamaParse Global: Using user-provided API key: ***REDACTED***')
         else:
             warning('LlamaParse Global: No API key provided in configuration.')
             api_key = None

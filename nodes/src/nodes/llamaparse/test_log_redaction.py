@@ -101,15 +101,38 @@ class TestRedactDict:
         result = _redact_dict(d)
         assert result['myapikey'] == '***REDACTED***'
 
+    def test_redacts_nested_dicts(self):
+        """Sensitive keys inside nested dicts must be redacted."""
+        d = {'outer': {'api_key': 'secret', 'name': 'safe'}, 'model': 'gpt-4'}
+        result = _redact_dict(d)
+        assert result['outer']['api_key'] == '***REDACTED***'
+        assert result['outer']['name'] == 'safe'
+        assert result['model'] == 'gpt-4'
+
+    def test_redacts_list_of_dicts(self):
+        """Sensitive keys inside lists of dicts must be redacted."""
+        d = {'items': [{'token': 'abc'}, {'name': 'ok'}]}
+        result = _redact_dict(d)
+        assert result['items'][0]['token'] == '***REDACTED***'
+        assert result['items'][1]['name'] == 'ok'
+
 
 # ---------------------------------------------------------------------------
 # Allow running with plain `python test_log_redaction.py`
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
     t = TestRedactDict()
+    failed = 0
     for method_name in sorted(dir(t)):
         if method_name.startswith('test_'):
             print(f'Running {method_name}...', end=' ')
-            getattr(t, method_name)()
-            print('OK')
+            try:
+                getattr(t, method_name)()
+                print('OK')
+            except Exception as exc:
+                failed += 1
+                print(f'FAILED: {exc}')
+    if failed:
+        print(f'\n{failed} test(s) failed.')
+        raise SystemExit(1)
     print('\nAll tests passed.')

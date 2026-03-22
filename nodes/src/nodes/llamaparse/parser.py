@@ -61,13 +61,13 @@ class Parser(ReaderBase):
 
         # Get the nodes configuration
         config = Config.getNodeConfig(provider, connConfig)
-        debug(f'LlamaParse Parser: Processed config: {config}')
+        debug(f'LlamaParse Parser: Processed config: {_redact_dict(config)}')
 
         # Check if config has nested structure
         if 'default' in config:
             debug('LlamaParse Parser: Found nested config structure, extracting from default profile')
             config = config.get('default', {})
-            debug(f'LlamaParse Parser: Extracted config: {config}')
+            debug(f'LlamaParse Parser: Extracted config: {_redact_dict(config)}')
 
         # Get the other configuration values
         self._parse_mode = config.get('parse_mode', None)
