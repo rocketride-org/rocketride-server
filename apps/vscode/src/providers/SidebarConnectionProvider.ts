@@ -23,13 +23,13 @@
 
 /**
  * Connection Tree Provider for Connection Management
- * 
+ *
  * Displays real-time connection status including:
  * - Connection state and mode information
  * - Service health indicators
  * - Configuration status
  * - Connection controls
- * 
+ *
  * Listens to ConnectionManager events and provides interactive
  * connection management through tree view interface.
  */
@@ -38,6 +38,7 @@ import * as vscode from 'vscode';
 import { ConfigManager, ConfigManagerInfo } from '../config';
 import { ConnectionManager } from '../connection/connection';
 import { ConnectionStatus, ConnectionState } from '../shared/types';
+import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
 
 export class SidebarConnectionProvider implements vscode.TreeDataProvider<ConnectionItem> {
 	private _onDidChangeTreeData: vscode.EventEmitter<ConnectionItem | undefined | null | void> = new vscode.EventEmitter<ConnectionItem | undefined | null | void>();
@@ -53,7 +54,7 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 
 	/**
 	 * Creates a new SidebarConnectionProvider
-	 * 
+	 *
 	 * @param context VS Code extension context for command registration
 	 */
 	constructor(private context: vscode.ExtensionContext) {
@@ -125,12 +126,12 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 			// Settings command
 			vscode.commands.registerCommand('rocketride.sidebar.connection.openSettings', () => {
 				vscode.commands.executeCommand('rocketride.page.settings.open');
-			})
+			}),
 		];
 
 		// Store disposables and add to context subscriptions
 		this.disposables.push(...commands);
-		commands.forEach(command => this.context.subscriptions.push(command));
+		commands.forEach((command) => this.context.subscriptions.push(command));
 	}
 
 	/**
@@ -151,18 +152,13 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 		});
 
 		// Listen for config changes
-		const configChangeListener = vscode.workspace.onDidChangeConfiguration(e => {
+		const configChangeListener = vscode.workspace.onDidChangeConfiguration((e) => {
 			if (e.affectsConfiguration('rocketride')) {
 				this.updateConnectionData();
 			}
 		});
 
-		this.disposables.push(
-			connectionStateListener,
-			connectedListener,
-			errorListener,
-			configChangeListener
-		);
+		this.disposables.push(connectionStateListener, connectedListener, errorListener, configChangeListener);
 	}
 
 	/**
@@ -220,35 +216,23 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 
 		// API Key Setup Warning (FIRST LINE if needed)
 		if (needsApiKeySetup) {
-			const warningItem = new ConnectionItem(
-				'⚠️ Setup API Key Required!',
-				vscode.TreeItemCollapsibleState.None,
-				'warning'
-			);
+			const warningItem = new ConnectionItem('⚠️ Setup API Key Required!', vscode.TreeItemCollapsibleState.None, 'warning');
 			warningItem.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('charts.yellow'));
 			warningItem.tooltip = 'API Key must be configured for Cloud or On-prem connection';
 			warningItem.command = {
 				command: 'rocketride.sidebar.connection.openSettings',
 				title: 'Setup API Key',
-				arguments: []
+				arguments: [],
 			};
 			items.push(warningItem);
 
 			// Blank line after warning
-			const blankLine1 = new ConnectionItem(
-				'',
-				vscode.TreeItemCollapsibleState.None,
-				'spacer'
-			);
+			const blankLine1 = new ConnectionItem('', vscode.TreeItemCollapsibleState.None, 'spacer');
 			items.push(blankLine1);
 		}
 
 		// Connection Status
-		const statusItem = new ConnectionItem(
-			this.getStatusLabel(connectionState),
-			vscode.TreeItemCollapsibleState.None,
-			'status'
-		);
+		const statusItem = new ConnectionItem(this.getStatusLabel(connectionState), vscode.TreeItemCollapsibleState.None, 'status');
 
 		statusItem.iconPath = this.getStatusIcon(connectionState);
 		statusItem.tooltip = this.getStatusTooltip(connectionState, config, this.hasApiKey);
@@ -256,11 +240,7 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 
 		// Show last error if present
 		if (connectionState.lastError && this.isConnectingState(connectionState.state)) {
-			const errorItem = new ConnectionItem(
-				connectionState.lastError,
-				vscode.TreeItemCollapsibleState.None,
-				'error-detail'
-			);
+			const errorItem = new ConnectionItem(connectionState.lastError, vscode.TreeItemCollapsibleState.None, 'error-detail');
 			errorItem.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('charts.yellow'));
 			items.push(errorItem);
 		}
@@ -269,75 +249,47 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 		if (this.isConnectingState(connectionState.state)) {
 			const detail = connectionState.progressMessage || this.getStateDetail(connectionState);
 			if (detail) {
-				const progressItem = new ConnectionItem(
-					detail,
-					vscode.TreeItemCollapsibleState.None,
-					'progress-detail'
-				);
+				const progressItem = new ConnectionItem(detail, vscode.TreeItemCollapsibleState.None, 'progress-detail');
 				items.push(progressItem);
 			}
 		}
 
 		// Blank line after status/retry info
-		const blankLine2 = new ConnectionItem(
-			'',
-			vscode.TreeItemCollapsibleState.None,
-			'spacer'
-		);
+		const blankLine2 = new ConnectionItem('', vscode.TreeItemCollapsibleState.None, 'spacer');
 		items.push(blankLine2);
 
 		// Connect/Disconnect Button (with leading spaces for indentation)
 		if (connectionState.state === 'connected') {
-			const disconnectItem = new ConnectionItem(
-				'          [ Disconnect ]',
-				vscode.TreeItemCollapsibleState.None,
-				'disconnect'
-			);
+			const disconnectItem = new ConnectionItem('          [ Disconnect ]', vscode.TreeItemCollapsibleState.None, 'disconnect');
 			disconnectItem.command = {
 				command: 'rocketride.sidebar.connection.disconnect',
 				title: 'Disconnect',
-				arguments: []
+				arguments: [],
 			};
 			disconnectItem.tooltip = 'Click to disconnect from the server';
 			items.push(disconnectItem);
-
 		} else if (this.isConnectingState(connectionState.state)) {
 			// Show placeholder during any connecting state to maintain consistent spacing
-			const placeholderItem = new ConnectionItem(
-				'',
-				vscode.TreeItemCollapsibleState.None,
-				'placeholder'
-			);
+			const placeholderItem = new ConnectionItem('', vscode.TreeItemCollapsibleState.None, 'placeholder');
 			items.push(placeholderItem);
-
 		} else {
 			// status === 'disconnected'
-			const connectItem = new ConnectionItem(
-				'          [ Connect ]',
-				vscode.TreeItemCollapsibleState.None,
-				'connect'
-			);
+			const connectItem = new ConnectionItem('          [ Connect ]', vscode.TreeItemCollapsibleState.None, 'connect');
 			connectItem.command = {
 				command: 'rocketride.sidebar.connection.connect',
 				title: 'Connect',
-				arguments: []
+				arguments: [],
 			};
-			connectItem.tooltip = needsApiKeySetup ?
-				'Setup API Key first before connecting' :
-				'Click to connect to the server';
+			connectItem.tooltip = needsApiKeySetup ? 'Setup API Key first before connecting' : 'Click to connect to the server';
 			items.push(connectItem);
 		}
 
 		// Settings Button (with leading spaces for indentation)
-		const settingsItem = new ConnectionItem(
-			'          [ Settings ]',
-			vscode.TreeItemCollapsibleState.None,
-			'settings'
-		);
+		const settingsItem = new ConnectionItem('          [ Settings ]', vscode.TreeItemCollapsibleState.None, 'settings');
 		settingsItem.command = {
 			command: 'rocketride.sidebar.connection.openSettings',
 			title: 'Open Settings',
-			arguments: []
+			arguments: [],
 		};
 		settingsItem.tooltip = 'Click to open the full settings page';
 		items.push(settingsItem);
@@ -349,10 +301,7 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 	 * Check if the status represents any connecting state
 	 */
 	private isConnectingState(status: ConnectionState): boolean {
-		return status === ConnectionState.DOWNLOADING_ENGINE ||
-			status === ConnectionState.STARTING_ENGINE ||
-			status === ConnectionState.CONNECTING ||
-			status === ConnectionState.STOPPING_ENGINE;
+		return status === ConnectionState.DOWNLOADING_ENGINE || status === ConnectionState.STARTING_ENGINE || status === ConnectionState.CONNECTING || status === ConnectionState.STOPPING_ENGINE;
 	}
 
 	/**
@@ -386,11 +335,16 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 		const getConnectingDots = (retryAttempt: number): string => {
 			const phase = retryAttempt % 4;
 			switch (phase) {
-				case 0: return '   '; // 3 spaces
-				case 1: return '.  '; // 1 dot + 2 spaces
-				case 2: return '.. '; // 2 dots + 1 space
-				case 3: return '...'; // 3 dots
-				default: return '...';
+				case 0:
+					return '   '; // 3 spaces
+				case 1:
+					return '.  '; // 1 dot + 2 spaces
+				case 2:
+					return '.. '; // 2 dots + 1 space
+				case 3:
+					return '...'; // 3 dots
+				default:
+					return '...';
 			}
 		};
 
@@ -470,7 +424,7 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 				// Handle various disconnected reasons
 				if (connectionState.lastError) {
 					return `Disconnected: ${connectionState.lastError}`;
-				} else if ((connectionState.connectionMode === 'cloud' || connectionState.connectionMode === 'onprem') && !hasApiKey) {
+				} else if (connectionModeRequiresApiKey(connectionState.connectionMode) && !hasApiKey) {
 					return 'Not connected - API key required';
 				} else if (!connectionState.hasCredentials) {
 					return `Not connected - ${connectionState.connectionMode} configuration required`;
@@ -493,7 +447,7 @@ export class SidebarConnectionProvider implements vscode.TreeDataProvider<Connec
 	 * Cleans up event listeners and resources
 	 */
 	public dispose(): void {
-		this.disposables.forEach(disposable => disposable.dispose());
+		this.disposables.forEach((disposable) => disposable.dispose());
 		this.disposables = [];
 	}
 }
