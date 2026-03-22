@@ -34,12 +34,12 @@
 	--bg-hover: #d5d5d5;
 	--text-primary: #1a1a1a;
 	--text-secondary: #4a4a4a;
-	--text-muted: #7a7a7a;
+	--text-muted: #a8a8a8;
 	--border-color: #d5d5d5;
 	--border-hover: #c5c5c5;
-	--accent-primary: #FF8C42;
-	--accent-secondary: #E67A2E;
-	--accent-hover: #FFA366;
+	--accent-primary: #ff8c42;
+	--accent-secondary: #e67a2e;
+	--accent-hover: #ffa366;
 	--success-color: #10b981;
 	--error-color: #ef4444;
 	--warning-color: #f59e0b;
@@ -58,7 +58,7 @@
 }
 
 body {
-	font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif);
+	font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, Ubuntu, 'Droid Sans', sans-serif);
 	font-size: var(--vscode-font-size, 13px);
 	line-height: 1.4;
 	-webkit-font-smoothing: antialiased;
@@ -419,7 +419,6 @@ body {
 }
 
 @keyframes typing-bounce {
-
 	0%,
 	80%,
 	100% {
@@ -470,7 +469,9 @@ body {
 	max-height: 120px;
 	overflow-y: auto;
 	outline: none;
-	transition: border-color 0.2s ease, box-shadow 0.2s ease;
+	transition:
+		border-color 0.2s ease,
+		box-shadow 0.2s ease;
 }
 
 .input-field:focus {
