@@ -19,7 +19,7 @@ _redact_dict = _mod.redact_dict
 
 
 class TestRedactDict:
-    """Unit tests for _redact_dict."""
+    """Unit tests for redact_dict."""
 
     def test_redacts_api_key(self):
         """api_key values must be replaced."""

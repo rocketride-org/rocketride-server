@@ -152,7 +152,7 @@ class IGlobal(IGlobalBase):
                 import json
 
                 advanced_config = json.loads(advanced_config_str) if advanced_config_str else {}
-                debug(f'LlamaParse Global: Using advanced config: {advanced_config}')
+                debug(f'LlamaParse Global: Using advanced config: {_redact_dict(advanced_config)}')
 
                 # Merge advanced config into parser_args (excluding api_key which is handled above)
                 for key, value in advanced_config.items():
@@ -198,7 +198,6 @@ class IGlobal(IGlobalBase):
             if spreadsheet_extract_sub_tables:
                 parser_args['spreadsheet_extract_sub_tables'] = spreadsheet_extract_sub_tables
 
-        debug(f'LlamaParse Global: Creating LlamaParse instance with args: {_redact_dict(parser_args)}')
         try:
             debug(f'LlamaParse Global: Creating LlamaParse instance with args: {_redact_dict(parser_args)}')
             self._llama_parse = LlamaParse(**parser_args)
