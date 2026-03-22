@@ -167,3 +167,12 @@ Key a11y gaps: missing aria-labels on chat input/send button, no keyboard activa
 | EI2 | Only content-length check (trivially bypassable)                                   | HIGH     | engine-installer.ts:782                 |
 | EI3 | Correct pattern exists in service-windows.ts NSSM download but not used for engine | INFO     | service-windows.ts:39                   |
 | EI4 | HTTPS enforced on download URLs                                                    | OK       | All download URLs use HTTPS             |
+
+## Docker Audit
+
+| #   | Finding                               | Severity | Location                |
+| --- | ------------------------------------- | -------- | ----------------------- |
+| D1  | ubuntu:jammy not pinned to SHA digest | LOW      | Dockerfile.engine:1     |
+| D2  | Non-root user (rocketride)            | OK       | Dockerfile.engine:10,16 |
+| D3  | Minimal apt packages, clean layer     | OK       | Dockerfile.engine:3-9   |
+| D4  | No secrets or env vars baked in       | OK       | Dockerfile.engine       |
