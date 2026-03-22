@@ -137,17 +137,30 @@ class _FakeIndex:
     def describe_index_stats(self) -> dict[str, int]:
         return {'dimension': 3}
 
-    def query(self, vector: list[float], top_k: int = 10, filter: dict | None = None, include_metadata: bool = False, include_values: bool = False) -> dict[str, list[dict[str, str]]]:
+    def query(
+        self,
+        vector: list[float],
+        top_k: int = 10,
+        filter_expr: dict | None = None,
+        include_metadata: bool = False,
+        include_values: bool = False,
+        **kwargs: object,
+    ) -> dict[str, list[dict[str, str]]]:
         self.query_calls += 1
-        matches = [{'id': record_id} for record_id, record in self.records.items() if self._matches_filter(record['metadata'], filter)]
+        if filter_expr is None:
+            filter_expr = kwargs.get('filter')
+
+        matches = [{'id': record_id} for record_id, record in self.records.items() if self._matches_filter(record['metadata'], filter_expr)]
         return {'matches': matches[:top_k]}
 
-    def delete(self, ids: list[str] | None = None, filter: dict | None = None) -> None:
+    def delete(self, ids: list[str] | None = None, filter_expr: dict | None = None, **kwargs: object) -> None:
         self.delete_calls += 1
 
-        if filter is not None:
-            wanted = set(filter.get('objectId', {}).get('$in', []))
-            doomed_ids = [record_id for record_id, record in self.records.items() if record['metadata'].get('objectId') in wanted]
+        if filter_expr is None:
+            filter_expr = kwargs.get('filter')
+
+        if filter_expr is not None:
+            doomed_ids = [record_id for record_id, record in self.records.items() if self._matches_filter(record['metadata'], filter_expr)]
             for record_id in doomed_ids:
                 self.records.pop(record_id, None)
             return
@@ -156,10 +169,13 @@ class _FakeIndex:
             for record_id in ids:
                 self.records.pop(record_id, None)
 
-    def update(self, id: str, set_metadata: dict | None = None) -> None:
+    def update(self, record_id: str | None = None, set_metadata: dict | None = None, **kwargs: object) -> None:
         self.update_calls += 1
-        if id in self.records and set_metadata:
-            self.records[id]['metadata'].update(set_metadata)
+        if record_id is None:
+            record_id = kwargs.get('id')
+
+        if record_id in self.records and set_metadata:
+            self.records[record_id]['metadata'].update(set_metadata)
 
     def _matches_filter(self, metadata: dict, filter_expr: dict | None) -> bool:
         if not filter_expr:
@@ -167,6 +183,8 @@ class _FakeIndex:
 
         if '$and' in filter_expr:
             return all(self._matches_filter(metadata, entry) for entry in filter_expr['$and'])
+        if '$or' in filter_expr:
+            return any(self._matches_filter(metadata, entry) for entry in filter_expr['$or'])
 
         for field_name, condition in filter_expr.items():
             value = metadata.get(field_name)
@@ -175,6 +193,8 @@ class _FakeIndex:
                     if operator == '$in' and value not in expected:
                         return False
                     if operator == '$eq' and value != expected:
+                        return False
+                    if operator == '$ne' and value == expected:
                         return False
             elif value != condition:
                 return False
@@ -201,60 +221,57 @@ def _make_store(records: dict[str, dict]) -> tuple[object, _FakeIndex]:
     return store, fake_index
 
 
+def _make_obj_records(object_id: str, count: int, is_deleted: bool) -> dict[str, dict]:
+    return {f'{object_id}-{index}': {'metadata': {'objectId': object_id, 'isDeleted': is_deleted}} for index in range(count)}
+
+
 def test_remove_deletes_all_matching_chunks() -> None:
     """remove() should delete every vector that matches the objectIds filter."""
-    store, _ = _make_store(
-        {
-            'a': {'metadata': {'objectId': 'obj-1', 'isDeleted': False}},
-            'b': {'metadata': {'objectId': 'obj-1', 'isDeleted': False}},
-            'c': {'metadata': {'objectId': 'obj-1', 'isDeleted': False}},
-            'd': {'metadata': {'objectId': 'obj-1', 'isDeleted': False}},
-            'e': {'metadata': {'objectId': 'obj-2', 'isDeleted': False}},
-        }
-    )
+    records = _make_obj_records('obj-1', 1001, is_deleted=False)
+    records.update(_make_obj_records('obj-2', 1, is_deleted=False))
+
+    store, _ = _make_store(records)
 
     store.remove(['obj-1'])
 
     remaining_obj1 = [record_id for record_id, record in store.client.index.records.items() if record['metadata'].get('objectId') == 'obj-1']
+    remaining_obj2 = [record_id for record_id, record in store.client.index.records.items() if record['metadata'].get('objectId') == 'obj-2']
     assert remaining_obj1 == []
+    assert remaining_obj2 != []
 
 
 def test_mark_deleted_updates_all_matching_chunks() -> None:
     """markDeleted() should flip isDeleted for all vectors of the target object."""
-    store, _ = _make_store(
-        {
-            'a': {'metadata': {'objectId': 'obj-1', 'isDeleted': False}},
-            'b': {'metadata': {'objectId': 'obj-1', 'isDeleted': False}},
-            'c': {'metadata': {'objectId': 'obj-1', 'isDeleted': False}},
-            'x': {'metadata': {'objectId': 'obj-2', 'isDeleted': False}},
-        }
-    )
+    records = _make_obj_records('obj-1', 1001, is_deleted=False)
+    records.update(_make_obj_records('obj-2', 1, is_deleted=False))
+
+    store, fake_index = _make_store(records)
 
     store.markDeleted(['obj-1'])
 
     obj1_values = [record['metadata']['isDeleted'] for record in store.client.index.records.values() if record['metadata'].get('objectId') == 'obj-1']
     obj2_values = [record['metadata']['isDeleted'] for record in store.client.index.records.values() if record['metadata'].get('objectId') == 'obj-2']
-    assert obj1_values == [True, True, True]
+    assert len(obj1_values) == 1001
+    assert all(obj1_values)
     assert obj2_values == [False]
+    assert fake_index.query_calls >= 2
 
 
 def test_mark_active_updates_all_matching_chunks() -> None:
     """markActive() should clear isDeleted for all vectors of the target object."""
-    store, _ = _make_store(
-        {
-            'a': {'metadata': {'objectId': 'obj-1', 'isDeleted': True}},
-            'b': {'metadata': {'objectId': 'obj-1', 'isDeleted': True}},
-            'c': {'metadata': {'objectId': 'obj-1', 'isDeleted': True}},
-            'x': {'metadata': {'objectId': 'obj-2', 'isDeleted': True}},
-        }
-    )
+    records = _make_obj_records('obj-1', 1001, is_deleted=True)
+    records.update(_make_obj_records('obj-2', 1, is_deleted=True))
+
+    store, fake_index = _make_store(records)
 
     store.markActive(['obj-1'])
 
     obj1_values = [record['metadata']['isDeleted'] for record in store.client.index.records.values() if record['metadata'].get('objectId') == 'obj-1']
     obj2_values = [record['metadata']['isDeleted'] for record in store.client.index.records.values() if record['metadata'].get('objectId') == 'obj-2']
-    assert obj1_values == [False, False, False]
+    assert len(obj1_values) == 1001
+    assert not any(obj1_values)
     assert obj2_values == [True]
+    assert fake_index.query_calls >= 2
 
 
 def test_update_records_noop_for_empty_objectids() -> None:
