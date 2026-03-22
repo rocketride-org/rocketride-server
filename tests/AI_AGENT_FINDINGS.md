@@ -135,3 +135,13 @@ Key a11y gaps: missing aria-labels on chat input/send button, no keyboard activa
 | CV1 | updateNodeInternals never called — floating edges when handles change dynamically | MEDIUM   | Node.tsx, Lanes.tsx |
 | CV2 | ReactFlowProvider hierarchy                                                       | OK       | Correct wrapping    |
 | CV3 | No hardcoded secrets in codebase                                                  | OK       | Grep verified       |
+
+## CI/CD Workflow Security Audit
+
+| #   | Bug                                                                    | Severity | Location               |
+| --- | ---------------------------------------------------------------------- | -------- | ---------------------- |
+| CI1 | scorecard.yml: 3 actions unpinned (v4, v2.4.0, v3) — supply chain risk | HIGH     | scorecard.yml:22,27,34 |
+| CI2 | stale.yml: actions/stale@v9 unpinned                                   | HIGH     | stale.yml:18           |
+| CI3 | run-name uses PR title — display only, not shell injection             | OK       | ci.yml:2               |
+| CI4 | Main workflows (ci, release, nightly) correctly SHA-pinned             | OK       | All                    |
+| CI5 | No self-hosted runner risks detected                                   | OK       | All                    |
