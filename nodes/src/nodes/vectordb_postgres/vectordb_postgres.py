@@ -50,7 +50,25 @@ MIN_SIMILARITY_SCORE = 0.20
 # SQL Queries
 SQL_QUERIES = {
     'check_collection_exists': "SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = %s)",
-    'create_collection': ('CREATE TABLE IF NOT EXISTS {collection} (id bigserial PRIMARY KEY, content text, objectId text, nodeId text, parent text, permissionId int, isDeleted boolean, chunkId int, isTable boolean, tableId int, vectorSize int, modelName text, embedding vector({vector_size}));'),
+    # fmt: off
+    'create_collection': (
+        'CREATE TABLE IF NOT EXISTS {collection} ('
+        'id bigserial PRIMARY KEY, '
+        'content text, '
+        'objectId text, '
+        'nodeId text, '
+        'parent text, '
+        'permissionId int, '
+        'isDeleted boolean, '
+        'chunkId int, '
+        'isTable boolean, '
+        'tableId int, '
+        'vectorSize int, '
+        'modelName text, '
+        'embedding vector({vector_size})'
+        ');'
+    ),
+    # fmt: on
     'count_documents': 'SELECT COUNT(*) FROM {collection}',
     'search_keyword': 'SELECT * FROM {collection} WHERE content LIKE %s {where_clause} LIMIT %s',
     'get_documents': 'SELECT * FROM {collection} {where_clause} LIMIT %s',
