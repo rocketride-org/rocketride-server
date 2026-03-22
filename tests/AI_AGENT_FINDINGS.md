@@ -158,3 +158,12 @@ Key a11y gaps: missing aria-labels on chat input/send button, no keyboard activa
 | #   | Fix                                                          | Severity |
 | --- | ------------------------------------------------------------ | -------- |
 | FIX | Replace throw in useEffect with configError state + error UI | MEDIUM   |
+
+## Engine Installer Security Audit
+
+| #   | Bug                                                                                | Severity | Location                                |
+| --- | ---------------------------------------------------------------------------------- | -------- | --------------------------------------- |
+| EI1 | CRITICAL: No SHA-256 verification on downloaded engine binaries                    | CRITICAL | engine-installer.ts:487, download.js:94 |
+| EI2 | Only content-length check (trivially bypassable)                                   | HIGH     | engine-installer.ts:782                 |
+| EI3 | Correct pattern exists in service-windows.ts NSSM download but not used for engine | INFO     | service-windows.ts:39                   |
+| EI4 | HTTPS enforced on download URLs                                                    | OK       | All download URLs use HTTPS             |
