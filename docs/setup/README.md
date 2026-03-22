@@ -92,21 +92,21 @@ For VS Code extension development details, see [README-vscode.md](../README-vsco
 
 ```bash
 # Run all tests
-pnpm run test
+./builder test
 
 # C++ engine tests only
-pnpm run test:native
+./builder server:test
 
-# Python tests only
-pnpm run test:python
+# Python tests only (nodes, AI, clients)
+./builder nodes:test
+./builder ai:test
+./builder client-python:test
 
 # TypeScript tests only
-pnpm run test:typescript
-
-# Test a specific module via the builder
-./builder nodes:test
-./builder server:test
 ./builder client-typescript:test
+
+# Other module tests
+./builder client-mcp:test
 ```
 
 For information on writing and running node-level tests, see [README-node-testing.md](../README-node-testing.md).
