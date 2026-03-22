@@ -68,3 +68,14 @@ Key a11y gaps: missing aria-labels on chat input/send button, no keyboard activa
 - [ ] Broken docs/legal links — update URLs
 - [ ] GitHub org links — change `rocketride-ai` to `rocketride-org`
 - [ ] Accessibility fixes (8 issues)
+
+## Mariner Visual Agent Findings (dropper-ui desktop 1280x720)
+
+| #   | Bug                                                        | Severity | Category |
+| --- | ---------------------------------------------------------- | -------- | -------- |
+| M1  | Header separator line misplaced — renders above title text | MEDIUM   | Layout   |
+| M2  | Dotted border broken at top-left corner of Connecting box  | MEDIUM   | Visual   |
+| M3  | Connecting box not horizontally centered — shifted left    | MEDIUM   | Layout   |
+| M4  | Trash icon present without context in connecting state     | MINOR    | UX       |
+| M5  | No connection failure state or retry button                | HIGH     | UX       |
+| M6  | Low contrast on secondary text (Connecting, Please wait)   | LOW      | A11y     |
