@@ -309,7 +309,16 @@ class McpSseClient:
         if event == 'endpoint':
             # The server provides a relative URL; resolve against the SSE origin.
             base = self._origin(self._sse_endpoint)
-            self._endpoint_url = urllib.parse.urljoin(base, data)
+            resolved = urllib.parse.urljoin(base, data)
+            # Validate the resolved URL stays on the same origin to prevent
+            # auth-token theft via malicious absolute-URL redirects.
+            if self._origin(resolved) != base:
+                raise McpProtocolError(
+                    f'MCP endpoint redirect rejected: '
+                    f'resolved origin {self._origin(resolved)!r} '
+                    f'does not match SSE origin {base!r}'
+                )
+            self._endpoint_url = resolved
             return
 
         if event != 'message':
