@@ -90,31 +90,40 @@ jobs:
           version: 10
       - name: Set up vcpkg
         run: ${{ matrix.builder_cmd }} vcpkg:submodule-build
-      - name: Set up vcpkg nuget / Linux/macOS
-        if: matrix.platform != 'windows'
+      - name: Configure vcpkg NuGet credentials
+        shell: bash
         run: |
-          NUGET_EXE=$(${{ matrix.vcpkg_cmd }} fetch nuget | tail -n1)
-          mono $NUGET_EXE sources add \
-            -Source "${{ env.NUGET_FEED_URL }}" \
-            -StorePasswordInClearText \
-            -Name GitHubPackages \
-            -UserName "${{ env.VCPKG_NUGET_USER }}" \
-            -Password "${{ secrets.GITHUB_TOKEN }}" || true
-          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
-            -Source "${{ env.NUGET_FEED_URL }}"
-      - name: Set up vcpkg nuget / Windows
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          $NUGET_EXE = $(${{ matrix.vcpkg_cmd }} fetch nuget | Select-Object -Last 1)
-          & $NUGET_EXE sources add `
-            -Source "${{ env.NUGET_FEED_URL }}" `
-            -StorePasswordInClearText `
-            -Name GitHubPackages `
-            -UserName "${{ env.VCPKG_NUGET_USER }}" `
-            -Password "${{ secrets.GITHUB_TOKEN }}"
-          & $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" `
-            -Source "${{ env.NUGET_FEED_URL }}"
+          # Write NuGet config directly instead of using 'nuget sources add
+          # -StorePasswordInClearText' which exposes the token in process
+          # arguments and stores it in plaintext in the config file.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            NUGET_DIR="$APPDATA/NuGet"
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            NUGET_DIR="$HOME/.config/NuGet"
+          else
+            NUGET_DIR="$HOME/.config/NuGet"
+          fi
+          mkdir -p "$NUGET_DIR"
+          cat > "$NUGET_DIR/NuGet.Config" <<NUGETEOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+              <add key="GitHubPackages" value="${NUGET_FEED_URL}" />
+            </packageSources>
+            <packageSourceCredentials>
+              <GitHubPackages>
+                <add key="Username" value="${VCPKG_NUGET_USER}" />
+                <add key="ClearTextPassword" value="${NUGET_TOKEN}" />
+              </GitHubPackages>
+            </packageSourceCredentials>
+          </configuration>
+          NUGETEOF
+          chmod 600 "$NUGET_DIR/NuGet.Config"
+        env:
+          NUGET_FEED_URL: ${{ env.NUGET_FEED_URL }}
+          VCPKG_NUGET_USER: ${{ env.VCPKG_NUGET_USER }}
+          NUGET_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build
         run: |
@@ -186,17 +195,30 @@ jobs:
       - name: Bootstrap vcpkg
         run: ./builder vcpkg:build
 
-      - name: Configure vcpkg NuGet cache
+      - name: Configure vcpkg NuGet credentials
         run: |
-          NUGET_EXE=$(./build/vcpkg/vcpkg fetch nuget | tail -n1)
-          mono $NUGET_EXE sources add \
-            -Source "${{ env.NUGET_FEED_URL }}" \
-            -StorePasswordInClearText \
-            -Name GitHubPackages \
-            -UserName "${{ env.VCPKG_NUGET_USER }}" \
-            -Password "${{ secrets.GITHUB_TOKEN }}" || true
-          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
-            -Source "${{ env.NUGET_FEED_URL }}"
+          NUGET_DIR="$HOME/.config/NuGet"
+          mkdir -p "$NUGET_DIR"
+          cat > "$NUGET_DIR/NuGet.Config" <<NUGETEOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+              <add key="GitHubPackages" value="${NUGET_FEED_URL}" />
+            </packageSources>
+            <packageSourceCredentials>
+              <GitHubPackages>
+                <add key="Username" value="${VCPKG_NUGET_USER}" />
+                <add key="ClearTextPassword" value="${NUGET_TOKEN}" />
+              </GitHubPackages>
+            </packageSourceCredentials>
+          </configuration>
+          NUGETEOF
+          chmod 600 "$NUGET_DIR/NuGet.Config"
+        env:
+          NUGET_FEED_URL: ${{ env.NUGET_FEED_URL }}
+          VCPKG_NUGET_USER: ${{ env.VCPKG_NUGET_USER }}
+          NUGET_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
