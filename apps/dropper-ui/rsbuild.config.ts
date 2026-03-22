@@ -40,19 +40,10 @@ export default defineConfig(({ command }) => {
 				index: './src/index.tsx',
 			},
 			define: {
-				...(isDev
-					? {
-							'process.env.CONFIG': JSON.stringify({
-								...parsed,
-								devMode: true,
-							}),
-						}
-					: {
-							'process.env.CONFIG': JSON.stringify({
-								...parsed,
-								devMode: false,
-							}),
-						}),
+				'process.env.CONFIG': JSON.stringify({
+					...parsed,
+					devMode: isDev,
+				}),
 			},
 		},
 
