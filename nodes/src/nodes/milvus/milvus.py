@@ -422,7 +422,7 @@ class Store(DocumentStoreBase):
 
         # Create the collection if needed
         if checkCollection and not self.createCollection(chunks):
-            return {}
+            return
 
         # Clear the object id list
         objectIds: Dict = {}
