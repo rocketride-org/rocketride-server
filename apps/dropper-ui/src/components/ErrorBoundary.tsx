@@ -4,7 +4,7 @@
  * See LICENSE file for details.
  */
 
-import React, { Component, type ErrorInfo, type ReactNode } from 'react';
+import { Component, type ErrorInfo, type ReactNode } from 'react';
 
 interface Props {
 	children: ReactNode;
@@ -32,11 +32,11 @@ export class ErrorBoundary extends Component<Props, State> {
 		return { hasError: true, error };
 	}
 
-	componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+	override componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
 		console.error('[ErrorBoundary] Component crash:', error, errorInfo);
 	}
 
-	render(): ReactNode {
+	override render(): ReactNode {
 		if (this.state.hasError) {
 			if (this.props.fallback) {
 				return this.props.fallback;
