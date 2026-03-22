@@ -90,7 +90,7 @@ class Chat(ChatBase):
         elif isinstance(error, APIConnectionError):
             return True
         else:
-            return super().map_exception(error)
+            return False
 
     def map_exception(self, error):
         """
