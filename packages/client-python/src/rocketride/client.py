@@ -40,7 +40,7 @@ Basic Usage:
 """
 
 import os
-from .core import DAPClient, TransportWebSocket, RocketRideException, CONST_DEFAULT_WEB_CLOUD
+from .core import DAPClient, RocketRideException, CONST_DEFAULT_WEB_CLOUD
 from .mixins.connection import ConnectionMixin
 from .mixins.execution import ExecutionMixin
 from .mixins.data import DataMixin
@@ -83,9 +83,9 @@ class RocketRideClient(
 
     Args:
         uri (str, optional): Service URI of the RocketRide server (e.g., "http://localhost:8080").
-            If not provided, uses ROCKETRIDE_URI environment variable or default service.
+            If not provided, uses non-empty ROCKETRIDE_URI from the environment, then `.env`, then the default service.
         auth (str, optional): Your API key or access token for authentication.
-            If not provided, uses ROCKETRIDE_APIKEY environment variable. Required at connect time.
+            If not provided, uses non-empty ROCKETRIDE_APIKEY from the environment, then `.env`. Required at connect time.
         **kwargs: Additional configuration options like custom module name
 
     Raises:
@@ -117,8 +117,8 @@ class RocketRideClient(
 
     def __init__(
         self,
-        uri: str = "",
-        auth: str = "",
+        uri: str = '',
+        auth: str = '',
         **kwargs,
     ):
         """
@@ -126,8 +126,8 @@ class RocketRideClient(
 
         Args:
             uri: WebSocket URI of your RocketRide server (e.g., "ws://localhost:8080").
-                Optional; uses ROCKETRIDE_URI from env or .env if empty.
-            auth: Your API key or access token. Optional; uses ROCKETRIDE_APIKEY from env or .env if empty.
+                Optional; uses non-empty ROCKETRIDE_URI from env, then `.env`, if empty.
+            auth: Your API key or access token. Optional; uses non-empty ROCKETRIDE_APIKEY from env, then `.env`, if empty.
             **kwargs: Additional options:
                 - env: Dictionary of environment variables to use instead of os.environ
                 - module: Custom module name for client identification
@@ -145,9 +145,9 @@ class RocketRideClient(
         # Get or load environment variables
         env = kwargs.get('env', None)
         if env is None:
-            # If not provided, load from .env file only
             self._env = {}
-            
+            config_env = {}
+
             # Try to load .env file
             try:
                 env_path = os.path.join(os.getcwd(), '.env')
@@ -164,27 +164,35 @@ class RocketRideClient(
                                 key = key.strip()
                                 value = value.strip()
                                 # Remove quotes if present
-                                if (value.startswith('"') and value.endswith('"')) or \
-                                   (value.startswith("'") and value.endswith("'")):
+                                if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
                                     value = value[1:-1]
                                 self._env[key] = value
+                                config_env[key] = value
             except Exception:
                 # File doesn't exist or can't be read - that's okay
                 pass
+
+            # Connection bootstrap should honor non-empty process env values without
+            # changing the older substitution behavior that reads from self._env.
+            for key, value in os.environ.items():
+                if value:
+                    config_env[key] = value
         else:
             # Use the provided env dictionary
             self._env = dict(env)
+            config_env = dict(env)
 
         # If we didn't get the URI, look at the env. If not there,
         # use the default
         if not uri:
-            uri = self._env.get('ROCKETRIDE_URI', CONST_DEFAULT_WEB_CLOUD)
+            uri = config_env.get('ROCKETRIDE_URI') or CONST_DEFAULT_WEB_CLOUD
 
         if not auth:
-            auth = self._env.get('ROCKETRIDE_APIKEY', None)
+            auth = config_env.get('ROCKETRIDE_APIKEY')
 
         # Normalize the URI into a fully-formed WebSocket address
         from .mixins.connection import ConnectionMixin
+
         self._uri = ConnectionMixin._get_websocket_uri(uri)
         self._apikey = auth
 
