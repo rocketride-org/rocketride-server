@@ -39,7 +39,7 @@ interface ChatInputProps {
  * - Clipboard paste support in VSCode webview
  * - Disabled state when not connected
  * - Auto-focus on mount
- * 
+ *
  * @param onSend - Callback function to send message
  * @param disabled - Whether input should be disabled
  */
@@ -55,7 +55,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 
 		const handleMessage = (event: MessageEvent) => {
 			if (event.data?.type === 'paste' && event.data.text) {
-				setInputText(prev => {
+				setInputText((prev) => {
 					const textarea = inputRef.current;
 					if (textarea) {
 						const start = textarea.selectionStart;
@@ -92,7 +92,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 
 	/**
 	 * Handles keyboard input
-	 * 
+	 *
 	 * Enter: Send message
 	 * Shift+Enter: New line
 	 */
@@ -131,20 +131,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 								}
 							}}
 							onKeyDown={handleKeyDown}
-							placeholder={disabled ? "Connecting..." : "Type your message here..."}
+							placeholder={disabled ? 'Connecting...' : 'Type your message here...'}
+							aria-label="Chat message"
 							className="input-field"
 							rows={1}
 							disabled={disabled}
 						/>
 					</div>
 
-					<button
-						onClick={handleSend}
-						disabled={!inputText.trim() || disabled}
-						className="send-btn"
-						title="Send message"
-						type="button"
-					>
+					<button onClick={handleSend} disabled={!inputText.trim() || disabled} className="send-btn" title="Send message" aria-label="Send message" type="button">
 						<Send className="w-5 h-5" />
 					</button>
 				</div>

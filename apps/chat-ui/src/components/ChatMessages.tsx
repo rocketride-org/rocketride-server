@@ -33,22 +33,20 @@ interface ChatMessagesProps {
 	statusMessage?: string | null;
 }
 
-type RenderItem =
-	| { kind: 'message'; message: MessageType }
-	| { kind: 'thinking-group'; id: number; messages: MessageType[] };
+type RenderItem = { kind: 'message'; message: MessageType } | { kind: 'thinking-group'; id: number; messages: MessageType[] };
 
 const ThinkingGroup: React.FC<{ messages: MessageType[] }> = ({ messages }) => {
 	const [isOpen, setIsOpen] = useState(false);
 
 	return (
 		<div className="thinking-group">
-			<button className="thinking-header" onClick={() => setIsOpen(o => !o)}>
+			<button className="thinking-header" onClick={() => setIsOpen((o) => !o)}>
 				<span className={`thinking-chevron${isOpen ? ' open' : ''}`} />
 				<span className="thinking-label">Thinking...</span>
 			</button>
 			{isOpen && (
 				<div className="thinking-messages">
-					{messages.map(msg => (
+					{messages.map((msg) => (
 						<div key={msg.id} className="message-status">
 							<span className="message-status-dot" />
 							<span className="message-status-text">{msg.text}</span>
@@ -105,13 +103,9 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, isTyping, 
 	}, [messages, statusMessage]);
 
 	return (
-		<div className="messages-container">
+		<div className="messages-container" role="log" aria-live="polite" aria-label="Chat messages">
 			<div className="messages-content">
-				{renderItems.map(item =>
-					item.kind === 'thinking-group'
-						? <ThinkingGroup key={`tg-${item.id}`} messages={item.messages} />
-						: <Message key={item.message.id} message={item.message} />
-				)}
+				{renderItems.map((item) => (item.kind === 'thinking-group' ? <ThinkingGroup key={`tg-${item.id}`} messages={item.messages} /> : <Message key={item.message.id} message={item.message} />))}
 
 				{statusMessage && (
 					<Message
@@ -119,7 +113,7 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, isTyping, 
 							id: -1,
 							text: statusMessage,
 							sender: 'bot',
-							timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+							timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
 						}}
 					/>
 				)}
