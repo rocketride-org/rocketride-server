@@ -36,3 +36,7 @@ test('onprem mode does not require an API key', () => {
 test('local mode does not require an API key', () => {
 	assert.equal(connectionModeRequiresApiKey('local'), false);
 });
+
+test('unknown connection modes do not require an API key', () => {
+	assert.equal(connectionModeRequiresApiKey('future-mode'), false);
+});
