@@ -34,6 +34,7 @@ from typing import List, Callable, Dict, Any, cast
 import numpy as np
 
 import psycopg2
+from psycopg2 import sql
 from pgvector.psycopg2 import register_vector
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
@@ -46,37 +47,60 @@ DEFAULT_POSTGRES_PORT = 5432
 # Minimum similarity score threshold for document filtering
 MIN_SIMILARITY_SCORE = 0.20
 
-# SQL Queries
-SQL_QUERIES = {
-    'check_collection_exists': "SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = %s)",
-    'create_collection': (
-        'CREATE TABLE IF NOT EXISTS {collection} ('
-        'id bigserial PRIMARY KEY, '
-        'content text, '
-        'objectId text, '
-        'nodeId text, '
-        'parent text, '
-        'permissionId int, '
-        'isDeleted boolean, '
-        'chunkId int, '
-        'isTable boolean, '
-        'tableId int, '
-        'vectorSize int, '
-        'modelName text, '
-        'embedding vector({vector_size})'
-        ');'
-    ),
-    'count_documents': 'SELECT COUNT(*) FROM {collection}',
-    'search_keyword': 'SELECT * FROM {collection} WHERE content LIKE %s {where_clause} LIMIT %s',
-    'get_documents': 'SELECT * FROM {collection} {where_clause} LIMIT %s',
-    'get_paths': 'SELECT parent, objectId FROM {collection} WHERE {where_clause} OFFSET %s LIMIT %s',
-    'insert_chunk': 'INSERT INTO {collection} ({columns}) VALUES ({placeholders})',
-    'delete_by_object_ids': 'DELETE FROM {collection} WHERE objectId = ANY(%s)',
-    'mark_deleted': 'UPDATE {collection} SET isDeleted = TRUE WHERE objectId = ANY(%s)',
-    'mark_active': 'UPDATE {collection} SET isDeleted = FALSE WHERE objectId = ANY(%s)',
-    'render_document': 'SELECT content, chunkId FROM {collection} WHERE objectId = %s AND chunkId >= %s AND chunkId < %s ORDER BY chunkId',
-    'semantic_search': 'SELECT *, embedding {similarity_operator} %s AS distance FROM {collection} {where_clause} ORDER BY distance LIMIT %s',
-}
+# Allowlist of valid similarity operators for pgvector
+VALID_SIMILARITY_OPERATORS = {'<->', '<#>', '<=>'}
+
+CHECK_COLLECTION_EXISTS = sql.SQL("SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = %s)")
+
+
+def _sql_create_collection(collection: str, vector_size: int) -> sql.Composed:
+    return sql.SQL('CREATE TABLE IF NOT EXISTS {collection} (id bigserial PRIMARY KEY, content text, objectId text, nodeId text, parent text, permissionId int, isDeleted boolean, chunkId int, isTable boolean, tableId int, vectorSize int, modelName text, embedding vector({vector_size}));').format(
+        collection=sql.Identifier(collection), vector_size=sql.Literal(vector_size)
+    )
+
+
+def _sql_count_documents(collection: str) -> sql.Composed:
+    return sql.SQL('SELECT COUNT(*) FROM {collection}').format(collection=sql.Identifier(collection))
+
+
+def _sql_search_keyword(collection: str, where_clause: sql.Composable) -> sql.Composed:
+    return sql.SQL('SELECT * FROM {collection} WHERE content LIKE %s {where_clause} LIMIT %s').format(collection=sql.Identifier(collection), where_clause=where_clause)
+
+
+def _sql_get_documents(collection: str, where_clause: sql.Composable) -> sql.Composed:
+    return sql.SQL('SELECT * FROM {collection} {where_clause} LIMIT %s').format(collection=sql.Identifier(collection), where_clause=where_clause)
+
+
+def _sql_get_paths(collection: str, where_clause: sql.Composable) -> sql.Composed:
+    return sql.SQL('SELECT parent, objectId FROM {collection} WHERE {where_clause} OFFSET %s LIMIT %s').format(collection=sql.Identifier(collection), where_clause=where_clause)
+
+
+def _sql_insert_chunk(collection: str, columns: list[str]) -> sql.Composed:
+    col_ids = sql.SQL(', ').join(sql.Identifier(c) for c in columns)
+    placeholders = sql.SQL(', ').join(sql.Placeholder() * len(columns))
+    return sql.SQL('INSERT INTO {collection} ({columns}) VALUES ({placeholders})').format(collection=sql.Identifier(collection), columns=col_ids, placeholders=placeholders)
+
+
+def _sql_delete_by_object_ids(collection: str) -> sql.Composed:
+    return sql.SQL('DELETE FROM {collection} WHERE objectId = ANY(%s)').format(collection=sql.Identifier(collection))
+
+
+def _sql_mark_deleted(collection: str) -> sql.Composed:
+    return sql.SQL('UPDATE {collection} SET isDeleted = TRUE WHERE objectId = ANY(%s)').format(collection=sql.Identifier(collection))
+
+
+def _sql_mark_active(collection: str) -> sql.Composed:
+    return sql.SQL('UPDATE {collection} SET isDeleted = FALSE WHERE objectId = ANY(%s)').format(collection=sql.Identifier(collection))
+
+
+def _sql_render_document(collection: str) -> sql.Composed:
+    return sql.SQL('SELECT content, chunkId FROM {collection} WHERE objectId = %s AND chunkId >= %s AND chunkId < %s ORDER BY chunkId').format(collection=sql.Identifier(collection))
+
+
+def _sql_semantic_search(collection: str, similarity_operator: str, where_clause: sql.Composable) -> sql.Composed:
+    if similarity_operator not in VALID_SIMILARITY_OPERATORS:
+        raise ValueError(f'Invalid similarity operator: {similarity_operator!r}. Must be one of {VALID_SIMILARITY_OPERATORS}')
+    return sql.SQL('SELECT *, embedding {similarity_operator} %s AS distance FROM {collection} {where_clause} ORDER BY distance LIMIT %s').format(collection=sql.Identifier(collection), similarity_operator=sql.SQL(similarity_operator), where_clause=where_clause)
 
 
 class Store(DocumentStoreBase):
@@ -154,7 +178,7 @@ class Store(DocumentStoreBase):
         @returns: True if the collection exists, False otherwise.
         """
         with self.client.cursor() as cur:
-            cur.execute(SQL_QUERIES['check_collection_exists'], (self.collection,))
+            cur.execute(CHECK_COLLECTION_EXISTS, (self.collection,))
             return cur.fetchone()[0]
 
     def _createCollection(self, vectorSize: int = 0) -> None:
@@ -164,7 +188,7 @@ class Store(DocumentStoreBase):
         @param vectorSize: The size of the vector.
         """
         with self.client.cursor() as cur:
-            cur.execute(SQL_QUERIES['create_collection'].format(collection=self.collection, vector_size=vectorSize))
+            cur.execute(_sql_create_collection(self.collection, vectorSize))
             self.client.commit()
 
     def _convertFilter(self, docFilter: DocFilter) -> tuple[str, list]:
@@ -303,7 +327,7 @@ class Store(DocumentStoreBase):
             return 0
 
         with self.client.cursor() as cur:
-            cur.execute(SQL_QUERIES['count_documents'].format(collection=self.collection))
+            cur.execute(_sql_count_documents(self.collection))
             return cur.fetchone()[0]
 
     def searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
@@ -321,8 +345,8 @@ class Store(DocumentStoreBase):
         query_params = [f'%{query}%'] + params
 
         with self.client.cursor() as cur:
-            where_clause = ('AND ' + where_sql.split('WHERE ')[1]) if where_sql else ''
-            cur.execute(SQL_QUERIES['search_keyword'].format(collection=self.collection, where_clause=where_clause), query_params + [docFilter.limit])
+            where_clause = sql.SQL('AND ' + where_sql.split('WHERE ')[1]) if where_sql else sql.SQL('')
+            cur.execute(_sql_search_keyword(self.collection, where_clause), query_params + [docFilter.limit])
             results = cur.fetchall()
 
         # Convert results to dictionary
@@ -343,7 +367,7 @@ class Store(DocumentStoreBase):
         where_sql, params = self._convertFilter(docFilter)
 
         with self.client.cursor() as cur:
-            cur.execute(SQL_QUERIES['get_documents'].format(collection=self.collection, where_clause=where_sql), params + [docFilter.limit])
+            cur.execute(_sql_get_documents(self.collection, sql.SQL(where_sql)), params + [docFilter.limit])
             results = cur.fetchall()
 
         points = [dict(zip([desc[0] for desc in cur.description], row)) for row in results]
@@ -371,7 +395,7 @@ class Store(DocumentStoreBase):
         where_sql = ' AND '.join(where_clauses)
 
         with self.client.cursor() as cur:
-            cur.execute(SQL_QUERIES['get_paths'].format(collection=self.collection, where_clause=where_sql), params + [offset, limit])
+            cur.execute(_sql_get_paths(self.collection, sql.SQL(where_sql)), params + [offset, limit])
             results = cur.fetchall()
 
         paths = {row[0]: row[1] for row in results}
@@ -400,9 +424,7 @@ class Store(DocumentStoreBase):
                     data['vectorSize'] = len(chunk.embedding) if chunk.embedding else 0
                 if 'modelName' not in data or data['modelName'] is None:
                     data['modelName'] = ''
-                columns = ', '.join(data.keys())
-                placeholders = ', '.join(['%s'] * len(data))
-                cur.execute(SQL_QUERIES['insert_chunk'].format(collection=self.collection, columns=columns, placeholders=placeholders), list(data.values()))
+                cur.execute(_sql_insert_chunk(self.collection, list(data.keys())), list(data.values()))
             self.client.commit()
 
     def remove(self, objectIds: List[str]) -> None:
@@ -415,7 +437,7 @@ class Store(DocumentStoreBase):
             return
 
         with self.client.cursor() as cur:
-            cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (objectIds,))
+            cur.execute(_sql_delete_by_object_ids(self.collection), (objectIds,))
             self.client.commit()
 
     def markDeleted(self, objectIds: List[str]) -> None:
@@ -428,7 +450,7 @@ class Store(DocumentStoreBase):
             return
 
         with self.client.cursor() as cur:
-            cur.execute(SQL_QUERIES['mark_deleted'].format(collection=self.collection), (objectIds,))
+            cur.execute(_sql_mark_deleted(self.collection), (objectIds,))
             self.client.commit()
 
     def markActive(self, objectIds: List[str]) -> None:
@@ -441,7 +463,7 @@ class Store(DocumentStoreBase):
             return
 
         with self.client.cursor() as cur:
-            cur.execute(SQL_QUERIES['mark_active'].format(collection=self.collection), (objectIds,))
+            cur.execute(_sql_mark_active(self.collection), (objectIds,))
             self.client.commit()
 
     def render(self, objectId: str, callback: Callable[[str], None]) -> None:
@@ -457,7 +479,7 @@ class Store(DocumentStoreBase):
         offset = 0
         while True:
             with self.client.cursor() as cur:
-                cur.execute(SQL_QUERIES['render_document'].format(collection=self.collection), (objectId, offset, offset + self.renderChunkSize))
+                cur.execute(_sql_render_document(self.collection), (objectId, offset, offset + self.renderChunkSize))
                 results = cur.fetchall()
 
             if not results:
@@ -502,7 +524,7 @@ class Store(DocumentStoreBase):
         embedding_arr = np.array(query.embedding)
 
         with self.client.cursor() as cur:
-            cur.execute(SQL_QUERIES['semantic_search'].format(collection=self.collection, similarity_operator=self.similarity, where_clause=where_sql), (embedding_arr, *params, docFilter.limit))
+            cur.execute(_sql_semantic_search(self.collection, self.similarity, sql.SQL(where_sql)), (embedding_arr, *params, docFilter.limit))
             results = cur.fetchall()
 
         # Convert results to dictionary
