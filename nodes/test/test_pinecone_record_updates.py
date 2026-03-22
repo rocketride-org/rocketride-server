@@ -32,6 +32,8 @@ _STUB_MODULE_NAMES = (
     'ai.common.schema',
     'ai.common.store',
     'ai.common.config',
+    'pinecone',
+    'pinecone.grpc',
 )
 
 
@@ -127,11 +129,25 @@ def _load_store_module() -> types.ModuleType:
 _store_module = _load_store_module()
 Store = _store_module.Store
 
-# Import MockPinecone/MockIndex from the project mock infrastructure.
-sys.path.insert(0, str(_MOCKS_DIR))
-from pinecone import MockPinecone, MockIndex  # noqa: E402
 
-sys.path.remove(str(_MOCKS_DIR))
+def _load_mock_pinecone_types() -> tuple[type, type]:
+    """Import the project Pinecone mock without leaking module state."""
+    saved = {name: sys.modules.get(name) for name in ('pinecone', 'pinecone.grpc')}
+    sys.path.insert(0, str(_MOCKS_DIR))
+    try:
+        from pinecone import MockPinecone, MockIndex  # noqa: E402
+
+        return MockPinecone, MockIndex
+    finally:
+        sys.path.remove(str(_MOCKS_DIR))
+        for name, module in saved.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+
+MockPinecone, MockIndex = _load_mock_pinecone_types()
 
 # ---------------------------------------------------------------------------
 # Helpers

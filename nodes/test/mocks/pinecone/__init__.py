@@ -198,6 +198,8 @@ class MockIndex:
                     elif op == '$contains':
                         if expected not in str(value):
                             return False
+                    else:
+                        raise ValueError(f'Unsupported filter operator: {op}')
             else:
                 # Direct equality
                 if value != condition:
