@@ -23,7 +23,7 @@ class DocumentStoreBase(ABC):
         self.vectorSize: int = 0
         self.modelName: str = ''
         self.threshold_search = 0.5
-        self.collectionLock = threading.Lock()
+        self.collectionLock = threading.RLock()
 
     @abstractmethod
     def _doesCollectionExist() -> bool:
@@ -145,25 +145,25 @@ class DocumentStoreBase(ABC):
             # Add this table to the score group
             tableKey = self._getTableKey(doc)
             if tableKey not in tableDocs:
-                # Reset the page content, we build it up
-                # in the next phase
-                doc.page_content = ''
-
-                # Save it
-                tableDocs[tableKey] = doc
+                # Initialize with a deep copy to avoid mutating input documents
+                # and reset the page content as we'll rebuild it
+                base_doc = doc.model_copy(deep=True)
+                base_doc.page_content = ''
+                base_doc.metadata.chunkId = 0
+                tableDocs[tableKey] = base_doc
 
             # Update the score if this one is higher
             if doc.score > tableDocs[tableKey].score:
-                tableDocs[tableKey] = doc.score
+                tableDocs[tableKey].score = doc.score
 
         # If there are no tables, done
-        if not len(tableIds):
+        if not tableIds:
             return documents
 
         # Now, we can do our queries
-        for objectId in tableIds.keys():
+        for objectId, table_ids in tableIds.items():
             # Build the filter
-            tableFilter = DocFilter(isTable=True, objectIds=[objectId], tableIds=tableIds[objectId])
+            tableFilter = DocFilter(isTable=True, objectIds=[objectId], tableIds=table_ids)
 
             # Get all the table chunks for these tables in
             # the document
@@ -177,17 +177,21 @@ class DocumentStoreBase(ABC):
                 # Get this chunks table key
                 tableKey = self._getTableKey(chunk)
 
-                # Get the object id
-                objectId = chunk.metadata.objectId
-
-                # If this is the first part of the table
+                # If this is the first part of the table we've encountered in the fetch
                 if tableKey not in tableDocs:
-                    # Add it to the list
-                    # TODO: Fix this
-                    tableDocs[tableKey] = Doc(objectId=objectId, chunk=doc.metadata.chunkId, score=chunk.score)
+                    # Initialize a new document for this table
+                    metadata = chunk.metadata.model_copy(deep=True)
+                    # Use a zeroed chunkId to represent the combined document
+                    metadata.chunkId = 0
+                    tableDocs[tableKey] = Doc(
+                        page_content='',
+                        metadata=metadata,
+                        score=chunk.score,
+                    )
 
-                # Append the text
-                tableDocs[tableKey].page_content += chunk.page_content
+                # Append the text safely
+                if chunk.page_content:
+                    tableDocs[tableKey].page_content += chunk.page_content
 
         # Now, we have the new documents built into tableDocs. The
         # key for this is (objectId/tableId). It has the highest score
@@ -204,67 +208,66 @@ class DocumentStoreBase(ABC):
             # Get the table key of this document table
             tableKey = self._getTableKey(doc)
 
-            # If this table is not there, it has already been replaced
+            # If this table is not in our set (shouldn't happen), skip
             if tableKey not in tableDocs:
                 continue
 
-            # Get the new document key for this
-            docKey = self._getDocKey(tableDocs[tableKey])
+            # Use the canonical key for the combined document (objectId, chunkId=0)
+            combined_doc = tableDocs[tableKey]
+            newKey = self._getDocKey(combined_doc)
 
             # Add this to the new docs
-            newDocs[docKey] = tableDocs[tableKey]
+            newDocs[newKey] = combined_doc
 
-            # Remove it from the tableDocs
+            # Remove it from the tableDocs so we don't add it multiple times
+            # if multiple chunks of the same table were in the input
             del tableDocs[tableKey]
 
         # Return the new document list
         return newDocs
 
     def _processFullDocuments(self, documents: Dict[Tuple[str, int], Doc]) -> Dict[Tuple[str, int], Doc]:
-        # Make sure we only read it once
+        """
+        Process full documents by combining all chunks for an object.
+        """
+        # Map objectIds to their representative 'best' document
         objectIds: Dict[str, Doc] = {}
 
-        # Walk through all the source documents
+        # Walk through all the source documents to identify which objects to hydrate
         for docKey, doc in documents.items():
-            # Get the object id
             objectId = doc.metadata.objectId
 
-            # If we have already read this document, grab the highest score
             if objectId in objectIds:
+                # If we found a higher score for this object, update the representative score
                 if doc.score > objectIds[objectId].score:
                     objectIds[objectId].score = doc.score
-                    continue
+                continue
 
-            # We will be filling this all in
-            doc.page_content = ''
-            doc.metadata.chunkId = 0
+            # This is the first time we see this object. Create a base doc for it.
+            base_doc = doc.model_copy(deep=True)
+            base_doc.page_content = ''
+            base_doc.metadata.chunkId = 0
+            objectIds[objectId] = base_doc
 
-            # Add it to the list
-            objectIds[doc.metadata.objectId] = doc
-
-        # Now, we have a collection of object ids we need to retrieve
+        # Retrieve and combine all chunks for the identified objects
         newDocs: Dict[Tuple[str, int], Doc] = {}
-        for objectId in objectIds.keys():
-            # Build the filter
+        for objectId, doc in objectIds.items():
+            # Fetch all chunks for this object
             docFilter = DocFilter(objectIds=[objectId])
-
-            # Get all the table chunks for these tables in
-            # the document
             docChunks = self.get(docFilter)
 
-            # Sort them by chunkId
-            docChunks.sort(key=lambda doc: doc.metadata.chunkId)
+            # Sort chunks by their original sequence
+            docChunks.sort(key=lambda chunk: chunk.metadata.chunkId)
 
-            # Get the base document
-            doc = objectIds[objectId]
-            for docChunk in docChunks:
-                doc.page_content += docChunk.page_content
+            # Accumulate text content
+            for chunk in docChunks:
+                if chunk.page_content:
+                    doc.page_content += chunk.page_content
 
-            # Get the key and save it
+            # Save the combined document using the object/chunkId=0 key
             docKey = self._getDocKey(doc)
             newDocs[docKey] = doc
 
-        # Return the update document list
         return newDocs
 
     def _queryDocuments(self, question: Question) -> Dict[Tuple[str, int], Doc]:
