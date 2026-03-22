@@ -145,3 +145,16 @@ Key a11y gaps: missing aria-labels on chat input/send button, no keyboard activa
 | CI3 | run-name uses PR title — display only, not shell injection             | OK       | ci.yml:2               |
 | CI4 | Main workflows (ci, release, nightly) correctly SHA-pinned             | OK       | All                    |
 | CI5 | No self-hosted runner risks detected                                   | OK       | All                    |
+
+## Build System Audit
+
+| #   | Bug                                                                 | Severity | Location                     |
+| --- | ------------------------------------------------------------------- | -------- | ---------------------------- |
+| BS1 | ZIP path traversal in extractArchive — no validation on entry paths | HIGH     | scripts/lib/download.js:244  |
+| BS2 | vsix README missing from BUILD_DIR (confirmed, already fixed)       | FIXED    | apps/vscode/scripts/tasks.js |
+
+## chat-ui UX Fix
+
+| #   | Fix                                                          | Severity |
+| --- | ------------------------------------------------------------ | -------- |
+| FIX | Replace throw in useEffect with configError state + error UI | MEDIUM   |

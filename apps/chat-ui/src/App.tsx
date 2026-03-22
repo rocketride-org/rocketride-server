@@ -32,6 +32,7 @@ import { startClient } from './hooks/clientSingleton';
 const App: React.FC = () => {
 	const [isVSCode] = useState(() => window.parent !== window);
 	const [authToken, setAuthToken] = useState<string | null>(null);
+	const [configError, setConfigError] = useState<string | null>(null);
 
 	// Initialize VSCode state
 	const [vscodeState, setVscodeState] = useState<VSCodeContextType>(() => {
@@ -40,14 +41,14 @@ const App: React.FC = () => {
 			return {
 				theme: null,
 				isVSCode: false,
-				isReady: true
+				isReady: true,
 			};
 		} else {
 			// VSCode mode - not ready yet
 			return {
 				theme: null,
 				isVSCode: true,
-				isReady: false
+				isReady: false,
 			};
 		}
 	});
@@ -94,8 +95,6 @@ const App: React.FC = () => {
 		// Try to get the token from session storage (skip in VSCode webview - shared storage would mix auth across tabs)
 		if (!isVSCode) {
 			token = sessionStorage.getItem('auth') || '';
-			if (token) {
-			}
 		}
 
 		// If we don't have a token yet
@@ -114,26 +113,28 @@ const App: React.FC = () => {
 			// If we got it from the query string...
 			if (token) {
 				// Remove it so the user doesn't see it in the URL
-				window.history.replaceState({}, "", window.location.pathname);
+				window.history.replaceState({}, '', window.location.pathname);
 			}
 		}
 
 		// Check these
 		if (!uri) {
-			throw new Error('Failed to start RocketRide client: No uri found');
+			setConfigError('No server URI found. Please open this page from VS Code or provide ?auth= parameter.');
+			return;
 		}
 		if (!token) {
-			throw new Error('Failed to start RocketRide client: No token found');
+			setConfigError('No authentication token found. Please open this page from VS Code or provide ?auth= parameter.');
+			return;
 		}
 
 		// Set the config
 		setAPIConfig({
 			ROCKETRIDE_APIKEY: token,
-			ROCKETRIDE_URI: uri
+			ROCKETRIDE_URI: uri,
 		});
 
 		// Start the client with persistent connection
-		startClient(token).catch(error => {
+		startClient(token).catch((error) => {
 			console.error('Failed to start client:', error);
 		});
 
@@ -160,7 +161,7 @@ const App: React.FC = () => {
 					setVscodeState({
 						theme: message.theme,
 						isVSCode: true,
-						isReady: true
+						isReady: true,
 					});
 				}
 			};
@@ -180,6 +181,15 @@ const App: React.FC = () => {
 	// CRITICAL: Absolutely do not render anything until ready
 	if (!vscodeState.isReady) {
 		return null;
+	}
+
+	if (configError) {
+		return (
+			<div style={{ padding: '2rem', textAlign: 'center', color: '#a8a8a8', fontFamily: 'system-ui' }}>
+				<h2 style={{ color: '#ef4444', marginBottom: '1rem' }}>Configuration Error</h2>
+				<p>{configError}</p>
+			</div>
+		);
 	}
 
 	return (
