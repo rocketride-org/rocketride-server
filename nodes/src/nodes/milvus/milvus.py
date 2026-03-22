@@ -48,7 +48,8 @@ from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
 
 
-def _escape_milvus_str(value):
+def _escape_milvus_str(value: object) -> str:
+    """Escape a value for safe interpolation into a Milvus filter expression."""
     return str(value).replace('\\', '\\\\').replace("'", "\\'")
 
 
@@ -188,7 +189,7 @@ class Store(DocumentStoreBase):
         must_conditions = []
 
         if docFilter.nodeId is not None:
-            (must_conditions.append(f"meta['nodeId'] == '{_escape_milvus_str(docFilter.nodeId)}'"),)
+            must_conditions.append(f"meta['nodeId'] == '{_escape_milvus_str(docFilter.nodeId)}'")
 
         if docFilter.isTable is not None:
             (must_conditions.append(f"meta['isTable'] == '{_escape_milvus_str(docFilter.isTable)}'"),)
