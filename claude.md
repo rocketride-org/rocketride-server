@@ -14,7 +14,7 @@
 
 ### Monorepo Structure
 
-```
+```text
 apps/
   chat-ui/              # Chat interface (React)
   dropper-ui/           # File dropper interface (React)
