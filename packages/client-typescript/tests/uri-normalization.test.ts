@@ -26,23 +26,13 @@ import { describe, it, expect } from '@jest/globals';
 import { RocketRideClient } from '../src/client';
 
 describe('RocketRideClient URI normalization', () => {
-	it('preserves secure websocket scheme for wss input', () => {
-		const client = new RocketRideClient({ auth: 'test-key', uri: 'wss://cloud.rocketride.ai' });
-		expect((client as any)._uri).toBe('wss://cloud.rocketride.ai/task/service');
-	});
-
-	it('maps https input to wss', () => {
-		const client = new RocketRideClient({ auth: 'test-key', uri: 'https://cloud.rocketride.ai' });
-		expect((client as any)._uri).toBe('wss://cloud.rocketride.ai/task/service');
-	});
-
-	it('preserves non-secure websocket scheme for ws input', () => {
-		const client = new RocketRideClient({ auth: 'test-key', uri: 'ws://localhost:5565' });
-		expect((client as any)._uri).toBe('ws://localhost:5565/task/service');
-	});
-
-	it('maps http input to ws', () => {
-		const client = new RocketRideClient({ auth: 'test-key', uri: 'http://localhost:5565' });
-		expect((client as any)._uri).toBe('ws://localhost:5565/task/service');
+	it.each([
+		['wss://cloud.rocketride.ai', 'wss://cloud.rocketride.ai/task/service'],
+		['https://cloud.rocketride.ai', 'wss://cloud.rocketride.ai/task/service'],
+		['ws://localhost:5565', 'ws://localhost:5565/task/service'],
+		['http://localhost:5565', 'ws://localhost:5565/task/service'],
+	])('normalizes %s to %s', (inputUri, expectedUri) => {
+		const client = new RocketRideClient({ auth: 'test-key', uri: inputUri });
+		expect((client as any)._uri).toBe(expectedUri);
 	});
 });

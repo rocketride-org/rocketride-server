@@ -22,32 +22,20 @@
 
 """Regression tests for websocket URI normalization."""
 
-import unittest
+import pytest
 
 from rocketride.mixins.connection import ConnectionMixin
 
 
-class TestConnectionUriNormalization(unittest.TestCase):
-    def test_preserves_wss_input_as_secure_websocket(self) -> None:
-        self.assertEqual(
-            ConnectionMixin._get_websocket_uri('wss://cloud.rocketride.ai'),
-            'wss://cloud.rocketride.ai/task/service',
-        )
-
-    def test_maps_https_input_to_secure_websocket(self) -> None:
-        self.assertEqual(
-            ConnectionMixin._get_websocket_uri('https://cloud.rocketride.ai'),
-            'wss://cloud.rocketride.ai/task/service',
-        )
-
-    def test_preserves_ws_input_as_non_secure_websocket(self) -> None:
-        self.assertEqual(
-            ConnectionMixin._get_websocket_uri('ws://localhost:5565'),
-            'ws://localhost:5565/task/service',
-        )
-
-    def test_maps_http_input_to_non_secure_websocket(self) -> None:
-        self.assertEqual(
-            ConnectionMixin._get_websocket_uri('http://localhost:5565'),
-            'ws://localhost:5565/task/service',
-        )
+@pytest.mark.parametrize(
+    ('input_uri', 'expected_uri'),
+    [
+        ('wss://cloud.rocketride.ai', 'wss://cloud.rocketride.ai/task/service'),
+        ('https://cloud.rocketride.ai', 'wss://cloud.rocketride.ai/task/service'),
+        ('ws://localhost:5565', 'ws://localhost:5565/task/service'),
+        ('http://localhost:5565', 'ws://localhost:5565/task/service'),
+    ],
+)
+def test_get_websocket_uri_normalization(input_uri: str, expected_uri: str) -> None:
+    """Verify websocket URI normalization preserves secure and non-secure schemes."""
+    assert ConnectionMixin._get_websocket_uri(input_uri) == expected_uri
