@@ -23,7 +23,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolvePipelineCommandUri } from '../providers/sidebarCommandContext';
+import { resolvePipelineCommandUri, resolvePipelineSourceComponentId } from '../providers/sidebarCommandContext';
 
 test('prefers explicit sidebar selection when present', () => {
 	const explicitUri = { fsPath: '/tmp/selected.pipe' };
@@ -54,6 +54,38 @@ test('ignores non-pipeline active editors', () => {
 	const activeEditorUri = { fsPath: '/tmp/readme.md' };
 
 	const result = resolvePipelineCommandUri(undefined, activeEditorUri);
+
+	assert.equal(result, undefined);
+});
+
+test('falls back to active custom editor tab when there is no active text editor', () => {
+	const activeTabUri = { fsPath: '/tmp/active.pipe' };
+
+	const result = resolvePipelineCommandUri(undefined, undefined, activeTabUri);
+
+	assert.equal(result, activeTabUri);
+});
+
+test('prefers explicit source component id when available', () => {
+	const result = resolvePipelineSourceComponentId('chat_1', 'pipeline_source', [{ id: 'source_1' }]);
+
+	assert.equal(result, 'chat_1');
+});
+
+test('falls back to the pipeline source field when no explicit component id exists', () => {
+	const result = resolvePipelineSourceComponentId(undefined, 'pipeline_source', [{ id: 'source_1' }]);
+
+	assert.equal(result, 'pipeline_source');
+});
+
+test('falls back to the first parsed source component when pipeline.source is missing', () => {
+	const result = resolvePipelineSourceComponentId(undefined, undefined, [{ id: 'source_1' }, { id: 'source_2' }]);
+
+	assert.equal(result, 'source_1');
+});
+
+test('returns undefined when no source component can be resolved', () => {
+	const result = resolvePipelineSourceComponentId(undefined, undefined, []);
 
 	assert.equal(result, undefined);
 });

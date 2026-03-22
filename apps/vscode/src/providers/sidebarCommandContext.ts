@@ -25,11 +25,15 @@ interface UriLike {
 	fsPath: string;
 }
 
+interface SourceComponentLike {
+	id: string;
+}
+
 function isPipelineFile(filePath: string): boolean {
 	return filePath.endsWith('.pipe') || filePath.endsWith('.pipe.json');
 }
 
-export function resolvePipelineCommandUri<T extends UriLike>(explicitUri?: T, activeEditorUri?: T): T | undefined {
+export function resolvePipelineCommandUri<T extends UriLike>(explicitUri?: T, activeEditorUri?: T, activeTabUri?: T): T | undefined {
 	if (explicitUri) {
 		return explicitUri;
 	}
@@ -38,5 +42,25 @@ export function resolvePipelineCommandUri<T extends UriLike>(explicitUri?: T, ac
 		return activeEditorUri;
 	}
 
+	if (activeTabUri && isPipelineFile(activeTabUri.fsPath)) {
+		return activeTabUri;
+	}
+
 	return undefined;
+}
+
+export function resolvePipelineSourceComponentId<T extends SourceComponentLike>(
+	explicitSourceId?: string,
+	pipelineSourceId?: string,
+	sourceComponents: T[] = []
+): string | undefined {
+	if (explicitSourceId) {
+		return explicitSourceId;
+	}
+
+	if (pipelineSourceId) {
+		return pipelineSourceId;
+	}
+
+	return sourceComponents[0]?.id;
 }
