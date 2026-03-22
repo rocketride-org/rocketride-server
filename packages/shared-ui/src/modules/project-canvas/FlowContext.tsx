@@ -61,6 +61,11 @@ import { resolveDefaultFormData } from '../../services/dynamic-forms/utils';
  */
 type NodeHandleSelection = [string, string, string[], string?];
 
+// Suppresses host-echoed project updates immediately after local writes.
+// If this window is too small, echoes can overwrite just-dropped node positions;
+// if too large, legitimate external updates may be delayed.
+const SELF_UPDATE_SUPPRESS_MS = 500;
+
 /**
  * Shape of the FlowContext value.
  *
@@ -353,7 +358,6 @@ export const FlowProvider = ({ children, oauth2RootUrl, project: currentProject,
 	const contentChangeEnabledRef = useRef(false);
 	// Timestamp of the last onContentChanged call — echoes arriving within the suppression window are skipped
 	const selfUpdateTimestampRef = useRef(0);
-	const SELF_UPDATE_SUPPRESS_MS = 500;
 
 	const onToolchainUpdated = useCallback(() => {
 		// Mark the toolchain as dirty (unsaved changes exist)
@@ -384,19 +388,21 @@ export const FlowProvider = ({ children, oauth2RootUrl, project: currentProject,
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [currentProject?.name, currentProject?.description, currentProject?.version, onContentChanged]);
 
-	const detectChange = useCallback((changes: NodeChange[]) => {
-		// Ignore cosmetic changes (select/deselect, dimensions) and only fire for structural ones.
-		// Also skip intermediate drag frames — only the final drop (dragging: false) matters.
-		const meaningfulChanges = changes.filter((change) => {
-			if (change.type === 'position' && change.dragging) return false;
-			return ['add', 'remove', 'position'].includes(change.type);
-		});
+	const detectChange = useCallback(
+		(changes: NodeChange[]) => {
+			// Ignore cosmetic changes (select/deselect, dimensions) and only fire for structural ones.
+			// Also skip intermediate drag frames — only the final drop (dragging: false) matters.
+			const meaningfulChanges = changes.filter((change) => {
+				if (change.type === 'position' && change.dragging) return false;
+				return ['add', 'remove', 'position'].includes(change.type);
+			});
 
-		if (meaningfulChanges.length > 0) {
-			onToolchainUpdated();
-		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
+			if (meaningfulChanges.length > 0) {
+				onToolchainUpdated();
+			}
+		},
+		[onToolchainUpdated]
+	);
 
 	//
 	// Node Related
