@@ -117,3 +117,13 @@ Key a11y gaps: missing aria-labels on chat input/send button, no keyboard activa
 | P2  | Auth credential logged in DAP auth request            | MEDIUM   | dap_client.py:322                  |
 | P3  | requires-python >=3.8 but project needs 3.10+         | LOW      | pyproject.toml                     |
 | P4  | Missing Python 3.13 classifier on PyPI                | LOW      | pyproject.toml                     |
+
+## MCP Client Node Security Audit
+
+| #    | Bug                                                                        | Severity | Location                                         |
+| ---- | -------------------------------------------------------------------------- | -------- | ------------------------------------------------ |
+| MCP1 | CRITICAL: Arbitrary command execution via pipeline config commandLine      | CRITICAL | IGlobal.py:91, mcp_stdio_client.py:92            |
+| MCP2 | No allowlist of permitted MCP server commands                              | CRITICAL | IGlobal.py:87-105                                |
+| MCP3 | SSE/HTTP clients connect to any user-specified URL without validation      | HIGH     | mcp_sse_client.py, mcp_streamable_http_client.py |
+| MCP4 | No MCP server authentication or identity verification                      | MEDIUM   | All transport clients                            |
+| MCP5 | Tool arguments from LLM passed directly to MCP server without sanitization | MEDIUM   | IInstance.py                                     |
