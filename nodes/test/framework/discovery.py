@@ -204,6 +204,16 @@ def _infer_outputs_from_cases(cases: List[TestCase]) -> List[str]:
     return sorted(outputs)
 
 
+def _ensure_cases_list(cases: Any, service_file: str) -> List[Any]:
+    """Normalize `cases` to a list; invalid shapes log once and become []."""
+    if cases is None:
+        return []
+    if isinstance(cases, list):
+        return cases
+    print(f'Warning: Invalid "cases" in {service_file}; expected array, got {type(cases).__name__}')
+    return []
+
+
 def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], test_key: str = 'test') -> List[NodeTestConfig]:
     """Parse a test key (e.g. 'test' or 'fulltest') from a service.json into a list of NodeTestConfig.
 
@@ -237,7 +247,7 @@ def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], 
         config_id = base_id if total_groups == 1 else f'{base_id}:{test_key}{group_index + 1}'
 
         # Parse test cases using new format
-        raw_cases = group.get('cases') or []
+        raw_cases = _ensure_cases_list(group.get('cases'), service_file)
         cases = []
         for case_data in raw_cases:
             if not isinstance(case_data, dict):
