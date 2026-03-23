@@ -1217,6 +1217,15 @@ export class RocketRideClient extends DAPClient {
 				result = await pipe.close();
 			} catch (err) {
 				error = err instanceof Error ? err.message : String(err);
+			} finally {
+				// Ensure the pipe is always closed to release SSE callbacks and server resources
+				if (pipe !== null && result === undefined) {
+					try {
+						await pipe.close();
+					} catch {
+						// Ignore close errors to avoid masking the original error
+					}
+				}
 			}
 
 			// Send final status
