@@ -31,35 +31,9 @@
  *   wires up event handlers, and manages the full lifecycle of the pipeline editor.
  * - `useFlow` -- a convenience hook that consumes the context with a guard.
  */
-import {
-	Dispatch,
-	ReactElement,
-	ReactNode,
-	RefObject,
-	SetStateAction,
-	createContext,
-	useCallback,
-	useContext,
-	useState,
-	useEffect,
-	useMemo,
-	useRef,
-	MouseEvent,
-} from 'react';
+import { Dispatch, ReactElement, ReactNode, RefObject, SetStateAction, createContext, useCallback, useContext, useState, useEffect, useMemo, useRef, MouseEvent } from 'react';
 
-import {
-	useNodesState,
-	useEdgesState,
-	useReactFlow,
-	getConnectedEdges,
-	Edge,
-	Node,
-	useOnSelectionChange,
-	NodeChange,
-	EdgeChange,
-	Connection,
-	Viewport,
-} from '@xyflow/react';
+import { useNodesState, useEdgesState, useReactFlow, getConnectedEdges, Edge, Node, useOnSelectionChange, NodeChange, EdgeChange, Connection, Viewport } from '@xyflow/react';
 import { useTranslation } from 'react-i18next';
 
 import { uuid } from '../../utils/uuid';
@@ -67,47 +41,18 @@ import { getNativeQueryParam } from '../../utils/query-helper';
 import { getDefaultFormState, validateFormData } from '../../utils/rjsf';
 
 import { FlowFeatures, DEFAULT_FLOW_FEATURES } from './types/features';
-import {
-	generateId,
-	propertyToObject,
-	objectToProperty,
-	getNodePositionInsideParent,
-	getDefaultNodePosition,
-	computeEdgesFromNodes,
-} from './helpers';
-import {
-	ActionsType,
-	defaultToolchainState,
-	IToolchainState,
-	NavigationMode,
-	NodePosition,
-	NodeType,
-} from './constants';
+import { generateId, propertyToObject, objectToProperty, getNodePositionInsideParent, getDefaultNodePosition, computeEdgesFromNodes } from './helpers';
+import { ActionsType, defaultToolchainState, IToolchainState, NavigationMode, NodePosition, NodeType } from './constants';
 
-import {
-	createAnnotationNode,
-	createRemoteGroupNode,
-	createNode,
-	createGroupNode,
-} from './factories';
+import { createAnnotationNode, createRemoteGroupNode, createNode, createGroupNode } from './factories';
 import { useImportExport, ExportOptions } from './hooks/useImportExport';
 import { useNavigationMode } from './hooks/useNavigationMode';
 
 import { useSnackbar } from '../../contexts/snackbar/SnackbarContext';
 
-import {
-	IProject,
-	IToolchainExport,
-	IValidateResponse,
-	IControl,
-	IInputLane,
-	INodeData,
-	TaskStatus,
-	TASK_STATE,
-} from './types';
+import { IProject, IToolchainExport, IValidateResponse, IControl, IInputLane, INodeData, TaskStatus, TASK_STATE } from './types';
 import { IDynamicForms } from '../../services/dynamic-forms/types';
 import { resolveDefaultFormData } from '../../services/dynamic-forms/utils';
-
 
 /**
  * Tuple representing a selected handle: [nodeId, handleId, laneKeys, optionalInputKey].
@@ -290,37 +235,7 @@ interface IProps {
  * - Exposes import/export and navigation-mode hooks.
  * - Notifies the host of content changes (dirty-state) when nodes or edges change.
  */
-export const FlowProvider = ({
-	children,
-	oauth2RootUrl,
-	project: currentProject,
-	projects = [],
-	taskStatuses,
-	componentPipeCounts,
-	totalPipes,
-	panel,
-	activeNodeId,
-	features = DEFAULT_FLOW_FEATURES,
-	inventory,
-	servicesJson,
-	servicesJsonError,
-	inventoryConnectorTitleMap,
-	runPipeline: _runPipeline,
-	stopPipeline: _stopPipeline,
-	handleValidatePipeline,
-	saveProject,
-	onAddNodeSuccess,
-	isAutosaveEnabled,
-	onAutosaveEnabledChange,
-	onOpenLink,
-	getPreference,
-	setPreference,
-	onRegisterPanelActions,
-	onOpenLogHistory,
-	googlePickerDeveloperKey,
-	googlePickerClientId,
-	onContentChanged,
-}: IProps): ReactElement => {
+export const FlowProvider = ({ children, oauth2RootUrl, project: currentProject, projects = [], taskStatuses, componentPipeCounts, totalPipes, panel, activeNodeId, features = DEFAULT_FLOW_FEATURES, inventory, servicesJson, servicesJsonError, inventoryConnectorTitleMap, runPipeline: _runPipeline, stopPipeline: _stopPipeline, handleValidatePipeline, saveProject, onAddNodeSuccess, isAutosaveEnabled, onAutosaveEnabledChange, onOpenLink, getPreference, setPreference, onRegisterPanelActions, onOpenLogHistory, googlePickerDeveloperKey, googlePickerClientId, onContentChanged }: IProps): ReactElement => {
 	const { openSnackbar } = useSnackbar();
 	const { t } = useTranslation();
 
@@ -330,17 +245,7 @@ export const FlowProvider = ({
 	//
 	// React Flow
 	//
-	const {
-		screenToFlowPosition,
-		setViewport,
-		getIntersectingNodes,
-		deleteElements,
-		getInternalNode,
-		getViewport,
-		toObject,
-		setCenter,
-		getNode,
-	} = useReactFlow();
+	const { screenToFlowPosition, setViewport, getIntersectingNodes, deleteElements, getInternalNode, getViewport, toObject, setCenter, getNode } = useReactFlow();
 
 	// Tracks which nodes are currently multi-selected (e.g. via lasso or Shift+click)
 	const [selectedNodes, setSelectedNodes] = useState<Node[]>([]);
@@ -372,14 +277,9 @@ export const FlowProvider = ({
 	// Selected Node/Handle
 	const [selectedNodeId, setSelectedNodeId] = useState<string | undefined>(activeNodeId);
 
-	const selectedNode = useMemo(
-		() => (selectedNodeId ? nodes.find((n: Node) => n.id === selectedNodeId) : undefined),
-		[selectedNodeId, nodes]
-	);
+	const selectedNode = useMemo(() => (selectedNodeId ? nodes.find((n: Node) => n.id === selectedNodeId) : undefined), [selectedNodeId, nodes]);
 
-	const [selectedHandle, _setSelectedHandle] = useState<NodeHandleSelection | undefined>(
-		undefined
-	);
+	const [selectedHandle, _setSelectedHandle] = useState<NodeHandleSelection | undefined>(undefined);
 
 	const setSelectedNode = (nodeId?: string) => {
 		// Do nothing if selecting already selected node
@@ -392,15 +292,9 @@ export const FlowProvider = ({
 		setSelectedNodeId(nodeId);
 	};
 
-	const setSelectedHandle = (
-		nodeId?: string,
-		handleId?: string,
-		keys?: string[],
-		inputKey?: string
-	) => {
+	const setSelectedHandle = (nodeId?: string, handleId?: string, keys?: string[], inputKey?: string) => {
 		// Build the tuple only when both nodeId and handleId are present; clear otherwise
-		const tuple: NodeHandleSelection | undefined =
-			nodeId != null && handleId != null ? [nodeId, handleId, keys ?? [], inputKey] : undefined;
+		const tuple: NodeHandleSelection | undefined = nodeId != null && handleId != null ? [nodeId, handleId, keys ?? [], inputKey] : undefined;
 		_setSelectedHandle(tuple);
 	};
 
@@ -443,14 +337,7 @@ export const FlowProvider = ({
 	const [toolchainState, setToolchainState] = useState<IToolchainState>(defaultToolchainState);
 
 	// Derive running state from task statuses: true if any task is neither completed nor cancelled
-	const isPipelineRunning = useMemo(
-		() =>
-			Object.values(taskStatuses ?? {}).filter(
-				(status) =>
-					status.state !== TASK_STATE.COMPLETED && status.state !== TASK_STATE.CANCELLED
-			).length > 0,
-		[taskStatuses]
-	);
+	const isPipelineRunning = useMemo(() => Object.values(taskStatuses ?? {}).filter((status) => status.state !== TASK_STATE.COMPLETED && status.state !== TASK_STATE.CANCELLED).length > 0, [taskStatuses]);
 
 	// Import/Export functionality
 	const { importToolchain, exportToolchain, exportOptions, setExportOptions } = useImportExport({
@@ -464,6 +351,9 @@ export const FlowProvider = ({
 
 	// When true, node/edge changes should trigger onContentChanged (skip right after initial load)
 	const contentChangeEnabledRef = useRef(false);
+	// Timestamp of the last onContentChanged call — echoes arriving within the suppression window are skipped
+	const selfUpdateTimestampRef = useRef(0);
+	const SELF_UPDATE_SUPPRESS_MS = 500;
 
 	const onToolchainUpdated = useCallback(() => {
 		// Mark the toolchain as dirty (unsaved changes exist)
@@ -486,22 +376,26 @@ export const FlowProvider = ({
 				if (currentProject?.project_id) {
 					project.project_id = currentProject.project_id;
 				}
+				// Mark the time so echoes arriving within the suppression window are skipped
+				selfUpdateTimestampRef.current = Date.now();
 				onContentChanged(project);
 			}, 50);
 		}
-	// eslint-disable-next-line react-hooks/exhaustive-deps
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [currentProject?.name, currentProject?.description, currentProject?.version, onContentChanged]);
 
 	const detectChange = useCallback((changes: NodeChange[]) => {
-		// Ignore cosmetic changes (select/deselect, dimensions) and only fire for structural ones
-		const meaningfulChanges = changes.filter((change) =>
-			['add', 'remove', 'position'].includes(change.type)
-		);
+		// Ignore cosmetic changes (select/deselect, dimensions) and only fire for structural ones.
+		// Also skip intermediate drag frames — only the final drop (dragging: false) matters.
+		const meaningfulChanges = changes.filter((change) => {
+			if (change.type === 'position' && change.dragging) return false;
+			return ['add', 'remove', 'position'].includes(change.type);
+		});
 
 		if (meaningfulChanges.length > 0) {
 			onToolchainUpdated();
 		}
-	// eslint-disable-next-line react-hooks/exhaustive-deps
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	//
@@ -509,29 +403,15 @@ export const FlowProvider = ({
 	//
 
 	const addNode = useCallback(
-		(
-			data: Record<string, unknown>,
-			position?: NodePosition,
-			type: NodeType = NodeType.Default
-		) => {
+		(data: Record<string, unknown>, position?: NodePosition, type: NodeType = NodeType.Default) => {
 			// Generate a collision-free ID based on the provider name
 			const id = generateId(nodes, data.provider as string);
 
 			// Use the caller-supplied position or fall back to a centred default
-			const _position = position
-				? position
-				: getDefaultNodePosition(
-						NodeType.RemoteGroup,
-						canvasRef,
-						nodes,
-						screenToFlowPosition
-					);
+			const _position = position ? position : getDefaultNodePosition(NodeType.RemoteGroup, canvasRef, nodes, screenToFlowPosition);
 
 			// Dispatch to the annotation factory or the standard node factory
-			const node =
-				type === NodeType.Annotation
-					? createAnnotationNode(id, _position, data)
-					: createNode(id, _position, data);
+			const node = type === NodeType.Annotation ? createAnnotationNode(id, _position, data) : createNode(id, _position, data);
 
 			const nd = node.data as INodeData;
 			const savedFormData = nd.formData ?? {};
@@ -547,10 +427,7 @@ export const FlowProvider = ({
 					nd.formData = resolvedFormData;
 
 					// Eagerly validate so the node can show a red/green indicator immediately
-					const validationResult = validateFormData(
-						nd.Pipe.schema,
-						nd.formData
-					);
+					const validationResult = validateFormData(nd.Pipe.schema, nd.formData);
 
 					nd.formDataValid = validationResult.errors.length === 0;
 				}
@@ -572,37 +449,22 @@ export const FlowProvider = ({
 
 	const addAnnotationNode = useCallback(() => {
 		const id = generateId(nodes, NodeType.Annotation);
-		const position = getDefaultNodePosition(
-			NodeType.Annotation,
-			canvasRef,
-			nodes,
-			screenToFlowPosition
-		);
+		const position = getDefaultNodePosition(NodeType.Annotation, canvasRef, nodes, screenToFlowPosition);
 		const node = createAnnotationNode(id, position);
 		setNodes((nds: Node[]) => [...nds, node]);
 		onToolchainUpdated();
-	// eslint-disable-next-line react-hooks/exhaustive-deps
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [nodes, screenToFlowPosition, canvasRef]);
 
 	const addRemoteGroupNode = useCallback(
 		(data: Record<string, unknown>, position?: NodePosition) => {
 			const id = generateId(nodes, NodeType.RemoteGroup);
-			const _position = position
-				? position
-				: getDefaultNodePosition(
-						NodeType.RemoteGroup,
-						canvasRef,
-						nodes,
-						screenToFlowPosition
-					);
+			const _position = position ? position : getDefaultNodePosition(NodeType.RemoteGroup, canvasRef, nodes, screenToFlowPosition);
 			const node = createRemoteGroupNode(id, _position, data);
 
 			// ReactFlow renders nodes in array order; group nodes must come first
 			// so child nodes render on top and receive pointer events correctly.
-			const groupNodes = [
-				...nodes.filter((n: Node) => n.type === NodeType.RemoteGroup),
-				node,
-			];
+			const groupNodes = [...nodes.filter((n: Node) => n.type === NodeType.RemoteGroup), node];
 			const otherNodes = nodes.filter((n: Node) => n.type !== NodeType.RemoteGroup);
 			const _nodes = [...groupNodes, ...otherNodes];
 
@@ -624,9 +486,7 @@ export const FlowProvider = ({
 			// Re-parent each selected node under the new group, converting absolute
 			// positions to group-relative coordinates and raising their zIndex.
 			const updatedNodes: Node[] = nodes.map((node) => {
-				const isSelected = selectedNodes.some(
-					(selectedNode: Node) => selectedNode.id === node.id
-				);
+				const isSelected = selectedNodes.some((selectedNode: Node) => selectedNode.id === node.id);
 				return isSelected
 					? {
 							...node,
@@ -679,7 +539,7 @@ export const FlowProvider = ({
 	const onDoubleClickNode = useCallback((node: Node) => {
 		setSelectedNode(node.id);
 		toggleActionsPanel(ActionsType.Node);
-	// eslint-disable-next-line react-hooks/exhaustive-deps
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	const onNodeDrag = useCallback(
@@ -697,9 +557,7 @@ export const FlowProvider = ({
 
 			// For top-level nodes, detect whether the drag position overlaps a group
 			else if (!node.parentId) {
-				const groupNode = getIntersectingNodes(node, true, nodes).find(
-					(n: Node) => n.id !== node.id && n.type === NodeType.RemoteGroup
-				);
+				const groupNode = getIntersectingNodes(node, true, nodes).find((n: Node) => n.id !== node.id && n.type === NodeType.RemoteGroup);
 				if (!groupNode) {
 					setHoveredGroupNodeId(undefined);
 				} else {
@@ -723,19 +581,10 @@ export const FlowProvider = ({
 			setHoveredGroupNodeId(undefined);
 
 			// Nodes that already belong to a group, or are groups themselves, can't be re-parented
-			if (
-				node.parentId != null ||
-				node.type === NodeType.RemoteGroup ||
-				node.type === NodeType.Group
-			)
-				return;
+			if (node.parentId != null || node.type === NodeType.RemoteGroup || node.type === NodeType.Group) return;
 
 			// Check whether the drop position overlaps with any group node
-			const groupNode = getIntersectingNodes(node, true, nodes).find(
-				(n: Node) =>
-					n.id !== node.id &&
-					(n.type === NodeType.RemoteGroup || n.type === NodeType.Group)
-			);
+			const groupNode = getIntersectingNodes(node, true, nodes).find((n: Node) => n.id !== node.id && (n.type === NodeType.RemoteGroup || n.type === NodeType.Group));
 
 			if (!groupNode) return;
 
@@ -837,13 +686,10 @@ export const FlowProvider = ({
 		[nodes]
 	);
 
-	const onHandleClick = useCallback(
-		(nodeId: string, handleId: string, keys: string[], inputKey?: string) => {
-			toggleActionsPanel(ActionsType.CreateNode);
-			setSelectedHandle(nodeId, handleId, keys, inputKey);
-		},
-		[]
-	);
+	const onHandleClick = useCallback((nodeId: string, handleId: string, keys: string[], inputKey?: string) => {
+		toggleActionsPanel(ActionsType.CreateNode);
+		setSelectedHandle(nodeId, handleId, keys, inputKey);
+	}, []);
 
 	const onNodesDelete = useCallback(
 		(deletedNodes: Node[]) => {
@@ -876,15 +722,11 @@ export const FlowProvider = ({
 			// Build a quick lookup for the nodes being deleted
 			const _nodesMap = Object.fromEntries(_nodes.map((n: Node) => [n.id, n]));
 			// Identify child nodes that will be orphaned when their parent is deleted
-			const childNodes = nodes
-				.filter((n: Node) => n.parentId != null && ids.has(n.parentId))
-				.map((n: Node) => n.id);
+			const childNodes = nodes.filter((n: Node) => n.parentId != null && ids.has(n.parentId)).map((n: Node) => n.id);
 			const childNodeIds = new Set(childNodes);
 
 			let nodesToDelete = _nodes;
-			const childNodesToDelete = nodes.filter((n: Node) =>
-				n.parentId != null && ids.has(n.parentId)
-			);
+			const childNodesToDelete = nodes.filter((n: Node) => n.parentId != null && ids.has(n.parentId));
 
 			// Before deleting the parent, promote its children to top-level by converting
 			// their positions back to absolute coordinates and removing parentId/extent.
@@ -918,13 +760,8 @@ export const FlowProvider = ({
 				const groupNode = prevNodes.find((n) => n.id === groupId);
 
 				// Safety check: only valid group types can be locked/unlocked
-				if (
-					!groupNode ||
-					(groupNode.type !== NodeType.Group && groupNode.type !== NodeType.RemoteGroup)
-				) {
-					console.warn(
-						`toggleGroupLock: Group node with id ${groupId} not found or not a valid group type.`
-					);
+				if (!groupNode || (groupNode.type !== NodeType.Group && groupNode.type !== NodeType.RemoteGroup)) {
+					console.warn(`toggleGroupLock: Group node with id ${groupId} not found or not a valid group type.`);
 					return prevNodes;
 				}
 
@@ -1044,15 +881,12 @@ export const FlowProvider = ({
 							const und = updatedNode.data as INodeData;
 							if (edgeToRemove.sourceHandle?.startsWith('invoke-source')) {
 								// Remove the matching control connection entry
-								const controlConnections: IControl[] =
-									und.controlConnections || [];
+								const controlConnections: IControl[] = und.controlConnections || [];
 								updatedNode = {
 									...updatedNode,
 									data: {
 										...updatedNode.data,
-										controlConnections: controlConnections.filter(
-											(c: IControl) => c.from !== edgeToRemove.source
-										),
+										controlConnections: controlConnections.filter((c: IControl) => c.from !== edgeToRemove.source),
 									},
 								};
 							} else {
@@ -1063,10 +897,7 @@ export const FlowProvider = ({
 									...updatedNode,
 									data: {
 										...updatedNode.data,
-										input: input.filter(
-											(i: IInputLane) =>
-												!(i.from === edgeToRemove.source && i.lane === lane)
-										),
+										input: input.filter((i: IInputLane) => !(i.from === edgeToRemove.source && i.lane === lane)),
 									},
 								};
 							}
@@ -1149,10 +980,7 @@ export const FlowProvider = ({
 						};
 
 						// Preserve project_id across saves so running tasks stay matched.
-						_project.project_id =
-							_project.project_id ??
-							updatedProject.project_id ??
-							uuid();
+						_project.project_id = _project.project_id ?? updatedProject.project_id ?? uuid();
 
 						// Delegate to the host-provided persistence callback
 						if (saveProject) await saveProject(_project);
@@ -1197,13 +1025,7 @@ export const FlowProvider = ({
 				const nodesInPipeline = validationResult?.data?.pipeline?.chain || [];
 
 				// Check only the nodes in the pipeline chain; fall back to all nodes if unknown
-				const invalidNodes =
-					nodesInPipeline.length > 0
-						? nodes.filter(
-								(n) =>
-									(n.data as INodeData).formDataValid === false && nodesInPipeline.includes(n.id)
-							)
-						: nodes.filter((n) => (n.data as INodeData).formDataValid === false);
+				const invalidNodes = nodesInPipeline.length > 0 ? nodes.filter((n) => (n.data as INodeData).formDataValid === false && nodesInPipeline.includes(n.id)) : nodes.filter((n) => (n.data as INodeData).formDataValid === false);
 
 				if (invalidNodes.length > 0) {
 					// Block the run and highlight the nodes that need fixing
@@ -1289,12 +1111,7 @@ export const FlowProvider = ({
 		// Restore the viewport position/zoom. Use queueMicrotask so React Flow processes
 		// the new nodes first and doesn't immediately overwrite our viewport with its own fitView.
 		const vp = object.viewport;
-		if (
-			vp &&
-			typeof vp.x === 'number' &&
-			typeof vp.y === 'number' &&
-			typeof vp.zoom === 'number'
-		) {
+		if (vp && typeof vp.x === 'number' && typeof vp.y === 'number' && typeof vp.zoom === 'number') {
 			const savedViewport = { x: vp.x, y: vp.y, zoom: vp.zoom };
 			queueMicrotask(() => setViewport(savedViewport));
 		}
@@ -1316,25 +1133,35 @@ export const FlowProvider = ({
 			setSelectedNode(parsedState.node_id);
 			toggleActionsPanel(ActionsType.Node);
 		}
-	// eslint-disable-next-line react-hooks/exhaustive-deps
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [currentProject, servicesJson, oAuthPanelInit, authType, clientId, clientSecret, nodeId]);
 
 	// Initial load: deserialise the project once both servicesJson and currentProject are available
 	useEffect(() => {
+		const msSinceLastUpdate = Date.now() - selfUpdateTimestampRef.current;
 		// Guard: wait until the service definitions have been fetched
 		if (!Object.keys(servicesJson ?? {}).length) return;
 		// Guard: wait until the project payload has been populated
 		if (!Object.keys(currentProject ?? {}).length) return;
 
+		// If this update is an echo of our own onContentChanged call, skip reloading —
+		// we already have the correct local state and reloading would overwrite positions.
+		if (selfUpdateTimestampRef.current > 0 && msSinceLastUpdate < SELF_UPDATE_SUPPRESS_MS) {
+			return;
+		}
+
 		// Suppress content-change notifications during the initial load to avoid false dirty state
 		contentChangeEnabledRef.current = false;
+		// Also stamp the timestamp so that any cascading echoes (loadData → setNodes →
+		// updateNodeInternals → onToolchainUpdated → onContentChanged → echo) are suppressed
+		selfUpdateTimestampRef.current = Date.now();
 		loadData();
 		// Re-enable notifications after a short delay so React Flow finishes initialising
 		const id = setTimeout(() => {
 			contentChangeEnabledRef.current = true;
 		}, 200);
 		return () => clearTimeout(id);
-	// eslint-disable-next-line react-hooks/exhaustive-deps
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [currentProject, servicesJson]);
 
 	// Keep toolchainState.isRunning in sync with the derived isPipelineRunning flag
