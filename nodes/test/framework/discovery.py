@@ -67,9 +67,12 @@ class NodeTestConfig:
     # Node metadata
     preconfig: Dict[str, Any] = field(default_factory=dict)
     lanes: Dict[str, Any] = field(default_factory=dict)
+    config_id: Optional[str] = None
 
     def get_test_id(self) -> str:
         """Generate a unique test ID for this node config."""
+        if self.config_id:
+            return self.config_id
         return f"{self.node_name}:{Path(self.service_file).stem}"
 
     def has_required_env_vars(self) -> bool:
@@ -234,9 +237,16 @@ def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], 
 
     # Support both a single object and an array of objects
     groups = test_data if isinstance(test_data, list) else [test_data]
+    total_groups = len(groups)
 
     configs = []
-    for group in groups:
+    for group_index, group in enumerate(groups):
+        if not isinstance(group, dict):
+            print(f'Warning: Skipping invalid {test_key} group in {service_file}; expected object, got {type(group).__name__}')
+            continue
+        base_id = f'{node_name}:{Path(service_file).stem}'
+        config_id = base_id if total_groups == 1 else f'{base_id}:{test_key}{group_index + 1}'
+
         # Parse test cases using new format
         cases = []
         for case_data in group.get('cases', []):
@@ -260,7 +270,8 @@ def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], 
             timeout=group.get('timeout', 60),
             cases=cases,
             preconfig=data.get('preconfig', {}),
-            lanes=data.get('lanes', {})
+            lanes=data.get('lanes', {}),
+            config_id=config_id,
         ))
 
     return configs
