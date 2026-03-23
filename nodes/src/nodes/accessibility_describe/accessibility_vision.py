@@ -184,7 +184,7 @@ class Chat(ChatBase):
                 image_data = context_item
                 break
 
-        if question.questions and len(question.questions) > 0:
+        if question.questions:
             prompt_text = question.questions[0].text
 
         if not image_data:
@@ -192,9 +192,14 @@ class Chat(ChatBase):
 
         # Parse the data URL outside the retry loop (deterministic)
         # Format: data:image/jpeg;base64,<data>
-        header, b64_data = image_data.split(',', 1)
-        mime_type = header.split(':')[1].split(';')[0]
-        image_bytes = base64.b64decode(b64_data)
+        try:
+            header, b64_data = image_data.split(',', 1)
+            mime_type = header.split(':')[1].split(';')[0]
+            image_bytes = base64.b64decode(b64_data)
+        except (ValueError, IndexError) as e:
+            raise ValueError(
+                'Malformed image data URL. Expected format: data:<mime>;base64,<data>'
+            ) from e
 
         for attempt in range(max_retries + 1):
             try:

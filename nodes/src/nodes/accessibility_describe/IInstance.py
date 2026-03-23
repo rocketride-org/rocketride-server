@@ -49,11 +49,16 @@ class IInstance(IInstanceGenericLLM):
 
         # Write: append image chunks
         if action == AVI_ACTION.WRITE:
+            if self.image_data is None:
+                self.image_data = bytearray()
             self.image_data += buffer
             return self.preventDefault()
 
         # End: process the complete image
         if action == AVI_ACTION.END:
+            if self.image_data is None:
+                return self.preventDefault()
+
             from ai.common.schema import Question
             import base64
 
