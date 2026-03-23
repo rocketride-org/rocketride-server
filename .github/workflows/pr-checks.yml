@@ -24,6 +24,50 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  check-linked-issue:
+    name: Require linked issue
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+      issues: read
+    steps:
+      - name: Check for linked issue
+        uses: nearform-actions/github-action-check-linked-issues@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  check-branch-name:
+    name: Validate branch name
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Check branch naming convention
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          # Skip check for dependabot, release, and main/develop branches
+          if [[ "$BRANCH" =~ ^(dependabot/|release/|main$|develop$) ]]; then
+            echo "✅ Branch '$BRANCH' is exempt from naming convention."
+            exit 0
+          fi
+
+          # Enforce: feat|fix|hotfix|docs|refactor|chore / RR-<number>-<description>
+          PATTERN='^(feat|fix|hotfix|docs|refactor|chore)/RR-[0-9]+-[a-z0-9][a-z0-9-]*$'
+          if [[ "$BRANCH" =~ $PATTERN ]]; then
+            echo "✅ Branch '$BRANCH' follows naming convention."
+          else
+            echo "❌ Branch '$BRANCH' does not follow naming convention."
+            echo ""
+            echo "Expected format: <type>/RR-<issue-number>-<short-description>"
+            echo "  Types: feat, fix, hotfix, docs, refactor, chore"
+            echo "  Example: fix/RR-123-sql-injection-prevention"
+            echo ""
+            echo "To create a branch from an issue, use:"
+            echo "  gh issue develop <number> --name 'fix/RR-<number>-<description>' --checkout"
+            exit 1
+          fi
+
   label:
     name: Auto-label
     runs-on: ubuntu-latest
