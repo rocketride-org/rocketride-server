@@ -32,7 +32,8 @@ returning both the aggregate counts and raw PR-level detail.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any
 
 import requests
 
@@ -41,8 +42,9 @@ from ai.common.tools import ToolsBase
 BASE_URL = 'https://api.github.com'
 MAX_PRS = 500
 PER_PAGE = 100
+MAX_RETRIES = 3
 
-INPUT_SCHEMA: Dict[str, Any] = {
+INPUT_SCHEMA: dict[str, Any] = {
     'type': 'object',
     'required': ['repo'],
     'properties': {
@@ -74,11 +76,15 @@ class GithubDriver(ToolsBase):
             }
         )
 
+    def close(self) -> None:
+        """Close the underlying HTTP session."""
+        self._session.close()
+
     # ------------------------------------------------------------------
     # ToolsBase hooks
     # ------------------------------------------------------------------
 
-    def _tool_query(self) -> List[Dict[str, Any]]:
+    def _tool_query(self) -> list[dict[str, Any]]:
         return [
             {
                 'name': self._namespaced,
@@ -105,14 +111,14 @@ class GithubDriver(ToolsBase):
         pull_requests = self._fetch_pull_requests(repo, since)
         truncated = len(pull_requests) >= MAX_PRS
 
-        reviews_by_user: Dict[str, int] = {}
-        pr_details: List[Dict[str, Any]] = []
+        reviews_by_user: dict[str, int] = {}
+        pr_details: list[dict[str, Any]] = []
 
         for pr in pull_requests:
             pr_number = pr['number']
             reviews = self._fetch_reviews(repo, pr_number)
 
-            reviewers: List[str] = []
+            reviewers: list[str] = []
             seen: set = set()
             for review in reviews:
                 login = review.get('user', {}).get('login', '')
@@ -153,39 +159,60 @@ class GithubDriver(ToolsBase):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _fetch_pull_requests(self, repo: str, since: Optional[str]) -> List[Dict[str, Any]]:
+    def _get_with_retry(self, url: str, params: dict[str, Any]) -> requests.Response:
+        """GET with retry/backoff. Respects Retry-After on 429."""
+        for attempt in range(MAX_RETRIES):
+            try:
+                resp = self._session.get(url, params=params, timeout=30)
+                if resp.status_code == 429:
+                    wait = int(resp.headers.get('Retry-After', 2**attempt))
+                    time.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                return resp
+            except requests.exceptions.HTTPError as e:
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(2**attempt)
+                    continue
+                raise RuntimeError(f'GitHub API error for {url} params={params}: {e}') from e
+            except requests.exceptions.RequestException as e:
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(2**attempt)
+                    continue
+                raise RuntimeError(f'GitHub request failed for {url} params={params}: {e}') from e
+        raise RuntimeError(f'GitHub API exceeded {MAX_RETRIES} retries for {url}')
+
+    def _fetch_pull_requests(self, repo: str, since: str | None) -> list[dict[str, Any]]:
         """Paginate through all PRs (open + closed), up to MAX_PRS."""
-        results: List[Dict[str, Any]] = []
-        params: Dict[str, Any] = {'state': 'all', 'per_page': PER_PAGE, 'page': 1}
-        if since:
-            params['since'] = since
+        results: list[dict[str, Any]] = []
+        params: dict[str, Any] = {'state': 'all', 'per_page': PER_PAGE, 'page': 1}
 
         while len(results) < MAX_PRS:
-            resp = self._session.get(f'{BASE_URL}/repos/{repo}/pulls', params=params, timeout=30)
-            resp.raise_for_status()
+            resp = self._get_with_retry(f'{BASE_URL}/repos/{repo}/pulls', params)
             page = resp.json()
             if not page:
                 break
             results.extend(page)
             params['page'] += 1
-            # If the page was smaller than per_page, we've reached the end
             if len(page) < PER_PAGE:
                 break
 
+        # Apply date filtering post-fetch — the Pulls API ignores 'since'
+        if since:
+            results = [pr for pr in results if (pr.get('updated_at') or '') >= since]
+
         return results[:MAX_PRS]
 
-    def _fetch_reviews(self, repo: str, pr_number: int) -> List[Dict[str, Any]]:
+    def _fetch_reviews(self, repo: str, pr_number: int) -> list[dict[str, Any]]:
         """Fetch all reviews for a single PR."""
-        results: List[Dict[str, Any]] = []
-        params = {'per_page': PER_PAGE, 'page': 1}
+        results: list[dict[str, Any]] = []
+        params: dict[str, Any] = {'per_page': PER_PAGE, 'page': 1}
 
         while True:
-            resp = self._session.get(
+            resp = self._get_with_retry(
                 f'{BASE_URL}/repos/{repo}/pulls/{pr_number}/reviews',
-                params=params,
-                timeout=30,
+                params,
             )
-            resp.raise_for_status()
             page = resp.json()
             if not page:
                 break

@@ -61,20 +61,23 @@ class IGlobal(IGlobalBase):
 
         import requests
 
-        resp = requests.get(
-            'https://api.github.com/user',
-            headers={
-                'Authorization': f'Bearer {token}',
-                'Accept': 'application/vnd.github+json',
-            },
-            timeout=10,
-        )
-        if resp.status_code == 401:
-            warning('tool_github: GitHub API token is invalid or expired')
-        elif not resp.ok:
-            warning(f'tool_github: GitHub API returned {resp.status_code} during validation')
+        try:
+            resp = requests.get(
+                'https://api.github.com/user',
+                headers={
+                    'Authorization': f'Bearer {token}',
+                    'Accept': 'application/vnd.github+json',
+                },
+                timeout=10,
+            )
+            if resp.status_code == 401:
+                warning('tool_github: GitHub API token is invalid or expired')
+            elif not resp.ok:
+                warning(f'tool_github: GitHub API returned {resp.status_code} during validation')
+        except requests.RequestException as e:
+            warning(f'tool_github: network error during token validation: {e}')
 
     def endGlobal(self) -> None:
         if self.driver is not None:
-            self.driver._session.close()
+            self.driver.close()
         self.driver = None
