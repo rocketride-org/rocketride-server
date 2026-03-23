@@ -51,7 +51,7 @@ export const VideosView: React.FC<VideosViewProps> = ({ videos, compareMode, set
 					<div
 						key={group.filename}
 						ref={(el) => {
-							if (el && setRef) setRef(group.filename, el);
+							if (setRef) setRef(group.filename, el);
 						}}
 					>
 						<div className="content-item-header">{group.filename}</div>
