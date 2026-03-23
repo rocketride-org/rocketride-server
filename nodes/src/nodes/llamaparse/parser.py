@@ -33,7 +33,7 @@ from ai.common.reader import ReaderBase
 from ai.common.config import Config
 from ai.web.metrics import metrics
 from rocketlib import debug
-from library.helpers.redact import redact_dict as _redact_dict
+from library.helpers.redact import redact_secrets as _redact_secrets
 
 
 class Parser(ReaderBase):
@@ -57,17 +57,17 @@ class Parser(ReaderBase):
         self.bag = bag
 
         debug(f'LlamaParse Parser: Provider: {provider}')
-        debug(f'LlamaParse Parser: Raw connConfig: {_redact_dict(connConfig)}')
+        debug(f'LlamaParse Parser: Raw connConfig: {_redact_secrets(connConfig)}')
 
         # Get the nodes configuration
         config = Config.getNodeConfig(provider, connConfig)
-        debug(f'LlamaParse Parser: Processed config: {_redact_dict(config)}')
+        debug(f'LlamaParse Parser: Processed config: {_redact_secrets(config)}')
 
         # Check if config has nested structure
         if 'default' in config:
             debug('LlamaParse Parser: Found nested config structure, extracting from default profile')
             config = config.get('default', {})
-            debug(f'LlamaParse Parser: Extracted config: {_redact_dict(config)}')
+            debug(f'LlamaParse Parser: Extracted config: {_redact_secrets(config)}')
 
         # Get the other configuration values
         self._parse_mode = config.get('parse_mode', None)

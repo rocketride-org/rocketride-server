@@ -26,7 +26,7 @@ import threading
 from typing import TYPE_CHECKING
 from rocketlib import IGlobalBase, debug, warning
 from ai.common.config import Config
-from library.helpers.redact import redact_dict as _redact_dict
+from library.helpers.redact import redact_secrets as _redact_secrets
 
 
 if TYPE_CHECKING:
@@ -118,7 +118,7 @@ class IGlobal(IGlobalBase):
         # Get API key from user configuration
         api_key = config.get('api_key')
         if api_key:
-            debug('LlamaParse Global: Using user-provided API key: ***REDACTED***')
+            debug(f'LlamaParse Global: Using user-provided API key: {api_key[:10]}...')
         else:
             warning('LlamaParse Global: No API key provided in configuration.')
             api_key = None
@@ -152,7 +152,7 @@ class IGlobal(IGlobalBase):
                 import json
 
                 advanced_config = json.loads(advanced_config_str) if advanced_config_str else {}
-                debug(f'LlamaParse Global: Using advanced config: {_redact_dict(advanced_config)}')
+                debug(f'LlamaParse Global: Using advanced config: {_redact_secrets(advanced_config)}')
 
                 # Merge advanced config into parser_args (excluding api_key which is handled above)
                 for key, value in advanced_config.items():
@@ -199,7 +199,7 @@ class IGlobal(IGlobalBase):
                 parser_args['spreadsheet_extract_sub_tables'] = spreadsheet_extract_sub_tables
 
         try:
-            debug(f'LlamaParse Global: Creating LlamaParse instance with args: {_redact_dict(parser_args)}')
+            debug(f'LlamaParse Global: Creating LlamaParse instance with args: {_redact_secrets(parser_args)}')
             self._llama_parse = LlamaParse(**parser_args)
             debug('LlamaParse Global: LlamaParse instance created successfully')
         except Exception as e:

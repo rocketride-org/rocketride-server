@@ -1,4 +1,4 @@
-"""Tests for the redact_dict log-redaction helper used in LlamaParse and Reducto nodes."""
+"""Tests for the redact_secrets helper used in LlamaParse and Reducto nodes."""
 
 import importlib.util
 import os
@@ -10,7 +10,7 @@ _spec = importlib.util.spec_from_file_location(
 )
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
-_redact_dict = _mod.redact_dict
+_redact_secrets = _mod.redact_secrets
 
 
 # ---------------------------------------------------------------------------
@@ -18,46 +18,46 @@ _redact_dict = _mod.redact_dict
 # ---------------------------------------------------------------------------
 
 
-class TestRedactDict:
-    """Unit tests for redact_dict."""
+class TestRedactSecrets:
+    """Unit tests for redact_secrets."""
 
     def test_redacts_api_key(self):
         """api_key values must be replaced."""
         d = {'api_key': 'llx-secret-1234', 'verbose': False}
-        result = _redact_dict(d)
+        result = _redact_secrets(d)
         assert result['api_key'] == '***REDACTED***'
         assert result['verbose'] is False
 
     def test_redacts_token(self):
         """Keys containing 'token' must be redacted."""
         d = {'auth_token': 'tok_abc', 'mode': 'fast'}
-        result = _redact_dict(d)
+        result = _redact_secrets(d)
         assert result['auth_token'] == '***REDACTED***'
         assert result['mode'] == 'fast'
 
     def test_redacts_password(self):
         """Keys containing 'password' must be redacted."""
         d = {'db_password': 'hunter2', 'host': 'localhost'}
-        result = _redact_dict(d)
+        result = _redact_secrets(d)
         assert result['db_password'] == '***REDACTED***'
         assert result['host'] == 'localhost'
 
     def test_redacts_secret(self):
         """Keys containing 'secret' must be redacted."""
         d = {'client_secret': 's3cr3t'}
-        result = _redact_dict(d)
+        result = _redact_secrets(d)
         assert result['client_secret'] == '***REDACTED***'
 
     def test_redacts_credential(self):
         """Keys containing 'credential' must be redacted."""
         d = {'service_credential': 'cred123'}
-        result = _redact_dict(d)
+        result = _redact_secrets(d)
         assert result['service_credential'] == '***REDACTED***'
 
     def test_case_insensitive(self):
         """Matching must be case-insensitive."""
         d = {'API_KEY': 'key1', 'ApiKey': 'key2', 'TOKEN': 'tok'}
-        result = _redact_dict(d)
+        result = _redact_secrets(d)
         assert result['API_KEY'] == '***REDACTED***'
         assert result['ApiKey'] == '***REDACTED***'
         assert result['TOKEN'] == '***REDACTED***'
@@ -65,18 +65,18 @@ class TestRedactDict:
     def test_non_sensitive_keys_unchanged(self):
         """Non-sensitive keys must pass through unchanged."""
         d = {'parse_mode': 'fast', 'verbose': True, 'timeout': 30}
-        result = _redact_dict(d)
+        result = _redact_secrets(d)
         assert result == d
 
     def test_empty_dict(self):
         """An empty dict must return an empty dict."""
-        assert _redact_dict({}) == {}
+        assert _redact_secrets({}) == {}
 
     def test_original_not_mutated(self):
         """The original dict must not be modified."""
         d = {'api_key': 'secret_val', 'name': 'test'}
         original_copy = dict(d)
-        _redact_dict(d)
+        _redact_secrets(d)
         assert d == original_copy
 
     def test_multiple_sensitive_keys(self):
@@ -88,7 +88,7 @@ class TestRedactDict:
             'password': 'p1',
             'host': 'localhost',
         }
-        result = _redact_dict(d)
+        result = _redact_secrets(d)
         assert result['api_key'] == '***REDACTED***'
         assert result['secret'] == '***REDACTED***'
         assert result['token'] == '***REDACTED***'
@@ -98,13 +98,13 @@ class TestRedactDict:
     def test_redacts_apikey_no_underscore(self):
         """Keys containing 'apikey' (no underscore) must be redacted."""
         d = {'myapikey': 'val'}
-        result = _redact_dict(d)
+        result = _redact_secrets(d)
         assert result['myapikey'] == '***REDACTED***'
 
     def test_redacts_nested_dicts(self):
         """Sensitive keys inside nested dicts must be redacted."""
         d = {'outer': {'api_key': 'secret', 'name': 'safe'}, 'model': 'gpt-4'}
-        result = _redact_dict(d)
+        result = _redact_secrets(d)
         assert result['outer']['api_key'] == '***REDACTED***'
         assert result['outer']['name'] == 'safe'
         assert result['model'] == 'gpt-4'
@@ -112,7 +112,7 @@ class TestRedactDict:
     def test_redacts_list_of_dicts(self):
         """Sensitive keys inside lists of dicts must be redacted."""
         d = {'items': [{'token': 'abc'}, {'name': 'ok'}]}
-        result = _redact_dict(d)
+        result = _redact_secrets(d)
         assert result['items'][0]['token'] == '***REDACTED***'
         assert result['items'][1]['name'] == 'ok'
 
@@ -121,7 +121,7 @@ class TestRedactDict:
 # Allow running with plain `python test_log_redaction.py`
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
-    t = TestRedactDict()
+    t = TestRedactSecrets()
     failed = 0
     for method_name in sorted(dir(t)):
         if method_name.startswith('test_'):

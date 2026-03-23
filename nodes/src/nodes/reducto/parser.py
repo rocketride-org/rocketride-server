@@ -25,7 +25,7 @@ from typing import Any, Dict, Optional, List
 from ai.common.reader import ReaderBase
 from ai.common.config import Config
 from rocketlib import debug
-from library.helpers.redact import redact_dict as _redact_dict
+from library.helpers.redact import redact_secrets as _redact_secrets
 
 
 class Parser(ReaderBase):
@@ -58,7 +58,7 @@ class Parser(ReaderBase):
         if 'default' in self.config:
             debug('Reducto Parser: Found nested config structure, extracting from default profile')
             self.config = self.config.get('default', {})
-            debug(f'Reducto Parser: Extracted config: {_redact_dict(self.config)}')
+            debug(f'Reducto Parser: Extracted config: {_redact_secrets(self.config)}')
 
         # Get configuration values
         self._api_key = self.config.get('api_key')
