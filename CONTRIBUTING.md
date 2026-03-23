@@ -29,6 +29,7 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
 ### Making Changes
 
 1. Create a new branch from `develop`:
+
    ```bash
    git checkout develop
    git pull origin develop
@@ -36,6 +37,7 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
    ```
 
 2. Make your changes, ensuring:
+
    - Code follows the project style guidelines
    - All tests pass
    - New code has appropriate tests
@@ -62,6 +64,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 ### Pull Request Process
 
 1. Push your branch to GitHub:
+
    ```bash
    git push origin feature/your-feature-name
    ```
@@ -69,6 +72,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 2. Open a Pull Request against the `develop` branch
 
 3. Fill out the PR template with:
+
    - Description of changes
    - Related issue numbers
    - Testing performed
@@ -108,16 +112,18 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```bash
 # All tests
-pnpm run test
+./builder test
 
-# C++ tests only
-pnpm run test:native
+# C++ engine tests only
+./builder server:test
 
-# Python tests only
-pnpm run test:python
+# Python tests only (nodes, AI, clients)
+./builder nodes:test
+./builder ai:test
+./builder client-python:test
 
 # TypeScript tests only
-pnpm run test:typescript
+./builder client-typescript:test
 ```
 
 ### Writing Tests
@@ -163,4 +169,3 @@ If you have questions, feel free to:
 - Review closed issues for similar questions
 
 Thank you for contributing to RocketRide Engine!
-
