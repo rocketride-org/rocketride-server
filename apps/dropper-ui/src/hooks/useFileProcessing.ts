@@ -88,6 +88,17 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 	/** Accumulates base64 video chunks per filename as they stream in via SSE */
 	const videoChunksRef = useRef<Map<string, { chunks: string[]; mimeType: string }>>(new Map());
 
+	/** Tracks active Blob URLs created from SSE video chunks so they can be revoked */
+	const videoBlobUrlsRef = useRef<Map<string, string>>(new Map());
+
+	// Revoke all Blob URLs on unmount to avoid memory leaks
+	useEffect(() => {
+		const urlsRef = videoBlobUrlsRef;
+		return () => {
+			urlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+		};
+	}, []);
+
 	// ============= UPLOAD PROGRESS TRACKING =============
 
 	/**
@@ -178,7 +189,11 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 					const binary = atob(videoEntry.chunks.join(''));
 					const bytes = new Uint8Array(binary.length);
 					for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+					// Revoke any existing URL for this file before creating a new one
+					const existingUrl = videoBlobUrlsRef.current.get(r.filepath);
+					if (existingUrl) URL.revokeObjectURL(existingUrl);
 					const blobUrl = URL.createObjectURL(new Blob([bytes], { type: videoEntry.mimeType }));
+					videoBlobUrlsRef.current.set(r.filepath, blobUrl);
 					return {
 						...r,
 						result: {
@@ -363,19 +378,40 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 			const fileToRemove = uploadedFiles.find((f) => f.id === fileId);
 			if (!fileToRemove) return;
 
+			const filename = fileToRemove.file.name;
+
 			// Remove file from list
 			setUploadedFiles((prev) => prev.filter((file) => file.id !== fileId));
 
+			// Revoke any Blob URL created for this file
+			const blobUrl = videoBlobUrlsRef.current.get(filename);
+			if (blobUrl) {
+				URL.revokeObjectURL(blobUrl);
+				videoBlobUrlsRef.current.delete(filename);
+			}
+
 			// Remove corresponding results
-			const updatedUploadResults = uploadResults.filter((result) => result.filepath !== fileToRemove.file.name);
+			const updatedUploadResults = uploadResults.filter((result) => result.filepath !== filename);
 			setUploadResults(updatedUploadResults);
 
-			// Re-parse remaining results or clear if none remain
-			if (updatedUploadResults.length > 0) {
-				const parsedResults = parseDropperResults(updatedUploadResults);
-				setResults(parsedResults);
-			} else {
+			// Filter the existing results state directly to preserve video-enriched objects
+			if (updatedUploadResults.length === 0) {
 				setResults(null);
+			} else {
+				setResults((prev) => {
+					if (!prev) return null;
+					const filterGroups = (arr: typeof prev.textContent) => arr.filter((g) => g.filename !== filename);
+					return {
+						...prev,
+						textContent: filterGroups(prev.textContent),
+						documents: filterGroups(prev.documents),
+						tables: filterGroups(prev.tables),
+						images: filterGroups(prev.images),
+						videos: filterGroups(prev.videos),
+						questions: filterGroups(prev.questions),
+						answers: filterGroups(prev.answers),
+					};
+				});
 			}
 		},
 		[uploadedFiles, uploadResults]
@@ -394,12 +430,14 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 	 * Use when user wants to start completely fresh
 	 */
 	const clearAll = useCallback((): void => {
+		videoBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+		videoBlobUrlsRef.current.clear();
+		videoChunksRef.current.clear();
 		setUploadedFiles([]);
 		setResults(null);
 		setUploadResults([]);
 		setUploadProgress([]);
 		setRemainingFiles(0);
-		videoChunksRef.current.clear();
 	}, []);
 
 	// ============= RETURN API =============

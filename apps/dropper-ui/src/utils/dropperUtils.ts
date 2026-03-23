@@ -218,7 +218,13 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 				case 'video':
 				case 'videos':
 					// Video content is a Blob URL assembled from SSE chunks — pass through as-is
-					if (typeof fieldData === 'string' && fieldData.trim()) {
+					if (Array.isArray(fieldData)) {
+						fieldData.forEach((item) => {
+							if (typeof item === 'string' && item.trim()) {
+								videoItems.push({ filename, content: item, fieldName });
+							}
+						});
+					} else if (typeof fieldData === 'string' && fieldData.trim()) {
 						videoItems.push({ filename, content: fieldData, fieldName });
 					}
 					break;
