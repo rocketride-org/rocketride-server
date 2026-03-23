@@ -1093,7 +1093,7 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @param files - Array of file objects with optional metadata and MIME types
 	 * @param token - Pipeline task token to receive the uploads
-	 * @param maxConcurrent - Maximum number of concurrent uploads (default: 5)
+	 * @param onSSE - Optional callback invoked for each SSE event received during upload processing
 	 *
 	 * @returns Promise resolving to array of UPLOAD_RESULT objects in the same order as input
 	 *
