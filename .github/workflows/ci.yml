@@ -57,6 +57,7 @@ jobs:
               - 'builder.cmd'
               - 'scripts/lib/**'
               - '.github/workflows/_build.yaml'
+              - '.github/workflows/_init.yaml'
               - '.github/workflows/ci.yml'
 
   build:
