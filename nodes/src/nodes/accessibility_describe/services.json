@@ -179,8 +179,8 @@
         "timeout": 30,
         "cases": [
             {
-                "name": "Street scene description",
-                "image": "images/street.jpg",
+                "name": "Scene description from image with text",
+                "image": "images/ocr_test_text.png",
                 "expect": {
                     "text": {
                         "notEmpty": true
@@ -188,8 +188,8 @@
                 }
             },
             {
-                "name": "Indoor scene with text",
-                "image": "images/indoor.jpg",
+                "name": "Mixed content scene description",
+                "image": "images/ocr_test_mixed.png",
                 "expect": {
                     "text": {
                         "notEmpty": true

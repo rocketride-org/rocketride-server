@@ -37,20 +37,23 @@ class IInstance(IInstanceGenericLLM):
 
     IGlobal: IGlobal
 
-    # Raw image data buffer
-    image_data: bytearray = None
+    def __init__(self):
+        super().__init__()
+        self.image_data: bytearray | None = None
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Begin: initialize the image buffer
         if action == AVI_ACTION.BEGIN:
             self.image_data = bytearray()
             return self.preventDefault()
+
         # Write: append image chunks
-        elif action == AVI_ACTION.WRITE:
+        if action == AVI_ACTION.WRITE:
             self.image_data += buffer
             return self.preventDefault()
+
         # End: process the complete image
-        elif action == AVI_ACTION.END:
+        if action == AVI_ACTION.END:
             from ai.common.schema import Question
             import base64
 
@@ -64,10 +67,10 @@ class IInstance(IInstanceGenericLLM):
             question.addContext(image_data_url)
 
             # Add the accessibility analysis prompt
-            question.addQuestion(self.IGlobal._chat._prompt)
+            question.addQuestion(self.IGlobal.chat._prompt)
 
             # Call the vision model and get the accessibility description
-            answer = self.IGlobal._chat.chat(question)
+            answer = self.IGlobal.chat.chat(question)
 
             # Emit the description as text output
             self.instance.writeText(answer.getText())
@@ -75,3 +78,5 @@ class IInstance(IInstanceGenericLLM):
             # Clean up
             self.image_data = None
             return self.preventDefault()
+
+        return None

@@ -24,11 +24,16 @@
 import os
 from rocketlib import IGlobalBase
 from ai.common.config import Config
-from ai.common.chat import ChatBase
 
 
 class IGlobal(IGlobalBase):
-    chat: ChatBase | None = None
+    """Global handler for the Accessibility Describe node.
+
+    Manages the singleton lifecycle of the Gemini Vision chat instance
+    used for accessibility-optimized scene descriptions.
+    """
+
+    chat = None
 
     def beginGlobal(self):
         from depends import depends  # type: ignore
@@ -42,7 +47,7 @@ class IGlobal(IGlobalBase):
         # Get this node's config
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         # Create the chat interface
-        self._chat = Chat(self.glb.logicalType, config, bag)
+        self.chat = Chat(self.glb.logicalType, config, bag)
 
     def endGlobal(self):
-        self._chat = None
+        self.chat = None

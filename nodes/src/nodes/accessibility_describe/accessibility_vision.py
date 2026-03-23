@@ -25,7 +25,7 @@ import os
 import time
 import base64
 from depends import depends  # type: ignore
-from typing import Any, Dict, Tuple
+from typing import Any
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
@@ -58,6 +58,20 @@ DEFAULT_PROMPT = """Describe this image for a blind person. Structure your respo
 
 Keep the total description under 150 words. Prioritize safety-relevant details."""
 
+# Hazard priority prompt modifiers
+HAZARD_PROMPTS = {
+    'high': '\n\nCRITICAL: You MUST lead with hazards. If no hazards exist, explicitly state the area appears safe.',
+    'medium': '\n\nInclude any hazards you notice in their spatial context.',
+    'low': '',
+}
+
+# Spatial format prompt modifiers
+SPATIAL_PROMPTS = {
+    'clock': '\n\nUse clock positions for spatial references (12 o\'clock = straight ahead).',
+    'relative': '\n\nUse relative directions (left, right, ahead, behind) for spatial references.',
+    'both': '\n\nUse both clock positions and relative directions for spatial references.',
+}
+
 
 class Chat(ChatBase):
     """Google Gemini Vision chat for accessibility scene descriptions."""
@@ -67,7 +81,7 @@ class Chat(ChatBase):
     _system_prompt: str = ''
     _prompt: str = ''
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, connConfig: dict[str, Any], bag: dict[str, Any]):
         """Initialize the Gemini Vision accessibility chat instance."""
         super().__init__(provider, connConfig, bag)
         config = Config.getNodeConfig(provider, connConfig)
@@ -75,12 +89,19 @@ class Chat(ChatBase):
         self._model = config.get('model', 'gemini-2.5-flash')
         api_key = config.get('apikey')
 
-        # Get accessibility-specific prompts with defaults
+        # Get accessibility-specific config
+        hazard_priority = config.get('accessibility.prioritizeHazards', 'high')
+        spatial_format = config.get('accessibility.spatialFormat', 'clock')
+
+        # Build system prompt with config modifiers
         self._system_prompt = (
             config.get('accessibility.systemPrompt')
             or config.get('systemPrompt')
             or DEFAULT_SYSTEM_PROMPT
         )
+        self._system_prompt += HAZARD_PROMPTS.get(hazard_priority, '')
+        self._system_prompt += SPATIAL_PROMPTS.get(spatial_format, '')
+
         self._prompt = (
             config.get('accessibility.prompt')
             or config.get('prompt')
@@ -102,7 +123,7 @@ class Chat(ChatBase):
         try:
             self._client = genai.Client(api_key=api_key)
         except Exception as e:
-            raise ValueError(f'Failed to initialize Google AI client: {str(e)}')
+            raise ValueError(f'Failed to initialize Google AI client: {str(e)}') from e
 
         self._modelTotalTokens = config.get('modelTotalTokens', 1048576)
         bag['chat'] = self
@@ -150,7 +171,7 @@ class Chat(ChatBase):
         image_data = None
         prompt_text = self._prompt
         for context_item in question.context:
-            if context_item.startswith('data:image/') or context_item.startswith('data:application/'):
+            if context_item.startswith(('data:image/', 'data:application/')):
                 image_data = context_item
                 break
 
@@ -160,14 +181,14 @@ class Chat(ChatBase):
         if not image_data:
             raise ValueError('No image provided for accessibility description.')
 
+        # Parse the data URL outside the retry loop (deterministic)
+        # Format: data:image/jpeg;base64,<data>
+        header, b64_data = image_data.split(',', 1)
+        mime_type = header.split(':')[1].split(';')[0]
+        image_bytes = base64.b64decode(b64_data)
+
         for attempt in range(max_retries + 1):
             try:
-                # Parse the data URL to get mime type and base64 data
-                # Format: data:image/jpeg;base64,<data>
-                header, b64_data = image_data.split(',', 1)
-                mime_type = header.split(':')[1].split(';')[0]
-                image_bytes = base64.b64decode(b64_data)
-
                 # Build the request with system prompt + image + analysis prompt
                 contents = [
                     Content(
