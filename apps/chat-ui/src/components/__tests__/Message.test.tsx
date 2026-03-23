@@ -36,17 +36,17 @@ describe('Message', () => {
 
 	it('renders user message text', () => {
 		render(<Message message={userMessage} />);
-		expect(screen.getByText('Hello, how are you?')).toBeDefined();
+		expect(screen.getByText('Hello, how are you?')).toBeInTheDocument();
 	});
 
 	it('renders bot message text', () => {
 		render(<Message message={botMessage} />);
-		expect(screen.getByText('I am doing well, thank you!')).toBeDefined();
+		expect(screen.getByText('I am doing well, thank you!')).toBeInTheDocument();
 	});
 
 	it('renders system message text', () => {
 		render(<Message message={systemMessage} />);
-		expect(screen.getByText('Connection established')).toBeDefined();
+		expect(screen.getByText('Connection established')).toBeInTheDocument();
 	});
 
 	it('renders without crashing for empty text', () => {
@@ -56,9 +56,7 @@ describe('Message', () => {
 			sender: 'bot',
 			timestamp: new Date().toISOString(),
 		};
-		// Should not throw
-		const { container } = render(<Message message={emptyMsg} />);
-		expect(container).toBeDefined();
+		expect(() => render(<Message message={emptyMsg} />)).not.toThrow();
 	});
 
 	it('renders markdown in bot messages', () => {
@@ -69,7 +67,6 @@ describe('Message', () => {
 			timestamp: new Date().toISOString(),
 		};
 		render(<Message message={markdownMsg} />);
-		// Bold text should be rendered (markdown processed)
-		expect(screen.getByText('bold text')).toBeDefined();
+		expect(screen.getByText('bold text')).toBeInTheDocument();
 	});
 });

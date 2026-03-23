@@ -31,97 +31,20 @@ env:
 jobs:
   init:
     name: Initialize
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - name: Set up variables
-        id: vars
-        run: |
-          VERSION=$(jq -r '.version' package.json)
-          echo "FULL_VERSION=$VERSION.${{ github.run_number }}" >> $GITHUB_OUTPUT
-          echo "BUILD_HASH=$(echo ${{ github.sha }} | cut -c1-8)" >> $GITHUB_OUTPUT
-          echo "BUILD_STAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
-          cat $GITHUB_OUTPUT
-    outputs:
-      FULL_VERSION: ${{ steps.vars.outputs.FULL_VERSION }}
-      BUILD_HASH: ${{ steps.vars.outputs.BUILD_HASH }}
-      BUILD_STAMP: ${{ steps.vars.outputs.BUILD_STAMP }}
-
+    uses: ./.github/workflows/_init.yaml
   build:
-    name: Build / ${{ matrix.label }}
+    name: Build
     needs: init
     if: github.event_name != 'schedule'
-    timeout-minutes: 90
-    runs-on: ${{ matrix.runner }}
+    uses: ./.github/workflows/_build.yaml
     permissions:
       contents: read
       packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: ubuntu
-            label: Ubuntu 22.04
-            runner: ubuntu-22.04
-            builder_cmd: ./builder
-            vcpkg_cmd: ./build/vcpkg/vcpkg
-          - platform: windows
-            label: Windows Server 2022
-            runner: windows-2022
-            builder_cmd: ./builder.cmd
-            vcpkg_cmd: ./build/vcpkg/vcpkg.exe
-          - platform: macos
-            label: macOS (ARM64)
-            runner: macos-14
-            builder_cmd: ./builder
-            vcpkg_cmd: ./build/vcpkg/vcpkg
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: recursive
-      - name: Set up pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
-        with:
-          version: 10
-      - name: Set up vcpkg
-        run: ${{ matrix.builder_cmd }} vcpkg:submodule-build
-      - name: Set up vcpkg nuget / Linux/macOS
-        if: matrix.platform != 'windows'
-        run: |
-          NUGET_EXE=$(${{ matrix.vcpkg_cmd }} fetch nuget | tail -n1)
-          mono $NUGET_EXE sources add \
-            -Source "${{ env.NUGET_FEED_URL }}" \
-            -StorePasswordInClearText \
-            -Name GitHubPackages \
-            -UserName "${{ env.VCPKG_NUGET_USER }}" \
-            -Password "${{ secrets.GITHUB_TOKEN }}" || true
-          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
-            -Source "${{ env.NUGET_FEED_URL }}"
-      - name: Set up vcpkg nuget / Windows
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          $NUGET_EXE = $(${{ matrix.vcpkg_cmd }} fetch nuget | Select-Object -Last 1)
-          & $NUGET_EXE sources add `
-            -Source "${{ env.NUGET_FEED_URL }}" `
-            -StorePasswordInClearText `
-            -Name GitHubPackages `
-            -UserName "${{ env.VCPKG_NUGET_USER }}" `
-            -Password "${{ secrets.GITHUB_TOKEN }}"
-          & $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" `
-            -Source "${{ env.NUGET_FEED_URL }}"
-
-      - name: Build
-        run: |
-          ${{ matrix.builder_cmd }} build --verbose --autoinstall --version=${{ needs.init.outputs.FULL_VERSION }} --hash=${{ needs.init.outputs.BUILD_HASH }} --stamp=${{ needs.init.outputs.BUILD_STAMP }}
-
-      - name: Test
-        run: ${{ matrix.builder_cmd }} test --verbose
+    with:
+      full_version: ${{ needs.init.outputs.full_server_version }}
+      build_hash: ${{ needs.init.outputs.build_hash }}
+      build_stamp: ${{ needs.init.outputs.build_stamp }}
+    secrets: inherit
 
   # ---------------------------------------------------------------------------
   #  CodeQL — scheduled + push only (not on PRs to avoid blocking releases)
@@ -161,62 +84,18 @@ jobs:
   codeql-cpp:
     name: CodeQL / cpp
     if: github.event_name == 'schedule'
-    runs-on: ubuntu-22.04
-    timeout-minutes: 90
-    continue-on-error: true
+    needs: init
+    uses: ./.github/workflows/_build.yaml
     permissions:
       contents: read
       packages: write
       security-events: write
-    env:
-      VCPKG_NUGET_USER: ${{ github.repository_owner }}
-      NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
-      VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: recursive
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
-        with:
-          version: 10
-
-      - name: Bootstrap vcpkg
-        run: ./builder vcpkg:build
-
-      - name: Configure vcpkg NuGet cache
-        run: |
-          NUGET_EXE=$(./build/vcpkg/vcpkg fetch nuget | tail -n1)
-          mono $NUGET_EXE sources add \
-            -Source "${{ env.NUGET_FEED_URL }}" \
-            -StorePasswordInClearText \
-            -Name GitHubPackages \
-            -UserName "${{ env.VCPKG_NUGET_USER }}" \
-            -Password "${{ secrets.GITHUB_TOKEN }}" || true
-          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
-            -Source "${{ env.NUGET_FEED_URL }}"
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
-        with:
-          languages: cpp
-          build-mode: manual
-          queries: security-and-quality
-
-      - name: Skip prebuilt download
-        run: |
-          mkdir -p build
-          echo '{"server":{"compiledVersion":"codeql"}}' > build/state.json
-
-      - name: Build C++
-        run: ./builder server:build --verbose --autoinstall
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
-        with:
-          category: '/language:cpp'
+    with:
+      codeql: true
+      full_version: ${{ needs.init.outputs.full_server_version }}
+      build_hash: ${{ needs.init.outputs.build_hash }}
+      build_stamp: ${{ needs.init.outputs.build_stamp }}
+    secrets: inherit
 
   # ---------------------------------------------------------------------------
   #  Container scan

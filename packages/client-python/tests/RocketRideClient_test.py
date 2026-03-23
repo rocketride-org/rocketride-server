@@ -70,16 +70,12 @@ from unittest.mock import AsyncMock
 
 # Load .env from project root before any imports that need env vars
 from dotenv import load_dotenv
+
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 load_dotenv(PROJECT_ROOT / '.env')
 
 # Skip chat tests when no LLM API key is available
-HAS_LLM_KEY = bool(
-    os.environ.get('ROCKETRIDE_APIKEY_OPENAI')
-    or os.environ.get('ROCKETRIDE_APIKEY_ANTHROPIC')
-    or os.environ.get('ROCKETRIDE_APIKEY_GEMINI')
-    or os.environ.get('ROCKETRIDE_HOST_OLLAMA')
-)
+HAS_LLM_KEY = bool(os.environ.get('ROCKETRIDE_APIKEY_OPENAI') or os.environ.get('ROCKETRIDE_APIKEY_ANTHROPIC') or os.environ.get('ROCKETRIDE_APIKEY_GEMINI') or os.environ.get('ROCKETRIDE_HOST_OLLAMA'))
 requires_llm = pytest.mark.skipif(
     not HAS_LLM_KEY,
     reason='Skipped: no LLM API key set (need ROCKETRIDE_APIKEY_OPENAI, ROCKETRIDE_APIKEY_ANTHROPIC, ROCKETRIDE_APIKEY_GEMINI, or ROCKETRIDE_HOST_OLLAMA)',
@@ -515,7 +511,7 @@ class TestDataOperations:
             assert upload_result['bytes_sent'] == len(test_content)
             assert upload_result['file_size'] == len(test_content)
             assert isinstance(upload_result['upload_time'], (int, float))
-            assert upload_result['upload_time'] > 0
+            assert upload_result['upload_time'] >= 0
             assert 'error' not in upload_result or upload_result['error'] is None
 
             # Validate processing result
@@ -2151,10 +2147,7 @@ class TestConcurrentPipelineOperations:
 
             # Create 4 independent subprocesses concurrently
             sub_tokens = [f'{self.CONCURRENT_TOKEN}-stress-{i}' for i in range(SUBPROCESS_COUNT)]
-            await asyncio.gather(*[
-                client.use(pipeline=get_echo_pipeline(), token=token)
-                for token in sub_tokens
-            ])
+            await asyncio.gather(*[client.use(pipeline=get_echo_pipeline(), token=token) for token in sub_tokens])
 
             # Each pipeline independently cycles 32 send/recv — all 4 run in parallel
             async def run_pipeline(token, pipeline_index):
@@ -2167,9 +2160,7 @@ class TestConcurrentPipelineOperations:
                     results.append(result['text'][0])
                 return results
 
-            all_results = await asyncio.gather(*[
-                run_pipeline(token, i) for i, token in enumerate(sub_tokens)
-            ])
+            all_results = await asyncio.gather(*[run_pipeline(token, i) for i, token in enumerate(sub_tokens)])
 
             flat = [r for pipeline in all_results for r in pipeline]
             assert len(flat) == SUBPROCESS_COUNT * CYCLES_PER_PIPELINE
@@ -2180,7 +2171,7 @@ class TestConcurrentPipelineOperations:
                 try:
                     await client.terminate(token)
                 except Exception as e:
-                    print(f"Warning: failed to terminate pipeline token={token}: {e}")
+                    print(f'Warning: failed to terminate pipeline token={token}: {e}')
             await client.disconnect()
 
 

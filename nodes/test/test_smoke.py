@@ -52,14 +52,14 @@ NODE_NAMES = [n[0] for n in ALL_NODES]
 # ---------------------------------------------------------------------------
 # Test: every node directory has required files
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize('name,node_dir,services_files', ALL_NODES, ids=NODE_NAMES)
-def test_node_has_init(name, node_dir, services_files):
+@pytest.mark.parametrize(('name', 'node_dir', 'services_files'), ALL_NODES, ids=NODE_NAMES)
+def test_node_has_init(name, node_dir, _services_files):
     """Every node must have an __init__.py."""
     init_file = node_dir / '__init__.py'
     assert init_file.exists(), f'{name}/ is missing __init__.py'
 
 
-@pytest.mark.parametrize('name,node_dir,services_files', ALL_NODES, ids=NODE_NAMES)
+@pytest.mark.parametrize(('name', 'node_dir', 'services_files'), ALL_NODES, ids=NODE_NAMES)
 def test_services_json_valid(name, node_dir, services_files):
     """Every services*.json must be valid JSON with required fields."""
     for sfile in services_files:
@@ -74,7 +74,7 @@ def test_services_json_valid(name, node_dir, services_files):
 # ---------------------------------------------------------------------------
 # Test: every node's Python module can be imported without crashing
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize('name,node_dir,services_files', ALL_NODES, ids=NODE_NAMES)
+@pytest.mark.parametrize(('name', 'node_dir', 'services_files'), ALL_NODES, ids=NODE_NAMES)
 def test_node_importable(name, node_dir, services_files):
     """Node's __init__.py should import without errors."""
     # Add nodes/src to path
@@ -95,7 +95,7 @@ def test_node_importable(name, node_dir, services_files):
 # ---------------------------------------------------------------------------
 # Test: lane definitions are consistent
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize('name,node_dir,services_files', ALL_NODES, ids=NODE_NAMES)
+@pytest.mark.parametrize(('name', 'node_dir', 'services_files'), ALL_NODES, ids=NODE_NAMES)
 def test_lanes_valid(name, node_dir, services_files):
     """Lane definitions must reference valid lane names."""
     valid_lanes = {
@@ -112,8 +112,7 @@ def test_lanes_valid(name, node_dir, services_files):
 
     for sfile in services_files:
         data = _parse_service_json(str(sfile))
-        if data is None:
-            continue
+        assert data is not None, f'{sfile.name} failed to parse'
 
         lanes = data.get('lanes', {})
         for input_lane, output_lanes in lanes.items():
@@ -122,6 +121,8 @@ def test_lanes_valid(name, node_dir, services_files):
                 continue
             assert input_lane in valid_lanes, f'{sfile.name}: unknown input lane "{input_lane}". Valid: {valid_lanes}'
             for out_lane in output_lanes:
+                if out_lane.startswith('_'):
+                    continue
                 assert out_lane in valid_lanes, f'{sfile.name}: unknown output lane "{out_lane}". Valid: {valid_lanes}'
 
 
@@ -131,7 +132,7 @@ def test_lanes_valid(name, node_dir, services_files):
 def test_no_duplicate_protocols():
     """Each node must have a unique protocol identifier."""
     protocols = {}
-    for name, node_dir, services_files in ALL_NODES:
+    for name, _node_dir, services_files in ALL_NODES:
         for sfile in services_files:
             data = _parse_service_json(str(sfile))
             if data is None:

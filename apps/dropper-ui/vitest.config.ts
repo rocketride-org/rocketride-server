@@ -1,5 +1,5 @@
 /**
- * Vitest config for chat-ui React webview tests.
+ * Vitest config for dropper-ui React webview tests.
  *
  * Based on Reddit March 2026 best practices:
  * - JSDOM for fast component tests (not browser mode)

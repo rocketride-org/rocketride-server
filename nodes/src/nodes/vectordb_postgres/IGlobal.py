@@ -26,10 +26,12 @@
 # ------------------------------------------------------------------------------
 import os
 import re
-from rocketlib import OPEN_MODE
+from rocketlib import OPEN_MODE, warning
 from ai.common.transform import IGlobalTransform
-from rocketlib import warning
 from ai.common.config import Config
+
+# Valid unquoted PostgreSQL identifier: letter/underscore start, alphanumeric/underscore body, max 63 chars
+VALID_TABLE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
 
 
 class IGlobal(IGlobalTransform):
@@ -87,7 +89,6 @@ class IGlobal(IGlobalTransform):
             table = ((cfg.get('table') or cfg.get('collection')) or '').strip()
 
             # Table name validation: unquoted identifier rules, total ≤63 chars
-            VALID_TABLE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
             if not VALID_TABLE.fullmatch(table or ''):
                 warning('Table name must be ≤63 chars; start with letter/underscore; only letters, digits, underscore; no spaces or special characters (- . / \\ \' " ` ( ) [ ] { } , ; : * + = | & # @ % ^ ! ? ~ $)')
                 return

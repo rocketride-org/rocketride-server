@@ -17,6 +17,7 @@ Usage:
     pytest nodes/test/test_node_smoke.py -v -x  # stop on first failure
 """
 
+import ast
 import importlib
 import sys
 from pathlib import Path
@@ -31,30 +32,6 @@ NODES_DIR = Path(__file__).parent.parent / 'src' / 'nodes'
 # Ensure nodes src is importable
 if str(NODES_DIR) not in sys.path:
     sys.path.insert(0, str(NODES_DIR))
-
-
-# ---------------------------------------------------------------------------
-# Fixtures (Reddit pattern: dependency injection for node testing)
-# ---------------------------------------------------------------------------
-@pytest.fixture
-def mock_provider():
-    """Mock provider string for node instantiation."""
-    return 'test_provider'
-
-
-@pytest.fixture
-def mock_config():
-    """Mock connection config matching typical service.json defaults."""
-    return {
-        'profile': 'default',
-        'default': {},
-    }
-
-
-@pytest.fixture
-def mock_bag():
-    """Mock bag (shared state) for node instantiation."""
-    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +66,7 @@ def discover_nodes_with_python():
                 'services': services_files,
                 'data': data,
                 'node_type': data.get('node', ''),
-                'class_type': data.get('classType', []),
+                'class_type': data.get('classType') if isinstance(data.get('classType'), list) else [data['classType']] if data.get('classType') else [],
             }
         )
     return nodes
@@ -107,8 +84,7 @@ def test_node_module_imports(node):
     """Node Python module imports without crashing."""
     name = node['name']
     try:
-        mod = importlib.import_module(name)
-        assert mod is not None
+        importlib.import_module(name)
     except ImportError as e:
         dep = str(e)
         # Known optional deps that may not be installed
@@ -154,11 +130,10 @@ def test_node_has_instance_class(node):
         pytest.skip('No IInstance.py')
 
     try:
-        spec = importlib.util.spec_from_file_location(f'{node["name"]}.IInstance', str(iinstance))
-        # Don't execute — just check the spec loads
-        assert spec is not None
-    except Exception as e:
-        pytest.fail(f'IInstance.py cannot be loaded: {e}')
+        source = iinstance.read_text(encoding='utf-8')
+        ast.parse(source, filename=str(iinstance))
+    except SyntaxError as e:
+        pytest.fail(f'IInstance.py has syntax error: {e}')
 
 
 # ---------------------------------------------------------------------------

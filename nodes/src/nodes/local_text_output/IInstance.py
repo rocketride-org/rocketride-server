@@ -100,7 +100,15 @@ class IInstance(IInstanceBase):
 
                 # Create the full target path by joining with output directory
                 # e.g. /Users/username/Desktop/Hackathon/folder1/gradient_terms_of_use.txt
-                file_path = os.path.join(output_path, file)
+                resolved_output = os.path.realpath(output_path)
+                candidate_path = os.path.realpath(os.path.join(resolved_output, file.lstrip('/\\')))
+                try:
+                    is_within_output = os.path.commonpath([resolved_output, candidate_path]) == resolved_output
+                except ValueError:
+                    is_within_output = False
+                if not is_within_output:
+                    raise ValueError(f'Path traversal detected: {file} resolves outside output directory')
+                file_path = candidate_path
 
                 # Create all necessary subdirectories
                 target_dir = os.path.dirname(file_path)

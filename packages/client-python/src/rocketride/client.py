@@ -40,7 +40,7 @@ Basic Usage:
 """
 
 import os
-from .core import DAPClient, TransportWebSocket, RocketRideException, CONST_DEFAULT_WEB_CLOUD
+from .core import DAPClient, TransportWebSocket, RocketRideException, CONST_DEFAULT_WEB_CLOUD  # noqa: F401
 from .mixins.connection import ConnectionMixin
 from .mixins.execution import ExecutionMixin
 from .mixins.data import DataMixin
@@ -117,8 +117,8 @@ class RocketRideClient(
 
     def __init__(
         self,
-        uri: str = "",
-        auth: str = "",
+        uri: str = '',
+        auth: str = '',
         **kwargs,
     ):
         """
@@ -145,9 +145,9 @@ class RocketRideClient(
         # Get or load environment variables
         env = kwargs.get('env', None)
         if env is None:
-            # If not provided, load from .env file only
-            self._env = {}
-            
+            # Start with process environment so ROCKETRIDE_* vars work out of the box.
+            self._env = dict(os.environ)
+
             # Try to load .env file
             try:
                 env_path = os.path.join(os.getcwd(), '.env')
@@ -164,10 +164,10 @@ class RocketRideClient(
                                 key = key.strip()
                                 value = value.strip()
                                 # Remove quotes if present
-                                if (value.startswith('"') and value.endswith('"')) or \
-                                   (value.startswith("'") and value.endswith("'")):
+                                if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
                                     value = value[1:-1]
-                                self._env[key] = value
+                                # Preserve already-defined process env values.
+                                self._env.setdefault(key, value)
             except Exception:
                 # File doesn't exist or can't be read - that's okay
                 pass
@@ -185,6 +185,7 @@ class RocketRideClient(
 
         # Normalize the URI into a fully-formed WebSocket address
         from .mixins.connection import ConnectionMixin
+
         self._uri = ConnectionMixin._get_websocket_uri(uri)
         self._apikey = auth
 

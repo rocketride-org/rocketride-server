@@ -1,0 +1,178 @@
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      full_version:
+        description: Full build version (e.g. 1.2.3.456)
+        required: true
+        type: string
+      build_hash:
+        description: Short commit hash (8 chars)
+        required: true
+        type: string
+      build_stamp:
+        description: Build timestamp (ISO 8601 UTC)
+        required: true
+        type: string
+      codeql:
+        description: Run CodeQL C++ analysis (ubuntu only)
+        required: false
+        type: boolean
+        default: false
+      package:
+        description: Run the package step and upload artifacts
+        required: false
+        type: boolean
+        default: false
+      retention_days:
+        description: Artifact retention in days
+        required: false
+        type: number
+        default: 3
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    timeout-minutes: 90
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VCPKG_NUGET_USER: ${{ github.repository_owner }}
+      NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+      VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu
+            label: Ubuntu 22.04
+            runner: ubuntu-22.04
+            builder_cmd: ./builder
+            vcpkg_cmd: ./build/vcpkg/vcpkg
+          - platform: windows
+            label: Windows Server 2022
+            runner: windows-2022
+            builder_cmd: ./builder.cmd
+            vcpkg_cmd: ./build/vcpkg/vcpkg.exe
+          - platform: macos
+            label: macOS (ARM64)
+            runner: macos-14
+            builder_cmd: ./builder
+            vcpkg_cmd: ./build/vcpkg/vcpkg
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+      - name: Set up pnpm
+        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+        with:
+          version: 10
+      - name: Set up vcpkg
+        run: ${{ matrix.builder_cmd }} vcpkg:submodule-build
+      - name: Set up vcpkg nuget / Linux/macOS
+        if: matrix.platform != 'windows'
+        run: |
+          NUGET_EXE=$(${{ matrix.vcpkg_cmd }} fetch nuget | tail -n1)
+          mono $NUGET_EXE sources add \
+            -Source "${{ env.NUGET_FEED_URL }}" \
+            -StorePasswordInClearText \
+            -Name GitHubPackages \
+            -UserName "${{ env.VCPKG_NUGET_USER }}" \
+            -Password "${{ secrets.GITHUB_TOKEN }}" || true
+          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
+            -Source "${{ env.NUGET_FEED_URL }}"
+      - name: Set up vcpkg nuget / Windows
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $NUGET_EXE = $(${{ matrix.vcpkg_cmd }} fetch nuget | Select-Object -Last 1)
+          & $NUGET_EXE sources add `
+            -Source "${{ env.NUGET_FEED_URL }}" `
+            -StorePasswordInClearText `
+            -Name GitHubPackages `
+            -UserName "${{ env.VCPKG_NUGET_USER }}" `
+            -Password "${{ secrets.GITHUB_TOKEN }}"
+          & $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" `
+            -Source "${{ env.NUGET_FEED_URL }}"
+
+      - name: Initialize CodeQL
+        if: inputs.codeql && matrix.platform == 'ubuntu'
+        uses: github/codeql-action/init@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
+        with:
+          languages: cpp
+          build-mode: manual
+          queries: security-and-quality
+
+      - name: Build
+        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version=${{ inputs.full_version }} --hash=${{ inputs.build_hash }} --stamp=${{ inputs.build_stamp }}
+
+      - name: Test
+        if: inputs.codeql == false
+        run: ${{ matrix.builder_cmd }} test --verbose
+
+      - name: Perform CodeQL Analysis
+        if: inputs.codeql && matrix.platform == 'ubuntu'
+        uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
+        with:
+          category: /language:cpp
+
+      - name: Package
+        if: inputs.package
+        run: ${{ matrix.builder_cmd }} package --verbose
+
+      - name: Upload server artifacts
+        if: inputs.package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: server-artifacts-${{ matrix.platform }}
+          retention-days: ${{ inputs.retention_days }}
+          path: |
+            ${{ github.workspace }}/dist/artifacts/*.zip
+            ${{ github.workspace }}/dist/artifacts/*.tar.gz
+            ${{ github.workspace }}/dist/artifacts/*.json
+          if-no-files-found: error
+
+      - name: Upload VS Code extension
+        if: inputs.package && matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: vscode-artifacts
+          retention-days: ${{ inputs.retention_days }}
+          path: ${{ github.workspace }}/dist/vscode/*.vsix
+          if-no-files-found: error
+
+      - name: Upload MCP client
+        if: inputs.package && matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mcp-client-artifacts
+          retention-days: ${{ inputs.retention_days }}
+          path: |
+            ${{ github.workspace }}/dist/clients/mcp/*.whl
+            ${{ github.workspace }}/dist/clients/mcp/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload Python client
+        if: inputs.package && matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-client-artifacts
+          retention-days: ${{ inputs.retention_days }}
+          path: |
+            ${{ github.workspace }}/dist/clients/python/*.whl
+            ${{ github.workspace }}/dist/clients/python/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload TypeScript client
+        if: inputs.package && matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: typescript-client-artifacts
+          retention-days: ${{ inputs.retention_days }}
+          path: ${{ github.workspace }}/dist/clients/typescript/*.tgz
+          if-no-files-found: error

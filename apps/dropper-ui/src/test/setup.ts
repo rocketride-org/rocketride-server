@@ -1,12 +1,17 @@
 /**
- * Vitest setup for chat-ui webview tests.
+ * Vitest setup for dropper-ui webview tests.
  *
  * Mocks:
  * - VSCode API (acquireVsCodeApi) — the postMessage bridge
  * - WebSocket — prevents real connections in tests
  * - window.matchMedia — required by some React components
  */
-import { vi } from 'vitest';
+import { vi, afterEach } from 'vitest';
+import '@testing-library/jest-dom/vitest';
+
+afterEach(() => {
+	vi.clearAllMocks();
+});
 
 // Mock VSCode API bridge (injected by VSCode into webviews)
 const mockVsCodeApi = {

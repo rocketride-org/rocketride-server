@@ -20,12 +20,9 @@ export default defineConfig(({ command }) => {
 	return {
 		server: {
 			port: 3003,
-			base: '/dropper/'
+			base: '/dropper/',
 		},
-		plugins: [
-			pluginReact(),
-			pluginTypeCheck()
-		],
+		plugins: [pluginReact(), pluginTypeCheck()],
 
 		html: {
 			template: './src/index.html',
@@ -34,44 +31,37 @@ export default defineConfig(({ command }) => {
 			meta: {
 				description: 'RocketRide AI Dropper - Intelligent data governance viewer',
 				'theme-color': '#FF8C42',
-				viewport: 'width=device-width, initial-scale=1.0'
-			}
+				viewport: 'width=device-width, initial-scale=1.0',
+			},
 		},
 
 		source: {
 			entry: {
-				index: './src/index.tsx'
+				index: './src/index.tsx',
 			},
 			define: {
-				...(isDev ? {
-					'process.env.CONFIG': JSON.stringify({
-						...parsed,
-						devMode: true
-					})
-				} : {
-					'process.env.CONFIG': JSON.stringify({
-						...parsed,
-						devMode: false
-					})
-				})
-			}
+				'process.env.CONFIG': JSON.stringify({
+					...parsed,
+					devMode: isDev,
+				}),
+			},
 		},
 
 		dev: {
 			writeToDisk: true,
-			assetPrefix: '/dropper/'
+			assetPrefix: '/dropper/',
 		},
 
 		output: {
 			distPath: {
-				root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'dropper-ui')
+				root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'dropper-ui'),
 			},
 			assetPrefix: '/dropper/',
 			cleanDistPath: true,
 			sourceMap: {
-				js: 'source-map',
-				css: true
-			}
-		}
+				js: isDev ? 'source-map' : false,
+				css: isDev,
+			},
+		},
 	};
 });
