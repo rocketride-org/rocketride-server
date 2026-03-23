@@ -1,0 +1,46 @@
+{
+	"title": "GitHub",
+	"protocol": "tool_github://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_github",
+	"prefix": "github",
+	"icon": "github.svg",
+	"description": ["Fetches pull request and review data from a GitHub repository.", "Exposes a github.get_pr_reviews tool that returns a review leaderboard", "and per-PR detail. Requires a GitHub personal access token."],
+	"tile": ["Tool: ${parameters.github.serverName}.get_pr_reviews"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default",
+				"serverName": "github"
+			}
+		}
+	},
+	"fields": {
+		"github.serverName": {
+			"hidden": true,
+			"type": "string",
+			"title": "Server name",
+			"description": "Namespace prefix for the tool: <serverName>.get_pr_reviews",
+			"default": "github"
+		},
+		"github.token": {
+			"type": "string",
+			"secure": true,
+			"title": "GitHub API Token",
+			"description": "Personal access token or fine-grained token with repo read access.",
+			"default": ""
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "GitHub",
+			"properties": ["type", "github.token"]
+		}
+	]
+}
