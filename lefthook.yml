@@ -1,6 +1,14 @@
 pre-commit:
   parallel: true
   commands:
+    gitleaks:
+      tags: security
+      run: |
+        if command -v gitleaks >/dev/null 2>&1; then
+          gitleaks protect --verbose --staged --config .gitleaks.toml
+        else
+          echo "⚠️  gitleaks not installed — skipping secret scan (install: brew install gitleaks)"
+        fi
     eslint:
       glob: '*.{js,ts,jsx,tsx,mjs,cjs}'
       run: npx eslint {staged_files}
