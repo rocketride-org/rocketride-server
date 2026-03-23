@@ -126,27 +126,29 @@
 	//	Full test configuration - tests all NER model profiles.
 	//	Run via: builder model_server:fulltest
 	//
-	"fulltest": {
-		"profiles": [
-			"bertLarge",
-			"bertBase",
-			"distilbert",
-			"xlmRoberta",
-			"deberta",
-			"biomedical"
-		],
-		"cases": [
-			{
-				"text": "Barack Obama was the 44th President of the United States.",
-				"expect": {
-					"text": {
-						"notEmpty": true,
-						"contains": "Obama"
+	"fulltest": [
+		{
+			"profiles": [
+				"bertLarge",
+				"bertBase",
+				"distilbert",
+				"xlmRoberta",
+				"deberta",
+				"biomedical"
+			],
+			"cases": [
+				{
+					"text": "Barack Obama was the 44th President of the United States.",
+					"expect": {
+						"text": {
+							"notEmpty": true,
+							"contains": "Obama"
+						}
 					}
 				}
-			}
-		]
-	},
+			]
+		}
+	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver
