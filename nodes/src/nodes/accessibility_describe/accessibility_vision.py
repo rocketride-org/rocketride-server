@@ -127,7 +127,7 @@ class Chat(ChatBase):
         try:
             self._client = genai.Client(api_key=api_key)
         except Exception as e:
-            raise ValueError(f'Failed to initialize Google AI client: {str(e)}') from e
+            raise ValueError(f'Failed to initialize Google AI client: {e!s}') from e
 
         self._modelTotalTokens = config.get('modelTotalTokens', 1048576)
         bag['chat'] = self
@@ -196,24 +196,24 @@ class Chat(ChatBase):
             header, b64_data = image_data.split(',', 1)
             mime_type = header.split(':')[1].split(';')[0]
             image_bytes = base64.b64decode(b64_data)
-        except (ValueError, IndexError) as e:
+        except (ValueError, IndexError, base64.binascii.Error) as e:
             raise ValueError(
                 'Malformed image data URL. Expected format: data:<mime>;base64,<data>'
             ) from e
 
+        # Build request contents once (deterministic, no need to rebuild per retry)
+        contents = [
+            Content(
+                role='user',
+                parts=[
+                    Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                    Part.from_text(text=prompt_text),
+                ],
+            )
+        ]
+
         for attempt in range(max_retries + 1):
             try:
-                # Build the request with system prompt + image + analysis prompt
-                contents = [
-                    Content(
-                        role='user',
-                        parts=[
-                            Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                            Part.from_text(text=prompt_text),
-                        ],
-                    )
-                ]
-
                 response = self._client.models.generate_content(
                     model=self._model,
                     contents=contents,

@@ -56,7 +56,7 @@ class IInstance(IInstanceGenericLLM):
 
         # End: process the complete image
         if action == AVI_ACTION.END:
-            if self.image_data is None:
+            if not self.image_data:
                 return self.preventDefault()
 
             from ai.common.schema import Question
