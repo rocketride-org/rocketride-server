@@ -21,8 +21,8 @@ export const VideosView: React.FC<VideosViewProps> = ({ videos, compareMode, set
 		setVideoErrors((prev) => new Set(prev).add(src));
 	};
 
-	const renderVideo = (block: ContentBlock, key: number) => (
-		<div key={key} className="content-item">
+	const renderVideo = (block: ContentBlock) => (
+		<div className="content-item">
 			{videoErrors.has(block.content as string) ? (
 				<p className="video-error">Video could not be loaded.</p>
 			) : (
@@ -61,7 +61,7 @@ export const VideosView: React.FC<VideosViewProps> = ({ videos, compareMode, set
 								{group.contents.map((block: ContentBlock, contentIndex: number) => (
 									<div key={contentIndex} className="compare-column">
 										{block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
-										{renderVideo(block, contentIndex)}
+										{renderVideo(block)}
 									</div>
 								))}
 							</div>
@@ -69,7 +69,7 @@ export const VideosView: React.FC<VideosViewProps> = ({ videos, compareMode, set
 							group.contents.map((block: ContentBlock, contentIndex: number) => (
 								<div key={contentIndex} className="content-item-wrapper">
 									{group.contents.length > 1 && block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
-									{renderVideo(block, contentIndex)}
+									{renderVideo(block)}
 								</div>
 							))
 						)}
