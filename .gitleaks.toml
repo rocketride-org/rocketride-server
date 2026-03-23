@@ -5,27 +5,26 @@
 [extend]
 useDefault = true
 
-# Custom rule: detect hardcoded API keys in .pipe JSON files
+# Custom rule: detect hardcoded API keys in .pipe pipeline files
 [[rules]]
 id = "pipe-file-api-key"
 description = "Hardcoded API key in .pipe pipeline file"
-regex = '''(?i)"(apikey|api_key|secret|token|password|auth)"\s*:\s*"([^"$]{8,})"'''
+regex = '''(?i)"(apikey|api_key|secret|token|password|auth)"\s*:\s*"([^"]{8,})"'''
 secretGroup = 2
 keywords = ["apikey", "api_key", "secret", "token", "password", "auth"]
-paths = ['''\.pipe$''', '''\.json$''']
+paths = ['''\.pipe$''']
 
     [rules.allowlist]
     regexes = [
         '''\$[A-Z_]+''',
         '''\$\{[A-Z_]+\}''',
-        '''^\s*$''',
     ]
 
 # Custom rule: detect hardcoded keys in services.json node configs
 [[rules]]
 id = "services-json-api-key"
 description = "Hardcoded API key in node services.json config"
-regex = '''(?i)"(apikey|api_key|secret_key|access_key)"\s*:\s*"([^"$]{16,})"'''
+regex = '''(?i)"(apikey|api_key|secret_key|access_key)"\s*:\s*"([^"]{16,})"'''
 secretGroup = 2
 keywords = ["apikey", "api_key", "secret_key", "access_key"]
 paths = ['''services.*\.json$''']
