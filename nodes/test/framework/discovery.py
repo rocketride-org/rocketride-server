@@ -30,10 +30,7 @@ from typing import List, Dict, Any, Optional
 
 
 # Known input lane names for detecting which key is the input
-KNOWN_INPUT_LANES = {
-    'text', 'image', 'documents', 'audio', 'video', 
-    'questions', 'answers', 'table', 'classifications', 'tags', '_source'
-}
+KNOWN_INPUT_LANES = {'text', 'image', 'documents', 'audio', 'video', 'questions', 'answers', 'table', 'classifications', 'tags', '_source'}
 
 # Lanes where the value is a file path (not inline content)
 FILE_INPUT_LANES = {'image', 'audio', 'video', 'documents'}
@@ -42,6 +39,7 @@ FILE_INPUT_LANES = {'image', 'audio', 'video', 'documents'}
 @dataclass
 class TestCase:
     """A single test case from a node's test configuration."""
+
     input_lane: str
     input_data: Any  # {"text": "..."} or {"file": "path"}
     expect: Optional[Dict[str, Any]] = None  # lane -> expectations
@@ -51,10 +49,11 @@ class TestCase:
 @dataclass
 class NodeTestConfig:
     """Test configuration for a node, parsed from service*.json."""
+
     node_name: str
     provider: str
     service_file: str
-    
+
     # Test configuration
     requires: List[str] = field(default_factory=list)
     profiles: List[str] = field(default_factory=list)
@@ -63,7 +62,7 @@ class NodeTestConfig:
     outputs: List[str] = field(default_factory=list)
     timeout: int = 60
     cases: List[TestCase] = field(default_factory=list)
-    
+
     # Node metadata
     preconfig: Dict[str, Any] = field(default_factory=dict)
     lanes: Dict[str, Any] = field(default_factory=dict)
@@ -73,7 +72,7 @@ class NodeTestConfig:
         """Generate a unique test ID for this node config."""
         if self.config_id:
             return self.config_id
-        return f"{self.node_name}:{Path(self.service_file).stem}"
+        return f'{self.node_name}:{Path(self.service_file).stem}'
 
     def has_required_env_vars(self) -> bool:
         """Check if all required environment variables are set."""
@@ -92,19 +91,19 @@ def _remove_json_comments(content: str) -> str:
     # Process line by line to avoid matching // inside strings
     lines = content.split('\n')
     result_lines = []
-    
+
     in_multiline_comment = False
-    
+
     for line in lines:
         # Handle multi-line comments
         if in_multiline_comment:
             if '*/' in line:
-                line = line[line.index('*/') + 2:]
+                line = line[line.index('*/') + 2 :]
                 in_multiline_comment = False
             else:
                 result_lines.append('')
                 continue
-        
+
         if '/*' in line:
             # Check if it's not inside a string (simple heuristic: before any quote)
             comment_pos = line.find('/*')
@@ -117,7 +116,7 @@ def _remove_json_comments(content: str) -> str:
                 else:
                     line = line[:comment_pos]
                     in_multiline_comment = True
-        
+
         # Remove single-line comments, but only if // is not inside a string
         # Simple heuristic: only match // at start of line or after whitespace
         # and not preceded by : (which would be in a URL like "http://")
@@ -126,17 +125,17 @@ def _remove_json_comments(content: str) -> str:
             in_string = False
             i = 0
             while i < len(line) - 1:
-                if line[i] == '"' and (i == 0 or line[i-1] != '\\'):
+                if line[i] == '"' and (i == 0 or line[i - 1] != '\\'):
                     in_string = not in_string
-                elif line[i:i+2] == '//' and not in_string:
+                elif line[i : i + 2] == '//' and not in_string:
                     # Check it's not part of a URL (preceded by :)
-                    if i == 0 or line[i-1] != ':':
+                    if i == 0 or line[i - 1] != ':':
                         line = line[:i]
                         break
                 i += 1
-        
+
         result_lines.append(line)
-    
+
     return '\n'.join(result_lines)
 
 
@@ -151,59 +150,49 @@ def _parse_service_json(file_path: str) -> Optional[Dict[str, Any]]:
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        
+
         content = _remove_json_comments(content)
         content = _remove_trailing_commas(content)
-        
+
         # Use strict=False to allow control characters (tabs, etc.) in strings
         return json.loads(content, strict=False)
     except Exception as e:
-        print(f"Warning: Failed to parse {file_path}: {e}")
+        print(f'Warning: Failed to parse {file_path}: {e}')
         return None
 
 
 def _parse_test_case(case_data: Dict[str, Any]) -> TestCase:
     """
     Parse a single test case from the new format.
-    
+
     New format uses lane name as key:
         { "text": "What is the capital?", "expect": {...} }
         { "image": "testdata/ocr/sample.png", "expect": {...} }
         { "text": { "text": "content" }, "expect": {...} }  # explicit object
-    
+
     Also supports legacy format for backwards compatibility:
         { "inputLane": "text", "inputData": "...", "expect": {...} }
     """
     # Check for legacy format first
     if 'inputLane' in case_data:
-        return TestCase(
-            input_lane=case_data.get('inputLane', 'text'),
-            input_data=case_data.get('inputData', ''),
-            expect=case_data.get('expect'),
-            name=case_data.get('name')
-        )
-    
+        return TestCase(input_lane=case_data.get('inputLane', 'text'), input_data=case_data.get('inputData', ''), expect=case_data.get('expect'), name=case_data.get('name'))
+
     # New format: find the input lane key
     input_lane = None
     input_data = None
-    
+
     for key, value in case_data.items():
         if key in KNOWN_INPUT_LANES:
             input_lane = key
             input_data = value
             break
-    
+
     if input_lane is None:
         # Default to text if no lane key found
         input_lane = 'text'
         input_data = ''
-    
-    return TestCase(
-        input_lane=input_lane,
-        input_data=input_data,
-        expect=case_data.get('expect'),
-        name=case_data.get('name')
-    )
+
+    return TestCase(input_lane=input_lane, input_data=input_data, expect=case_data.get('expect'), name=case_data.get('name'))
 
 
 def _infer_outputs_from_cases(cases: List[TestCase]) -> List[str]:
@@ -248,8 +237,12 @@ def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], 
         config_id = base_id if total_groups == 1 else f'{base_id}:{test_key}{group_index + 1}'
 
         # Parse test cases using new format
+        raw_cases = group.get('cases') or []
         cases = []
-        for case_data in group.get('cases', []):
+        for case_data in raw_cases:
+            if not isinstance(case_data, dict):
+                print(f'Warning: Skipping invalid test case in {service_file}; expected object, got {type(case_data).__name__}')
+                continue
             case = _parse_test_case(case_data)
             cases.append(case)
 
@@ -258,21 +251,23 @@ def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], 
         if outputs is None:
             outputs = _infer_outputs_from_cases(cases)
 
-        configs.append(NodeTestConfig(
-            node_name=node_name,
-            provider=provider,
-            service_file=service_file,
-            requires=group.get('requires', []),
-            profiles=group.get('profiles', []),
-            controls=group.get('controls', []),
-            chain=group.get('chain', ['*']),
-            outputs=outputs,
-            timeout=group.get('timeout', 60),
-            cases=cases,
-            preconfig=data.get('preconfig', {}),
-            lanes=data.get('lanes', {}),
-            config_id=config_id,
-        ))
+        configs.append(
+            NodeTestConfig(
+                node_name=node_name,
+                provider=provider,
+                service_file=service_file,
+                requires=group.get('requires', []),
+                profiles=group.get('profiles', []),
+                controls=group.get('controls', []),
+                chain=group.get('chain', ['*']),
+                outputs=outputs,
+                timeout=group.get('timeout', 60),
+                cases=cases,
+                preconfig=data.get('preconfig', {}),
+                lanes=data.get('lanes', {}),
+                config_id=config_id,
+            )
+        )
 
     return configs
 
@@ -319,4 +314,3 @@ def get_node_test_config(node_name: str, nodes_src_dir: str = None) -> Optional[
         if config.node_name == node_name:
             return config
     return None
-
