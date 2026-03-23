@@ -62,26 +62,28 @@ class IInstance(IInstanceGenericLLM):
             from ai.common.schema import Question
             import base64
 
-            question = Question()
+            try:
+                question = Question()
 
-            # Convert image bytes to base64 data URL
-            image_base64 = base64.b64encode(bytes(self.image_data)).decode('utf-8')
-            image_data_url = f'data:{mimeType};base64,{image_base64}'
+                # Convert image bytes to base64 data URL
+                image_base64 = base64.b64encode(bytes(self.image_data)).decode('utf-8')
+                image_data_url = f'data:{mimeType};base64,{image_base64}'
 
-            # Add the image as context for the vision model
-            question.addContext(image_data_url)
+                # Add the image as context for the vision model
+                question.addContext(image_data_url)
 
-            # Add the accessibility analysis prompt
-            question.addQuestion(self.IGlobal.chat.prompt)
+                # Add the accessibility analysis prompt
+                question.addQuestion(self.IGlobal.chat.prompt)
 
-            # Call the vision model and get the accessibility description
-            answer = self.IGlobal.chat.chat(question)
+                # Call the vision model and get the accessibility description
+                answer = self.IGlobal.chat.chat(question)
 
-            # Emit the description as text output
-            self.instance.writeText(answer.getText())
+                # Emit the description as text output
+                self.instance.writeText(answer.getText())
+            finally:
+                # Always clean up to prevent stale data on next invocation
+                self.image_data = None
 
-            # Clean up
-            self.image_data = None
             return self.preventDefault()
 
         return None

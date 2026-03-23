@@ -157,7 +157,7 @@ class Chat(ChatBase):
         if any(phrase in error_lower for phrase in ['invalid input', 'bad request', '400']):
             return 'Invalid input. Please check your image format and prompt.'
         if any(phrase in error_lower for phrase in ['model not found', 'unavailable', 'not supported']):
-            return f"Model '{self._model}' is currently unavailable. Please try a different model."
+            return f'Model \'{self._model}\' is currently unavailable. Please try a different model.'
         if any(phrase in error_lower for phrase in ['timeout', 'timed out']):
             return 'Request timed out. Please try again.'
         if any(phrase in error_lower for phrase in ['content policy', 'safety', 'blocked']):
@@ -179,6 +179,8 @@ class Chat(ChatBase):
         # Extract image data from context
         image_data = None
         prompt_text = self._prompt
+        if not question.context:
+            raise ValueError('No image provided for accessibility description.')
         for context_item in question.context:
             if context_item.startswith(('data:image/', 'data:application/')):
                 image_data = context_item
