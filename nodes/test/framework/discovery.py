@@ -202,13 +202,13 @@ def _infer_outputs_from_cases(cases: List[TestCase]) -> List[str]:
     return sorted(outputs)
 
 
-def _ensure_cases_list(cases: Any, service_file: str) -> List[Any]:
-    """Normalize `cases` to a list; invalid shapes log once and become []."""
-    if cases is None:
+def _ensure_list_field(value: Any, field_name: str, service_file: str) -> List[Any]:
+    """Normalize grouped list fields; invalid shapes log once and become []."""
+    if value is None:
         return []
-    if isinstance(cases, list):
-        return cases
-    print(f'Warning: Invalid "cases" in {service_file}; expected array, got {type(cases).__name__}')
+    if isinstance(value, list):
+        return value
+    print(f'Warning: Invalid "{field_name}" in {service_file}; expected array, got {type(value).__name__}')
     return []
 
 
@@ -245,7 +245,7 @@ def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], 
         config_id = base_id if total_groups == 1 else f'{base_id}:{test_key}{group_index + 1}'
 
         # Parse test cases using new format
-        raw_cases = _ensure_cases_list(group.get('cases'), service_file)
+        raw_cases = _ensure_list_field(group.get('cases'), 'cases', service_file)
         cases = []
         for case_index, case_data in enumerate(raw_cases, start=1):
             if not isinstance(case_data, dict):
@@ -257,19 +257,21 @@ def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], 
                 print(f'Warning: Skipping invalid test case {case_index} in {test_key} group {group_index + 1} of {service_file}: {exc}')
 
         # Infer outputs from expect keys only when outputs key is not present
-        outputs = group.get('outputs')
-        if outputs is None:
+        raw_outputs = group.get('outputs')
+        if raw_outputs is None:
             outputs = _infer_outputs_from_cases(cases)
+        else:
+            outputs = _ensure_list_field(raw_outputs, 'outputs', service_file)
 
         configs.append(
             NodeTestConfig(
                 node_name=node_name,
                 provider=provider,
                 service_file=service_file,
-                requires=group.get('requires', []),
-                profiles=group.get('profiles', []),
-                controls=group.get('controls', []),
-                chain=group.get('chain', ['*']),
+                requires=_ensure_list_field(group.get('requires'), 'requires', service_file),
+                profiles=_ensure_list_field(group.get('profiles'), 'profiles', service_file),
+                controls=_ensure_list_field(group.get('controls'), 'controls', service_file),
+                chain=(['*'] if group.get('chain') is None else _ensure_list_field(group.get('chain'), 'chain', service_file)),
                 outputs=outputs,
                 timeout=group.get('timeout', 60),
                 cases=cases,
