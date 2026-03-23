@@ -67,7 +67,7 @@ class IInstance(IInstanceGenericLLM):
             question.addContext(image_data_url)
 
             # Add the accessibility analysis prompt
-            question.addQuestion(self.IGlobal.chat._prompt)
+            question.addQuestion(self.IGlobal.chat.prompt)
 
             # Call the vision model and get the accessibility description
             answer = self.IGlobal.chat.chat(question)

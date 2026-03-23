@@ -73,6 +73,10 @@ SPATIAL_PROMPTS = {
 }
 
 
+class AccessibilityVisionError(Exception):
+    """Raised when accessibility vision analysis fails."""
+
+
 class Chat(ChatBase):
     """Google Gemini Vision chat for accessibility scene descriptions."""
 
@@ -127,6 +131,11 @@ class Chat(ChatBase):
 
         self._modelTotalTokens = config.get('modelTotalTokens', 1048576)
         bag['chat'] = self
+
+    @property
+    def prompt(self) -> str:
+        """Get the current analysis prompt."""
+        return self._prompt
 
     def getTotalTokens(self) -> int:
         """Get the total token limit for the current model."""
@@ -220,8 +229,7 @@ class Chat(ChatBase):
                     delay = base_delay * (2 ** attempt)
                     time.sleep(delay)
                     continue
-                else:
-                    break
+                break
 
         user_friendly_error = self._format_user_error(str(last_error))
-        raise Exception(user_friendly_error)
+        raise AccessibilityVisionError(user_friendly_error) from last_error
