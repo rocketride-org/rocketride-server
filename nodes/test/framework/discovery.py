@@ -188,9 +188,7 @@ def _parse_test_case(case_data: Dict[str, Any]) -> TestCase:
             break
 
     if input_lane is None:
-        # Default to text if no lane key found
-        input_lane = 'text'
-        input_data = ''
+        raise ValueError('Test case is missing a recognized input lane key')
 
     return TestCase(input_lane=input_lane, input_data=input_data, expect=case_data.get('expect'), name=case_data.get('name'))
 
@@ -249,12 +247,14 @@ def _parse_test_config(node_name: str, service_file: str, data: Dict[str, Any], 
         # Parse test cases using new format
         raw_cases = _ensure_cases_list(group.get('cases'), service_file)
         cases = []
-        for case_data in raw_cases:
+        for case_index, case_data in enumerate(raw_cases, start=1):
             if not isinstance(case_data, dict):
                 print(f'Warning: Skipping invalid test case in {service_file}; expected object, got {type(case_data).__name__}')
                 continue
-            case = _parse_test_case(case_data)
-            cases.append(case)
+            try:
+                cases.append(_parse_test_case(case_data))
+            except ValueError as exc:
+                print(f'Warning: Skipping invalid test case {case_index} in {test_key} group {group_index + 1} of {service_file}: {exc}')
 
         # Infer outputs from expect keys only when outputs key is not present
         outputs = group.get('outputs')
