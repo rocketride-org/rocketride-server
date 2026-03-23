@@ -4,9 +4,9 @@
  * See LICENSE file for details.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Video } from 'lucide-react';
-import { ProcessedResults } from '../../types/dropper.types';
+import { ProcessedResults, ContentBlock } from '../../types/dropper.types';
 
 interface VideosViewProps {
 	videos: ProcessedResults['videos'];
@@ -15,6 +15,24 @@ interface VideosViewProps {
 }
 
 export const VideosView: React.FC<VideosViewProps> = ({ videos, compareMode, setRef }) => {
+	const [videoErrors, setVideoErrors] = useState<Set<string>>(new Set());
+
+	const handleVideoError = (src: string) => {
+		setVideoErrors((prev) => new Set(prev).add(src));
+	};
+
+	const renderVideo = (block: ContentBlock, key: number) => (
+		<div key={key} className="content-item">
+			{videoErrors.has(block.content as string) ? (
+				<p className="video-error">Video could not be loaded.</p>
+			) : (
+				<video src={block.content as string} controls className="processed-video" style={{ width: '100%' }} onError={() => handleVideoError(block.content as string)}>
+					Your browser does not support the video element.
+				</video>
+			)}
+		</div>
+	);
+
 	if (videos.length === 0) {
 		return (
 			<div className="tab-content">
@@ -29,9 +47,9 @@ export const VideosView: React.FC<VideosViewProps> = ({ videos, compareMode, set
 	return (
 		<div className="tab-content">
 			<div className="content-list">
-				{videos.map((group, groupIndex) => (
+				{videos.map((group) => (
 					<div
-						key={groupIndex}
+						key={group.filename}
 						ref={(el) => {
 							if (el && setRef) setRef(group.filename, el);
 						}}
@@ -40,22 +58,18 @@ export const VideosView: React.FC<VideosViewProps> = ({ videos, compareMode, set
 
 						{compareMode && group.contents.length > 1 ? (
 							<div className="compare-grid">
-								{group.contents.map((block: any, contentIndex: number) => (
+								{group.contents.map((block: ContentBlock, contentIndex: number) => (
 									<div key={contentIndex} className="compare-column">
 										{block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
-										<div className="content-item">
-											<video src={block.content} controls className="processed-video" style={{ width: '100%' }} />
-										</div>
+										{renderVideo(block, contentIndex)}
 									</div>
 								))}
 							</div>
 						) : (
-							group.contents.map((block: any, contentIndex: number) => (
+							group.contents.map((block: ContentBlock, contentIndex: number) => (
 								<div key={contentIndex} className="content-item-wrapper">
 									{group.contents.length > 1 && block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
-									<div className="content-item">
-										<video src={block.content} controls className="processed-video" style={{ width: '100%' }} />
-									</div>
+									{renderVideo(block, contentIndex)}
 								</div>
 							))
 						)}
