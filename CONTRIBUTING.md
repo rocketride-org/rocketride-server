@@ -26,7 +26,7 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
 
 All other branches **must** follow the naming convention:
 
-```
+```text
 <type>/RR-<issue-number>-<short-description>
 ```
 
