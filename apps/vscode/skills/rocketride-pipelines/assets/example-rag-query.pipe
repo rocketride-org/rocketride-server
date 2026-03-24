@@ -45,12 +45,6 @@
       "id": "qdrant_1",
       "provider": "qdrant",
       "config": {
-        "profile": "cloud",
-        "cloud": {
-          "collection": "ROCKETRIDE",
-          "port": 6333,
-          "score": 0.7
-        },
         "type": "qdrant",
         "parameters": {
           "qdrant": {

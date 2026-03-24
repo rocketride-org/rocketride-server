@@ -62,6 +62,7 @@ esbuild
 		const srcSkills = path.join(__dirname, 'skills');
 		const destSkills = path.join(buildRoot, 'skills');
 		if (fs.existsSync(srcSkills)) {
+			fs.rmSync(destSkills, { recursive: true, force: true });
 			fs.cpSync(srcSkills, destSkills, { recursive: true });
 			console.log(`Copied skills/ to ${destSkills}`);
 		}
