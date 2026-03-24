@@ -25,6 +25,7 @@ Usage:
 
 import gc
 import hashlib
+import math
 import mimetypes
 import os
 import re
@@ -165,6 +166,15 @@ def get_mem_mb():
 # ---------------------------------------------------------------------------
 
 
+def _extract_title(text):
+    """Extract a title/header from the first lines of a document."""
+    for line in text.split('\n')[:5]:
+        line = line.strip().lstrip('#').strip()
+        if len(line) >= 5:
+            return line
+    return ''
+
+
 def discover_and_parse(root_dir):
     """Walk root_dir, read text files, return list of doc dicts."""
     docs = []
@@ -188,6 +198,7 @@ def discover_and_parse(root_dir):
                         'path': fpath,
                         'relative': os.path.relpath(fpath, root_dir),
                         'text': text,
+                        'title': _extract_title(text),
                         'doc_id': len(docs),
                     }
                 )
@@ -238,6 +249,10 @@ def _deterministic_select(items, n, seed_str):
 def generate_qa_pairs(docs):
     """For each document, extract facts and create questions.
 
+    The question includes the document title to anchor the query to
+    distinctive terms, simulating how a user would ask about a specific
+    document (e.g. "In Document 42, what enables...").
+
     Returns list of dicts: {question, doc_id, fact_sentence}
     """
     qa_pairs = []
@@ -249,6 +264,7 @@ def generate_qa_pairs(docs):
         # Pick up to _MAX_QA_PER_DOC sentences deterministically
         candidates = _deterministic_select(sentences, _MAX_QA_PER_DOC * 3, doc['relative'])
 
+        title = doc.get('title', '')
         count = 0
         for sent in candidates:
             if count >= _MAX_QA_PER_DOC:
@@ -257,7 +273,9 @@ def generate_qa_pairs(docs):
             for pattern, template in _QA_PATTERNS:
                 m = pattern.match(sent)
                 if m:
-                    question = template(m)
+                    base_question = template(m)
+                    # Prepend title for doc-distinctive query terms
+                    question = f'{title} {base_question}' if title else base_question
                     qa_pairs.append(
                         {
                             'question': question,
@@ -287,12 +305,13 @@ def chunk_text(text, chunk_size=512, overlap=50):
 
 
 def chunk_and_index(docs, chunk_size=512, overlap=50):
-    """Chunk all documents and build an inverted index.
+    """Chunk all documents and build an inverted index with IDF weights.
 
     Returns:
         all_chunks: list of {text, doc_id, chunk_idx}
         index: dict mapping word -> set of chunk indices
         doc_to_chunks: dict mapping doc_id -> set of chunk indices
+        idf: dict mapping word -> IDF weight
     """
     word_pattern = re.compile(r'\w{2,}')
     all_chunks = []
@@ -315,7 +334,13 @@ def chunk_and_index(docs, chunk_size=512, overlap=50):
             for w in words:
                 index[w].add(chunk_idx)
 
-    return all_chunks, dict(index), dict(doc_to_chunks)
+    # Compute IDF: log(N / df) + 1 so rare terms score higher
+    n_chunks = len(all_chunks)
+    idf = {}
+    for word, posting in index.items():
+        idf[word] = math.log((n_chunks + 1) / (len(posting) + 1)) + 1.0
+
+    return all_chunks, dict(index), dict(doc_to_chunks), idf
 
 
 # ---------------------------------------------------------------------------
@@ -323,29 +348,36 @@ def chunk_and_index(docs, chunk_size=512, overlap=50):
 # ---------------------------------------------------------------------------
 
 
-def _search(index, query, max_results):
-    """Search the inverted index. Returns ranked list of chunk indices."""
+def _search(index, idf, query, max_results):
+    """TF-IDF weighted search. Returns ranked list of chunk indices."""
     words = re.findall(r'\w{2,}', query.lower())
     if not words:
         return []
 
-    # Score chunks by number of matching query terms (BM25-lite)
-    scores = defaultdict(int)
-    for word in words:
+    # Count query term frequency
+    query_tf = defaultdict(int)
+    for w in words:
+        query_tf[w] += 1
+
+    # Score chunks: sum of (query_tf * idf) for matching terms
+    scores = defaultdict(float)
+    for word, qtf in query_tf.items():
+        w_idf = idf.get(word, 0.0)
         for chunk_idx in index.get(word, set()):
-            scores[chunk_idx] += 1
+            scores[chunk_idx] += qtf * w_idf
 
     # Sort by score descending, break ties by chunk index (deterministic)
     ranked = sorted(scores.keys(), key=lambda c: (-scores[c], c))
     return ranked[:max_results]
 
 
-def search_and_evaluate(qa_pairs, index, all_chunks, doc_to_chunks, k_values=None):
+def search_and_evaluate(qa_pairs, index, idf, all_chunks, doc_to_chunks, k_values=None):
     """Run each question through the index, compute Recall@K and MRR.
 
     Args:
         qa_pairs: list of {question, doc_id, fact_sentence}
         index: inverted index (word -> set of chunk indices)
+        idf: IDF weights (word -> float)
         all_chunks: list of chunk dicts
         doc_to_chunks: doc_id -> set of chunk indices
         k_values: list of K values for Recall@K
@@ -365,9 +397,7 @@ def search_and_evaluate(qa_pairs, index, all_chunks, doc_to_chunks, k_values=Non
         return {f'recall_at_{k}': 0.0 for k in k_values} | {'mrr': 0.0}
 
     for qa in qa_pairs:
-        # Use key terms from both question and fact for realistic keyword search
-        query = qa['question'] + ' ' + qa.get('fact_sentence', '')
-        results = _search(index, query, max_results=max_k)
+        results = _search(index, idf, qa['question'], max_results=max_k)
         target_doc_id = qa['doc_id']
         target_chunks = doc_to_chunks.get(target_doc_id, set())
 
@@ -468,7 +498,7 @@ def run(root_dir):
     print('\n[3/4] Chunking and building inverted index...')
     gc.collect()
     t0 = time.perf_counter()
-    all_chunks, index, doc_to_chunks = chunk_and_index(docs)
+    all_chunks, index, doc_to_chunks, idf = chunk_and_index(docs)
     t_index = time.perf_counter() - t0
     print(f'      {len(all_chunks):,} chunks, {len(index):,} index terms in {t_index:.2f}s')
 
@@ -477,7 +507,7 @@ def run(root_dir):
     gc.collect()
     t0 = time.perf_counter()
     k_values = [1, 5, 10]
-    metrics = search_and_evaluate(qa_pairs, index, all_chunks, doc_to_chunks, k_values)
+    metrics = search_and_evaluate(qa_pairs, index, idf, all_chunks, doc_to_chunks, k_values)
     t_eval = time.perf_counter() - t0
     print(f'      {len(qa_pairs):,} queries evaluated in {t_eval:.2f}s')
 
