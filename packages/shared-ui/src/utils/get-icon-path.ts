@@ -45,6 +45,7 @@ import embeddingImageIcon from '../assets/nodes/embedding-image.svg';
 import embeddingOpenaiIcon from '../assets/nodes/embedding-openai.svg';
 import embeddingTextIcon from '../assets/nodes/embedding-text.svg';
 import elasticsearchIcon from '../assets/nodes/elasticsearch.svg';
+import exaIcon from '../assets/nodes/exa.svg';
 import fileSystemIcon from '../assets/nodes/file-system.svg';
 import firecrawlIcon from '../assets/nodes/firecrawl.svg';
 import frameGrabberIcon from '../assets/nodes/frame_grabber.svg';
@@ -126,6 +127,7 @@ const iconMap: Record<string, string> = {
 	dictionary: dictionaryIcon,
 	dropper: dropperIcon,
 	elasticsearch: elasticsearchIcon,
+	exa: exaIcon,
 	'embedding-image': embeddingImageIcon,
 	'embedding-openai': embeddingOpenaiIcon,
 	'embedding-text': embeddingTextIcon,

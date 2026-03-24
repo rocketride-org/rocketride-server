@@ -93,6 +93,8 @@ export const flow: ITranslationFlow = {
 			embedding:
 				'Komponenten, die Text, Bilder oder andere Daten in Vektordarstellungen umwandeln. Diese Tools transformieren Inhalte in numerische Einbettungen, die semantische Bedeutung erfassen und Ähnlichkeitssuche, Clustering und andere vektorbasierte Operationen ermöglichen.',
 			llm: 'Komponenten, die sich in verschiedene KI-Sprachmodelle zur Textgenerierung und -verständnis integrieren. Diese Connectoren bieten NLP-Funktionen wie Textgenerierung, Zusammenfassung, Fragebeantwortung und Inhaltserstellung.',
+			search:
+				'Komponenten, die Benutzeranfragen an Suchanbieter senden und die gefundenen Ergebnisse zurückgeben. Diese Connectoren sind für Web- und Dokumentenrecherche gedacht, bei denen frische Suchtreffer das primäre Ergebnis sind.',
 			database:
 				'Komponenten, die strukturierte und Vektordaten speichern, verwalten und abrufen. Diese Connectoren bieten dauerhafte Speicherlösungen für Einbettungen, Metadaten und Verarbeitungsergebnisse und ermöglichen effizientes Datenmanagement und -abruf.',
 			image: 'Komponenten, die visuelle Inhalte verarbeiten, analysieren und transformieren. Diese Tools übernehmen bildspezifische Operationen wie OCR (Texterkennung), Thumbnail-Erstellung und visuelle Inhaltsanalyse.',

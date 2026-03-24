@@ -94,6 +94,7 @@ export interface ITranslationFlow {
 			source: string;
 			embedding: string;
 			llm: string;
+			search: string;
 			database: string;
 			image: string;
 			filter: string;
@@ -292,6 +293,8 @@ export const flow: ITranslationFlow = {
 			embedding:
 				'Components that convert text, images, or other data into vector representations. These tools transform content into numerical embeddings that capture semantic meaning, enabling similarity search, clustering, and other vector-based operations.',
 			llm: ' Components that integrate with various AI language models for text generation and understanding. These connectors provide natural language processing capabilities including text generation, summarization, question answering, and content creation.',
+			search:
+				'Components that send user queries to search providers and return retrieved results. These connectors are intended for web and document retrieval workflows where fresh search output is the primary result.',
 			database:
 				'Components that store, manage, and retrieve structured and vector data. These connectors provide persistent storage solutions for embeddings, metadata, and processed results, enabling efficient data management and retrieval.',
 			image: ' Components that process, analyze, and transform visual content. These tools handle image-specific operations like OCR (text extraction), thumbnail generation, and visual content analysis.',
