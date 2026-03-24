@@ -133,13 +133,25 @@ class WebServer:
         # Declare the port
         self._port = None
 
-        # Add CORS middleware to allow unrestricted API access
+        # Configure CORS origins and credentials
+        cors_origins_env = os.environ.get('ROCKETRIDE_CORS_ORIGINS', '')
+        if cors_origins_env:
+            cors_origins = [o.strip() for o in cors_origins_env.split(',') if o.strip()]
+        else:
+            cors_origins = []
+
+        if cors_origins:
+            allow_credentials = True
+        else:
+            cors_origins = ['*']
+            allow_credentials = False
+
         self.app.add_middleware(
             CORSMiddleware,
-            allow_origins=['*'],  # Allows all origins (not recommended for production)
-            allow_credentials=True,  # Allows cookies and authentication credentials
-            allow_methods=['*'],  # Allows all HTTP methods (GET, POST, PUT, etc.)
-            allow_headers=['*'],  # Allows all HTTP headers
+            allow_origins=cors_origins,
+            allow_credentials=allow_credentials,
+            allow_methods=['*'],
+            allow_headers=['*'],
         )
 
         # Store the server configuration
