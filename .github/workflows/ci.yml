@@ -58,7 +58,6 @@ jobs:
               - 'scripts/**'
               - 'builder'
               - 'builder.cmd'
-              - 'build/vcpkg/**'
               - '.github/workflows/**'
 
   build:
