@@ -213,3 +213,205 @@ def search_index(index, query, top_k=10):
             for idx in posting:
                 scores[idx] += idf
     return sorted(scores.keys(), key=lambda x: -scores[x])[:top_k]
+
+
+# ---------------------------------------------------------------------------
+# Enhanced indexing for RocketRide (stemming + stop words + BM25 tuning)
+# Per Reddit best practices 2026
+# ---------------------------------------------------------------------------
+
+# Porter stemmer (simplified — handles common English suffixes)
+_SUFFIX_RULES = [
+    (r'ies$', 'i'),
+    (r'ied$', 'i'),
+    (r'ous$', ''),
+    (r'ive$', ''),
+    (r'ing$', ''),
+    (r'tion$', 't'),
+    (r'sion$', 's'),
+    (r'ment$', ''),
+    (r'ness$', ''),
+    (r'able$', ''),
+    (r'ible$', ''),
+    (r'ful$', ''),
+    (r'less$', ''),
+    (r'ize$', ''),
+    (r'ise$', ''),
+    (r'ate$', ''),
+    (r'ity$', ''),
+    (r'ance$', ''),
+    (r'ence$', ''),
+    (r'ally$', ''),
+    (r'erly$', ''),
+    (r'edly$', ''),
+    (r'ly$', ''),
+    (r'er$', ''),
+    (r'or$', ''),
+    (r'es$', ''),
+    (r'ed$', ''),
+    (r's$', ''),
+]
+_COMPILED_RULES = [(re.compile(p), r) for p, r in _SUFFIX_RULES]
+
+STOP_WORDS = frozenset(
+    {
+        'the',
+        'is',
+        'at',
+        'which',
+        'on',
+        'a',
+        'an',
+        'and',
+        'or',
+        'but',
+        'in',
+        'with',
+        'to',
+        'for',
+        'of',
+        'not',
+        'no',
+        'can',
+        'had',
+        'has',
+        'have',
+        'it',
+        'its',
+        'that',
+        'this',
+        'was',
+        'are',
+        'be',
+        'been',
+        'being',
+        'by',
+        'do',
+        'does',
+        'did',
+        'from',
+        'he',
+        'she',
+        'they',
+        'we',
+        'you',
+        'all',
+        'each',
+        'every',
+        'both',
+        'few',
+        'more',
+        'most',
+        'other',
+        'some',
+        'such',
+        'than',
+        'too',
+        'very',
+        'just',
+        'about',
+        'also',
+        'may',
+        'will',
+        'would',
+        'should',
+        'could',
+        'into',
+        'over',
+        'after',
+        'before',
+        'between',
+        'under',
+        'above',
+        'when',
+        'where',
+        'how',
+        'what',
+        'who',
+        'whom',
+        'why',
+        'if',
+        'then',
+        'so',
+        'up',
+        'out',
+        'as',
+        'any',
+        'only',
+        'same',
+        'here',
+        'there',
+        'these',
+        'those',
+        'through',
+        'during',
+        'while',
+        'because',
+        'until',
+    }
+)
+
+
+def _stem(word):
+    """Apply simplified Porter stemming."""
+    if len(word) <= 3:
+        return word
+    for pattern, replacement in _COMPILED_RULES:
+        new = pattern.sub(replacement, word)
+        if new != word and len(new) >= 3:
+            return new
+    return word
+
+
+def _tokenize_enhanced(text):
+    """Tokenize with stemming and stop word removal."""
+    words = re.findall(r'\w{2,}', text.lower())
+    tokens = set()
+    prev = None
+    for w in words:
+        if w in STOP_WORDS:
+            prev = None
+            continue
+        stemmed = _stem(w)
+        tokens.add(stemmed)
+        # Add bi-grams
+        if prev is not None:
+            tokens.add(f'{prev}_{stemmed}')
+        prev = stemmed
+    return tokens
+
+
+def build_enhanced_index(chunks):
+    """Build enhanced inverted index with stemming, stop words, bi-grams."""
+    index = defaultdict(set)
+    doc_lengths = defaultdict(int)
+    for i, chunk in enumerate(chunks):
+        tokens = _tokenize_enhanced(chunk['text'])
+        for t in tokens:
+            index[t].add(i)
+        doc_lengths[i] = len(tokens)
+    avg_dl = sum(doc_lengths.values()) / max(1, len(doc_lengths))
+    return dict(index), doc_lengths, avg_dl
+
+
+def search_enhanced(index, query, doc_lengths, avg_dl, top_k=10, k1=0.9, b=0.1):
+    """Search with BM25 scoring tuned for RAG chunks (Reddit 2026 params)."""
+    tokens = _tokenize_enhanced(query)
+    if not tokens:
+        return []
+    n_docs = max(1, max(max(v) for v in index.values() if v) + 1) if index else 1
+    scores = defaultdict(float)
+    for t in tokens:
+        posting = index.get(t, set())
+        if not posting:
+            continue
+        idf = max(0.0, (n_docs - len(posting) + 0.5) / (len(posting) + 0.5))
+        import math
+
+        idf = math.log(1 + idf)
+        for doc_id in posting:
+            dl = doc_lengths.get(doc_id, avg_dl)
+            tf = 1.0  # binary TF for set-based index
+            tf_norm = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / avg_dl))
+            scores[doc_id] += idf * tf_norm
+    return sorted(scores.keys(), key=lambda x: -scores[x])[:top_k]
