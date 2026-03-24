@@ -142,7 +142,7 @@ Read `references/services.md` (adjacent to this file) for the live catalog of ev
 **Prompt nodes** — instructions array defines the system prompt:
 
 ```json
-"config": { "type": "prompt", "parameters": { "prompt": { "instructions": ["You are a helpful assistant. Use the provided context to answer questions."] } } }
+"config": { "instructions": ["You are a helpful assistant. Use the provided context to answer questions."], "parameters": {} }
 ```
 
 **Frame grabber** — profile selects extraction mode:
@@ -230,13 +230,13 @@ Agent_2 has no input lanes — it is invoked as a tool by Agent_1.
 
 ## RAG Pattern (Retrieval-Augmented Generation)
 
-For RAG query pipelines, the vector DB handles context injection directly. No prompt node needed:
+For simple RAG query pipelines, the vector DB can enrich queries directly:
 
 ```text
 chat → embedding (questions) → vector_db (questions → questions with context) → llm → response
 ```
 
-The vector DB receives embedded questions, retrieves matching documents, and passes enriched questions to the LLM.
+For more control over context merging (e.g., combining retrieved documents with custom instructions), use a prompt node between the vector DB and LLM — see the Prompt Node section below.
 
 ## The Prompt Node (Context Merging)
 
