@@ -125,7 +125,7 @@ def run(max_docs=100000):
     print(f'Max docs: {max_docs:,}')
     print('=' * 90)
 
-    scales = [s for s in [1000, 5000, 10000, 50000, 100000] if s <= max_docs]
+    scales = [s for s in [1000, 5000, 10000, 50000, 100000, 200000, 500000, 1000000] if s <= max_docs]
     if not scales:
         scales = [max_docs]
 
