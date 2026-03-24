@@ -95,6 +95,8 @@ def create_mcp_server() -> FastMCP:
         try:
             await client.connect()
             result = await execute_tool(client=client, name=name, filepath=filepath)
+            if isinstance(result, dict) and result.get('error'):
+                raise RuntimeError(f'{result["error"]} (status {result.get("status", "unknown")})')
             return str(result)
         finally:
             await client.disconnect()
