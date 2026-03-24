@@ -201,18 +201,20 @@ class WebServer:
         # Decode the URL-encoded path
         decoded_path = urllib.parse.unquote(path)
 
-        # Normalize the path to resolve any '..' or '.' components
-        normalized_path = os.path.normpath(decoded_path)
+        # Resolve the real path (resolves symlinks AND '..' components)
+        resolved_path = os.path.realpath(decoded_path)
 
-        # Reject paths that still contain traversal sequences after normalization
-        if '..' in normalized_path.split(os.sep):
+        # Paths must be absolute — relative paths are ambiguous
+        if not os.path.isabs(resolved_path):
+            raise ValueError(f'File path must be absolute: {path}')
+
+        # Reject paths that still contain traversal sequences after resolution
+        if '..' in resolved_path.split(os.sep):
             raise ValueError(f'Path traversal detected in: {path}')
 
         # Return the valid file path if it exists
-        if os.path.exists(normalized_path):
-            return normalized_path
-        elif os.path.exists(path):
-            return os.path.normpath(path)
+        if os.path.exists(resolved_path):
+            return resolved_path
         else:
             raise FileNotFoundError(f'File {path} not found')
 
