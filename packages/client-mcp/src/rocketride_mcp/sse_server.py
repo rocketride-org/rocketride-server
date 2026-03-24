@@ -106,7 +106,7 @@ def create_app() -> Starlette:
     """Create the Starlette app with SSE transport and optional auth."""
     mcp = create_mcp_server()
 
-    async def health(request: Request) -> JSONResponse:
+    async def health(_request: Request) -> JSONResponse:
         return JSONResponse({'status': 'ok', 'server': 'rocketride-mcp'})
 
     middleware = [Middleware(AuthMiddleware)] if _API_KEY else []
