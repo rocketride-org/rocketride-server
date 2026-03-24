@@ -78,7 +78,8 @@ def create_mcp_server() -> FastMCP:
         try:
             await client.connect()
             tools = await get_tools(client)
-            names = [t.get('name', '') for t in tools]
+            names = [t.get('name') or t.get('pipeline', '') for t in tools]
+            names = [n for n in names if n]
             return f'Available pipelines: {", ".join(names)}' if names else 'No pipelines configured.'
         finally:
             await client.disconnect()
