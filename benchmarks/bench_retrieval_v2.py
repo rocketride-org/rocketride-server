@@ -86,6 +86,72 @@ def load_nq_dataset(limit=500):
     return docs, qa_pairs
 
 
+def load_squad_dataset(limit=500):
+    """Load SQuAD v2 — long Wikipedia paragraphs with specific answer spans.
+
+    Groups multiple contexts by title into larger documents (5-10K chars)
+    to simulate real-world long documents with answers at specific locations.
+    """
+    from datasets import load_dataset
+
+    print(f'  Loading SQuAD v2 (limit={limit} QA pairs)...')
+    ds = load_dataset('rajpurkar/squad_v2', split='validation', streaming=True)
+
+    # Group contexts by title to build longer documents
+    title_contexts = {}  # title -> list of unique contexts
+    title_qas = {}  # title -> list of (question, answer, context)
+
+    count = 0
+    for item in ds:
+        if count >= limit:
+            break
+        title = item.get('title', '')
+        context = item.get('context', '')
+        question = item.get('question', '')
+        answers = item.get('answers', {}).get('text', [])
+
+        if not context or not question or not answers:
+            continue
+
+        if title not in title_contexts:
+            title_contexts[title] = []
+            title_qas[title] = []
+
+        # Add unique contexts
+        if context not in title_contexts[title]:
+            title_contexts[title].append(context)
+
+        title_qas[title].append(
+            {
+                'question': question,
+                'answer': answers[0],
+                'context': context,
+            }
+        )
+        count += 1
+
+    # Build documents by concatenating contexts per title
+    docs = []
+    qa_pairs = []
+    for title, contexts in title_contexts.items():
+        doc_content = f'# {title}\n\n' + '\n\n'.join(contexts)
+        doc_id = len(docs)
+        docs.append({'content': doc_content, 'id': doc_id, 'path': f'squad_{title}'})
+
+        for qa in title_qas[title]:
+            qa_pairs.append(
+                {
+                    'question': qa['question'],
+                    'answer': qa['answer'],
+                    'doc_id': doc_id,
+                }
+            )
+
+    total_chars = sum(len(d['content']) for d in docs)
+    print(f'  {len(docs)} docs ({total_chars:,} chars), {len(qa_pairs)} QA pairs from SQuAD v2')
+    return docs, qa_pairs
+
+
 def load_synthetic_dataset(root_dir):
     """Load synthetic docs and generate QA pairs from content."""
     docs = []
@@ -261,7 +327,9 @@ def run(dataset='synthetic', docs_dir=None, limit=500):
     print('=' * 80)
 
     # Load dataset
-    if dataset == 'nq':
+    if dataset == 'squad':
+        docs, qa_pairs = load_squad_dataset(limit=limit)
+    elif dataset == 'nq':
         docs, qa_pairs = load_nq_dataset(limit=limit)
     else:
         if not docs_dir or not os.path.isdir(docs_dir):
@@ -403,7 +471,7 @@ def run(dataset='synthetic', docs_dir=None, limit=500):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Retrieval Benchmark v2')
     parser.add_argument('docs_dir', nargs='?', default=None, help='Docs directory (for synthetic mode)')
-    parser.add_argument('--dataset', choices=['nq', 'synthetic'], default='synthetic')
+    parser.add_argument('--dataset', choices=['nq', 'squad', 'synthetic'], default='synthetic')
     parser.add_argument('--limit', type=int, default=500)
     args = parser.parse_args()
 

@@ -110,13 +110,13 @@ CHUNKERS = {}
 
 
 def chunk_rocketride(docs):
-    """Chunk with RocketRide native C++ chunker."""
+    """Chunk with RocketRide native C++ chunker (overlap=100 per Reddit best practices)."""
     if not _native_available:
         raise RuntimeError('Native C++ libs not compiled. Run: cd nodes/src/nodes/preprocessor_native && make')
     chunks = []
     for doc in docs:
         text_bytes = doc['content'].encode('utf-8')
-        for piece in native_chunk(text_bytes):
+        for piece in native_chunk(text_bytes, chunk_size=512, overlap=50):
             chunks.append({'text': piece.decode('utf-8', errors='replace'), 'doc_id': doc['id']})
     return chunks
 
