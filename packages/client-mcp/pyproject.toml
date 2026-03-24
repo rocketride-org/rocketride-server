@@ -29,7 +29,6 @@ rocketride-mcp-sse = "rocketride_mcp.sse_server:main"
 sse = [
   "uvicorn>=0.30.0",
   "starlette>=0.38.0",
-  "sse-starlette>=2.0.0",
 ]
 dev = [
   "ruff>=0.8.0",

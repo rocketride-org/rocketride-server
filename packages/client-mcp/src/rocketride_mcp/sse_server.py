@@ -4,7 +4,7 @@
 # =============================================================================
 
 """
-HTTP/SSE transport wrapper for the RocketRide MCP server.
+HTTP/SSE transport for the RocketRide MCP server.
 
 Exposes the same MCP tools as the stdio server but over HTTP/SSE,
 allowing remote clients (like Glama) to connect via network.
@@ -24,63 +24,53 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 import uvicorn
 
-from mcp.server.lowlevel import Server, NotificationOptions
-from mcp.server.models import InitializationOptions
-from mcp.server.sse import SseServerTransport
+from mcp.server.fastmcp import FastMCP
 
 from .config import load_settings
-from .tools import get_tools, format_tools, execute_tool
+from .tools import get_tools, execute_tool
 
 logger = logging.getLogger(__name__)
 
 
-def create_mcp_server() -> Server:
+def create_mcp_server() -> FastMCP:
     """Create and configure the MCP server with RocketRide tools."""
-    server = Server('rocketride-mcp')
+    mcp = FastMCP('rocketride-mcp')
 
-    @server.list_tools()
-    async def handle_list_tools():
+    @mcp.tool()
+    async def list_pipelines() -> str:
+        """List available RocketRide pipelines."""
         settings = load_settings()
         tools = get_tools(settings)
-        return format_tools(tools)
+        names = [t['name'] for t in tools]
+        return f'Available pipelines: {", ".join(names)}' if names else 'No pipelines configured.'
 
-    @server.call_tool()
-    async def handle_call_tool(name: str, arguments: dict | None):
+    @mcp.tool()
+    async def run_pipeline(name: str, filepath: str) -> str:
+        """Run a RocketRide pipeline on a file.
+
+        Args:
+            name: Pipeline name to execute.
+            filepath: Path to the input file.
+        """
         settings = load_settings()
         tools = get_tools(settings)
-        return await execute_tool(name, arguments or {}, tools, settings)
+        result = await execute_tool(name, {'filepath': filepath}, tools, settings)
+        return str(result)
 
-    return server
+    return mcp
 
 
 def create_app() -> Starlette:
     """Create the Starlette app with SSE transport."""
-    mcp_server = create_mcp_server()
-    sse = SseServerTransport('/messages/')
+    mcp = create_mcp_server()
 
-    async def handle_sse(request: Request):
-        async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
-            await mcp_server.run(
-                streams[0],
-                streams[1],
-                InitializationOptions(
-                    server_name='rocketride-mcp',
-                    server_version='1.0.5',
-                    capabilities=mcp_server.get_capabilities(
-                        notification_options=NotificationOptions(),
-                        experimental_capabilities={},
-                    ),
-                ),
-            )
-
-    async def health(request: Request):
+    async def health(request: Request) -> JSONResponse:
         return JSONResponse({'status': 'ok', 'server': 'rocketride-mcp'})
 
     return Starlette(
         routes=[
             Route('/health', health),
-            Route('/sse', handle_sse),
-            Mount('/messages/', app=sse.handle_post_message),
+            Mount('/', app=mcp.sse_app()),
         ],
     )
 

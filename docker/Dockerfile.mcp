@@ -1,5 +1,7 @@
 FROM python:3.12-slim
 
+ENV PYTHONUNBUFFERED=1
+
 RUN groupadd -r rocketride && useradd -r -g rocketride -d /app rocketride
 
 WORKDIR /app
@@ -10,10 +12,7 @@ COPY packages/client-python/ ./client-python/
 
 RUN pip install --no-cache-dir \
     ./client-python \
-    ./client-mcp \
-    uvicorn \
-    starlette \
-    sse-starlette
+    "./client-mcp[sse]"
 
 USER rocketride
 
