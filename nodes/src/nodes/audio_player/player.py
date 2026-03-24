@@ -123,7 +123,7 @@ class Player(AudioReader):
         del buf[:required_bytes]
 
         # Save the new buffer
-        self.play_callback_buffer = buf
+        self._play_callback_buffer = buf
 
     def start(self):
         """

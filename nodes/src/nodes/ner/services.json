@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"text"
-	],
+	"classType": ["text"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"gpu"
-	],
+	"capabilities": ["gpu"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,15 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A text processing component that identifies and extracts named entities from text using ",
-		"state-of-the-art transformer models. It can detect and classify entities such as persons, ",
-		"organizations, locations, dates, and more. The extracted entities are added to document ",
-		"metadata for enhanced search, filtering, and analysis capabilities.</br>",
-		"</br>",
-		"The component supports multiple pre-trained models optimized for different languages and ",
-		"use cases, from general-purpose entity recognition to specialized domains."
-	],
+	"description": ["A text processing component that identifies and extracts named entities from text using ", "state-of-the-art transformer models. It can detect and classify entities such as persons, ", "organizations, locations, dates, and more. The extracted entities are added to document ", "metadata for enhanced search, filtering, and analysis capabilities.</br>", "</br>", "The component supports multiple pre-trained models optimized for different languages and ", "use cases, from general-purpose entity recognition to specialized domains."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -76,12 +64,8 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"text": [
-			"text"
-		],
-		"documents": [
-			"documents"
-		]
+		"text": ["text"],
+		"documents": ["documents"]
 	},
 	"input": [
 		{
@@ -126,27 +110,22 @@
 	//	Full test configuration - tests all NER model profiles.
 	//	Run via: builder model_server:fulltest
 	//
-	"fulltest": {
-		"profiles": [
-			"bertLarge",
-			"bertBase",
-			"distilbert",
-			"xlmRoberta",
-			"deberta",
-			"biomedical"
-		],
-		"cases": [
-			{
-				"text": "Barack Obama was the 44th President of the United States.",
-				"expect": {
-					"text": {
-						"notEmpty": true,
-						"contains": "Obama"
+	"fulltest": [
+		{
+			"profiles": ["bertLarge", "bertBase", "distilbert", "xlmRoberta", "deberta", "biomedical"],
+			"cases": [
+				{
+					"text": "Barack Obama was the 44th President of the United States.",
+					"expect": {
+						"text": {
+							"notEmpty": true,
+							"contains": "Obama"
+						}
 					}
 				}
-			}
-		]
-	},
+			]
+		}
+	],
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver
@@ -218,13 +197,7 @@
 			"title": "Entity aggregation strategy",
 			"description": "How to combine word pieces into entities",
 			"default": "simple",
-			"enum": [
-				"none",
-				"simple",
-				"first",
-				"average",
-				"max"
-			]
+			"enum": ["none", "simple", "first", "average", "max"]
 		},
 		"ner.min_confidence": {
 			"type": "number",
@@ -242,111 +215,66 @@
 		},
 		"ner.custom": {
 			"object": "custom",
-			"properties": [
-				"ner.model",
-				"ner.aggregation_strategy",
-				"ner.min_confidence",
-				"ner.store_in_metadata"
-			]
+			"properties": ["ner.model", "ner.aggregation_strategy", "ner.min_confidence", "ner.store_in_metadata"]
 		},
 		"ner.bertLarge": {
 			"object": "bertLarge",
-			"properties": [
-				"ner.aggregation_strategy",
-				"ner.min_confidence",
-				"ner.store_in_metadata"
-			]
+			"properties": ["ner.aggregation_strategy", "ner.min_confidence", "ner.store_in_metadata"]
 		},
 		"ner.bertBase": {
 			"object": "bertBase",
-			"properties": [
-				"ner.aggregation_strategy",
-				"ner.min_confidence",
-				"ner.store_in_metadata"
-			]
+			"properties": ["ner.aggregation_strategy", "ner.min_confidence", "ner.store_in_metadata"]
 		},
 		"ner.distilbert": {
 			"object": "distilbert",
-			"properties": [
-				"ner.aggregation_strategy",
-				"ner.min_confidence",
-				"ner.store_in_metadata"
-			]
+			"properties": ["ner.aggregation_strategy", "ner.min_confidence", "ner.store_in_metadata"]
 		},
 		"ner.xlmRoberta": {
 			"object": "xlmRoberta",
-			"properties": [
-				"ner.aggregation_strategy",
-				"ner.min_confidence",
-				"ner.store_in_metadata"
-			]
+			"properties": ["ner.aggregation_strategy", "ner.min_confidence", "ner.store_in_metadata"]
 		},
 		"ner.deberta": {
 			"object": "deberta",
-			"properties": [
-				"ner.aggregation_strategy",
-				"ner.min_confidence",
-				"ner.store_in_metadata"
-			]
+			"properties": ["ner.aggregation_strategy", "ner.min_confidence", "ner.store_in_metadata"]
 		},
 		"ner.biomedical": {
 			"object": "biomedical",
-			"properties": [
-				"ner.aggregation_strategy",
-				"ner.min_confidence",
-				"ner.store_in_metadata"
-			]
+			"properties": ["ner.aggregation_strategy", "ner.min_confidence", "ner.store_in_metadata"]
 		},
 		"ner.profile": {
 			"title": "Model",
 			"description": "NER model configuration",
 			"type": "string",
 			"default": "bertLarge",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": [
-						"ner.custom"
-					]
+					"properties": ["ner.custom"]
 				},
 				{
 					"value": "bertLarge",
-					"properties": [
-						"ner.bertLarge"
-					]
+					"properties": ["ner.bertLarge"]
 				},
 				{
 					"value": "bertBase",
-					"properties": [
-						"ner.bertBase"
-					]
+					"properties": ["ner.bertBase"]
 				},
 				{
 					"value": "distilbert",
-					"properties": [
-						"ner.distilbert"
-					]
+					"properties": ["ner.distilbert"]
 				},
 				{
 					"value": "xlmRoberta",
-					"properties": [
-						"ner.xlmRoberta"
-					]
+					"properties": ["ner.xlmRoberta"]
 				},
 				{
 					"value": "deberta",
-					"properties": [
-						"ner.deberta"
-					]
+					"properties": ["ner.deberta"]
 				},
 				{
 					"value": "biomedical",
-					"properties": [
-						"ner.biomedical"
-					]
+					"properties": ["ner.biomedical"]
 				}
 			]
 		}
@@ -360,10 +288,7 @@
 		{
 			"section": "Pipe",
 			"title": "Named Entity Recognition",
-			"properties": [
-				"ner.profile"
-			]
+			"properties": ["ner.profile"]
 		}
 	]
 }
-

@@ -140,16 +140,18 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```bash
 # All tests
-pnpm run test
+./builder test
 
-# C++ tests only
-pnpm run test:native
+# C++ engine tests only
+./builder server:test
 
-# Python tests only
-pnpm run test:python
+# Python tests only (nodes, AI, clients)
+./builder nodes:test
+./builder ai:test
+./builder client-python:test
 
 # TypeScript tests only
-pnpm run test:typescript
+./builder client-typescript:test
 ```
 
 ### Writing Tests

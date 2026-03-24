@@ -316,18 +316,18 @@ class Store(DocumentStoreBase):
             return {}
 
         # Build match stage filter
-        match_filter = {'metadata.chunkId': 0}
+        match_filter = {'meta.chunkId': 0}
 
         if parent is not None:
-            match_filter['metadata.parent'] = parent
+            match_filter['meta.parent'] = parent
 
         # Use aggregation pipeline
         pipeline = [
             {'$match': match_filter},
             {
                 '$group': {
-                    '_id': '$metadata.parent',
-                    'objectId': {'$first': '$metadata.objectId'},  # Get any objectId for this parent
+                    '_id': '$meta.parent',
+                    'objectId': {'$first': '$meta.objectId'},
                 }
             },
             {'$skip': offset},
@@ -335,7 +335,8 @@ class Store(DocumentStoreBase):
         ]
 
         # Execute aggregation
-        results = self.collection.aggregate(pipeline)
+        collection = self.database.get_collection(self.collection_name)
+        results = collection.aggregate(pipeline)
 
         # Build paths dictionary
         paths: Dict[str, str] = {}
