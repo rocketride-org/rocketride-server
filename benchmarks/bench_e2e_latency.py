@@ -7,26 +7,24 @@
 """
 E2E pipeline latency benchmark with P50/P95/P99 percentiles.
 
-Measures per-stage and end-to-end latency for a complete RAG pipeline:
-  ingest → parse → chunk → index → search
+Measures per-stage and end-to-end latency for all 5 frameworks:
+  discover → parse → chunk → index → search
 
-Runs multiple iterations for statistical significance and reports
-percentile latencies per stage.
+Runs multiple iterations for statistical significance.
 
 Usage:
     python benchmarks/bench_e2e_latency.py <docs_dir> [iterations]
 """
 
 import gc
-import hashlib
 import mimetypes
 import os
-import statistics
 import sys
 import time
-from collections import defaultdict
 
 import psutil
+
+from chunkers import CHUNKERS, build_inverted_index, search_index
 
 
 def percentile(data, p):
@@ -47,55 +45,11 @@ def get_mem_mb():
     return psutil.Process().memory_info().rss / (1024 * 1024)
 
 
-class PipelineBenchmark:
-    """Measures per-stage latencies across multiple iterations."""
-
-    def __init__(self):
-        """Initialize latency collectors."""
-        self.latencies = defaultdict(list)
-
-    def measure(self, stage, func, *args, **kwargs):
-        """Time a function call and record its latency."""
-        t0 = time.perf_counter()
-        result = func(*args, **kwargs)
-        elapsed = time.perf_counter() - t0
-        self.latencies[stage].append(elapsed)
-        return result
-
-    def print_stats(self):
-        """Print percentile latency table."""
-        print(f'\n{"Stage":<20} | {"P50 (ms)":>10} | {"P95 (ms)":>10} | {"P99 (ms)":>10} | {"Mean (ms)":>10}')
-        print('-' * 72)
-        for stage in ['discover', 'parse', 'chunk', 'index', 'search', 'e2e_ingest', 'e2e_search']:
-            times = self.latencies.get(stage, [])
-            if not times:
-                continue
-            ms = [t * 1000 for t in times]
-            p50 = percentile(ms, 50)
-            p95 = percentile(ms, 95)
-            p99 = percentile(ms, 99)
-            mean = statistics.mean(ms)
-            print(f'{stage:<20} | {p50:>10.2f} | {p95:>10.2f} | {p99:>10.2f} | {mean:>10.2f}')
-
-    def get_results(self):
-        """Return results dict for comparison runner."""
-        results = {}
-        for stage in ['discover', 'parse', 'chunk', 'index', 'search', 'e2e_ingest', 'e2e_search']:
-            times = self.latencies.get(stage, [])
-            if times:
-                ms = [t * 1000 for t in times]
-                results[f'{stage}_p50_ms'] = percentile(ms, 50)
-                results[f'{stage}_p95_ms'] = percentile(ms, 95)
-                results[f'{stage}_p99_ms'] = percentile(ms, 99)
-                results[f'{stage}_mean_ms'] = statistics.mean(ms)
-        return results
-
-
-# Pipeline stages
 def discover_files(root_dir):
     """Discover text files in directory."""
     entries = []
-    for dirpath, _, filenames in os.walk(root_dir):
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        dirnames.sort()
         for fname in sorted(filenames):
             fpath = os.path.join(dirpath, fname)
             mime = mimetypes.guess_type(fpath)[0] or 'application/octet-stream'
@@ -104,163 +58,126 @@ def discover_files(root_dir):
     return entries
 
 
-def parse_file(fpath):
-    """Read and hash a file."""
-    with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
-        content = f.read()
-    content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-    return content, content_hash
-
-
-def chunk_text(text, chunk_size=512, overlap=50):
-    """Split text into fixed-size chunks with overlap."""
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = min(start + chunk_size, len(text))
-        chunks.append(text[start:end])
-        start += chunk_size - overlap
-    return chunks
-
-
-def build_index(chunks):
-    """Build inverted index."""
-    index = defaultdict(set)
-    for i, chunk in enumerate(chunks):
-        for word in chunk.lower().split():
-            cleaned = ''.join(c for c in word if c.isalnum())
-            if cleaned:
-                index[cleaned].add(i)
-    return index
-
-
-def search_query(index, query):
-    """Search inverted index."""
-    terms = query.lower().split()
-    result_ids = None
-    for term in terms:
-        cleaned = ''.join(c for c in term if c.isalnum())
-        if cleaned in index:
-            ids = index[cleaned]
-            result_ids = ids if result_ids is None else result_ids & ids
-    return result_ids or set()
+def parse_files(file_list):
+    """Read and hash all files."""
+    docs = []
+    for fpath in file_list:
+        with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        docs.append({'content': content, 'path': fpath, 'id': len(docs)})
+    return docs
 
 
 def run(root_dir, iterations=5):
-    """Run E2E latency benchmark with multiple iterations."""
+    """Run E2E latency benchmark for all frameworks."""
     if not os.path.isdir(root_dir):
         print(f'Error: {root_dir} not found')
         sys.exit(1)
 
-    print('=' * 60)
-    print('E2E PIPELINE LATENCY BENCHMARK')
-    print(f'Dataset: {root_dir}')
-    print(f'Iterations: {iterations}')
-    print('=' * 60)
+    print('=' * 80)
+    print('E2E PIPELINE LATENCY BENCHMARK (all frameworks)')
+    print(f'Dataset: {root_dir}, Iterations: {iterations}')
+    print('=' * 80)
 
-    bench = PipelineBenchmark()
     queries = ['data processing', 'machine learning', 'pipeline configuration', 'error handling', 'vector database', 'authentication', 'memory management', 'inverted index', 'embedding model', 'chunk strategy']
 
-    gc.collect()
-    mem_start = get_mem_mb()
+    # Discover + parse once (shared across frameworks)
+    file_list = discover_files(root_dir)
+    docs = parse_files(file_list)
+    print(f'\n{len(docs)} docs, {sum(len(d["content"]) for d in docs):,} chars\n')
 
-    # Warmup iteration — run full pipeline so all caches are hot
-    print('\n[Warmup] Running 1 warmup iteration...')
-    files = discover_files(root_dir)
-    warmup_docs = []
-    for fpath in files:
-        content, _hash = parse_file(fpath)
-        warmup_docs.append(content)
-    warmup_chunks = []
-    for doc in warmup_docs:
-        warmup_chunks.extend(chunk_text(doc))
-    warmup_index = build_index(warmup_chunks)
-    for q in queries:
-        search_query(warmup_index, q)
-    del warmup_docs, warmup_chunks, warmup_index
+    all_framework_results = []
 
-    total_chunks = 0
-    total_terms = 0
+    for fw_name, chunker_func in CHUNKERS.items():
+        print(f'\n--- {fw_name} ({iterations} iterations) ---')
 
-    for iteration in range(iterations):
-        print(f'\n[Iteration {iteration + 1}/{iterations}]')
+        latencies = {'chunk': [], 'index': [], 'search': [], 'e2e_ingest': [], 'e2e_search': []}
 
-        # E2E ingest
-        t_ingest_start = time.perf_counter()
+        # Warmup
+        try:
+            warmup_chunks = chunker_func(docs[:10])
+            warmup_idx = build_inverted_index(warmup_chunks)
+            search_index(warmup_idx, 'test query')
+        except Exception as e:
+            print(f'  SKIP ({e!s:.60})')
+            continue
 
-        # Discover
-        file_list = bench.measure('discover', discover_files, root_dir)
+        gc.collect()
 
-        # Parse all files
-        all_chunks = []
-        t_parse_start = time.perf_counter()
-        docs = []
-        for fpath in file_list:
-            content, _hash = parse_file(fpath)
-            docs.append(content)
-        bench.latencies['parse'].append(time.perf_counter() - t_parse_start)
+        for iteration in range(iterations):
+            # E2E ingest
+            t_ingest_start = time.perf_counter()
 
-        # Chunk all docs
-        t_chunk_start = time.perf_counter()
-        for doc in docs:
-            all_chunks.extend(chunk_text(doc))
-        bench.latencies['chunk'].append(time.perf_counter() - t_chunk_start)
+            # Chunk
+            t0 = time.perf_counter()
+            try:
+                chunks = chunker_func(docs)
+            except Exception as e:
+                print(f'  SKIP iteration {iteration}: {e!s:.40}')
+                break
+            latencies['chunk'].append(time.perf_counter() - t0)
 
-        # Index
-        index = bench.measure('index', build_index, all_chunks)
+            # Index
+            t0 = time.perf_counter()
+            index = build_inverted_index(chunks)
+            latencies['index'].append(time.perf_counter() - t0)
 
-        bench.latencies['e2e_ingest'].append(time.perf_counter() - t_ingest_start)
+            latencies['e2e_ingest'].append(time.perf_counter() - t_ingest_start)
 
-        total_chunks = len(all_chunks)
-        total_terms = len(index)
+            # Search
+            for q in queries:
+                t0 = time.perf_counter()
+                search_index(index, q)
+                latencies['search'].append(time.perf_counter() - t0)
 
-        # E2E search (multiple queries)
-        for q in queries:
-            t_search_start = time.perf_counter()
-            search_query(index, q)
-            bench.latencies['search'].append(time.perf_counter() - t_search_start)
-            bench.latencies['e2e_search'].append(time.perf_counter() - t_search_start)
+            # E2E search (batch of 10 queries)
+            t0 = time.perf_counter()
+            for q in queries:
+                search_index(index, q)
+            latencies['e2e_search'].append(time.perf_counter() - t0)
 
-    mem_end = get_mem_mb()
+        if not latencies['chunk']:
+            continue
 
-    # Results
-    print('\n' + '=' * 72)
-    print('LATENCY PERCENTILES')
-    bench.print_stats()
+        # Print per-framework results
+        print(f'  {"Stage":<15} {"P50 (ms)":>10} {"P95 (ms)":>10} {"P99 (ms)":>10}')
+        print(f'  {"-" * 50}')
+        fw_result = {'name': fw_name}
+        for stage in ['chunk', 'index', 'search', 'e2e_ingest', 'e2e_search']:
+            times = latencies.get(stage, [])
+            if not times:
+                continue
+            ms = [t * 1000 for t in times]
+            p50 = percentile(ms, 50)
+            p95 = percentile(ms, 95)
+            p99 = percentile(ms, 99)
+            print(f'  {stage:<15} {p50:>10.2f} {p95:>10.2f} {p99:>10.2f}')
+            fw_result[f'{stage}_p50'] = p50
+            fw_result[f'{stage}_p95'] = p95
+            fw_result[f'{stage}_p99'] = p99
 
-    print(f'\n{"=" * 60}')
-    print('SUMMARY')
-    print(f'{"=" * 60}')
-    print(f'  Files:        {len(files)}')
-    print(f'  Chunks:       {total_chunks}')
-    print(f'  Index terms:  {total_terms}')
-    print(f'  Iterations:   {iterations}')
-    print(f'  Memory delta: {mem_end - mem_start:.1f} MB')
+        all_framework_results.append(fw_result)
 
-    e2e_ingest_times = bench.latencies.get('e2e_ingest', [])
-    if e2e_ingest_times:
-        print(f'  E2E Ingest P50: {percentile([t * 1000 for t in e2e_ingest_times], 50):.1f} ms')
-        print(f'  E2E Ingest P95: {percentile([t * 1000 for t in e2e_ingest_times], 95):.1f} ms')
+    if not all_framework_results:
+        print('No frameworks completed.')
+        return
 
-    e2e_search_times = bench.latencies.get('e2e_search', [])
-    if e2e_search_times:
-        print(f'  E2E Search P50: {percentile([t * 1000 for t in e2e_search_times], 50):.3f} ms')
-        print(f'  E2E Search P95: {percentile([t * 1000 for t in e2e_search_times], 95):.3f} ms')
+    # Comparison table
+    print(f'\n{"=" * 80}')
+    print('E2E INGEST LATENCY COMPARISON (P50 ms)')
+    print(f'{"=" * 80}')
+    print(f'{"Framework":<15} {"Chunk P50":>12} {"Index P50":>12} {"E2E Ingest":>12} {"Search P50":>12}')
+    print('-' * 65)
+    for r in sorted(all_framework_results, key=lambda x: x.get('e2e_ingest_p50', 9999)):
+        print(f'{r["name"]:<15} {r.get("chunk_p50", 0):>12.2f} {r.get("index_p50", 0):>12.2f} {r.get("e2e_ingest_p50", 0):>12.2f} {r.get("search_p50", 0):>12.4f}')
 
-    print(f'{"=" * 60}')
+    # Markdown
+    print('\n| Framework | Chunk P50 | Index P50 | E2E Ingest P50 | Search P50 |')
+    print('|---|---|---|---|---|')
+    for r in sorted(all_framework_results, key=lambda x: x.get('e2e_ingest_p50', 9999)):
+        print(f'| {r["name"]} | {r.get("chunk_p50", 0):.2f}ms | {r.get("index_p50", 0):.2f}ms | {r.get("e2e_ingest_p50", 0):.2f}ms | {r.get("search_p50", 0):.4f}ms |')
 
-    # Return results compatible with run_comparison.py
-    result = {
-        'tool': 'e2e_latency',
-        'total_time': statistics.mean(e2e_ingest_times) if e2e_ingest_times else 0,
-        'docs': len(files),
-        'chars': sum(len(d) for d in docs),
-        'chunks': total_chunks,
-        'index_terms': total_terms,
-        'mem_delta_mb': mem_end - mem_start,
-    }
-    result.update(bench.get_results())
-    return result
+    return {'tool': 'e2e_latency', 'frameworks': all_framework_results}
 
 
 if __name__ == '__main__':
