@@ -180,6 +180,7 @@ def run(root_dir):
     entries = []
     for dirpath, dirnames, filenames in os.walk(root_dir):
         dirnames[:] = [d for d in dirnames if d != '.git']
+        dirnames.sort()
         for fname in filenames:
             fpath = os.path.join(dirpath, fname)
             try:

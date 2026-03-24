@@ -27,6 +27,16 @@ import time
 
 import psutil
 
+try:
+    import fitz as _fitz
+except ImportError:
+    _fitz = None
+
+try:
+    import pdfplumber as _pdfplumber
+except ImportError:
+    _pdfplumber = None
+
 
 def get_mem_mb():
     """Return current process RSS in MB."""
@@ -57,27 +67,23 @@ def parse_text_builtin(fpath):
 
 def parse_pdf_pymupdf(fpath):
     """Parse PDF with PyMuPDF (fast, rule-based)."""
-    import fitz
-
-    doc = fitz.open(fpath)
-    text = ''
+    doc = _fitz.open(fpath)
+    parts = []
     for page in doc:
-        text += page.get_text()
+        parts.append(page.get_text())
     doc.close()
-    return text
+    return ''.join(parts)
 
 
 def parse_pdf_pdfplumber(fpath):
     """Parse PDF with pdfplumber (coordinate-based)."""
-    import pdfplumber
-
-    text = ''
-    with pdfplumber.open(fpath) as pdf:
+    parts = []
+    with _pdfplumber.open(fpath) as pdf:
         for page in pdf.pages:
             page_text = page.extract_text()
             if page_text:
-                text += page_text + '\n'
-    return text
+                parts.append(page_text)
+    return '\n'.join(parts) + ('\n' if parts else '')
 
 
 def benchmark_parser(name, parse_func, files):
@@ -142,23 +148,23 @@ def run(root_dir):
         print(f'\n--- PDF files ({len(files["pdf"])}) ---')
 
         # PyMuPDF
-        try:
+        if _fitz is not None:
             r = benchmark_parser('PyMuPDF', parse_pdf_pymupdf, files['pdf'])
             if r:
                 print(f'  PyMuPDF: {r["files"]} files, {r["total_chars"]:,} chars in {r["total_time"]:.3f}s')
                 print(f'    {r["files_per_sec"]:.0f} files/sec, {r["mb_per_sec"]:.1f} MB/sec')
                 results.append(r)
-        except ImportError:
+        else:
             print('  PyMuPDF: not installed (pip install pymupdf)')
 
         # pdfplumber
-        try:
+        if _pdfplumber is not None:
             r = benchmark_parser('pdfplumber', parse_pdf_pdfplumber, files['pdf'])
             if r:
                 print(f'  pdfplumber: {r["files"]} files, {r["total_chars"]:,} chars in {r["total_time"]:.3f}s')
                 print(f'    {r["files_per_sec"]:.0f} files/sec, {r["mb_per_sec"]:.1f} MB/sec')
                 results.append(r)
-        except ImportError:
+        else:
             print('  pdfplumber: not installed (pip install pdfplumber)')
 
     if not results:

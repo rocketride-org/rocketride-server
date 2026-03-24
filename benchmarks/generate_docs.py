@@ -15,6 +15,7 @@ Defaults: 1000 docs in benchmarks/test_docs/
 
 import os
 import random
+import shutil
 import sys
 
 PARAGRAPHS = [
@@ -49,7 +50,9 @@ def main():
         count = 1
     output_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), 'test_docs')
 
-    os.makedirs(output_dir, exist_ok=True)
+    if os.path.isdir(output_dir):
+        shutil.rmtree(output_dir)
+    os.makedirs(output_dir)
 
     total_chars = 0
     for i in range(count):

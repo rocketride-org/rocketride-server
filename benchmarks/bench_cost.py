@@ -199,4 +199,7 @@ if __name__ == '__main__':
     if len(sys.argv) < 2:
         print(f'Usage: {sys.argv[0]} <docs_directory>')
         sys.exit(1)
+    if not os.path.isdir(sys.argv[1]):
+        print(f'ERROR: {sys.argv[1]} is not a valid directory')
+        sys.exit(1)
     run(sys.argv[1])
