@@ -414,9 +414,11 @@ class Task(DAPBase):
 
         fd, taskpath = tempfile.mkstemp(suffix='.json', prefix=f'task-{self.id}-')
         try:
-            await asyncio.to_thread(os.write, fd, pipeline_str.encode('utf-8'))
-        finally:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                await asyncio.to_thread(f.write, pipeline_str)
+        except BaseException:
             os.close(fd)
+            raise
 
         return taskpath
 

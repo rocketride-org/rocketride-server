@@ -11,7 +11,6 @@ import asyncio
 import json
 import os
 import stat
-import tempfile
 import unittest
 from unittest.mock import MagicMock, PropertyMock, patch
 
@@ -38,6 +37,7 @@ class TestWriteTaskFileSecurity(unittest.TestCase):
         mock._write_task_file = Task._write_task_file.__get__(mock, Task)
         return mock
 
+    @unittest.skipIf(os.name == 'nt', 'POSIX file permissions not available on Windows')
     def test_file_permissions_owner_only(self):
         """Temporary file must be created with 0o600 (owner read/write only)."""
         engine = self._make_task_engine()
@@ -115,6 +115,7 @@ class TestWriteTaskFileSecurity(unittest.TestCase):
         finally:
             os.unlink(taskpath)
 
+    @unittest.skipIf(os.name == 'nt', 'os.getuid() not available on Windows')
     def test_file_owned_by_current_user(self):
         """Temporary file must be owned by the current process user."""
         engine = self._make_task_engine()
