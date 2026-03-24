@@ -26,7 +26,7 @@ const fs = require('fs');
 const path = require('path');
 
 const production = process.argv.includes('--production');
-const buildRoot = path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'vscode');
+const buildRoot = path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? path.join(__dirname, '..', '..', 'build'), 'vscode');
 const outfile = path.join(buildRoot, 'rocketride.js');
 
 esbuild
@@ -61,11 +61,13 @@ esbuild
 		// Copy skills/ directory to build output for agent documentation discovery
 		const srcSkills = path.join(__dirname, 'skills');
 		const destSkills = path.join(buildRoot, 'skills');
-		if (fs.existsSync(srcSkills)) {
-			fs.rmSync(destSkills, { recursive: true, force: true });
-			fs.cpSync(srcSkills, destSkills, { recursive: true });
-			console.log(`Copied skills/ to ${destSkills}`);
+		if (!fs.existsSync(srcSkills)) {
+			console.error(`skills/ directory not found at ${srcSkills}`);
+			process.exit(1);
 		}
+		fs.rmSync(destSkills, { recursive: true, force: true });
+		fs.cpSync(srcSkills, destSkills, { recursive: true });
+		console.log(`Copied skills/ to ${destSkills}`);
 	})
 	.catch((error) => {
 		console.error('esbuild failed:', error);
