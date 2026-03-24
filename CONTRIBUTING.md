@@ -97,7 +97,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 2. Open a Pull Request against the `develop` branch
 
-3. **Link the issue** — use `Fixes #123` in the PR description (required by CI)
+3. **Link the issue** — use `Fixes #123`, `Closes #123`, or `Resolves #123` in the PR description (required by CI)
 
 4. Fill out the PR template with:
 
