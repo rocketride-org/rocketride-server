@@ -33,7 +33,9 @@ jobs:
     name: Initialize
     uses: ./.github/workflows/_init.yaml
 
-  # Detect which areas changed to skip expensive builds
+  # Skip build entirely for docs-only PRs (no code changed).
+  # For all code changes, builder handles engine download-vs-compile
+  # internally via hash comparison with nightly builds.
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
@@ -42,23 +44,21 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      engine: ${{ steps.filter.outputs.engine }}
+      code: ${{ steps.filter.outputs.code }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
         id: filter
         with:
           filters: |
-            engine:
-              - 'packages/server/**'
-              - 'packages/tika/**'
-              - 'build/vcpkg/**'
+            code:
+              - 'packages/**'
+              - 'nodes/**'
+              - 'apps/**'
+              - 'scripts/**'
               - 'builder'
               - 'builder.cmd'
-              - 'scripts/lib/**'
-              - '.github/workflows/_build.yaml'
-              - '.github/workflows/_init.yaml'
-              - '.github/workflows/ci.yml'
+              - '.github/workflows/**'
 
   build:
     name: Build
@@ -67,7 +67,7 @@ jobs:
       always() &&
       needs.init.result == 'success' &&
       github.event_name != 'schedule' &&
-      (github.event_name != 'pull_request' || needs.changes.outputs.engine == 'true')
+      (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     uses: ./.github/workflows/_build.yaml
     permissions:
       contents: read
