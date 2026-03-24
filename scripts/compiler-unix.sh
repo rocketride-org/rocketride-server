@@ -348,6 +348,16 @@ check_linux_dependencies() {
                     echo "✓ gnupg: gpg available"
                 fi
                 ;;
+            ca-certificates)
+                # update-ca-certificates may be root-only on PATH while the package is installed (#370)
+                if dpkg -l ca-certificates 2>/dev/null | grep -q "^ii" || command_exists update-ca-certificates; then
+                    echo "✓ ca-certificates"
+                else
+                    echo "✗ ca-certificates: package not installed and update-ca-certificates not on PATH"
+                    COMMANDS+=("    # Install package ca-certificates")
+                    COMMANDS+=("    sudo apt install -y ca-certificates")
+                fi
+                ;;
             libncurses-dev)
                 # Ubuntu 24.04+ uses libncurses-dev, older systems use libncurses5-dev/libncursesw5-dev
                 if ! dpkg -l "libncurses-dev" 2>/dev/null | grep -q "^ii" && \
@@ -374,7 +384,6 @@ check_linux_dependencies() {
                     ninja-build) cmd_name="ninja" ;;
                     libtool) cmd_name="libtoolize" ;;
                     dos2unix) cmd_name="dos2unix" ;;
-                    ca-certificates) cmd_name="update-ca-certificates" ;;
                     python3-pip) cmd_name="pip3" ;;
                     python3-venv) cmd_name="python3" ;;
                     autoconf-archive | lsb-release)
