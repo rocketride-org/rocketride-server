@@ -168,7 +168,7 @@ class RocketRideClient(
                                     value = value[1:-1]
                                 self._env[key] = value
                                 config_env[key] = value
-            except Exception:
+            except (OSError, UnicodeDecodeError):
                 # File doesn't exist or can't be read - that's okay
                 pass
 

@@ -149,7 +149,6 @@ class DocumentStoreBase(ABC):
                 # and reset the page content as we'll rebuild it
                 base_doc = doc.model_copy(deep=True)
                 base_doc.page_content = ''
-                base_doc.metadata.chunkId = 0
                 tableDocs[tableKey] = base_doc
 
             # Update the score if this one is higher
@@ -179,10 +178,9 @@ class DocumentStoreBase(ABC):
 
                 # If this is the first part of the table we've encountered in the fetch
                 if tableKey not in tableDocs:
-                    # Initialize a new document for this table
+                    # Initialize a new document for this table, preserving
+                    # the first chunk's chunkId to avoid key collisions
                     metadata = chunk.metadata.model_copy(deep=True)
-                    # Use a zeroed chunkId to represent the combined document
-                    metadata.chunkId = 0
                     tableDocs[tableKey] = Doc(
                         page_content='',
                         metadata=metadata,
@@ -212,7 +210,7 @@ class DocumentStoreBase(ABC):
             if tableKey not in tableDocs:
                 continue
 
-            # Use the canonical key for the combined document (objectId, chunkId=0)
+            # Use the combined document's key (objectId, first chunkId)
             combined_doc = tableDocs[tableKey]
             newKey = self._getDocKey(combined_doc)
 
@@ -247,24 +245,34 @@ class DocumentStoreBase(ABC):
             base_doc = doc.model_copy(deep=True)
             base_doc.page_content = ''
             base_doc.metadata.chunkId = 0
+            # Clear table-specific metadata so the hydrated full document
+            # is not incorrectly labeled as a table
+            base_doc.metadata.isTable = False
+            base_doc.metadata.tableId = 0
             objectIds[objectId] = base_doc
 
-        # Retrieve and combine all chunks for the identified objects
+        # Fetch all chunks in a single batch query
+        docFilter = DocFilter(objectIds=list(objectIds.keys()))
+        allChunks = self.get(docFilter)
+
+        # Group chunks by objectId
+        chunksByObject: Dict[str, List[Doc]] = {}
+        for chunk in allChunks:
+            oid = chunk.metadata.objectId
+            if oid not in chunksByObject:
+                chunksByObject[oid] = []
+            chunksByObject[oid].append(chunk)
+
+        # Combine chunks into each base document
         newDocs: Dict[Tuple[str, int], Doc] = {}
         for objectId, doc in objectIds.items():
-            # Fetch all chunks for this object
-            docFilter = DocFilter(objectIds=[objectId])
-            docChunks = self.get(docFilter)
+            chunks = chunksByObject.get(objectId, [])
+            chunks.sort(key=lambda c: c.metadata.chunkId)
 
-            # Sort chunks by their original sequence
-            docChunks.sort(key=lambda chunk: chunk.metadata.chunkId)
-
-            # Accumulate text content
-            for chunk in docChunks:
+            for chunk in chunks:
                 if chunk.page_content:
                     doc.page_content += chunk.page_content
 
-            # Save the combined document using the object/chunkId=0 key
             docKey = self._getDocKey(doc)
             newDocs[docKey] = doc
 

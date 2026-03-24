@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # MIT License
 #
 # Copyright (c) 2026 Aparavi Software AG
