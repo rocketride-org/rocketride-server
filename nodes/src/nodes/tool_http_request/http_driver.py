@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Set
 from ai.common.tools import ToolsBase
 
 from .http_client import execute_request
+from .ssrf_guard import validate_url
 
 VALID_METHODS = {'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'}
 VALID_AUTH_TYPES = {'none', 'basic', 'bearer', 'api_key'}
@@ -164,7 +165,7 @@ INPUT_SCHEMA: Dict[str, Any] = {
 
 
 class HttpDriver(ToolsBase):
-    def __init__(
+    def __init__(  # noqa: D107
         self,
         *,
         server_name: str,
@@ -250,19 +251,14 @@ class HttpDriver(ToolsBase):
         if method.upper() not in VALID_METHODS:
             raise ValueError(f'method must be one of {sorted(VALID_METHODS)}; got {method!r}')
         if method.upper() not in self._enabled_methods:
-            raise ValueError(
-                f'HTTP method "{method.upper()}" is not allowed. '
-                f'Enabled methods: {", ".join(sorted(self._enabled_methods))}'
-            )
+            raise ValueError(f'HTTP method "{method.upper()}" is not allowed. Enabled methods: {", ".join(sorted(self._enabled_methods))}')
 
         # --- Guardrail: URL whitelist (empty list = allow all) ---
         url = input_obj.get('url')
         if not url or not isinstance(url, str):
             raise ValueError('url is required and must be a non-empty string')
         if self._url_patterns and not any(p.search(url) for p in self._url_patterns):
-            raise ValueError(
-                f'URL "{url}" does not match any allowed URL pattern.'
-            )
+            raise ValueError(f'URL "{url}" does not match any allowed URL pattern.')
 
         # --- Standard field validation ---
         auth = input_obj.get('auth')
@@ -280,9 +276,7 @@ class HttpDriver(ToolsBase):
                 raw = body.get('raw') or {}
                 ct = (raw.get('content_type') or 'application/json').strip().lower()
                 if ct not in VALID_RAW_CONTENT_TYPES:
-                    raise ValueError(
-                        f'body.raw.content_type must be one of {sorted(VALID_RAW_CONTENT_TYPES)}; got {ct!r}'
-                    )
+                    raise ValueError(f'body.raw.content_type must be one of {sorted(VALID_RAW_CONTENT_TYPES)}; got {ct!r}')
 
     def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:  # noqa: ANN401
         if not isinstance(input_obj, dict):
@@ -290,6 +284,8 @@ class HttpDriver(ToolsBase):
 
         self._normalize_shortcuts(input_obj)
         self._tool_validate(tool_name=tool_name, input_obj=input_obj)
+
+        validate_url(input_obj.get('url', ''))
 
         return execute_request(
             url=input_obj.get('url', ''),
