@@ -53,6 +53,9 @@ def main():
         sys.exit(1)
 
     docs_dir = sys.argv[1]
+    if not os.path.isdir(docs_dir):
+        print(f'Error: {docs_dir} not found')
+        sys.exit(1)
     bench_dir = os.path.dirname(os.path.abspath(__file__))
 
     benchmarks = [
@@ -100,9 +103,12 @@ def main():
     baseline_time = results[0]['total_time'] if results else 1
 
     for r in results:
-        speedup = baseline_time / r['total_time'] if r['total_time'] > 0 else 0
-        speedup_str = f'{speedup:.1f}x' if r['label'] != results[0]['label'] else 'baseline'
-        print(f'{r["label"]:<22} {r["total_time"]:>7.3f} {r["chunks"]:>8} {r["mem_delta_mb"]:>8.1f} {r["tokens_per_sec"]:>10,.0f} {r["mb_per_sec"]:>7.1f} {speedup_str:>8}')
+        try:
+            speedup = baseline_time / r['total_time'] if r['total_time'] > 0 else 0
+            speedup_str = f'{speedup:.1f}x' if r['label'] != results[0]['label'] else 'baseline'
+            print(f'{r["label"]:<22} {r["total_time"]:>7.3f} {r["chunks"]:>8} {r["mem_delta_mb"]:>8.1f} {r["tokens_per_sec"]:>10,.0f} {r["mb_per_sec"]:>7.1f} {speedup_str:>8}')
+        except KeyError as e:
+            print(f'{r.get("label", "unknown"):<22} (missing key: {e})')
 
     print('=' * 90)
 

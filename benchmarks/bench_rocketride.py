@@ -306,6 +306,16 @@ def run(root_dir):
     print(f'  Mem delta:      {mem_final - mem_start:>+10.0f} MB')
     print()
 
+    return {
+        'tool': 'rocketride',
+        'total_time': t_total,
+        'docs': len(docs),
+        'chars': sum(len(d['text_bytes']) for d in docs),
+        'chunks': len(all_chunk_bytes),
+        'index_terms': n_terms,
+        'mem_delta_mb': mem_final - mem_start,
+    }
+
 
 if __name__ == '__main__':
     root = sys.argv[1] if len(sys.argv) > 1 else '/tmp/linux-kernel'

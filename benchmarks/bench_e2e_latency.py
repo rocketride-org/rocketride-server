@@ -148,6 +148,10 @@ def search_query(index, query):
 
 def run(root_dir, iterations=5):
     """Run E2E latency benchmark with multiple iterations."""
+    if not os.path.isdir(root_dir):
+        print(f'Error: {root_dir} not found')
+        sys.exit(1)
+
     print('=' * 60)
     print('E2E PIPELINE LATENCY BENCHMARK')
     print(f'Dataset: {root_dir}')
@@ -160,9 +164,20 @@ def run(root_dir, iterations=5):
     gc.collect()
     mem_start = get_mem_mb()
 
-    # Warmup iteration (not counted)
+    # Warmup iteration — run full pipeline so all caches are hot
     print('\n[Warmup] Running 1 warmup iteration...')
     files = discover_files(root_dir)
+    warmup_docs = []
+    for fpath in files:
+        content, _hash = parse_file(fpath)
+        warmup_docs.append(content)
+    warmup_chunks = []
+    for doc in warmup_docs:
+        warmup_chunks.extend(chunk_text(doc))
+    warmup_index = build_index(warmup_chunks)
+    for q in queries:
+        search_query(warmup_index, q)
+    del warmup_docs, warmup_chunks, warmup_index
 
     total_chunks = 0
     total_terms = 0

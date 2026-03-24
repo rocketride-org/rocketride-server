@@ -55,7 +55,6 @@ DEFAULT_PARAMS = {
     'retrieved_chunks': 10,
     'tokens_per_chunk': 128,
     'output_tokens': 200,
-    'rerank_queries': 10,
 }
 
 
@@ -135,20 +134,20 @@ def run(root_dir):
     print('COST-PER-QUERY ESTIMATION')
     print('=' * 60)
 
-    # Count docs and chars
-    total_chars = 0
+    # Count docs and total size (os.path.getsize returns bytes, not chars)
+    total_bytes = 0
     num_docs = 0
     for dirpath, _, filenames in os.walk(root_dir):
         for fname in filenames:
             fpath = os.path.join(dirpath, fname)
             try:
-                total_chars += os.path.getsize(fpath)
+                total_bytes += os.path.getsize(fpath)
                 num_docs += 1
             except OSError:
                 continue
 
-    avg_chars = total_chars // max(1, num_docs)
-    print(f'\nDataset: {num_docs} docs, {total_chars:,} chars, avg {avg_chars} chars/doc')
+    avg_bytes = total_bytes // max(1, num_docs)
+    print(f'\nDataset: {num_docs} docs, {total_bytes:,} bytes, avg {avg_bytes} bytes/doc')
 
     # Query cost comparison
     configs = [
@@ -176,7 +175,7 @@ def run(root_dir):
     print('-' * 72)
 
     for label, emb, _llm, vdb in configs:
-        ing = estimate_ingestion_cost(num_docs, avg_chars, embedding_model=emb, vector_db=vdb)
+        ing = estimate_ingestion_cost(num_docs, avg_bytes, embedding_model=emb, vector_db=vdb)
         print(f'{label:<35} {ing["total_cost"]:>10.4f} {ing["total_chunks"]:>10} {ing["total_tokens"]:>12,}')
 
     # Summary for README
@@ -188,7 +187,7 @@ def run(root_dir):
         'tool': 'cost_estimation',
         'total_time': 0,
         'docs': num_docs,
-        'chars': total_chars,
+        'chars': total_bytes,
         'chunks': 0,
         'index_terms': 0,
         'mem_delta_mb': 0,

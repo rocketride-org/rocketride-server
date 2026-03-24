@@ -42,7 +42,11 @@ def generate_doc(doc_id, num_paragraphs=None):
 
 def main():
     """Generate synthetic test documents."""
+    random.seed(42)
+
     count = int(sys.argv[1]) if len(sys.argv) > 1 else 1000
+    if count < 1:
+        count = 1
     output_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), 'test_docs')
 
     os.makedirs(output_dir, exist_ok=True)
