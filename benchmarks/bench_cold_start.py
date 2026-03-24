@@ -25,6 +25,8 @@ from collections import defaultdict
 
 import psutil
 
+from chunkers import CHUNKERS
+
 
 def get_mem_mb():
     """Return current process RSS in MB."""
@@ -65,60 +67,6 @@ def build_index_and_search(chunks, query):
     return len(results) > 0, len(index)
 
 
-# Framework chunkers
-def _chunk_langchain(docs):
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-    splitter = RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=50)
-    chunks = []
-    for doc in docs:
-        for text in splitter.split_text(doc['content']):
-            chunks.append({'text': text, 'doc_id': doc['id']})
-    return chunks
-
-
-def _chunk_chonkie(docs):
-    from chonkie import TokenChunker
-
-    chunker = TokenChunker(chunk_size=512, chunk_overlap=50)
-    chunks = []
-    for doc in docs:
-        for c in chunker.chunk(doc['content']):
-            chunks.append({'text': c.text, 'doc_id': doc['id']})
-    return chunks
-
-
-def _chunk_llamaindex(docs):
-    from llama_index.core.node_parser import SentenceSplitter
-    from llama_index.core.schema import TextNode
-
-    splitter = SentenceSplitter(chunk_size=512, chunk_overlap=50)
-    chunks = []
-    for doc in docs:
-        nodes = splitter.get_nodes_from_documents([TextNode(text=doc['content'])])
-        for n in nodes:
-            chunks.append({'text': n.text, 'doc_id': doc['id']})
-    return chunks
-
-
-def _chunk_haystack(docs):
-    from haystack.components.preprocessors import DocumentSplitter
-    from haystack import Document
-
-    splitter = DocumentSplitter(split_by='word', split_length=100, split_overlap=10)
-    hs_docs = [Document(content=doc['content'], meta={'doc_id': doc['id']}) for doc in docs]
-    result = splitter.run(documents=hs_docs)
-    return [{'text': d.content, 'doc_id': d.meta.get('doc_id', 0)} for d in result['documents']]
-
-
-FRAMEWORKS = {
-    'LangChain': _chunk_langchain,
-    'Chonkie': _chunk_chonkie,
-    'LlamaIndex': _chunk_llamaindex,
-    'Haystack': _chunk_haystack,
-}
-
-
 def benchmark_cold_start(name, chunker, docs, query):
     """Measure total time from zero to first search result."""
     gc.collect()
@@ -127,10 +75,7 @@ def benchmark_cold_start(name, chunker, docs, query):
     t_start = time.perf_counter()
 
     # Full pipeline: chunk → index → search
-    try:
-        chunks = chunker(docs)
-    except Exception as e:
-        return {'name': name, 'error': str(e)}
+    chunks = chunker(docs)
 
     t_chunked = time.perf_counter()
 
@@ -176,8 +121,12 @@ def run(root_dir):
         print(f'{"Framework":<15} {"Total (ms)":>12} {"Chunk (ms)":>12} {"Idx+Search":>12} {"Chunks":>8} {"Mem MB":>8}')
         print('-' * 72)
 
-        for name, func in FRAMEWORKS.items():
-            r = benchmark_cold_start(name, func, docs, query)
+        for name, func in CHUNKERS.items():
+            try:
+                r = benchmark_cold_start(name, func, docs, query)
+            except Exception as e:
+                print(f'  SKIP {name}: {e}')
+                continue
             if 'error' in r:
                 print(f'{name:<15} SKIP ({r["error"][:40]})')
             else:
@@ -190,8 +139,12 @@ def run(root_dir):
     docs = all_docs[: max(scales)]
     print(f'\n| Framework | Cold Start ({max(scales)} docs) | Chunks | Memory |')
     print('|---|---|---|---|')
-    for name, func in FRAMEWORKS.items():
-        r = benchmark_cold_start(name, func, docs, query)
+    for name, func in CHUNKERS.items():
+        try:
+            r = benchmark_cold_start(name, func, docs, query)
+        except Exception as e:
+            print(f'  SKIP {name}: {e}')
+            continue
         if 'error' not in r:
             print(f'| {name} | {r["total_ms"]:.0f}ms | {r["chunks"]:,} | +{r["mem_delta"]:.0f} MB |')
 

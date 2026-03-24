@@ -38,6 +38,8 @@ import psutil
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from chunkers import CHUNKERS
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -242,59 +244,6 @@ def evaluate(queries, chunks, bm25_idx, vec_idx, doc_to_chunks):
 
 
 # ---------------------------------------------------------------------------
-# Chunker wrappers (try/except — skip if not installed)
-# ---------------------------------------------------------------------------
-
-CHUNKERS = {}
-
-
-def register_chunker(name):
-    def decorator(func):
-        CHUNKERS[name] = func
-        return func
-
-    return decorator
-
-
-@register_chunker('LangChain')
-def chunk_langchain(docs):
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-    splitter = RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=50)
-    chunks = []
-    for doc in docs:
-        for text in splitter.split_text(doc['content']):
-            chunks.append({'text': text, 'doc_id': doc['id']})
-    return chunks
-
-
-@register_chunker('Chonkie')
-def chunk_chonkie(docs):
-    from chonkie import TokenChunker
-
-    chunker = TokenChunker(chunk_size=512, chunk_overlap=50)
-    chunks = []
-    for doc in docs:
-        for c in chunker.chunk(doc['content']):
-            chunks.append({'text': c.text, 'doc_id': doc['id']})
-    return chunks
-
-
-@register_chunker('Haystack')
-def chunk_haystack(docs):
-    from haystack import Document
-    from haystack.components.preprocessors import DocumentSplitter
-
-    splitter = DocumentSplitter(split_by='word', split_length=100, split_overlap=10)
-    hs_docs = [Document(content=doc['content'], meta={'doc_id': doc['id']}) for doc in docs]
-    result = splitter.run(documents=hs_docs)
-    chunks = []
-    for d in result['documents']:
-        chunks.append({'text': d.content, 'doc_id': d.meta.get('doc_id', 0)})
-    return chunks
-
-
-# ---------------------------------------------------------------------------
 # Benchmark a single framework
 # ---------------------------------------------------------------------------
 
@@ -307,10 +256,7 @@ def benchmark_framework(name, chunker_func, docs, queries):
     t0 = time.perf_counter()
 
     # Chunk
-    try:
-        chunks = chunker_func(docs)
-    except Exception as e:
-        return {'name': name, 'error': str(e)}
+    chunks = chunker_func(docs)
 
     t_chunk = time.perf_counter() - t0
 
@@ -405,7 +351,7 @@ def run(root_dir):
         try:
             r = benchmark_framework(name, func, docs, queries)
         except Exception as e:
-            print(f'SKIP ({e})')
+            print(f'SKIP {name}: {e}')
             continue
 
         if 'error' in r:

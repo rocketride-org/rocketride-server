@@ -26,6 +26,8 @@ from collections import defaultdict
 
 import psutil
 
+from chunkers import CHUNKERS, build_inverted_index, search_index
+
 
 def get_mem_mb():
     """Return current process RSS in MB."""
@@ -53,32 +55,6 @@ def load_docs(root_dir):
     return docs
 
 
-def build_inverted_index(chunks):
-    """Build inverted index from chunk texts. Return (index, chunk_to_doc)."""
-    index = defaultdict(set)
-    for i, chunk in enumerate(chunks):
-        words = set(re.findall(r'\w{2,}', chunk['text'].lower()))
-        for w in words:
-            index[w].add(i)
-    return dict(index)
-
-
-def search(index, query, top_k=10):
-    """Search inverted index with TF-IDF-like scoring."""
-    words = re.findall(r'\w{2,}', query.lower())
-    if not words:
-        return []
-    scores = defaultdict(float)
-    total_chunks = max(1, max(max(v) for v in index.values() if v) + 1) if index else 1
-    for w in words:
-        posting = index.get(w, set())
-        if posting:
-            idf = 1.0 / (1.0 + len(posting) / total_chunks)
-            for idx in posting:
-                scores[idx] += idf
-    return sorted(scores.keys(), key=lambda x: -scores[x])[:top_k]
-
-
 def generate_queries(docs):
     """Generate keyword queries from docs for recall evaluation."""
     queries = []
@@ -100,79 +76,6 @@ def generate_queries(docs):
 
 
 # ---------------------------------------------------------------------------
-# Chunker wrappers
-# ---------------------------------------------------------------------------
-
-CHUNKERS = {}
-
-
-def register_chunker(name):
-    """Register a chunker function by name."""
-
-    def decorator(func):
-        CHUNKERS[name] = func
-        return func
-
-    return decorator
-
-
-@register_chunker('LangChain')
-def chunk_langchain(docs):
-    """Chunk with LangChain RecursiveCharacterTextSplitter."""
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-    splitter = RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=50)
-    chunks = []
-    for doc in docs:
-        for text in splitter.split_text(doc['content']):
-            chunks.append({'text': text, 'doc_id': doc['id']})
-    return chunks
-
-
-@register_chunker('Chonkie')
-def chunk_chonkie(docs):
-    """Chunk with Chonkie TokenChunker."""
-    from chonkie import TokenChunker
-
-    chunker = TokenChunker(chunk_size=512, chunk_overlap=50)
-    chunks = []
-    for doc in docs:
-        for c in chunker.chunk(doc['content']):
-            chunks.append({'text': c.text, 'doc_id': doc['id']})
-    return chunks
-
-
-@register_chunker('LlamaIndex')
-def chunk_llamaindex(docs):
-    """Chunk with LlamaIndex SentenceSplitter."""
-    from llama_index.core.node_parser import SentenceSplitter
-    from llama_index.core.schema import TextNode
-
-    splitter = SentenceSplitter(chunk_size=512, chunk_overlap=50)
-    chunks = []
-    for doc in docs:
-        nodes = splitter.get_nodes_from_documents([TextNode(text=doc['content'])])
-        for n in nodes:
-            chunks.append({'text': n.text, 'doc_id': doc['id']})
-    return chunks
-
-
-@register_chunker('Haystack')
-def chunk_haystack(docs):
-    """Chunk with Haystack DocumentSplitter."""
-    from haystack.components.preprocessors import DocumentSplitter
-    from haystack import Document
-
-    splitter = DocumentSplitter(split_by='word', split_length=100, split_overlap=10)
-    hs_docs = [Document(content=doc['content'], meta={'doc_id': doc['id']}) for doc in docs]
-    result = splitter.run(documents=hs_docs)
-    chunks = []
-    for d in result['documents']:
-        chunks.append({'text': d.content, 'doc_id': d.meta.get('doc_id', 0)})
-    return chunks
-
-
-# ---------------------------------------------------------------------------
 # Benchmark functions
 # ---------------------------------------------------------------------------
 
@@ -184,10 +87,7 @@ def benchmark_framework(name, chunker_func, docs, queries):
     # 1. Chunking speed
     mem_before = get_mem_mb()
     t0 = time.perf_counter()
-    try:
-        chunks = chunker_func(docs)
-    except Exception as e:
-        return {'name': name, 'error': str(e)}
+    chunks = chunker_func(docs)
     chunk_time = time.perf_counter() - t0
 
     # 2. Index build
@@ -207,7 +107,7 @@ def benchmark_framework(name, chunker_func, docs, queries):
     total_queries = len(queries)
 
     for q in queries:
-        results = search(index, q['query'], top_k=10)
+        results = search_index(index, q['query'], top_k=10)
         target = doc_to_chunks.get(q['doc_id'], set())
         for k in hits_at:
             if set(results[:k]) & target:
@@ -276,7 +176,11 @@ def run(root_dir):
     results = []
     for name, func in CHUNKERS.items():
         print(f'  Running {name}...', end=' ', flush=True)
-        r = benchmark_framework(name, func, docs, queries)
+        try:
+            r = benchmark_framework(name, func, docs, queries)
+        except Exception as e:
+            print(f'SKIP {name}: {e}')
+            continue
         if 'error' in r:
             print(f'SKIP ({r["error"][:50]})')
         else:
