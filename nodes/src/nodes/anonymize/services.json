@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"text"
-	],
+	"classType": ["text"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"gpu"
-	],
+	"capabilities": ["gpu"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,14 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A filter component that ",
-		"identifies and masks sensitive information in text data. It can be configured ",
-		"to detect and redact personally identifiable information (PII), maintaining ",
-		"data privacy while preserving document context.</br>",
-		"</br>",
-		"<b>Note</b>: This component uses AI so 100% accuracy is not guaranteed. It is recommended to review the results."
-	],
+	"description": ["A filter component that ", "identifies and masks sensitive information in text data. It can be configured ", "to detect and redact personally identifiable information (PII), maintaining ", "data privacy while preserving document context.</br>", "</br>", "<b>Note</b>: This component uses AI so 100% accuracy is not guaranteed. It is recommended to review the results."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -75,9 +64,7 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"text": [
-			"text"
-		]
+		"text": ["text"]
 	},
 	"input": [
 		{
@@ -114,25 +101,7 @@
 	//
 	"fulltest": [
 		{
-			"profiles": [
-				"glinerSmall",
-				"glinerMedium",
-				"glinerLarge",
-				"glinerMultiPII",
-				"glinerPIILarge",
-				"glinerMergedLarge",
-				"glinerMulti",
-				"gretelSmall",
-				"gretelLarge",
-				"glinerKo",
-				"glinerIt",
-				"glinerAr",
-				"glinerCommunitySmall",
-				"glinerCommunityMedium",
-				"glinerCommunityLarge",
-				"glinerBiomedSmall",
-				"glinerBiomedLarge"
-			],
+			"profiles": ["glinerSmall", "glinerMedium", "glinerLarge", "glinerMultiPII", "glinerPIILarge", "glinerMergedLarge", "glinerMulti", "gretelSmall", "gretelLarge", "glinerKo", "glinerIt", "glinerAr", "glinerCommunitySmall", "glinerCommunityMedium", "glinerCommunityLarge", "glinerBiomedSmall", "glinerBiomedLarge"],
 			"cases": [
 				{
 					"text": "My name is John Smith and my email is john.smith@example.com. Please contact me at 555-123-4567.",
@@ -284,229 +253,154 @@
 		},
 		"anonymize.custom": {
 			"object": "custom",
-			"properties": [
-				"anonymize.model",
-				"anonymizeChar"
-			]
+			"properties": ["anonymize.model", "anonymizeChar"]
 		},
 		"anonymize.glinerMergedLarge": {
 			"object": "glinerMergedLarge",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.glinerMultiPII": {
 			"object": "glinerMultiPII",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.glinerPIILarge": {
 			"object": "glinerPIILarge",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.glinerSmall": {
 			"object": "glinerSmall",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.glinerMedium": {
 			"object": "glinerMedium",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.glinerLarge": {
 			"object": "glinerLarge",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.glinerMulti": {
 			"object": "glinerMulti",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.gretelSmall": {
 			"object": "gretelSmall",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.gretelLarge": {
 			"object": "gretelLarge",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.glinerKo": {
 			"object": "glinerKo",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.glinerIt": {
 			"object": "glinerIt",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.glinerAr": {
 			"object": "glinerAr",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.glinerCommunitySmall": {
 			"object": "glinerCommunitySmall",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.glinerCommunityMedium": {
 			"object": "glinerCommunityMedium",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.glinerCommunityLarge": {
 			"object": "glinerCommunityLarge",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.glinerBiomedSmall": {
 			"object": "glinerBiomedSmall",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.glinerBiomedLarge": {
 			"object": "glinerBiomedLarge",
-			"properties": [
-				"anonymizeChar"
-			]
+			"properties": ["anonymizeChar"]
 		},
 		"anonymize.profile": {
 			"title": "Model",
 			"description": "Anonymize model",
 			"type": "string",
 			"default": "glinerMergedLarge",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": [
-						"anonymize.custom"
-					]
+					"properties": ["anonymize.custom"]
 				},
 				{
 					"value": "glinerMergedLarge",
-					"properties": [
-						"anonymize.glinerMergedLarge"
-					]
+					"properties": ["anonymize.glinerMergedLarge"]
 				},
 				{
 					"value": "glinerMultiPII",
-					"properties": [
-						"anonymize.glinerMultiPII"
-					]
+					"properties": ["anonymize.glinerMultiPII"]
 				},
 				{
 					"value": "glinerPIILarge",
-					"properties": [
-						"anonymize.glinerPIILarge"
-					]
+					"properties": ["anonymize.glinerPIILarge"]
 				},
 				{
 					"value": "glinerSmall",
-					"properties": [
-						"anonymize.glinerSmall"
-					]
+					"properties": ["anonymize.glinerSmall"]
 				},
 				{
 					"value": "glinerMedium",
-					"properties": [
-						"anonymize.glinerMedium"
-					]
+					"properties": ["anonymize.glinerMedium"]
 				},
 				{
 					"value": "glinerLarge",
-					"properties": [
-						"anonymize.glinerLarge"
-					]
+					"properties": ["anonymize.glinerLarge"]
 				},
 				{
 					"value": "glinerMulti",
-					"properties": [
-						"anonymize.glinerMulti"
-					]
+					"properties": ["anonymize.glinerMulti"]
 				},
 				{
 					"value": "gretelSmall",
-					"properties": [
-						"anonymize.gretelSmall"
-					]
+					"properties": ["anonymize.gretelSmall"]
 				},
 				{
 					"value": "gretelLarge",
-					"properties": [
-						"anonymize.gretelLarge"
-					]
+					"properties": ["anonymize.gretelLarge"]
 				},
 				{
 					"value": "glinerKo",
-					"properties": [
-						"anonymize.glinerKo"
-					]
+					"properties": ["anonymize.glinerKo"]
 				},
 				{
 					"value": "glinerIt",
-					"properties": [
-						"anonymize.glinerIt"
-					]
+					"properties": ["anonymize.glinerIt"]
 				},
 				{
 					"value": "glinerAr",
-					"properties": [
-						"anonymize.glinerAr"
-					]
+					"properties": ["anonymize.glinerAr"]
 				},
 				{
 					"value": "glinerCommunitySmall",
-					"properties": [
-						"anonymize.glinerCommunitySmall"
-					]
+					"properties": ["anonymize.glinerCommunitySmall"]
 				},
 				{
 					"value": "glinerCommunityMedium",
-					"properties": [
-						"anonymize.glinerCommunityMedium"
-					]
+					"properties": ["anonymize.glinerCommunityMedium"]
 				},
 				{
 					"value": "glinerCommunityLarge",
-					"properties": [
-						"anonymize.glinerCommunityLarge"
-					]
+					"properties": ["anonymize.glinerCommunityLarge"]
 				},
 				{
 					"value": "glinerBiomedSmall",
-					"properties": [
-						"anonymize.glinerBiomedSmall"
-					]
+					"properties": ["anonymize.glinerBiomedSmall"]
 				},
 				{
 					"value": "glinerBiomedLarge",
-					"properties": [
-						"anonymize.glinerBiomedLarge"
-					]
+					"properties": ["anonymize.glinerBiomedLarge"]
 				}
 			]
 		}
@@ -520,9 +414,7 @@
 		{
 			"section": "Pipe",
 			"title": "Anonymize",
-			"properties": [
-				"anonymize.profile"
-			]
+			"properties": ["anonymize.profile"]
 		}
 	]
 }
