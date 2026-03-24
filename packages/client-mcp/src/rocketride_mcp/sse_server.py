@@ -109,7 +109,15 @@ def create_app() -> Starlette:
     mcp = create_mcp_server()
 
     async def health(_request: Request) -> JSONResponse:
-        return JSONResponse({'status': 'ok', 'server': 'rocketride-mcp'})
+        status: dict = {'status': 'ok', 'server': 'rocketride-mcp'}
+        try:
+            client = _get_client()
+            await client.connect()
+            await client.disconnect()
+        except Exception:
+            status['status'] = 'degraded'
+            status['engine'] = 'unreachable'
+        return JSONResponse(status)
 
     middleware = [Middleware(AuthMiddleware)] if _API_KEY else []
 
@@ -125,7 +133,8 @@ def create_app() -> Starlette:
 def main():
     """Start the MCP SSE server."""
     parser = argparse.ArgumentParser(description='RocketRide MCP SSE Server')
-    parser.add_argument('--host', default='0.0.0.0', help='Bind host')
+    # Bind to all interfaces — required for Docker container networking
+    parser.add_argument('--host', default='0.0.0.0', help='Bind host')  # noqa: S104
     parser.add_argument('--port', type=int, default=8080, help='Bind port')
     args = parser.parse_args()
 
