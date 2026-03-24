@@ -199,7 +199,7 @@ Agent nodes use TWO connection types:
 
 **Layout rule for agents:** Controlled nodes (LLM, tools, memory) are positioned **below** the agent. The agent's invoke handles are on its **bottom edge**, the controlled node's invoke handle is on its **top edge**.
 
-```
+```text
   Chat (y:200) --questions--> Agent (y:180) --answers--> Response (y:160)
                                   |
                      +------------+-------------------+
@@ -209,7 +209,7 @@ Agent nodes use TWO connection types:
 
 **Multi-agent pipelines:** An agent can invoke another agent as a tool. The sub-agent has `control: [{ classType: "tool", from: "parent_agent_id" }]`. The sub-agent's own dependencies (LLM, memory) are positioned below it, forming tiers.
 
-```
+```text
   Chat (y:200) ---> Agent_1 (y:180) --answers--> Response (y:160)
                         |
            +------------+------------+
@@ -232,7 +232,7 @@ Agent_2 has no input lanes — it is invoked as a tool by Agent_1.
 
 For RAG query pipelines, the vector DB handles context injection directly. No prompt node needed:
 
-```
+```text
 chat → embedding (questions) → vector_db (questions → questions with context) → llm → response
 ```
 
