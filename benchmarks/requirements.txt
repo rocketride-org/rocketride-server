@@ -3,3 +3,6 @@ chonkie[all]>=1.6.0
 llama-index-core>=0.12.0
 haystack-ai>=2.8.0
 psutil>=5.9.0
+scikit-learn>=1.5.0
+pymupdf>=1.24.0
+pdfplumber>=0.11.0
