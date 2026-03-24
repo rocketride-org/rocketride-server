@@ -8,6 +8,7 @@ concurrency:
 permissions:
   contents: write
   packages: write
+  id-token: write
 
 on:
   schedule:
