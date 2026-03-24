@@ -22,39 +22,51 @@
 // =============================================================================
 
 const esbuild = require('esbuild');
+const fs = require('fs');
 const path = require('path');
 
 const production = process.argv.includes('--production');
-const outfile = path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'vscode/rocketride.js');
+const buildRoot = path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'vscode');
+const outfile = path.join(buildRoot, 'rocketride.js');
 
-esbuild.build({
-	entryPoints: ['src/extension.ts'],
-	bundle: true,
-	format: 'cjs',
-	minify: production,
-	sourcemap: true,
-	platform: 'node',
-	target: 'node16',
-	outfile,
-	external: ['vscode'],
-	alias: {
-		// docker-modem requires ssh2 at load time, but we only use local socket.
-		// Stub it out so no native .node binaries are needed.
-		'ssh2': path.resolve(__dirname, 'src/stubs/ssh2.js'),
-	},
-	mainFields: ['main'],
-	resolveExtensions: ['.ts', '.js', '.json'],
-	logLevel: 'info',
-	packages: 'bundle',
-	// Disable AMD detection properly
-	define: {
-		'define': 'undefined'
-	},
-	loader: {
-		'.json': 'json'
-	}
-}).catch((error) => {
-	console.error('esbuild failed:', error);
-	process.exit(1);
-});
-
+esbuild
+	.build({
+		entryPoints: ['src/extension.ts'],
+		bundle: true,
+		format: 'cjs',
+		minify: production,
+		sourcemap: true,
+		platform: 'node',
+		target: 'node16',
+		outfile,
+		external: ['vscode'],
+		alias: {
+			// docker-modem requires ssh2 at load time, but we only use local socket.
+			// Stub it out so no native .node binaries are needed.
+			ssh2: path.resolve(__dirname, 'src/stubs/ssh2.js'),
+		},
+		mainFields: ['main'],
+		resolveExtensions: ['.ts', '.js', '.json'],
+		logLevel: 'info',
+		packages: 'bundle',
+		// Disable AMD detection properly
+		define: {
+			define: 'undefined',
+		},
+		loader: {
+			'.json': 'json',
+		},
+	})
+	.then(() => {
+		// Copy skills/ directory to build output for agent documentation discovery
+		const srcSkills = path.join(__dirname, 'skills');
+		const destSkills = path.join(buildRoot, 'skills');
+		if (fs.existsSync(srcSkills)) {
+			fs.cpSync(srcSkills, destSkills, { recursive: true });
+			console.log(`Copied skills/ to ${destSkills}`);
+		}
+	})
+	.catch((error) => {
+		console.error('esbuild failed:', error);
+		process.exit(1);
+	});

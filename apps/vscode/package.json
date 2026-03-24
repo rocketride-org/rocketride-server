@@ -32,6 +32,11 @@
 		"onStartupFinished"
 	],
 	"contributes": {
+		"chatSkills": [
+			{
+				"path": "./skills/rocketride-pipelines"
+			}
+		],
 		"customEditors": [
 			{
 				"viewType": "rocketride.PageEditor",
@@ -406,6 +411,7 @@
 		"package.json",
 		"LICENSE",
 		"docs/**",
-		"dist/**"
+		"dist/**",
+		"skills/**"
 	]
 }

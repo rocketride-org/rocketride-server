@@ -1,0 +1,73 @@
+{
+  "name": "Simple Chat with OpenAI",
+  "description": "A basic chat pipeline that routes user questions through OpenAI and returns answers",
+  "version": 1,
+  "viewport": { "x": 0, "y": 0, "zoom": 1 },
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "type": "chat",
+        "parameters": {}
+      },
+      "ui": {
+        "position": { "x": 20, "y": 200 },
+        "measured": { "width": 160, "height": 65 },
+        "data": {
+          "provider": "chat",
+          "class": "source",
+          "type": "default"
+        },
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "llm_openai_1",
+      "provider": "llm_openai",
+      "config": {
+        "type": "llm_openai",
+        "parameters": {
+          "llm_openai": {
+            "profile": "openai-5-2"
+          }
+        }
+      },
+      "ui": {
+        "position": { "x": 240, "y": 200 },
+        "measured": { "width": 160, "height": 65 },
+        "data": {
+          "provider": "llm_openai",
+          "class": "llm",
+          "type": "default"
+        },
+        "formDataValid": true
+      },
+      "input": [
+        { "lane": "questions", "from": "chat_1" }
+      ]
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "ui": {
+        "position": { "x": 460, "y": 200 },
+        "measured": { "width": 160, "height": 65 },
+        "data": {
+          "provider": "response_answers",
+          "class": "infrastructure",
+          "type": "default"
+        },
+        "formDataValid": true
+      },
+      "input": [
+        { "lane": "answers", "from": "llm_openai_1" }
+      ]
+    }
+  ]
+}

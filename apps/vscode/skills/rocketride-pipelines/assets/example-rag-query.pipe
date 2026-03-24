@@ -1,0 +1,115 @@
+{
+  "viewport": { "x": -625, "y": 5, "zoom": 1 },
+  "version": 1,
+  "name": "RAG Chat — Query with Context",
+  "description": "Chat interface that searches a Qdrant vector DB for relevant documents and uses them as context for LLM answers",
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      },
+      "ui": {
+        "position": { "x": 20, "y": 200 },
+        "measured": { "width": 176, "height": 61 },
+        "data": { "provider": "chat", "class": "source", "type": "default" },
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "embedding_openai_1",
+      "provider": "embedding_openai",
+      "config": {
+        "profile": "text-embedding-3-small",
+        "text-embedding-3-small": {},
+        "type": "embedding_openai",
+        "parameters": {
+          "embedding_openai": { "profile": "text-embedding-3-small" }
+        }
+      },
+      "ui": {
+        "position": { "x": 240, "y": 200 },
+        "measured": { "width": 176, "height": 79 },
+        "data": { "provider": "embedding_openai", "class": "embedding", "type": "default" },
+        "formDataValid": true
+      },
+      "input": [
+        { "lane": "questions", "from": "chat_1" }
+      ]
+    },
+    {
+      "id": "qdrant_1",
+      "provider": "qdrant",
+      "config": {
+        "profile": "cloud",
+        "cloud": {
+          "collection": "ROCKETRIDE",
+          "port": 6333,
+          "score": 0.7
+        },
+        "type": "qdrant",
+        "parameters": {
+          "qdrant": {
+            "profile": "local",
+            "local": {
+              "host": "localhost",
+              "port": 6333,
+              "collection": "my_documents"
+            }
+          }
+        }
+      },
+      "ui": {
+        "position": { "x": 460, "y": 160 },
+        "measured": { "width": 176, "height": 96 },
+        "data": { "provider": "qdrant", "class": "store", "type": "default" },
+        "formDataValid": true
+      },
+      "input": [
+        { "lane": "questions", "from": "embedding_openai_1" }
+      ]
+    },
+    {
+      "id": "llm_openai_1",
+      "provider": "llm_openai",
+      "config": {
+        "profile": "openai-5-2",
+        "openai-5-2": {},
+        "type": "llm_openai",
+        "parameters": {
+          "llm_openai": { "profile": "openai-5-2" }
+        }
+      },
+      "ui": {
+        "position": { "x": 700, "y": 160 },
+        "measured": { "width": 176, "height": 61 },
+        "data": { "provider": "llm_openai", "class": "llm", "type": "default" },
+        "formDataValid": true
+      },
+      "input": [
+        { "lane": "questions", "from": "qdrant_1" }
+      ]
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "ui": {
+        "position": { "x": 960, "y": 180 },
+        "measured": { "width": 176, "height": 61 },
+        "data": { "provider": "response_answers", "class": "infrastructure", "type": "default" },
+        "formDataValid": true
+      },
+      "input": [
+        { "lane": "answers", "from": "llm_openai_1" }
+      ]
+    }
+  ],
+  "project_id": "7758b123-f490-446a-9010-c53914d81f2e"
+}

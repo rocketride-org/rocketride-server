@@ -1,0 +1,127 @@
+{
+  "viewport": {
+    "x": 20,
+    "y": -114,
+    "zoom": 0.97
+  },
+  "version": 1,
+  "name": "Agent with Tools",
+  "description": "Chat-driven agent that can reason, use HTTP tools, and maintain memory across planning waves",
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      },
+      "ui": {
+        "position": { "x": 20, "y": 200 },
+        "measured": { "width": 176, "height": 61 },
+        "data": { "provider": "chat", "class": "source", "type": "default" },
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "agent_rocketride_1",
+      "provider": "agent_rocketride",
+      "config": {
+        "instructions": [
+          "SAMPLE INSTRUCTION 1",
+          "SAMPLE INSTRUCTION 2"
+        ],
+        "max_waves": 10,
+        "parameters": {}
+      },
+      "ui": {
+        "position": { "x": 320, "y": 180 },
+        "measured": { "width": 176, "height": 80 },
+        "data": { "provider": "agent_rocketride", "class": "agent", "type": "default" },
+        "formDataValid": true
+      },
+      "input": [
+        { "lane": "questions", "from": "chat_1" }
+      ]
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "ui": {
+        "position": { "x": 620, "y": 160 },
+        "measured": { "width": 176, "height": 61 },
+        "data": { "provider": "response_answers", "class": "infrastructure", "type": "default" },
+        "formDataValid": true
+      },
+      "input": [
+        { "lane": "answers", "from": "agent_rocketride_1" }
+      ]
+    },
+    {
+      "id": "llm_openai_1",
+      "provider": "llm_openai",
+      "config": {
+        "profile": "openai-5-2",
+        "openai-5-2": {},
+        "type": "llm_openai",
+        "parameters": {
+          "llm_openai": { "profile": "openai-5-2" }
+        }
+      },
+      "ui": {
+        "position": { "x": 240, "y": 340 },
+        "measured": { "width": 176, "height": 61 },
+        "data": { "provider": "llm_openai", "class": "llm", "type": "default" },
+        "formDataValid": true
+      },
+      "control": [
+        { "classType": "llm", "from": "agent_rocketride_1" }
+      ]
+    },
+    {
+      "id": "tool_http_request_1",
+      "provider": "tool_http_request",
+      "config": {
+        "type": "tool_http_request",
+        "urlWhitelist": [],
+        "allowGET": true,
+        "allowPOST": true,
+        "allowPUT": true,
+        "allowPATCH": true,
+        "allowDELETE": true,
+        "allowHEAD": false,
+        "allowOPTIONS": false
+      },
+      "ui": {
+        "position": { "x": 460, "y": 360 },
+        "measured": { "width": 176, "height": 34 },
+        "data": { "provider": "tool_http_request", "class": "tool", "type": "default" },
+        "formDataValid": true
+      },
+      "control": [
+        { "classType": "tool", "from": "agent_rocketride_1" }
+      ]
+    },
+    {
+      "id": "memory_internal_1",
+      "provider": "memory_internal",
+      "config": {
+        "type": "memory_internal"
+      },
+      "ui": {
+        "position": { "x": 680, "y": 360 },
+        "measured": { "width": 176, "height": 34 },
+        "data": { "provider": "memory_internal", "class": "memory", "type": "default" },
+        "formDataValid": true
+      },
+      "control": [
+        { "classType": "memory", "from": "agent_rocketride_1" }
+      ]
+    }
+  ],
+  "project_id": "f5ce00b5-441b-4390-aa7f-42a4311cf73b"
+}
