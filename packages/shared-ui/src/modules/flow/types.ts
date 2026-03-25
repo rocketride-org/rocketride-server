@@ -41,6 +41,9 @@ export type { IProject, IProjectComponent, IComponentUI, IControlConnection, IIn
 
 export { IServiceCapabilities, ITaskState, DEFAULT_TOOLCHAIN_STATE } from '../../types/project';
 
+/** Pipeline schema version. Must match the server's IServices::VERSION (engine-lib). */
+export const PIPELINE_SCHEMA_VERSION = 1;
+
 // ============================================================================
 // Node Type Discriminator
 // ============================================================================

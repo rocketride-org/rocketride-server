@@ -45,6 +45,7 @@ export type PageEditorIncomingMessage =
 			type: 'taskStatusUpdate';
 			source: string; // Component ID
 			taskStatus: TaskStatus; // Single TaskStatus update from backend
+			host: string; // Server host URL for {host} placeholder replacement
 	  }
 	| {
 			type: 'servicesUpdate';
@@ -75,6 +76,7 @@ export type PageEditorOutgoingMessage =
 	| {
 			type: 'openExternal';
 			url: string;
+			displayName?: string;
 	  }
 	| {
 			type: 'setPreference';
@@ -86,6 +88,19 @@ export type PageEditorOutgoingMessage =
 	| {
 			type: 'validate';
 			pipeline: IProject;
+	  }
+	| {
+			type: 'run';
+			source: string;
+			content: string;
+	  }
+	| {
+			type: 'stop';
+			source: string;
+	  }
+	| {
+			type: 'openStatus';
+			source: string;
 	  };
 
 // ============================================================================
@@ -122,6 +137,8 @@ export const PageEditor: React.FC = () => {
 	const [oauth2RootUrl, setOauth2RootUrl] = useState<string>('https://oauth2.rocketride.ai');
 	// Canvas preferences (synced from extension on ready, persisted via setPreference)
 	const [preferences, setPreferences] = useState<Record<string, unknown>>({});
+	// Server host URL for {host} placeholder replacement in endpoint URLs
+	const [serverHost, setServerHost] = useState<string>('');
 
 	const contentChangedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const pendingContentRef = useRef<string | null>(null);
@@ -144,7 +161,8 @@ export const PageEditor: React.FC = () => {
 				case 'taskStatusUpdate': {
 					// Drive canvas node state from status_update: merge this source's status
 					// so the node with id === source (e.g. chat_2) re-renders with run/Processing/offline.
-					const { source, taskStatus } = message;
+					const { source, taskStatus, host } = message;
+					if (host) setServerHost(host);
 					setTaskStatuses((prev) => ({
 						...prev,
 						[source]: taskStatus,
@@ -236,8 +254,8 @@ export const PageEditor: React.FC = () => {
 	};
 
 	const onOpenLink = useCallback(
-		(url: string) => {
-			sendMessage({ type: 'openExternal', url });
+		(url: string, displayName?: string) => {
+			sendMessage({ type: 'openExternal', url, displayName });
 		},
 		[sendMessage]
 	);
@@ -255,6 +273,28 @@ export const PageEditor: React.FC = () => {
 	// are handled natively by VS Code's custom editor framework.
 	const onUndo = useCallback(() => sendMessage({ type: 'requestUndo' }), [sendMessage]);
 	const onRedo = useCallback(() => sendMessage({ type: 'requestRedo' }), [sendMessage]);
+
+	// Pipeline execution callbacks — save-to-disk + run is atomic on the host side
+	const onRunPipeline = useCallback(
+		(source: string, project: IProject) => {
+			sendMessage({ type: 'run', source, content: JSON.stringify(project) });
+		},
+		[sendMessage]
+	);
+
+	const onStopPipeline = useCallback(
+		(source: string) => {
+			sendMessage({ type: 'stop', source });
+		},
+		[sendMessage]
+	);
+
+	const onOpenStatus = useCallback(
+		(source: string) => {
+			sendMessage({ type: 'openStatus', source });
+		},
+		[sendMessage]
+	);
 
 	const onContentChanged = useCallback(
 		(project: object) => {
@@ -293,7 +333,7 @@ export const PageEditor: React.FC = () => {
 
 	return (
 		<div className="pipeline-editor-container">
-			<Canvas oauth2RootUrl={oauth2RootUrl} project={content} servicesJson={servicesJson} handleValidatePipeline={handleValidatePipeline} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} onOpenLink={onOpenLink} getPreference={getPreference} setPreference={setPreference} onContentChanged={onContentChanged} onUndo={onUndo} onRedo={onRedo} />
+			<Canvas oauth2RootUrl={oauth2RootUrl} project={content} servicesJson={servicesJson} handleValidatePipeline={handleValidatePipeline} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} onOpenLink={onOpenLink} getPreference={getPreference} setPreference={setPreference} onContentChanged={onContentChanged} onUndo={onUndo} onRedo={onRedo} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} />
 		</div>
 	);
 };

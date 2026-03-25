@@ -77,7 +77,7 @@ export interface IFlowProps {
 	handleValidatePipeline: (pipeline: IProject) => Promise<IValidateResponse>;
 
 	/** Opens a URL in the host browser. */
-	onOpenLink?: (url: string) => void;
+	onOpenLink?: (url: string, displayName?: string) => void;
 
 	/** Host-provided preference reader. */
 	getPreference?: (key: string) => unknown;
@@ -93,13 +93,25 @@ export interface IFlowProps {
 
 	/** Host-provided redo callback. */
 	onRedo?: () => void;
+
+	/** Runs a pipeline: host saves to disk then executes. */
+	onRunPipeline?: (source: string, project: IProject) => void;
+
+	/** Stops a running pipeline for the given source node. */
+	onStopPipeline?: (source: string) => void;
+
+	/** Opens the status page for a source node. */
+	onOpenStatus?: (source: string) => void;
+
+	/** Server host URL for replacing {host} placeholders in endpoint URLs. */
+	serverHost?: string;
 }
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onUndo, onRedo }: IFlowProps) {
+export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost }: IFlowProps) {
 	// --- Build inventory from service catalog --------------------------------
 	const inventory = buildInventory(servicesJson);
 
@@ -154,6 +166,10 @@ export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuse
 					onContentChanged={onContentChanged}
 					onUndo={onUndo}
 					onRedo={onRedo}
+					onRunPipeline={onRunPipeline}
+					onStopPipeline={onStopPipeline}
+					onOpenStatus={onOpenStatus}
+					serverHost={serverHost}
 					features={{
 						addNode: true,
 						addAnnotation: true,

@@ -551,9 +551,9 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 
 				const message = runningComponents.length === 1 ? `Pipeline component "${componentNames}" in ${fileName} is running. Restart it?` : `${runningComponents.length} components (${componentNames}) in ${fileName} are running. Restart them?`;
 
-				const choice = await vscode.window.showInformationMessage(message, { modal: true }, 'Restart');
+				const choice = await vscode.window.showInformationMessage(message, { modal: true }, 'Yes', 'No');
 
-				if (choice === 'Restart') {
+				if (choice === 'Yes') {
 					for (const component of runningComponents) {
 						await this.restartPipe(parsedFile.projectId!, component.id, uri);
 					}
