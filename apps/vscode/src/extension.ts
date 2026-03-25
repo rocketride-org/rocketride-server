@@ -407,71 +407,86 @@ async function scaffoldAgentDocs(): Promise<void> {
 	// Read integration settings
 	const config = vscode.workspace.getConfiguration('rocketride');
 
-	// Claude Code — .claude/rules/rocketride.md (auto-loaded at session start)
-	if (config.get<boolean>('integrations.claudeCode', false)) {
-		const dir = path.join(workspaceRoot, '.claude', 'rules');
-		await fs.promises.mkdir(dir, { recursive: true });
-		const file = path.join(dir, 'rocketride.md');
-		await fs.promises.writeFile(file, docsContent + '\n', 'utf-8');
-		logger.output(`${icons.info} Claude Code integration written to ${file}`);
-	}
+	// Helper: write or remove an owned file
+	const writeOrRemoveFile = async (enabled: boolean, filePath: string, content: string, label: string) => {
+		if (enabled) {
+			await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+			await fs.promises.writeFile(filePath, content, 'utf-8');
+			logger.output(`${icons.info} ${label} written to ${filePath}`);
+		} else {
+			try {
+				await fs.promises.unlink(filePath);
+				logger.output(`${icons.info} ${label} removed from ${filePath}`);
+			} catch {
+				// File doesn't exist — nothing to remove
+			}
+		}
+	};
+
+	// Helper: upsert or remove a managed section in a shared file
+	const upsertOrRemoveSection = async (enabled: boolean, filePath: string, sectionContent: string, label: string) => {
+		const marker = '## RocketRide';
+		const markerEnd = '\n## ';
+		const section = ['', marker, '', docsContent, ''].join('\n');
+
+		if (enabled) {
+			await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+			try {
+				const existing = await fs.promises.readFile(filePath, 'utf-8');
+				const markerIdx = existing.indexOf(marker);
+				if (markerIdx !== -1) {
+					// Replace existing section
+					const afterMarker = existing.indexOf(markerEnd, markerIdx + marker.length);
+					const before = existing.substring(0, markerIdx);
+					const after = afterMarker !== -1 ? existing.substring(afterMarker) : '';
+					await fs.promises.writeFile(filePath, before + section.trimStart() + after, 'utf-8');
+					logger.output(`${icons.info} ${label} updated in ${filePath}`);
+				} else {
+					await fs.promises.writeFile(filePath, existing + section, 'utf-8');
+					logger.output(`${icons.info} ${label} appended to ${filePath}`);
+				}
+			} catch {
+				await fs.promises.writeFile(filePath, section.trimStart(), 'utf-8');
+				logger.output(`${icons.info} ${label} written to ${filePath}`);
+			}
+		} else {
+			// Remove our section if it exists
+			try {
+				const existing = await fs.promises.readFile(filePath, 'utf-8');
+				const markerIdx = existing.indexOf(marker);
+				if (markerIdx !== -1) {
+					const afterMarker = existing.indexOf(markerEnd, markerIdx + marker.length);
+					const before = existing.substring(0, markerIdx);
+					const after = afterMarker !== -1 ? existing.substring(afterMarker) : '';
+					const cleaned = (before + after).trim();
+					if (cleaned.length > 0) {
+						await fs.promises.writeFile(filePath, cleaned + '\n', 'utf-8');
+					} else {
+						await fs.promises.unlink(filePath);
+					}
+					logger.output(`${icons.info} ${label} removed from ${filePath}`);
+				}
+			} catch {
+				// File doesn't exist — nothing to clean
+			}
+		}
+	};
+
+	// Claude Code — .claude/rules/rocketride.md
+	await writeOrRemoveFile(config.get<boolean>('integrations.claudeCode', false), path.join(workspaceRoot, '.claude', 'rules', 'rocketride.md'), docsContent + '\n', 'Claude Code integration');
 
 	// Cursor — .cursor/rules/rocketride.mdc
-	if (config.get<boolean>('integrations.cursor', false)) {
-		const dir = path.join(workspaceRoot, '.cursor', 'rules');
-		await fs.promises.mkdir(dir, { recursive: true });
-		const file = path.join(dir, 'rocketride.mdc');
-		const mdc = ['---', 'description: Build, edit, or debug RocketRide data processing pipelines (.pipe files). Use when the user asks about RocketRide pipelines, nodes, lanes, or agent workflows.', 'alwaysApply: false', '---', '', docsContent, ''].join('\n');
-		await fs.promises.writeFile(file, mdc, 'utf-8');
-		logger.output(`${icons.info} Cursor integration written to ${file}`);
-	}
+	const mdcContent = ['---', 'description: Build, edit, or debug RocketRide data processing pipelines (.pipe files). Use when the user asks about RocketRide pipelines, nodes, lanes, or agent workflows.', 'alwaysApply: false', '---', '', docsContent, ''].join('\n');
+	await writeOrRemoveFile(config.get<boolean>('integrations.cursor', false), path.join(workspaceRoot, '.cursor', 'rules', 'rocketride.mdc'), mdcContent, 'Cursor integration');
 
-	// Copilot — .github/copilot-instructions.md (append if exists, create if not)
-	if (config.get<boolean>('integrations.copilot', false)) {
-		const dir = path.join(workspaceRoot, '.github');
-		await fs.promises.mkdir(dir, { recursive: true });
-		const file = path.join(dir, 'copilot-instructions.md');
-		const section = ['', '## RocketRide', '', docsContent, ''].join('\n');
-
-		const marker = '## RocketRide';
-		try {
-			const existing = await fs.promises.readFile(file, 'utf-8');
-			if (!existing.includes(marker)) {
-				await fs.promises.writeFile(file, existing + section, 'utf-8');
-				logger.output(`${icons.info} Copilot integration appended to ${file}`);
-			}
-		} catch {
-			await fs.promises.writeFile(file, section.trimStart(), 'utf-8');
-			logger.output(`${icons.info} Copilot integration written to ${file}`);
-		}
-	}
+	// Copilot — .github/copilot-instructions.md (managed section)
+	await upsertOrRemoveSection(config.get<boolean>('integrations.copilot', false), path.join(workspaceRoot, '.github', 'copilot-instructions.md'), docsContent, 'Copilot integration');
 
 	// Windsurf — .windsurf/rules/rocketride.md
-	if (config.get<boolean>('integrations.windsurf', false)) {
-		const dir = path.join(workspaceRoot, '.windsurf', 'rules');
-		await fs.promises.mkdir(dir, { recursive: true });
-		const file = path.join(dir, 'rocketride.md');
-		await fs.promises.writeFile(file, docsContent + '\n', 'utf-8');
-		logger.output(`${icons.info} Windsurf integration written to ${file}`);
-	}
+	await writeOrRemoveFile(config.get<boolean>('integrations.windsurf', false), path.join(workspaceRoot, '.windsurf', 'rules', 'rocketride.md'), docsContent + '\n', 'Windsurf integration');
 
-	// Codex — AGENTS.md (append if exists, create if not)
-	if (config.get<boolean>('integrations.codex', false)) {
-		const file = path.join(workspaceRoot, 'AGENTS.md');
-		const section = ['', '## RocketRide', '', docsContent, ''].join('\n');
-
-		const marker = '## RocketRide';
-		try {
-			const existing = await fs.promises.readFile(file, 'utf-8');
-			if (!existing.includes(marker)) {
-				await fs.promises.writeFile(file, existing + section, 'utf-8');
-				logger.output(`${icons.info} Codex integration appended to ${file}`);
-			}
-		} catch {
-			await fs.promises.writeFile(file, section.trimStart(), 'utf-8');
-			logger.output(`${icons.info} Codex integration written to ${file}`);
-		}
-	}
+	// Codex — AGENTS.md (managed section)
+	await upsertOrRemoveSection(config.get<boolean>('integrations.codex', false), path.join(workspaceRoot, 'AGENTS.md'), docsContent, 'Codex integration');
 }
 
 /**
