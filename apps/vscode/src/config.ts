@@ -28,6 +28,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { RocketRideClient } from 'rocketride';
+import { buildEffectiveEngineArgs } from './shared/util/engineArgs';
 
 export type ConnectionMode = 'cloud' | 'onprem' | 'local';
 
@@ -467,28 +468,13 @@ export class ConfigManager {
 	}
 
 	/**
-	 * Returns the effective engine args as an array, injecting --trace=servicePython
-	 * if debug output is enabled and the user hasn't specified their own --trace.
-	 *
-	 * Note: engineArgs is passed as a single string intentionally. The backend
-	 * engine splits all arguments according to shell parsing rules (handling
-	 * quoted paths, escaped spaces, etc.). Naive whitespace splitting here
-	 * would break arguments like --path='C:\Program Files\RocketRide'.
+	 * Returns the effective engine args as an argv-style array, injecting
+	 * --trace=servicePython if debug output is enabled and the user hasn't
+	 * specified their own --trace. Quoted paths and escaped spaces are preserved.
 	 */
 	public getEffectiveEngineArgs(): string[] {
 		const config = this.getConfig();
-		const rawArgs = config.engineArgs;
-		const argsStr = Array.isArray(rawArgs) ? rawArgs.join(' ') : String(rawArgs || '');
-		const hasTrace = argsStr.includes('--trace=');
-
-		const result: string[] = [];
-		if (argsStr.trim()) {
-			result.push(argsStr.trim());
-		}
-		if (config.local.debugOutput && !hasTrace) {
-			result.push('--trace=servicePython');
-		}
-		return result;
+		return buildEffectiveEngineArgs(config.engineArgs, config.local.debugOutput);
 	}
 
 	/**

@@ -26,6 +26,7 @@ import * as assert from 'assert';
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
 import * as vscode from 'vscode';
+import { buildEffectiveEngineArgs, splitEngineArgs } from '../shared/util/engineArgs';
 // import * as myExtension from '../../extension';
 
 suite('Extension Test Suite', () => {
@@ -34,5 +35,18 @@ suite('Extension Test Suite', () => {
 	test('Sample test', () => {
 		assert.strictEqual(-1, [1, 2, 3].indexOf(5));
 		assert.strictEqual(-1, [1, 2, 3].indexOf(0));
+	});
+
+	test('splitEngineArgs splits multiple flags into separate argv tokens', () => {
+		assert.deepStrictEqual(splitEngineArgs('--verbose --modelserver=5590'), ['--verbose', '--modelserver=5590']);
+	});
+
+	test('splitEngineArgs preserves quoted paths with spaces', () => {
+		assert.deepStrictEqual(splitEngineArgs('--path="C:\\Program Files\\RocketRide" --flag'), ['--path=C:\\Program Files\\RocketRide', '--flag']);
+	});
+
+	test('buildEffectiveEngineArgs injects trace only when not already present', () => {
+		assert.deepStrictEqual(buildEffectiveEngineArgs('--verbose', true), ['--verbose', '--trace=servicePython']);
+		assert.deepStrictEqual(buildEffectiveEngineArgs('--trace=servicePython --verbose', true), ['--trace=servicePython', '--verbose']);
 	});
 });
