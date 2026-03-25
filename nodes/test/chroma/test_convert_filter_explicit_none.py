@@ -123,7 +123,7 @@ def _scoped_stubs() -> Iterator[None]:
 
 
 def _load_store_class() -> type:
-    nodes_root = Path(__file__).resolve().parent.parent
+    nodes_root = Path(__file__).resolve().parent.parent.parent
     chroma_py = nodes_root / 'src' / 'nodes' / 'chroma' / 'chroma.py'
     with _scoped_stubs():
         spec = importlib.util.spec_from_file_location('chroma_store_under_test', chroma_py)
