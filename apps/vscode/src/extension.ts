@@ -49,6 +49,7 @@ import { SidebarConnectionProvider } from './providers/SidebarConnectionProvider
 // Core managers
 let connectionManager: ConnectionManager | undefined;
 let configManager: ConfigManager | undefined;
+let extensionContext: vscode.ExtensionContext | undefined;
 
 // Provider references
 let pageConnection: PageConnectionProvider | undefined;
@@ -100,6 +101,8 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
 	const logger = getLogger();
 	logger.output(`${icons.begin} Activating RocketRide extension...`);
+
+	extensionContext = context;
 
 	// Initialize config manager with context for secure storage
 	configManager = ConfigManager.getInstance();
@@ -369,9 +372,10 @@ export async function deactivate(): Promise<void> {
 
 /**
  * Builds the agent instruction content pointing to the extension's skill docs.
+ * The services catalog lives in globalStorageUri (writable), everything else in extensionPath (readonly).
  */
-function buildAgentDocsContent(skillDir: string): string {
-	return ['When the user asks you to build, edit, or debug a RocketRide pipeline (.pipe file),', 'read the following documentation before generating any pipeline JSON.', '', `1. \`${path.join(skillDir, 'SKILL.md')}\` — How to think about pipelines, lane system, DAG rules, config patterns`, `2. \`${path.join(skillDir, 'references', 'services.md')}\` — Live catalog of every available node (lanes, profiles, config fields)`, `3. \`${path.join(skillDir, 'assets')}\` — Example .pipe files you can use as templates`].join('\n');
+function buildAgentDocsContent(skillDir: string, servicesPath: string): string {
+	return ['When the user asks you to build, edit, or debug a RocketRide pipeline (.pipe file),', 'read the following documentation before generating any pipeline JSON.', '', `1. \`${path.join(skillDir, 'SKILL.md')}\` — How to think about pipelines, lane system, DAG rules, config patterns`, `2. \`${servicesPath}\` — Live catalog of every available node (lanes, profiles, config fields)`, `3. \`${path.join(skillDir, 'assets')}\` — Example .pipe files you can use as templates`].join('\n');
 }
 
 /**
@@ -396,7 +400,9 @@ async function scaffoldAgentDocs(): Promise<void> {
 	}
 
 	const skillDir = path.join(extensionPath, 'skills', 'rocketride-pipelines');
-	const docsContent = buildAgentDocsContent(skillDir);
+	const storageDir = extensionContext?.globalStorageUri?.fsPath;
+	const servicesPath = storageDir ? path.join(storageDir, 'services.md') : path.join(skillDir, 'references', 'services.md');
+	const docsContent = buildAgentDocsContent(skillDir, servicesPath);
 
 	// Always write rocketride.md as the universal fallback
 	const docsFile = path.join(workspaceRoot, 'rocketride.md');
@@ -490,20 +496,27 @@ async function scaffoldAgentDocs(): Promise<void> {
 }
 
 /**
- * Writes a formatted catalog of running services to the extension's
- * skills directory so coding agents can discover available nodes via
- * the rocketride.md pointer.
+ * Writes a formatted catalog of running services to globalStorageUri
+ * so it's writable regardless of extension install location (marketplace,
+ * remote, etc.). Falls back to the extension's skills directory if
+ * globalStorageUri is unavailable.
  */
 async function writeServicesCatalog(services: Record<string, unknown>): Promise<void> {
-	const extensionPath = vscode.extensions.getExtension('rocketride.rocketride')?.extensionPath;
-	if (!extensionPath) {
-		return;
+	const storageDir = extensionContext?.globalStorageUri?.fsPath;
+	let servicesFile: string;
+
+	if (storageDir) {
+		await fs.promises.mkdir(storageDir, { recursive: true });
+		servicesFile = path.join(storageDir, 'services.md');
+	} else {
+		const extensionPath = vscode.extensions.getExtension('rocketride.rocketride')?.extensionPath;
+		if (!extensionPath) {
+			return;
+		}
+		const skillDir = path.join(extensionPath, 'skills', 'rocketride-pipelines', 'references');
+		await fs.promises.mkdir(skillDir, { recursive: true });
+		servicesFile = path.join(skillDir, 'services.md');
 	}
-
-	const skillDir = path.join(extensionPath, 'skills', 'rocketride-pipelines', 'references');
-	const servicesFile = path.join(skillDir, 'services.md');
-
-	await fs.promises.mkdir(skillDir, { recursive: true });
 
 	const lines: string[] = ['# Available RocketRide Services', '', '> Auto-generated from the running RocketRide engine.', '> This file refreshes on every engine connection.', '', 'Use this catalog to select the right nodes when building `.pipe` pipelines.', 'Each service below is a node you can add to a pipeline as a `provider`.', ''];
 
