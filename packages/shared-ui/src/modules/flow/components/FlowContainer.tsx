@@ -88,7 +88,7 @@ export interface IFlowContainerProps {
 	onRedo?: () => void;
 
 	/** Opens a URL in the host browser. */
-	onOpenLink?: (url: string) => void;
+	onOpenLink?: (url: string, displayName?: string) => void;
 
 	/** Host-provided preference reader. */
 	getPreference?: (key: string) => unknown;
@@ -105,6 +105,18 @@ export interface IFlowContainerProps {
 	/** Google Picker client ID. */
 	googlePickerClientId?: string;
 
+	/** Runs a pipeline: host saves to disk then executes. */
+	onRunPipeline?: (source: string, project: IProject) => void;
+
+	/** Stops a running pipeline for the given source node. */
+	onStopPipeline?: (source: string) => void;
+
+	/** Opens the status page for a source node. */
+	onOpenStatus?: (source: string) => void;
+
+	/** Server host URL for replacing {host} placeholders in endpoint URLs. */
+	serverHost?: string;
+
 	/** Child components (typically the Canvas grid). */
 	children?: ReactNode;
 }
@@ -119,12 +131,12 @@ export interface IFlowContainerProps {
  * Uses `key` on the outer Box to force a clean re-mount when the project
  * ID changes, ensuring no stale graph state leaks between projects.
  */
-export default function FlowContainer({ project, oauth2RootUrl, features, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onUndo, onRedo, onOpenLink, getPreference, setPreference, googlePickerDeveloperKey, googlePickerClientId, children }: IFlowContainerProps): ReactElement {
+export default function FlowContainer({ project, oauth2RootUrl, features, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onUndo, onRedo, onOpenLink, getPreference, setPreference, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, children }: IFlowContainerProps): ReactElement {
 	return (
 		<ReactFlowProvider>
 			{/* Re-key on project ID to force clean re-mount between projects */}
 			<Box sx={{ position: 'relative', width: '100%', height: '100%' }} key={`${project.project_id ?? 'new'}-${project.name}`}>
-				<FlowProvider project={project} projectId={project.project_id ?? ''} features={features} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} servicesJson={servicesJson} servicesJsonError={servicesJsonError} inventory={inventory} inventoryConnectorTitleMap={inventoryConnectorTitleMap} handleValidatePipeline={handleValidatePipeline} onContentChanged={onContentChanged} onUndo={onUndo} onRedo={onRedo} oauth2RootUrl={oauth2RootUrl} onOpenLink={onOpenLink} getPreference={getPreference} setPreference={setPreference} googlePickerDeveloperKey={googlePickerDeveloperKey} googlePickerClientId={googlePickerClientId}>
+				<FlowProvider project={project} projectId={project.project_id ?? ''} features={features} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} servicesJson={servicesJson} servicesJsonError={servicesJsonError} inventory={inventory} inventoryConnectorTitleMap={inventoryConnectorTitleMap} handleValidatePipeline={handleValidatePipeline} onContentChanged={onContentChanged} onUndo={onUndo} onRedo={onRedo} oauth2RootUrl={oauth2RootUrl} onOpenLink={onOpenLink} getPreference={getPreference} setPreference={setPreference} googlePickerDeveloperKey={googlePickerDeveloperKey} googlePickerClientId={googlePickerClientId} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost}>
 					{children}
 				</FlowProvider>
 			</Box>

@@ -50,7 +50,7 @@ import { createContext, ReactElement, ReactNode, useCallback, useContext, useEff
 
 import { Connection, Edge, EdgeChange, Node, NodeChange, useEdgesState, useNodesState, useReactFlow, getConnectedEdges } from '@xyflow/react';
 
-import { INode, INodeData, IInputConnection, IControlConnection, IProject, INodeType } from '../types';
+import { INode, INodeData, IInputConnection, IControlConnection, IProject, INodeType, PIPELINE_SCHEMA_VERSION } from '../types';
 
 /** ReactFlow Node with strongly-typed data. Used throughout this context. */
 type FlowNode = Node<INodeData>;
@@ -268,7 +268,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	/** True while loadData is replacing all nodes/edges. Prevents onNodesChange from notifying the host. */
 	const isLoadingRef = useRef(false);
 
-	/** The last version number we sent to the host. -1 ensures initial load always runs. */
+	/** The last docRevision number we sent to the host. -1 ensures initial load always runs. */
 	const lastSentVersion = useRef(-1);
 
 	// --- Derived state -----------------------------------------------------
@@ -318,7 +318,8 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				...currentProjectRef.current,
 				components,
 				viewport,
-				version: nextVersion,
+				version: PIPELINE_SCHEMA_VERSION,
+				docRevision: nextVersion,
 			};
 			lastSentVersion.current = nextVersion;
 			onContentChanged(project);
@@ -818,13 +819,13 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		[setNodes, setEdges]
 	);
 
-	// --- Load project on mount / when host sends a new version --------------
+	// --- Load project on mount / when host sends a new docRevision ----------
 	// Reloads the canvas whenever the host sends a project with a different
-	// version than what we last sent. Our own changes increment version before
-	// sending, so echoed updates match lastSentVersion and are skipped.
-	// Undo/redo sends an older version, which triggers a reload.
+	// docRevision than what we last sent. Our own changes increment docRevision
+	// before sending, so echoed updates match lastSentVersion and are skipped.
+	// Undo/redo sends an older docRevision, which triggers a reload.
 
-	const incomingVersion = currentProject?.version ?? 0;
+	const incomingVersion = currentProject?.docRevision ?? 0;
 
 	useEffect(() => {
 		if (!currentProject) return;

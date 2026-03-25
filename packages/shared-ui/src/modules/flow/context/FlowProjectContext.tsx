@@ -117,13 +117,27 @@ export interface IFlowProjectContext {
 	oauth2RootUrl: string;
 
 	/** Opens an external URL in the host's default browser. */
-	onOpenLink?: (url: string) => void;
+	onOpenLink?: (url: string, displayName?: string) => void;
 
 	/** Google Picker developer key (for Google Drive integration). */
 	googlePickerDeveloperKey?: string;
 
 	/** Google Picker client ID (for Google Drive integration). */
 	googlePickerClientId?: string;
+
+	// --- Pipeline execution callbacks --------------------------------------
+
+	/** Runs a pipeline: host saves to disk then executes. */
+	onRunPipeline?: (source: string, project: IProject) => void;
+
+	/** Stops a running pipeline for the given source node. */
+	onStopPipeline?: (source: string) => void;
+
+	/** Opens the status page for a source node. */
+	onOpenStatus?: (source: string) => void;
+
+	/** Server host URL for replacing {host} placeholders in endpoint URLs. */
+	serverHost?: string;
 }
 
 const FlowProjectContext = createContext<IFlowProjectContext | null>(null);
@@ -160,9 +174,15 @@ export interface IFlowProjectProviderProps {
 	onUndo?: () => void;
 	onRedo?: () => void;
 	oauth2RootUrl: string;
-	onOpenLink?: (url: string) => void;
+	onOpenLink?: (url: string, displayName?: string) => void;
 	googlePickerDeveloperKey?: string;
 	googlePickerClientId?: string;
+
+	// --- Pipeline execution callbacks --------------------------------------
+	onRunPipeline?: (source: string, project: IProject) => void;
+	onStopPipeline?: (source: string) => void;
+	onOpenStatus?: (source: string) => void;
+	serverHost?: string;
 }
 
 // ============================================================================
@@ -176,7 +196,7 @@ export interface IFlowProjectProviderProps {
  * The host application passes props that are tunneled through this context
  * so deeply nested components can access them without prop drilling.
  */
-export function FlowProjectProvider({ children, project: currentProject, features = DEFAULT_FLOW_FEATURES, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId }: IFlowProjectProviderProps): ReactElement {
+export function FlowProjectProvider({ children, project: currentProject, features = DEFAULT_FLOW_FEATURES, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost }: IFlowProjectProviderProps): ReactElement {
 	// --- Toolchain state ---------------------------------------------------
 
 	const [toolchainState, setToolchainState] = useState<IToolchainState>(DEFAULT_TOOLCHAIN_STATE);
@@ -221,6 +241,10 @@ export function FlowProjectProvider({ children, project: currentProject, feature
 		onOpenLink,
 		googlePickerDeveloperKey,
 		googlePickerClientId,
+		onRunPipeline,
+		onStopPipeline,
+		onOpenStatus,
+		serverHost,
 	};
 
 	return <FlowProjectContext.Provider value={value}>{children}</FlowProjectContext.Provider>;

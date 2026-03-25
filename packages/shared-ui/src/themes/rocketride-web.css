@@ -181,6 +181,18 @@
 	/** Primary button foreground. */
 	--rr-fg-button: #ffffff;
 
+	/** Small button height (compact actions on nodes, toolbars). */
+	--rr-btn-sm-height: 16px;
+
+	/** Small button horizontal padding. */
+	--rr-btn-sm-padding: 0 6px;
+
+	/** Small button font size. */
+	--rr-btn-sm-font-size: 9px;
+
+	/** Small button border radius. */
+	--rr-btn-sm-radius: 3px;
+
 	/* ================================================================== */
 	/* Inputs                                                              */
 	/* ================================================================== */

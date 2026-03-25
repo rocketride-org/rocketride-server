@@ -104,6 +104,11 @@
 	--rr-bg-button: var(--vscode-button-background);
 	--rr-fg-button: var(--vscode-button-foreground);
 
+	--rr-btn-sm-height: 16px;
+	--rr-btn-sm-padding: 0 6px;
+	--rr-btn-sm-font-size: 9px;
+	--rr-btn-sm-radius: 3px;
+
 	/* ================================================================== */
 	/* Inputs                                                              */
 	/* ================================================================== */

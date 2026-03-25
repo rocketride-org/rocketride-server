@@ -31,7 +31,6 @@ import { TokenSection } from '../../components/TokenSection';
 import { TabPanel } from '../../components/TabPanel';
 import { TraceSection, TraceRow } from '../../components/TraceSection';
 import { EndpointInfoModal, EndpointInfo } from '../../components/EndpointInfoModal';
-import { WarningIcon } from '../../components/icons/WarningIcon';
 
 // Import the styles
 import '../../styles/vscode.css';
@@ -400,15 +399,26 @@ export const PageStatus: React.FC = () => {
 
 	const endpointInfo = getEndpointInfo();
 	const controlButton = getControlButton();
-	const errorCount = (taskStatus?.errors?.length ?? 0) + (taskStatus?.warnings?.length ?? 0);
+	const errCount = taskStatus?.errors?.length ?? 0;
+	const warnCount = taskStatus?.warnings?.length ?? 0;
 
-	// Build tab list (Errors tab always visible, badge shown when count > 0)
+	// Build tab list (Errors tab always visible, badges shown when count > 0)
+	const errorsBadge = (() => {
+		if (errCount === 0 && warnCount === 0) return undefined;
+		return (
+			<span style={{ display: 'inline-flex', gap: '3px', marginLeft: '4px' }}>
+				{errCount > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '16px', height: '16px', borderRadius: '8px', backgroundColor: 'var(--vscode-errorForeground, #f14c4c)', color: '#fff', fontSize: '10px', fontWeight: 600, padding: '0 4px' }}>{errCount}</span>}
+				{warnCount > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: '16px', height: '16px', borderRadius: '8px', backgroundColor: 'var(--vscode-editorWarning-foreground, #cca700)', color: '#fff', fontSize: '10px', fontWeight: 600, padding: '0 4px' }}>{warnCount}</span>}
+			</span>
+		);
+	})();
+
 	const tabs = [
 		{ id: 'status', label: 'Status' },
 		{ id: 'tokens', label: 'Tokens' },
 		{ id: 'flow', label: 'Flow' },
 		{ id: 'trace', label: 'Trace' },
-		{ id: 'errors', label: 'Errors', badge: errorCount > 0 ? <WarningIcon size={14} /> : undefined },
+		{ id: 'errors', label: 'Errors', badge: errorsBadge },
 	];
 
 	return (

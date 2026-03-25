@@ -54,6 +54,7 @@ import { Edge, Position } from '@xyflow/react';
 
 import { useFlow } from '../../../hooks';
 import { useFlowGraph } from '../../../context/FlowGraphContext';
+import { useFlowProject } from '../../../context/FlowProjectContext';
 import { getIconPath } from '../../../util/get-icon-path';
 import ConditionalRender from '../../ConditionalRender';
 import { INodeData, IService, IServiceCatalog, IServiceLane, INodeLayout, IServiceCapabilities, ITaskState } from '../../../types';
@@ -62,6 +63,7 @@ import NodeTop from './top';
 import NodeHeader from './header';
 import NodeLanes from './lanes';
 import NodeStatus from './status';
+import RunButton from './run-button';
 import { InvokeHandle } from '../../handles';
 
 // =============================================================================
@@ -116,6 +118,7 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 	// Pull shared canvas state from the flow context
 	const { nodes, taskStatuses, componentPipeCounts, totalPipes, servicesJson, edges } = useFlow();
 	const { setQuickAddState } = useFlowGraph();
+	const { onOpenStatus, onOpenLink, serverHost } = useFlowProject();
 
 	// =========================================================================
 	// Service lookup — all service metadata comes from here, not from data
@@ -175,6 +178,18 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 	/** Task status for this node from DAP events. */
 	const taskStatus = taskStatuses?.[id];
 
+	/** Error count for the source node badge (from failedCount or errors array). */
+	const errorCount = useMemo(() => {
+		if (!isSourceNode || !taskStatus) return 0;
+		return Math.max(taskStatus.failedCount || 0, taskStatus.errors?.length || 0);
+	}, [isSourceNode, taskStatus]);
+
+	/** Warning count for the source node badge. */
+	const warningCount = useMemo(() => {
+		if (!isSourceNode || !taskStatus) return 0;
+		return taskStatus.warnings?.length || 0;
+	}, [isSourceNode, taskStatus]);
+
 	// =========================================================================
 	// Section visibility flags — drive the bottom cap background color
 	// =========================================================================
@@ -182,8 +197,8 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 	/** Any lane key (including _ prefixed hidden lanes) means lanes render. */
 	const hasLanes = Object.keys(lanes ?? {}).length > 0;
 
-	/** Status section is visible when the pipeline is actively running. */
-	const hasStatus = isSourceNode ? !!(taskStatus && !taskStatus.completed && [ITaskState.STARTING, ITaskState.INITIALIZING, ITaskState.RUNNING].includes(taskStatus.state)) : !!(componentPipeCounts && id in componentPipeCounts && (totalPipes ?? 0) > 0);
+	/** Status section is visible when running OR when completed status should persist. */
+	const hasStatus = isSourceNode ? !!(taskStatus && taskStatus.state !== ITaskState.NONE) : !!(componentPipeCounts && id in componentPipeCounts && (totalPipes ?? 0) > 0);
 
 	// Bottom cap color:
 	//   - If the node has lanes, status, OR invoke source diamonds, use canvas bg
@@ -196,11 +211,14 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 
 	return (
 		<>
+			{/* Play/stop button on source nodes — slides out from the left edge */}
+			{isSourceNode && <RunButton nodeId={id} />}
+
 			{/* Top cap + optional invoke target diamond */}
 			<NodeTop id={id} edges={edges} isInvocable={isInvocable} setQuickAddState={setQuickAddState} />
 
-			{/* Header — icon, title, class type, gear, overflow menu */}
-			<NodeHeader id={id} icon={icon} title={displayTitle} handleClick={handleClick} nodeType={type} hideEdit={false} formDataValid={data.formDataValid} description={displayDescription} documentation={documentation} parentId={mostRecentParentId} classType={classType} />
+			{/* Header — icon, title, class type, gear, overflow menu, error badge */}
+			<NodeHeader id={id} icon={icon} title={displayTitle} handleClick={handleClick} nodeType={type} hideEdit={false} formDataValid={data.formDataValid} description={displayDescription} documentation={documentation} parentId={mostRecentParentId} classType={classType} errorCount={isSourceNode ? errorCount : undefined} warningCount={isSourceNode ? warningCount : undefined} onBadgeClick={isSourceNode && onOpenStatus ? () => onOpenStatus(id) : undefined} />
 			{children}
 
 			{/* Data lanes — input/output handles */}
@@ -208,9 +226,9 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 				<NodeLanes nodeId={id} lanes={lanes!} layout={layout} data={data} />
 			</ConditionalRender>
 
-			{/* Pipeline execution status (only during active runs) */}
+			{/* Pipeline execution status — persists after completion for source nodes */}
 			<ConditionalRender condition={hasStatus}>
-				<NodeStatus componentProvider={id} isSourceNode={isSourceNode} taskStatus={taskStatus} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} />
+				<NodeStatus componentProvider={id} isSourceNode={isSourceNode} taskStatus={taskStatus} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} onOpenStatus={onOpenStatus} onOpenLink={onOpenLink} serverHost={serverHost} displayName={displayTitle} />
 			</ConditionalRender>
 
 			{/* Spacer to reserve vertical space for invoke source labels */}

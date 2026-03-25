@@ -278,7 +278,10 @@ export interface IProjectComponent extends Omit<PipelineComponent, 'ui'> {
  * Top-level project entity persisted to the .pipe file.
  * Extends the SDK's PipelineConfig.
  */
-export interface IProject extends PipelineConfig {}
+export interface IProject extends PipelineConfig {
+	/** Editor document revision counter for change tracking (undo/redo, echo detection). Not a schema version. */
+	docRevision?: number;
+}
 
 // ============================================================================
 // Validation

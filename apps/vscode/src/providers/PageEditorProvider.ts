@@ -174,6 +174,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 						type: 'taskStatusUpdate',
 						source: source,
 						taskStatus: taskStatus,
+						host: this.connectionManager.getHttpUrl(),
 					});
 				}
 				break;
@@ -283,6 +284,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 							type: 'taskStatusUpdate',
 							source,
 							taskStatus,
+							host: this.connectionManager.getHttpUrl(),
 						});
 					}
 				}
@@ -425,6 +427,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 								type: 'taskStatusUpdate',
 								source: source,
 								taskStatus: taskStatus,
+								host: this.connectionManager.getHttpUrl(),
 							});
 						}
 					}
@@ -461,9 +464,54 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 					break;
 				}
 
+				case 'run': {
+					// Save to disk then execute the pipeline.
+					// The file watcher fires asynchronously after the disk write and checks
+					// handlePipelineRestart. We flag savesForRun so it skips the restart
+					// prompt, and clear the flag after a delay to cover the async watcher.
+					if (typeof data.content === 'string' && typeof data.source === 'string') {
+						const uriKey = document.uri.toString();
+						this.savesForRun.add(uriKey);
+						try {
+							await this.saveDocument(document, data.content);
+							const parsed = JSON.parse(document.getText());
+							await this.runPipeline({ pipeline: { ...parsed, source: data.source } });
+						} catch (error: unknown) {
+							const message = error instanceof Error ? error.message : String(error);
+							vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
+						}
+						// Clear after a delay so the async file watcher has time to check the flag
+						setTimeout(() => this.savesForRun.delete(uriKey), 2000);
+					}
+					break;
+				}
+
+				case 'stop': {
+					// Stop a running pipeline for the given source node
+					if (typeof data.source === 'string') {
+						await this.stopPipeline(data.source, document);
+					}
+					break;
+				}
+
+				case 'openStatus': {
+					// Open the status page for a source node
+					if (typeof data.source === 'string') {
+						try {
+							const parsed = JSON.parse(document.getText());
+							const projectId = parsed.project_id ?? '';
+							const displayName = data.source;
+							await vscode.commands.executeCommand('rocketride.page.status.open', displayName, document.uri, projectId, data.source);
+						} catch (error: unknown) {
+							this.logger.error(`[PageEditorProvider] Failed to open status page: ${error}`);
+						}
+					}
+					break;
+				}
+
 				case 'openExternal':
 					if (data.url) {
-						vscode.env.openExternal(vscode.Uri.parse(data.url));
+						this.openLink(data.url, data.displayName);
 					}
 					break;
 
@@ -628,11 +676,13 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 			const projectId = project.project_id;
 			const source = project.source;
 
-			// Use DAP command to execute pipeline
+			// Use DAP command to execute pipeline (always trace from canvas)
 			await this.connectionManager.request('execute', {
 				projectId: projectId,
 				source: source,
 				pipeline: projectTransformed,
+				pipelineTraceLevel: 'full',
+				args: ConfigManager.getInstance().getEffectiveEngineArgs(),
 			});
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -675,6 +725,223 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 			const message = error instanceof Error ? error.message : String(error);
 			vscode.window.showErrorMessage(`Failed to stop pipeline: ${message}`);
 		}
+	}
+
+	/**
+	 * Opens a URL in an embedded VS Code WebviewPanel with an iframe.
+	 *
+	 * Mirrors PageStatusProvider.openLink — bridges drag-and-drop, clipboard,
+	 * theme colors, and env variables to the iframe.
+	 */
+	private openLink(url: string, displayName?: string): void {
+		const panel = vscode.window.createWebviewPanel('externalContent', displayName || 'Pipeline', vscode.ViewColumn.One, {
+			enableScripts: true,
+			retainContextWhenHidden: true,
+		});
+
+		const env: Record<string, string | boolean> = ConfigManager.getInstance().getEnv();
+		env['devMode'] = true;
+
+		panel.webview.html = `
+			<!DOCTYPE html>
+			<html>
+			<head>
+				<meta charset="UTF-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<style>
+					body { margin: 0; padding: 0; }
+					iframe { width: 100%; height: 100vh; border: none; }
+				</style>
+			</head>
+			<body>
+				<iframe id="app-iframe" src="${url}${url.includes('?') ? '&' : '?'}_t=${Date.now()}" allow="clipboard-read; clipboard-write"></iframe>
+				<script>
+					(function() {
+						const vscode = acquireVsCodeApi();
+						const iframe = document.getElementById('app-iframe');
+						const envVars = ${JSON.stringify(env)};
+						let iframeOrigin = '*';
+						try { iframeOrigin = new URL(iframe.src).origin; } catch(e) {}
+
+						['dragenter', 'dragover'].forEach(eventName => {
+							document.addEventListener(eventName, (e) => {
+								e.preventDefault();
+								e.stopPropagation();
+								try { iframe.contentWindow.postMessage({ type: 'dragHover', x: e.clientX, y: e.clientY }, iframeOrigin); } catch(err) {}
+							});
+						});
+						document.addEventListener('dragleave', (e) => {
+							if (e.relatedTarget === null) {
+								try { iframe.contentWindow.postMessage({ type: 'dragLeave' }, iframeOrigin); } catch(err) {}
+							}
+						});
+
+						document.addEventListener('drop', async (e) => {
+							e.preventDefault();
+							e.stopPropagation();
+							const files = e.dataTransfer && e.dataTransfer.files;
+							if (!files || files.length === 0) return;
+
+							const fileDataArray = [];
+							for (let i = 0; i < files.length; i++) {
+								const file = files[i];
+								const buffer = await file.arrayBuffer();
+								fileDataArray.push({
+									name: file.name,
+									type: file.type || 'application/octet-stream',
+									size: file.size,
+									lastModified: file.lastModified,
+									buffer: buffer
+								});
+							}
+
+							try {
+								iframe.contentWindow.postMessage({
+									type: 'bridgedFileDrop',
+									files: fileDataArray
+								}, iframeOrigin, fileDataArray.map(f => f.buffer));
+								iframe.contentWindow.postMessage({ type: 'dragLeave' }, iframeOrigin);
+							} catch (err) {
+								console.error('[Parent] Error bridging file drop to iframe:', err);
+							}
+						});
+
+						function getVSCodeThemeColors() {
+							const style = getComputedStyle(document.body);
+							const getColor = (varName, fallback = '') => {
+								const value = style.getPropertyValue(varName).trim();
+								return value || fallback;
+							};
+							return {
+								'--bg-primary': getColor('--vscode-editor-background'),
+								'--bg-secondary': getColor('--vscode-sideBar-background'),
+								'--bg-tertiary': getColor('--vscode-editorWidget-background'),
+								'--bg-hover': getColor('--vscode-list-hoverBackground'),
+								'--text-primary': getColor('--vscode-editor-foreground'),
+								'--text-secondary': getColor('--vscode-descriptionForeground'),
+								'--text-muted': getColor('--vscode-disabledForeground'),
+								'--border-color': getColor('--vscode-panel-border'),
+								'--border-hover': getColor('--vscode-focusBorder'),
+								'--accent-primary': getColor('--vscode-focusBorder'),
+								'--accent-secondary': getColor('--vscode-button-background'),
+								'--accent-hover': getColor('--vscode-button-hoverBackground'),
+								'--success-color': getColor('--vscode-terminal-ansiGreen'),
+								'--error-color': getColor('--vscode-errorForeground'),
+								'--warning-color': getColor('--vscode-editorWarning-foreground'),
+								'--info-color': getColor('--vscode-editorInfo-foreground'),
+								'--code-bg': getColor('--vscode-textCodeBlock-background'),
+								'--input-bg': getColor('--vscode-input-background'),
+								'--input-border': getColor('--vscode-input-border'),
+								'--shadow-sm': getColor('--vscode-widget-shadow'),
+								'--shadow-md': getColor('--vscode-widget-shadow'),
+								'--shadow-lg': getColor('--vscode-widget-shadow')
+							};
+						}
+
+						function sendDataToIframe() {
+							const colors = getVSCodeThemeColors();
+							try {
+								iframe.contentWindow.postMessage({
+									type: 'vscodeData',
+									env: envVars,
+									theme: colors
+								}, iframeOrigin);
+							} catch (error) {
+								console.error('[Parent] Error sending data to iframe:', error);
+							}
+						}
+
+						window.addEventListener('message', (event) => {
+							if (event.source === iframe.contentWindow) {
+								if (event.data.type === 'ready') {
+									sendDataToIframe();
+								}
+								if (event.data.type === 'requestPaste') {
+									vscode.postMessage({ type: 'requestPaste' });
+								}
+								if (event.data.type === 'copyText' && event.data.text) {
+									vscode.postMessage({ type: 'copyText', text: event.data.text });
+								}
+								if (event.data.type === 'requestFileDialog') {
+									vscode.postMessage({ type: 'requestFileDialog' });
+								}
+							}
+						});
+
+						window.addEventListener('message', (event) => {
+							const msg = event.data;
+							if (msg.type === 'themeChanged') {
+								setTimeout(() => {
+									sendDataToIframe();
+								}, 50);
+							}
+							if (msg.type === 'pasteContent' && msg.text && iframe.contentWindow) {
+								iframe.contentWindow.postMessage({
+									type: 'paste',
+									text: msg.text
+								}, iframeOrigin);
+							}
+							if (msg.type === 'nativeFilesSelected' && iframe.contentWindow) {
+								iframe.contentWindow.postMessage({
+									type: 'nativeFilesSelected',
+									files: msg.files
+								}, iframeOrigin);
+							}
+						});
+					})();
+				</script>
+			</body>
+			</html>
+		`;
+
+		const messageDisposable = panel.webview.onDidReceiveMessage(async (msg: { type: string; text?: string }) => {
+			if (msg.type === 'requestPaste') {
+				const text = await vscode.env.clipboard.readText();
+				if (text) {
+					panel.webview.postMessage({ type: 'pasteContent', text });
+				}
+			}
+			if (msg.type === 'copyText' && msg.text) {
+				await vscode.env.clipboard.writeText(msg.text);
+			}
+			if (msg.type === 'requestFileDialog') {
+				const uris = await vscode.window.showOpenDialog({
+					canSelectMany: true,
+					canSelectFiles: true,
+					canSelectFolders: false,
+					title: 'Select files to upload',
+				});
+				if (uris && uris.length > 0) {
+					const path = require('path');
+					const fileDataArray: { name: string; type: string; size: number; lastModified: number; buffer: number[] }[] = [];
+					for (const uri of uris) {
+						const bytes = await vscode.workspace.fs.readFile(uri);
+						fileDataArray.push({
+							name: path.basename(uri.fsPath),
+							type: 'application/octet-stream',
+							size: bytes.length,
+							lastModified: Date.now(),
+							buffer: Array.from(bytes),
+						});
+					}
+					panel.webview.postMessage({
+						type: 'nativeFilesSelected',
+						files: fileDataArray,
+					});
+				}
+			}
+		});
+
+		const themeChangeDisposable = vscode.window.onDidChangeActiveColorTheme(() => {
+			panel.webview.postMessage({
+				type: 'themeChanged',
+			});
+		});
+
+		panel.onDidDispose(() => {
+			messageDisposable.dispose();
+			themeChangeDisposable.dispose();
+		});
 	}
 
 	/**

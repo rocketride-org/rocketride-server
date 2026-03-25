@@ -78,6 +78,12 @@ interface INodeHeaderProps {
 	handleClick?: () => void;
 	/** Class type tags for the node (e.g. ["llm"]), shown as a subtitle. */
 	classType?: string[];
+	/** Number of pipeline errors to display as a red badge on the title. */
+	errorCount?: number;
+	/** Number of pipeline warnings to display as an orange badge on the title. */
+	warningCount?: number;
+	/** Callback when error/warning badge is clicked (opens status page). */
+	onBadgeClick?: () => void;
 }
 
 /**
@@ -86,7 +92,7 @@ interface INodeHeaderProps {
  * @param props - Node identity, metadata, and an optional click handler.
  * @returns The fully rendered header bar element.
  */
-export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title, description, documentation, formDataValid, parentId: _parentId, handleClick, classType }: INodeHeaderProps): ReactElement {
+export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title, description, documentation, formDataValid, parentId: _parentId, handleClick, classType, errorCount, warningCount, onBadgeClick }: INodeHeaderProps): ReactElement {
 	// ========================================================================
 	// FlowContext state and actions
 	// ========================================================================
@@ -161,7 +167,33 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 	// Title element — reused in both the tooltip and non-tooltip render paths
 	const titleElement = (
 		<Box>
-			<Typography sx={{ ...styles.title, ...nodeStyles.label }}>{displayTitle}</Typography>
+			<Typography sx={{ ...styles.title, ...nodeStyles.label }}>
+				{displayTitle}
+				{errorCount != null && errorCount > 0 && (
+					<Box
+						component="span"
+						sx={styles.errorBadge}
+						onClick={(e: React.MouseEvent) => {
+							e.stopPropagation();
+							onBadgeClick?.();
+						}}
+					>
+						{errorCount}
+					</Box>
+				)}
+				{warningCount != null && warningCount > 0 && (
+					<Box
+						component="span"
+						sx={styles.warningBadge}
+						onClick={(e: React.MouseEvent) => {
+							e.stopPropagation();
+							onBadgeClick?.();
+						}}
+					>
+						{warningCount}
+					</Box>
+				)}
+			</Typography>
 			<ConditionalRender condition={subtitleText}>
 				<Typography sx={styles.subtitle}>{subtitleText}</Typography>
 			</ConditionalRender>
@@ -326,5 +358,42 @@ const styles = {
 		height: '1rem',
 		width: 'auto',
 		fill: 'var(--rr-text-secondary)',
+	},
+
+	/** Red error count badge next to the title. */
+	errorBadge: {
+		display: 'inline-flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		backgroundColor: 'var(--rr-error, #f14c4c)',
+		color: '#fff',
+		fontSize: '8px',
+		fontWeight: 600,
+		minWidth: '14px',
+		height: '14px',
+		borderRadius: '7px',
+		padding: '0 3px',
+		marginLeft: '4px',
+		lineHeight: 1,
+		cursor: 'pointer',
+		verticalAlign: 'middle',
+	},
+	/** Orange warning count badge next to the title. */
+	warningBadge: {
+		display: 'inline-flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		backgroundColor: 'var(--rr-warning, #cca700)',
+		color: '#fff',
+		fontSize: '8px',
+		fontWeight: 600,
+		minWidth: '14px',
+		height: '14px',
+		borderRadius: '7px',
+		padding: '0 3px',
+		marginLeft: '4px',
+		lineHeight: 1,
+		cursor: 'pointer',
+		verticalAlign: 'middle',
 	},
 };
