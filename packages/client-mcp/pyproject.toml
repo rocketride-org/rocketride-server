@@ -23,8 +23,13 @@ Repository = "https://github.com/rocketride/rocketride-clients"
 
 [project.scripts]
 rocketride-mcp = "rocketride_mcp.server:main"
+rocketride-mcp-sse = "rocketride_mcp.sse_server:main"
 
 [project.optional-dependencies]
+sse = [
+  "uvicorn>=0.30.0",
+  "starlette>=0.38.0",
+]
 dev = [
   "ruff>=0.8.0",
   "pytest>=7.0.0",
