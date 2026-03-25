@@ -143,14 +143,14 @@ body.vscode-high-contrast .welcome-logo .logo-dark {
 	width: 100%;
 	height: 1px;
 	background: var(--left-divider);
-	margin: 10px 0 20px;
+	margin-top: auto;
+	margin-bottom: 20px;
 }
 
 /* Bottom links */
 .welcome-links {
 	display: flex;
 	gap: 20px;
-	margin-top: auto;
 }
 
 .welcome-links a {
@@ -285,7 +285,7 @@ body.vscode-high-contrast .welcome-logo .logo-dark {
 	gap: 8px;
 }
 
-.welcome-checkbox-row input[type="checkbox"] {
+.welcome-checkbox-row input[type='checkbox'] {
 	width: auto;
 	margin: 0;
 }
@@ -294,6 +294,77 @@ body.vscode-high-contrast .welcome-logo .logo-dark {
 	font-weight: 400;
 	margin-bottom: 0;
 	font-size: 12.5px;
+}
+
+/* ============================================================================ */
+/* AGENT INTEGRATIONS                                                           */
+/* ============================================================================ */
+
+.welcome-beta-badge {
+	display: inline-block;
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	padding: 1px 6px;
+	border-radius: 3px;
+	background: rgba(100, 149, 237, 0.2);
+	color: cornflowerblue;
+	vertical-align: middle;
+	margin-left: 6px;
+}
+
+.welcome-integrations-grid {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.welcome-integration-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 8px;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 12.5px;
+	font-weight: 400 !important;
+	margin-bottom: 0 !important;
+	color: var(--vscode-foreground);
+	transition: background 0.15s;
+}
+
+.welcome-integration-item:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.welcome-integration-item input[type='checkbox'] {
+	width: auto;
+	margin: 0;
+	flex-shrink: 0;
+}
+
+.welcome-integration-logo {
+	width: 18px;
+	height: 18px;
+	object-fit: contain;
+	flex-shrink: 0;
+}
+
+/* Theme-dynamic logos: invert dark icons for dark themes */
+.welcome-integration-logo.theme-dynamic {
+	filter: none;
+}
+body.vscode-dark .welcome-integration-logo.theme-dynamic,
+body.vscode-high-contrast .welcome-integration-logo.theme-dynamic {
+	filter: brightness(0) invert(1);
+}
+
+.welcome-integration-warning {
+	font-size: 11px;
+	color: #e57373;
+	padding: 2px 8px 4px 34px;
+	line-height: 1.4;
 }
 
 /* ============================================================================ */

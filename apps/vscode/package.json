@@ -151,6 +151,11 @@
 					"type": "boolean",
 					"default": false,
 					"description": "Enable RocketRide integration with Windsurf"
+				},
+				"rocketride.integrations.codex": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable RocketRide integration with OpenAI Codex"
 				}
 			}
 		},

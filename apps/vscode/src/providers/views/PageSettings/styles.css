@@ -1,4 +1,4 @@
- * =============================================================================
+* =============================================================================
  * MIT License
  * Copyright (c) 2026 Aparavi Software AG
  *
@@ -192,12 +192,12 @@ label {
 /* CHECKBOX STYLING */
 /* ============================================================================ */
 
-.form-group input[type="checkbox"] {
+.form-group input[type='checkbox'] {
 	margin-right: 8px;
 	vertical-align: middle;
 }
 
-.form-group input[type="checkbox"]+label {
+.form-group input[type='checkbox'] + label {
 	display: inline;
 	font-weight: normal;
 	margin: 0;
@@ -219,7 +219,7 @@ label {
 	margin: 0;
 }
 
-.checkbox-group label input[type="checkbox"] {
+.checkbox-group label input[type='checkbox'] {
 	margin: 0 8px 0 0;
 	flex-shrink: 0;
 	cursor: pointer;
@@ -554,4 +554,13 @@ label {
 
 .env-note {
 	margin-top: 16px;
+}
+
+/* Theme-dynamic logos: invert dark icons for dark themes */
+img.theme-dynamic {
+	filter: none;
+}
+body.vscode-dark img.theme-dynamic,
+body.vscode-high-contrast img.theme-dynamic {
+	filter: brightness(0) invert(1);
 }

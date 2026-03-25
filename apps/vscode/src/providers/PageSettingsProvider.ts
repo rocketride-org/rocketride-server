@@ -23,13 +23,13 @@
 
 /**
  * Settings Page Provider for Extension Configuration
- * 
+ *
  * Provides a full-page settings interface with multiple configuration sections:
  * - Connection settings with cloud/local mode support
  * - Pipeline configuration and default paths
  * - Local engine settings for self-hosted instances
  * - Debugging configuration options
- * 
+ *
  * Manages secure storage of API keys and validates connection settings.
  */
 
@@ -49,7 +49,7 @@ export class PageSettingsProvider {
 
 	/**
 	 * Creates a new PageSettingsProvider
-	 * 
+	 *
 	 * @param extensionUri Extension URI for resource loading
 	 */
 	constructor(private readonly extensionUri: vscode.Uri) {
@@ -66,7 +66,7 @@ export class PageSettingsProvider {
 		const envChangeListener = this.configManager.onEnvVarsChanged(() => {
 			if (this._isSaving) return;
 			// Reload settings in all active webviews
-			this.activeWebviews.forEach(webview => {
+			this.activeWebviews.forEach((webview) => {
 				this.loadAllSettings(webview);
 			});
 		});
@@ -92,10 +92,7 @@ export class PageSettingsProvider {
 			}),
 
 			vscode.commands.registerCommand('rocketride.page.settings.clearApiKey', async () => {
-				const result = await vscode.window.showWarningMessage(
-					'Are you sure you want to clear the stored API key?',
-					'Yes', 'No'
-				);
+				const result = await vscode.window.showWarningMessage('Are you sure you want to clear the stored API key?', 'Yes', 'No');
 
 				if (result === 'Yes') {
 					await this.configManager.deleteApiKey();
@@ -109,7 +106,7 @@ export class PageSettingsProvider {
 					// Optionally disconnect since credentials are now invalid
 					connectionManager?.disconnect();
 				}
-			})
+			}),
 		];
 
 		this.disposables.push(...commands);
@@ -124,16 +121,11 @@ export class PageSettingsProvider {
 			return;
 		}
 
-		const panel = vscode.window.createWebviewPanel(
-			'rocketride.page.settings',
-			'RocketRide Settings',
-			vscode.ViewColumn.One,
-			{
-				enableScripts: true,
-				localResourceRoots: [this.extensionUri],
-				retainContextWhenHidden: true
-			}
-		);
+		const panel = vscode.window.createWebviewPanel('rocketride.page.settings', 'RocketRide Settings', vscode.ViewColumn.One, {
+			enableScripts: true,
+			localResourceRoots: [this.extensionUri],
+			retainContextWhenHidden: true,
+		});
 
 		this.panel = panel;
 		panel.webview.html = this.getHtmlForWebview(panel.webview);
@@ -232,12 +224,13 @@ export class PageSettingsProvider {
 			integrationCopilot: workspaceConfig.get('integrations.copilot', false),
 			integrationClaudeCode: workspaceConfig.get('integrations.claudeCode', false),
 			integrationCursor: workspaceConfig.get('integrations.cursor', false),
-			integrationWindsurf: workspaceConfig.get('integrations.windsurf', false)
+			integrationWindsurf: workspaceConfig.get('integrations.windsurf', false),
+			integrationCodex: workspaceConfig.get('integrations.codex', false),
 		};
 
 		webview.postMessage({
 			type: 'settingsLoaded',
-			settings: allSettings
+			settings: allSettings,
 		});
 	}
 
@@ -296,6 +289,9 @@ export class PageSettingsProvider {
 			if (settings.integrationWindsurf !== undefined) {
 				await workspaceConfig.update('integrations.windsurf', settings.integrationWindsurf, vscode.ConfigurationTarget.Global);
 			}
+			if (settings.integrationCodex !== undefined) {
+				await workspaceConfig.update('integrations.codex', settings.integrationCodex, vscode.ConfigurationTarget.Global);
+			}
 
 			// Save API key to secure storage whenever provided (used for cloud dev and deployment)
 			if (typeof settings.apiKey === 'string') {
@@ -353,7 +349,7 @@ export class PageSettingsProvider {
 				return;
 			}
 
-			const port = parsedUrl.port ? parseInt(parsedUrl.port, 10) : (parsedUrl.protocol === 'https:' ? 443 : 80);
+			const port = parsedUrl.port ? parseInt(parsedUrl.port, 10) : parsedUrl.protocol === 'https:' ? 443 : 80;
 			if (port < 1 || port > 65535) {
 				this.showMessage(webview, 'error', `Invalid port number: ${port}. Port must be between 1 and 65535.`, 'development');
 				return;
@@ -410,7 +406,7 @@ export class PageSettingsProvider {
 				columnsStartAt1: true,
 				supportsVariableType: true,
 				supportsVariablePaging: true,
-				supportsRunInTerminalRequest: true
+				supportsRunInTerminalRequest: true,
 			};
 
 			let response;
@@ -434,10 +430,11 @@ export class PageSettingsProvider {
 			} else {
 				this.showMessage(webview, 'warning', 'Server responded with an unexpected format. Connection may still work.', 'development');
 			}
-
 		} catch (error) {
 			if (testClient) {
-				testClient.disconnect().catch(() => { /* ignore */ });
+				testClient.disconnect().catch(() => {
+					/* ignore */
+				});
 			}
 
 			const errorMessage = error instanceof Error ? error.message : String(error);
@@ -469,7 +466,6 @@ export class PageSettingsProvider {
 		}
 	}
 
-
 	/**
 	 * Fetches available engine versions from GitHub and sends them to the webview
 	 */
@@ -486,13 +482,13 @@ export class PageSettingsProvider {
 			const versions = await this.engineInstaller.getReleases(undefined, githubToken);
 			webview.postMessage({
 				type: 'engineVersionsLoaded',
-				versions
+				versions,
 			});
 		} catch (error) {
 			console.error('[PageSettingsProvider] Failed to fetch engine versions:', error);
 			webview.postMessage({
 				type: 'engineVersionsLoaded',
-				versions: []
+				versions: [],
 			});
 			this.showMessage(webview, 'warning', `Could not fetch engine versions: ${error}`);
 		}
@@ -507,7 +503,7 @@ export class PageSettingsProvider {
 			type: 'showMessage',
 			level: level,
 			message: message,
-			...(context && { context })
+			...(context && { context }),
 		});
 	}
 
@@ -522,21 +518,14 @@ export class PageSettingsProvider {
 			let htmlContent = require('fs').readFileSync(htmlPath.fsPath, 'utf8');
 
 			// Replace template placeholders
-			htmlContent = htmlContent
-				.replace(/\{\{nonce\}\}/g, nonce)
-				.replace(/\{\{cspSource\}\}/g, webview.cspSource);
+			htmlContent = htmlContent.replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, webview.cspSource);
 
 			// Convert resource URLs to webview URIs
-			return htmlContent.replace(
-				/(?:src|href)="(\/static\/[^"]+)"/g,
-				(match: string, relativePath: string): string => {
-					const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
-					const resourceUri = webview.asWebviewUri(
-						vscode.Uri.joinPath(this.extensionUri, 'webview', cleanPath)
-					);
-					return match.replace(relativePath, resourceUri.toString());
-				}
-			);
+			return htmlContent.replace(/(?:src|href)="(\/static\/[^"]+)"/g, (match: string, relativePath: string): string => {
+				const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+				const resourceUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'webview', cleanPath));
+				return match.replace(relativePath, resourceUri.toString());
+			});
 		} catch (error) {
 			console.error('Error loading settings HTML:', error);
 			return this.getErrorHtml(error, htmlPath.fsPath);
@@ -581,7 +570,7 @@ export class PageSettingsProvider {
 	 * Cleans up event listeners and resources
 	 */
 	public dispose(): void {
-		this.disposables.forEach(disposable => disposable.dispose());
+		this.disposables.forEach((disposable) => disposable.dispose());
 		this.disposables = [];
 		this.activeWebviews.clear();
 	}

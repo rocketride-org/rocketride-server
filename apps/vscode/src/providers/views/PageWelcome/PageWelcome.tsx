@@ -28,6 +28,13 @@ import '../../styles/vscode.css';
 import '../../styles/app.css';
 import './styles.css';
 
+// Agent integration logos
+import logoClaudeCode from '../logos/claude-color.svg';
+import logoCursor from '../logos/cursor.svg';
+import logoCodex from '../logos/codex-color.svg';
+import logoCopilot from '../logos/githubcopilot.svg';
+import logoWindsurf from '../logos/windsurf.svg';
+
 // ============================================================================
 // TYPE DEFINITIONS
 // ============================================================================
@@ -39,6 +46,11 @@ interface WelcomeSettings {
 	hasApiKey: boolean;
 	autoConnect: boolean;
 	localEngineVersion: string;
+	integrationCopilot: boolean;
+	integrationClaudeCode: boolean;
+	integrationCursor: boolean;
+	integrationWindsurf: boolean;
+	integrationCodex: boolean;
 }
 
 interface EngineVersionItem {
@@ -51,19 +63,9 @@ interface MessageData {
 	message: string;
 }
 
-type IncomingMessage =
-	| { type: 'settingsLoaded'; settings: WelcomeSettings; logoDarkUri?: string; logoLightUri?: string }
-	| { type: 'showMessage'; level: 'success' | 'error' | 'info' | 'warning'; message: string }
-	| { type: 'engineVersionsLoaded'; versions: EngineVersionItem[] };
+type IncomingMessage = { type: 'settingsLoaded'; settings: WelcomeSettings; logoDarkUri?: string; logoLightUri?: string } | { type: 'showMessage'; level: 'success' | 'error' | 'info' | 'warning'; message: string } | { type: 'engineVersionsLoaded'; versions: EngineVersionItem[] };
 
-type OutgoingMessage =
-	| { type: 'ready' }
-	| { type: 'saveAndConnect'; settings: WelcomeSettings }
-	| { type: 'dismiss' }
-	| { type: 'testConnection'; settings: WelcomeSettings }
-	| { type: 'openSettings' }
-	| { type: 'openExternal'; url: string }
-	| { type: 'fetchEngineVersions' };
+type OutgoingMessage = { type: 'ready' } | { type: 'saveAndConnect'; settings: WelcomeSettings } | { type: 'dismiss' } | { type: 'testConnection'; settings: WelcomeSettings } | { type: 'openSettings' } | { type: 'openExternal'; url: string } | { type: 'fetchEngineVersions' };
 
 // ============================================================================
 // MODE DESCRIPTIONS
@@ -72,7 +74,7 @@ type OutgoingMessage =
 const MODE_DESCRIPTIONS: Record<string, string> = {
 	cloud: 'Connect to RocketRide.ai cloud. Requires an API key from your account dashboard.',
 	onprem: 'Connect to your own hosted RocketRide server.',
-	local: 'Run the server locally on your machine. The extension will download and manage the server for you.'
+	local: 'Run the server locally on your machine. The extension will download and manage the server for you.',
 };
 
 // ============================================================================
@@ -87,6 +89,11 @@ export const PageWelcome: React.FC = () => {
 		hasApiKey: false,
 		autoConnect: true,
 		localEngineVersion: 'latest',
+		integrationCopilot: false,
+		integrationClaudeCode: false,
+		integrationCursor: false,
+		integrationWindsurf: false,
+		integrationCodex: false,
 	});
 
 	const [logoLightUri, setLogoLightUri] = useState<string | undefined>();
@@ -121,7 +128,7 @@ export const PageWelcome: React.FC = () => {
 					setEngineVersionsLoading(false);
 					break;
 			}
-		}
+		},
 	});
 
 	// ========================================================================
@@ -144,11 +151,11 @@ export const PageWelcome: React.FC = () => {
 			sendMessage({ type: 'fetchEngineVersions' });
 		}
 
-		setSettings(prev => ({ ...prev, ...updates }));
+		setSettings((prev) => ({ ...prev, ...updates }));
 	};
 
 	const handleVersionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-		setSettings(prev => ({ ...prev, localEngineVersion: e.target.value }));
+		setSettings((prev) => ({ ...prev, localEngineVersion: e.target.value }));
 	};
 
 	const displayVersion = (tagName: string): string => tagName.replace(/^server-/, '');
@@ -172,29 +179,56 @@ export const PageWelcome: React.FC = () => {
 		<div className="welcome-container">
 			{/* LEFT PANEL — Branding */}
 			<div className="welcome-left">
-				<div className="welcome-logo">
-					{logoLightUri ? <img src={logoLightUri} alt="RocketRide" /> : '\u{1F680}'}
-				</div>
+				<div className="welcome-logo">{logoLightUri ? <img src={logoLightUri} alt="RocketRide" /> : '\u{1F680}'}</div>
 				<div className="welcome-brand-name">RocketRide</div>
 				<div className="welcome-tagline">
-					High-performance data processing<br />
+					High-performance data processing
+					<br />
 					with AI/ML integration
 				</div>
 
 				<ul className="welcome-features">
-					<li><span className="welcome-feature-icon">&#9670;</span> Visual pipeline editor</li>
-					<li><span className="welcome-feature-icon">&#9670;</span> High-performance C++ engine</li>
-					<li><span className="welcome-feature-icon">&#9670;</span> 50+ pipeline nodes with AI/ML</li>
-					<li><span className="welcome-feature-icon">&#9670;</span> Multi-agent workflows</li>
-					<li><span className="welcome-feature-icon">&#9670;</span> Tool and model agnostic</li>
-					<li><span className="welcome-feature-icon">&#9670;</span> TypeScript, Python &amp; MCP SDKs</li>
+					<li>
+						<span className="welcome-feature-icon">&#9670;</span> Visual pipeline editor
+					</li>
+					<li>
+						<span className="welcome-feature-icon">&#9670;</span> High-performance C++ engine
+					</li>
+					<li>
+						<span className="welcome-feature-icon">&#9670;</span> 50+ pipeline nodes with AI/ML
+					</li>
+					<li>
+						<span className="welcome-feature-icon">&#9670;</span> Multi-agent workflows
+					</li>
+					<li>
+						<span className="welcome-feature-icon">&#9670;</span> Tool and model agnostic
+					</li>
+					<li>
+						<span className="welcome-feature-icon">&#9670;</span> TypeScript, Python &amp; MCP SDKs
+					</li>
 				</ul>
 
 				<div className="welcome-divider" />
 
 				<div className="welcome-links">
-					<a href="#" onClick={(e) => { e.preventDefault(); sendMessage({ type: 'openExternal', url: 'https://docs.rocketride.org' }); }}>Documentation</a>
-					<a href="#" onClick={(e) => { e.preventDefault(); sendMessage({ type: 'openExternal', url: 'https://discord.gg/9hr3tdZmEG' }); }}>Discord</a>
+					<a
+						href="#"
+						onClick={(e) => {
+							e.preventDefault();
+							sendMessage({ type: 'openExternal', url: 'https://docs.rocketride.org' });
+						}}
+					>
+						Documentation
+					</a>
+					<a
+						href="#"
+						onClick={(e) => {
+							e.preventDefault();
+							sendMessage({ type: 'openExternal', url: 'https://discord.gg/9hr3tdZmEG' });
+						}}
+					>
+						Discord
+					</a>
 				</div>
 			</div>
 
@@ -206,11 +240,7 @@ export const PageWelcome: React.FC = () => {
 				{/* Connection Mode */}
 				<div className="welcome-form-group">
 					<label htmlFor="connectionMode">Connection Mode</label>
-					<select
-						id="connectionMode"
-						value={settings.connectionMode}
-						onChange={handleModeChange}
-					>
+					<select id="connectionMode" value={settings.connectionMode} onChange={handleModeChange}>
 						<option value="cloud">Cloud (RocketRide.ai)</option>
 						<option value="onprem">On-prem (your hosted server)</option>
 						<option value="local">Local (your machine)</option>
@@ -219,9 +249,7 @@ export const PageWelcome: React.FC = () => {
 
 				{/* Config box — description + mode-specific fields */}
 				<div className="welcome-config-box">
-					<div className="welcome-mode-desc">
-						{MODE_DESCRIPTIONS[settings.connectionMode]}
-					</div>
+					<div className="welcome-mode-desc">{MODE_DESCRIPTIONS[settings.connectionMode]}</div>
 
 					{/* Coming Soon — Cloud */}
 					{isCloud && (
@@ -229,7 +257,8 @@ export const PageWelcome: React.FC = () => {
 							<div className="welcome-coming-soon-icon">&#9729;</div>
 							<div className="welcome-coming-soon-title">Coming Soon</div>
 							<div className="welcome-coming-soon-text">
-								RocketRide Cloud is under active development.<br />
+								RocketRide Cloud is under active development.
+								<br />
 								Stay tuned for managed cloud hosting with zero setup.
 							</div>
 						</div>
@@ -245,22 +274,23 @@ export const PageWelcome: React.FC = () => {
 									id="apiKey"
 									placeholder="Enter your API key"
 									value={settings.apiKey}
-									onChange={(e) => setSettings(prev => ({
-										...prev,
-										apiKey: e.target.value,
-										hasApiKey: e.target.value.trim().length > 0
-									}))}
+									onChange={(e) =>
+										setSettings((prev) => ({
+											...prev,
+											apiKey: e.target.value,
+											hasApiKey: e.target.value.trim().length > 0,
+										}))
+									}
 								/>
-								<button
-									type="button"
-									className="secondary small"
-									onClick={() => setShowApiKey(!showApiKey)}
-								>
+								<button type="button" className="secondary small" onClick={() => setShowApiKey(!showApiKey)}>
 									{showApiKey ? 'Hide' : 'Show'}
 								</button>
 							</div>
 							<div className="welcome-help">
-								Get your API key from <a href="https://cloud.rocketride.ai" target="_blank" rel="noopener">cloud.rocketride.ai</a>
+								Get your API key from{' '}
+								<a href="https://cloud.rocketride.ai" target="_blank" rel="noopener">
+									cloud.rocketride.ai
+								</a>
 							</div>
 						</div>
 					)}
@@ -269,13 +299,7 @@ export const PageWelcome: React.FC = () => {
 					{settings.connectionMode === 'onprem' && (
 						<div className="welcome-form-group">
 							<label htmlFor="hostUrl">Host URL</label>
-							<input
-								type="text"
-								id="hostUrl"
-								placeholder="your-server:5565"
-								value={settings.hostUrl}
-								onChange={(e) => setSettings(prev => ({ ...prev, hostUrl: e.target.value }))}
-							/>
+							<input type="text" id="hostUrl" placeholder="your-server:5565" value={settings.hostUrl} onChange={(e) => setSettings((prev) => ({ ...prev, hostUrl: e.target.value }))} />
 							<div className="welcome-help">Base URL of your hosted RocketRide server</div>
 						</div>
 					)}
@@ -283,12 +307,7 @@ export const PageWelcome: React.FC = () => {
 					{/* Auto-connect — On-prem */}
 					{settings.connectionMode === 'onprem' && (
 						<div className="welcome-form-group welcome-checkbox-row">
-							<input
-								type="checkbox"
-								id="autoConnect"
-								checked={settings.autoConnect}
-								onChange={(e) => setSettings(prev => ({ ...prev, autoConnect: e.target.checked }))}
-							/>
+							<input type="checkbox" id="autoConnect" checked={settings.autoConnect} onChange={(e) => setSettings((prev) => ({ ...prev, autoConnect: e.target.checked }))} />
 							<label htmlFor="autoConnect">Auto-connect on startup</label>
 						</div>
 					)}
@@ -298,23 +317,15 @@ export const PageWelcome: React.FC = () => {
 						<>
 							<div className="welcome-form-group">
 								<label htmlFor="engineVersion">Server Version</label>
-								<select
-									id="engineVersion"
-									value={settings.localEngineVersion}
-									onChange={handleVersionChange}
-									disabled={engineVersionsLoading}
-								>
+								<select id="engineVersion" value={settings.localEngineVersion} onChange={handleVersionChange} disabled={engineVersionsLoading}>
 									<option value="latest">&lt;Latest&gt;</option>
 									<option value="prerelease">&lt;Prerelease&gt;</option>
-									{engineVersions.length > 0 && (
-										<option disabled>{'────────────────'}</option>
-									)}
-									{engineVersionsLoading && (
-										<option disabled>Loading versions...</option>
-									)}
-									{engineVersions.map(v => (
+									{engineVersions.length > 0 && <option disabled>{'────────────────'}</option>}
+									{engineVersionsLoading && <option disabled>Loading versions...</option>}
+									{engineVersions.map((v) => (
 										<option key={v.tag_name} value={v.tag_name}>
-											{displayVersion(v.tag_name)}{v.prerelease ? ' (pre)' : ''}
+											{displayVersion(v.tag_name)}
+											{v.prerelease ? ' (pre)' : ''}
 										</option>
 									))}
 								</select>
@@ -324,12 +335,36 @@ export const PageWelcome: React.FC = () => {
 					)}
 				</div>
 
-				{/* Message area */}
-				{message && (
-					<div className={`welcome-message ${message.level}`}>
-						{message.message}
+				{/* Agent Integrations */}
+				<div className="welcome-form-group">
+					<label>
+						Agent Integrations <span className="welcome-beta-badge">beta</span>
+					</label>
+				</div>
+				<div className="welcome-config-box">
+					<div className="welcome-mode-desc">Enable AI coding assistant integrations so agents can build RocketRide pipelines from natural language.</div>
+					<div className="welcome-integrations-grid">
+						{[
+							{ key: 'integrationClaudeCode' as const, label: 'Claude Code', logo: logoClaudeCode, themeDynamic: false, warning: '' },
+							{ key: 'integrationCursor' as const, label: 'Cursor', logo: logoCursor, themeDynamic: true, warning: '' },
+							{ key: 'integrationCodex' as const, label: 'Codex', logo: logoCodex, themeDynamic: false, warning: 'Appends to AGENTS.md in your project root' },
+							{ key: 'integrationCopilot' as const, label: 'GitHub Copilot', logo: logoCopilot, themeDynamic: true, warning: 'Appends to .github/copilot-instructions.md' },
+							{ key: 'integrationWindsurf' as const, label: 'Windsurf', logo: logoWindsurf, themeDynamic: true, warning: '' },
+						].map(({ key, label, logo, themeDynamic, warning }) => (
+							<div key={key}>
+								<label className="welcome-integration-item">
+									<input type="checkbox" checked={settings[key]} onChange={(e) => setSettings((prev) => ({ ...prev, [key]: e.target.checked }))} />
+									<img className={`welcome-integration-logo${themeDynamic ? ' theme-dynamic' : ''}`} src={logo} alt={label} />
+									<span>{label}</span>
+								</label>
+								{warning && settings[key] && <div className="welcome-integration-warning">{warning}</div>}
+							</div>
+						))}
 					</div>
-				)}
+				</div>
+
+				{/* Message area */}
+				{message && <div className={`welcome-message ${message.level}`}>{message.message}</div>}
 
 				{/* Action buttons */}
 				<div className="welcome-button-row">
@@ -345,10 +380,23 @@ export const PageWelcome: React.FC = () => {
 
 				{/* Footer links */}
 				<div className="welcome-footer-links">
-					<a href="#" onClick={(e) => { e.preventDefault(); sendMessage({ type: 'openSettings' }); }}>
+					<a
+						href="#"
+						onClick={(e) => {
+							e.preventDefault();
+							sendMessage({ type: 'openSettings' });
+						}}
+					>
 						Advanced Settings
 					</a>
-					<a href="#" className="welcome-dismiss" onClick={(e) => { e.preventDefault(); sendMessage({ type: 'dismiss' }); }}>
+					<a
+						href="#"
+						className="welcome-dismiss"
+						onClick={(e) => {
+							e.preventDefault();
+							sendMessage({ type: 'dismiss' });
+						}}
+					>
 						Dismiss
 					</a>
 				</div>
