@@ -830,7 +830,7 @@ export class ConfigManager {
 				this.envRawText = this.updateEnvRawText(updates);
 				await this.saveEnvFile();
 			}
-		} catch (_error) {
+		} catch {
 			// Silently handle env file sync errors
 		}
 	}
@@ -865,7 +865,7 @@ export class ConfigManager {
 				await this.saveEnvFile();
 				this.envChangeEmitter.fire(this.getEnvVars());
 			}
-		} catch (_error) {
+		} catch {
 			// Silently handle settings sync errors
 		}
 	}
