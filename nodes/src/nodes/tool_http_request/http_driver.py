@@ -37,8 +37,7 @@ from typing import Any, Dict, List, Set
 
 from ai.common.tools import ToolsBase
 
-from .http_client import execute_request
-from .ssrf_guard import validate_url
+from .http_client import execute_request, _resolve_path_params
 
 VALID_METHODS = {'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'}
 VALID_AUTH_TYPES = {'none', 'basic', 'bearer', 'api_key'}
@@ -165,13 +164,25 @@ INPUT_SCHEMA: Dict[str, Any] = {
 
 
 class HttpDriver(ToolsBase):
-    def __init__(  # noqa: D107
+    def __init__(
         self,
         *,
         server_name: str,
         enabled_methods: Set[str],
         url_patterns: List[re.Pattern],
     ):
+        """Initialize the HTTP request tool driver.
+
+        Parameters
+        ----------
+        server_name : str
+            Logical name for the MCP server (used as tool-name prefix).
+        enabled_methods : Set[str]
+            Uppercase HTTP methods the tool is allowed to issue.
+        url_patterns : List[re.Pattern]
+            Compiled regexes; at least one must match for a URL to be allowed.
+            An empty list disables the allowlist check.
+        """
         self._server_name = (server_name or '').strip() or 'http'
         self._tool_name = 'http_request'
         self._namespaced = f'{self._server_name}.{self._tool_name}'
@@ -183,6 +194,7 @@ class HttpDriver(ToolsBase):
     # ------------------------------------------------------------------
 
     def _tool_query(self) -> List[Dict[str, Any]]:
+        """Return the list of tool descriptors exposed by this driver."""
         return [
             {
                 'name': self._namespaced,
@@ -238,6 +250,7 @@ class HttpDriver(ToolsBase):
         return input_obj
 
     def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
+        """Validate tool input against allowed methods, URL patterns, and field schemas."""
         if tool_name != self._tool_name and tool_name != self._namespaced:
             raise ValueError(f'Unknown tool {tool_name!r} (expected {self._tool_name!r})')
 
@@ -257,8 +270,10 @@ class HttpDriver(ToolsBase):
         url = input_obj.get('url')
         if not url or not isinstance(url, str):
             raise ValueError('url is required and must be a non-empty string')
-        if self._url_patterns and not any(p.search(url) for p in self._url_patterns):
-            raise ValueError(f'URL "{url}" does not match any allowed URL pattern.')
+        path_params = input_obj.get('path_params')
+        resolved_url = _resolve_path_params(url, path_params) if path_params else url
+        if self._url_patterns and not any(p.search(resolved_url) for p in self._url_patterns):
+            raise ValueError(f'URL "{resolved_url}" does not match any allowed URL pattern.')
 
         # --- Standard field validation ---
         auth = input_obj.get('auth')
@@ -279,13 +294,12 @@ class HttpDriver(ToolsBase):
                     raise ValueError(f'body.raw.content_type must be one of {sorted(VALID_RAW_CONTENT_TYPES)}; got {ct!r}')
 
     def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:  # noqa: ANN401
+        """Normalize, validate, and execute the HTTP request described by *input_obj*."""
         if not isinstance(input_obj, dict):
             raise ValueError('Tool input must be a JSON object (dict)')
 
         self._normalize_shortcuts(input_obj)
         self._tool_validate(tool_name=tool_name, input_obj=input_obj)
-
-        validate_url(input_obj.get('url', ''))
 
         return execute_request(
             url=input_obj.get('url', ''),

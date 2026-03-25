@@ -37,7 +37,7 @@ from typing import Any, Dict, Optional
 import requests
 from requests.auth import HTTPBasicAuth
 
-from .ssrf_guard import validate_url
+from nodes.library.internet.ssrf_guard import validate_url
 
 DEFAULT_TIMEOUT_SECONDS = 30
 MAX_TIMEOUT_SECONDS = 300
@@ -58,9 +58,8 @@ def execute_request(
 
     Raises ``requests.RequestException`` on transport-level failures.
     """
-    validate_url(url)
-
     resolved_url = _resolve_path_params(url, path_params)
+    validate_url(resolved_url)
 
     req_headers = dict(headers or {})
     req_auth = None
@@ -78,6 +77,7 @@ def execute_request(
         'headers': req_headers,
         'params': merged_params or None,
         'auth': req_auth,
+        'allow_redirects': False,
     }
 
     _apply_body(body, req_headers, req_kwargs)

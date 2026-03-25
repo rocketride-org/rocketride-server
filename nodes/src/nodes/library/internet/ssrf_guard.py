@@ -40,8 +40,8 @@ def validate_url(url: str) -> None:
     # Resolve hostname and check IP
     try:
         addr_info = socket.getaddrinfo(hostname, None)
-    except socket.gaierror:
-        return  # Let requests library handle DNS errors
+    except socket.gaierror as exc:
+        raise ValueError(f'Cannot resolve hostname {hostname!r}: {exc}') from exc
 
     for _family, _, _, _, sockaddr in addr_info:
         ip = ipaddress.ip_address(sockaddr[0])
