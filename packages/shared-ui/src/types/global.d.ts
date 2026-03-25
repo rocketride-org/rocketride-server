@@ -27,12 +27,6 @@
  * and untyped npm packages used throughout the shared-ui package.
  */
 
-/** Ambient declaration for the `is-hotkey` keyboard shortcut library. */
-declare module 'is-hotkey';
-
-/** Ambient declaration for the `lodash` utility library. */
-declare module 'lodash';
-
 /** Ambient declaration for the `d3` data visualization library. */
 declare module 'd3';
 

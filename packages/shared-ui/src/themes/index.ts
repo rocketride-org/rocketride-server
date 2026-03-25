@@ -1,0 +1,1 @@
+export { getMuiTheme } from './getMuiTheme';
