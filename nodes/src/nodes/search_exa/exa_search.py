@@ -5,8 +5,12 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
+import os
+import socket
 from typing import Any, Dict, List
+from urllib.parse import urlparse
 
 import requests
 
@@ -15,6 +19,7 @@ from ai.common.config import Config
 from ai.common.schema import Answer, Question
 
 _EXA_SEARCH_URL = 'https://api.exa.ai/search'
+_URL_FIELDS = {'url', 'image', 'favicon'}
 
 
 def _get_question_texts(question: Question) -> List[str]:
@@ -72,23 +77,73 @@ class ExaSearch(ChatBase):
                 }
             }
 
-        response = requests.post(
-            _EXA_SEARCH_URL,
-            headers={
-                'x-api-key': self._apikey,
-                'Content-Type': 'application/json',
-            },
-            json=payload,
-            timeout=30,
-        )
+        try:
+            response = requests.post(
+                _EXA_SEARCH_URL,
+                headers={
+                    'x-api-key': self._apikey,
+                    'Content-Type': 'application/json',
+                },
+                json=payload,
+                timeout=30,
+            )
+        except requests.Timeout as e:
+            raise TimeoutError('Exa request timed out') from e
+        except requests.ConnectionError as e:
+            raise ConnectionError('Unable to connect to Exa') from e
+        except requests.RequestException as e:
+            raise RuntimeError(f'Exa request failed: {e}') from e
 
         if response.status_code >= 400:
             raise self._map_error(response)
 
         body = response.json()
+        body = self._sanitize_result_urls(body)
         answer = Answer(expectJson=question.expectJson)
         answer.setAnswer(json.dumps(body, indent=2))
         return answer
+
+    def _sanitize_result_urls(self, value: Any) -> Any:  # noqa: ANN401
+        if os.environ.get('ROCKETRIDE_MOCK'):
+            return value
+
+        if isinstance(value, list):
+            return [self._sanitize_result_urls(item) for item in value]
+
+        if isinstance(value, dict):
+            sanitized: Dict[str, Any] = {}
+            for key, item in value.items():
+                if key in _URL_FIELDS and isinstance(item, str):
+                    sanitized[key] = self._validate_public_url(item)
+                else:
+                    sanitized[key] = self._sanitize_result_urls(item)
+            return sanitized
+
+        return value
+
+    def _validate_public_url(self, raw_url: str) -> str:
+        parsed = urlparse(raw_url)
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+            raise ValueError(f'Exa returned an invalid URL: {raw_url}')
+
+        try:
+            addrinfo = socket.getaddrinfo(parsed.hostname, None, type=socket.SOCK_STREAM)
+        except socket.gaierror as e:
+            raise ValueError(f'Exa returned an unresolved URL host: {parsed.hostname}') from e
+
+        for _, _, _, _, sockaddr in addrinfo:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_multicast
+                or ip.is_unspecified
+            ):
+                raise ValueError(f'Exa returned a blocked URL host: {parsed.hostname}')
+
+        return raw_url
 
     def _map_error(self, response: requests.Response) -> Exception:
         try:

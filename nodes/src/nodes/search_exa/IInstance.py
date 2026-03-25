@@ -17,7 +17,17 @@ class IInstance(IInstanceBase):
         if search is None:
             raise RuntimeError('search_exa: search backend not initialized')
 
-        answer = search.chat(question)
+        try:
+            answer = search.chat(question)
+        except TimeoutError as e:
+            raise RuntimeError('search_exa: Exa request timed out') from e
+        except ConnectionError as e:
+            raise RuntimeError('search_exa: Unable to reach Exa') from e
+        except ValueError as e:
+            raise RuntimeError(f'search_exa: {e}') from e
+        except Exception as e:
+            raise RuntimeError(f'search_exa: Unexpected Exa error: {e}') from e
+
         if self.instance.hasListener('answers'):
             self.instance.writeAnswers(answer)
         if self.instance.hasListener('text'):
