@@ -34,7 +34,7 @@
 	"contributes": {
 		"chatSkills": [
 			{
-				"path": "./skills/rocketride-pipelines"
+				"path": "./skills/rocketride-pipelines/SKILL.md"
 			}
 		],
 		"customEditors": [

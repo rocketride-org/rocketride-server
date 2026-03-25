@@ -68,7 +68,7 @@ Lanes are the type system. A connection is valid ONLY when the output lane name 
 - RAG ingest: `text` → embedding → `documents` → vector_db
 - RAG query: `questions` → vector_db → `documents` → prompt(+questions) → `questions` → llm → `answers`
 
-**If lane types don't match, you need a converter node.** For example, `image` can't go directly to `questions` — you need accessibility_describe (image→text), then question (text→questions).
+**If lane types don't match, you need a converter node.** For example, `image` can't go directly to `questions` — you need accessibility_describe (image→text), then question (text→questions). Consult `references/services.md` to find nodes that accept your source lane type as input and produce your target lane type as output.
 
 ## Step 3: Look Up Available Nodes
 
@@ -99,7 +99,7 @@ Read `references/services.md` (adjacent to this file) for the live catalog of ev
 		"measured": { "width": 160, "height": 65 },
 		"data": {
 			"provider": "<provider_key>",
-			"class": "<source|data|llm|infrastructure|store|embedding|agent>",
+			"class": "<source|data|llm|infrastructure|store|embedding|agent|memory|tool>",
 			"type": "default"
 		}
 	},
@@ -112,7 +112,7 @@ Read `references/services.md` (adjacent to this file) for the live catalog of ev
 - `id`: Unique. Pattern: `<provider>_<n>` (e.g., `chat_1`, `qdrant_1`, `llm_anthropic_1`)
 - `provider`: Exact key from the services catalog
 - `input`: Array of lane connections. Source nodes have no `input` (they are entry points).
-- `ui.data.class`: Use the `classType` from the services catalog for that node
+- `ui.data.class`: Set to the `classType` value from the services catalog for that node
 - `ui.position`: Layout left-to-right, ~220px horizontal spacing, start at x:20 y:200. For nodes with multiple lanes, use height 135 instead of 65.
 
 ## Config Patterns
@@ -250,9 +250,8 @@ For more control over context merging (e.g., combining retrieved documents with 
 
 Use the `prompt` node when you need to merge multiple data types or add custom instructions before an LLM:
 
-- Accepts: `documents`, `text`, `table` (collected silently)
-- Triggered by: `questions` (fires the merge)
-- Outputs: enhanced `questions` with all collected context + instructions
+- Input lanes: `documents`, `text`, `table` (collected silently), `questions` (triggers the merge)
+- Output lane: `questions` (enhanced with all collected context + instructions)
 - Config: `instructions` array (strings) directly in config
 
 ```json
