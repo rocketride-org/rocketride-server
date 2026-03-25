@@ -49,4 +49,60 @@ suite('Extension Test Suite', () => {
 		assert.deepStrictEqual(buildEffectiveEngineArgs('--verbose', true), ['--verbose', '--trace=servicePython']);
 		assert.deepStrictEqual(buildEffectiveEngineArgs('--trace=servicePython --verbose', true), ['--trace=servicePython', '--verbose']);
 	});
+
+	// Single-quote support (reviewer dsapandora's request)
+	test('splitEngineArgs handles single-quoted arguments', () => {
+		assert.deepStrictEqual(splitEngineArgs("--filter='*.json'"), ['--filter=*.json']);
+		assert.deepStrictEqual(splitEngineArgs("--modelserver=5590 --filter='*.json'"), ['--modelserver=5590', '--filter=*.json']);
+		assert.deepStrictEqual(splitEngineArgs("--label='my pipeline'"), ['--label=my pipeline']);
+	});
+
+	// Mixed quote types
+	test('splitEngineArgs handles mixed single and double quotes', () => {
+		assert.deepStrictEqual(splitEngineArgs('--a="hello world" --b=\'foo bar\''), ['--a=hello world', '--b=foo bar']);
+	});
+
+	// Backslash escaping
+	test('splitEngineArgs handles backslash escaping outside quotes', () => {
+		assert.deepStrictEqual(splitEngineArgs('--path=C:\\\\Users\\\\name'), ['--path=C:\\Users\\name']);
+	});
+
+	// Empty input
+	test('splitEngineArgs handles empty and whitespace-only input', () => {
+		assert.deepStrictEqual(splitEngineArgs(''), []);
+		assert.deepStrictEqual(splitEngineArgs('   '), []);
+	});
+
+	// Multiple spaces between args
+	test('splitEngineArgs handles multiple spaces between arguments', () => {
+		assert.deepStrictEqual(splitEngineArgs('--a    --b'), ['--a', '--b']);
+	});
+
+	// Tab characters
+	test('splitEngineArgs handles tab characters as delimiters', () => {
+		assert.deepStrictEqual(splitEngineArgs('--a\t--b'), ['--a', '--b']);
+	});
+
+	// CodeRabbit requested: bare --trace flag
+	test('buildEffectiveEngineArgs detects bare --trace flag', () => {
+		assert.deepStrictEqual(buildEffectiveEngineArgs('--trace --verbose', true), ['--trace', '--verbose']);
+	});
+
+	// CodeRabbit requested: debugOutput=false
+	test('buildEffectiveEngineArgs does not inject trace when debugOutput is false', () => {
+		assert.deepStrictEqual(buildEffectiveEngineArgs('--verbose', false), ['--verbose']);
+	});
+
+	// CodeRabbit requested: empty/undefined
+	test('buildEffectiveEngineArgs handles empty and undefined input', () => {
+		assert.deepStrictEqual(buildEffectiveEngineArgs('', true), ['--trace=servicePython']);
+		assert.deepStrictEqual(buildEffectiveEngineArgs(undefined, true), ['--trace=servicePython']);
+		assert.deepStrictEqual(buildEffectiveEngineArgs('', false), []);
+		assert.deepStrictEqual(buildEffectiveEngineArgs(undefined, false), []);
+	});
+
+	// Array input
+	test('buildEffectiveEngineArgs handles array input', () => {
+		assert.deepStrictEqual(buildEffectiveEngineArgs(['--verbose', '--modelserver=5590'], true), ['--verbose', '--modelserver=5590', '--trace=servicePython']);
+	});
 });
