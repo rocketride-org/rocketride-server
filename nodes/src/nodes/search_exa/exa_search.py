@@ -108,13 +108,23 @@ class ExaSearch(ChatBase):
             return value
 
         if isinstance(value, list):
-            return [self._sanitize_result_urls(item) for item in value]
+            sanitized_items = []
+            for item in value:
+                sanitized_item = self._sanitize_result_urls(item)
+                if sanitized_item is not None:
+                    sanitized_items.append(sanitized_item)
+            return sanitized_items
 
         if isinstance(value, dict):
             sanitized: Dict[str, Any] = {}
             for key, item in value.items():
                 if key in _URL_FIELDS and isinstance(item, str):
-                    sanitized[key] = self._validate_public_url(item)
+                    try:
+                        sanitized[key] = self._validate_public_url(item)
+                    except ValueError:
+                        if key == 'url':
+                            return None
+                        continue
                 else:
                     sanitized[key] = self._sanitize_result_urls(item)
             return sanitized
