@@ -136,10 +136,12 @@ function makeRunPytestAction(options = {}) {
             require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 
             const port = ctx.brackets?.['node-test-server']?.port || ctx.port;
+            const mocksPath = path.join(PACKAGE_DIR, 'test', 'mocks');
 
             const testEnv = {
                 ...process.env,
-                ROCKETRIDE_URI: `http://localhost:${port}`
+                ROCKETRIDE_URI: `http://localhost:${port}`,
+                ROCKETRIDE_MOCK: process.env.ROCKETRIDE_MOCK || mocksPath
             };
 
             // Use absolute paths since cwd is dist/server

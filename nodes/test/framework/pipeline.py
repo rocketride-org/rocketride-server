@@ -93,7 +93,7 @@ class PipelineBuilder:
                 overrides = config.get(profile, {})
                 if isinstance(overrides, dict):
                     config[profile] = {**overrides, **_LLM_MOCK_CREDENTIALS[provider]}
-        if provider in _SEARCH_MOCK_CREDENTIALS:
+        if os.environ.get('ROCKETRIDE_MOCK') and provider in _SEARCH_MOCK_CREDENTIALS:
             config.update(_SEARCH_MOCK_CREDENTIALS[provider])
         return config
     
