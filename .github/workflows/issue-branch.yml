@@ -1,0 +1,97 @@
+name: Auto-create branch from issue
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: issue-branch-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  create-branch:
+    name: Create branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve branch prefix from label
+        id: prefix
+        env:
+          LABEL: ${{ github.event.label.name }}
+        run: |
+          case "$LABEL" in
+            bug)                  PREFIX="fix"   ;;
+            feature|enhancement)  PREFIX="feat"  ;;
+            chore)                PREFIX="chore" ;;
+            docs|documentation)   PREFIX="docs"  ;;
+            infra)                PREFIX="chore" ;;
+            *)                    PREFIX=""      ;;
+          esac
+          echo "prefix=$PREFIX" >> "$GITHUB_OUTPUT"
+
+      - name: Sanitize issue title into URL-safe slug
+        if: steps.prefix.outputs.prefix != ''
+        id: slug
+        env:
+          TITLE: ${{ github.event.issue.title }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          SLUG=$(echo "$TITLE" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed 's/[^a-z0-9]/-/g' \
+            | sed 's/-\{2,\}/-/g' \
+            | sed 's/^-//;s/-$//' \
+            | cut -c1-50)
+          # Fallback if title is all special chars
+          if [ -z "$SLUG" ]; then
+            SLUG="issue-${ISSUE_NUMBER}"
+          fi
+          echo "value=$SLUG" >> "$GITHUB_OUTPUT"
+
+      - name: Create branch (idempotent)
+        if: steps.prefix.outputs.prefix != ''
+        id: branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREFIX: ${{ steps.prefix.outputs.prefix }}
+          SLUG: ${{ steps.slug.outputs.value }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          BRANCH="${PREFIX}/RR-${ISSUE_NUMBER}-${SLUG}"
+          echo "name=$BRANCH" >> "$GITHUB_OUTPUT"
+
+          # Idempotent: skip if branch already exists
+          if gh api "repos/${REPO}/git/refs/heads/${BRANCH}" --silent 2>/dev/null; then
+            echo "Branch '${BRANCH}' already exists — skipping."
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          gh issue develop "$ISSUE_NUMBER" \
+            --repo "$REPO" \
+            --name "$BRANCH" \
+            --base develop
+
+          echo "created=true" >> "$GITHUB_OUTPUT"
+          echo "Created: ${BRANCH}"
+
+      - name: Comment on issue
+        if: steps.branch.outputs.created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$REPO" \
+            --body "Branch created: \`${BRANCH}\`
+
+          Check it out:
+          \`\`\`bash
+          gh issue develop ${ISSUE_NUMBER} --checkout
+          \`\`\`"
