@@ -96,7 +96,7 @@ def _scoped_stubs() -> Iterator[None]:
 def _load_store_class() -> type:
     """Load Weaviate Store class from source with temporary stubs."""
     with _scoped_stubs():
-        root = Path(__file__).resolve().parents[2]
+        root = Path(__file__).resolve().parents[3]
         mocks_path = root / 'nodes' / 'test' / 'mocks'
         weaviate_file = root / 'nodes' / 'src' / 'nodes' / 'weaviate' / 'weaviate.py'
         inserted = False
@@ -120,7 +120,7 @@ def _make_store(records: dict[str, dict]) -> tuple[object, object]:
     """Create a store instance with fake in-memory weaviate collection."""
     store_class = _load_store_class()
 
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     mocks_path = root / 'nodes' / 'test' / 'mocks'
     inserted = False
     if str(mocks_path) not in sys.path:
