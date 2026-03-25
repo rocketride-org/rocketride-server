@@ -502,6 +502,7 @@ function makeDownloadAction(options = {}) {
             if (await getState('server.downloadHash') === releaseHash) {
                 task.output = 'Server already downloaded';
                 ctx.serverReady = true;
+                ctx.serverDownloaded = true;
                 return;
             }
 
