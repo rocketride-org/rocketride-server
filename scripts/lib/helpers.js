@@ -106,7 +106,7 @@ function bracket({ name, setup, teardown, steps }) {
  * @example
  * when({
  *   name: 'from-source',
- *   condition: (ctx) => !ctx.downloaded,
+ *   condition: (ctx) => !ctx.serverReady,
  *   then: [
  *     { name: 'server:configure', action: makeConfigureAction() },
  *     { name: 'server:compile-engine', action: makeCompileEngineAction() }
