@@ -121,14 +121,37 @@ class CrewDriver(AgentBase):
             description: str
             args_schema: type[BaseModel] = _ToolInput
 
-            def _run(self, input: Any = None, **kwargs: Any) -> str:
+            def _run(self, **kwargs: Any) -> str:
+                merged = dict(kwargs)
+                input_val = merged.pop('input', None)
+                if isinstance(input_val, str):
+                    try:
+                        parsed = json.loads(input_val)
+                        if isinstance(parsed, dict):
+                            input_val = parsed
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                if isinstance(input_val, dict):
+                    merged = {**input_val, **merged}
+                elif input_val is not None and not merged:
+                    merged = input_val
+
+                import os as _os
+                _logpath = _os.path.expanduser('~/crewai_tool_debug.log')
+                with open(_logpath, 'a') as _f:
+                    _f.write('--- HostTool._run ---\n')
+                    _f.write(f'  name={self.name}\n')
+                    _f.write(f'  raw_kwargs={repr(kwargs)[:500]}\n')
+                    _f.write(f'  merged={repr(merged)[:1000]}\n')
                 try:
-                    out = invoke_tool(self.name, input=input, kwargs=kwargs)
+                    out = invoke_tool(self.name, input=merged, kwargs={})
                 except Exception as e:
                     out = {'error': str(e), 'type': type(e).__name__}
+                with open(_logpath, 'a') as _f:
+                    _f.write(f'  out={repr(out)[:1000]}\n\n')
 
                 try:
-                    log_tool_call(tool_name=self.name, input={'input': input, **kwargs}, output=out)
+                    log_tool_call(tool_name=self.name, input=merged, output=out)
                 except Exception:
                     pass
 
@@ -145,7 +168,7 @@ class CrewDriver(AgentBase):
                 continue
             if not desc:
                 desc = f'Invoke host tool: {name}'
-            input_schema = td.get('input_schema') if isinstance(td, dict) else None
+            input_schema = (td.get('input_schema') or td.get('inputSchema')) if isinstance(td, dict) else None
             if isinstance(input_schema, dict):
                 try:
                     schema_text = json.dumps(input_schema, ensure_ascii=False)
@@ -204,6 +227,7 @@ class CrewDriver(AgentBase):
             tools=tools_for_agent,
             llm=llm,
             verbose=False,
+            max_iter=5,
         )
 
         desc_parts = [

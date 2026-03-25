@@ -181,6 +181,9 @@ class HttpDriver(ToolsBase):
     # ToolsBase hooks
     # ------------------------------------------------------------------
 
+    def _get_known_tool_names(self) -> set:
+        return {self._namespaced}
+
     def _tool_query(self) -> List[Dict[str, Any]]:
         return [
             {

@@ -29,6 +29,9 @@ class McpDriver(ToolsBase):
         self._get_tool = get_tool
         self._call_tool = call_tool
 
+    def _get_known_tool_names(self) -> set:
+        return {t['name'] for t in self._list_namespaced_tools() if isinstance(t, dict) and 'name' in t}
+
     def _tool_query(self) -> List[ToolsBase.ToolDescriptor]:
         return self._list_namespaced_tools()
 

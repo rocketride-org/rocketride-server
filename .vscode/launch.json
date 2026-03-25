@@ -24,6 +24,9 @@
 			"linux": {
 				"python": "${workspaceFolder}/dist/server/engine",
 			},
+			"osx": {
+				"python": "${workspaceFolder}/dist/server/engine",
+			},
 			"justMyCode": false,
 			"subProcess": true,
 			"program": "${workspaceFolder}/dist/server/ai/eaas.py",

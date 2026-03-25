@@ -13,12 +13,29 @@ Providers implement three hooks:
 
 Shared routing logic for `tool.query`, `tool.validate`, and `tool.invoke` lives
 in `ToolsBase.invoke()`.
+
+Multi-tool fan-out
+------------------
+The engine's C++ control-plane uses **first-accept** semantics: it iterates
+connected tool nodes and returns as soon as one succeeds.  For ``tool.query``
+this means only the first tool node's descriptors are returned.  To support
+multiple tool nodes on the same agent we use the engine's ``PreventDefault``
+mechanism:
+
+- ``tool.query``: accumulate descriptors on the shared ``param.tools`` list,
+  then raise ``PreventDefault`` so the engine continues to the next tool node.
+  The agent-side invoker reads the accumulated list from the param.
+- ``tool.validate`` / ``tool.invoke``: if the requested tool name does not
+  belong to this node, raise ``PreventDefault`` so the engine tries the next
+  node.  Only the owning node returns success.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, TypedDict
+
+from rocketlib.error import APERR, Ec
 
 
 class ToolsBase(ABC):
@@ -48,6 +65,19 @@ class ToolsBase(ABC):
         input_schema: Dict[str, Any]
         output_schema: Dict[str, Any]
 
+    def _get_known_tool_names(self) -> set:
+        """Return the set of tool names this provider owns.
+
+        Used by handle_invoke to decide whether to accept or skip
+        validate/invoke requests.  Default implementation queries
+        ``_tool_query`` and extracts names.  Subclasses may override
+        for efficiency.
+        """
+        try:
+            return {t['name'] for t in self._tool_query() if isinstance(t, dict) and 'name' in t}
+        except Exception:
+            return set()
+
     def handle_invoke(self, param: Any) -> Any:  # noqa: ANN401
         """
         Handle a tool control-plane operation.
@@ -65,16 +95,19 @@ class ToolsBase(ABC):
                 existing = _get_field(param, 'tools')
                 if isinstance(existing, list):
                     existing.extend(tools)
-                    _set_field(param, 'tools', existing)
-                    return param
-                return tools
+                else:
+                    _set_field(param, 'tools', list(tools))
+                raise APERR(Ec.PreventDefault, 'tool.query: accumulated; continue to next provider')
 
             case 'tool.validate':
                 tool_name = _get_field(param, 'tool_name')
                 input_obj = _get_field(param, 'input')
                 if not isinstance(tool_name, str) or not tool_name.strip():
                     raise ValueError('tools: tool_name must be a non-empty string')
-                self._tool_validate(tool_name=tool_name.strip(), input_obj=input_obj)
+                clean_name = tool_name.strip()
+                if clean_name not in self._get_known_tool_names():
+                    raise APERR(Ec.PreventDefault, f'tool.validate: {clean_name} not owned by this provider')
+                self._tool_validate(tool_name=clean_name, input_obj=input_obj)
                 return {'valid': True, 'tool_name': tool_name}
 
             case 'tool.invoke':
@@ -82,8 +115,10 @@ class ToolsBase(ABC):
                 input_obj = _get_field(param, 'input')
                 if not isinstance(tool_name, str) or not tool_name.strip():
                     raise ValueError('tools: tool_name must be a non-empty string')
-                output = self._tool_invoke(tool_name=tool_name.strip(), input_obj=input_obj)
-                # Convention in `IInvokeTool.Invoke`: set `output` on the param.
+                clean_name = tool_name.strip()
+                if clean_name not in self._get_known_tool_names():
+                    raise APERR(Ec.PreventDefault, f'tool.invoke: {clean_name} not owned by this provider')
+                output = self._tool_invoke(tool_name=clean_name, input_obj=input_obj)
                 _set_field(param, 'output', output)
                 return param
 

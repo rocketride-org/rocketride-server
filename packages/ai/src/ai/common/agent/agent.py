@@ -13,6 +13,7 @@ their specific tool/LLM integration.
 from __future__ import annotations
 
 import json
+import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional
 
@@ -74,6 +75,7 @@ class AgentBase(ABC):
         started_at = now_iso()
         run_id = new_run_id()
         debug(f'agent base run_agent run_id={run_id} framework={self.FRAMEWORK}')
+        t_run_start = time.perf_counter()
 
         invoker, tool_calls = make_tracing_invoker(pSelf.instance.invoke)
 
@@ -132,6 +134,20 @@ class AgentBase(ABC):
                 )
             stack.append({'kind': 'RocketRide.agent.raw.v1', 'name': 'framework.output', 'payload': _json_safe(raw)})
             answer_payload['stack'] = stack
+            answer_payload['perf'] = {
+                'total_ms': round((time.perf_counter() - t_run_start) * 1000),
+                'llm_ms': round(sum(c.get('elapsed_ms', 0) for c in tool_calls if c.get('op') == 'llm.invoke')),
+                'tool_query_ms': round(sum(c.get('elapsed_ms', 0) for c in tool_calls if c.get('op') == 'tool.query')),
+                'tool_invoke_ms': round(sum(c.get('elapsed_ms', 0) for c in tool_calls if c.get('op') == 'tool.invoke')),
+                'tool_details': [
+                    {'name': c.get('tool_name'), 'ms': c.get('elapsed_ms', 0)}
+                    for c in tool_calls if c.get('op') == 'tool.invoke'
+                ],
+                'llm_details': [
+                    {'ms': c.get('elapsed_ms', 0)}
+                    for c in tool_calls if c.get('op') == 'llm.invoke'
+                ],
+            }
 
             debug(f'agent base _run completed run_id={run_id} content_len={len(content or "")}')
 
@@ -162,6 +178,54 @@ class AgentBase(ABC):
                 {'kind': 'RocketRide.agent.error.v1', 'name': 'exception', 'payload': {'type': error_type, 'message': error_message}}
             )
             answer_payload['stack'] = stack
+
+        t_run_total_ms = (time.perf_counter() - t_run_start) * 1000
+        llm_calls = [c for c in tool_calls if c.get('op') == 'llm.invoke']
+        tool_queries = [c for c in tool_calls if c.get('op') == 'tool.query']
+        tool_invokes = [c for c in tool_calls if c.get('op') == 'tool.invoke']
+        llm_total_ms = sum(c.get('elapsed_ms', 0) for c in llm_calls)
+        tool_query_ms = sum(c.get('elapsed_ms', 0) for c in tool_queries)
+        tool_invoke_ms = sum(c.get('elapsed_ms', 0) for c in tool_invokes)
+        overhead_ms = t_run_total_ms - llm_total_ms - tool_query_ms - tool_invoke_ms
+
+        debug(f'[PERF] ═══ Agent run_id={run_id} SUMMARY ═══')
+        debug(f'[PERF]   Total wall time:     {t_run_total_ms:.0f}ms')
+        debug(f'[PERF]   LLM calls ({len(llm_calls)}x):      {llm_total_ms:.0f}ms')
+        debug(f'[PERF]   Tool discovery ({len(tool_queries)}x): {tool_query_ms:.0f}ms')
+        debug(f'[PERF]   Tool invocations ({len(tool_invokes)}x): {tool_invoke_ms:.0f}ms')
+        debug(f'[PERF]   Agent overhead:      {overhead_ms:.0f}ms')
+        for c in tool_invokes:
+            debug(f'[PERF]     ↳ {c.get("tool_name", "?")}  {c.get("elapsed_ms", 0)}ms')
+        for c in llm_calls:
+            debug(f'[PERF]     ↳ llm  {c.get("elapsed_ms", 0)}ms')
+
+        import os as _os
+        _perf_path = _os.path.expanduser('~/agent_perf.jsonl')
+        try:
+            import json as _json
+            _perf_record = {
+                'run_id': run_id,
+                'total_ms': round(t_run_total_ms),
+                'llm_ms': round(llm_total_ms),
+                'llm_count': len(llm_calls),
+                'tool_query_ms': round(tool_query_ms),
+                'tool_query_count': len(tool_queries),
+                'tool_invoke_ms': round(tool_invoke_ms),
+                'tool_invoke_count': len(tool_invokes),
+                'overhead_ms': round(overhead_ms),
+                'tool_details': [
+                    {'name': c.get('tool_name'), 'ms': c.get('elapsed_ms', 0)}
+                    for c in tool_invokes
+                ],
+                'llm_details': [
+                    {'ms': c.get('elapsed_ms', 0)}
+                    for c in llm_calls
+                ],
+            }
+            with open(_perf_path, 'a') as _f:
+                _f.write(_json.dumps(_perf_record) + '\n')
+        except Exception:
+            pass
 
         if emit_answers_lane:
             debug(

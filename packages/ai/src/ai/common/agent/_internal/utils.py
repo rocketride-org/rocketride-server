@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from rocketlib import debug as _nip_debug
 from typing import Any, Dict, List, Optional, Union
 
 
@@ -80,6 +81,16 @@ def safe_str(value: Any) -> str:
     except Exception:
         return ''
 
+_FRAMEWORK_NOISE_KEYS = frozenset({'security_context', 'agent_fingerprint', 'task_fingerprint'})
+
+
+def _strip_payload(payload: Any) -> Any:
+    """Remove None values and framework-injected noise keys from a dict payload."""
+    if not isinstance(payload, dict):
+        return payload
+    return {k: v for k, v in payload.items() if v is not None and k not in _FRAMEWORK_NOISE_KEYS}
+
+
 # ---------------------------------------------------------------------------
 # Tool invocation payload normalization
 # ---------------------------------------------------------------------------
@@ -131,6 +142,13 @@ def normalize_invocation_payload(*, input: Any = None, kwargs: Optional[Dict[str
 
     kw = kwargs or {}
 
+    import os as _os
+    _logpath = _os.path.expanduser('~/crewai_tool_debug.log')
+    with open(_logpath, 'a') as _f:
+        _f.write('--- normalize_invocation_payload ENTRY ---\n')
+        _f.write(f'  input type={type(input).__name__} input={repr(input)[:1000]}\n')
+        _f.write(f'  kw keys={list(kw.keys())} kw={repr(kw)[:1000]}\n')
+
     payload: Any
     if input is not None:
         payload = _best_effort_pydantic_dump(input)
@@ -148,13 +166,22 @@ def normalize_invocation_payload(*, input: Any = None, kwargs: Optional[Dict[str
 
     if isinstance(payload, dict) and 'input' in payload:
         if len(payload) == 1:
-            return _best_effort_pydantic_dump(payload.get('input'))
+            result = _strip_payload(_best_effort_pydantic_dump(payload.get('input')))
+            with open(_logpath, 'a') as _f:
+                _f.write(f'  EXIT (unwrapped input) result={repr(result)[:1000]}\n\n')
+            return result
 
         inner = _best_effort_pydantic_dump(payload.get('input'))
         if isinstance(inner, dict):
             extras = {k: v for k, v in payload.items() if k != 'input'}
-            return {**inner, **extras}
+            result = _strip_payload({**inner, **extras})
+            with open(_logpath, 'a') as _f:
+                _f.write(f'  EXIT (merged inner+extras) result={repr(result)[:1000]}\n\n')
+            return result
 
+    payload = _strip_payload(payload)
+    with open(_logpath, 'a') as _f:
+        _f.write(f'  EXIT (passthrough) payload={repr(payload)[:1000]}\n\n')
     return payload
 
 # ---------------------------------------------------------------------------

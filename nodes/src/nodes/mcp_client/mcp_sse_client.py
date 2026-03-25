@@ -144,7 +144,7 @@ class McpSseClient:
     # MCP operations
     # ------------------------------------------------------------------
     def list_tools(self) -> List[McpToolDef]:
-        result = self._request('tools/list', {'cursor': None})
+        result = self._request('tools/list', {})
         if not isinstance(result, dict):
             raise McpProtocolError(f'tools/list result expected object, got {type(result)}')
         tools = result.get('tools', [])

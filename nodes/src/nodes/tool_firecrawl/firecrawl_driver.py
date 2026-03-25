@@ -93,6 +93,9 @@ class FirecrawlDriver(ToolsBase):
     # ToolsBase hooks
     # ------------------------------------------------------------------
 
+    def _get_known_tool_names(self) -> set:
+        return set(_TOOLS_BY_BARE_NAME.keys())
+
     def _tool_query(self) -> List[ToolsBase.ToolDescriptor]:
         out: List[ToolsBase.ToolDescriptor] = []
         for tool in _TOOLS_BY_BARE_NAME.values():
