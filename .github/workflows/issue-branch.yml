@@ -27,8 +27,9 @@ jobs:
             feature|enhancement)  PREFIX="feat"  ;;
             chore)                PREFIX="chore" ;;
             docs|documentation)   PREFIX="docs"  ;;
-            infra)                PREFIX="chore" ;;
-            *)                    PREFIX=""      ;;
+            infra)                PREFIX="chore"    ;;
+            refactor)             PREFIX="refactor" ;;
+            *)                    PREFIX=""         ;;
           esac
           echo "prefix=$PREFIX" >> "$GITHUB_OUTPUT"
 
@@ -43,8 +44,9 @@ jobs:
             | tr '[:upper:]' '[:lower:]' \
             | sed 's/[^a-z0-9]/-/g' \
             | sed 's/-\{2,\}/-/g' \
-            | sed 's/^-//;s/-$//' \
-            | cut -c1-50)
+            | sed 's/^-//' \
+            | cut -c1-50 \
+            | sed 's/-$//')
           # Fallback if title is all special chars
           if [ -z "$SLUG" ]; then
             SLUG="issue-${ISSUE_NUMBER}"
