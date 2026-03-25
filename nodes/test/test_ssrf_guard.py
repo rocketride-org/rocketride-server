@@ -182,8 +182,10 @@ class TestPrivateIPs:
         [
             '127.0.0.1',
             '10.0.0.1',
+            '10.255.255.255',
             '192.168.1.1',
             '172.16.0.1',
+            '172.31.255.255',
         ],
     )
     def test_private_ips_blocked(self, ip):
@@ -196,20 +198,52 @@ class TestPrivateIPs:
             with pytest.raises(ValueError, match='private/internal address'):
                 validate_url('http://localhost/')
 
+    def test_loopback_127_x(self):
+        with patch(_SSRF_GETADDR, _fake_getaddrinfo('127.0.0.2')):
+            with pytest.raises(ValueError, match='private/internal address'):
+                validate_url('http://loopback2.test/')
+
     def test_link_local_aws_metadata(self):
         with patch(_SSRF_GETADDR, _fake_getaddrinfo('169.254.169.254')):
             with pytest.raises(ValueError, match='private/internal address'):
                 validate_url('http://evil.example.com/')
+
+    def test_link_local_generic(self):
+        with patch(_SSRF_GETADDR, _fake_getaddrinfo('169.254.0.1')):
+            with pytest.raises(ValueError, match='private/internal address'):
+                validate_url('http://link-local.test/')
 
     def test_ipv6_loopback(self):
         with patch(_SSRF_GETADDR, _fake_getaddrinfo_v6('::1')):
             with pytest.raises(ValueError, match='private/internal address'):
                 validate_url('http://some-host.example.com/')
 
-    def test_ipv6_mapped_loopback(self):
+    def test_ipv4_mapped_ipv6_loopback(self):
         with patch(_SSRF_GETADDR, _fake_getaddrinfo_v6('::ffff:127.0.0.1')):
             with pytest.raises(ValueError, match='private/internal address'):
                 validate_url('http://some-host.example.com/')
+
+    def test_ipv4_mapped_ipv6_private(self):
+        with patch(_SSRF_GETADDR, _fake_getaddrinfo_v6('::ffff:10.0.0.1')):
+            with pytest.raises(ValueError, match='private/internal address'):
+                validate_url('http://some-host.example.com/')
+
+    def test_ipv6_link_local(self):
+        with patch(_SSRF_GETADDR, _fake_getaddrinfo_v6('fe80::1')):
+            with pytest.raises(ValueError, match='private/internal address'):
+                validate_url('http://some-host.example.com/')
+
+    def test_reserved_0_0_0_0(self):
+        with patch(_SSRF_GETADDR, _fake_getaddrinfo('0.0.0.0')):
+            with pytest.raises(ValueError, match='private/internal address'):
+                validate_url('http://zero.test/')
+
+    def test_shared_address_space_cgnat_not_caught(self):
+        """100.64.0.0/10 (CGNAT) is not flagged by Python's ipaddress module."""
+        with patch(_SSRF_GETADDR, _fake_getaddrinfo('100.64.0.1')):
+            # Python's ipaddress does not classify CGNAT as private/reserved,
+            # so our guard does not block it. This is a known limitation.
+            validate_url('http://cgnat.test/')  # should not raise
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +260,14 @@ class TestPublicIPs:
         with patch(_SSRF_GETADDR, _fake_getaddrinfo('8.8.8.8')):
             validate_url('https://dns.google/')  # should not raise
 
+    def test_public_ip_with_port(self):
+        with patch(_SSRF_GETADDR, _fake_getaddrinfo('93.184.216.34')):
+            validate_url('https://example.com:8443/path')
+
+    def test_public_ip_with_path(self):
+        with patch(_SSRF_GETADDR, _fake_getaddrinfo('93.184.216.34')):
+            validate_url('https://example.com/api/v1/users')
+
 
 # ---------------------------------------------------------------------------
 # DNS failure -- fail closed
@@ -240,6 +282,14 @@ class TestDNSFailure:
         with patch(_SSRF_GETADDR, _fail):
             with pytest.raises(ValueError, match='Cannot resolve hostname'):
                 validate_url('http://does-not-exist.invalid/')
+
+    def test_nxdomain_raises(self):
+        def _fail(*args, **kwargs):
+            raise socket.gaierror('[Errno 8] nodename nor servname provided')
+
+        with patch(_SSRF_GETADDR, _fail):
+            with pytest.raises(ValueError, match='Cannot resolve hostname'):
+                validate_url('http://nx.example.invalid/')
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +309,10 @@ class TestMalformedURLs:
     def test_scheme_only(self):
         with pytest.raises(ValueError, match='missing hostname'):
             validate_url('http://')
+
+    def test_bare_colon_slash(self):
+        with pytest.raises(ValueError, match='Unsupported URL scheme'):
+            validate_url('://')
 
 
 # ---------------------------------------------------------------------------
