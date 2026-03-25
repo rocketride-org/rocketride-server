@@ -22,6 +22,14 @@ class Response:
 def post(url, headers=None, json=None, timeout=None):
     if url != 'https://api.exa.ai/search':
         raise RuntimeError(f'Unhandled mock requests.post URL: {url}')
+    if not isinstance(headers, dict):
+        raise RuntimeError('Expected Exa request headers dict')
+    if headers.get('x-api-key') != 'exa-mock-placeholder-for-tests':
+        raise RuntimeError('Expected Exa mock API key header')
+    if headers.get('Content-Type') != 'application/json':
+        raise RuntimeError('Expected Exa JSON content type header')
+    if timeout != 30:
+        raise RuntimeError(f'Expected Exa timeout=30, got {timeout!r}')
 
     query = ''
     search_type = 'auto'
