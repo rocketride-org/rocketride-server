@@ -1,4 +1,4 @@
- * =============================================================================
+* =============================================================================
  * MIT License
  * Copyright (c) 2026 Aparavi Software AG
  *
@@ -51,6 +51,7 @@
 	justify-content: center;
 	align-items: center;
 	min-height: 300px;
+	margin-top: 100px;
 	text-align: center;
 }
 
@@ -178,7 +179,9 @@
 	bottom: 0;
 	height: 2px;
 	background: var(--vscode-focusBorder);
-	transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+	transition:
+		left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+		width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 	border-radius: 1px 1px 0 0;
 }
 
@@ -328,7 +331,7 @@
 	justify-content: flex-end;
 }
 
-.tracing-toggle input[type="checkbox"] {
+.tracing-toggle input[type='checkbox'] {
 	accent-color: var(--vscode-focusBorder);
 	cursor: pointer;
 }
@@ -803,7 +806,9 @@
 	z-index: 10;
 	background: var(--vscode-panel-border);
 	opacity: 0.7;
-	transition: opacity 0.2s, background-color 0.2s;
+	transition:
+		opacity 0.2s,
+		background-color 0.2s;
 }
 
 .trace-resize-handle:hover {
