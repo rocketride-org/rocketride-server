@@ -129,8 +129,8 @@ export class ConfigManager {
 				if (event.affectsConfiguration(this.configSection)) {
 					await this.refreshConfig();
 
-					// If hostUrl changed, sync to .env
-					if (event.affectsConfiguration(`${this.configSection}.hostUrl`)) {
+					// If hostUrl or connectionMode changed, sync to .env
+					if (event.affectsConfiguration(`${this.configSection}.hostUrl`) || event.affectsConfiguration(`${this.configSection}.connectionMode`)) {
 						await this.syncSettingsToEnv();
 					}
 				}
@@ -208,7 +208,7 @@ export class ConfigManager {
 		this.envFileWatcher.onDidChange(() => {
 			this.loadEnvFile()
 				.then(async () => {
-					this.refreshConfig();
+					await this.refreshConfig();
 					// Ensure required vars are present after manual edit
 					await this.ensureEnvFileSync();
 					// Notify listeners that env vars have changed
@@ -223,7 +223,7 @@ export class ConfigManager {
 		this.envFileWatcher.onDidCreate(() => {
 			this.loadEnvFile()
 				.then(async () => {
-					this.refreshConfig();
+					await this.refreshConfig();
 					// Ensure required vars are present in new file
 					await this.ensureEnvFileSync();
 					// Notify listeners that env vars have changed
@@ -631,6 +631,7 @@ export class ConfigManager {
 	public onConfigurationChanged(callback: (config: ConfigManagerInfo) => void): vscode.Disposable {
 		return vscode.workspace.onDidChangeConfiguration(async (event) => {
 			if (event.affectsConfiguration(this.configSection)) {
+				await this.refreshConfig();
 				const config = this.getConfig();
 				callback(config);
 			}
