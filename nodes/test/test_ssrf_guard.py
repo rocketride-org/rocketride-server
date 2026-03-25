@@ -94,9 +94,44 @@ class TestBlockedHosts:
         with pytest.raises(ValueError, match='internal metadata service'):
             validate_url('http://metadata.goog/computeMetadata/v1/')
 
+    def test_metadata_azure(self):
+        with pytest.raises(ValueError, match='internal metadata service'):
+            validate_url('http://metadata.azure.com/metadata/instance')
+
+    def test_management_azure(self):
+        with pytest.raises(ValueError, match='internal metadata service'):
+            validate_url('http://management.azure.com/some/path')
+
     def test_blocked_hosts_case_insensitive(self):
         with pytest.raises(ValueError, match='internal metadata service'):
             validate_url('http://METADATA.GOOGLE.INTERNAL/something')
+
+
+# ---------------------------------------------------------------------------
+# URL scheme validation
+# ---------------------------------------------------------------------------
+
+
+class TestSchemeValidation:
+    def test_file_scheme_blocked(self):
+        with pytest.raises(ValueError, match='Unsupported URL scheme'):
+            validate_url('file:///etc/passwd')
+
+    def test_gopher_scheme_blocked(self):
+        with pytest.raises(ValueError, match='Unsupported URL scheme'):
+            validate_url('gopher://evil.com/')
+
+    def test_ftp_scheme_blocked(self):
+        with pytest.raises(ValueError, match='Unsupported URL scheme'):
+            validate_url('ftp://evil.com/secret')
+
+    def test_http_scheme_allowed(self):
+        with patch(_SSRF_GETADDR, _fake_getaddrinfo('93.184.216.34')):
+            validate_url('http://example.com/')  # should not raise
+
+    def test_https_scheme_allowed(self):
+        with patch(_SSRF_GETADDR, _fake_getaddrinfo('93.184.216.34')):
+            validate_url('https://example.com/')  # should not raise
 
 
 # ---------------------------------------------------------------------------
@@ -177,11 +212,11 @@ class TestDNSFailure:
 
 class TestMalformedURLs:
     def test_empty_url(self):
-        with pytest.raises(ValueError, match='missing hostname'):
+        with pytest.raises(ValueError, match='Unsupported URL scheme'):
             validate_url('')
 
     def test_no_hostname(self):
-        with pytest.raises(ValueError, match='missing hostname'):
+        with pytest.raises(ValueError, match='Unsupported URL scheme'):
             validate_url('/just/a/path')
 
     def test_scheme_only(self):

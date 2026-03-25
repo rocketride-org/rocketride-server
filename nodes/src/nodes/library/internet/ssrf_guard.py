@@ -17,6 +17,8 @@ BLOCKED_HOSTS = frozenset(
     {
         'metadata.google.internal',
         'metadata.goog',
+        'metadata.azure.com',
+        'management.azure.com',
     }
 )
 
@@ -30,12 +32,20 @@ def validate_url(url: str) -> None:
     parsed = urlparse(url)
     hostname = parsed.hostname
 
+    if parsed.scheme.lower() not in ('http', 'https'):
+        raise ValueError(f'Unsupported URL scheme: {parsed.scheme!r}')
+
     if not hostname:
         raise ValueError(f'Invalid URL: missing hostname in {url}')
 
     # Block known cloud metadata hostnames
     if hostname.lower() in BLOCKED_HOSTS:
         raise ValueError(f'Blocked request to internal metadata service: {hostname}')
+
+    # TODO(security): DNS rebinding (TOCTOU) — an attacker-controlled DNS server
+    # could return a public IP during validation and a private IP during the
+    # actual request. Full mitigation requires pinning resolved IPs at the
+    # transport layer. Tracked as a known limitation.
 
     # Resolve hostname and check IP
     try:

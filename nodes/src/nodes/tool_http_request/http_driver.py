@@ -164,6 +164,8 @@ INPUT_SCHEMA: Dict[str, Any] = {
 
 
 class HttpDriver(ToolsBase):
+    """MCP tool driver that exposes an ``http_request`` tool with SSRF guardrails."""
+
     def __init__(
         self,
         *,
