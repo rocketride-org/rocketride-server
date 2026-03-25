@@ -11,8 +11,6 @@
 
 RocketRide is a high-performance data processing engine built on a C++ core with a Python-extensible node system. With 50+ pipeline nodes, native AI/ML support, and SDKs for TypeScript, Python, and MCP, it lets you process, transform, and analyze data at scale — entirely on your own infrastructure.
 
-[![RocketRide MCP server](https://glama.ai/mcp/servers/rocketride-org/rocketride-server/badges/card.svg)](https://glama.ai/mcp/servers/rocketride-org/rocketride-server)
-
 ## Key Capabilities
 
 - **Stay in your IDE** — Build, debug, test, and scale heavy AI and data workloads with an intuitive visual builder in the environment you're used to. Stop using your browser.

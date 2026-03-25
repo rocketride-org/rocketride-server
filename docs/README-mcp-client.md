@@ -1,5 +1,7 @@
 # RocketRide MCP
 
+[![rocketride-server MCP server](https://glama.ai/mcp/servers/rocketride-org/rocketride-server/badges/score.svg)](https://glama.ai/mcp/servers/rocketride-org/rocketride-server)
+
 Model Context Protocol (MCP) integration for the RocketRide Engine - let AI assistants run your pipelines.
 
 > [RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline platform.
@@ -15,11 +17,11 @@ Add to your Claude Desktop or Claude Code configuration:
 
 ```json
 {
-  "mcpServers": {
-    "rocketride": {
-      "command": "rocketride-mcp"
-    }
-  }
+	"mcpServers": {
+		"rocketride": {
+			"command": "rocketride-mcp"
+		}
+	}
 }
 ```
 
@@ -66,12 +68,12 @@ Add to your Claude Desktop configuration:
 
 ```json
 {
-  "mcpServers": {
-    "rocketride": {
-      "command": "python",
-      "args": ["-m", "rocketride_mcp"]
-    }
-  }
+	"mcpServers": {
+		"rocketride": {
+			"command": "python",
+			"args": ["-m", "rocketride_mcp"]
+		}
+	}
 }
 ```
 
@@ -81,11 +83,11 @@ Add to your Claude Code MCP settings:
 
 ```json
 {
-  "mcpServers": {
-    "rocketride": {
-      "command": "rocketride-mcp"
-    }
-  }
+	"mcpServers": {
+		"rocketride": {
+			"command": "rocketride-mcp"
+		}
+	}
 }
 ```
 
@@ -123,11 +125,11 @@ Tool results include both human-readable text and structured data:
 
 Set these environment variables (required; no config file is used):
 
-| Variable           | Required | Description                                          |
-| ------------------ | -------- | ---------------------------------------------------- |
-| `ROCKETRIDE_URI`   | Yes      | Server URI (e.g. `https://your-engine.example.com`)  |
-| `ROCKETRIDE_APIKEY` | Yes*    | API key for authentication                           |
-| `ROCKETRIDE_AUTH`  | Yes*     | Alternative to `ROCKETRIDE_APIKEY`                   |
+| Variable            | Required | Description                                         |
+| ------------------- | -------- | --------------------------------------------------- |
+| `ROCKETRIDE_URI`    | Yes      | Server URI (e.g. `https://your-engine.example.com`) |
+| `ROCKETRIDE_APIKEY` | Yes\*    | API key for authentication                          |
+| `ROCKETRIDE_AUTH`   | Yes\*    | Alternative to `ROCKETRIDE_APIKEY`                  |
 
 \* Provide either `ROCKETRIDE_APIKEY` or `ROCKETRIDE_AUTH`.
 
