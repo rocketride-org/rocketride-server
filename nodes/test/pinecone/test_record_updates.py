@@ -22,7 +22,7 @@ from pathlib import Path
 # Module stubs required to import pinecone.py in isolation
 # ---------------------------------------------------------------------------
 
-_ROOT = Path(__file__).resolve().parents[2]
+_ROOT = Path(__file__).resolve().parents[3]
 _MOCKS_DIR = _ROOT / 'nodes' / 'test' / 'mocks'
 
 _STUB_MODULE_NAMES = (
