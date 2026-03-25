@@ -26,7 +26,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable
 
 from ai.common.agent import AgentBase
 from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
@@ -34,10 +34,30 @@ from ai.common.tools import ToolsBase
 
 
 class DeepAgentDriver(AgentBase):
+    """
+    Framework driver that executes single-agent pipelines via the ``deepagents`` library.
+
+    Built on LangChain/LangGraph, the driver layers strategic planning, persistent state,
+    and long-context management on top of the standard LangChain agent loop.  It follows
+    the RocketRide ``AgentBase`` contract for tool discovery, host-LLM routing, SSE
+    progress events, and hierarchical agent-as-tool invocation.
+
+    Class attributes:
+        FRAMEWORK: Identifier string used in metadata and logging (``'deepagent'``).
+    """
+
     FRAMEWORK = 'deepagent'
 
     def __init__(self, iGlobal: Any) -> None:
-        """Initialize the DeepAgents driver."""
+        """
+        Initialise the DeepAgents driver.
+
+        Args:
+            iGlobal: The node's ``IGlobal`` instance, forwarded unchanged to ``AgentBase``.
+
+        Returns:
+            None
+        """
         super().__init__(iGlobal)
 
     # ------------------------------------------------------------------
@@ -49,26 +69,69 @@ class DeepAgentDriver(AgentBase):
         *,
         host: AgentHost,
         call_llm: Callable[..., str],
-        ctx: Dict[str, Any],
+        ctx: dict[str, Any],
     ) -> Any:
+        """
+        Wrap the RocketRide host LLM in a LangChain ``BaseChatModel``.
+
+        The returned model converts a LangChain message list into a plain-text transcript,
+        prepends the JSON tool-call protocol prompt, calls ``call_llm``, and parses the
+        response envelope back into a ``ChatResult``.  Up to three attempts are made when
+        the LLM produces malformed JSON.
+
+        Args:
+            host: The ``AgentHost`` context for the current run (unused here; present for
+                interface compatibility).
+            call_llm: Callable that accepts a prompt string and optional ``stop_words``
+                keyword argument and returns the raw LLM response string.
+            ctx: Arbitrary run-context dictionary (unused here; present for interface
+                compatibility).
+
+        Returns:
+            An instance of the locally-defined ``RocketRideToolCallingChatModel``.
+        """
         from langchain_core.language_models import BaseChatModel
         from langchain_core.messages import AIMessage
         from langchain_core.outputs import ChatGeneration, ChatResult
 
         class RocketRideToolCallingChatModel(BaseChatModel):
+            """
+            LangChain ``BaseChatModel`` that routes inference through the RocketRide host LLM.
+
+            Tool-calling is implemented via a JSON envelope protocol injected as a system
+            prompt, allowing any host LLM (including those without native function-calling
+            support) to drive agentic behaviour.
+            """
+
+            _bound_tools: list[dict[str, Any]]
+
             def __init__(self):
+                """Initialise the model."""
                 super().__init__()
-                self._bound_tools: List[Dict[str, Any]] = []
+                self._bound_tools: list[dict[str, Any]] = []
 
             @property
             def _llm_type(self) -> str:
+                """Return the LLM type identifier string used by LangChain internals."""
                 return 'rocketride-host-llm'
 
             @property
-            def _identifying_params(self) -> Dict[str, Any]:
+            def _identifying_params(self) -> dict[str, Any]:
+                """Return a dict of identifying parameters for this model instance."""
                 return {'framework': 'rocketride', 'adapter': 'tool_calling_json'}
 
-            def bind_tools(self, tools: Any, **kwargs: Any) -> 'RocketRideToolCallingChatModel':
+            def bind_tools(self, tools: Any, **kwargs: Any) -> RocketRideToolCallingChatModel:
+                """
+                Register tools for use with the JSON envelope protocol.
+
+                Args:
+                    tools: A single tool or list of tools with ``name``, ``description``,
+                        and optional ``args_schema`` / ``_rr_input_schema`` attributes.
+                    **kwargs: Ignored; present for LangChain interface compatibility.
+
+                Returns:
+                    ``self`` to allow method chaining.
+                """
                 try:
                     self._bound_tools = _normalize_bound_tools(tools)
                 except Exception:
@@ -76,6 +139,26 @@ class DeepAgentDriver(AgentBase):
                 return self
 
             def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> Any:
+                """
+                Generate a response for *messages* via the host LLM.
+
+                Converts *messages* to a plain-text transcript, builds the tool-call
+                protocol system prompt, and calls the host LLM.  The raw response is
+                parsed as a JSON envelope; on failure the raw string is wrapped in an
+                ``AIMessage`` fallback.  Up to three retries are attempted with an
+                error-correction prompt suffix.
+
+                Args:
+                    messages: LangChain message list or any value accepted by
+                        ``_langchain_messages_to_transcript``.
+                    stop: Optional list of stop-word strings forwarded to the host LLM.
+                    run_manager: Ignored; present for LangChain callback compatibility.
+                    **kwargs: Ignored extra keyword arguments.
+
+                Returns:
+                    A ``ChatResult`` wrapping either a tool-call ``AIMessage`` or a plain
+                    ``AIMessage`` with the raw LLM text as its content.
+                """
                 transcript = _langchain_messages_to_transcript(messages)
                 tool_hint = _tool_call_protocol_prompt(self._bound_tools)
                 prompt = (tool_hint + '\n\n' + transcript).strip()
@@ -97,19 +180,57 @@ class DeepAgentDriver(AgentBase):
         self,
         *,
         host: AgentHost,
-        tool_descriptors: List[ToolsBase.ToolDescriptor],
+        tool_descriptors: list[ToolsBase.ToolDescriptor],
         invoke_tool: Callable[..., Any],
         log_tool_call: Callable[..., None],
-        ctx: Dict[str, Any],
-    ) -> List[Any]:
+        ctx: dict[str, Any],
+    ) -> list[Any]:
+        """
+        Convert RocketRide tool descriptors into LangChain ``BaseTool`` instances.
+
+        Each descriptor is wrapped in a ``HostTool`` whose ``_run`` method forwards calls
+        through ``invoke_tool`` and serialises the result to JSON.  Pydantic argument
+        schemas are dynamically generated from the descriptor's ``input_schema`` field
+        when available.
+
+        Args:
+            host: The ``AgentHost`` context for the current run (unused here; present for
+                interface compatibility).
+            tool_descriptors: List of ``ToolsBase.ToolDescriptor`` dicts describing the
+                tools available to the agent.
+            invoke_tool: Callable that executes a named host tool and returns its output.
+            log_tool_call: Callable invoked after each tool execution for audit logging;
+                errors are silently ignored.
+            ctx: Arbitrary run-context dictionary (unused here; present for interface
+                compatibility).
+
+        Returns:
+            A list of LangChain ``BaseTool`` instances ready to be passed to the agent.
+        """
         from langchain_core.tools import BaseTool
         from pydantic import BaseModel, ConfigDict, Field, create_model
 
         class _ToolInput(BaseModel):
+            """Default fallback Pydantic model for tools that lack a typed input schema."""
+
             input: Any = Field(default=None, description='Tool input payload')
             model_config = ConfigDict(extra='allow')
 
-        def _make_args_schema(input_schema: Optional[Dict[str, Any]]) -> type[BaseModel]:
+        def _make_args_schema(input_schema: dict[str, Any] | None) -> type[BaseModel]:
+            """
+            Build a typed Pydantic ``BaseModel`` from a JSON-Schema *input_schema* dict.
+
+            Falls back to ``_ToolInput`` when *input_schema* is ``None``, empty, or
+            cannot be parsed.
+
+            Args:
+                input_schema: A JSON-Schema dict with optional ``properties`` and
+                    ``required`` keys, or ``None``.
+
+            Returns:
+                A ``BaseModel`` subclass whose fields mirror *input_schema*, or
+                ``_ToolInput`` on any error.
+            """
             if not isinstance(input_schema, dict):
                 return _ToolInput
             props = input_schema.get('properties', {})
@@ -117,7 +238,7 @@ class DeepAgentDriver(AgentBase):
                 return _ToolInput
             required_keys = set(input_schema.get('required', []) or [])
 
-            field_defs: Dict[str, Any] = {}
+            field_defs: dict[str, Any] = {}
             for key, prop in props.items():
                 if not isinstance(key, str) or not key:
                     continue
@@ -143,11 +264,29 @@ class DeepAgentDriver(AgentBase):
                 return _ToolInput
 
         class HostTool(BaseTool):  # type: ignore[misc]
+            """
+            LangChain ``BaseTool`` that delegates execution to a RocketRide host tool.
+
+            The ``_run`` method serialises its output to a JSON string so LangChain can
+            incorporate it into the agent message history.
+            """
+
             name: str
             description: str
             args_schema: type[BaseModel] = _ToolInput
 
             def _run(self, input: Any = None, **kwargs: Any) -> str:  # noqa: ANN401, A002
+                """
+                Execute the host tool and return its result as a JSON string.
+
+                Args:
+                    input: Primary positional input payload forwarded to the host tool.
+                    **kwargs: Additional keyword arguments forwarded to the host tool.
+
+                Returns:
+                    A JSON-encoded string of the tool output, or the raw string
+                    representation when JSON serialisation fails.
+                """
                 tool_name = _safe_str(getattr(self, 'name', ''))
 
                 try:
@@ -165,7 +304,7 @@ class DeepAgentDriver(AgentBase):
                 except Exception:
                     return _safe_str(out)
 
-        tools: List[Any] = []
+        tools: list[Any] = []
         for td in tool_descriptors:
             if not hasattr(td, 'get'):
                 continue
@@ -194,48 +333,190 @@ class DeepAgentDriver(AgentBase):
     # ------------------------------------------------------------------
     # Run
     # ------------------------------------------------------------------
-    def _run(self, *, agent_input: AgentInput, host: AgentHost, ctx: Dict[str, Any]) -> AgentRunResult:
+    def _run(self, *, agent_input: AgentInput, host: AgentHost, ctx: dict[str, Any]) -> AgentRunResult:
+        """
+        Execute the agent using ``deepagents.create_deep_agent``.
+
+        Discovers host tools, binds the host LLM and tools into LangChain-compatible
+        objects, constructs the deep agent, and invokes it with the user's question.
+        SSE ``thinking`` events are emitted throughout via ``_SSECallbackHandler``.
+
+        Args:
+            agent_input: Encapsulates the user question and run metadata.
+            host: Provides access to host LLM and tool invocation services.
+            ctx: Arbitrary run-context dictionary forwarded from ``AgentBase.run_agent``.
+
+        Returns:
+            A tuple of ``(answer_text, raw_state)`` where *answer_text* is the final
+            agent response string and *raw_state* is the raw LangGraph state dict.
+
+        Raises:
+            RuntimeError: If ``create_deep_agent`` or ``agent.invoke`` raises, wrapping
+                the original error with stage information.
+        """
         from deepagents import create_deep_agent
-        from langchain_core.messages import AIMessage, HumanMessage
         from langchain_core.callbacks import BaseCallbackHandler
+        from langchain_core.messages import AIMessage, HumanMessage
 
         class _SSECallbackHandler(BaseCallbackHandler):
+            """
+            LangChain callback handler that forwards agent lifecycle events as SSE messages.
+
+            Each LangChain hook (LLM start/end, tool start/end, agent action/finish)
+            emits a ``thinking`` SSE event to the RocketRide UI via the provided
+            ``send_sse`` callable.
+            """
+
             def __init__(self, send_sse: Callable[..., Any]) -> None:
+                """
+                Initialise the handler with an SSE emitter.
+
+                Args:
+                    send_sse: Callable matching ``AgentBase.sendSSE(type, **data)``
+                        used to push progress events to the UI.
+
+                Returns:
+                    None
+                """
                 super().__init__()
                 self._send_sse = send_sse
 
             def on_tool_start(self, serialized: Any, input_str: Any, **kwargs: Any) -> None:
+                """
+                Emit an SSE event when a tool begins execution.
+
+                Args:
+                    serialized: LangChain serialised tool descriptor dict (may be ``None``).
+                    input_str: Raw input string passed to the tool.
+                    **kwargs: Additional LangChain callback keyword arguments (ignored).
+
+                Returns:
+                    None
+                """
                 tool_name = (serialized or {}).get('name', '') or 'tool'
                 self._send_sse('thinking', message=f'Calling {tool_name}...', tool=tool_name, input=input_str)
 
             def on_tool_end(self, output: Any, **kwargs: Any) -> None:
+                """
+                Emit an SSE event when a tool finishes successfully.
+
+                Args:
+                    output: Tool output value (ignored; event carries a fixed message).
+                    **kwargs: Additional LangChain callback keyword arguments (ignored).
+
+                Returns:
+                    None
+                """
                 self._send_sse('thinking', message='Tool complete')
 
             def on_tool_error(self, error: Any, **kwargs: Any) -> None:
+                """
+                Emit an SSE event when a tool raises an error.
+
+                Args:
+                    error: The exception or error value raised by the tool.
+                    **kwargs: Additional LangChain callback keyword arguments (ignored).
+
+                Returns:
+                    None
+                """
                 self._send_sse('thinking', message=f'Tool error: {_safe_str(error)}')
 
             def on_agent_action(self, action: Any, **kwargs: Any) -> None:
+                """
+                Emit an SSE event when the agent selects an action.
+
+                Args:
+                    action: The ``AgentAction`` chosen by the agent (ignored).
+                    **kwargs: Additional LangChain callback keyword arguments (ignored).
+
+                Returns:
+                    None
+                """
                 self._send_sse('thinking', message='Agent thinking...')
 
             def on_agent_finish(self, finish: Any, **kwargs: Any) -> None:
+                """
+                Emit an SSE event when the agent produces its final answer.
+
+                Args:
+                    finish: The ``AgentFinish`` value (ignored).
+                    **kwargs: Additional LangChain callback keyword arguments (ignored).
+
+                Returns:
+                    None
+                """
                 self._send_sse('thinking', message='Agent done')
 
             def on_llm_start(self, serialized: Any, prompts: Any, **kwargs: Any) -> None:
+                """
+                Emit an SSE event when a non-chat LLM call begins.
+
+                Args:
+                    serialized: LangChain serialised LLM descriptor (ignored).
+                    prompts: List of prompt strings sent to the LLM (ignored).
+                    **kwargs: Additional LangChain callback keyword arguments (ignored).
+
+                Returns:
+                    None
+                """
                 self._send_sse('thinking', message='LLM call started')
 
             def on_chat_model_start(self, serialized: Any, messages: Any, **kwargs: Any) -> None:
+                """
+                Emit an SSE event when a chat-model LLM call begins.
+
+                Args:
+                    serialized: LangChain serialised chat-model descriptor (ignored).
+                    messages: Nested list of ``BaseMessage`` objects sent to the model
+                        (ignored).
+                    **kwargs: Additional LangChain callback keyword arguments (ignored).
+
+                Returns:
+                    None
+                """
                 self._send_sse('thinking', message='LLM call started')
 
             def on_llm_end(self, response: Any, **kwargs: Any) -> None:
+                """
+                Emit an SSE event when an LLM call completes.
+
+                Args:
+                    response: ``LLMResult`` returned by the model (ignored).
+                    **kwargs: Additional LangChain callback keyword arguments (ignored).
+
+                Returns:
+                    None
+                """
                 self._send_sse('thinking', message='LLM call completed')
 
             def on_llm_error(self, error: Any, **kwargs: Any) -> None:
+                """
+                Emit an SSE event when an LLM call raises an error.
+
+                Args:
+                    error: The exception or error value raised by the LLM.
+                    **kwargs: Additional LangChain callback keyword arguments (ignored).
+
+                Returns:
+                    None
+                """
                 self._send_sse('thinking', message=f'LLM error: {_safe_str(error)}')
 
         tool_descriptors = self.discover_tools(host=host)
         self.sendSSE('thinking', message=f'Discovered {len(tool_descriptors)} host tool(s): {[td.get("name") for td in tool_descriptors if hasattr(td, "get")]}')
 
         def _call_llm(messages: Any, stop_words: Any = None) -> str:
+            """
+            Forward a prompt to the host LLM via ``AgentBase.call_host_llm``.
+
+            Args:
+                messages: Prompt string or message list to send to the host LLM.
+                stop_words: Optional stop-word list forwarded verbatim.
+
+            Returns:
+                The raw response string from the host LLM.
+            """
             return self.call_host_llm(
                 host=host,
                 messages=messages,
@@ -243,7 +524,18 @@ class DeepAgentDriver(AgentBase):
                 stop_words=stop_words,
             )
 
-        def _invoke_tool(tool_name: str, input: Any = None, kwargs: Optional[Dict[str, Any]] = None) -> Any:  # noqa: A002
+        def _invoke_tool(tool_name: str, input: Any = None, kwargs: dict[str, Any] | None = None) -> Any:  # noqa: A002
+            """
+            Forward a tool invocation request to the host via ``AgentBase.invoke_host_tool``.
+
+            Args:
+                tool_name: The fully-qualified name of the tool to invoke.
+                input: Primary positional input forwarded to the tool.
+                kwargs: Additional keyword arguments forwarded to the tool.
+
+            Returns:
+                The raw output returned by the host tool.
+            """
             return self.invoke_host_tool(host=host, tool_name=tool_name, input=input, kwargs=kwargs)
 
         llm = self._bind_framework_llm(host=host, call_llm=_call_llm, ctx=ctx)
@@ -289,7 +581,22 @@ class DeepAgentDriver(AgentBase):
 # ------------------------------------------------------------------
 # Helpers (shared with LangChain driver pattern)
 # ------------------------------------------------------------------
-def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
+def _tool_call_protocol_prompt(bound_tools: list[dict[str, Any]]) -> str:
+    """
+    Build the system-prompt preamble that instructs the LLM to output a JSON envelope.
+
+    The returned string is prepended to the message transcript before every LLM call so
+    that models without native tool-calling support can still drive agentic behaviour via
+    the ``{"type":"tool_call",...}`` / ``{"type":"final",...}`` envelope schema.
+
+    Args:
+        bound_tools: List of tool descriptor dicts (``name``, ``description``,
+            ``args_schema``, optional ``input_schema``) to advertise to the LLM.
+
+    Returns:
+        A newline-joined string of ``system:`` directives ready to prepend to the
+        conversation transcript.
+    """
     tools_json = json.dumps(bound_tools, ensure_ascii=False)
     return '\n'.join(
         [
@@ -305,8 +612,22 @@ def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
     ).strip()
 
 
-def _normalize_bound_tools(tools: Any) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
+def _normalize_bound_tools(tools: Any) -> list[dict[str, Any]]:
+    """
+    Normalise a LangChain tool or list of tools into plain descriptor dicts.
+
+    Each dict contains ``name``, ``description``, ``args_schema`` (string repr), and
+    optionally ``input_schema`` (the original JSON-Schema dict stored on the tool as
+    ``_rr_input_schema``).
+
+    Args:
+        tools: A single LangChain tool object or a list of them.  Any falsy value
+            returns an empty list.
+
+    Returns:
+        A list of ``dict`` objects suitable for use with ``_tool_call_protocol_prompt``.
+    """
+    out: list[dict[str, Any]] = []
     if not tools:
         return out
     if not isinstance(tools, list):
@@ -325,7 +646,7 @@ def _normalize_bound_tools(tools: Any) -> List[Dict[str, Any]]:
         except Exception:
             input_schema = None
 
-        entry: Dict[str, Any] = {'name': name, 'description': desc, 'args_schema': _safe_str(schema)}
+        entry: dict[str, Any] = {'name': name, 'description': desc, 'args_schema': _safe_str(schema)}
         if isinstance(input_schema, dict):
             entry['input_schema'] = input_schema
         out.append(entry)
@@ -333,6 +654,20 @@ def _normalize_bound_tools(tools: Any) -> List[Dict[str, Any]]:
 
 
 def _langchain_messages_to_transcript(messages: Any) -> str:
+    """
+    Convert a LangChain message list (or plain string/dict) into a plain-text transcript.
+
+    Each message is rendered as ``"<role>: <content>"`` on its own line.  Unknown message
+    types fall back to the ``user`` role.  Non-list inputs are handled gracefully:
+    ``None`` → ``''``, ``str`` → as-is, ``dict`` → JSON string.
+
+    Args:
+        messages: A LangChain message list, a plain string, a dict, or ``None``.
+
+    Returns:
+        A single newline-joined string representing the conversation transcript, or an
+        empty string when conversion fails entirely.
+    """
     try:
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
     except Exception:
@@ -350,7 +685,7 @@ def _langchain_messages_to_transcript(messages: Any) -> str:
         except Exception:
             return ''
 
-    lines: List[str] = []
+    lines: list[str] = []
     for m in messages:
         role = 'user'
         content = ''
@@ -380,6 +715,22 @@ def _langchain_messages_to_transcript(messages: Any) -> str:
 
 
 def _parse_tool_call_envelope(raw: str) -> Any:
+    """
+    Parse a raw LLM response string as a JSON tool-call or final-answer envelope.
+
+    Understands two envelope shapes:
+
+    * ``{"type": "tool_call", "name": "...", "args": {...}}`` — converted to a
+      LangChain ``AIMessage`` with ``tool_calls``.
+    * ``{"type": "final", "content": "..."}`` — converted to a plain ``AIMessage``.
+
+    Args:
+        raw: The raw string returned by the LLM; expected to be a single JSON object.
+
+    Returns:
+        A LangChain ``AIMessage`` on success, or ``None`` when *raw* is not valid JSON,
+        has an unrecognised ``type`` value, or the required fields are absent.
+    """
     try:
         obj = json.loads(raw)
     except Exception:
@@ -423,6 +774,16 @@ def _parse_tool_call_envelope(raw: str) -> Any:
 
 
 def _safe_str(v: Any) -> str:
+    """
+    Safely convert any value to a string without raising.
+
+    Args:
+        v: Any value, including ``None``.
+
+    Returns:
+        The string representation of *v*, or ``''`` if *v* is ``None`` or if
+        ``str(v)`` raises an exception.
+    """
     try:
         return '' if v is None else str(v)
     except Exception:

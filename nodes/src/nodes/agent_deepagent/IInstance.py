@@ -21,9 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-"""
-Deep Agent node instance.
-"""
+"""Deep Agent node instance — bridges the RocketRide engine to ``DeepAgentDriver``."""
 
 from __future__ import annotations
 
@@ -36,12 +34,46 @@ from .IGlobal import IGlobal
 
 
 class IInstance(IInstanceBase):
+    """
+    Per-instance handler for the Deep Agent node.
+
+    Receives pipeline questions via ``writeQuestions`` and forwards them to
+    ``DeepAgentDriver.run_agent``.  Also handles hierarchical ``tool.*`` invoke
+    operations so this node can be used as a tool inside another agent.
+    """
+
     IGlobal: IGlobal
 
-    def writeQuestions(self, question: Question):
+    def writeQuestions(self, question: Question) -> None:
+        """
+        Process an incoming pipeline question by running the deep agent.
+
+        Delegates execution to ``DeepAgentDriver.run_agent``, which writes a single
+        JSON answer to the ``answers`` lane on completion.
+
+        Args:
+            question: The ``Question`` object from the pipeline lane.
+
+        Returns:
+            None
+        """
         self.IGlobal.agent.run_agent(self, question, emit_answers_lane=True)
 
     def invoke(self, param: Any) -> Any:  # noqa: ANN401
+        """
+        Handle a control-plane invocation on this node instance.
+
+        Intercepts ``tool.*`` operations so the node can be composed as a tool inside
+        a parent agent.  All other operations are forwarded to the base-class handler.
+
+        Args:
+            param: Invocation parameter dict (with an ``op`` key) or an object with
+                an ``op`` attribute.
+
+        Returns:
+            The result of ``DeepAgentDriver.handle_invoke`` for ``tool.*`` ops, or the
+            base-class ``invoke`` result otherwise.
+        """
         op = param.get('op') if isinstance(param, dict) else getattr(param, 'op', None)
         if isinstance(op, str) and op.startswith('tool.'):
             return self.IGlobal.agent.handle_invoke(self, param)

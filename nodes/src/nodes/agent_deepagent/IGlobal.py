@@ -21,6 +21,8 @@
 # SOFTWARE.
 # =============================================================================
 
+"""Global singleton for the Deep Agent node — owns dependency bootstrap and driver lifecycle."""
+
 from __future__ import annotations
 
 import os
@@ -30,9 +32,31 @@ from rocketlib import IGlobalBase, OPEN_MODE
 
 
 class IGlobal(IGlobalBase):
+    """
+    Node-global state holder for the Deep Agent node.
+
+    Created once per node configuration and shared across all ``IInstance`` objects.
+    Responsible for installing Python dependencies on first open and constructing the
+    ``DeepAgentDriver`` singleton used by every pipeline invocation.
+
+    Attributes:
+        agent: The active ``DeepAgentDriver`` instance, or ``None`` when the node is
+            opened in ``CONFIG`` mode or after ``endGlobal`` has been called.
+    """
+
     agent: Any = None
 
     def beginGlobal(self) -> None:
+        """
+        Initialise the node: install dependencies and create the driver.
+
+        Skipped entirely when the endpoint is opened in ``CONFIG`` mode (no runtime
+        execution is expected).  Otherwise, resolves ``requirements.txt`` via
+        ``depends`` and instantiates ``DeepAgentDriver``.
+
+        Returns:
+            None
+        """
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
@@ -46,4 +70,13 @@ class IGlobal(IGlobalBase):
         self.agent = DeepAgentDriver(self)
 
     def endGlobal(self) -> None:
+        """
+        Tear down the node: release the driver instance.
+
+        Sets ``agent`` to ``None`` so the ``DeepAgentDriver`` and any resources it
+        holds can be garbage-collected.
+
+        Returns:
+            None
+        """
         self.agent = None
