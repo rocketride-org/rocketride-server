@@ -32,6 +32,7 @@ jobs:
       full_version: ${{ needs.init.outputs.full_server_version }}
       build_hash: ${{ needs.init.outputs.build_hash }}
       build_stamp: ${{ needs.init.outputs.build_stamp }}
+      nodownload: true
       package: true
     secrets: inherit
 
