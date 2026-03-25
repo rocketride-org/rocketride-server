@@ -89,4 +89,5 @@ class IGlobal(IGlobalBase):
 
     def endGlobal(self) -> None:
         """Release shared runtime state for this node instance."""
+        self.IEndpoint.endpoint.bag.pop('search_exa', None)
         self.search = None
