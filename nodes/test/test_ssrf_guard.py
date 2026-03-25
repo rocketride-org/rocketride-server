@@ -344,29 +344,174 @@ class TestPathParamInjection:
 
 
 # ---------------------------------------------------------------------------
-# Redirect bypass -- allow_redirects=False
+# Integration tests -- http_client.execute_request
 # ---------------------------------------------------------------------------
 
 
-class TestRedirectBypass:
-    def test_allow_redirects_false_in_kwargs(self):
-        """Verify that execute_request sets allow_redirects=False."""
+class TestExecuteRequestSSRF:
+    """Verify SSRF guards are wired into ``execute_request``."""
+
+    def test_validate_called_on_resolved_url(self):
+        """validate_url must run against the URL *after* path-param substitution."""
         with (
             patch(_SSRF_GETADDR, _fake_getaddrinfo('93.184.216.34')),
-            patch(_CLIENT_REQUEST) as mock_request,
+            patch(_CLIENT_REQUEST, return_value=_mock_response()) as mock_req,
         ):
-            mock_resp = MagicMock()
-            mock_resp.status_code = 200
-            mock_resp.reason = 'OK'
-            mock_resp.headers = {'Content-Type': 'text/plain'}
-            mock_resp.text = 'hello'
-            mock_resp.json.side_effect = ValueError
-            mock_request.return_value = mock_resp
+            execute_request(
+                url='https://api.example.com/users/:id',
+                method='GET',
+                path_params={'id': '42'},
+            )
+            actual_url = mock_req.call_args[1]['url']
+            assert actual_url == 'https://api.example.com/users/42'
 
-            execute_request(url='http://example.com/', method='GET')
+    def test_allow_redirects_false(self):
+        """Requests must NOT follow redirects (open-redirect SSRF bypass)."""
+        with (
+            patch(_SSRF_GETADDR, _fake_getaddrinfo('93.184.216.34')),
+            patch(_CLIENT_REQUEST, return_value=_mock_response()) as mock_req,
+        ):
+            execute_request(url='https://example.com', method='GET')
+            actual_kwargs = mock_req.call_args[1]
+            assert actual_kwargs['allow_redirects'] is False, 'allow_redirects must be False to prevent redirect-based SSRF'
 
-            mock_request.assert_called_once()
-            call_kwargs = mock_request.call_args
-            # requests.request is called with **kwargs, so check keyword args
-            actual_kwargs = call_kwargs.kwargs if call_kwargs.kwargs else call_kwargs[1]
-            assert actual_kwargs.get('allow_redirects') is False, 'allow_redirects must be False to prevent redirect-based SSRF'
+    def test_path_param_injection_blocked(self):
+        """Injecting a private IP via path params must still be caught."""
+        with patch(_SSRF_GETADDR, _fake_getaddrinfo('10.0.0.1')):
+            with pytest.raises(ValueError, match='private/internal'):
+                execute_request(
+                    url='https://api.example.com/proxy/:target',
+                    method='GET',
+                    path_params={'target': 'http://10.0.0.1'},
+                )
+
+    def test_metadata_host_via_path_param_blocked(self):
+        """Injecting a metadata hostname via path params is caught."""
+        with pytest.raises(ValueError, match='internal metadata service'):
+            execute_request(
+                url='http://:host/latest/meta-data/',
+                method='GET',
+                path_params={'host': 'metadata.google.internal'},
+            )
+
+    def test_unresolvable_url_blocked(self):
+        """DNS failure after path-param resolution must raise."""
+
+        def _fail(*args, **kwargs):
+            raise socket.gaierror('NXDOMAIN')
+
+        with patch(_SSRF_GETADDR, _fail):
+            with pytest.raises(ValueError, match='Cannot resolve hostname'):
+                execute_request(url='https://doesnotexist.invalid/', method='GET')
+
+
+# ---------------------------------------------------------------------------
+# Integration tests -- HttpDriver._tool_invoke
+# ---------------------------------------------------------------------------
+
+
+class TestHttpDriverSSRF:
+    """Verify URL allowlist in ``HttpDriver`` runs against resolved URLs."""
+
+    def _make_driver(self, url_patterns=None, methods=None):
+        import re
+
+        patterns = url_patterns or []
+        return HttpDriver(
+            server_name='test',
+            enabled_methods=methods or {'GET', 'POST'},
+            url_patterns=[re.compile(p) for p in patterns],
+        )
+
+    def test_allowlist_matches_resolved_url(self):
+        """URL allowlist must be checked against the resolved URL, not the template."""
+        with (
+            patch(_SSRF_GETADDR, _fake_getaddrinfo('93.184.216.34')),
+            patch(_CLIENT_REQUEST, return_value=_mock_response()) as mock_req,
+        ):
+            driver = self._make_driver(url_patterns=[r'https://api\.example\.com/'])
+            driver._tool_invoke(
+                tool_name='test.http_request',
+                input_obj={
+                    'url': 'https://api.example.com/users/:id',
+                    'method': 'GET',
+                    'path_params': {'id': '42'},
+                },
+            )
+            actual_url = mock_req.call_args[1]['url']
+            assert actual_url == 'https://api.example.com/users/42'
+
+    def test_allowlist_rejects_non_matching_url(self):
+        driver = self._make_driver(url_patterns=[r'https://api\.allowed\.com/'])
+        with pytest.raises(ValueError, match='does not match any allowed URL pattern'):
+            driver._tool_invoke(
+                tool_name='test.http_request',
+                input_obj={
+                    'url': 'https://evil.com/steal',
+                    'method': 'GET',
+                },
+            )
+
+    def test_empty_allowlist_permits_any_url(self):
+        """An empty URL-pattern list means 'no allowlist restriction'."""
+        with (
+            patch(_SSRF_GETADDR, _fake_getaddrinfo('93.184.216.34')),
+            patch(_CLIENT_REQUEST, return_value=_mock_response()) as mock_req,
+        ):
+            driver = self._make_driver(url_patterns=[])
+            driver._tool_invoke(
+                tool_name='test.http_request',
+                input_obj={
+                    'url': 'https://any-url.example.com/',
+                    'method': 'GET',
+                },
+            )
+            mock_req.assert_called_once()
+
+    def test_ssrf_guard_blocks_even_with_matching_allowlist(self):
+        """Even if the URL matches the allowlist, SSRF guard must still block private IPs."""
+        with patch(_SSRF_GETADDR, _fake_getaddrinfo('10.0.0.1')):
+            driver = self._make_driver(url_patterns=[r'https://internal\.corp/'])
+            with pytest.raises(ValueError, match='private/internal'):
+                driver._tool_invoke(
+                    tool_name='test.http_request',
+                    input_obj={
+                        'url': 'https://internal.corp/admin',
+                        'method': 'GET',
+                    },
+                )
+
+    def test_allowlist_with_path_param_injection(self):
+        """Path params that change the resolved URL must be checked against allowlist."""
+        driver = self._make_driver(url_patterns=[r'https://api\.example\.com/users/\d+$'])
+        with pytest.raises(ValueError, match='does not match any allowed URL pattern'):
+            driver._tool_invoke(
+                tool_name='test.http_request',
+                input_obj={
+                    'url': 'https://api.example.com/users/:id',
+                    'method': 'GET',
+                    'path_params': {'id': '../../../etc/passwd'},
+                },
+            )
+
+
+# ---------------------------------------------------------------------------
+# Path param resolution helpers
+# ---------------------------------------------------------------------------
+
+
+class TestResolvePathParams:
+    """Verify path parameter substitution edge cases."""
+
+    def test_basic_substitution(self):
+        assert _resolve_path_params('http://a.com/:id', {'id': '42'}) == 'http://a.com/42'
+
+    def test_multiple_params(self):
+        result = _resolve_path_params('http://a.com/:org/:repo', {'org': 'acme', 'repo': 'api'})
+        assert result == 'http://a.com/acme/api'
+
+    def test_no_params_returns_original(self):
+        assert _resolve_path_params('http://a.com/path', None) == 'http://a.com/path'
+
+    def test_empty_params_returns_original(self):
+        assert _resolve_path_params('http://a.com/path', {}) == 'http://a.com/path'
