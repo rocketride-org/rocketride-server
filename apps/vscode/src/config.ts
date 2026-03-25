@@ -63,7 +63,6 @@ export interface ConfigManagerInfo {
 
 	/** Environment variables loaded from .env file */
 	env: Record<string, string>;
-
 }
 
 /**
@@ -95,10 +94,10 @@ export class ConfigManager {
 		},
 		autoConnect: true,
 		pipelineRestartBehavior: 'prompt',
-		env: {}
+		env: {},
 	};
 
-	private constructor() { }
+	private constructor() {}
 
 	public static getInstance(): ConfigManager {
 		if (!ConfigManager.instance) {
@@ -125,10 +124,10 @@ export class ConfigManager {
 
 		// Listen for configuration changes
 		this.disposables.push(
-			vscode.workspace.onDidChangeConfiguration(async event => {
+			vscode.workspace.onDidChangeConfiguration(async (event) => {
 				if (event.affectsConfiguration(this.configSection)) {
 					await this.refreshConfig();
-					
+
 					// If hostUrl changed, sync to .env
 					if (event.affectsConfiguration(`${this.configSection}.hostUrl`)) {
 						await this.syncSettingsToEnv();
@@ -139,7 +138,7 @@ export class ConfigManager {
 
 		// Listen for secret storage changes (API key changes)
 		this.disposables.push(
-			context.secrets.onDidChange(async event => {
+			context.secrets.onDidChange(async (event) => {
 				if (event.key === this.API_KEY_SECRET_KEY) {
 					await this.refreshConfig();
 					// API key changed, sync to .env
@@ -187,7 +186,7 @@ export class ConfigManager {
 			},
 			autoConnect: config.get('autoConnect', true),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
-			env: this.config?.env || {}
+			env: this.config?.env || {},
 		};
 	}
 
@@ -206,28 +205,32 @@ export class ConfigManager {
 
 		// Watch for changes
 		this.envFileWatcher.onDidChange(() => {
-			this.loadEnvFile().then(async () => {
-				this.refreshConfig();
-				// Ensure required vars are present after manual edit
-				await this.ensureEnvFileSync();
-				// Notify listeners that env vars have changed
-				this.envChangeEmitter.fire(this.getEnvVars());
-			}).catch(error => {
-				console.error('Failed to reload .env file:', error);
-			});
+			this.loadEnvFile()
+				.then(async () => {
+					this.refreshConfig();
+					// Ensure required vars are present after manual edit
+					await this.ensureEnvFileSync();
+					// Notify listeners that env vars have changed
+					this.envChangeEmitter.fire(this.getEnvVars());
+				})
+				.catch((error) => {
+					console.error('Failed to reload .env file:', error);
+				});
 		});
 
 		// Watch for creation
 		this.envFileWatcher.onDidCreate(() => {
-			this.loadEnvFile().then(async () => {
-				this.refreshConfig();
-				// Ensure required vars are present in new file
-				await this.ensureEnvFileSync();
-				// Notify listeners that env vars have changed
-				this.envChangeEmitter.fire(this.getEnvVars());
-			}).catch(error => {
-				console.error('Failed to load .env file after creation:', error);
-			});
+			this.loadEnvFile()
+				.then(async () => {
+					this.refreshConfig();
+					// Ensure required vars are present in new file
+					await this.ensureEnvFileSync();
+					// Notify listeners that env vars have changed
+					this.envChangeEmitter.fire(this.getEnvVars());
+				})
+				.catch((error) => {
+					console.error('Failed to load .env file after creation:', error);
+				});
 		});
 
 		// Watch for deletion
@@ -236,14 +239,16 @@ export class ConfigManager {
 			if (this.config) {
 				this.config.env = {};
 			}
-			this.refreshConfig().then(async () => {
-				// Recreate .env file with required vars
-				await this.ensureEnvFileSync();
-				// Notify listeners that env vars have changed
-				this.envChangeEmitter.fire(this.getEnvVars());
-			}).catch(error => {
-				console.error('Failed to recreate .env file after deletion:', error);
-			});
+			this.refreshConfig()
+				.then(async () => {
+					// Recreate .env file with required vars
+					await this.ensureEnvFileSync();
+					// Notify listeners that env vars have changed
+					this.envChangeEmitter.fire(this.getEnvVars());
+				})
+				.catch((error) => {
+					console.error('Failed to recreate .env file after deletion:', error);
+				});
 		});
 
 		this.disposables.push(this.envFileWatcher);
@@ -313,8 +318,7 @@ export class ConfigManager {
 				let value = match[2].trim();
 
 				// Remove surrounding quotes if present
-				if ((value.startsWith('"') && value.endsWith('"')) ||
-					(value.startsWith("'") && value.endsWith("'"))) {
+				if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
 					value = value.slice(1, -1);
 				}
 
@@ -379,7 +383,7 @@ export class ConfigManager {
 			return this.substituteEnvVars(obj, env);
 		} else if (Array.isArray(obj)) {
 			// If it's an array, process each element
-			return obj.map(item => this.processEnvSubstitution(item, env));
+			return obj.map((item) => this.processEnvSubstitution(item, env));
 		} else if (obj !== null && typeof obj === 'object') {
 			// If it's an object, process each property
 			const result: Record<string, unknown> = {};
@@ -395,7 +399,7 @@ export class ConfigManager {
 	/**
 	 * Substitutes environment variables in an object (e.g., pipeline configuration) (SYNC)
 	 * Returns a new object with all ${ROCKETRIDE_*} patterns replaced with their values.
-	 * 
+	 *
 	 * @param obj The object to process (e.g., pipeline configuration)
 	 * @returns A new object with environment variables substituted
 	 */
@@ -412,7 +416,7 @@ export class ConfigManager {
 		return {
 			...this.config,
 			local: { ...this.config.local },
-			env: { ...this.config.env }
+			env: { ...this.config.env },
 		};
 	}
 
@@ -639,7 +643,7 @@ export class ConfigManager {
 	 * @returns Disposable for cleanup
 	 */
 	public onConfigurationChanged(callback: (config: ConfigManagerInfo) => void): vscode.Disposable {
-		return vscode.workspace.onDidChangeConfiguration(async event => {
+		return vscode.workspace.onDidChangeConfiguration(async (event) => {
 			if (event.affectsConfiguration(this.configSection)) {
 				const config = this.getConfig();
 				callback(config);
@@ -727,7 +731,6 @@ export class ConfigManager {
 			}
 
 			await vscode.workspace.fs.writeFile(envPath, Buffer.from(this.envRawText || '', 'utf8'));
-
 		} catch (error) {
 			console.error('Error saving .env file:', error);
 			throw new Error(`Failed to save .env file: ${error}`);
@@ -738,10 +741,7 @@ export class ConfigManager {
 	 * Patches envRawText by updating, adding, or removing keys while preserving
 	 * comments, blank lines, and formatting.
 	 */
-	private updateEnvRawText(
-		updates: Record<string, string>,
-		keysToRemove?: Set<string>
-	): string {
+	private updateEnvRawText(updates: Record<string, string>, keysToRemove?: Set<string>): string {
 		const lines = this.envRawText.split('\n');
 		const consumedKeys = new Set<string>();
 		const resultLines: string[] = [];
@@ -782,7 +782,7 @@ export class ConfigManager {
 		}
 
 		// Append any new keys that weren't found in existing lines
-		const newKeys = Object.keys(updates).filter(k => !consumedKeys.has(k));
+		const newKeys = Object.keys(updates).filter((k) => !consumedKeys.has(k));
 		if (newKeys.length > 0) {
 			const lastLine = resultLines[resultLines.length - 1];
 			if (lastLine !== undefined && lastLine.trim() !== '') {
@@ -843,8 +843,8 @@ export class ConfigManager {
 				this.envRawText = this.updateEnvRawText(updates);
 				await this.saveEnvFile();
 			}
-		} catch (error) {
-			error;
+		} catch (_error) {
+			// Silently handle env file sync errors
 		}
 	}
 
@@ -878,8 +878,8 @@ export class ConfigManager {
 				await this.saveEnvFile();
 				this.envChangeEmitter.fire(this.getEnvVars());
 			}
-		} catch (error) {
-			error;
+		} catch (_error) {
+			// Silently handle settings sync errors
 		}
 	}
 
@@ -893,7 +893,7 @@ export class ConfigManager {
 		this.envChangeEmitter.dispose();
 
 		// Dispose all resources
-		this.disposables.forEach(disposable => {
+		this.disposables.forEach((disposable) => {
 			try {
 				disposable.dispose();
 			} catch (error) {
