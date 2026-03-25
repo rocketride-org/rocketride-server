@@ -314,10 +314,24 @@ pipeline = {
 
 ## Discovering Available Nodes
 
-If a running engine is available, query it for the current node catalog:
+Before building a pipeline, query the running engine for available nodes, their lanes, profiles, and config fields:
 
 ```python
-services = await client.get_services()
+from rocketride import RocketRideClient
+
+async with RocketRideClient(uri='http://localhost:5565', auth='key') as client:
+    result = await client.get_services()
+    services = result.get('services', {})
+
+    # Each key is a provider name, value is the service definition
+    for provider, definition in services.items():
+        title = definition.get('title', provider)
+        lanes = definition.get('lanes', {})
+        print(f'{provider} ({title}): lanes={lanes}')
 ```
+
+The services response contains every node's `title`, `description`, `classType`, `lanes` (input→output mappings), `preconfig` (available profiles/models), and `fields` (config options). Use this to select the right nodes and profiles for the pipeline you're building.
+
+If the engine is not running, you can still build pipelines using the common nodes documented above (chat, webhook, llm_openai, llm_anthropic, embedding_openai, qdrant, response_answers, agent_rocketride, etc.).
 
 Check `examples/` adjacent to this file for complete working pipeline scripts.
