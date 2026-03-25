@@ -48,11 +48,12 @@
  * on the node itself.
  */
 
-import { ReactElement, useMemo } from 'react';
+import React, { ReactElement, useMemo } from 'react';
 import { Box } from '@mui/material';
 import { Edge, Position } from '@xyflow/react';
 
 import { useFlow } from '../../../hooks';
+import { useFlowGraph } from '../../../context/FlowGraphContext';
 import { getIconPath } from '../../../util/get-icon-path';
 import ConditionalRender from '../../ConditionalRender';
 import { INodeData, IService, IServiceCatalog, IServiceLane, INodeLayout, IServiceCapabilities, ITaskState } from '../../../types';
@@ -114,6 +115,7 @@ interface INodeProps {
 export default function NodeComponent({ id, data, type, parentId, children, layout = 'horizontal', handleClick }: INodeProps): ReactElement {
 	// Pull shared canvas state from the flow context
 	const { nodes, taskStatuses, componentPipeCounts, totalPipes, servicesJson, edges } = useFlow();
+	const { setQuickAddState } = useFlowGraph();
 
 	// =========================================================================
 	// Service lookup — all service metadata comes from here, not from data
@@ -195,7 +197,7 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 	return (
 		<>
 			{/* Top cap + optional invoke target diamond */}
-			<NodeTop id={id} edges={edges} isInvocable={isInvocable} />
+			<NodeTop id={id} edges={edges} isInvocable={isInvocable} setQuickAddState={setQuickAddState} />
 
 			{/* Header — icon, title, class type, gear, overflow menu */}
 			<NodeHeader id={id} icon={icon} title={displayTitle} handleClick={handleClick} nodeType={type} hideEdit={false} formDataValid={data.formDataValid} description={displayDescription} documentation={documentation} parentId={mostRecentParentId} classType={classType} />
@@ -247,7 +249,25 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 					}}
 				>
 					{invokeSourceKeys.map((key: string) => (
-						<InvokeHandle key={key} id={`invoke-source.${key}`} type="source" position={Position.Bottom} invokeType={key} isConnected={edges.some((edge: Edge) => edge.sourceHandle === `invoke-source.${key}` && edge.source === id)} />
+						<InvokeHandle
+							key={key}
+							id={`invoke-source.${key}`}
+							type="source"
+							position={Position.Bottom}
+							invokeType={key}
+							isConnected={edges.some((edge: Edge) => edge.sourceHandle === `invoke-source.${key}` && edge.source === id)}
+							onClick={(e: React.MouseEvent) =>
+								setQuickAddState({
+									nodeId: id,
+									handleId: `invoke-source.${key}`,
+									laneType: '',
+									isSource: true,
+									position: { x: e.clientX, y: e.clientY },
+									mode: 'invoke',
+									invokeKey: key,
+								})
+							}
+						/>
 					))}
 				</Box>
 			</ConditionalRender>

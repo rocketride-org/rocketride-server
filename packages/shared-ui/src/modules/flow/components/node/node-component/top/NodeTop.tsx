@@ -11,11 +11,12 @@
  * top edge so the node can receive invoke (control-flow) connections.
  */
 
-import { ReactElement } from 'react';
+import React, { ReactElement } from 'react';
 import { Box } from '@mui/material';
 import { Edge, Position } from '@xyflow/react';
 import { InvokeHandle } from '../../../handles';
 import ConditionalRender from '../../../ConditionalRender';
+import { IQuickAddState } from '../../../../context/FlowGraphContext';
 
 /**
  * Props for the NodeTop component.
@@ -27,12 +28,14 @@ interface INodeTopProps {
 	edges: Edge[];
 	/** Whether this node can be invoked — controls diamond visibility. */
 	isInvocable: boolean;
+	/** Setter for the quick-add popup state, enabling click-to-add on invoke handles. */
+	setQuickAddState?: (state: IQuickAddState | null) => void;
 }
 
 /**
  * Renders the top corner cap and an optional invoke target diamond.
  */
-export default function NodeTop({ id, edges, isInvocable }: INodeTopProps): ReactElement {
+export default function NodeTop({ id, edges, isInvocable, setQuickAddState }: INodeTopProps): ReactElement {
 	return (
 		<>
 			{/* Invoke target diamond — centered on the top edge */}
@@ -49,7 +52,25 @@ export default function NodeTop({ id, edges, isInvocable }: INodeTopProps): Reac
 						zIndex: 1,
 					}}
 				>
-					<InvokeHandle id="invoke-target" type="target" position={Position.Top} isConnected={edges.some((edge: Edge) => edge.targetHandle === 'invoke-target' && edge.target === id)} />
+					<InvokeHandle
+						id="invoke-target"
+						type="target"
+						position={Position.Top}
+						isConnected={edges.some((edge: Edge) => edge.targetHandle === 'invoke-target' && edge.target === id)}
+						onClick={
+							setQuickAddState
+								? (e: React.MouseEvent) =>
+										setQuickAddState({
+											nodeId: id,
+											handleId: 'invoke-target',
+											laneType: '',
+											isSource: false,
+											position: { x: e.clientX, y: e.clientY },
+											mode: 'invoke',
+										})
+								: undefined
+						}
+					/>
 				</Box>
 			</ConditionalRender>
 

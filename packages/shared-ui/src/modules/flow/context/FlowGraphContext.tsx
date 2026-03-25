@@ -65,18 +65,22 @@ import { validateFormData } from '../util/rjsf';
 // Quick-add state (click handle → popup → create + connect)
 // ============================================================================
 
-/** State for the quick-add popup triggered by clicking a lane handle. */
+/** State for the quick-add popup triggered by clicking a lane or invoke handle. */
 export interface IQuickAddState {
 	/** ID of the node whose handle was clicked. */
 	nodeId: string;
-	/** Handle ID (e.g. "source-data", "target-text"). */
+	/** Handle ID (e.g. "source-data", "target-text", "invoke-source.llm"). */
 	handleId: string;
-	/** Lane type extracted from the handle ID (e.g. "data", "text"). */
+	/** Lane type extracted from the handle ID (e.g. "data", "text"). Unused in invoke mode. */
 	laneType: string;
-	/** Whether the clicked handle is a source (right side) or target (left side). */
+	/** Whether the clicked handle is a source or target. */
 	isSource: boolean;
 	/** Screen position for the popup. */
 	position: { x: number; y: number };
+	/** Connection mode: lane (left/right data handles) or invoke (top/bottom control handles). */
+	mode: 'lane' | 'invoke';
+	/** For invoke-source clicks: the channel key (e.g. "llm"). Undefined for invoke-target or lane mode. */
+	invokeKey?: string;
 }
 
 // ============================================================================

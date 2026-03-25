@@ -29,8 +29,11 @@ import { getIconPath } from '../../../util/get-icon-path';
 /** Default gap between nodes when auto-placing. */
 const GAP = 40;
 
-/** Vertical step when searching for a free slot. */
+/** Vertical step when searching for a free slot (lane mode shifts down, invoke mode shifts right). */
 const STEP_Y = 20;
+
+/** Horizontal step when searching for a free slot in invoke mode. */
+const STEP_X = 20;
 
 /**
  * Finds a free position near the clicked node by starting at the ideal
@@ -54,6 +57,29 @@ function findFreePosition(nodes: { position: { x: number; y: number }; measured?
 
 	// Fallback — place below everything
 	return { x: anchorX, y };
+}
+
+/**
+ * Finds a free position for invoke mode by starting at the ideal spot
+ * (GAP px above or below) and shifting right until no existing node overlaps.
+ */
+function findFreePositionVertical(nodes: { position: { x: number; y: number }; measured?: { width?: number; height?: number } }[], anchorX: number, anchorY: number, estimatedWidth: number, estimatedHeight: number): { x: number; y: number } {
+	const overlaps = (x: number, y: number) =>
+		nodes.some((n) => {
+			const nw = n.measured?.width ?? 200;
+			const nh = n.measured?.height ?? 80;
+			return x < n.position.x + nw && x + estimatedWidth > n.position.x && y < n.position.y + nh && y + estimatedHeight > n.position.y;
+		});
+
+	let x = anchorX;
+	// Try up to 30 steps right before giving up
+	for (let i = 0; i < 30; i++) {
+		if (!overlaps(x, anchorY)) return { x, y: anchorY };
+		x += STEP_X;
+	}
+
+	// Fallback — place to the right of everything
+	return { x, y: anchorY };
 }
 
 // =============================================================================
@@ -149,11 +175,11 @@ export default function QuickAddPopup(): ReactElement | null {
 		}
 	}, [quickAddState]);
 
-	// Filter services compatible with the clicked handle's lane type
+	// Filter services compatible with the clicked handle
 	const compatibleServices = useMemo(() => {
 		if (!quickAddState || !servicesJson) return [];
 
-		const { laneType, isSource } = quickAddState;
+		const { laneType, isSource, mode, invokeKey } = quickAddState;
 		const catalog = servicesJson as Record<string, IService>;
 		const results: { key: string; service: IService }[] = [];
 
@@ -166,29 +192,52 @@ export default function QuickAddPopup(): ReactElement | null {
 			const isDeprecated = service.capabilities && (IServiceCapabilities.Deprecated & service.capabilities) === IServiceCapabilities.Deprecated;
 			if (isDeprecated) continue;
 
-			const lanes = service.lanes as Record<string, IServiceLane> | undefined;
-			if (!lanes) continue;
-
-			if (isSource) {
-				// Clicked a source handle — find services that accept this lane type as input
-				if (laneType in lanes) {
-					results.push({ key: providerKey, service });
+			if (mode === 'invoke') {
+				// --- Invoke mode filtering ---
+				if (isSource && invokeKey) {
+					// Clicked an invoke-source handle (e.g. invoke-source.llm)
+					// New node must be invocable AND have a classType matching the channel key
+					const isInvocable = service.capabilities && (IServiceCapabilities.Invoke & service.capabilities) === IServiceCapabilities.Invoke;
+					if (isInvocable && Array.isArray(service.classType) && service.classType.includes(invokeKey)) {
+						results.push({ key: providerKey, service });
+					}
+				} else if (!isSource) {
+					// Clicked an invoke-target handle
+					// New node must have an invoke channel whose key matches one of the clicked node's classType entries
+					const clickedNode = nodes.find((n) => n.id === quickAddState.nodeId);
+					const clickedService = clickedNode ? catalog[clickedNode.data.provider as string] : undefined;
+					const clickedClassType = clickedService?.classType ?? [];
+					const serviceInvokeKeys = Object.keys(service.invoke ?? {});
+					if (serviceInvokeKeys.some((k) => clickedClassType.includes(k))) {
+						results.push({ key: providerKey, service });
+					}
 				}
 			} else {
-				// Clicked a target handle — find services that produce this lane type as output
-				let produces = false;
-				for (const outputLanes of Object.values(lanes)) {
-					for (const entry of outputLanes) {
-						const { type } = getOutputLaneDisplayValues(entry);
-						if (type === laneType) {
-							produces = true;
-							break;
-						}
+				// --- Lane mode filtering ---
+				const lanes = service.lanes as Record<string, IServiceLane> | undefined;
+				if (!lanes) continue;
+
+				if (isSource) {
+					// Clicked a source handle — find services that accept this lane type as input
+					if (laneType in lanes) {
+						results.push({ key: providerKey, service });
 					}
-					if (produces) break;
-				}
-				if (produces) {
-					results.push({ key: providerKey, service });
+				} else {
+					// Clicked a target handle — find services that produce this lane type as output
+					let produces = false;
+					for (const outputLanes of Object.values(lanes)) {
+						for (const entry of outputLanes) {
+							const { type } = getOutputLaneDisplayValues(entry);
+							if (type === laneType) {
+								produces = true;
+								break;
+							}
+						}
+						if (produces) break;
+					}
+					if (produces) {
+						results.push({ key: providerKey, service });
+					}
 				}
 			}
 		}
@@ -200,13 +249,15 @@ export default function QuickAddPopup(): ReactElement | null {
 		}
 
 		return results.sort((a, b) => (a.service.title ?? a.key).localeCompare(b.service.title ?? b.key));
-	}, [quickAddState, servicesJson, search]);
+	}, [quickAddState, servicesJson, search, nodes]);
 
 	if (!quickAddState) return null;
 
-	const { nodeId, handleId, laneType, isSource, position } = quickAddState;
+	const { nodeId, handleId, laneType, isSource, position, mode, invokeKey } = quickAddState;
 
 	const onSelect = (providerKey: string) => {
+		const catalog = servicesJson as Record<string, IService>;
+
 		// Compute the new node's ID before creating it
 		const newNodeId = generateNodeId(nodes, providerKey);
 
@@ -214,14 +265,22 @@ export default function QuickAddPopup(): ReactElement | null {
 		const clickedNode = nodes.find((n) => n.id === nodeId);
 		const nodePos = clickedNode?.position ?? { x: 0, y: 0 };
 		const nodeWidth = clickedNode?.measured?.width ?? 200;
+		const nodeHeight = clickedNode?.measured?.height ?? 80;
 		const estimatedNewWidth = 200;
 		const estimatedNewHeight = 80;
 
-		// Ideal anchor point: GAP px to the right (source) or left (target)
-		const anchorX = isSource ? nodePos.x + nodeWidth + GAP : nodePos.x - estimatedNewWidth - GAP;
+		let newPos: { x: number; y: number };
 
-		// Find a free slot starting at the clicked node's Y, shifting down if occupied
-		const newPos = findFreePosition(nodes, anchorX, nodePos.y, estimatedNewWidth, estimatedNewHeight);
+		if (mode === 'invoke') {
+			// Invoke mode: position above (target click) or below (source click), centered horizontally
+			const anchorX = nodePos.x + (nodeWidth - estimatedNewWidth) / 2;
+			const anchorY = isSource ? nodePos.y + nodeHeight + GAP : nodePos.y - estimatedNewHeight - GAP;
+			newPos = findFreePositionVertical(nodes, anchorX, anchorY, estimatedNewWidth, estimatedNewHeight);
+		} else {
+			// Lane mode: position to the right (source) or left (target)
+			const anchorX = isSource ? nodePos.x + nodeWidth + GAP : nodePos.x - estimatedNewWidth - GAP;
+			newPos = findFreePosition(nodes, anchorX, nodePos.y, estimatedNewWidth, estimatedNewHeight);
+		}
 
 		// Create the new node
 		addNode(
@@ -236,21 +295,50 @@ export default function QuickAddPopup(): ReactElement | null {
 			newPos
 		);
 
-		// Connect the clicked handle to the new node's matching handle
-		if (isSource) {
-			onEdgeConnect({
-				source: nodeId,
-				target: newNodeId,
-				sourceHandle: handleId,
-				targetHandle: `target-${laneType}`,
-			});
+		if (mode === 'invoke') {
+			// Connect invoke handles
+			if (isSource && invokeKey) {
+				// Clicked invoke-source.{key} on existing node → new node is the target
+				onEdgeConnect({
+					source: nodeId,
+					target: newNodeId,
+					sourceHandle: handleId,
+					targetHandle: 'invoke-target',
+				});
+			} else {
+				// Clicked invoke-target on existing node → new node is the source
+				// Find which invoke key on the new node matches the clicked node's classType
+				const clickedService = clickedNode ? catalog[clickedNode.data.provider as string] : undefined;
+				const clickedClassType = clickedService?.classType ?? [];
+				const newService = catalog[providerKey];
+				const newInvokeKeys = Object.keys(newService?.invoke ?? {});
+				const matchingKey = newInvokeKeys.find((k) => clickedClassType.includes(k));
+				if (matchingKey) {
+					onEdgeConnect({
+						source: newNodeId,
+						target: nodeId,
+						sourceHandle: `invoke-source.${matchingKey}`,
+						targetHandle: 'invoke-target',
+					});
+				}
+			}
 		} else {
-			onEdgeConnect({
-				source: newNodeId,
-				target: nodeId,
-				sourceHandle: `source-${laneType}`,
-				targetHandle: handleId,
-			});
+			// Connect lane handles
+			if (isSource) {
+				onEdgeConnect({
+					source: nodeId,
+					target: newNodeId,
+					sourceHandle: handleId,
+					targetHandle: `target-${laneType}`,
+				});
+			} else {
+				onEdgeConnect({
+					source: newNodeId,
+					target: nodeId,
+					sourceHandle: `source-${laneType}`,
+					targetHandle: handleId,
+				});
+			}
 		}
 
 		setQuickAddState(null);
@@ -276,7 +364,7 @@ export default function QuickAddPopup(): ReactElement | null {
 						inputRef={searchRef}
 						size="small"
 						fullWidth
-						placeholder={`Add ${laneType} ${isSource ? 'consumer' : 'producer'}...`}
+						placeholder={mode === 'invoke' ? (isSource ? `Add ${invokeKey ?? 'invoke'} provider...` : 'Add invoker...') : `Add ${laneType} ${isSource ? 'consumer' : 'producer'}...`}
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}
 						InputProps={{

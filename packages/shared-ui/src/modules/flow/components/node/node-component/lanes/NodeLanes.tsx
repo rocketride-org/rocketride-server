@@ -202,6 +202,7 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 															laneType: type,
 															isSource: false,
 															position: { x: e.clientX, y: e.clientY },
+															mode: 'lane',
 														})
 													}
 													color="var(--rr-border)"
@@ -259,6 +260,7 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 														laneType: type,
 														isSource: true,
 														position: { x: e.clientX, y: e.clientY },
+														mode: 'lane',
 													})
 												}
 											/>
