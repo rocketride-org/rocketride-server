@@ -43,7 +43,6 @@ from .stop import StopCommand
 from .events import EventsCommand
 from .list import ListCommand
 from .store import StoreCommand
-from .init import InitCommand
 
 __all__ = [
     'StartCommand',
@@ -53,5 +52,4 @@ __all__ = [
     'EventsCommand',
     'ListCommand',
     'StoreCommand',
-    'InitCommand',
 ]

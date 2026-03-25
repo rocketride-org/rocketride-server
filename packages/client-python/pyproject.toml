@@ -76,8 +76,4 @@ where = ["src"]
 include = ["rocketride*"]
 
 [tool.setuptools.package-data]
-rocketride = [
-    "py.typed",
-    "skills/rocketride-pipelines/SKILL.md",
-    "skills/rocketride-pipelines/examples/*.py",
-]
+rocketride = ["py.typed"]

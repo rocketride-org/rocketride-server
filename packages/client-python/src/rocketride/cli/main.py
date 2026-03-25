@@ -463,16 +463,6 @@ class RocketRideCLI:
             help='Output results in JSON format',
         )
 
-        # Init command - scaffold agent integration files (no server connection needed)
-        init_parser = subparsers.add_parser('init', help='Scaffold agent integration files for coding assistants')
-        init_parser.add_argument('--claude', action='store_true', help='Scaffold Claude Code integration')
-        init_parser.add_argument('--cursor', action='store_true', help='Scaffold Cursor integration')
-        init_parser.add_argument('--codex', action='store_true', help='Scaffold Codex integration')
-        init_parser.add_argument('--copilot', action='store_true', help='Scaffold GitHub Copilot integration')
-        init_parser.add_argument('--windsurf', action='store_true', help='Scaffold Windsurf integration')
-        init_parser.add_argument('--all', action='store_true', help='Scaffold all agent integrations')
-        init_parser.add_argument('--dir', default='.', help='Target directory (default: current directory)')
-
         # Store command - manages project storage
         # Create a parent parser with common args that will be inherited by subcommands
         store_common_parser = argparse.ArgumentParser(add_help=False)
@@ -709,13 +699,6 @@ class RocketRideCLI:
         if not self.args.command:
             parser.print_help()
             return 1
-
-        # Handle init command separately — no server connection needed
-        if self.args.command == 'init':
-            from .commands.init import InitCommand
-
-            self.command = InitCommand(self, self.args)
-            return await self.command.execute()
 
         # Validate required authentication
         if not self.args.apikey:
