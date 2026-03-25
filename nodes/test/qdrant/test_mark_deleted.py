@@ -26,7 +26,7 @@ from unittest.mock import MagicMock, patch
 # Bootstrap mocks so qdrant.py can be imported without real dependencies
 # ---------------------------------------------------------------------------
 
-NODES_SRC = Path(__file__).parent.parent / 'src' / 'nodes'
+NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
 
 
 # --- ai.common.store: provide a real DocumentStoreBase with stub methods ---
