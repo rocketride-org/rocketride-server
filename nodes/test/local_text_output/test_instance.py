@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from unittest.mock import Mock
 
-NODES_SRC = Path(__file__).parent.parent / 'src' / 'nodes'
+NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
 if str(NODES_SRC) not in sys.path:
     sys.path.insert(0, str(NODES_SRC))
 
