@@ -115,7 +115,7 @@ sys.modules.setdefault('pydantic', mock_pydantic)
 # Load atlas.py directly by file path (bypasses atlas/__init__.py)
 # ---------------------------------------------------------------------------
 
-_atlas_path = Path(__file__).parent.parent / 'src' / 'nodes' / 'atlas' / 'atlas.py'
+_atlas_path = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'atlas' / 'atlas.py'
 _spec = importlib.util.spec_from_file_location('_atlas_direct', _atlas_path)
 atlas_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(atlas_mod)
