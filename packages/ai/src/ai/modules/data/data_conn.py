@@ -163,6 +163,33 @@ class DataConn(DAPConn):
                     self._pipe_sem.release()
                     self.debug_message(f'Released semaphore for remaining pipe {pipe_id}')
 
+    def _extract_question_text(self, json_data: dict, field_path: str) -> str:
+        """
+        Extract a text value from a parsed JSON payload using a dot-notation field path.
+
+        Supports nested fields via dot notation (e.g. 'body.text' traverses
+        json_data['body']['text']). Falls back to the full JSON serialization
+        when the path cannot be resolved.
+
+        Args:
+            json_data: Parsed JSON payload dict.
+            field_path: Dot-separated key path to the target field.
+
+        Returns:
+            The extracted string value, or a JSON serialisation of the full
+            payload when the path is absent or unresolvable.
+        """
+        if not field_path:
+            return json.dumps(json_data)
+        value = json_data
+        for key in field_path.split('.'):
+            if isinstance(value, dict):
+                value = value.get(key)
+            else:
+                value = None
+                break
+        return str(value) if value is not None else json.dumps(json_data)
+
     def _determine_lane(self, mime_type: str, pipe_instance: IServiceFilterPipe) -> str:
         """
         Determine the appropriate data lane based on MIME type and available listeners.
@@ -187,6 +214,11 @@ class DataConn(DAPConn):
 
         # If this is question and we have a question listener
         elif mime_type.startswith('application/rocketride-question') and 'questions' in listeners:
+            return 'questions'
+
+        # If this is a JSON payload and there is a question listener with a configured
+        # field mapping, extract the field and route it to the questions lane
+        elif mime_type == 'application/json' and 'questions' in listeners and self._target.taskConfig.get('questionField'):
             return 'questions'
 
         # If this is text content and we have a text listener
@@ -530,7 +562,6 @@ class DataConn(DAPConn):
         This resets the activity timer to prevent the pipe from being
         considered a zombie for another 60 seconds.
         """
-
         # Resolve conn_pipe in the async scope so we can set in_use before dispatching
         pipe_id = args.get('pipe_id', None)
         if pipe_id is None:
@@ -587,9 +618,21 @@ class DataConn(DAPConn):
 
                 elif lane == 'questions':
                     try:
-                        question_str = data.decode('utf-8')
-                        question = Question.model_validate_json(question_str)
-                        pipe.writeQuestions(question)
+                        mime_type = conn_pipe.mime_type
+                        if mime_type == 'application/json':
+                            # Field-extraction mode: pull the configured field out of
+                            # the JSON payload and wrap it in a Question object.
+                            json_data = json.loads(data.decode('utf-8'))
+                            field_path = self._target.taskConfig.get('questionField', '')
+                            question_text = self._extract_question_text(json_data, field_path)
+                            question = Question()
+                            question.addQuestion(question_text)
+                            pipe.writeQuestions(question)
+                        else:
+                            # Native mode: the caller already serialised a Question object.
+                            question_str = data.decode('utf-8')
+                            question = Question.model_validate_json(question_str)
+                            pipe.writeQuestions(question)
                     except Exception as e:
                         raise ValueError(str(e))
 
