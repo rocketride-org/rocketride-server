@@ -153,7 +153,7 @@ class ExaSearch(ChatBase):
 
         message = payload.get('error') or payload.get('message') or response.text
         if response.status_code == 401:
-            return ValueError(f'Exa authentication failed: {message}')
+            return PermissionError(f'Exa authentication failed: {message}')
         if response.status_code == 429:
-            return ValueError(f'Exa rate limit exceeded: {message}')
-        return ValueError(f'Exa request failed ({response.status_code}): {message}')
+            return RuntimeError(f'Exa rate limit exceeded: {message}')
+        return RuntimeError(f'Exa request failed ({response.status_code}): {message}')
