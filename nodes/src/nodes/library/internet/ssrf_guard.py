@@ -55,5 +55,5 @@ def validate_url(url: str) -> None:
 
     for _family, _, _, _, sockaddr in addr_info:
         ip = ipaddress.ip_address(sockaddr[0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+        if not ip.is_global:
             raise ValueError(f'Blocked request to private/internal address: {hostname} resolves to {ip}')

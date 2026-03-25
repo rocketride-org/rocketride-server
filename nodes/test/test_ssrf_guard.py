@@ -238,12 +238,11 @@ class TestPrivateIPs:
             with pytest.raises(ValueError, match='private/internal address'):
                 validate_url('http://zero.test/')
 
-    def test_shared_address_space_cgnat_not_caught(self):
-        """100.64.0.0/10 (CGNAT) is not flagged by Python's ipaddress module."""
+    def test_shared_address_space_cgnat(self):
+        """100.64.0.0/10 (Carrier-grade NAT) is blocked via is_global check."""
         with patch(_SSRF_GETADDR, _fake_getaddrinfo('100.64.0.1')):
-            # Python's ipaddress does not classify CGNAT as private/reserved,
-            # so our guard does not block it. This is a known limitation.
-            validate_url('http://cgnat.test/')  # should not raise
+            with pytest.raises(ValueError, match='private/internal address'):
+                validate_url('http://cgnat.test/')
 
 
 # ---------------------------------------------------------------------------
