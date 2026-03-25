@@ -53,6 +53,9 @@ def validate_url(url: str) -> None:
     except socket.gaierror as exc:
         raise ValueError(f'Cannot resolve hostname {hostname!r}: {exc}') from exc
 
+    if not addr_info:
+        raise ValueError(f'DNS resolution returned no addresses for {hostname!r}')
+
     for _family, _, _, _, sockaddr in addr_info:
         ip = ipaddress.ip_address(sockaddr[0])
         if not ip.is_global:
