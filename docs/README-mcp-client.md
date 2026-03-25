@@ -1,6 +1,6 @@
-[![rocketride-server MCP server](https://glama.ai/mcp/servers/rocketride-org/rocketride-server/badges/score.svg)](https://glama.ai/mcp/servers/rocketride-org/rocketride-server)
-
 # RocketRide MCP
+
+[![rocketride-server MCP server](https://glama.ai/mcp/servers/rocketride-org/rocketride-server/badges/score.svg)](https://glama.ai/mcp/servers/rocketride-org/rocketride-server)
 
 Model Context Protocol (MCP) integration for the RocketRide Engine - let AI assistants run your pipelines.
 
