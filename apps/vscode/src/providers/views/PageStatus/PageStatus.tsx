@@ -34,7 +34,7 @@ import { EndpointInfoModal, EndpointInfo } from '../../components/EndpointInfoMo
 import { WarningIcon } from '../../components/icons/WarningIcon';
 
 // Import the styles
-import '../../styles/vscode.css'
+import '../../styles/vscode.css';
 import '../../styles/app.css';
 import './styles.css';
 
@@ -42,43 +42,47 @@ import './styles.css';
 // STATUS PAGE VIEW COMPONENT
 // ============================================================================
 
-export type PageStatusIncomingMessage
-	= {
-		type: 'update';
-		taskStatus: TaskStatus | undefined;
-		state: ConnectionState;
-		host: string;
-	}
+export type PageStatusIncomingMessage =
 	| {
-		type: 'connectionState';
-		state: ConnectionState;
-	}
+			type: 'update';
+			taskStatus: TaskStatus | undefined;
+			state: ConnectionState;
+			host: string;
+	  }
 	| {
-		type: 'traceEvent';
-		pipelineId: number;
-		op: 'begin' | 'enter' | 'leave' | 'end';
-		pipes: string[];
-		trace: {
-			lane?: string;
-			data?: Record<string, unknown>;
-			result?: string;
-			error?: string;
-		};
-	};
+			type: 'connectionState';
+			state: ConnectionState;
+	  }
+	| {
+			type: 'scrollToSection';
+			section: 'errors' | 'warnings';
+	  }
+	| {
+			type: 'traceEvent';
+			pipelineId: number;
+			op: 'begin' | 'enter' | 'leave' | 'end';
+			pipes: string[];
+			trace: {
+				lane?: string;
+				data?: Record<string, unknown>;
+				result?: string;
+				error?: string;
+			};
+	  };
 
-export type PageStatusOutgoingMessage
-	= {
-		type: 'ready';
-	}
+export type PageStatusOutgoingMessage =
 	| {
-		type: 'openExternal';
-		url: string;
-	}
+			type: 'ready';
+	  }
 	| {
-		type: 'pipelineAction';
-		action: 'stop' | 'run' | 'restart';
-		tracing?: boolean;
-	};
+			type: 'openExternal';
+			url: string;
+	  }
+	| {
+			type: 'pipelineAction';
+			action: 'stop' | 'run' | 'restart';
+			tracing?: boolean;
+	  };
 
 /**
  * PageStatus - Main Layout Component for Pipeline Status Page
@@ -107,7 +111,11 @@ export const PageStatus: React.FC = () => {
 	const intervalRef = useRef<number | null>(null);
 
 	// Document-based trace state: per-pipeline-slot routing with bounded archive
-	interface TraceDocument { objectName: string; completed: boolean; rows: TraceRow[] }
+	interface TraceDocument {
+		objectName: string;
+		completed: boolean;
+		rows: TraceRow[];
+	}
 	const traceIdRef = useRef<number>(0);
 	const nextDocIdRef = useRef<number>(0);
 	const MAX_DOCS = 64;
@@ -133,108 +141,104 @@ export const PageStatus: React.FC = () => {
 	// WEBVIEW MESSAGING
 	// ========================================================================
 
-	const { sendMessage, isReady } = useMessaging<
-		PageStatusOutgoingMessage, PageStatusIncomingMessage>({
-			onMessage: (message) => {
-				switch (message.type) {
-					case 'update': {
-						setTaskStatus(message.taskStatus);
-						setConnectionState(message.state);
-						setHost(message.host);
-						break;
-					}
-					case 'connectionState': {
-						setConnectionState(message.state);
-						break;
-					}
-					case 'scrollToSection': {
-						setActiveTab('errors');
-						setScrollToSectionTarget(message.section);
-						break;
-					}
-					case 'traceEvent': {
-						const { pipelineId, op, pipes, trace } = message;
-						const lane = trace.lane || op;
+	const { sendMessage, isReady } = useMessaging<PageStatusOutgoingMessage, PageStatusIncomingMessage>({
+		onMessage: (message) => {
+			switch (message.type) {
+				case 'update': {
+					setTaskStatus(message.taskStatus);
+					setConnectionState(message.state);
+					setHost(message.host);
+					break;
+				}
+				case 'connectionState': {
+					setConnectionState(message.state);
+					break;
+				}
+				case 'scrollToSection': {
+					setActiveTab('errors');
+					setScrollToSectionTarget(message.section);
+					break;
+				}
+				case 'traceEvent': {
+					const { pipelineId, op, pipes, trace } = message;
+					const lane = trace.lane || op;
 
-						if (op === 'begin') {
-							// Create a new document and bind this pipeline slot to it
-							const docId = nextDocIdRef.current++;
-							const objectName = pipes[0] || '';
-							documentsRef.current.set(docId, { objectName, completed: false, rows: [] });
-							docOrderRef.current.push(docId);
-							slotBindingsRef.current.set(pipelineId, docId);
-							pendingStacksRef.current.set(pipelineId, []);
+					if (op === 'begin') {
+						// Create a new document and bind this pipeline slot to it
+						const docId = nextDocIdRef.current++;
+						const objectName = pipes[0] || '';
+						documentsRef.current.set(docId, { objectName, completed: false, rows: [] });
+						docOrderRef.current.push(docId);
+						slotBindingsRef.current.set(pipelineId, docId);
+						pendingStacksRef.current.set(pipelineId, []);
 
-							// Evict oldest completed documents if over cap
-							while (docOrderRef.current.length > MAX_DOCS) {
-								const oldId = docOrderRef.current[0];
-								const oldDoc = documentsRef.current.get(oldId);
-								if (oldDoc && !oldDoc.completed) break; // don't evict in-flight docs
-								docOrderRef.current.shift();
-								documentsRef.current.delete(oldId);
-							}
-
-							flushTraceRows();
-
-						} else if (op === 'enter') {
-							const docId = slotBindingsRef.current.get(pipelineId);
-							if (docId == null) break;
-							const doc = documentsRef.current.get(docId);
-							if (!doc) break;
-
-							const filterName = pipes[pipes.length - 1] || '';
-							const depth = Math.max(0, pipes.length - 2);
-							const row: TraceRow = {
-								id: traceIdRef.current++,
-								docId,
-								completed: false,
-								lane,
-								filterName,
-								depth,
-								entryData: trace.data,
-								timestamp: Date.now(),
-								objectName: doc.objectName
-							};
-							doc.rows.push(row);
-							pendingStacksRef.current.get(pipelineId)?.push(row);
-							flushTraceRows();
-
-						} else if (op === 'leave') {
-							const docId = slotBindingsRef.current.get(pipelineId);
-							if (docId == null) break;
-							const doc = documentsRef.current.get(docId);
-							if (!doc) break;
-
-							const pending = pendingStacksRef.current.get(pipelineId)?.pop();
-							if (pending) {
-								const idx = doc.rows.findIndex(r => r.id === pending.id);
-								if (idx !== -1) {
-									doc.rows[idx] = {
-										...doc.rows[idx],
-										exitData: trace.data,
-										result: trace.result,
-										error: trace.error,
-										endTimestamp: Date.now()
-									};
-								}
-							}
-							flushTraceRows();
-
-						} else if (op === 'end') {
-							const docId = slotBindingsRef.current.get(pipelineId);
-							if (docId != null) {
-								const doc = documentsRef.current.get(docId);
-								if (doc) doc.completed = true;
-							}
-							slotBindingsRef.current.delete(pipelineId);
-							pendingStacksRef.current.delete(pipelineId);
-							flushTraceRows();
+						// Evict oldest completed documents if over cap
+						while (docOrderRef.current.length > MAX_DOCS) {
+							const oldId = docOrderRef.current[0];
+							const oldDoc = documentsRef.current.get(oldId);
+							if (oldDoc && !oldDoc.completed) break; // don't evict in-flight docs
+							docOrderRef.current.shift();
+							documentsRef.current.delete(oldId);
 						}
-						break;
+
+						flushTraceRows();
+					} else if (op === 'enter') {
+						const docId = slotBindingsRef.current.get(pipelineId);
+						if (docId == null) break;
+						const doc = documentsRef.current.get(docId);
+						if (!doc) break;
+
+						const filterName = pipes[pipes.length - 1] || '';
+						const depth = Math.max(0, pipes.length - 2);
+						const row: TraceRow = {
+							id: traceIdRef.current++,
+							docId,
+							completed: false,
+							lane,
+							filterName,
+							depth,
+							entryData: trace.data,
+							timestamp: Date.now(),
+							objectName: doc.objectName,
+						};
+						doc.rows.push(row);
+						pendingStacksRef.current.get(pipelineId)?.push(row);
+						flushTraceRows();
+					} else if (op === 'leave') {
+						const docId = slotBindingsRef.current.get(pipelineId);
+						if (docId == null) break;
+						const doc = documentsRef.current.get(docId);
+						if (!doc) break;
+
+						const pending = pendingStacksRef.current.get(pipelineId)?.pop();
+						if (pending) {
+							const idx = doc.rows.findIndex((r) => r.id === pending.id);
+							if (idx !== -1) {
+								doc.rows[idx] = {
+									...doc.rows[idx],
+									exitData: trace.data,
+									result: trace.result,
+									error: trace.error,
+									endTimestamp: Date.now(),
+								};
+							}
+						}
+						flushTraceRows();
+					} else if (op === 'end') {
+						const docId = slotBindingsRef.current.get(pipelineId);
+						if (docId != null) {
+							const doc = documentsRef.current.get(docId);
+							if (doc) doc.completed = true;
+						}
+						slotBindingsRef.current.delete(pipelineId);
+						pendingStacksRef.current.delete(pipelineId);
+						flushTraceRows();
 					}
+					break;
 				}
 			}
-		});
+		},
+	});
 
 	// ========================================================================
 	// LIFECYCLE MANAGEMENT
@@ -307,10 +311,7 @@ export const PageStatus: React.FC = () => {
 	const isConnected = (): boolean => connectionState === ConnectionState.CONNECTED;
 
 	const isConnecting = (): boolean => {
-		return connectionState === ConnectionState.DOWNLOADING_ENGINE ||
-			connectionState === ConnectionState.STARTING_ENGINE ||
-			connectionState === ConnectionState.CONNECTING ||
-			connectionState === ConnectionState.STOPPING_ENGINE;
+		return connectionState === ConnectionState.DOWNLOADING_ENGINE || connectionState === ConnectionState.STARTING_ENGINE || connectionState === ConnectionState.CONNECTING || connectionState === ConnectionState.STOPPING_ENGINE;
 	};
 
 	/**
@@ -322,12 +323,7 @@ export const PageStatus: React.FC = () => {
 		}
 
 		const firstNote = taskStatus.notes[0];
-		if (firstNote &&
-			typeof firstNote === 'object' &&
-			'url-text' in firstNote &&
-			'url-link' in firstNote &&
-			'auth-text' in firstNote &&
-			'auth-key' in firstNote) {
+		if (firstNote && typeof firstNote === 'object' && 'url-text' in firstNote && 'url-link' in firstNote && 'auth-text' in firstNote && 'auth-key' in firstNote) {
 			return firstNote as EndpointInfo;
 		}
 
@@ -412,7 +408,7 @@ export const PageStatus: React.FC = () => {
 		{ id: 'tokens', label: 'Tokens' },
 		{ id: 'flow', label: 'Flow' },
 		{ id: 'trace', label: 'Trace' },
-		{ id: 'errors', label: 'Errors', badge: errorCount > 0 ? <WarningIcon size={14} /> : undefined }
+		{ id: 'errors', label: 'Errors', badge: errorCount > 0 ? <WarningIcon size={14} /> : undefined },
 	];
 
 	return (
@@ -437,10 +433,7 @@ export const PageStatus: React.FC = () => {
 										{endpointInfo['button-text']}
 									</button>
 								)}
-								<button
-									className="action-btn secondary"
-									onClick={() => setIsEndpointModalOpen(true)}
-								>
+								<button className="action-btn secondary" onClick={() => setIsEndpointModalOpen(true)}>
 									Endpoint Info
 								</button>
 							</>
@@ -457,11 +450,7 @@ export const PageStatus: React.FC = () => {
 					</div>
 					{canRun() && (
 						<label className="tracing-toggle">
-							<input
-								type="checkbox"
-								checked={tracingEnabled}
-								onChange={(e) => setTracingEnabled(e.target.checked)}
-							/>
+							<input type="checkbox" checked={tracingEnabled} onChange={(e) => setTracingEnabled(e.target.checked)} />
 							<span className="tracing-toggle-label">Enable tracing</span>
 						</label>
 					)}
@@ -471,36 +460,16 @@ export const PageStatus: React.FC = () => {
 
 			{/* Tab bar — outside the box, content boxed by .tab-content CSS. All panels always mounted so Performance Metrics state is preserved on tab switch. */}
 			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab}>
-				<div
-					className={activeTab === 'status' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
-					role="tabpanel"
-					aria-hidden={activeTab !== 'status'}
-				>
+				<div className={activeTab === 'status' ? 'tab-panel' : 'tab-panel tab-panel-hidden'} role="tabpanel" aria-hidden={activeTab !== 'status'}>
 					<StatusSection taskStatus={taskStatus} currentElapsed={currentElapsed} />
 				</div>
-				<div
-					className={activeTab === 'tokens' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
-					role="tabpanel"
-					aria-hidden={activeTab !== 'tokens'}
-				>
+				<div className={activeTab === 'tokens' ? 'tab-panel' : 'tab-panel tab-panel-hidden'} role="tabpanel" aria-hidden={activeTab !== 'tokens'}>
 					<TokenSection taskStatus={taskStatus} />
 				</div>
-				<div
-					className={activeTab === 'flow' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
-					role="tabpanel"
-					aria-hidden={activeTab !== 'flow'}
-				>
-					<PipelineFlowSection
-						taskStatus={taskStatus}
-						viewMode={viewMode}
-						onViewModeChange={handleViewModeChange}
-					/>
+				<div className={activeTab === 'flow' ? 'tab-panel' : 'tab-panel tab-panel-hidden'} role="tabpanel" aria-hidden={activeTab !== 'flow'}>
+					<PipelineFlowSection taskStatus={taskStatus} viewMode={viewMode} onViewModeChange={handleViewModeChange} />
 				</div>
-				<div
-					className={activeTab === 'trace' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
-					role="tabpanel"
-					aria-hidden={activeTab !== 'trace'}
-				>
+				<div className={activeTab === 'trace' ? 'tab-panel' : 'tab-panel tab-panel-hidden'} role="tabpanel" aria-hidden={activeTab !== 'trace'}>
 					<TraceSection
 						rows={traceRows}
 						onClear={() => {
@@ -514,11 +483,7 @@ export const PageStatus: React.FC = () => {
 						}}
 					/>
 				</div>
-				<div
-					className={activeTab === 'errors' ? 'tab-panel' : 'tab-panel tab-panel-hidden'}
-					role="tabpanel"
-					aria-hidden={activeTab !== 'errors'}
-				>
+				<div className={activeTab === 'errors' ? 'tab-panel' : 'tab-panel tab-panel-hidden'} role="tabpanel" aria-hidden={activeTab !== 'errors'}>
 					{taskStatus && taskStatus.errors.length > 0 && (
 						<div id="errors-section">
 							<ErrWarnSection title="Errors" items={taskStatus.errors} type="error" />
@@ -541,13 +506,7 @@ export const PageStatus: React.FC = () => {
 			</TabPanel>
 
 			{/* Endpoint Info Modal */}
-			<EndpointInfoModal
-				endpointInfo={endpointInfo}
-				isOpen={isEndpointModalOpen}
-				onClose={() => setIsEndpointModalOpen(false)}
-				onOpenExternal={handleOpenExternal}
-				host={host}
-			/>
+			<EndpointInfoModal endpointInfo={endpointInfo} isOpen={isEndpointModalOpen} onClose={() => setIsEndpointModalOpen(false)} onOpenExternal={handleOpenExternal} host={host} />
 		</div>
 	);
 };

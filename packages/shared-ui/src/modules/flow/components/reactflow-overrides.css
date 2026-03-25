@@ -1,0 +1,70 @@
+/**
+ * ReactFlow theme integration using --rr-* design tokens.
+ *
+ * All three visual states (idle / hover / selected) are expressed as
+ * box-shadow rings so that only ever ONE visual indicator is on screen.
+ * Box-shadow replaces itself on state change, so the states are
+ * mutually exclusive — no double-border problem.
+ */
+
+.react-flow {
+	--xy-node-border: none;
+	--xy-node-boxshadow-hover: var(--rr-shadow-hover);
+	--xy-node-boxshadow-selected: var(--rr-shadow-selected);
+}
+
+/* Suppress native focus ring — our box-shadow is the indicator */
+.react-flow__node {
+	outline: none !important;
+}
+
+/* Layout overrides — idle state gets a ring that looks like a border */
+.react-flow__node-default,
+.react-flow__node-input,
+.react-flow__node-output {
+	box-shadow: var(--rr-shadow-idle);
+	border-radius: 4px !important;
+	background-color: var(--rr-bg-paper) !important;
+	padding: 0 !important;
+}
+
+/* Annotation nodes: no decoration */
+.react-flow__node-annotation {
+	border: none !important;
+	box-shadow: none !important;
+	background-color: transparent !important;
+	outline: none !important;
+}
+
+/* Group nodes: same border ring as default nodes */
+.react-flow__node-group {
+	box-shadow: var(--rr-shadow-idle);
+	border-radius: 4px !important;
+	background-color: transparent !important;
+	padding: 0 !important;
+}
+
+/* Strip any border that MUI might add to direct children inside a node */
+.react-flow__node > div {
+	border: none !important;
+}
+
+/* Idle handles: crosshair to indicate "you can start a connection here" */
+.react-flow__handle.connectionindicator {
+	cursor: crosshair;
+}
+
+/* During active drag, invalid targets inherit parent cursor (grab hand) */
+.react-flow__handle.connectingto:not(.valid) {
+	cursor: inherit;
+}
+
+/* Only show crosshair when hovering a valid drop target during active drag */
+.react-flow__handle.connectingto.valid {
+	cursor: crosshair;
+}
+
+/* Ensure edge delete buttons render above edge lines */
+.react-flow__edgelabel-renderer {
+	z-index: 10;
+}
