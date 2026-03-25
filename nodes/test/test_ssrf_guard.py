@@ -1,10 +1,25 @@
-"""Tests for SSRF protection utilities and HTTP client integration."""
+"""
+Tests for SSRF (Server-Side Request Forgery) protection.
+
+Covers:
+- ``nodes.library.internet.ssrf_guard.validate_url`` -- URL validation against
+  private/internal/metadata IPs and hostnames.
+- ``nodes.tool_http_request.http_client.execute_request`` -- integration check
+  that validate_url is called on the *resolved* URL (after path-param
+  substitution) and that ``allow_redirects=False`` is enforced.
+- ``nodes.tool_http_request.http_driver.HttpDriver._tool_invoke`` -- URL
+  allowlist is applied against the resolved URL.
+
+Run:
+    cd nodes && python -m pytest test/test_ssrf_guard.py -v
+"""
 
 from __future__ import annotations
 
 import importlib.util
 import socket
 import sys
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -21,13 +36,10 @@ def _load_module(name: str, path: Path):
     """Import a module directly from *path* and register it in sys.modules."""
     if name in sys.modules:
         return sys.modules[name]
-    # Ensure parent packages exist as namespace entries
     parts = name.split('.')
     for i in range(1, len(parts)):
         parent = '.'.join(parts[:i])
         if parent not in sys.modules:
-            import types
-
             pkg = types.ModuleType(parent)
             pkg.__path__ = []
             pkg.__package__ = parent
@@ -51,6 +63,20 @@ _http_client_mod = _load_module(
 )
 _resolve_path_params = _http_client_mod._resolve_path_params
 execute_request = _http_client_mod.execute_request
+
+# Mock ai.common.tools.ToolsBase so HttpDriver can be imported
+_mock_tools_base = type('ToolsBase', (), {})
+_mock_ai_tools = types.ModuleType('ai.common.tools')
+_mock_ai_tools.ToolsBase = _mock_tools_base
+sys.modules.setdefault('ai.common.tools', _mock_ai_tools)
+sys.modules.setdefault('ai', types.ModuleType('ai'))
+sys.modules.setdefault('ai.common', types.ModuleType('ai.common'))
+
+_http_driver_mod = _load_module(
+    'nodes.tool_http_request.http_driver',
+    _NODES_SRC / 'tool_http_request' / 'http_driver.py',
+)
+HttpDriver = _http_driver_mod.HttpDriver
 
 # Patch target paths (module-qualified)
 _SSRF_GETADDR = 'nodes.library.internet.ssrf_guard.socket.getaddrinfo'
@@ -78,6 +104,17 @@ def _fake_getaddrinfo_v6(ip: str):
         return [(socket.AF_INET6, socket.SOCK_STREAM, 0, '', (ip, 0, 0, 0))]
 
     return _getaddrinfo
+
+
+def _mock_response(status=200, reason='OK', content_type='text/plain', text='ok'):
+    """Build a minimal ``requests.Response`` mock."""
+    resp = MagicMock()
+    resp.status_code = status
+    resp.reason = reason
+    resp.headers = {'Content-Type': content_type}
+    resp.text = text
+    resp.json.side_effect = ValueError
+    return resp
 
 
 # ---------------------------------------------------------------------------
