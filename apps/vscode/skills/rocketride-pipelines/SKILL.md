@@ -22,19 +22,27 @@ Before writing any JSON, break the user's request into a data flow:
 
 Example: "ingest a video and let me search for scenes"
 
-- IN: video file → `dropper` (source, outputs `video`)
-- Extract frames → `frame_grabber` (video → image)
-- Describe frames → `accessibility_describe` (image → text)
-- Convert to query format → `question` (text → questions)
-- Embed for search → `embedding_openai` (documents → documents with vectors)
-- Store vectors → `qdrant` (documents → stored)
-- Query interface → `chat` (source, outputs questions)
-- Search vectors → `qdrant` (questions → documents)
-- Build context → `prompt` (documents + questions → enhanced questions)
-- Generate answer → `llm_openai` (questions → answers)
-- Return result → `response_answers` (answers → client)
+This requires TWO separate `.pipe` files sharing the same vector DB collection:
 
-Note: this is actually TWO pipelines — one for ingestion, one for querying. Complex workflows often split into separate pipelines sharing a vector DB collection.
+**Pipeline 1 — Ingestion** (no response node needed):
+
+- `dropper` (source, outputs `video`)
+- `frame_grabber` (video → image)
+- `accessibility_describe` (image → text)
+- `question` (text → questions)
+- `embedding_openai` (documents → documents with vectors)
+- `qdrant` (documents → stored, terminal)
+
+**Pipeline 2 — Query** (has response node):
+
+- `chat` (source, outputs questions)
+- `embedding_openai` (questions → questions with vectors)
+- `qdrant` (questions → documents)
+- `prompt` (documents + questions → enhanced questions)
+- `llm_openai` (questions → answers)
+- `response_answers` (answers → client)
+
+Both pipelines use the same qdrant collection name. Pipeline 1 writes to it, Pipeline 2 reads from it.
 
 ## Step 2: Chain by Lane Types
 
