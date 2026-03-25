@@ -31,10 +31,10 @@ def _get_question_texts(question: Question) -> List[str]:
             text = str(text).strip()
             if text:
                 texts.append(text)
-    elif hasattr(question, 'text'):
-        text = getattr(question, 'text', None)
+    if not texts and hasattr(question, 'text'):
+        text = str(getattr(question, 'text', None) or '').strip()
         if text:
-            texts.append(str(text).strip())
+            texts.append(text)
     return texts
 
 
