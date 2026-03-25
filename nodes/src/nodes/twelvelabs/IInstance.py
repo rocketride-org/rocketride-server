@@ -39,10 +39,22 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     def beginInstance(self) -> None:
+        """
+        Initialize the instance.
+        """
         self._video_chunks = []
         self._mime_type = ''
 
     def writeVideo(self, action: int, mimeType: str, buffer: bytes) -> None:
+        """
+        Write video data to the instance.
+
+        Args:
+            action: The action to perform.
+            mimeType: The MIME type of the video.
+            buffer: The video data.
+        """
+        # TODO: refactor memory buffering to file buffering
         if action == AVI_ACTION.BEGIN:
             self._video_chunks = []
             self._mime_type = mimeType
@@ -61,12 +73,12 @@ class IInstance(IInstanceBase):
         tmp_path = None
 
         try:
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, mode='wb') as f:
+                tmp_path = os.path.realpath(f.name)
                 for chunk in self._video_chunks:
                     f.write(chunk)
-                tmp_path = os.path.realpath(f.name)
 
-            debug(f'    TwelveLabs: submitting {tmp_path} ({len(self._video_chunks)} chunks)')
+            debug(f'TwelveLabs: submitting {tmp_path} ({len(self._video_chunks)} chunks)')
 
             text = twelvelabs_driver.process_video(
                 self.IGlobal.api_key,
@@ -75,12 +87,15 @@ class IInstance(IInstanceBase):
             )
 
             if self.instance.hasListener('text'):
-                self.instance.writeText(text if text else "No data from TwelveLabs")
+                self.instance.writeText(text if text else 'No data from TwelveLabs')
 
         finally:
             self._video_chunks = []
-            # if tmp_path and os.path.exists(tmp_path):
-            #     os.unlink(tmp_path)
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError as e:
+                    debug(f'TwelveLabs: failed to delete temp file: {e}')
 
     @staticmethod
     def _suffix_for_mime(mime_type: str) -> str:

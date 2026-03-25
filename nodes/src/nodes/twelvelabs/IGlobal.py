@@ -22,7 +22,7 @@
 # =============================================================================
 
 from typing import List
-from rocketlib import IGlobalBase, debug
+from rocketlib import IGlobalBase, OPEN_MODE
 from ai.common.config import Config
 
 
@@ -35,15 +35,29 @@ class IGlobal(IGlobalBase):
     """
 
     api_key: str = ''
-    instructions: List[str] = []
+    instructions: List[str]
+
+    def __init__(self) -> None:
+        """
+        Initialize the global configuration for the TwelveLabs node.
+        """
+        super().__init__()
+        self.instructions = []
 
     def beginGlobal(self) -> None:
+        """
+        Load the API key and instructions from configuration once,
+        making them available to all instances.
+        """
+        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
+            return
+
         # install requirements
         import os
         from depends import depends  # type: ignore
 
         # Load the requirements
-        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
         depends(requirements)
 
         config = Config.getNodeConfig(
@@ -51,12 +65,13 @@ class IGlobal(IGlobalBase):
             self.glb.connConfig,
         )
 
-        self.api_key = config.get('apikey', '')
-        instructions = config.get('instructions', [])
-        self.instructions = [ str(instruction) for instruction in instructions]
-
-        debug(f'    TwelveLabs: instructions={len(self.instructions)} item(s)')
+        self.api_key = config.get('apikey') or ''
+        instructions = config.get('instructions') or []
+        self.instructions = [str(instruction) for instruction in instructions]
 
     def endGlobal(self) -> None:
+        """
+        Clear the global configuration.
+        """
         self.api_key = ''
         self.instructions = []

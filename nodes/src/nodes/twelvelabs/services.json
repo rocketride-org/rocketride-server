@@ -1,18 +1,67 @@
 {
+	//
+	// Required:
+	//		The displayable name of this node
+	//
 	"title": "TwelveLabs",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
 	"protocol": "twelvelabs://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
 	"classType": [
 		"video"
 	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
 	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
 	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
 	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most nodes
+	//
 	"path": "nodes.twelvelabs",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
 	"prefix": "twelvelabs",
+	//
+	// Optional:
+	//		Description of this driver
+	//
 	"description": [
 		"Sends a video to TwelveLabs along with instructions and returns the generated text response."
 	],
+	//
+	// Optional:
+	//		The icon is the icon to display in the UI for this node
+	//
 	"icon": "twelvelabs.svg",
+	//
+	// Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
 	"lanes": {
 		"video": [
 			"text"
@@ -30,6 +79,11 @@
 			]
 		}
 	],
+	//
+	// Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
 	"preconfig": {
 		"default": "default",
 		"profiles": {
@@ -39,6 +93,12 @@
 			}
 		}
 	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
 	"fields": {
 		"twelvelabs.apikey": {
 			"type": "string",
@@ -46,7 +106,7 @@
 			"description": "TwelveLabs API key.",
 			"format": "password"
 		},
-		"instructions": {
+		"twelvelabs.instructions": {
 			"type": "array",
 			"title": "Instructions",
 			"description": "Instructions to guide TwelveLabs when analyzing the video.",
@@ -59,7 +119,7 @@
 			"object": "default",
 			"properties": [
 				"twelvelabs.apikey",
-				"instructions"
+				"twelvelabs.instructions"
 			]
 		},
 		"twelvelabs.profile": {
@@ -82,6 +142,11 @@
 			]
 		}
 	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
 	"shape": [
 		{
 			"section": "Pipe",

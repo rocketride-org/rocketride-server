@@ -23,6 +23,8 @@
 
 import uuid
 from typing import List
+import time
+
 from rocketlib import debug
 
 
@@ -49,7 +51,7 @@ def process_video(api_key: str, video_path: str, instructions: List[str]) -> str
     client = TwelveLabs(api_key=api_key)
 
     index_name = f'rocketride-{uuid.uuid4().hex[:8]}'
-    debug(f'    TwelveLabs: creating index "{index_name}"')
+    debug(f'TwelveLabs: creating index "{index_name}"')
 
     index = None
 
@@ -64,34 +66,40 @@ def process_video(api_key: str, video_path: str, instructions: List[str]) -> str
             ],
         )
 
-        debug(f'    TwelveLabs: uploading video "{video_path}"')
+        debug(f'TwelveLabs: uploading video "{video_path}"')
         with open(video_path, 'rb') as video_file:
             task = client.tasks.create(index_id=index.id, video_file=video_file)
-        debug(f'    TwelveLabs: started task {task.id}')
+        debug(f'TwelveLabs: started task {task.id}')
 
-        import time
-
+        MAX_WAIT_TIME = 60 * 15  # 15 minutes
+        waited = 0
         while True:
             task = client.tasks.retrieve(task.id)
-            debug(f'    TwelveLabs: task status={task.status}')
+            debug(f'TwelveLabs: task status={task.status}')
             if task.status == 'ready':
                 break
             if task.status == 'failed':
                 raise RuntimeError('TwelveLabs task failed')
-            time.sleep(5)
 
-        debug(f'    TwelveLabs: generating text, video_id={task.video_id}')
+            # check if we waited too long
+            if waited >= MAX_WAIT_TIME:
+                raise RuntimeError('TwelveLabs task timed out')
+            time.sleep(5)
+            waited += 5
+
+        debug(f'TwelveLabs: generating text, video_id={task.video_id}')
         result = client.analyze(video_id=task.video_id, prompt=prompt)
-        debug(f'    TwelveLabs: generated text is "{result.data}"')
-        return result.data
+        generated_text = result.data or ''
+        debug(f'TwelveLabs: generated text length={len(generated_text)}')
+        return generated_text
 
     except Exception as e:
-        debug(f'    TwelveLabs: Error: {e}')
+        debug(f'TwelveLabs: Error: {e}')
         raise
     finally:
-        debug(f'    TwelveLabs: deleting index "{index.id}"')
-        try:
-            if index:
+        if index:
+            try:
+                debug(f'TwelveLabs: deleting index "{index.id}"')
                 client.indexes.delete(index.id)
-        except Exception as e:
-            debug(f'    TwelveLabs: failed to delete index: {e}')
+            except Exception as e:
+                debug(f'TwelveLabs: failed to delete index: {e}')
