@@ -98,7 +98,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 	const [isPending, setIsPending] = useState(false);
 	const isProcessingClick = useRef(false);
 
-	const { currentProject, taskStatuses, onRunPipeline, onStopPipeline } = useFlowProject();
+	const { currentProject, taskStatuses, onRunPipeline, onStopPipeline, isConnected } = useFlowProject();
 	const { nodes } = useFlowGraph();
 
 	// ── Running state ──────────────────────────────────────────────────────
@@ -162,6 +162,11 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 	}, [isPending]);
 
 	// ── Render ─────────────────────────────────────────────────────────────
+	// Hide the button entirely when not connected — can't run or stop without a server
+	if (!isConnected) {
+		return <></>;
+	}
+
 	if (isRunning) {
 		return (
 			<Box
