@@ -28,6 +28,8 @@ from ai.common.transform import IGlobalTransform
 from rocketlib import OPEN_MODE
 from rocketlib import warning
 
+from nodes.library.internet.ssrf_guard import validate_url
+
 
 # Module-level regex constant for collection name validation (official rule)
 WEAVIATE_COLLECTION_RE = re.compile(r'^[A-Z][_0-9A-Za-z]*$')
@@ -118,6 +120,7 @@ class IGlobal(IGlobalTransform):
             if is_cloud:
                 # Cloud: REST + API key only; do not probe gRPC
                 url = base_url.rstrip('/') + '/v1/meta'
+                validate_url(url)
                 headers = {'Authorization': f'Bearer {apikey}'} if apikey else {}
                 r = httpx.get(url, headers=headers, timeout=3)
                 r.raise_for_status()
