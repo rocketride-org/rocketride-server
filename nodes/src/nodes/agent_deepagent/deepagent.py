@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any, Callable
 
 from ai.common.agent import AgentBase
@@ -295,7 +296,8 @@ class DeepAgentDriver(AgentBase):
                     out = {'error': str(e), 'type': type(e).__name__}
 
                 try:
-                    log_tool_call(tool_name=tool_name, input={'input': input, **kwargs}, output=out)
+                    if log_tool_call:
+                        log_tool_call(tool_name=tool_name, input={'input': input, **kwargs}, output=out)
                 except Exception:
                     pass
 
@@ -539,12 +541,27 @@ class DeepAgentDriver(AgentBase):
             """
             return self.invoke_host_tool(host=host, tool_name=tool_name, input=input, kwargs=kwargs)
 
+        def _log_tool_call(tool_name: str, input: Any = None, output: Any = None) -> None:  # noqa: A002
+            """Log a tool invocation at debug level for audit and tracing.
+
+            Args:
+                tool_name: The fully-qualified name of the tool that was invoked.
+                input: The input payload passed to the tool.
+                output: The output returned by the tool.
+
+            Returns:
+                None
+            """
+            from rocketlib import debug
+
+            debug(f'deep agent tool call tool={tool_name} input_len={len(_safe_str(input))} output_len={len(_safe_str(output))}')
+
         llm = self._bind_framework_llm(host=host, call_llm=_call_llm, ctx=ctx)
         tools_for_agent = self._bind_framework_tools(
             host=host,
             tool_descriptors=tool_descriptors,
             invoke_tool=_invoke_tool,
-            log_tool_call=lambda **_: None,
+            log_tool_call=_log_tool_call,
             ctx=ctx,
         )
 
@@ -560,7 +577,7 @@ class DeepAgentDriver(AgentBase):
                 config={'callbacks': [_SSECallbackHandler(self.sendSSE)]},
             )
         except Exception as e:
-            raise RuntimeError('Deep agent {} failed: {}: {}'.format(stage, type(e).__name__, _safe_str(e))) from e
+            raise RuntimeError(f'Deep agent {stage} failed: {type(e).__name__}: {_safe_str(e)}') from e
 
         final_text = ''
         try:
@@ -778,7 +795,7 @@ def _parse_tool_call_envelope(raw: str) -> Any:
         if not isinstance(args, dict):
             args = {'input': args}
 
-        tool_call = {'id': f'call_{_safe_str(id(obj))}', 'type': 'tool_call', 'name': name, 'args': args}
+        tool_call = {'id': f'call_{uuid.uuid4().hex[:12]}', 'type': 'tool_call', 'name': name, 'args': args}
 
         try:
             from langchain_core.messages import AIMessage
