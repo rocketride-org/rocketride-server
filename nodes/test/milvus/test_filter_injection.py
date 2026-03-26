@@ -10,7 +10,7 @@ import sys
 import os
 import unittest
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'nodes', 'milvus'))
 
 from milvus import _escape_milvus_str
 
