@@ -197,7 +197,7 @@ function makePackageVsixAction() {
 
 			await mkdir(VSCODE_DIST_DIR);
 			const vsceOut = path.relative(BUILD_DIR, VSCODE_DIST_DIR);
-			await execCommand('npx', ['vsce', 'package', '--no-dependencies', '-o', vsceOut], { task, cwd: BUILD_DIR });
+			await execCommand('npx', ['@vscode/vsce', 'package', '--no-dependencies', '-o', vsceOut], { task, cwd: BUILD_DIR });
 
 			task.output = `Package created in ${VSCODE_DIST_DIR}`;
 		},
