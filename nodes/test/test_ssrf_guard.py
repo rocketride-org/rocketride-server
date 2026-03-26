@@ -233,9 +233,14 @@ class TestPrivateIPs:
             with pytest.raises(ValueError, match='private/internal address'):
                 validate_url('http://some-host.example.com/')
 
+    @patch(_SSRF_GETADDR, _fake_getaddrinfo_v6('fc00::1'))
+    def test_ipv6_unique_local(self):
+        with pytest.raises(ValueError, match='private/internal address'):
+            validate_url('http://some-host.example.com/')
+
     def test_reserved_0_0_0_0(self):
         with patch(_SSRF_GETADDR, _fake_getaddrinfo('0.0.0.0')):
-            with pytest.raises(ValueError, match='private/internal address'):
+            with pytest.raises(ValueError, match='unspecified address'):
                 validate_url('http://zero.test/')
 
     def test_shared_address_space_cgnat(self):
