@@ -23,6 +23,7 @@ _URL_FIELDS = {'url', 'image', 'favicon'}
 
 
 def _get_question_texts(question: Question) -> List[str]:
+    """Extract normalized text queries from a RocketRide question payload."""
     texts: List[str] = []
     if hasattr(question, 'questions'):
         qs = getattr(question, 'questions') or []
@@ -39,6 +40,8 @@ def _get_question_texts(question: Question) -> List[str]:
 
 
 class ExaSearch(ChatBase):
+    """Search backend that sends a single user query to Exa and returns raw JSON."""
+
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         super().__init__(provider, connConfig, bag)
         config = Config.getNodeConfig(provider, connConfig)
@@ -55,9 +58,11 @@ class ExaSearch(ChatBase):
         bag['search_exa'] = self
 
     def getTokens(self, value: str) -> int:
+        """Estimate token usage for the given text using a word-based heuristic."""
         return max(1, int(len(str(value).split()) / 0.75))
 
     def chat(self, question: Question) -> Answer:
+        """Execute one Exa search request and return the raw result payload as an answer."""
         queries = _get_question_texts(question)
         if not queries:
             raise ValueError('search_exa requires a non-empty question')
