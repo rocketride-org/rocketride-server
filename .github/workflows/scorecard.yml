@@ -5,7 +5,7 @@ on:
   schedule:
     - cron: '22 5 * * 1'  # Weekly Monday 5:22 UTC
   push:
-    branches: [develop, main]
+    branches: [develop]
   workflow_dispatch:
 
 permissions: read-all
