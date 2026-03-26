@@ -19,6 +19,7 @@ BLOCKED_HOSTS = frozenset(
         'metadata.goog',
         'metadata.azure.com',
         'management.azure.com',
+        'instance-data.ec2.internal',
     }
 )
 
@@ -58,5 +59,9 @@ def validate_url(url: str) -> None:
 
     for _family, _, _, _, sockaddr in addr_info:
         ip = ipaddress.ip_address(sockaddr[0])
+        if ip.is_multicast:
+            raise ValueError(f'Blocked request to multicast address: {hostname} resolves to {ip}')
+        if ip.is_unspecified:
+            raise ValueError(f'Blocked request to unspecified address: {hostname} resolves to {ip}')
         if not ip.is_global:
             raise ValueError(f'Blocked request to private/internal address: {hostname} resolves to {ip}')
