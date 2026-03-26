@@ -394,7 +394,8 @@ class DeepAgentDriver(AgentBase):
                     None
                 """
                 tool_name = (serialized or {}).get('name', '') or 'tool'
-                self._send_sse('thinking', message=f'Calling {tool_name}...', tool=tool_name, input=input_str)
+                input_len = len(_safe_str(input_str))
+                self._send_sse('thinking', message=f'Calling {tool_name}...', tool=tool_name, input_length=input_len)
 
             def on_tool_end(self, output: Any, **kwargs: Any) -> None:
                 """
@@ -420,7 +421,7 @@ class DeepAgentDriver(AgentBase):
                 Returns:
                     None
                 """
-                self._send_sse('thinking', message=f'Tool error: {_safe_str(error)}')
+                self._send_sse('thinking', message='Tool error', error_type=type(error).__name__)
 
             def on_agent_action(self, action: Any, **kwargs: Any) -> None:
                 """
@@ -501,10 +502,10 @@ class DeepAgentDriver(AgentBase):
                 Returns:
                     None
                 """
-                self._send_sse('thinking', message=f'LLM error: {_safe_str(error)}')
+                self._send_sse('thinking', message='LLM error', error_type=type(error).__name__)
 
         tool_descriptors = self.discover_tools(host=host)
-        self.sendSSE('thinking', message=f'Discovered {len(tool_descriptors)} host tool(s): {[td.get("name") for td in tool_descriptors if hasattr(td, "get")]}')
+        self.sendSSE('thinking', message=f'Discovered {len(tool_descriptors)} host tool(s)')
 
         def _call_llm(messages: Any, stop_words: Any = None) -> str:
             """
@@ -708,6 +709,25 @@ def _langchain_messages_to_transcript(messages: Any) -> str:
                 pass
         elif isinstance(m, AIMessage):
             role = 'assistant'
+            try:
+                tool_calls = getattr(m, 'tool_calls', None) or []
+                if tool_calls:
+                    rendered_calls = [
+                        json.dumps(
+                            {
+                                'type': 'tool_call',
+                                'name': _safe_str(tc.get('name', '')),
+                                'args': tc.get('args', {}),
+                            },
+                            ensure_ascii=False,
+                            default=str,
+                        )
+                        for tc in tool_calls
+                        if isinstance(tc, dict)
+                    ]
+                    content = '\n'.join(filter(None, [content, *rendered_calls]))
+            except Exception:
+                pass
 
         lines.append(f'{role}: {content}')
 
