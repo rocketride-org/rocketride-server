@@ -79,17 +79,6 @@ function processLink(link: string | undefined, host?: string): string | undefine
 	return link.replace(/{host}/g, host);
 }
 
-function truncateForNode(url: string): string {
-	if (url.length <= 42) return url;
-	return `${url.slice(0, 39)}...`;
-}
-
-function isWebhookEndpoint(info: IEndpointInfo, host?: string): boolean {
-	const url = processLink(info['url-link'], host) ?? info['url-link'];
-	const label = info['url-text'] ?? '';
-	return /web[\s-]?hook/i.test(url) || /web[\s-]?hook/i.test(label);
-}
-
 // =============================================================================
 // Component
 // =============================================================================
@@ -97,27 +86,11 @@ function isWebhookEndpoint(info: IEndpointInfo, host?: string): boolean {
 export default function PipelineActions({ notes, host, onOpenLink, displayName }: IPipelineActionsProps): ReactElement | null {
 	const endpointInfo = useMemo(() => getEndpointInfo(notes), [notes]);
 	const [isModalOpen, setIsModalOpen] = useState(false);
-	const [copyFeedback, setCopyFeedback] = useState(false);
 
 	if (!endpointInfo) return null;
 
 	const buttonLink = processLink(endpointInfo['button-link'], host);
-	const endpointUrl = processLink(endpointInfo['url-link'], host) ?? endpointInfo['url-link'];
 	const hasButton = endpointInfo['button-text'] && buttonLink;
-	const shouldShowEndpointUi = isWebhookEndpoint(endpointInfo, host);
-
-	const handleCopyEndpoint = (e: React.MouseEvent) => {
-		e.stopPropagation();
-		navigator.clipboard
-			.writeText(endpointUrl)
-			.then(() => {
-				setCopyFeedback(true);
-				setTimeout(() => setCopyFeedback(false), 1200);
-			})
-			.catch(() => {
-				// Clipboard may be blocked by host.
-			});
-	};
 
 	return (
 		<>
@@ -134,29 +107,18 @@ export default function PipelineActions({ notes, host, onOpenLink, displayName }
 							{endpointInfo['button-text']}
 						</button>
 					)}
-					{shouldShowEndpointUi && (
-						<button
-							style={styles.secondaryBtn}
-							onClick={(e: React.MouseEvent) => {
-								e.stopPropagation();
-								setIsModalOpen(true);
-							}}
-						>
-							Endpoint Info
-						</button>
-					)}
+					<button
+						style={styles.secondaryBtn}
+						onClick={(e: React.MouseEvent) => {
+							e.stopPropagation();
+							setIsModalOpen(true);
+						}}
+					>
+						Endpoint Info
+					</button>
 				</div>
-				{shouldShowEndpointUi && (
-					<div style={styles.endpointRow} title={endpointUrl}>
-						<div style={styles.endpointLabel}>Endpoint</div>
-						<div style={styles.endpointValue}>{truncateForNode(endpointUrl)}</div>
-						<button style={{ ...styles.endpointCopyBtn, ...(copyFeedback ? styles.endpointCopyBtnSuccess : {}) }} onClick={handleCopyEndpoint}>
-							{copyFeedback ? 'Copied' : 'Copy'}
-						</button>
-					</div>
-				)}
 			</div>
-			{shouldShowEndpointUi && <EndpointInfoModal endpointInfo={endpointInfo} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onOpenLink={onOpenLink} displayName={displayName} host={host} />}
+			<EndpointInfoModal endpointInfo={endpointInfo} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onOpenLink={onOpenLink} displayName={displayName} host={host} />
 		</>
 	);
 }

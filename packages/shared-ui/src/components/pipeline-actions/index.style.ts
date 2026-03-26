@@ -116,7 +116,11 @@ export const modalStyles: Record<string, CSSProperties> = {
 		border: '1px solid var(--rr-border, #dcdcdc)',
 		borderRadius: '8px',
 		width: '100%',
-		maxWidth: '500px',
+		maxWidth: '640px',
+		maxHeight: '90vh',
+		display: 'flex',
+		flexDirection: 'column',
+		overflow: 'hidden',
 		boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
 	},
 
@@ -148,6 +152,9 @@ export const modalStyles: Record<string, CSSProperties> = {
 
 	body: {
 		padding: '20px',
+		overflowY: 'auto',
+		flex: 1,
+		minHeight: 0,
 	},
 
 	configItem: {
@@ -215,6 +222,38 @@ export const modalStyles: Record<string, CSSProperties> = {
 	testActions: {
 		display: 'flex',
 		gap: '8px',
+		flexWrap: 'wrap',
+	},
+	integrationTabs: {
+		display: 'flex',
+		flexWrap: 'wrap',
+		gap: '4px',
+		marginBottom: '10px',
+		borderBottom: '1px solid var(--rr-border, #dcdcdc)',
+		paddingBottom: '8px',
+	},
+	integrationTab: {
+		padding: '4px 10px',
+		fontSize: '11px',
+		fontWeight: 600,
+		border: '1px solid var(--rr-border, #dcdcdc)',
+		borderRadius: '4px',
+		backgroundColor: 'transparent',
+		color: 'var(--rr-text-secondary, #666)',
+		cursor: 'pointer',
+	},
+	integrationTabActive: {
+		backgroundColor: 'var(--rr-accent, #007acc)',
+		borderColor: 'var(--rr-accent, #007acc)',
+		color: 'var(--rr-fg-button, #fff)',
+	},
+	integrationCodeScroll: {
+		maxHeight: '220px',
+		overflow: 'auto',
+		padding: '10px',
+		backgroundColor: 'var(--rr-bg-paper, #1e1e1e)',
+		border: '1px solid var(--rr-border, #dcdcdc)',
+		borderRadius: '4px',
 	},
 
 	configLabel: {
