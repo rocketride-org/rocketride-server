@@ -70,16 +70,19 @@ from unittest.mock import AsyncMock
 
 # Load .env from project root before any imports that need env vars
 from dotenv import load_dotenv
+
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 load_dotenv(PROJECT_ROOT / '.env')
 
 # Skip chat tests when no LLM API key is available
+# fmt: off
 HAS_LLM_KEY = bool(
     os.environ.get('ROCKETRIDE_APIKEY_OPENAI')
     or os.environ.get('ROCKETRIDE_APIKEY_ANTHROPIC')
     or os.environ.get('ROCKETRIDE_APIKEY_GEMINI')
     or os.environ.get('ROCKETRIDE_HOST_OLLAMA')
 )
+# fmt: on
 requires_llm = pytest.mark.skipif(
     not HAS_LLM_KEY,
     reason='Skipped: no LLM API key set (need ROCKETRIDE_APIKEY_OPENAI, ROCKETRIDE_APIKEY_ANTHROPIC, ROCKETRIDE_APIKEY_GEMINI, or ROCKETRIDE_HOST_OLLAMA)',
@@ -87,6 +90,7 @@ requires_llm = pytest.mark.skipif(
 
 # Import from rocketride
 from rocketride import RocketRideClient, TASK_STATE, Question
+from rocketride.mixins.connection import ConnectionMixin
 
 # Import pipelines - using absolute imports since they're in the same directory
 from echo_pipeline import get_echo_pipeline
@@ -2151,10 +2155,12 @@ class TestConcurrentPipelineOperations:
 
             # Create 4 independent subprocesses concurrently
             sub_tokens = [f'{self.CONCURRENT_TOKEN}-stress-{i}' for i in range(SUBPROCESS_COUNT)]
+            # fmt: off
             await asyncio.gather(*[
                 client.use(pipeline=get_echo_pipeline(), token=token)
                 for token in sub_tokens
             ])
+            # fmt: on
 
             # Each pipeline independently cycles 32 send/recv — all 4 run in parallel
             async def run_pipeline(token, pipeline_index):
@@ -2167,9 +2173,11 @@ class TestConcurrentPipelineOperations:
                     results.append(result['text'][0])
                 return results
 
+            # fmt: off
             all_results = await asyncio.gather(*[
                 run_pipeline(token, i) for i, token in enumerate(sub_tokens)
             ])
+            # fmt: on
 
             flat = [r for pipeline in all_results for r in pipeline]
             assert len(flat) == SUBPROCESS_COUNT * CYCLES_PER_PIPELINE
@@ -2180,7 +2188,7 @@ class TestConcurrentPipelineOperations:
                 try:
                     await client.terminate(token)
                 except Exception as e:
-                    print(f"Warning: failed to terminate pipeline token={token}: {e}")
+                    print(f'Warning: failed to terminate pipeline token={token}: {e}')
             await client.disconnect()
 
 
@@ -2216,6 +2224,20 @@ Integration tests may fail. Please ensure:
             """)
 
     asyncio.run(_check())
+
+
+@pytest.mark.parametrize(
+    ('input_uri', 'expected_uri'),
+    [
+        ('wss://cloud.rocketride.ai', 'wss://cloud.rocketride.ai/task/service'),
+        ('https://cloud.rocketride.ai', 'wss://cloud.rocketride.ai/task/service'),
+        ('ws://localhost:5565', 'ws://localhost:5565/task/service'),
+        ('http://localhost:5565', 'ws://localhost:5565/task/service'),
+    ],
+)
+def test_get_websocket_uri_normalization(input_uri: str, expected_uri: str) -> None:
+    """Verify websocket URI normalization preserves secure and non-secure schemes."""
+    assert ConnectionMixin._get_websocket_uri(input_uri) == expected_uri
 
 
 # Pytest configuration
