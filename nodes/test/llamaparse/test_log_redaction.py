@@ -6,7 +6,7 @@ import os
 # Direct-load the module to avoid pulling in the full RocketRide runtime.
 _spec = importlib.util.spec_from_file_location(
     'redact',
-    os.path.join(os.path.dirname(__file__), '..', 'library', 'helpers', 'redact.py'),
+    os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'nodes', 'library', 'helpers', 'redact.py'),
 )
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
