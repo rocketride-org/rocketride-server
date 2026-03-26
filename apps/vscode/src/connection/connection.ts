@@ -38,6 +38,7 @@ import { CloudManager } from './cloud-manager';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConnectionStatus, ConnectionState, GenericResponse } from '../shared/types';
+import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
 
 export class ConnectionManager extends EventEmitter {
 	private static instance: ConnectionManager;
@@ -56,7 +57,7 @@ export class ConnectionManager extends EventEmitter {
 		connectionMode: 'local',
 		hasCredentials: false,
 		retryAttempt: 0,
-		maxRetryAttempts: 120
+		maxRetryAttempts: 120,
 	};
 
 	// Reconnection management (exponential backoff: 1s -> 5s cap)
@@ -170,13 +171,13 @@ export class ConnectionManager extends EventEmitter {
 			this.logger.output(`${icons.error} Configuration errors: ${errors.join(', ')}`);
 			this.updateConnectionStatus({
 				state: ConnectionState.DISCONNECTED,
-				lastError: errors.join(', ')
+				lastError: errors.join(', '),
 			});
 			return;
 		}
 
 		this.updateConnectionStatus({
-			connectionMode: config.connectionMode
+			connectionMode: config.connectionMode,
 		});
 
 		if (config.autoConnect && this.canAttemptConnection()) {
@@ -192,17 +193,13 @@ export class ConnectionManager extends EventEmitter {
 
 		const config = this.configManager.getConfig();
 
-		const hasCredentials = (config.connectionMode === 'cloud' || config.connectionMode === 'onprem')
-			? !!(config.apiKey && config.hostUrl)
-			: true; // local mode: engine is auto-downloaded, always ready
+		const hasCredentials = connectionModeRequiresApiKey(config.connectionMode) ? !!(config.apiKey && config.hostUrl) : config.connectionMode === 'onprem' ? !!config.hostUrl : true; // local mode: engine is auto-downloaded, always ready
 
 		this.updateConnectionStatus({ hasCredentials });
 	}
 
 	private canAttemptConnection(): boolean {
-		return this.connectionStatus.hasCredentials &&
-			(this.connectionStatus.state === ConnectionState.DISCONNECTED ||
-				this.connectionStatus.state === ConnectionState.ENGINE_STARTUP_FAILED);
+		return this.connectionStatus.hasCredentials && (this.connectionStatus.state === ConnectionState.DISCONNECTED || this.connectionStatus.state === ConnectionState.ENGINE_STARTUP_FAILED);
 	}
 
 	public getHttpUrl(): string {
@@ -229,7 +226,7 @@ export class ConnectionManager extends EventEmitter {
 
 		this.updateConnectionStatus({
 			state: ConnectionState.CONNECTING,
-			lastError: undefined
+			lastError: undefined,
 		});
 
 		await this._connect();
@@ -243,7 +240,7 @@ export class ConnectionManager extends EventEmitter {
 			const errorMessage = `Configuration errors: ${errors.join(', ')}`;
 			this.updateConnectionStatus({
 				state: ConnectionState.DISCONNECTED,
-				lastError: errorMessage
+				lastError: errorMessage,
 			});
 			vscode.window.showErrorMessage(`Cannot connect: ${errorMessage}`);
 			return;
@@ -317,10 +314,8 @@ export class ConnectionManager extends EventEmitter {
 
 	private createClient(): RocketRideClient {
 		const config = this.configManager.getConfig();
-		const auth = (config.connectionMode === 'cloud' || config.connectionMode === 'onprem') ? config.apiKey : 'MYAPIKEY';
-		const uri = (config.connectionMode === 'local' && this.localEnginePort)
-			? `http://localhost:${this.localEnginePort}`
-			: this.configManager.getHttpUrl();
+		const auth = config.connectionMode === 'cloud' || config.connectionMode === 'onprem' ? config.apiKey : 'MYAPIKEY';
+		const uri = config.connectionMode === 'local' && this.localEnginePort ? `http://localhost:${this.localEnginePort}` : this.configManager.getHttpUrl();
 
 		const client = new RocketRideClient({
 			auth,
@@ -344,7 +339,9 @@ export class ConnectionManager extends EventEmitter {
 			onDisconnected: async (reason?: string, hasError?: boolean) => {
 				const isStale = this.client !== client;
 				// Ignore stale callbacks from a client that has been replaced or cleaned up
-				if (isStale) { return; }
+				if (isStale) {
+					return;
+				}
 				this.logger.output(`${icons.warning} WebSocket disconnected (reason: ${reason ?? 'unknown'}, error: ${hasError ?? false})`);
 				this.handleConnectionLoss();
 			},
@@ -356,7 +353,7 @@ export class ConnectionManager extends EventEmitter {
 	private async _connectClientWithRetries(): Promise<void> {
 		this.updateConnectionStatus({
 			state: ConnectionState.CONNECTING,
-			progressMessage: undefined
+			progressMessage: undefined,
 		});
 
 		// Clean up any previous client
@@ -383,7 +380,11 @@ export class ConnectionManager extends EventEmitter {
 
 				// Clean up failed client
 				if (this.client) {
-					try { await this.client.disconnect(); } catch { /* ignore */ }
+					try {
+						await this.client.disconnect();
+					} catch {
+						/* ignore */
+					}
 					this.client = undefined;
 				}
 
@@ -398,7 +399,7 @@ export class ConnectionManager extends EventEmitter {
 					const delaySec = Math.round(delayMs / 1000);
 					this.logger.output(`${icons.info} Connection attempt ${attempts} failed, waiting ${delaySec}s...`);
 					this.updateConnectionStatus({
-						progressMessage: `Waiting ${delaySec}s before next attempt`
+						progressMessage: `Waiting ${delaySec}s before next attempt`,
 					});
 					await this.delay(delayMs);
 				}
@@ -424,7 +425,7 @@ export class ConnectionManager extends EventEmitter {
 			lastConnected: new Date(),
 			lastError: undefined,
 			retryAttempt: 0,
-			progressMessage: undefined
+			progressMessage: undefined,
 		});
 
 		this.resetRetryState();
@@ -432,14 +433,18 @@ export class ConnectionManager extends EventEmitter {
 		this.emit('connected');
 
 		// Register global monitors for task lifecycle, output, and SSE events
-		this.request('rrext_monitor', {
-			types: ['task', 'output']
-		}, '*').catch(err => {
+		this.request(
+			'rrext_monitor',
+			{
+				types: ['task', 'output'],
+			},
+			'*'
+		).catch((err) => {
 			this.logger.error(`Failed to register global monitors: ${err}`);
 		});
 
 		// Fetch and cache services list during connection phase
-		this.refreshServices().catch(err => {
+		this.refreshServices().catch((err) => {
 			this.logger.error(`Failed to fetch services on connect: ${err}`);
 		});
 	}
@@ -450,10 +455,7 @@ export class ConnectionManager extends EventEmitter {
 			return;
 		}
 
-		const shouldReconnect = !this.isManualDisconnect &&
-			this.connectionStatus.hasCredentials &&
-			this.connectionStatus.retryAttempt < this.connectionStatus.maxRetryAttempts;
-
+		const shouldReconnect = !this.isManualDisconnect && this.connectionStatus.hasCredentials && this.connectionStatus.retryAttempt < this.connectionStatus.maxRetryAttempts;
 
 		if (shouldReconnect && this.connectionStatus.state === ConnectionState.CONNECTED) {
 			this.updateConnectionStatus({ state: ConnectionState.CONNECTING });
@@ -488,22 +490,17 @@ export class ConnectionManager extends EventEmitter {
 		// Do not retry on auth failure or rate limit (user action required)
 		const errorMsg = error instanceof Error ? error.message : String(error);
 		const isRateLimit = errorMsg.toLowerCase().includes('rate limit');
-		const shouldReconnect = !this.isManualDisconnect &&
-			this.connectionStatus.hasCredentials &&
-			!(error instanceof AuthenticationException) &&
-			!isRateLimit &&
-			this.connectionStatus.retryAttempt < this.connectionStatus.maxRetryAttempts;
-
+		const shouldReconnect = !this.isManualDisconnect && this.connectionStatus.hasCredentials && !(error instanceof AuthenticationException) && !isRateLimit && this.connectionStatus.retryAttempt < this.connectionStatus.maxRetryAttempts;
 
 		if (!shouldReconnect) {
 			this.updateConnectionStatus({
 				state: ConnectionState.DISCONNECTED,
-				lastError: errorMessage
+				lastError: errorMessage,
 			});
 		} else {
 			this.updateConnectionStatus({
 				state: ConnectionState.CONNECTING,
-				lastError: errorMessage
+				lastError: errorMessage,
 			});
 		}
 
@@ -526,14 +523,14 @@ export class ConnectionManager extends EventEmitter {
 		const delaySec = Math.round(delayMs / 1000);
 		this.logger.output(`${icons.info} Waiting ${delaySec}s before retrying...`);
 		this.updateConnectionStatus({
-			progressMessage: `Waiting ${delaySec}s before next attempt`
+			progressMessage: `Waiting ${delaySec}s before next attempt`,
 		});
 		this.reconnectTimeout = setTimeout(async () => {
 			if (this.connectionStatus.state === 'connecting' && !this.isManualDisconnect && !this.isDisposing) {
 				this.logger.output(`${icons.connecting} Reconnecting...`);
 				this.updateConnectionStatus({
 					retryAttempt: this.connectionStatus.retryAttempt + 1,
-					progressMessage: 'Attempting connection...'
+					progressMessage: 'Attempting connection...',
 				});
 
 				try {
@@ -558,13 +555,11 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	public isConnecting(): boolean {
-		return this.connectionStatus.state === 'starting-engine' ||
-			this.connectionStatus.state === 'connecting';
+		return this.connectionStatus.state === 'starting-engine' || this.connectionStatus.state === 'connecting';
 	}
 
 	public isDisconnected(): boolean {
-		return this.connectionStatus.state === ConnectionState.DISCONNECTED ||
-			this.connectionStatus.state === ConnectionState.ENGINE_STARTUP_FAILED;
+		return this.connectionStatus.state === ConnectionState.DISCONNECTED || this.connectionStatus.state === ConnectionState.ENGINE_STARTUP_FAILED;
 	}
 
 	public hasCredentials(): boolean {
@@ -599,7 +594,7 @@ export class ConnectionManager extends EventEmitter {
 		const info = this.manager?.getInfo();
 		return {
 			version: info?.version ?? null,
-			publishedAt: info?.publishedAt ?? null
+			publishedAt: info?.publishedAt ?? null,
 		};
 	}
 
@@ -640,9 +635,7 @@ export class ConnectionManager extends EventEmitter {
 					return;
 				}
 				const body = response?.body;
-				const services = (typeof body === 'object' && body !== null && 'services' in body)
-					? (body.services as Record<string, unknown>)
-					: {};
+				const services = typeof body === 'object' && body !== null && 'services' in body ? (body.services as Record<string, unknown>) : {};
 				this.cachedServices = services;
 				this.cachedServicesError = null;
 				this.emit('servicesUpdated', { services, servicesError: undefined });
@@ -678,7 +671,7 @@ export class ConnectionManager extends EventEmitter {
 
 		this.updateConnectionStatus({
 			state: ConnectionState.DISCONNECTED,
-			retryAttempt: 0
+			retryAttempt: 0,
 		});
 
 		// Only reset retry counters — keep isManualDisconnect true to prevent
@@ -709,7 +702,9 @@ export class ConnectionManager extends EventEmitter {
 	private cleanupClient(): void {
 		if (this.client) {
 			// Fire-and-forget disconnect; don't await to avoid blocking disposal
-			this.client.disconnect().catch(() => { /* ignore */ });
+			this.client.disconnect().catch(() => {
+				/* ignore */
+			});
 			this.client = undefined;
 		}
 	}
@@ -721,7 +716,7 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	private delay(ms: number): Promise<void> {
-		return new Promise(resolve => setTimeout(resolve, ms));
+		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
 	public async dispose(): Promise<void> {
@@ -744,7 +739,7 @@ export class ConnectionManager extends EventEmitter {
 		await this.cleanup();
 
 		// Clean up configuration listeners
-		this.disposables.forEach(d => d.dispose());
+		this.disposables.forEach((d) => d.dispose());
 		this.disposables = [];
 
 		// Dispose config manager

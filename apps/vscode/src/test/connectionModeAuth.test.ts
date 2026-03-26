@@ -21,43 +21,22 @@
 // SOFTWARE.
 // =============================================================================
 
-/**
- * cloud-manager.ts - Cloud/On-prem Backend Manager
- *
- * Manages the cloud or on-prem backend: validates that credentials
- * are configured before ConnectionManager connects the WebSocket client.
- */
-
-import { BaseManager, ManagerInfo } from './base-manager';
-import { ConfigManagerInfo } from '../config';
+import test from 'node:test';
+import assert from 'node:assert/strict';
 import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
 
-export class CloudManager extends BaseManager {
-	/**
-	 * Validates that cloud/onprem credentials are configured.
-	 */
-	public async start(config: ConfigManagerInfo): Promise<void> {
-		this.emit('status', 'Validating credentials...');
+test('cloud mode requires an API key', () => {
+	assert.equal(connectionModeRequiresApiKey('cloud'), true);
+});
 
-		if (!config.hostUrl) {
-			throw new Error('Host URL is required for cloud/on-prem connections. Configure it in Settings.');
-		}
-		if (connectionModeRequiresApiKey(config.connectionMode) && !config.apiKey) {
-			throw new Error('API key is required for cloud connections. Configure it in Settings.');
-		}
-	}
+test('onprem mode does not require an API key', () => {
+	assert.equal(connectionModeRequiresApiKey('onprem'), false);
+});
 
-	/**
-	 * No-op — cloud connections have no backend process to stop.
-	 */
-	public async stop(): Promise<void> {
-		// Nothing to do
-	}
+test('local mode does not require an API key', () => {
+	assert.equal(connectionModeRequiresApiKey('local'), false);
+});
 
-	/**
-	 * Cloud mode has no locally installed engine.
-	 */
-	public getInfo(): ManagerInfo | null {
-		return null;
-	}
-}
+test('unknown connection modes do not require an API key', () => {
+	assert.equal(connectionModeRequiresApiKey('future-mode'), false);
+});

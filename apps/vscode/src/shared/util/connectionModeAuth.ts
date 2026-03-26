@@ -21,43 +21,8 @@
 // SOFTWARE.
 // =============================================================================
 
-/**
- * cloud-manager.ts - Cloud/On-prem Backend Manager
- *
- * Manages the cloud or on-prem backend: validates that credentials
- * are configured before ConnectionManager connects the WebSocket client.
- */
+export type RocketRideConnectionMode = 'cloud' | 'local' | 'onprem';
 
-import { BaseManager, ManagerInfo } from './base-manager';
-import { ConfigManagerInfo } from '../config';
-import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
-
-export class CloudManager extends BaseManager {
-	/**
-	 * Validates that cloud/onprem credentials are configured.
-	 */
-	public async start(config: ConfigManagerInfo): Promise<void> {
-		this.emit('status', 'Validating credentials...');
-
-		if (!config.hostUrl) {
-			throw new Error('Host URL is required for cloud/on-prem connections. Configure it in Settings.');
-		}
-		if (connectionModeRequiresApiKey(config.connectionMode) && !config.apiKey) {
-			throw new Error('API key is required for cloud connections. Configure it in Settings.');
-		}
-	}
-
-	/**
-	 * No-op — cloud connections have no backend process to stop.
-	 */
-	public async stop(): Promise<void> {
-		// Nothing to do
-	}
-
-	/**
-	 * Cloud mode has no locally installed engine.
-	 */
-	public getInfo(): ManagerInfo | null {
-		return null;
-	}
+export function connectionModeRequiresApiKey(connectionMode: RocketRideConnectionMode | string): boolean {
+	return connectionMode === 'cloud';
 }
