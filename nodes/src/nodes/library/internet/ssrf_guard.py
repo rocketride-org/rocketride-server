@@ -19,6 +19,7 @@ BLOCKED_HOSTS = frozenset(
         'metadata.goog',
         'metadata.azure.com',
         'management.azure.com',
+        'instance-data.ec2.internal',
     }
 )
 
