@@ -21,13 +21,19 @@
 // SOFTWARE.
 // =============================================================================
 
-/** Append the next character as an escaped literal, advancing the index. */
+/** Append the next character as an escaped literal, advancing the index.
+ *  Only consumes the backslash when escaping special characters (whitespace,
+ *  quotes, backslash).  For all other characters the backslash is preserved
+ *  so that e.g. Windows paths like `C:\Users` are not mangled. */
 function appendEscapedChar(current: string, input: string, index: number): { value: string; nextIndex: number } {
 	const next = input[index + 1];
 	if (next === undefined) {
 		return { value: `${current}\\`, nextIndex: index };
 	}
-	return { value: `${current}${next}`, nextIndex: index + 1 };
+	if (next === '\\' || next === '"' || next === "'" || /\s/.test(next)) {
+		return { value: `${current}${next}`, nextIndex: index + 1 };
+	}
+	return { value: `${current}\\${next}`, nextIndex: index + 1 };
 }
 
 /**

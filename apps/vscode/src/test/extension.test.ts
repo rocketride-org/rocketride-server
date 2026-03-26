@@ -67,6 +67,11 @@ suite('Extension Test Suite', () => {
 		assert.deepStrictEqual(splitEngineArgs('--path=C:\\\\Users\\\\name'), ['--path=C:\\Users\\name']);
 	});
 
+	// Backslash before regular characters (Windows paths) should be preserved
+	test('splitEngineArgs preserves backslash before non-special characters', () => {
+		assert.deepStrictEqual(splitEngineArgs('--path=C:\\Users\\name'), ['--path=C:\\Users\\name']);
+	});
+
 	// Empty input
 	test('splitEngineArgs handles empty and whitespace-only input', () => {
 		assert.deepStrictEqual(splitEngineArgs(''), []);
