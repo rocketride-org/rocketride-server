@@ -53,6 +53,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
+from nodes.library.internet.ssrf_guard import validate_url
+
 
 class McpProtocolError(RuntimeError):
     pass
@@ -89,6 +91,7 @@ class McpStreamableHttpClient:
         self._endpoint = str(endpoint).strip()
         if not self._endpoint:
             raise ValueError('endpoint is required')
+        validate_url(self._endpoint)
 
         self._timeout_s = float(timeout_s)
         self._protocol_version = protocol_version
@@ -357,4 +360,3 @@ def _match_jsonrpc_id(msg: dict, *, req_id: int) -> Any | None:  # noqa: ANN401
         message = msg['error'].get('message')
         raise McpProtocolError(f'MCP error (id={req_id}) code={code} message={message}')
     return msg.get('result')
-
