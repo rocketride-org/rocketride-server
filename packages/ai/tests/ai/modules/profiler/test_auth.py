@@ -8,7 +8,14 @@ Verifies that:
 """
 
 import asyncio
+import sys
 from unittest.mock import MagicMock
+
+# Stub runtime-only modules so the profiler can be imported in a test context
+# without the full server stack. These are scoped to this file only.
+for _mod_name in ('depends', 'rocketride', 'rocketride.core'):
+    if _mod_name not in sys.modules:
+        sys.modules[_mod_name] = MagicMock()
 
 from ai.modules.profiler.profile import WebServerProfiler
 from ai.modules.profiler import _setup_profiling_endpoints
