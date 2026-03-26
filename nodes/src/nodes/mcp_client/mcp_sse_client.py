@@ -50,6 +50,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from nodes.library.internet.ssrf_guard import validate_url
+
 
 class McpProtocolError(RuntimeError):
     pass
@@ -77,6 +79,7 @@ class McpSseClient:
         self._sse_endpoint = str(sse_endpoint).strip()
         if not self._sse_endpoint:
             raise ValueError('sse_endpoint is required')
+        validate_url(self._sse_endpoint)
 
         self._timeout_s = float(timeout_s)
         self._protocol_version = protocol_version
@@ -89,7 +92,7 @@ class McpSseClient:
 
         self._reader_thread: threading.Thread | None = None
         self._stop = threading.Event()
-        self._incoming: "queue.Queue[dict]" = queue.Queue()
+        self._incoming: 'queue.Queue[dict]' = queue.Queue()
         self._endpoint_url: str | None = None
         self._resp = None
 
@@ -310,6 +313,10 @@ class McpSseClient:
             # The server provides a relative URL; resolve against the SSE origin.
             base = self._origin(self._sse_endpoint)
             self._endpoint_url = urllib.parse.urljoin(base, data)
+            try:
+                validate_url(self._endpoint_url)
+            except ValueError as exc:
+                raise McpProtocolError(f'Server-supplied endpoint failed SSRF check: {exc}') from exc
             return
 
         if event != 'message':
@@ -337,4 +344,3 @@ class McpSseClient:
             scheme = p2.scheme
             netloc = p2.netloc
         return f'{scheme}://{netloc}'
-
