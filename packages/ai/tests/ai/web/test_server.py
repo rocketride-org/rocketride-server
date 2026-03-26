@@ -11,50 +11,67 @@ import pytest
 # pulls in so we can import the module without a full runtime environment.
 # ---------------------------------------------------------------------------
 
+_INJECTED_MODULES: list[str] = []
+
+
+def _inject(name: str, module: object) -> None:
+    """Insert *module* into sys.modules under *name* if absent, tracking it."""
+    if name not in sys.modules:
+        sys.modules[name] = module  # type: ignore[assignment]
+        _INJECTED_MODULES.append(name)
+
+
 # rocketride constants
 _mock_rocketride = MagicMock()
 _mock_rocketride.CONST_WS_PING_INTERVAL = 20
 _mock_rocketride.CONST_WS_PING_TIMEOUT = 20
-sys.modules.setdefault('rocketride', _mock_rocketride)
+_inject('rocketride', _mock_rocketride)
 
 # depends (used transitively by ai.web.__init__)
-sys.modules.setdefault('depends', MagicMock())
+_inject('depends', MagicMock())
 
 # ai.account and its sub-modules (ai.web.__init__ imports ai.account.account)
 _mock_ai_account = MagicMock()
-sys.modules.setdefault('ai.account', _mock_ai_account)
-sys.modules.setdefault('ai.account.account', _mock_ai_account)
+_inject('ai.account', _mock_ai_account)
+_inject('ai.account.account', _mock_ai_account)
 
 # ai.web.response (ai.web.__init__ imports from ai.web.response)
-sys.modules.setdefault('ai.web.response', MagicMock())
+_inject('ai.web.response', MagicMock())
 
 # ai.web.middleware
-sys.modules.setdefault('ai.web.middleware', MagicMock())
+_inject('ai.web.middleware', MagicMock())
 
 # ai.web.endpoints — provide attribute stubs the import line expects
 _mock_endpoints = MagicMock()
 for _name in ('use', 'ping', 'version', 'shutdown', 'status'):
     setattr(_mock_endpoints, _name, MagicMock())
-sys.modules.setdefault('ai.web.endpoints', _mock_endpoints)
+_inject('ai.web.endpoints', _mock_endpoints)
 
 # ai.web.denied (server.py imports from .denied)
-sys.modules.setdefault('ai.web.denied', MagicMock())
+_inject('ai.web.denied', MagicMock())
 
 # ai.constants
 _mock_constants = MagicMock()
 _mock_constants.CONST_DEFAULT_WEB_PORT = 5565
-_mock_constants.CONST_DEFAULT_WEB_HOST = '0.0.0.0'
+_mock_constants.CONST_DEFAULT_WEB_HOST = '127.0.0.1'
 _mock_constants.CONST_WEB_WS_MAX_SIZE = 16 * 1024 * 1024
-sys.modules.setdefault('ai.constants', _mock_constants)
+_inject('ai.constants', _mock_constants)
 
 # dotenv
-sys.modules.setdefault('dotenv', MagicMock())
+_inject('dotenv', MagicMock())
 
 # uvicorn
-sys.modules.setdefault('uvicorn', MagicMock())
+_inject('uvicorn', MagicMock())
 
 # Now we can safely import the module under test
 from ai.web.server import ALLOWED_MODULES, WebServer
+
+
+def teardown_module() -> None:
+    """Remove injected mocks from sys.modules to avoid leaking into other tests."""
+    for name in _INJECTED_MODULES:
+        sys.modules.pop(name, None)
+    _INJECTED_MODULES.clear()
 
 
 # ============================================================================
@@ -89,7 +106,7 @@ class TestAllowedModules:
 # ============================================================================
 
 
-def _make_server():
+def _make_server() -> WebServer:
     """Build a minimal WebServer-like object suitable for testing use()."""
     server = object.__new__(WebServer)
     server.app = SimpleNamespace(state=SimpleNamespace(modules={}))
@@ -133,8 +150,10 @@ class TestUseMethod:
     @patch('ai.web.server.importlib.import_module')
     def test_use_does_not_reload_already_loaded_module(self, mock_import):
         server = _make_server()
-        server.app.state.modules['chat'] = MagicMock()
+        cached_module = MagicMock(initModule=MagicMock())
+        server.app.state.modules['chat'] = cached_module
 
         server.use('chat')
 
         mock_import.assert_not_called()
+        cached_module.initModule.assert_not_called()
