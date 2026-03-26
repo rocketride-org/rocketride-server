@@ -43,7 +43,6 @@ import { PipelineFileParser, ParsedPipelineFile, ParsedSourceComponent } from '.
 import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
 import { GenericEvent, GenericResponse } from '../shared/types';
-import { resolvePipelineCommandUri, resolvePipelineSourceComponentId } from './sidebarCommandContext';
 
 /** Parsed location from structured error format (ErrorType*`message`*filepath:linenumber) */
 export interface ParsedErrWarnLine {
@@ -220,13 +219,9 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					const pipelineTransformed = ConfigManager.getInstance().substituteEnvVariables(pipelineJson);
 
 					// Get project and source identifiers
-					const parsedFile = item?.parsedFile || this.getParsedPipeline(resourceUri);
-					const projectId = parsedFile?.projectId;
-					const sourceId = resolvePipelineSourceComponentId(
-						item?.sourceComponent?.id,
-						parsedFile?.pipeline?.source,
-						parsedFile?.sourceComponents
-					) || '';
+					const context = this.resolveKnownPipelineCommandContext(item, resourceUri);
+					const projectId = context?.parsedPipeline?.projectId;
+					const sourceId = context?.componentId ?? '';
 
 					// Use DAP command to execute pipeline without debugging
 					await this.connectionManager.request('execute', {
@@ -328,21 +323,27 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	}
 
 	private resolveCommandResourceUri(item?: PipelineFileItem): vscode.Uri | undefined {
-		return resolvePipelineCommandUri(item?.resourceUri, vscode.window.activeTextEditor?.document.uri, this.getActivePipelineEditorUri());
-	}
-
-	private getActivePipelineEditorUri(): vscode.Uri | undefined {
-		const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
-		if (!activeTab) {
-			return undefined;
+		if (item?.resourceUri) {
+			return item.resourceUri;
 		}
 
-		const input = activeTab.input;
-		if (input instanceof vscode.TabInputText || input instanceof vscode.TabInputCustom) {
-			return input.uri;
+		const activeEditorUri = vscode.window.activeTextEditor?.document.uri;
+		if (activeEditorUri && this.isPipelineUri(activeEditorUri)) {
+			return activeEditorUri;
+		}
+
+		const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+		if (activeTab instanceof vscode.TabInputText || activeTab instanceof vscode.TabInputCustom) {
+			if (this.isPipelineUri(activeTab.uri)) {
+				return activeTab.uri;
+			}
 		}
 
 		return undefined;
+	}
+
+	private isPipelineUri(uri: vscode.Uri): boolean {
+		return uri.fsPath.endsWith('.pipe') || uri.fsPath.endsWith('.pipe.json');
 	}
 
 	private resolveKnownPipelineCommandContext(
@@ -361,11 +362,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			return undefined;
 		}
 
-		const componentId = resolvePipelineSourceComponentId(
-			item?.sourceComponent?.id,
-			parsedPipeline.pipeline?.source,
-			parsedPipeline.sourceComponents
-		);
+		const componentId = item?.sourceComponent?.id ?? parsedPipeline.pipeline?.source ?? parsedPipeline.sourceComponents?.[0]?.id;
 		const sourceComponent = componentId ? item?.sourceComponent || this.getSourceComponentById(resourceUri, componentId) : undefined;
 		const services = this.connectionManager.getCachedServices()?.services ?? {};
 		const providerDef = sourceComponent?.provider ? (services[sourceComponent.provider] as { title?: string } | undefined) : undefined;
