@@ -467,6 +467,9 @@ class Store(DocumentStoreBase):
         if not self.doesCollectionExist():
             return
 
+        if not objectIds:
+            return
+
         objectIdsFilter: List[Filter] = []
         for objectId in objectIds:
             objectIdsFilter.append(Filter.by_property('objectId').equal(objectId))
@@ -482,6 +485,9 @@ class Store(DocumentStoreBase):
         # By definition, if the collection does not exists, there
         # is nothing to mark
         if not self.doesCollectionExist():
+            return
+
+        if not objectIds:
             return
 
         objectIdsFilter: List[Filter] = []
@@ -506,6 +512,9 @@ class Store(DocumentStoreBase):
         # By definition, if the collection does not exists, there
         # is nothing to mark
         if not self.doesCollectionExist():
+            return
+
+        if not objectIds:
             return
 
         objectIdsFilter: List[Filter] = []
