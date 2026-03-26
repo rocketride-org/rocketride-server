@@ -28,6 +28,7 @@ from typing import Dict, Any, List
 import requests
 from rocketlib import configureLogger, IGlobalBase, monitorStatus, IJson, Lvl
 from ai.common.config import Config
+from nodes.library.internet.ssrf_guard import validate_url
 
 
 class IGlobal(IGlobalBase):
@@ -66,6 +67,9 @@ class IGlobal(IGlobalBase):
         # Build the URLs to access the pipe
         self.urlControl = f'http://{self._host}:{self._port}/remote?pipe={self._pipeId}'
         self.urlProcess = f'ws://{self._host}:{self._port}/remote/pipe?pipe={self._pipeId}'
+
+        # SSRF protection: validate the remote host before making any requests
+        validate_url(self.urlControl)
 
         # Update the monitor
         monitorStatus('Loading remote pipe')
