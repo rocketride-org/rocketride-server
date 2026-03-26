@@ -204,8 +204,11 @@ export default function Canvas(): ReactElement {
 		const endpointNote = note as IEndpointInfo;
 		return /web[\s-]?hook/i.test(endpointNote['url-link']) || /web[\s-]?hook/i.test(endpointNote['url-text'] ?? '');
 	}) as [string, { notes: [IEndpointInfo] }][];
-	const firstEndpointNodeId = endpointEntries[0]?.[0];
-	const firstEndpointInfo = endpointEntries[0]?.[1]?.notes?.[0] ?? null;
+
+	const selectedNodeIds = new Set(nodes.filter((node) => node.selected).map((node) => node.id));
+	const activeEndpointEntry = endpointEntries.find(([nodeId]) => selectedNodeIds.has(nodeId)) ?? (endpointEntries.length === 1 ? endpointEntries[0] : undefined);
+	const activeEndpointNodeId = activeEndpointEntry?.[0];
+	const activeEndpointInfo = activeEndpointEntry?.[1]?.notes?.[0] ?? null;
 
 	// Close create panel when config panel opens
 	useEffect(() => {
@@ -325,10 +328,10 @@ export default function Canvas(): ReactElement {
 					</IconButton>
 				</Tooltip>
 
-				{/* Webhook quick access */}
-				<Tooltip title={firstEndpointInfo ? 'Open webhook endpoint' : 'Run a webhook source to expose endpoint info'}>
+				{/* Webhook quick access — uses selected source when multiple webhooks exist */}
+				<Tooltip title={activeEndpointInfo ? 'Open webhook endpoint info' : endpointEntries.length > 1 ? 'Select a webhook source on the canvas to open its endpoint info' : 'Run a webhook source to expose endpoint info'}>
 					<span>
-						<IconButton onClick={() => setIsWebhookModalOpen(true)} size="small" sx={iconButtonSx} disabled={!firstEndpointInfo}>
+						<IconButton onClick={() => setIsWebhookModalOpen(true)} size="small" sx={iconButtonSx} disabled={!activeEndpointInfo}>
 							<WebhookIcon fontSize="small" />
 						</IconButton>
 					</span>
@@ -392,7 +395,7 @@ export default function Canvas(): ReactElement {
 					</span>
 				}
 			/>
-			<EndpointInfoModal endpointInfo={firstEndpointInfo} isOpen={isWebhookModalOpen && !!firstEndpointInfo} onClose={() => setIsWebhookModalOpen(false)} onOpenLink={onOpenLink} displayName={firstEndpointNodeId} host={serverHost} />
+			<EndpointInfoModal endpointInfo={activeEndpointInfo} isOpen={isWebhookModalOpen && !!activeEndpointInfo} onClose={() => setIsWebhookModalOpen(false)} onOpenLink={onOpenLink} displayName={activeEndpointNodeId} host={serverHost} />
 		</div>
 	);
 }

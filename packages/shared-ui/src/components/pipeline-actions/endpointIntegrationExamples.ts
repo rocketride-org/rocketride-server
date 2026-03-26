@@ -9,7 +9,7 @@
  * endpoints (chat/dropper) where auth can be passed as `?auth=` on the URL.
  */
 
-export type IntegrationTabId = 'curl' | 'wget' | 'typescript' | 'python' | 'http';
+export type IntegrationTabId = 'curl' | 'curlCmd' | 'powershell' | 'wget' | 'typescript' | 'python' | 'http';
 
 /** Appends `?auth=` (or `&auth=`) so integrations can use the full URL without an Authorization header. */
 export function appendAuthQueryParam(url: string, authKey: string): string {
@@ -42,6 +42,8 @@ export function buildIntegrationExamples({ endpointUrl, authKey, isWebhook }: IB
 	const urlWithAuth = appendAuthQueryParam(endpointUrl, authKey);
 	const { host, pathWithQuery } = parseHttpUrl(endpointUrl);
 	const jsonOneLine = '{"event":"test","message":"hello"}';
+	/** Escape double quotes for JSON inside CMD `curl.exe ... -d "..."` */
+	const jsonOneLineCmd = jsonOneLine.replace(/"/g, '\\"');
 
 	if (isWebhook) {
 		const curlBash = `curl -X POST "${endpointUrl}" \\
@@ -49,11 +51,11 @@ export function buildIntegrationExamples({ endpointUrl, authKey, isWebhook }: IB
   -H "Authorization: Bearer ${authKey}" \\
   -d '${jsonOneLine}'`;
 
-		const curlWindows = `REM Use curl.exe so PowerShell does not treat "curl" as Invoke-WebRequest
+		const curlCmdOnly = `REM Use curl.exe so cmd does not use a PowerShell alias
 curl.exe -X POST "${endpointUrl}" ^
   -H "Content-Type: application/json" ^
   -H "Authorization: Bearer ${authKey}" ^
-  -d "${jsonOneLine}"`;
+  -d "${jsonOneLineCmd}"`;
 
 		const psInvoke = `$headers = @{
   Authorization = "Bearer ${authKey}"
@@ -62,16 +64,10 @@ $body = '${jsonOneLine}'
 Invoke-RestMethod -Uri "${endpointUrl}" -Method Post -Headers $headers -ContentType "application/json" -Body $body`;
 
 		return {
-			curl: `Bash / macOS / Linux
-${curlBash}
-
-Windows CMD (line continuation with ^)
-${curlWindows}
-
-Windows PowerShell (Invoke-RestMethod)
-${psInvoke}`,
-			wget: `GNU wget (POST + JSON)
-wget -qO- --method=POST "${endpointUrl}" \\
+			curl: curlBash,
+			curlCmd: curlCmdOnly,
+			powershell: psInvoke,
+			wget: `wget -qO- --method=POST "${endpointUrl}" \\
   --header='Content-Type: application/json' \\
   --header='Authorization: Bearer ${authKey}' \\
   --body-data='${jsonOneLine}'`,
@@ -106,17 +102,17 @@ ${jsonOneLine}`,
 
 	const getPath = parseHttpUrl(urlWithAuth);
 	const curlUiBash = `curl -sS "${urlWithAuth}"`;
-	const curlUiWin = `curl.exe -sS "${urlWithAuth}"`;
+	const curlUiCmd = `REM URL already includes ?auth= — no Authorization header needed
+curl.exe -sS "${urlWithAuth}"`;
+	const psUiGet = `Invoke-RestMethod -Uri '${urlWithAuth.replace(/'/g, "''")}' -Method Get`;
 
 	return {
-		curl: `Open in browser (URL includes auth via query — no header needed):
-${urlWithAuth}
+		curl: `# Open in browser (optional — URL includes auth):
+# ${urlWithAuth}
 
-Bash / macOS / Linux
-${curlUiBash}
-
-Windows
-${curlUiWin}`,
+${curlUiBash}`,
+		curlCmd: curlUiCmd,
+		powershell: psUiGet,
 		wget: `wget -qO- "${urlWithAuth}"`,
 		typescript: `// Open UI with auth in the URL (recommended for embedded apps)
 window.open("${urlWithAuth}", "_blank");

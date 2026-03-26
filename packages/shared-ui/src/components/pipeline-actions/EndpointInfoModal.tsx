@@ -54,10 +54,12 @@ function processEndpointInfo(info: IEndpointInfo, host?: string): IEndpointInfo 
 
 const MASKED_VALUE = '•••••••••••••••••••';
 
-const TAB_ORDER: IntegrationTabId[] = ['curl', 'wget', 'typescript', 'python', 'http'];
+const TAB_ORDER: IntegrationTabId[] = ['curl', 'curlCmd', 'powershell', 'wget', 'typescript', 'python', 'http'];
 
 const TAB_LABELS: Record<IntegrationTabId, string> = {
-	curl: 'cURL',
+	curl: 'cURL (Bash)',
+	curlCmd: 'cURL (cmd)',
+	powershell: 'PowerShell',
 	wget: 'wget',
 	typescript: 'TypeScript',
 	python: 'Python',
