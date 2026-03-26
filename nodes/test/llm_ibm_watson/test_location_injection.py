@@ -20,7 +20,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_MOD_PATH = os.path.join(_HERE, 'ibm_watson.py')
+_MOD_PATH = os.path.join(_HERE, '..', '..', 'src', 'nodes', 'llm_ibm_watson', 'ibm_watson.py')
 
 
 def _load_validate_location():
