@@ -71,6 +71,17 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 	if (!endpointInfo || !isOpen) return null;
 
 	const processed = processEndpointInfo(endpointInfo, host);
+	const endpointUrl = processed['url-link'];
+	const isLocalEndpoint = /localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(endpointUrl);
+	const isChatEndpoint = /\/chat(?:\/|$)/i.test(endpointUrl) || /chat/i.test(processed['url-text'] ?? '') || /chat/i.test(processed['button-text'] ?? '');
+	const isWebhookEndpoint = /web[\s-]?hook/i.test(endpointUrl) || /web[\s-]?hook/i.test(processed['url-text'] ?? '');
+	const curlExample = isWebhookEndpoint
+		? `curl -X POST "${endpointUrl}" \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer ${processed['auth-key']}" \\
+  -d '{"event":"test","message":"hello from curl"}'`
+		: `curl -X GET "${endpointUrl}" \\
+  -H "Authorization: Bearer ${processed['auth-key']}"`;
 
 	const handleCopy = (text: string, label: string) => {
 		navigator.clipboard
@@ -110,6 +121,11 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 				<div style={styles.body}>
 					{/* URL Section */}
 					<div style={styles.configItem}>
+						<div style={styles.envRow}>
+							<span style={styles.envLabel}>Environment</span>
+							<span style={isLocalEndpoint ? styles.envBadgeLocal : styles.envBadgeProd}>{isLocalEndpoint ? 'Local' : 'Production'}</span>
+						</div>
+						<div style={styles.envHint}>{isLocalEndpoint ? 'This endpoint points to a local host. Use a public tunnel/domain before integrating external webhook providers.' : 'This endpoint uses a non-local host and can be used for external webhook integrations.'}</div>
 						<div style={styles.configLabel}>{processed['url-text']}</div>
 						<div style={styles.configValueRow}>
 							<div style={styles.configValueLink}>
@@ -118,16 +134,16 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 									style={styles.link}
 									onClick={(e) => {
 										e.preventDefault();
-										onOpenLink?.(processed['url-link'], displayName);
+										onOpenLink?.(endpointUrl, displayName);
 									}}
 								>
-									{processed['url-link']}
+									{endpointUrl}
 								</a>
 							</div>
-							<button style={iconBtn('url')} onClick={() => handleCopy(processed['url-link'], 'url')}>
+							<button style={iconBtn('url')} onClick={() => handleCopy(endpointUrl, 'url')}>
 								{copyFeedback === 'url' ? 'Copied!' : 'Copy'}
 							</button>
-							<button style={styles.iconBtn} onClick={() => onOpenLink?.(processed['url-link'], displayName)}>
+							<button style={styles.iconBtn} onClick={() => onOpenLink?.(endpointUrl, displayName)}>
 								Open
 							</button>
 						</div>
@@ -167,6 +183,22 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 					<div style={styles.securityNote}>
 						<strong>Security:</strong> Keep your authentication credentials secure. Do not share them publicly or commit them to version control.
 					</div>
+
+					{!isChatEndpoint && (
+						<div style={styles.testBox}>
+							<div style={styles.testTitle}>Test with curl</div>
+							<div style={styles.envHint}>{isWebhookEndpoint ? 'Webhook endpoints typically accept POST JSON payloads.' : 'This endpoint is not detected as a webhook endpoint; generated command uses GET.'}</div>
+							<div style={styles.curlBlock}>{curlExample}</div>
+							<div style={styles.testActions}>
+								<button style={iconBtn('curl')} onClick={() => handleCopy(curlExample, 'curl')}>
+									{copyFeedback === 'curl' ? 'Copied!' : 'Copy curl'}
+								</button>
+								<button style={styles.iconBtn} onClick={() => onOpenLink?.('https://docs.rocketride.org/', 'Webhook Troubleshooting')}>
+									Troubleshooting
+								</button>
+							</div>
+						</div>
+					)}
 				</div>
 			</div>
 		</div>,
