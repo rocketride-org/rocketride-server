@@ -1,0 +1,24 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1
+
+RUN groupadd -r rocketride && useradd -r -g rocketride -d /app rocketride
+
+WORKDIR /app
+
+# Install MCP server + SSE dependencies
+COPY packages/client-mcp/ ./client-mcp/
+COPY packages/client-python/ ./client-python/
+
+RUN pip install --no-cache-dir \
+    ./client-python \
+    "./client-mcp[sse]"
+
+USER rocketride
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
+
+ENTRYPOINT ["python", "-m", "rocketride_mcp.sse_server", "--host", "0.0.0.0", "--port", "8080"]

@@ -184,10 +184,10 @@ class Store(DocumentStoreBase):
         must_conditions = []
 
         if docFilter.nodeId is not None:
-            (must_conditions.append(f"meta['nodeId'] == '{docFilter.nodeId}'"),)
+            must_conditions.append(f"meta['nodeId'] == '{docFilter.nodeId}'")
 
         if docFilter.isTable is not None:
-            (must_conditions.append(f"meta['isTable'] == '{docFilter.nodeId}'"),)
+            must_conditions.append(f"meta['isTable'] == {docFilter.isTable}")
 
         if docFilter.tableIds is not None:
             table_ids = ', '.join(map(str, docFilter.tableIds))
@@ -201,8 +201,8 @@ class Store(DocumentStoreBase):
             must_conditions.append(f"meta['permissionId'] in [{permission_ids}]")
 
         if docFilter.objectIds is not None:
-            object_ids = ', '.join(map(str, docFilter.objectIds))
-            must_conditions.append(f"meta['objectId'] in ['{object_ids}']")
+            object_ids = ', '.join(json.dumps(str(oid)) for oid in docFilter.objectIds)
+            must_conditions.append(f"meta['objectId'] in [{object_ids}]")
 
         # If we are not going after deleted docs, add a condition
         if docFilter.isDeleted is None or not docFilter.isDeleted:
@@ -472,11 +472,13 @@ class Store(DocumentStoreBase):
 
         # If a permissionId list was specified
         if objectIds:
-            objectIdsJoint = ', '.join(map(str, objectIds))
+            objectIdsJoint = ', '.join(json.dumps(str(oid)) for oid in objectIds)
             must_conditions.append(f"meta['objectId'] in [{objectIdsJoint}]")
 
         # TODO: Add time out
-        self.client.delete(collection_name=self.collection, filter=must_conditions)
+        filter_expression = ' and '.join(must_conditions) if must_conditions else None
+        if filter_expression:
+            self.client.delete(collection_name=self.collection, filter=filter_expression)
 
         return
 
@@ -495,10 +497,14 @@ class Store(DocumentStoreBase):
 
         # If a permissionId list was specified
         if objectIds:
-            objectIdsJoint = ', '.join(map(str, objectIds))
+            objectIdsJoint = ', '.join(json.dumps(str(oid)) for oid in objectIds)
             must_conditions.append(f"meta['objectId'] in [{objectIdsJoint}]")
 
-        results = self.client.query(collection_name=self.collection, filter=must_conditions)
+        filter_expression = ' and '.join(must_conditions) if must_conditions else None
+        if not filter_expression:
+            return
+
+        results = self.client.query(collection_name=self.collection, filter=filter_expression)
 
         # Update the 'isDeleted' field for each result -> TODO: Might there be a better way to do this? Looping over the
         # vecotrs can be a performance bottleneck and additionally whats the oint if all entries will be deleled shortly after?
@@ -523,10 +529,14 @@ class Store(DocumentStoreBase):
 
         # If a permissionId list was specified
         if objectIds:
-            objectIdsJoint = ', '.join(map(str, objectIds))
+            objectIdsJoint = ', '.join(json.dumps(str(oid)) for oid in objectIds)
             must_conditions.append(f"meta['objectId'] in [{objectIdsJoint}]")
 
-        results = self.client.query(collection_name=self.collection, filter=must_conditions)
+        filter_expression = ' and '.join(must_conditions) if must_conditions else None
+        if not filter_expression:
+            return
+
+        results = self.client.query(collection_name=self.collection, filter=filter_expression)
 
         # Update the 'isDeleted' field for each result -> TODO: Might there be a better way to do this? Looping over the
         # vecotrs can be a performance bottleneck and additionally whats the oint if all entries will be deleled shortly after?

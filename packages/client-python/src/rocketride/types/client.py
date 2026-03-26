@@ -42,20 +42,20 @@ These types are compatible with Python 3.8+ using native typing without extensio
 
 Usage:
     from rocketride.types import RocketRideClientConfig, EventCallback
-    
+
     # Type-safe configuration
     config: RocketRideClientConfig = {
         'auth': 'your_api_key',
         'uri': 'wss://server.example.com',
         'onEvent': my_event_handler
     }
-    
+
     # Type hints for callbacks
     async def handle_event(event: DAPMessage) -> None:
         print(f"Event: {event['event']}")
 """
 
-from typing import Any, Callable, Awaitable, TypedDict, Literal, Optional
+from typing import Any, Callable, Awaitable, TypedDict, Literal, Optional, Union
 
 
 class TraceInfo(TypedDict):
@@ -90,7 +90,7 @@ class DAPMessage(TypedDict, total=False):
     request_seq: int  # Sequence number of the request this response corresponds to
     event: str  # Event type name for event messages
     token: str  # Task or pipeline token for operation context
-    data: bytes | str  # Binary or text data payload
+    data: Union[bytes, str]  # Binary or text data payload
     trace: TraceInfo  # Stack trace information for errors
 
 
@@ -154,7 +154,7 @@ class RocketRideClientConfig(TypedDict, total=False):
     uri: str  # Server URI (will be converted to WebSocket URI automatically)
 
     # Environment variables for pipeline config substitution.
-    # If not provided, loads from .env file then falls back to os.environ.
+    # If not provided, loads values from `.env`.
     env: dict[str, str]
 
     # Callbacks

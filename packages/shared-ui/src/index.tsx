@@ -23,13 +23,10 @@
 
 /**
  * Main entry point for the shared-ui package.
- * Re-exports all public components and the Canvas module so consumers
- * can import everything from a single package path.
- * @module shared-ui
+ *
+ * Exports the Flow component (as Canvas) and all shared types.
  */
 
-// eslint-disable-next-line react-refresh/only-export-components
-export * from './components';
-export { default as Canvas } from './modules/canvas';
-export type { IProject, IValidateResponse } from './modules/project-canvas/types';
-export type { IDynamicForms } from './services/dynamic-forms/types';
+export { default as Canvas } from './modules/flow';
+export type { IFlowProps } from './modules/flow';
+export type { IProject, IValidateResponse, IServiceCatalog } from './types/project';

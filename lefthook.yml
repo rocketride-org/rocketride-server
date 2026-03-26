@@ -1,6 +1,9 @@
 pre-commit:
   parallel: true
   commands:
+    gitleaks:
+      tags: security
+      run: gitleaks protect --verbose --staged --config .gitleaks.toml || true
     eslint:
       glob: '*.{js,ts,jsx,tsx,mjs,cjs}'
       run: npx eslint {staged_files}

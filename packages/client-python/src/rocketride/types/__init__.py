@@ -44,14 +44,14 @@ Usage:
         TASK_STATUS,
         EventCallback
     )
-    
+
     # Type-safe client configuration
     config: RocketRideClientConfig = {
         'auth': 'your_api_key',
         'uri': 'wss://server.example.com',
         'on_event': my_event_handler
     }
-    
+
     # Type hints for better IDE support
     def handle_status(status: TASK_STATUS) -> None:
         print(f"Pipeline state: {status['state']}")
@@ -71,6 +71,7 @@ from .client import (
 
 from .pipeline import (
     PipelineInputConnection,
+    PipelineControlConnection,
     PipelineComponent,
     PipelineConfig,
 )
@@ -107,6 +108,7 @@ __all__ = [
     'TransportCallbacks',
     # Pipeline types
     'PipelineInputConnection',
+    'PipelineControlConnection',
     'PipelineComponent',
     'PipelineConfig',
     # Task types

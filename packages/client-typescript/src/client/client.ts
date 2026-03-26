@@ -414,7 +414,7 @@ export class RocketRideClient extends DAPClient {
 
 		try {
 			const url = new URL(httpUrl);
-			const wsScheme = url.protocol === 'https:' ? 'wss:' : 'ws:';
+			const wsScheme = (url.protocol === 'https:' || url.protocol === 'wss:') ? 'wss:' : 'ws:';
 			return `${wsScheme}//${url.host}/task/service`;
 		} catch {
 			return `${httpUrl}/task/service`;

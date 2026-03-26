@@ -545,7 +545,7 @@ async function contentHash(dirPath, options = {}) {
 
     const hash = crypto.createHash('sha256');
     for (const f of files) {
-        const content = await fsp.readFile(f.full);
+        const content = (await fsp.readFile(f.full, 'utf8')).replace(/\r/g, '');
         hash.update(f.rel);
         hash.update(content);
     }

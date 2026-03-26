@@ -13,17 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"embedding"
-	],
+	"classType": ["embedding"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"gpu"
-	],
+	"capabilities": ["gpu"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -51,14 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that transforms text into numerical vector representations using advanced embedding ",
-		"models. It converts input text—ranging from individual words to entire documents—into high-dimensional ",
-		"vectors that capture semantic meaning and relationships. These embeddings enable efficient similarity ",
-		"searches, clustering, and other advanced natural language processing tasks. The text embedder is highly ",
-		"configurable, supporting various pre-trained models and fine-tuning options, ensuring flexibility for ",
-		"different use cases across domains."
-	],
+	"description": ["A component that transforms text into numerical vector representations using advanced embedding ", "models. It converts input text—ranging from individual words to entire documents—into high-dimensional ", "vectors that capture semantic meaning and relationships. These embeddings enable efficient similarity ", "searches, clustering, and other advanced natural language processing tasks. The text embedder is highly ", "configurable, supporting various pre-trained models and fine-tuning options, ensuring flexibility for ", "different use cases across domains."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -75,12 +64,8 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"documents": [
-			"documents"
-		],
-		"questions": [
-			"questions"
-		]
+		"documents": ["documents"],
+		"questions": ["questions"]
 	},
 	"input": [
 		{
@@ -152,27 +137,18 @@
 		"embedding.custom": {
 			"object": "custom",
 			"title": "",
-			"properties": [
-				"embedding.model",
-				"embedding.truncate_dim",
-				"embedding.document_prefix",
-				"embedding.query_prefix"
-			]
+			"properties": ["embedding.model", "embedding.truncate_dim", "embedding.document_prefix", "embedding.query_prefix"]
 		},
 		"embedding.profile": {
 			"title": "Model",
 			"description": "Embedding model",
 			"type": "string",
 			"default": "miniLM",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": [
-						"embedding.custom"
-					]
+					"properties": ["embedding.custom"]
 				}
 			]
 		},
@@ -191,9 +167,7 @@
 		{
 			"section": "Pipe",
 			"title": "Sentence Transformer",
-			"properties": [
-				"embedding.profile"
-			]
+			"properties": ["embedding.profile"]
 		}
 	],
 	//
@@ -205,10 +179,7 @@
 		"cases": [
 			{
 				"name": "Embed text chunks",
-				"documents": [
-					{"page_content": "Hello world, this is a test document."},
-					{"page_content": "Second chunk for embedding."}
-				],
+				"documents": [{ "page_content": "Hello world, this is a test document." }, { "page_content": "Second chunk for embedding." }],
 				"expect": {
 					"documents": {
 						"notEmpty": true
@@ -236,41 +207,36 @@
 	//	Full test configuration - tests all sentence-transformer profiles.
 	//	Run via: builder model_server:fulltest
 	//
-	"fulltest": {
-		"profiles": [
-			"miniLM",
-			"miniAll",
-			"mpnet"
-		],
-		"outputs": ["documents", "questions"],
-		"cases": [
-			{
-				"name": "Embed text chunks",
-				"documents": [
-					{"page_content": "Hello world, this is a test document."},
-					{"page_content": "Second chunk for embedding."}
-				],
-				"expect": {
-					"documents": {
-						"notEmpty": true
+	"fulltest": [
+		{
+			"profiles": ["miniLM", "miniAll", "mpnet"],
+			"outputs": ["documents", "questions"],
+			"cases": [
+				{
+					"name": "Embed text chunks",
+					"documents": [{ "page_content": "Hello world, this is a test document." }, { "page_content": "Second chunk for embedding." }],
+					"expect": {
+						"documents": {
+							"notEmpty": true
+						}
+					}
+				},
+				{
+					"name": "Embed single question (flat vector for Qdrant)",
+					"questions": "What is the capital of France?",
+					"expect": {
+						"questions": {
+							"notEmpty": true,
+							"property": [
+								{
+									"path": "[0].questions[0].embedding",
+									"minLength": 384
+								}
+							]
+						}
 					}
 				}
-			},
-			{
-				"name": "Embed single question (flat vector for Qdrant)",
-				"questions": "What is the capital of France?",
-				"expect": {
-					"questions": {
-						"notEmpty": true,
-						"property": [
-							{
-								"path": "[0].questions[0].embedding",
-								"minLength": 384
-							}
-						]
-					}
-				}
-			}
-		]
-	}
+			]
+		}
+	]
 }

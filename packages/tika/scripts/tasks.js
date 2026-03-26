@@ -147,6 +147,26 @@ function makeBuildTikaJarAction(options = {}) {
     };
 }
 
+function makeTestDbgconnAction() {
+    const buildDbgconnDir = path.join(BUILD_DIR, 'lib', 'dbgconn');
+
+    return {
+        run: async (_ctx, task) => {
+            await execMaven(['test', '-q'], { task, cwd: buildDbgconnDir });
+        }
+    };
+}
+
+function makeTestTikaJarAction() {
+    const buildTikaDir = path.join(BUILD_DIR, 'lib', 'tika');
+
+    return {
+        run: async (_ctx, task) => {
+            await execMaven(['test', '-q'], { task, cwd: buildTikaDir });
+        }
+    };
+}
+
 function makeCopyTikaOutputsAction(options = {}) {
     const buildDbgconnDir = path.join(BUILD_DIR, 'lib', 'dbgconn');
     const buildTikaDir = path.join(BUILD_DIR, 'lib', 'tika');
@@ -211,6 +231,8 @@ module.exports = {
         { name: 'tika:build-dbgconn', action: makeBuildDbgconnAction },
         { name: 'tika:build-jar', action: makeBuildTikaJarAction },
         { name: 'tika:sync', action: makeCopyTikaOutputsAction },
+        { name: 'tika:test-dbgconn', action: makeTestDbgconnAction },
+        { name: 'tika:test-jar', action: makeTestTikaJarAction },
 
         // Submodule actions (called by server:build-core / server:clean-all)
         { name: 'tika:submodule-build', action: () => ({
@@ -223,6 +245,15 @@ module.exports = {
                 ], 'Build Java modules'),
                 'tika:sync'
             ]
+        })},
+        { name: 'tika:submodule-test', action: () => ({
+            steps: [
+                'tika:submodule-build',
+                parallel([
+                    'tika:test-dbgconn',
+                    'tika:test-jar'
+                ], 'Test Java modules')
+            ]                
         })},
         { name: 'tika:submodule-clean', action: () => ({
             run: async (ctx, task) => {
