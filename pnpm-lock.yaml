@@ -107,7 +107,7 @@ importers:
         version: 4.0.1
       rocketride:
         specifier: workspace:*
-        version: link:../vscode
+        version: link:../../packages/client-typescript
       web-vitals:
         specifier: ^5.1.0
         version: 5.1.0
@@ -195,7 +195,7 @@ importers:
         version: 4.0.1
       rocketride:
         specifier: workspace:*
-        version: link:../vscode
+        version: link:../../packages/client-typescript
       web-vitals:
         specifier: ^5.1.0
         version: 5.1.0
@@ -268,7 +268,7 @@ importers:
         version: 4.1.2
       rocketride:
         specifier: workspace:*
-        version: 'link:'
+        version: link:../../packages/client-typescript
       shared:
         specifier: workspace:*
         version: link:../../packages/shared-ui

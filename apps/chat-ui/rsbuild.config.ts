@@ -1,6 +1,6 @@
 import { defineConfig, loadEnv } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
-import { pluginTypeCheck } from '@rsbuild/plugin-type-check';
+
 
 export default defineConfig(({ command }) => {
 	const isDev = command === 'dev';
@@ -17,7 +17,6 @@ export default defineConfig(({ command }) => {
 		},
 		plugins: [
 			pluginReact(),
-			pluginTypeCheck()
 		],
 
 		html: {
