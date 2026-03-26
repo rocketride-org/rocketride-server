@@ -8,6 +8,7 @@ concurrency:
 permissions:
   contents: write
   packages: write
+  id-token: write
 
 on:
   schedule:
@@ -26,6 +27,7 @@ jobs:
       full_version: ${{ needs.init.outputs.full_server_version }}
       build_hash: ${{ needs.init.outputs.build_hash }}
       build_stamp: ${{ needs.init.outputs.build_stamp }}
+      nodownload: true
       package: true
       retention_days: 3
     secrets: inherit

@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"image"
-	],
+	"classType": ["image"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"gpu"
-	],
+	"capabilities": ["gpu"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,13 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that extracts machine-readable text from images and scanned documents ",
-		"using optical character recognition. It enables the transformation of visual content—such ",
-		"as PDFs, screenshots, and photos—into structured text for further analysis and processing. ",
-		"Supporting various image formats and multilingual text, the component is ideal for digitizing ",
-		"printed materials, enabling search, indexing, and downstream natural language tasks."
-	],
+	"description": ["A component that extracts machine-readable text from images and scanned documents ", "using optical character recognition. It enables the transformation of visual content—such ", "as PDFs, screenshots, and photos—into structured text for further analysis and processing. ", "Supporting various image formats and multilingual text, the component is ideal for digitizing ", "printed materials, enabling search, indexing, and downstream natural language tasks."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -73,21 +63,15 @@
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": [
-	],
+	"tile": [],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"documents": [
-			"text"
-		],
-		"image": [
-			"text",
-			"table"
-		]
+		"documents": ["text"],
+		"image": ["text", "table"]
 	},
 	"input": [
 		{
@@ -116,81 +100,81 @@
 	//		itself
 	//
 	"preconfig": {
-	  "default": "latin",
-	  "profiles": {
-		"latin": {
-		  "title": "Latin (English)",
-		  "engine": "easyocr",
-		  "script_family": "latin",
-		  "table_engine": "doctr"
-		},
-		"latin-extended": {
-		  "title": "Latin Extended (European)",
-		  "engine": "easyocr",
-		  "script_family": "latin-extended",
-		  "table_engine": "doctr"
-		},
-		"cyrillic": {
-		  "title": "Cyrillic (Russian, etc.)",
-		  "engine": "easyocr",
-		  "script_family": "cyrillic",
-		  "table_engine": "doctr"
-		},
-		"arabic": {
-		  "title": "Arabic/Persian/Urdu",
-		  "engine": "easyocr",
-		  "script_family": "arabic",
-		  "table_engine": "doctr"
-		},
-		"devanagari": {
-		  "title": "Devanagari (Hindi, etc.)",
-		  "engine": "easyocr",
-		  "script_family": "devanagari",
-		  "table_engine": "doctr"
-		},
-		"chinese-simplified": {
-		  "title": "Chinese (Simplified)",
-		  "engine": "easyocr",
-		  "script_family": "chinese-simplified",
-		  "table_engine": "doctr"
-		},
-		"chinese-traditional": {
-		  "title": "Chinese (Traditional)",
-		  "engine": "easyocr",
-		  "script_family": "chinese-traditional",
-		  "table_engine": "doctr"
-		},
-		"japanese": {
-		  "title": "Japanese",
-		  "engine": "easyocr",
-		  "script_family": "japanese",
-		  "table_engine": "doctr"
-		},
-		"korean": {
-		  "title": "Korean",
-		  "engine": "easyocr",
-		  "script_family": "korean",
-		  "table_engine": "doctr"
-		},
-		"doctr": {
-		  "title": "DocTR (Language-agnostic)",
-		  "engine": "doctr",
-		  "script_family": "latin",
-		  "table_engine": "doctr"
-		},
-		"surya": {
-		  "title": "Surya (Multi-language)",
-		  "engine": "surya",
-		  "script_family": "latin",
-		  "table_engine": "surya"
-		},
-		"trocr": {
-		  "title": "TrOCR (Transformer)",
-		  "engine": "trocr",
-		  "script_family": "latin",
-		  "table_engine": "doctr"
+		"default": "latin",
+		"profiles": {
+			"latin": {
+				"title": "Latin (English)",
+				"engine": "easyocr",
+				"script_family": "latin",
+				"table_engine": "doctr"
+			},
+			"latin-extended": {
+				"title": "Latin Extended (European)",
+				"engine": "easyocr",
+				"script_family": "latin-extended",
+				"table_engine": "doctr"
+			},
+			"cyrillic": {
+				"title": "Cyrillic (Russian, etc.)",
+				"engine": "easyocr",
+				"script_family": "cyrillic",
+				"table_engine": "doctr"
+			},
+			"arabic": {
+				"title": "Arabic/Persian/Urdu",
+				"engine": "easyocr",
+				"script_family": "arabic",
+				"table_engine": "doctr"
+			},
+			"devanagari": {
+				"title": "Devanagari (Hindi, etc.)",
+				"engine": "easyocr",
+				"script_family": "devanagari",
+				"table_engine": "doctr"
+			},
+			"chinese-simplified": {
+				"title": "Chinese (Simplified)",
+				"engine": "easyocr",
+				"script_family": "chinese-simplified",
+				"table_engine": "doctr"
+			},
+			"chinese-traditional": {
+				"title": "Chinese (Traditional)",
+				"engine": "easyocr",
+				"script_family": "chinese-traditional",
+				"table_engine": "doctr"
+			},
+			"japanese": {
+				"title": "Japanese",
+				"engine": "easyocr",
+				"script_family": "japanese",
+				"table_engine": "doctr"
+			},
+			"korean": {
+				"title": "Korean",
+				"engine": "easyocr",
+				"script_family": "korean",
+				"table_engine": "doctr"
+			},
+			"doctr": {
+				"title": "DocTR (Language-agnostic)",
+				"engine": "doctr",
+				"script_family": "latin",
+				"table_engine": "doctr"
+			},
+			"surya": {
+				"title": "Surya (Multi-language)",
+				"engine": "surya",
+				"script_family": "latin",
+				"table_engine": "surya"
+			},
+			"trocr": {
+				"title": "TrOCR (Transformer)",
+				"engine": "trocr",
+				"script_family": "latin",
+				"table_engine": "doctr"
+			}
 		}
-	  }
 	},
 	// Optional:
 	//		Local fields defintions - these define fields only for the
@@ -236,32 +220,14 @@
 			"title": "Detection Architecture (DocTR)",
 			"description": "Choose the architecture used for table text detection.\n Documentation: https://mindee.github.io/doctr/latest/using_doctr/using_models.html",
 			"default": "db_resnet50",
-			"enum": [
-				"linknet_resnet18",
-				"linknet_resnet34",
-				"linknet_resnet50",
-				"db_resnet50",
-				"db_mobilenet_v3_large",
-				"fast_tiny",
-				"fast_small",
-				"fast_base"
-			]
+			"enum": ["linknet_resnet18", "linknet_resnet34", "linknet_resnet50", "db_resnet50", "db_mobilenet_v3_large", "fast_tiny", "fast_small", "fast_base"]
 		},
 		"ocr.reco_arch": {
 			"type": "string",
 			"title": "Recognition Architecture (DocTR)",
 			"description": "Choose the architecture used for table text recognition.\n Documentation: https://mindee.github.io/doctr/latest/using_doctr/using_models.html",
 			"default": "crnn_vgg16_bn",
-			"enum": [
-				"crnn_vgg16_bn",
-				"crnn_mobilenet_v3_small",
-				"crnn_mobilenet_v3_large",
-				"sar_resnet31",
-				"master",
-				"vitstr_small",
-				"vitstr_base",
-				"parseq"
-			]
+			"enum": ["crnn_vgg16_bn", "crnn_mobilenet_v3_small", "crnn_mobilenet_v3_large", "sar_resnet31", "master", "vitstr_small", "vitstr_base", "parseq"]
 		},
 		"ocr.table_engine": {
 			"type": "string",
@@ -276,27 +242,20 @@
 		},
 		"ocr.easyocr_options": {
 			"object": "easyocr_options",
-			"properties": [
-				"ocr.script_family"
-			]
+			"properties": ["ocr.script_family"]
 		},
 		"ocr.doctr_options": {
 			"object": "doctr_options",
-			"properties": [
-				"ocr.det_arch",
-				"ocr.reco_arch"
-			]
+			"properties": ["ocr.det_arch", "ocr.reco_arch"]
 		},
 		"ocr.profile": {
 			"title": "OCR Profile",
 			"description": "Select a preconfigured OCR profile optimized for different languages and use cases.",
 			"type": "string",
 			"default": "latin",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			]
+			"enum": ["*>preconfig.profiles.*.title"]
 		}
-	  },
+	},
 	//
 	// Required:
 	//		Defines the fields (shape) of the service. Either source or target
@@ -306,12 +265,7 @@
 		{
 			"section": "Pipe",
 			"title": "OCR Settings",
-			"properties": [
-				"ocr.profile",
-				"ocr.engine",
-				"ocr.script_family",
-				"ocr.table_engine"
-			]
+			"properties": ["ocr.profile", "ocr.engine", "ocr.script_family", "ocr.table_engine"]
 		}
 	],
 	//
@@ -368,16 +322,7 @@
 	"fulltest": [
 		{
 			// EasyOCR profiles (excluding Japanese) — full text + table assertions
-			"profiles": [
-				"latin",
-				"latin-extended",
-				"cyrillic",
-				"arabic",
-				"devanagari",
-				"chinese-simplified",
-				"chinese-traditional",
-				"korean"
-			],
+			"profiles": ["latin", "latin-extended", "cyrillic", "arabic", "devanagari", "chinese-simplified", "chinese-traditional", "korean"],
 			"outputs": ["text", "table"],
 			"timeout": 120,
 			"cases": [
@@ -422,9 +367,7 @@
 		},
 		{
 			// EasyOCR Japanese — relaxed text assertion (Japanese models may misread English)
-			"profiles": [
-				"japanese"
-			],
+			"profiles": ["japanese"],
 			"outputs": ["text"],
 			"timeout": 120,
 			"cases": [
@@ -442,9 +385,7 @@
 		},
 		{
 			// DocTR engine — text assertions only (no table assertions)
-			"profiles": [
-				"doctr"
-			],
+			"profiles": ["doctr"],
 			"outputs": ["text"],
 			"timeout": 180,
 			"cases": [

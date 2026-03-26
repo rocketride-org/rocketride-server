@@ -24,6 +24,8 @@ let VERSION = '0.0.0';
 let REPO = 'rocketride-org/rocketride-server';
 let packageJsonLoaded = false;
 
+const TODAY = new Date().toISOString().slice(0, 10).replace(/-/g, '.'); // yyyy.MM.dd
+
 async function loadPackageJson() {
     if (!packageJsonLoaded) {
         const packageJson = await readJson(path.join(PROJECT_ROOT, 'package.json'));
@@ -48,42 +50,59 @@ async function loadPackageJson() {
 async function downloadFile(url, filename, task) {
     const destPath = path.join(DOWNLOADS_DIR, filename);
     const stateKey = ['downloads', url];
-    
+
     // Check if already downloaded (atomic read)
     if (await getState(stateKey) && await exists(destPath)) {
         return destPath;
     }
-    
+
     // Ensure downloads directory exists
     await mkdir(DOWNLOADS_DIR);
-    
+
     // Download the file
     await _download(url, destPath, task);
-    
+
     // Mark as downloaded (atomic write)
-    await setState(stateKey, filename);
-    
+    await setState(stateKey, { name: filename, date: TODAY });
+
     return destPath;
 }
 
 async function downloadGitHubFile(releaseTag, filename, task) {
     const { repo } = await loadPackageJson();
-    const fileurl = `https://github.com/${repo}/releases/download/${releaseTag}/${filename}`;
+    const fileUrl = `https://github.com/${repo}/releases/download/${releaseTag}/${filename}`;
+
+    const downloadName = `${releaseTag}_${filename}`;
+    const filePath = path.join(DOWNLOADS_DIR, downloadName);
+    const stateKey = ['downloads', fileUrl];
+
     try {
-        let downloadName = null;
-        if (releaseTag.endsWith('-prerelease')) {
-            // Add tag and timestamp to the pre-release file name to update pre-releases daily
-            const { name, ext } = path.parse(filename);
-            const today = new Date().toISOString().split('T')[0].replace(/-/g, ''); // 'yyyyMMdd'
-            downloadName = `${releaseTag}_${name}-${today}${ext}`;
-        } else {
-            // Add tag to the release filename
-            downloadName = `${releaseTag}_${filename}`;
-        }
-        return await downloadFile(fileurl, downloadName, task);
-    } catch (err) {
-        if (err.message && err.message.includes('HTTP 404'))
+        const fileState = await getState(stateKey);
+
+        // File not found today, so skip it
+        if (fileState && fileState.notFound && fileState.date === TODAY) {
             return null;
+        }
+
+        // Download the new file or re-download the prerelease if it is out of date
+        if (!await exists(filePath) || (releaseTag.endsWith('-prerelease') && fileState?.date !== TODAY)) {
+            // Ensure downloads directory exists
+            await mkdir(DOWNLOADS_DIR);
+
+            // Download the file
+            await _download(fileUrl, filePath, task);
+
+            await setState(stateKey, { name: downloadName, date: TODAY });
+        }
+
+        return filePath;
+
+    } catch (err) {
+        if (err.message && err.message.includes('HTTP 404')) {
+            // Let’s just note for today that the file cannot be found
+            await setState(stateKey, { notFound: true, date: TODAY });
+            return null;
+        }
         throw err;
     }
 }

@@ -460,6 +460,9 @@ class Store(DocumentStoreBase):
         """
         Collect the ids of records in a list of objectIds to update or delete the records.
         """
+        if not objectIds:
+            return
+
         # By definition, if the collection does not exists, there
         # is nothing to update
         if not self.doesCollectionExist():
@@ -467,19 +470,41 @@ class Store(DocumentStoreBase):
 
         # Getting index
         index = self.client.Index(self.collection)
-        vector_size = int(index.describe_index_stats()['dimension'])
-
-        records = index.query(vector=[1] * vector_size, top_k=len(objectIds), filter={'objectId': {'$in': objectIds}}, include_metadata=False, include_values=False)['matches']
-        ids_to_update = [record['id'] for record in records]
+        object_ids_filter = {'objectId': {'$in': objectIds}}
 
         # Deleting if we need to fully remove documents
-        if ids_to_update and isDeleteOperation:
-            index.delete(ids_to_update)
+        if isDeleteOperation:
+            index.delete(filter=object_ids_filter)
             return
 
+        if not metadataUpdates:
+            return
+
+        vector_size = int(index.describe_index_stats()['dimension'])
+        batch_size = 1000
+
+        # Query only records that still differ from the target metadata state.
+        # This makes every loop iteration monotonic: updated records are excluded
+        # from subsequent queries, so we can safely process batches until complete.
+        pending_conditions = [{key: {'$ne': value}} for key, value in metadataUpdates.items()]
+        pending_filter = {
+            '$and': [
+                object_ids_filter,
+                pending_conditions[0] if len(pending_conditions) == 1 else {'$or': pending_conditions},
+            ]
+        }
+
         # Updating the metadata fields we want changed for the batch update
-        for id_to_update in ids_to_update:
-            index.update(id=id_to_update, set_metadata=metadataUpdates)
+        while True:
+            records = index.query(vector=[1] * vector_size, top_k=batch_size, filter=pending_filter, include_metadata=False, include_values=False)['matches']
+            if not records:
+                break
+
+            batch_ids = [record['id'] for record in records]
+            for id_to_update in batch_ids:
+                index.update(id=id_to_update, set_metadata=metadataUpdates)
+            if len(batch_ids) < batch_size:
+                break
         return
 
     def remove(self, objectIds: List[str]) -> None:

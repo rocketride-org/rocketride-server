@@ -23,11 +23,11 @@
 
 /**
  * Pipeline Editor Provider for Custom .pipeline File Editor
- * 
+ *
  * Provides a visual editor for .pipeline files using a webview-based interface.
  * The editor shows a full-screen webview with the RocketRide pipeline visual UI
  * instead of the default text editor.
- * 
+ *
  * Features:
  * - Custom visual editor for .pipeline files
  * - Two-way synchronization between webview and file content
@@ -67,7 +67,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 
 	/**
 	 * Creates a new PageEditorProvider
-	 * 
+	 *
 	 * @param context VS Code extension context for command registration
 	 */
 	constructor(private readonly context: vscode.ExtensionContext) {
@@ -77,7 +77,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 
 	/**
 	 * Checks if a file save is part of a Run operation
-	 * 
+	 *
 	 * @param uri The file URI to check
 	 * @returns true if this save is part of a Run operation
 	 */
@@ -101,7 +101,8 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 		// Listen for connection state changes to start monitoring when connected
 		const connectionStateListener = this.connectionManager.on('connectionStateChanged', async (connectionStatus) => {
 			try {
-				if (connectionStatus.state === 2) { // ConnectionState.CONNECTED
+				if (connectionStatus.state === 2) {
+					// ConnectionState.CONNECTED
 					await this.startMonitoringForAllEditors();
 				} else {
 					await this.stopMonitoringForAllEditors();
@@ -126,68 +127,69 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 	private broadcastServicesToAllEditors(payload: { services: Record<string, unknown>; servicesError?: string }): void {
 		for (const editorState of this.editorStates.values()) {
 			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
-				editorState.webviewPanel.webview.postMessage({
-					type: 'servicesUpdate',
-					services: payload.services,
-					servicesError: payload.servicesError
-				}).then(undefined, (err: unknown) => {
-					this.logger.error(`Failed to post servicesUpdate to webview: ${err}`);
-				});
+				editorState.webviewPanel.webview
+					.postMessage({
+						type: 'servicesUpdate',
+						services: payload.services,
+						servicesError: payload.servicesError,
+					})
+					.then(undefined, (err: unknown) => {
+						this.logger.error(`Failed to post servicesUpdate to webview: ${err}`);
+					});
 			}
 		}
 	}
 
 	/**
 	 * Handles events and routes them to the appropriate webviews
-	 * 
+	 *
 	 * @param event The DAP event received from the connection manager
 	 */
 	private handleEvent(event: GenericEvent): void {
 		switch (event.event) {
-		case 'apaevt_status_update': {
-			// Parse the event to extract project_id
-			const projectId = event.body?.project_id;
-			const source = event.body?.source;
+			case 'apaevt_status_update': {
+				// Parse the event to extract project_id
+				const projectId = event.body?.project_id;
+				const source = event.body?.source;
 
-			if (!projectId || !source) {
-				return;
+				if (!projectId || !source) {
+					return;
+				}
+
+				// Find editor for this project (match by projectId only)
+				const editorState = Array.from(this.editorStates.values()).find((state) => !state.isDisposed && state.projectId === projectId);
+
+				if (!editorState) {
+					return;
+				}
+
+				const taskStatus = event.body as TaskStatus;
+
+				// Always cache the status update
+				editorState.cachedStatuses[source] = taskStatus;
+
+				// If webview is ready, forward immediately
+				if (editorState.isReady) {
+					editorState.webviewPanel.webview.postMessage({
+						type: 'taskStatusUpdate',
+						source: source,
+						taskStatus: taskStatus,
+						host: this.connectionManager.getHttpUrl(),
+					});
+				}
+				break;
 			}
 
-			// Find editor for this project (match by projectId only)
-			const editorState = Array.from(this.editorStates.values()).find(
-				state => !state.isDisposed && state.projectId === projectId
-			);
-
-			if (!editorState) {
-				return;
+			case 'apaevt_task': {
+				// Running list is used by SidebarFilesProvider; we rely on apaevt_status_update for canvas state.
+				break;
 			}
-
-			const taskStatus = event.body as TaskStatus;
-
-			// Always cache the status update
-			editorState.cachedStatuses[source] = taskStatus;
-
-			// If webview is ready, forward immediately
-			if (editorState.isReady) {
-				editorState.webviewPanel.webview.postMessage({
-					type: 'taskStatusUpdate',
-					source: source,
-					taskStatus: taskStatus
-				});
-			}
-			break;
-		}
-
-		case 'apaevt_task': {
-			// Running list is used by SidebarFilesProvider; we rely on apaevt_status_update for canvas state.
-			break;
-		}
 		}
 	}
 
 	/**
 	 * Extracts project_id and source from pipeline document
-	 * 
+	 *
 	 * @param document The pipeline document
 	 * @returns Object containing projectId and sourceId, or undefined values if parsing fails
 	 */
@@ -198,7 +200,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 
 			return {
 				projectId: parsed.project_id,
-				sourceId: parsed.source
+				sourceId: parsed.source,
 			};
 		} catch {
 			// If parsing fails, return undefined values
@@ -208,15 +210,14 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 
 	/**
 	 * Starts monitoring for a specific editor (monitors all components in the project)
-	 * 
+	 *
 	 * @param documentUri The document URI to start monitoring for
 	 */
 	private async startMonitoring(documentUri: string): Promise<void> {
 		const editorState = this.editorStates.get(documentUri);
 
 		// If we are already monitoring, not connected, disposed, or missing projectId, do nothing
-		if (!editorState || editorState.isMonitoring || editorState.isDisposed || 
-		    !editorState.projectId || !this.connectionManager.isConnected()) {
+		if (!editorState || editorState.isMonitoring || editorState.isDisposed || !editorState.projectId || !this.connectionManager.isConnected()) {
 			return;
 		}
 
@@ -224,8 +225,8 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 			// Send DAP command to start monitoring all components (*) for this project
 			await this.connectionManager.request('rrext_monitor', {
 				projectId: editorState.projectId,
-				source: '*',  // Monitor ALL components in this project
-				types: ['summary']
+				source: '*', // Monitor ALL components in this project
+				types: ['summary'],
 			});
 
 			// Mark as monitoring
@@ -239,7 +240,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 
 	/**
 	 * Stops monitoring for a specific editor
-	 * 
+	 *
 	 * @param documentUri The document URI to stop monitoring for
 	 */
 	private async stopMonitoring(documentUri: string): Promise<void> {
@@ -256,7 +257,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 				// Send DAP command to stop monitoring (no types parameter)
 				await this.connectionManager.request('rrext_monitor', {
 					projectId: editorState.projectId,
-					source: '*'
+					source: '*',
 				});
 			} catch (error) {
 				this.logger.error(`Stopping monitoring for project ${editorState.projectId}: ${error}`);
@@ -282,7 +283,8 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 						editorState.webviewPanel.webview.postMessage({
 							type: 'taskStatusUpdate',
 							source,
-							taskStatus
+							taskStatus,
+							host: this.connectionManager.getHttpUrl(),
 						});
 					}
 				}
@@ -329,26 +331,22 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 					// Force reload of the editor content
 					await vscode.commands.executeCommand('workbench.action.reloadWindow');
 				}
-			})
+			}),
 		];
 
 		// Store disposables and add to context subscriptions
 		this.disposables.push(...commands);
-		commands.forEach(command => this.context.subscriptions.push(command));
+		commands.forEach((command) => this.context.subscriptions.push(command));
 	}
 
 	/**
 	 * Called by VS Code when a .pipeline file is opened with this editor
-	 * 
+	 *
 	 * @param document The text document being edited
 	 * @param webviewPanel The webview panel for the custom editor
 	 * @param _token Cancellation token
 	 */
-	public async resolveCustomTextEditor(
-		document: vscode.TextDocument,
-		webviewPanel: vscode.WebviewPanel,
-		_token: vscode.CancellationToken
-	): Promise<void> {
+	public async resolveCustomTextEditor(document: vscode.TextDocument, webviewPanel: vscode.WebviewPanel, _token: vscode.CancellationToken): Promise<void> {
 		const webview = webviewPanel.webview;
 
 		// Show a clean pipeline name in the tab (strip .pipe or .pipe.json extension)
@@ -366,7 +364,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 			isMonitoring: false,
 			isDisposed: false,
 			isReady: false,
-			cachedStatuses: {}
+			cachedStatuses: {},
 		};
 
 		// Store editor state using document URI as key
@@ -375,7 +373,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 		// Configure webview security and capabilities
 		webview.options = {
 			enableScripts: true,
-			localResourceRoots: [this.context.extensionUri]
+			localResourceRoots: [this.context.extensionUri],
 		};
 
 		// Load the webview content
@@ -387,38 +385,40 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 				case 'ready': {
 					// Mark webview as ready
 					editorState.isReady = true;
-					
+
 					// Send initial document content
 					this.updateWebview(webview, document);
-					
+
 					// Send OAuth2 root URL from extension settings (refresh path for services OAuth2 endpoint)
 					const oauth2RootUrl = vscode.workspace.getConfiguration('rocketride').get<string>('oauth2RootUrl', 'https://oauth2.rocketride.ai');
-					webview.postMessage({
-						type: 'oauth2Config',
-						oauth2RootUrl
-					}).then(undefined, (err: unknown) => {
-						this.logger.error(`Failed to post oauth2Config to webview: ${err}`);
-					});
+					webview
+						.postMessage({
+							type: 'oauth2Config',
+							oauth2RootUrl,
+						})
+						.then(undefined, (err: unknown) => {
+							this.logger.error(`Failed to post oauth2Config to webview: ${err}`);
+						});
 
 					// Send persisted canvas preferences (snap-to-grid, navigation mode, etc.)
 					const storedPrefs = this.context.workspaceState.get<Record<string, unknown>>(CANVAS_PREFERENCES_KEY) ?? {};
 					webview.postMessage({ type: 'preferences', preferences: storedPrefs }).then(undefined, (err: unknown) => {
 						this.logger.error(`Failed to post preferences to webview: ${err}`);
 					});
-					
+
 					// Send cached services so the editor shows something immediately
 					const cached = this.connectionManager.getCachedServices();
 					webview.postMessage({
 						type: 'servicesUpdate',
 						services: cached.services,
-						servicesError: cached.servicesError
+						servicesError: cached.servicesError,
 					});
 
 					// Kick off background refresh; when done, servicesUpdated will push to all editors
-					this.connectionManager.refreshServices().catch(err => {
+					this.connectionManager.refreshServices().catch((err) => {
 						this.logger.error(`Background services refresh failed: ${err}`);
 					});
-					
+
 					// Send all cached status updates
 					const cachedCount = Object.keys(editorState.cachedStatuses).length;
 					if (cachedCount > 0) {
@@ -426,11 +426,12 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 							webview.postMessage({
 								type: 'taskStatusUpdate',
 								source: source,
-								taskStatus: taskStatus
+								taskStatus: taskStatus,
+								host: this.connectionManager.getHttpUrl(),
 							});
 						}
 					}
-					
+
 					// Now start monitoring for future updates (if not already monitoring)
 					if (!editorState.isMonitoring) {
 						try {
@@ -442,83 +443,108 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 					break;
 				}
 
-			case 'save':
-				// Handle save requests from the pipeline editor
-				this.saveDocument(document, data.content);
-				break;
+				case 'save':
+					// Handle save requests from the pipeline editor
+					this.saveDocument(document, data.content);
+					break;
 
-			case 'requestUndo':
-				void vscode.commands.executeCommand('undo');
-				break;
+				case 'requestUndo':
+					void vscode.commands.executeCommand('undo');
+					break;
 
-			case 'requestRedo':
-				void vscode.commands.executeCommand('redo');
-				break;
+				case 'requestRedo':
+					void vscode.commands.executeCommand('redo');
+					break;
 
-			case 'contentChanged': {
-				// Mark document dirty with current canvas content (do not save to disk)
-				if (typeof data.content === 'string') {
-					this.applyDocumentEdit(document, data.content);
+				case 'contentChanged': {
+					// Mark document dirty with current canvas content (do not save to disk)
+					if (typeof data.content === 'string') {
+						this.applyDocumentEdit(document, data.content);
+					}
+					break;
 				}
-				break;
-			}
 
-			case 'run': {
-				// Handle pipeline run requests
-				// Mark this document as having a "save for run" to prevent file watcher restart prompt
-				const documentUri = document.uri.toString();
-				this.savesForRun.add(documentUri);
-
-				// Clear the flag after 2 seconds (enough time for file watcher to process)
-				setTimeout(() => {
-					this.savesForRun.delete(documentUri);
-				}, 2000);
-
-				this.runPipeline(data);
-				break;
-			}
-
-			case 'stop':
-				// Handle pipeline stop requests
-				this.stopPipeline(data.componentId, document);
-				break;
-
-			case 'openExternal':
-				if (data.url) {
-					vscode.env.openExternal(vscode.Uri.parse(data.url));
+				case 'run': {
+					// Save to disk then execute the pipeline.
+					// The file watcher fires asynchronously after the disk write and checks
+					// handlePipelineRestart. We flag savesForRun so it skips the restart
+					// prompt, and clear the flag after a delay to cover the async watcher.
+					if (typeof data.content === 'string' && typeof data.source === 'string') {
+						const uriKey = document.uri.toString();
+						this.savesForRun.add(uriKey);
+						try {
+							await this.saveDocument(document, data.content);
+							const parsed = JSON.parse(document.getText());
+							await this.runPipeline({ pipeline: { ...parsed, source: data.source } });
+						} catch (error: unknown) {
+							const message = error instanceof Error ? error.message : String(error);
+							vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
+						}
+						// Clear after a delay so the async file watcher has time to check the flag
+						setTimeout(() => this.savesForRun.delete(uriKey), 2000);
+					}
+					break;
 				}
-				break;
 
-			case 'setPreference':
-				if (typeof data.key === 'string') {
-					const current = this.context.workspaceState.get<Record<string, unknown>>(CANVAS_PREFERENCES_KEY) ?? {};
-					this.context.workspaceState.update(CANVAS_PREFERENCES_KEY, { ...current, [data.key]: data.value }).then(undefined, (err: unknown) => {
-						this.logger.error(`Failed to persist preference: ${err}`);
-					});
+				case 'stop': {
+					// Stop a running pipeline for the given source node
+					if (typeof data.source === 'string') {
+						await this.stopPipeline(data.source, document);
+					}
+					break;
 				}
-				break;
 
-			case 'validate': {
-				this.logger.output(`${icons.pipeline} Validating pipeline...`);
-				const pipeline = ConfigManager.getInstance().substituteEnvVariables(data.pipeline);
-				try {
-					const client = this.connectionManager.getClient();
-					if (!client) throw new Error('Not connected to server');
-					const result = await client.validate({ pipeline });
-					this.logger.output(`${icons.success} Pipeline validation passed`);
-					webview.postMessage({ type: 'validateResponse', result });
-				} catch (error) {
-					const msg = error instanceof Error ? error.message : String(error);
-					this.logger.output(`${icons.error} Pipeline validation failed: ${msg}`);
-					webview.postMessage({ type: 'validateResponse', result: null, error: msg });
+				case 'openStatus': {
+					// Open the status page for a source node
+					if (typeof data.source === 'string') {
+						try {
+							const parsed = JSON.parse(document.getText());
+							const projectId = parsed.project_id ?? '';
+							const displayName = data.source;
+							await vscode.commands.executeCommand('rocketride.page.status.open', displayName, document.uri, projectId, data.source);
+						} catch (error: unknown) {
+							this.logger.error(`[PageEditorProvider] Failed to open status page: ${error}`);
+						}
+					}
+					break;
 				}
-				break;
-			}
+
+				case 'openExternal':
+					if (data.url) {
+						this.openLink(data.url, data.displayName);
+					}
+					break;
+
+				case 'setPreference':
+					if (typeof data.key === 'string') {
+						const current = this.context.workspaceState.get<Record<string, unknown>>(CANVAS_PREFERENCES_KEY) ?? {};
+						this.context.workspaceState.update(CANVAS_PREFERENCES_KEY, { ...current, [data.key]: data.value }).then(undefined, (err: unknown) => {
+							this.logger.error(`Failed to persist preference: ${err}`);
+						});
+					}
+					break;
+
+				case 'validate': {
+					this.logger.output(`${icons.pipeline} Validating pipeline...`);
+					const pipeline = ConfigManager.getInstance().substituteEnvVariables(data.pipeline);
+					try {
+						const client = this.connectionManager.getClient();
+						if (!client) throw new Error('Not connected to server');
+						const result = await client.validate({ pipeline });
+						this.logger.output(`${icons.success} Pipeline validation passed`);
+						webview.postMessage({ type: 'validateResponse', result });
+					} catch (error) {
+						const msg = error instanceof Error ? error.message : String(error);
+						this.logger.output(`${icons.error} Pipeline validation failed: ${msg}`);
+						webview.postMessage({ type: 'validateResponse', result: null, error: msg });
+					}
+					break;
+				}
 			}
 		});
 
 		// Listen for document changes (including undo/redo) and sync content to webview so canvas stays in sync
-		const changeDocumentSubscription = vscode.workspace.onDidChangeTextDocument(e => {
+		const changeDocumentSubscription = vscode.workspace.onDidChangeTextDocument((e) => {
 			if (e.document.uri.toString() === document.uri.toString()) {
 				const { projectId } = this.extractPipelineIds(e.document);
 				editorState.projectId = projectId;
@@ -528,22 +554,24 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 
 		// Listen for theme changes in VSCode and notify the webview
 		const themeChangeDisposable = vscode.window.onDidChangeActiveColorTheme((_theme) => {
-			webview.postMessage({
-				type: 'themeChanged'
-			}).then(
-				() => {},
-				(error) => this.logger.error(`[PageEditorProvider] Error sending theme change message: ${error}`)
-			);
+			webview
+				.postMessage({
+					type: 'themeChanged',
+				})
+				.then(
+					() => {},
+					(error) => this.logger.error(`[PageEditorProvider] Error sending theme change message: ${error}`)
+				);
 		});
 
 		// Clean up when panel is disposed
 		webviewPanel.onDidDispose(async () => {
 			// Stop monitoring before disposing
 			await this.stopMonitoring(document.uri.toString());
-			
+
 			// Clear cached statuses
 			editorState.cachedStatuses = {};
-			
+
 			editorState.isDisposed = true;
 			this.editorStates.delete(document.uri.toString());
 
@@ -553,10 +581,10 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 
 		// Send initial content to webview
 		this.updateWebview(webview, document);
-		
+
 		// Start monitoring immediately if connected (status updates will be cached until webview is ready)
 		if (this.connectionManager.isConnected()) {
-			this.startMonitoring(document.uri.toString()).catch(error => {
+			this.startMonitoring(document.uri.toString()).catch((error) => {
 				this.logger.error(`Starting initial monitoring: ${error}`);
 			});
 		}
@@ -564,14 +592,14 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 
 	/**
 	 * Updates the webview with current document content
-	 * 
+	 *
 	 * @param webview The webview to update
 	 * @param document The document with current content
 	 */
 	private updateWebview(webview: vscode.Webview, document: vscode.TextDocument): void {
 		webview.postMessage({
 			type: 'update',
-			content: document.getText()
+			content: document.getText(),
 		});
 	}
 
@@ -609,10 +637,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 		}
 		const docLen = currentText.length;
 		const edit = new vscode.WorkspaceEdit();
-		const fullRange = new vscode.Range(
-			document.positionAt(0),
-			document.positionAt(docLen)
-		);
+		const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(docLen));
 		edit.replace(document.uri, fullRange, normalizedNew);
 		const success = await vscode.workspace.applyEdit(edit);
 		if (!success) {
@@ -651,13 +676,14 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 			const projectId = project.project_id;
 			const source = project.source;
 
-			// Use DAP command to execute pipeline
+			// Use DAP command to execute pipeline (always trace from canvas)
 			await this.connectionManager.request('execute', {
 				projectId: projectId,
 				source: source,
-				pipeline: projectTransformed
+				pipeline: projectTransformed,
+				pipelineTraceLevel: 'full',
+				args: ConfigManager.getInstance().getEffectiveEngineArgs(),
 			});
-
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : String(error);
 			vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
@@ -679,10 +705,10 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 			}
 
 			// Get the token for the running task
-			const response = await this.connectionManager.request('rrext_get_token', {
+			const response = (await this.connectionManager.request('rrext_get_token', {
 				projectId: projectId,
-				source: componentId
-			}) as GenericResponse | undefined;
+				source: componentId,
+			})) as GenericResponse | undefined;
 
 			const token = response?.body?.token;
 
@@ -694,12 +720,228 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 
 			// Send terminate command
 			await this.connectionManager.request('terminate', {}, token);
-
 		} catch (error: unknown) {
 			this.logger.error(`[PageEditorProvider] Unable to stop pipeline: ${error}`);
 			const message = error instanceof Error ? error.message : String(error);
 			vscode.window.showErrorMessage(`Failed to stop pipeline: ${message}`);
 		}
+	}
+
+	/**
+	 * Opens a URL in an embedded VS Code WebviewPanel with an iframe.
+	 *
+	 * Mirrors PageStatusProvider.openLink — bridges drag-and-drop, clipboard,
+	 * theme colors, and env variables to the iframe.
+	 */
+	private openLink(url: string, displayName?: string): void {
+		const panel = vscode.window.createWebviewPanel('externalContent', displayName || 'Pipeline', vscode.ViewColumn.One, {
+			enableScripts: true,
+			retainContextWhenHidden: true,
+		});
+
+		const env: Record<string, string | boolean> = ConfigManager.getInstance().getEnv();
+		env['devMode'] = true;
+
+		panel.webview.html = `
+			<!DOCTYPE html>
+			<html>
+			<head>
+				<meta charset="UTF-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<style>
+					body { margin: 0; padding: 0; }
+					iframe { width: 100%; height: 100vh; border: none; }
+				</style>
+			</head>
+			<body>
+				<iframe id="app-iframe" src="${url}${url.includes('?') ? '&' : '?'}_t=${Date.now()}" allow="clipboard-read; clipboard-write"></iframe>
+				<script>
+					(function() {
+						const vscode = acquireVsCodeApi();
+						const iframe = document.getElementById('app-iframe');
+						const envVars = ${JSON.stringify(env)};
+						let iframeOrigin = '*';
+						try { iframeOrigin = new URL(iframe.src).origin; } catch(e) {}
+
+						['dragenter', 'dragover'].forEach(eventName => {
+							document.addEventListener(eventName, (e) => {
+								e.preventDefault();
+								e.stopPropagation();
+								try { iframe.contentWindow.postMessage({ type: 'dragHover', x: e.clientX, y: e.clientY }, iframeOrigin); } catch(err) {}
+							});
+						});
+						document.addEventListener('dragleave', (e) => {
+							if (e.relatedTarget === null) {
+								try { iframe.contentWindow.postMessage({ type: 'dragLeave' }, iframeOrigin); } catch(err) {}
+							}
+						});
+
+						document.addEventListener('drop', async (e) => {
+							e.preventDefault();
+							e.stopPropagation();
+							const files = e.dataTransfer && e.dataTransfer.files;
+							if (!files || files.length === 0) return;
+
+							const fileDataArray = [];
+							for (let i = 0; i < files.length; i++) {
+								const file = files[i];
+								const buffer = await file.arrayBuffer();
+								fileDataArray.push({
+									name: file.name,
+									type: file.type || 'application/octet-stream',
+									size: file.size,
+									lastModified: file.lastModified,
+									buffer: buffer
+								});
+							}
+
+							try {
+								iframe.contentWindow.postMessage({
+									type: 'bridgedFileDrop',
+									files: fileDataArray
+								}, iframeOrigin, fileDataArray.map(f => f.buffer));
+								iframe.contentWindow.postMessage({ type: 'dragLeave' }, iframeOrigin);
+							} catch (err) {
+								console.error('[Parent] Error bridging file drop to iframe:', err);
+							}
+						});
+
+						function getVSCodeThemeColors() {
+							const style = getComputedStyle(document.body);
+							const getColor = (varName, fallback = '') => {
+								const value = style.getPropertyValue(varName).trim();
+								return value || fallback;
+							};
+							return {
+								'--bg-primary': getColor('--vscode-editor-background'),
+								'--bg-secondary': getColor('--vscode-sideBar-background'),
+								'--bg-tertiary': getColor('--vscode-editorWidget-background'),
+								'--bg-hover': getColor('--vscode-list-hoverBackground'),
+								'--text-primary': getColor('--vscode-editor-foreground'),
+								'--text-secondary': getColor('--vscode-descriptionForeground'),
+								'--text-muted': getColor('--vscode-disabledForeground'),
+								'--border-color': getColor('--vscode-panel-border'),
+								'--border-hover': getColor('--vscode-focusBorder'),
+								'--accent-primary': getColor('--vscode-focusBorder'),
+								'--accent-secondary': getColor('--vscode-button-background'),
+								'--accent-hover': getColor('--vscode-button-hoverBackground'),
+								'--success-color': getColor('--vscode-terminal-ansiGreen'),
+								'--error-color': getColor('--vscode-errorForeground'),
+								'--warning-color': getColor('--vscode-editorWarning-foreground'),
+								'--info-color': getColor('--vscode-editorInfo-foreground'),
+								'--code-bg': getColor('--vscode-textCodeBlock-background'),
+								'--input-bg': getColor('--vscode-input-background'),
+								'--input-border': getColor('--vscode-input-border'),
+								'--shadow-sm': getColor('--vscode-widget-shadow'),
+								'--shadow-md': getColor('--vscode-widget-shadow'),
+								'--shadow-lg': getColor('--vscode-widget-shadow')
+							};
+						}
+
+						function sendDataToIframe() {
+							const colors = getVSCodeThemeColors();
+							try {
+								iframe.contentWindow.postMessage({
+									type: 'vscodeData',
+									env: envVars,
+									theme: colors
+								}, iframeOrigin);
+							} catch (error) {
+								console.error('[Parent] Error sending data to iframe:', error);
+							}
+						}
+
+						window.addEventListener('message', (event) => {
+							if (event.source === iframe.contentWindow) {
+								if (event.data.type === 'ready') {
+									sendDataToIframe();
+								}
+								if (event.data.type === 'requestPaste') {
+									vscode.postMessage({ type: 'requestPaste' });
+								}
+								if (event.data.type === 'copyText' && event.data.text) {
+									vscode.postMessage({ type: 'copyText', text: event.data.text });
+								}
+								if (event.data.type === 'requestFileDialog') {
+									vscode.postMessage({ type: 'requestFileDialog' });
+								}
+							}
+						});
+
+						window.addEventListener('message', (event) => {
+							const msg = event.data;
+							if (msg.type === 'themeChanged') {
+								setTimeout(() => {
+									sendDataToIframe();
+								}, 50);
+							}
+							if (msg.type === 'pasteContent' && msg.text && iframe.contentWindow) {
+								iframe.contentWindow.postMessage({
+									type: 'paste',
+									text: msg.text
+								}, iframeOrigin);
+							}
+							if (msg.type === 'nativeFilesSelected' && iframe.contentWindow) {
+								iframe.contentWindow.postMessage({
+									type: 'nativeFilesSelected',
+									files: msg.files
+								}, iframeOrigin);
+							}
+						});
+					})();
+				</script>
+			</body>
+			</html>
+		`;
+
+		const messageDisposable = panel.webview.onDidReceiveMessage(async (msg: { type: string; text?: string }) => {
+			if (msg.type === 'requestPaste') {
+				const text = await vscode.env.clipboard.readText();
+				if (text) {
+					panel.webview.postMessage({ type: 'pasteContent', text });
+				}
+			}
+			if (msg.type === 'copyText' && msg.text) {
+				await vscode.env.clipboard.writeText(msg.text);
+			}
+			if (msg.type === 'requestFileDialog') {
+				const uris = await vscode.window.showOpenDialog({
+					canSelectMany: true,
+					canSelectFiles: true,
+					canSelectFolders: false,
+					title: 'Select files to upload',
+				});
+				if (uris && uris.length > 0) {
+					const path = require('path');
+					const fileDataArray: { name: string; type: string; size: number; lastModified: number; buffer: number[] }[] = [];
+					for (const uri of uris) {
+						const bytes = await vscode.workspace.fs.readFile(uri);
+						fileDataArray.push({
+							name: path.basename(uri.fsPath),
+							type: 'application/octet-stream',
+							size: bytes.length,
+							lastModified: Date.now(),
+							buffer: Array.from(bytes),
+						});
+					}
+					panel.webview.postMessage({
+						type: 'nativeFilesSelected',
+						files: fileDataArray,
+					});
+				}
+			}
+		});
+
+		const themeChangeDisposable = vscode.window.onDidChangeActiveColorTheme(() => {
+			panel.webview.postMessage({
+				type: 'themeChanged',
+			});
+		});
+
+		panel.onDidDispose(() => {
+			messageDisposable.dispose();
+			themeChangeDisposable.dispose();
+		});
 	}
 
 	/**
@@ -713,21 +955,14 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 			let htmlContent = require('fs').readFileSync(htmlPath.fsPath, 'utf8');
 
 			// Replace template placeholders
-			htmlContent = htmlContent
-				.replace(/\{\{nonce\}\}/g, nonce)
-				.replace(/\{\{cspSource\}\}/g, webview.cspSource);
+			htmlContent = htmlContent.replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, webview.cspSource);
 
 			// Convert resource URLs to webview URIs
-			return htmlContent.replace(
-				/(?:src|href)="(\/static\/[^"]+)"/g,
-				(match: string, relativePath: string): string => {
-					const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
-					const resourceUri = webview.asWebviewUri(
-						vscode.Uri.joinPath(this.context.extensionUri, 'webview', cleanPath)
-					);
-					return match.replace(relativePath, resourceUri.toString());
-				}
-			);
+			return htmlContent.replace(/(?:src|href)="(\/static\/[^"]+)"/g, (match: string, relativePath: string): string => {
+				const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+				const resourceUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', cleanPath));
+				return match.replace(relativePath, resourceUri.toString());
+			});
 		} catch (error) {
 			this.logger.error(`Error loading pipeline editor HTML: ${error}`);
 			return this.getErrorHtml(error, htmlPath.fsPath);
@@ -772,7 +1007,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 	 * Cleans up event listeners and resources
 	 */
 	public dispose(): void {
-		this.disposables.forEach(disposable => disposable.dispose());
+		this.disposables.forEach((disposable) => disposable.dispose());
 		this.disposables = [];
 	}
 }

@@ -47,6 +47,7 @@ logo = r"""
                     All rights reserved
     """
 
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     # Call the startup method
@@ -132,13 +133,25 @@ class WebServer:
         # Declare the port
         self._port = None
 
-        # Add CORS middleware to allow unrestricted API access
+        # Configure CORS origins and credentials
+        cors_origins_env = os.environ.get('ROCKETRIDE_CORS_ORIGINS', '')
+        if cors_origins_env:
+            cors_origins = [o.strip() for o in cors_origins_env.split(',') if o.strip()]
+        else:
+            cors_origins = []
+
+        if cors_origins:
+            allow_credentials = True
+        else:
+            cors_origins = ['*']
+            allow_credentials = False
+
         self.app.add_middleware(
             CORSMiddleware,
-            allow_origins=['*'],  # Allows all origins (not recommended for production)
-            allow_credentials=True,  # Allows cookies and authentication credentials
-            allow_methods=['*'],  # Allows all HTTP methods (GET, POST, PUT, etc.)
-            allow_headers=['*'],  # Allows all HTTP headers
+            allow_origins=cors_origins,
+            allow_credentials=allow_credentials,
+            allow_methods=['*'],
+            allow_headers=['*'],
         )
 
         # Store the server configuration
@@ -200,11 +213,20 @@ class WebServer:
         # Decode the URL-encoded path
         decoded_path = urllib.parse.unquote(path)
 
+        # Resolve the real path (resolves symlinks AND '..' components)
+        resolved_path = os.path.realpath(decoded_path)
+
+        # Paths must be absolute — relative paths are ambiguous
+        if not os.path.isabs(resolved_path):
+            raise ValueError(f'File path must be absolute: {path}')
+
+        # Reject paths that still contain traversal sequences after resolution
+        if '..' in resolved_path.split(os.sep):
+            raise ValueError(f'Path traversal detected in: {path}')
+
         # Return the valid file path if it exists
-        if os.path.exists(decoded_path):
-            return decoded_path
-        elif os.path.exists(path):
-            return path
+        if os.path.exists(resolved_path):
+            return resolved_path
         else:
             raise FileNotFoundError(f'File {path} not found')
 
@@ -309,9 +331,7 @@ class WebServer:
         if self._user_shutdown is not None:
             await self._user_shutdown()
 
-    async def _authenticate_credential_inner(
-        self, authorization: str
-    ) -> Union[AccountInfo, Tuple[int, str]]:
+    async def _authenticate_credential_inner(self, authorization: str) -> Union[AccountInfo, Tuple[int, str]]:
         """
         Authenticate a normalized credential string (chain + account fallback).
         Returns AccountInfo on success, (error_code, error_message) on failure.

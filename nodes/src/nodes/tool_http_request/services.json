@@ -8,14 +8,8 @@
 	"path": "nodes.tool_http_request",
 	"prefix": "http",
 	"icon": "http.svg",
-	"description": [
-		"Makes HTTP requests to any API endpoint — like curl for agents.",
-		"The agent provides the full request (method, URL, headers, body, auth).",
-		"The node enforces security guardrails: only whitelisted URLs and enabled HTTP methods are permitted."
-	],
-	"tile": [
-		"Tool: ${parameters.http_request.serverName}.http_request"
-	],
+	"description": ["Makes HTTP requests to any API endpoint — like curl for agents.", "The agent provides the full request (method, URL, headers, body, auth).", "The node enforces security guardrails: only whitelisted URLs and enabled HTTP methods are permitted."],
+	"tile": ["Tool: ${parameters.http_request.serverName}.http_request"],
 	"lanes": {},
 	"preconfig": {
 		"default": "default",
@@ -39,43 +33,64 @@
 			"type": "boolean",
 			"title": "GET",
 			"default": true,
-			"enum": [[true, "Yes"], [false, "No"]]
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
 		},
 		"http_request.allowPOST": {
 			"type": "boolean",
 			"title": "POST",
 			"default": true,
-			"enum": [[true, "Yes"], [false, "No"]]
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
 		},
 		"http_request.allowPUT": {
 			"type": "boolean",
 			"title": "PUT",
 			"default": true,
-			"enum": [[true, "Yes"], [false, "No"]]
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
 		},
 		"http_request.allowPATCH": {
 			"type": "boolean",
 			"title": "PATCH",
 			"default": true,
-			"enum": [[true, "Yes"], [false, "No"]]
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
 		},
 		"http_request.allowDELETE": {
 			"type": "boolean",
 			"title": "DELETE",
 			"default": true,
-			"enum": [[true, "Yes"], [false, "No"]]
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
 		},
 		"http_request.allowHEAD": {
 			"type": "boolean",
 			"title": "HEAD",
 			"default": false,
-			"enum": [[true, "Yes"], [false, "No"]]
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
 		},
 		"http_request.allowOPTIONS": {
 			"type": "boolean",
 			"title": "OPTIONS",
 			"default": false,
-			"enum": [[true, "Yes"], [false, "No"]]
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
 		},
 
 		"http_request.whitelistPattern": {
@@ -87,12 +102,11 @@
 			"title": "URL Whitelist",
 			"description": "Regex patterns for allowed URLs. A request URL must match at least one pattern. If empty, all URLs are allowed.",
 			"type": "array",
+			"optional": true,
 			"minItems": 0,
 			"items": {
 				"type": "object",
-				"properties": [
-					"http_request.whitelistPattern"
-				]
+				"properties": ["http_request.whitelistPattern"]
 			}
 		}
 	},
@@ -100,17 +114,7 @@
 		{
 			"section": "Pipe",
 			"title": "HTTP Request",
-			"properties": [
-				"type",
-				"http_request.allowGET",
-				"http_request.allowPOST",
-				"http_request.allowPUT",
-				"http_request.allowPATCH",
-				"http_request.allowDELETE",
-				"http_request.allowHEAD",
-				"http_request.allowOPTIONS",
-				"http_request.urlWhitelist"
-			]
+			"properties": ["type", "http_request.allowGET", "http_request.allowPOST", "http_request.allowPUT", "http_request.allowPATCH", "http_request.allowDELETE", "http_request.allowHEAD", "http_request.allowOPTIONS", "http_request.urlWhitelist"]
 		}
 	]
 }
