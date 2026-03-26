@@ -330,6 +330,9 @@ importers:
       esbuild:
         specifier: ^0.25.9
         version: 0.25.12
+      glob:
+        specifier: '>=11.1.0'
+        version: 11.1.0
       react:
         specifier: ^18.3.1
         version: 18.3.1

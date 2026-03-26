@@ -1,8 +1,8 @@
 {
-	"name": "rocketride",
+	"name": "rocketride-vscode",
 	"displayName": "RocketRide",
 	"description": "RocketRide extension for Visual Studio Code",
-	"version": "1.0.4",
+	"version": "1.0.5",
 	"publisher": "rocketride",
 	"repository": {
 		"type": "git",
@@ -384,6 +384,7 @@
 		"@vscode/test-electron": "^2.5.2",
 		"@vscode/vsce": "^3.6.0",
 		"esbuild": "^0.25.9",
+		"glob": "^10.5.0",
 		"react": "^18.3.1",
 		"react-dom": "^18.3.1",
 		"typescript": "^5.8.3"
