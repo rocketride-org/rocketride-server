@@ -169,9 +169,11 @@ class Store(DocumentStoreBase):
         if docFilter.objectIds is not None:
             filter_dict['meta.objectId'] = {'$in': docFilter.objectIds}
 
-        # If we are not going after deleted docs, add a condition
-        if docFilter.isDeleted is not None:
-            filter_dict['meta.isDeleted'] = docFilter.isDeleted
+        # Match other document stores (Qdrant, Postgres, Elasticsearch): default
+        # queries must not return soft-deleted rows. When isDeleted is True, omit this
+        # clause so callers can include deleted documents in the result set.
+        if docFilter.isDeleted is None or not docFilter.isDeleted:
+            filter_dict['meta.isDeleted'] = False
 
         # If we are going after specific chunks
         if docFilter.chunkIds is not None:
