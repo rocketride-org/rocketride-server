@@ -178,10 +178,13 @@ class ExaSearch(ChatBase):
     def _map_error(self, response: requests.Response) -> Exception:
         try:
             payload = response.json()
-        except Exception:
-            payload = {}
+        except ValueError:
+            payload = None
 
-        message = payload.get('error') or payload.get('message') or response.text
+        if isinstance(payload, dict):
+            message = payload.get('error') or payload.get('message') or response.text
+        else:
+            message = response.text
         if response.status_code == 401:
             return PermissionError(f'Exa authentication failed: {message}')
         if response.status_code == 429:
