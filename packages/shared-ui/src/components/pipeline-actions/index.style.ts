@@ -116,7 +116,7 @@ export const modalStyles: Record<string, CSSProperties> = {
 		border: '1px solid var(--rr-border, #dcdcdc)',
 		borderRadius: '8px',
 		width: '100%',
-		maxWidth: '640px',
+		maxWidth: '780px',
 		maxHeight: '90vh',
 		display: 'flex',
 		flexDirection: 'column',
@@ -223,6 +223,7 @@ export const modalStyles: Record<string, CSSProperties> = {
 		display: 'flex',
 		gap: '8px',
 		flexWrap: 'wrap',
+		marginTop: '12px',
 	},
 	integrationCodeScroll: {
 		maxHeight: '220px',
@@ -246,10 +247,8 @@ export const modalStyles: Record<string, CSSProperties> = {
 		display: 'flex',
 		alignItems: 'center',
 		gap: '8px',
-		backgroundColor: 'var(--rr-bg-surface-alt, var(--rr-bg-paper))',
-		border: '1px solid var(--rr-border, #dcdcdc)',
-		borderRadius: '4px',
-		padding: '10px',
+		minHeight: '32px',
+		paddingLeft: '28px',
 	},
 
 	configValueLink: {
