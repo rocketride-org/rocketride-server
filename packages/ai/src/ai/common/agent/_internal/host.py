@@ -52,6 +52,7 @@ class AgentHostServices:
         def __init__(self, invoker):
             """Create a Tools host service wrapper bound to an engine invoker."""
             self._invoker = invoker
+            self._tool_list: Dict[Any] = {}
             self._tool_nodes = self._invoker.instance.getControllerNodeIds('tool')
 
             # For every tool node
