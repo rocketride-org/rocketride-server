@@ -516,7 +516,7 @@ export const PageStatus: React.FC = () => {
 			</TabPanel>
 
 			{/* Endpoint Info Modal */}
-			<EndpointInfoModal endpointInfo={endpointInfo} isOpen={isEndpointModalOpen} onClose={() => setIsEndpointModalOpen(false)} onOpenExternal={handleOpenExternal} host={host} />
+			<EndpointInfoModal endpointInfo={endpointInfo} isOpen={isEndpointModalOpen} onClose={() => setIsEndpointModalOpen(false)} onOpenLink={(url) => handleOpenExternal(url)} host={host} />
 		</div>
 	);
 };

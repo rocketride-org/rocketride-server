@@ -94,27 +94,29 @@ export default function PipelineActions({ notes, host, onOpenLink, displayName }
 
 	return (
 		<>
-			<div style={styles.container}>
-				{hasButton && (
+			<div>
+				<div style={styles.container}>
+					{hasButton && (
+						<button
+							style={styles.primaryBtn}
+							onClick={(e: React.MouseEvent) => {
+								e.stopPropagation();
+								onOpenLink?.(buttonLink, displayName);
+							}}
+						>
+							{endpointInfo['button-text']}
+						</button>
+					)}
 					<button
-						style={styles.primaryBtn}
+						style={styles.secondaryBtn}
 						onClick={(e: React.MouseEvent) => {
 							e.stopPropagation();
-							onOpenLink?.(buttonLink, displayName);
+							setIsModalOpen(true);
 						}}
 					>
-						{endpointInfo['button-text']}
+						Endpoint Info
 					</button>
-				)}
-				<button
-					style={styles.secondaryBtn}
-					onClick={(e: React.MouseEvent) => {
-						e.stopPropagation();
-						setIsModalOpen(true);
-					}}
-				>
-					Endpoint Info
-				</button>
+				</div>
 			</div>
 			<EndpointInfoModal endpointInfo={endpointInfo} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onOpenLink={onOpenLink} displayName={displayName} host={host} />
 		</>

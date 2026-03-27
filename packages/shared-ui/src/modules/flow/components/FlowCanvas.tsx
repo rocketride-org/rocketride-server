@@ -41,6 +41,7 @@ import { Settings } from '@mui/icons-material';
 import UndoIcon from '@mui/icons-material/Undo';
 import RedoIcon from '@mui/icons-material/Redo';
 import { OpenWith, HighlightAlt, AddBox } from '@mui/icons-material';
+import WebhookIcon from '@mui/icons-material/Webhook';
 import '@xyflow/react/dist/style.css';
 
 // Design tokens — web defaults, then VS Code overrides (cascade order matters)
@@ -78,6 +79,8 @@ import { INodeType } from '../types';
 import { useFlowProject } from '../context/FlowProjectContext';
 import { useAutoLayout } from '../hooks/useAutoLayout';
 import { useTemplateInstantiator } from '../hooks/useTemplateInstantiator';
+import EndpointInfoModal from '../../../components/pipeline-actions/EndpointInfoModal';
+import type { IEndpointInfo } from '../../../components/pipeline-actions/PipelineActions';
 
 // =============================================================================
 // Node type registry — maps NodeType to its React component
@@ -123,7 +126,7 @@ export default function Canvas(): ReactElement {
 	// --- Preferences from context ------------------------------------------
 	const { navigationMode, setNavigationMode, isLocked, toggleLock, getPreference, setPreference } = useFlowPreferences();
 
-	const { features, onUndo, onRedo } = useFlowProject();
+	const { features, onUndo, onRedo, taskStatuses, serverHost, onOpenLink } = useFlowProject();
 	const { fitView, zoomIn, zoomOut } = useReactFlow();
 
 	// --- Auto-layout -------------------------------------------------------
@@ -132,6 +135,7 @@ export default function Canvas(): ReactElement {
 	// --- Template instantiation (must live here, not in the dialog) ---------
 	const { instantiateTemplate: rawInstantiateTemplate, requestFitView } = useTemplateInstantiator();
 	const [configSnackbar, setConfigSnackbar] = useState<string | null>(null);
+	const [isWebhookModalOpen, setIsWebhookModalOpen] = useState(false);
 
 	const instantiateTemplate = useCallback(
 		(...args: Parameters<typeof rawInstantiateTemplate>) => {
@@ -191,6 +195,20 @@ export default function Canvas(): ReactElement {
 	const showConfigPanel = !!editingNodeId;
 	/** The node being edited (derived from editingNodeId). */
 	const editingNode = editingNodeId ? nodeMap[editingNodeId] : undefined;
+
+	const endpointEntries = Object.entries(taskStatuses ?? {}).filter(([, status]) => {
+		const note = status.notes?.[0];
+		if (!(note && typeof note === 'object' && 'url-text' in note && 'url-link' in note && 'auth-text' in note && 'auth-key' in note)) {
+			return false;
+		}
+		const endpointNote = note as IEndpointInfo;
+		return /web[\s-]?hook/i.test(endpointNote['url-link']) || /web[\s-]?hook/i.test(endpointNote['url-text'] ?? '');
+	}) as [string, { notes: [IEndpointInfo] }][];
+
+	const selectedNodeIds = new Set(nodes.filter((node) => node.selected).map((node) => node.id));
+	const activeEndpointEntry = endpointEntries.find(([nodeId]) => selectedNodeIds.has(nodeId)) ?? (endpointEntries.length === 1 ? endpointEntries[0] : undefined);
+	const activeEndpointNodeId = activeEndpointEntry?.[0];
+	const activeEndpointInfo = activeEndpointEntry?.[1]?.notes?.[0] ?? null;
 
 	// Close create panel when config panel opens
 	useEffect(() => {
@@ -309,6 +327,15 @@ export default function Canvas(): ReactElement {
 						{isPanMode ? <HighlightAlt /> : <OpenWith />}
 					</IconButton>
 				</Tooltip>
+
+				{/* Webhook quick access — uses selected source when multiple webhooks exist */}
+				<Tooltip title={activeEndpointInfo ? 'Open webhook endpoint info' : endpointEntries.length > 1 ? 'Select a webhook source on the canvas to open its endpoint info' : 'Run a webhook source to expose endpoint info'}>
+					<span>
+						<IconButton onClick={() => setIsWebhookModalOpen(true)} size="small" sx={iconButtonSx} disabled={!activeEndpointInfo}>
+							<WebhookIcon fontSize="small" />
+						</IconButton>
+					</span>
+				</Tooltip>
 			</FloatingToolbar>
 
 			<ReactFlow
@@ -368,6 +395,7 @@ export default function Canvas(): ReactElement {
 					</span>
 				}
 			/>
+			<EndpointInfoModal endpointInfo={activeEndpointInfo} isOpen={isWebhookModalOpen && !!activeEndpointInfo} onClose={() => setIsWebhookModalOpen(false)} onOpenLink={onOpenLink} displayName={activeEndpointNodeId} host={serverHost} />
 		</div>
 	);
 }
