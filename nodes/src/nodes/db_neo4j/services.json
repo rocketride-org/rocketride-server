@@ -1,0 +1,263 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Neo4J",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "db_neo4j://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"database",
+		"tool"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [
+		"noremote",
+		"invoke"
+	],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.db_neo4j",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "neo4j",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": [
+		"A processing component that connects to a Neo4J graph database. ",
+		"Accepts natural-language questions, translates them to Cypher queries ",
+		"via an LLM, and returns results to the pipeline. Also supports inserting ",
+		"structured data as graph nodes. Designed for knowledge graph retrieval, ",
+		"entity linking, and graph-based RAG workflows."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "neo4j.svg",
+	//
+	// Optional:
+	//		Defines the invoke connections that may/must be connected
+	// 		which are utilized by this driver
+	//
+	"invoke": {
+		"llm": {
+			"description": "LLM to use to craft Cypher queries from question",
+			"min": 1
+		}
+	},
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		// "answers": [],
+		"questions": [
+			"table",
+			"text",
+			"answers"
+		]
+	},
+	"input": [
+		// {
+		// 	"lane": "answers",
+		// 	"output": []
+		// },
+		{
+			"lane": "questions",
+			"output": [
+				{
+					"lane": "table"
+				},
+				{
+					"lane": "text"
+				},
+				{
+					"lane": "answers"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "default",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"default": {
+				"database": "neo4j"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"neo4jdb.uri": {
+			"type": "string",
+			"title": "Connection URI",
+			"default": "neo4j://localhost:7687",
+			"description": "Bolt URI for the Neo4J instance. Use neo4j:// or bolt:// for plaintext, neo4j+s:// or bolt+s:// for TLS (e.g. Neo4J Aura cloud)"
+		},
+		"neo4jdb.auth_method": {
+			"type": "string",
+			"title": "Authentication",
+			"default": "userpass",
+			"enum": [
+				["userpass", "Username & Password"],
+				["token", "Bearer Token"]
+			],
+			"conditional": [
+				{
+					"value": "userpass",
+					"properties": [
+						"neo4jdb.user",
+						"neo4jdb.password"
+					]
+				},
+				{
+					"value": "token",
+					"properties": [
+						"neo4jdb.token"
+					]
+				}
+			]
+		},
+		"neo4jdb.user": {
+			"type": "string",
+			"title": "User",
+			"default": "neo4j",
+			"description": "Username to authenticate with the Neo4J instance."
+		},
+		"neo4jdb.password": {
+			"type": "string",
+			"title": "Password",
+			"description": "Password to authenticate with the Neo4J instance.",
+			"secure": true,
+			"ui": {
+				"ui:widget": "password"
+			}
+		},
+		"neo4jdb.token": {
+			"type": "string",
+			"title": "Bearer token",
+			"description": "Bearer token for token-based authentication (e.g. Neo4J Aura cloud).",
+			"secure": true,
+			"ui": {
+				"ui:widget": "password"
+			}
+		},
+		"neo4jdb.database": {
+			"type": "string",
+			"title": "Database name",
+			"default": "neo4j",
+			"description": "Name of the Neo4J database to connect to. Use 'neo4j' for the default database."
+		},
+		"neo4jdb.label": {
+			"type": "string",
+			"title": "Node label",
+			"default": "Row",
+			"description": "Label applied to graph nodes created when inserting data from the pipeline (e.g. Person, Event, Row)."
+		},
+		"neo4jdb.db_description": {
+			"type": "string",
+			"title": "Graph description",
+			"default": "",
+			"description": "What is this graph used for? Describe its content and domain — this helps the LLM generate more accurate Cypher queries.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"neo4jdb.max_attempts": {
+			"type": "integer",
+			"title": "Max validation attempts",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 20,
+			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query"
+		},
+		"neo4jdb.default": {
+			"object": "default",
+			"properties": [
+				"neo4jdb.db_description",
+				"neo4jdb.uri",
+				"neo4jdb.auth_method",
+				"neo4jdb.database",
+				"neo4jdb.label",
+				"neo4jdb.max_attempts"
+			]
+		},
+		"neo4jdb.profile": {
+			"hidden": true,
+			"type": "string",
+			"default": "default",
+			"enum": [
+				[
+					"default",
+					"Default"
+				]
+			],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": [
+						"neo4jdb.default"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Neo4J",
+			"properties": [
+				"neo4jdb.profile"
+			]
+		}
+	]
+}
