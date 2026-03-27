@@ -63,6 +63,28 @@ function firstSentence(description: string | undefined): string {
 }
 
 /**
+ * Sanitize a service name so it is safe to use as a filename.
+ * Only `[a-zA-Z0-9._-]` characters are kept; everything else is replaced with `_`.
+ * Each leading dot is replaced individually to preserve name uniqueness.
+ */
+function sanitizeServiceName(name: string): string {
+	return name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, (match) => '_'.repeat(match.length));
+}
+
+/**
+ * Return true only when `child` is strictly inside `parent` (same scheme + authority,
+ * and child path starts with parent path followed by a `/`).
+ * Used as a defense-in-depth guard after name sanitization.
+ */
+function isUnderDirectory(parent: vscode.Uri, child: vscode.Uri): boolean {
+	if (child.scheme !== parent.scheme || child.authority !== parent.authority) {
+		return false;
+	}
+	const parentPath = parent.path.endsWith('/') ? parent.path : parent.path + '/';
+	return child.path.startsWith(parentPath);
+}
+
+/**
  * Sync service catalog data to .rocketride/ when the server sends services.
  *
  * 1. Write individual schema files: .rocketride/schema/<component>.json
@@ -73,18 +95,25 @@ export async function syncServiceCatalog(workspaceRoot: vscode.Uri, services: Re
 	const schemaDir = vscode.Uri.joinPath(workspaceRoot, '.rocketride', 'schema');
 	await vscode.workspace.fs.createDirectory(schemaDir);
 
+	const logger = getLogger();
 	const serviceNames = Object.keys(services);
-	const expectedFiles = new Set(serviceNames.map((name) => `${name}.json`));
 
-	// Step 1: Write individual schema files
+	// Step 1: Write individual schema files; track written filenames for cleanup.
+	const expectedFiles = new Set<string>();
 	for (const name of serviceNames) {
-		const schemaUri = vscode.Uri.joinPath(schemaDir, `${name}.json`);
+		const safeName = sanitizeServiceName(name);
+		const schemaUri = vscode.Uri.joinPath(schemaDir, `${safeName}.json`);
+		// Defense-in-depth: verify the resolved path is still within schemaDir.
+		if (!isUnderDirectory(schemaDir, schemaUri)) {
+			logger.output(`${icons.info} Skipped schema write for unsafe service name: ${name}`);
+			continue;
+		}
+		expectedFiles.add(`${safeName}.json`);
 		const json = JSON.stringify(services[name], null, 2);
 		await writeIfChanged(schemaUri, json);
 	}
 
 	// Step 2: Remove obsolete schema files
-	const logger = getLogger();
 	try {
 		const entries = await vscode.workspace.fs.readDirectory(schemaDir);
 		for (const [fileName, fileType] of entries) {
