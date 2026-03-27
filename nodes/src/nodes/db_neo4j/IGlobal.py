@@ -124,7 +124,7 @@ class IGlobal(IGlobalBase):
             params = {}
 
         with self.driver.session(database=self.database) as session:
-            result = session.run(cypher, params, timeout=timeout)
+            result = session.run(neo4j.Query(cypher, timeout=timeout), params)
             return [_record_to_dict(record) for record in result]
 
     def _validate_query(self, cypher: str) -> Tuple[bool, str]:
@@ -248,10 +248,20 @@ class IGlobal(IGlobalBase):
 
     @staticmethod
     def _build_auth(config: Dict[str, Any]) -> Any:
-        """Build a neo4j auth tuple or bearer-token auth from config."""
-        token = config.get('token', '').strip()
-        if token:
-            return neo4j.bearer_auth(token)
+        """Build a neo4j auth tuple or bearer-token auth from config.
+
+        Respects the ``auth_method`` field: ``'token'`` → bearer auth,
+        anything else (default ``'userpass'``) → username/password.
+
+        Args:
+            config (Dict[str, Any]): Unprefixed node config dict.
+
+        Returns:
+            Any: A ``neo4j.bearer_auth`` token or a ``(user, password)`` tuple.
+        """
+        auth_method = config.get('auth_method', 'userpass').strip()
+        if auth_method == 'token':
+            return neo4j.bearer_auth(config.get('token', ''))
         user = config.get('user', 'neo4j').strip() or 'neo4j'
         password = config.get('password', '')
         return (user, password)

@@ -175,6 +175,8 @@ class Neo4JDriver(ToolsBase):
             return self._invoke_get_cypher(input_obj)
         elif name == 'get_data':
             return self._invoke_get_data(input_obj)
+        else:
+            raise ValueError(f'Unknown tool {tool_name!r}')
 
     def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:
         """Raise ValueError if the tool input is missing required fields."""
@@ -221,13 +223,13 @@ class Neo4JDriver(ToolsBase):
 
     def _invoke_get_cypher(self, input_obj: Dict[str, Any]) -> Dict[str, Any]:
         """Translate a natural-language question to Cypher without executing it."""
-        from .IInstance import _is_cypher_safe
+        from .IInstance import _is_cypher_safe, _parse_is_valid
 
         question = self._get_question(input_obj)
         limit = self._get_limit(input_obj)
 
         result = self._instance._buildCypherQuery(question, limit=limit)
-        is_valid = result.get('isValid', '').lower() == 'true'
+        is_valid = _parse_is_valid(result.get('isValid', False))
         cypher = result.get('query', '')
 
         if is_valid and cypher and _is_cypher_safe(cypher):
