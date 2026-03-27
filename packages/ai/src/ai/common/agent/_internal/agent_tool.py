@@ -41,22 +41,15 @@ class _AgentAsToolProvider(ToolsBase):
     """
     `ToolsBase` implementation that routes tool calls into `agent.run_agent(...)`.
 
-    The tool name is namespaced by the pipeline component id so it remains unique
-    per connected agent node.
+    Emits a bare tool name; `AgentHostServices.Tools` handles node-id
+    namespacing so each agent instance is unique in the tool catalog.
     """
 
     def __init__(self, *, agent: Any, pSelf: Any):
         self._agent = agent
         self._pSelf = pSelf
-        self._full_name = f'{self.unique_agent_tool_name()}.{getattr(self._agent, "_AGENT_TOOL_NAME", "run_agent")}'
+        self._full_name = getattr(self._agent, '_AGENT_TOOL_NAME', 'run_agent')
         self._tools_available: Optional[List[Tuple[str, str]]] = None
-
-    def unique_agent_tool_name(self) -> str:
-        """Return the unique tool namespace for this agent node instance."""
-        inst = self._pSelf.instance
-        pipe_type = inst.pipeType
-        pipe_id = pipe_type.get('id') if isinstance(pipe_type, dict) else pipe_type.id
-        return str(pipe_id)
 
     def _connected_tools_available(self) -> List[Tuple[str, str]]:
         """
@@ -154,7 +147,7 @@ class _AgentAsToolProvider(ToolsBase):
                     'stack': {'type': 'array', 'items': {'type': 'object'}, 'description': 'Run trace stack'},
                 },
                 'required': ['content', 'meta', 'stack'],
-            }
+            },
         }
         return [descriptor]
 

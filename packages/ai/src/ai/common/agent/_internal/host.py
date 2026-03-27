@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from rocketlib.types import IInvokeLLM, IInvokeTool
 
+
 class AgentHostServices:
     class LLM:
         """LLM host interface backed by `invoke('llm', ...)`."""
@@ -64,9 +65,18 @@ class AgentHostServices:
                     # return success — but param.tools should be populated with the tool descriptors from this node
                     pass
 
-                # Add the tools
+                # Add the tools, namespaced by node id so that two nodes
+                # exposing the same tool name (e.g. two postgres instances)
+                # never collide.
                 for tool in param.tools:
-                    self._tool_list[tool['name']] = {'node_id': tool_node, 'tool': tool}
+                    original_name = tool['name']
+                    namespaced = f'{tool_node}.{original_name}'
+                    tool['name'] = namespaced
+                    self._tool_list[namespaced] = {
+                        'node_id': tool_node,
+                        'tool': tool,
+                        'original_name': original_name,
+                    }
 
             # And done
             return
@@ -117,11 +127,13 @@ class AgentHostServices:
             if tool_name not in self._tool_list:
                 raise ValueError(f'Tool {tool_name} not found in tool catalog')
 
-            # Build the invoke
-            param = IInvokeTool.Validate(tool_name=tool_name, input=input)
+            # Build the invoke using the original (un-prefixed) name so the
+            # provider's _owns_tool() match works.
+            entry = self._tool_list[tool_name]
+            param = IInvokeTool.Validate(tool_name=entry['original_name'], input=input)
 
             # Call the tool to validate - throws on error
-            self._invoker.instance.invoke('tool', param, nodeId=self._tool_list[tool_name]['node_id'])
+            self._invoker.instance.invoke('tool', param, nodeId=entry['node_id'])
 
         def invoke(self, tool_name: str, input: Any) -> Any:
             """
@@ -138,11 +150,13 @@ class AgentHostServices:
             if tool_name not in self._tool_list:
                 raise ValueError(f'Tool {tool_name} not found in tool catalog')
 
-            # Build the invoke
-            param = IInvokeTool.Invoke(tool_name=tool_name, input=input)
+            # Build the invoke using the original (un-prefixed) name so the
+            # provider's _owns_tool() match works.
+            entry = self._tool_list[tool_name]
+            param = IInvokeTool.Invoke(tool_name=entry['original_name'], input=input)
 
             # Invoke it
-            self._invoker.instance.invoke('tool', param, nodeId=self._tool_list[tool_name]['node_id'])
+            self._invoker.instance.invoke('tool', param, nodeId=entry['node_id'])
 
             # And return the output
             return getattr(param, 'output', None)
@@ -151,6 +165,7 @@ class AgentHostServices:
         """Memory host interface — thin wrapper over the memory_internal node."""
 
         def __init__(self, invoker, node_id: str) -> None:
+            """Create a Memory host service wrapper bound to an engine invoker."""
             self._invoker = invoker
             self._node_id = node_id
 
@@ -176,6 +191,4 @@ class AgentHostServices:
         self.llm = AgentHostServices.LLM(invoker)
         self.tools = AgentHostServices.Tools(invoker)
         nodes = invoker.instance.getControllerNodeIds('memory')
-        self.memory: Optional[AgentHostServices.Memory] = (
-            AgentHostServices.Memory(invoker, nodes[0]) if nodes else None
-        )
+        self.memory: Optional[AgentHostServices.Memory] = AgentHostServices.Memory(invoker, nodes[0]) if nodes else None
