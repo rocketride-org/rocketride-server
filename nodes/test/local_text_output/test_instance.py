@@ -6,6 +6,7 @@
 """Unit tests for local_text_output IInstance (no engine server required)."""
 
 import sys
+import tempfile
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -19,7 +20,7 @@ from local_text_output.IInstance import IInstance  # noqa: E402
 def _make_instance():
     inst = IInstance()
     iglobal = Mock()
-    iglobal.output_path = str(Path('/tmp/local_text_output_test'))
+    iglobal.output_path = str(Path(tempfile.gettempdir()) / 'local_text_output_test')
     iglobal.exclude = 'N/A'
     inst.IGlobal = iglobal
     return inst
