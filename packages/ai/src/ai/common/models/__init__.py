@@ -9,7 +9,7 @@ This package provides:
   (used by connectors)
 
 Subpackages:
-- audio: Whisper (transcription)
+- audio: Whisper (transcription), Piper TTS (model server)
 - gliner: GLiNER (zero-shot NER)
 - ocr: EasyOCR, DocTR, Surya, TrOCR
 - transformers: SentenceTransformer, pipeline, AutoModel, AutoTokenizer
@@ -22,7 +22,7 @@ model type without model-specific branching.
 from .base import BaseLoader
 
 # Audio models
-from .audio import Whisper, WhisperLoader
+from .audio import ElevenLabsTTSLoader, OpenAITTSLoader, PiperLoader, Whisper, WhisperLoader
 
 # GLiNER models (zero-shot NER)
 from .gliner import GLiNER, GLiNERLoader
@@ -44,6 +44,9 @@ __all__ = [
     # Base
     'BaseLoader',
     # Audio
+    'ElevenLabsTTSLoader',
+    'OpenAITTSLoader',
+    'PiperLoader',
     'Whisper',
     'WhisperLoader',
     # GLiNER

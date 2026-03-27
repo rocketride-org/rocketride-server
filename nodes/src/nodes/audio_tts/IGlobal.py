@@ -3,16 +3,14 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-import base64
-import json
 import os
-import shutil
 import tempfile
 import time
 from typing import Any, Dict
 
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase, OPEN_MODE
 from ai.common.config import Config
+from ai.common.models.base import get_model_server_address
 
 
 class IGlobal(IGlobalBase):
@@ -25,31 +23,79 @@ class IGlobal(IGlobalBase):
         params = config.get('parameters') if isinstance(config.get('parameters'), dict) else {}
         return params.get(key, default)
 
+    def _resolve_tts_model(self, cfg: Dict[str, Any], engine: str) -> str:
+        """Map profile-specific keys (+ legacy ``model``) to the HF/API id TTSEngine expects."""
+        e = engine.lower()
+        if e == 'coqui':
+            v = self._read_cfg(cfg, 'coqui_model', '') or self._read_cfg(cfg, 'model', '')
+            return str(v or 'coqui/XTTS-v2').strip()
+        if e == 'kokoro':
+            v = self._read_cfg(cfg, 'kokoro_model', '') or self._read_cfg(cfg, 'model', '')
+            return str(v or 'hexgrad/Kokoro-82M').strip()
+        if e in ('bark', 'bak'):
+            v = self._read_cfg(cfg, 'bark_model', '') or self._read_cfg(cfg, 'model', '')
+            return str(v or 'suno/bark-small').strip()
+        if e == 'openai':
+            v = self._read_cfg(cfg, 'openai_model', '') or self._read_cfg(cfg, 'model', '')
+            return str(v or 'gpt-4o-mini-tts').strip()
+        if e == 'elevenlabs':
+            v = self._read_cfg(cfg, 'elevenlabs_model', '') or self._read_cfg(cfg, 'model', '')
+            return str(v or 'eleven_multilingual_v2').strip()
+        return str(self._read_cfg(cfg, 'model', '') or '').strip()
+
+    def _resolve_tts_voice(self, cfg: Dict[str, Any], engine: str) -> str:
+        e = engine.lower()
+        if e == 'openai':
+            v = self._read_cfg(cfg, 'openai_voice', '') or self._read_cfg(cfg, 'voice', '')
+            return str(v or 'alloy').strip()
+        if e == 'elevenlabs':
+            v = self._read_cfg(cfg, 'elevenlabs_voice', '') or self._read_cfg(cfg, 'voice', '')
+            return str(v or 'EXAVITQu4vr4xnSDxMaL').strip()
+        return str(self._read_cfg(cfg, 'voice', '') or 'alloy').strip()
+
     def beginGlobal(self):
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
+        from depends import depends  # type: ignore
+
+        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
+        depends(requirements)
+
         from .tts_engine import TTSEngine
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        output_format = str(self._read_cfg(cfg, 'output_format', 'wav')).lower()
         engine = str(self._read_cfg(cfg, 'engine', 'piper')).lower()
+
+        piper_voice = str(self._read_cfg(cfg, 'piper_voice', '') or '').strip()
+        voice_model = ''
+        _ms = get_model_server_address() is not None
+        piper_use_model_server = engine == 'piper' and _ms
+        openai_use_model_server = engine == 'openai' and _ms
+        elevenlabs_use_model_server = engine == 'elevenlabs' and _ms
+
+        if engine == 'piper' and piper_voice:
+            if not piper_use_model_server:
+                from . import piper_catalog
+
+                voice_model = piper_catalog.ensure_voice_cached(piper_voice)
+            else:
+                voice_model = ''
 
         self._config = {
             'engine': engine,
-            'voice': self._read_cfg(cfg, 'voice', 'alloy'),
-            'voice_model': self._read_cfg(cfg, 'voice_model', ''),
-            'model': self._read_cfg(cfg, 'model', 'gpt-4o-mini-tts'),
+            'voice': self._resolve_tts_voice(cfg, engine),
+            'voice_model': voice_model,
+            'piper_voice': piper_voice,
+            'piper_use_model_server': piper_use_model_server,
+            'openai_use_model_server': openai_use_model_server,
+            'elevenlabs_use_model_server': elevenlabs_use_model_server,
+            'model': self._resolve_tts_model(cfg, engine),
             'api_key': self._read_cfg(cfg, 'api_key', ''),
-            'output_mode': str(self._read_cfg(cfg, 'output_mode', 'path')).lower(),
-            'output_format': output_format if output_format in ('wav', 'mp3') else 'wav',
-            'piper_bin': self._read_cfg(cfg, 'piper_bin', 'piper'),
-            'ffmpeg_bin': self._read_cfg(cfg, 'ffmpeg_bin', 'ffmpeg'),
-            'use_model_server': bool(self._read_cfg(cfg, 'use_model_server', False)),
-            'ws_enabled': bool(self._read_cfg(cfg, 'ws_enabled', False)),
-            'ws_host': self._read_cfg(cfg, 'ws_host', 'localhost'),
-            'ws_port': int(self._read_cfg(cfg, 'ws_port', 5565)),
-            'ws_route': self._read_cfg(cfg, 'ws_route', '/audio/tts'),
+            # Retained for model-server load options / identity; local Piper uses ``PiperVoice`` in-process.
+            'piper_bin': 'piper',
+            # MP3: ``lameenc`` in-process first; ffmpeg (``imageio-ffmpeg`` / PATH) as fallback in tts_engine.
+            'ffmpeg_bin': 'ffmpeg',
         }
         self._engine = TTSEngine(self._config)
 
@@ -86,50 +132,29 @@ class IGlobal(IGlobalBase):
         engine = str(self._read_cfg(cfg, 'engine', 'piper')).lower()
         if engine in ('elevenlabs', 'openai') and not self._read_cfg(cfg, 'api_key', ''):
             raise Exception(f'Engine "{engine}" requires api_key')
-        if engine == 'piper' and not self._read_cfg(cfg, 'voice_model', ''):
-            raise Exception('Engine "piper" requires voice_model (.onnx path)')
-        if engine in ('coqui', 'kokoro', 'bark', 'bak') and not self._read_cfg(cfg, 'model', ''):
-            raise Exception(f'Engine "{engine}" requires model')
-        output_format = str(self._read_cfg(cfg, 'output_format', 'wav')).lower()
-        ffmpeg_bin = str(self._read_cfg(cfg, 'ffmpeg_bin', 'ffmpeg'))
-        # Local/model-based engines generate wav first; mp3 requires ffmpeg conversion.
-        if output_format == 'mp3' and engine in ('piper', 'coqui', 'kokoro', 'bark', 'bak'):
-            if shutil.which(ffmpeg_bin) is None:
-                raise Exception(f'Engine "{engine}" with output_format "mp3" requires ffmpeg. Binary not found: {ffmpeg_bin}')
+        if engine == 'piper':
+            pv = str(self._read_cfg(cfg, 'piper_voice', '') or '').strip()
+            if not pv:
+                raise Exception('Piper: choose a voice preset from the list (downloads on first run)')
 
-    def synthesize(self, text: str) -> Dict[str, Any]:
+    def synthesize(self, text: str, output_format: str) -> Dict[str, Any]:
         self._cleanup_stale_outputs()
-        ext = self._config.get('output_format', 'wav')
+        ext = output_format if output_format in ('wav', 'mp3') else 'wav'
         filename = f'tts_{int(time.time() * 1000)}.{ext}'
         out_path = os.path.join(tempfile.gettempdir(), filename)
 
         runtime_cfg = dict(self._config)
         runtime_cfg['output_path'] = out_path
+        runtime_cfg['output_format'] = ext
         self._engine.config = runtime_cfg
 
         result = self._engine.synthesize(text)
         path = result['path']
 
-        payload = {'path': path, 'mime_type': result.get('mime_type', 'audio/wav')}
-        if self._config.get('output_mode') == 'base64':
-            with open(path, 'rb') as fin:
-                payload['base64'] = base64.b64encode(fin.read()).decode('ascii')
-        return payload
-
-    def notify_ws(self, payload: Dict[str, Any]):
-        if not self._config.get('ws_enabled'):
-            return
-        try:
-            from websockets.sync.client import connect
-
-            host = self._config.get('ws_host', 'localhost')
-            port = self._config.get('ws_port', 5565)
-            route = self._config.get('ws_route', '/audio/tts')
-            url = f'ws://{host}:{port}{route}'
-            with connect(url, open_timeout=5, close_timeout=3) as ws:
-                ws.send(json.dumps(payload))
-        except Exception as e:
-            warning(f'WebSocket notification failed: {e}')
+        return {'path': path, 'mime_type': result.get('mime_type', 'audio/wav')}
 
     def endGlobal(self):
-        self._engine = None
+        eng = getattr(self, '_engine', None)
+        if eng is not None:
+            eng.dispose()
+            self._engine = None

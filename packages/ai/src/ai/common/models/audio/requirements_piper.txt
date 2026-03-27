@@ -1,0 +1,4 @@
+huggingface_hub>=0.20.0
+piper-tts>=1.2.0,<2
+lameenc>=1.6.0
+imageio-ffmpeg>=0.4.0

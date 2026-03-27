@@ -57,7 +57,6 @@ class BaseLoader:
         the actual ML libraries.
         """
         if cls._REQUIREMENTS_FILE and not cls._dependencies_loaded:
-            import ai.common.torch
             from depends import depends
 
             depends(cls._REQUIREMENTS_FILE)
@@ -251,7 +250,7 @@ class ModelClient:
 
         Args:
             model_name: Model name/path
-            model_type: Model type ('sentence_transformer', 'transformers', 'whisper')
+            model_type: Model type ('sentence_transformer', 'transformers', 'whisper', 'piper', ...)
             loader_options: Options passed to the loader (identity + HF params)
 
         Raises:

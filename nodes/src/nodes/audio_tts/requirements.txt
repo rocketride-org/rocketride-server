@@ -1,3 +1,10 @@
 requests
-websockets
 numpy
+huggingface_hub>=0.20.0
+# Piper (all profiles share this file via depends): in-process ONNX synthesis
+piper-tts>=1.2.0,<2
+# Coqui / Kokoro / Bark: Hugging Face pipelines (torch is provided by the engine / model-server image)
+transformers
+# WAV→MP3 without ffmpeg subprocess when possible (Piper + HF paths); fallback: imageio-ffmpeg → bundled ffmpeg
+lameenc>=1.6.0
+imageio-ffmpeg>=0.4.0
