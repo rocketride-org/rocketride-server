@@ -48,6 +48,9 @@ class Neo4JDriver(ToolsBase):
 
     _SERVER_NAME = 'neo4j'
 
+    LIMIT_DEFAULT: int = 250
+    LIMIT_MAX: int = 25_000
+
     def __init__(self, *, instance: Any):
         """Initialise the driver, holding a reference to the owning IInstance."""
         self._instance = instance
@@ -156,6 +159,23 @@ class Neo4JDriver(ToolsBase):
             },
         ]
 
+    def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:
+        """Validate and dispatch a tool call to the appropriate handler."""
+        if input_obj is None:
+            input_obj = {}
+        if not isinstance(input_obj, dict):
+            raise ValueError('Tool input must be a JSON object (dict)')
+
+        self._tool_validate(tool_name=tool_name, input_obj=input_obj)
+        name = _strip_ns(tool_name)
+
+        if name == 'get_schema':
+            return self._invoke_get_schema(input_obj)
+        elif name == 'get_cypher':
+            return self._invoke_get_cypher(input_obj)
+        elif name == 'get_data':
+            return self._invoke_get_data(input_obj)
+
     def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:
         """Raise ValueError if the tool input is missing required fields."""
         name = _strip_ns(tool_name)
@@ -173,23 +193,6 @@ class Neo4JDriver(ToolsBase):
 
         else:
             raise ValueError(f'Unknown tool {tool_name!r} (expected get_schema, get_cypher, or get_data)')
-
-    def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:
-        """Validate and dispatch a tool call to the appropriate handler."""
-        if input_obj is None:
-            input_obj = {}
-        if not isinstance(input_obj, dict):
-            raise ValueError('Tool input must be a JSON object (dict)')
-
-        self._tool_validate(tool_name=tool_name, input_obj=input_obj)
-        name = _strip_ns(tool_name)
-
-        if name == 'get_schema':
-            return self._invoke_get_schema(input_obj)
-        elif name == 'get_cypher':
-            return self._invoke_get_cypher(input_obj)
-        elif name == 'get_data':
-            return self._invoke_get_data(input_obj)
 
     # ------------------------------------------------------------------
     # Tool implementations
@@ -220,8 +223,8 @@ class Neo4JDriver(ToolsBase):
         """Translate a natural-language question to Cypher without executing it."""
         from .IInstance import _is_cypher_safe
 
-        question = input_obj['question'].strip()
-        limit = input_obj.get('limit', 250)
+        question = self._get_question(input_obj)
+        limit = self._get_limit(input_obj)
 
         result = self._instance._buildCypherQuery(question, limit=limit)
         is_valid = result.get('isValid', '').lower() == 'true'
@@ -236,10 +239,9 @@ class Neo4JDriver(ToolsBase):
 
     def _invoke_get_data(self, input_obj: Dict[str, Any]) -> Dict[str, Any]:
         """Translate a natural-language question to Cypher, execute it, and return rows."""
-        raw_limit = input_obj.get('limit')
-        limit = max(1, min(int(raw_limit), 25000)) if raw_limit is not None else 250
+        limit = self._get_limit(input_obj)
 
-        cypher_result = self._invoke_get_cypher({'question': input_obj['question'], 'limit': limit})
+        cypher_result = self._invoke_get_cypher({'question': self._get_question(input_obj), 'limit': limit})
         if not cypher_result.get('valid'):
             return cypher_result
 
@@ -251,6 +253,36 @@ class Neo4JDriver(ToolsBase):
             return {'error': str(e), 'cypher': cypher, 'rows': []}
 
         return {'rows': rows, 'cypher': cypher, 'row_limit': limit}
+
+    # ------------------------------------------------------------------
+    # Input helpers
+    # ------------------------------------------------------------------
+
+    def _get_question(self, input_obj: Dict[str, Any]) -> str:
+        """Extract and normalise the question string from a tool input object.
+
+        Args:
+            input_obj (Dict[str, Any]): Tool input object containing the ``question`` key.
+
+        Returns:
+            str: The question string with leading/trailing whitespace stripped.
+        """
+        return input_obj['question'].strip()
+
+    def _get_limit(self, input_obj: Dict[str, Any]) -> int:
+        """Extract and clamp the row limit from a tool input object.
+
+        Args:
+            input_obj (Dict[str, Any]): Tool input object optionally containing a ``limit`` key.
+
+        Returns:
+            int: Clamped limit between 1 and ``LIMIT_MAX``, or ``LIMIT_DEFAULT`` if not provided.
+        """
+        raw_limit = input_obj.get('limit')
+        try:
+            return max(1, min(int(raw_limit), self.LIMIT_MAX)) if raw_limit is not None else self.LIMIT_DEFAULT
+        except (ValueError, TypeError):
+            return self.LIMIT_DEFAULT
 
 
 # ---------------------------------------------------------------------------

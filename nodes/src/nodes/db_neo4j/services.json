@@ -56,8 +56,7 @@
 	"description": [
 		"A processing component that connects to a Neo4J graph database. ",
 		"Accepts natural-language questions, translates them to Cypher queries ",
-		"via an LLM, and returns results to the pipeline. Also supports inserting ",
-		"structured data as graph nodes. Designed for knowledge graph retrieval, ",
+		"via an LLM, and returns results to the pipeline. Designed for knowledge graph retrieval, ",
 		"entity linking, and graph-based RAG workflows."
 	],
 	//
@@ -143,8 +142,14 @@
 			"title": "Authentication",
 			"default": "userpass",
 			"enum": [
-				["userpass", "Username & Password"],
-				["token", "Bearer Token"]
+				[
+					"userpass",
+					"Username & Password"
+				],
+				[
+					"token",
+					"Bearer Token"
+				]
 			],
 			"conditional": [
 				{
@@ -192,12 +197,12 @@
 			"default": "neo4j",
 			"description": "Name of the Neo4J database to connect to. Use 'neo4j' for the default database."
 		},
-		"neo4jdb.label": {
-			"type": "string",
-			"title": "Node label",
-			"default": "Row",
-			"description": "Label applied to graph nodes created when inserting data from the pipeline (e.g. Person, Event, Row)."
-		},
+		// "neo4jdb.label": {
+		// 	"type": "string",
+		// 	"title": "Node label",
+		// 	"default": "Row",
+		// 	"description": "Label applied to graph nodes created when inserting data from the pipeline (e.g. Person, Event, Row)."
+		// },
 		"neo4jdb.db_description": {
 			"type": "string",
 			"title": "Graph description",
@@ -222,7 +227,7 @@
 				"neo4jdb.uri",
 				"neo4jdb.auth_method",
 				"neo4jdb.database",
-				"neo4jdb.label",
+				// "neo4jdb.label",
 				"neo4jdb.max_attempts"
 			]
 		},

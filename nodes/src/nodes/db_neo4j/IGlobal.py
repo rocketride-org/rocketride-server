@@ -43,17 +43,19 @@ from ai.common.config import Config
 class IGlobal(IGlobalBase):
     """Neo4J-specific global connection state."""
 
+    QUERY_TIMEOUT: float = 30.0  # Maximum seconds a Cypher query may run before being aborted.
+
     # neo4j.Driver instance — opened in beginGlobal, closed in endGlobal.
     driver: Optional[neo4j.Driver] = None
 
     # Cached graph schema: {'nodes': {label: [(prop, type), ...]},
     #                        'relationships': [{type, start, end}, ...]}
-    graph_schema: Dict[str, Any] = {}
+    graph_schema: Dict[str, Any]
 
     # Unprefixed config values set during beginGlobal.
     uri: str = ''
     database: str = 'neo4j'
-    label: str = 'Row'
+    # label: str = 'Row'
     db_description: str = ''
     max_validation_attempts: int = 5
 
@@ -63,11 +65,12 @@ class IGlobal(IGlobalBase):
 
     def beginGlobal(self) -> None:
         """Open the Neo4J driver, verify connectivity, and cache the graph schema."""
+        self.graph_schema = {}
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
         self.uri = config.get('uri', 'neo4j://localhost:7687').strip()
         self.database = config.get('database', 'neo4j').strip() or 'neo4j'
-        self.label = config.get('label', 'Row').strip() or 'Row'
+        # self.label = config.get('label', 'Row').strip() or 'Row'
         self.db_description = config.get('db_description', '')
 
         try:
@@ -102,13 +105,26 @@ class IGlobal(IGlobalBase):
     # Public helpers used by IInstance and the driver
     # ------------------------------------------------------------------
 
-    def _run_query(self, cypher: str, params: Optional[Dict] = None) -> List[Dict]:
-        """Execute a Cypher query and return rows as a list of plain dicts."""
+    def _run_query(self, cypher: str, params: Optional[Dict] = None, *, timeout: float = QUERY_TIMEOUT) -> List[Dict]:
+        """Execute a Cypher query and return rows as a list of plain dicts.
+
+        Args:
+            cypher (str): The Cypher query to execute.
+            params (Optional[Dict]): Query parameters to bind into the Cypher statement.
+            timeout (float): Maximum seconds the query may run before being aborted.
+                Defaults to ``QUERY_TIMEOUT``.
+
+        Returns:
+            List[Dict]: Result rows, each serialised to a plain Python dict.
+
+        Raises:
+            neo4j.exceptions.Neo4jError: If the driver reports a query or connection error.
+        """
         if params is None:
             params = {}
 
         with self.driver.session(database=self.database) as session:
-            result = session.run(cypher, params)
+            result = session.run(cypher, params, timeout=timeout)
             return [_record_to_dict(record) for record in result]
 
     def _validate_query(self, cypher: str) -> Tuple[bool, str]:

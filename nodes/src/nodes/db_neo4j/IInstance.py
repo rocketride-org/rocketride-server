@@ -49,16 +49,17 @@ from .neo4j_driver import Neo4JDriver
 # ---------------------------------------------------------------------------
 
 _UNSAFE_CYPHER = re.compile(
-    r'^\s*(?:CREATE|MERGE|DELETE|DETACH\s+DELETE|SET|REMOVE|DROP|'
+    r'\b(?:CREATE|MERGE|DELETE|DETACH\s+DELETE|SET|REMOVE|DROP|'
     r'CALL\s+apoc\.(?:create|merge|delete|periodic\.commit|refactor))\b',
-    re.IGNORECASE | re.MULTILINE,
+    re.IGNORECASE,
 )
 
 
 def _is_cypher_safe(cypher: str) -> bool:
     """Return True when the Cypher statement is read-only (MATCH/RETURN/CALL schema only)."""
-    # Strip single-line comments before checking.
+    # Strip both single-line and block comments before checking.
     stripped = re.sub(r'//[^\n]*', '', cypher)
+    stripped = re.sub(r'/\*.*?\*/', '', stripped, flags=re.DOTALL)
     return not bool(_UNSAFE_CYPHER.search(stripped))
 
 
@@ -107,7 +108,9 @@ class IInstance(IInstanceBase):
             is_valid = query_json.get('isValid', '').lower() == 'true'
             cypher = query_json.get('query', '')
 
-            if is_valid and cypher and _is_cypher_safe(cypher):
+            executed = is_valid and bool(cypher) and _is_cypher_safe(cypher)
+
+            if executed:
                 result = self.IGlobal._run_query(cypher)
             else:
                 result = cypher
@@ -115,12 +118,12 @@ class IInstance(IInstanceBase):
             if 'text' in lanes:
                 self.instance.writeText(str(result))
 
-            if 'table' in lanes and is_valid and result:
+            if 'table' in lanes and executed and result:
                 self.instance.writeTable(self._formatResultAsMarkdown(result))
 
             if 'answers' in lanes:
                 answer = Answer()
-                if is_valid and result:
+                if executed and result:
                     answer.setAnswer(self._formatResultAsMarkdown(result))
                 else:
                     answer.setAnswer(str(result))
@@ -179,7 +182,7 @@ class IInstance(IInstanceBase):
                 question_text,
                 limit=limit,
                 previous_cypher=previous_cypher,
-                error=last_error,
+                error_message=last_error,
             )
 
             is_valid = result.get('isValid', '').lower() == 'true'
@@ -205,7 +208,7 @@ class IInstance(IInstanceBase):
         *,
         limit: int = 250,
         previous_cypher: Optional[str] = None,
-        error: Optional[str] = None,
+        error_message: Optional[str] = None,
     ) -> Dict:
         """Single LLM call: translate a natural-language question into Cypher."""
 
@@ -278,8 +281,8 @@ class IInstance(IInstanceBase):
             },
         )
 
-        if previous_cypher and error:
-            question.addContext(f'Your previous attempt produced the following Cypher:\n\n{previous_cypher}\n\nNeo4J rejected it with this error:\n\n{error}\n\nPlease fix the query and try again.')
+        if previous_cypher and error_message:
+            question.addContext(f'Your previous attempt produced the following Cypher:\n\n{previous_cypher}\n\nNeo4J rejected it with this error:\n\n{error_message}\n\nPlease fix the query and try again.')
 
         result = self.instance.invoke('llm', IInvokeLLM(op='ask', question=question))
 
