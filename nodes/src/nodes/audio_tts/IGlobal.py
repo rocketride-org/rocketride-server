@@ -53,6 +53,34 @@ class IGlobal(IGlobalBase):
         }
         self._engine = TTSEngine(self._config)
 
+    def _cleanup_stale_outputs(self):
+        # Keep current output behavior but prevent unbounded temp directory growth.
+        if not self._read_cfg(self._config, 'cleanup_temp_outputs', True):
+            return
+
+        max_age_sec = int(self._read_cfg(self._config, 'temp_output_max_age_sec', 3600))
+        if max_age_sec <= 0:
+            return
+
+        now = time.time()
+        temp_dir = tempfile.gettempdir()
+        for name in os.listdir(temp_dir):
+            if not name.startswith('tts_'):
+                continue
+            if not (name.endswith('.wav') or name.endswith('.mp3')):
+                continue
+
+            full_path = os.path.join(temp_dir, name)
+            try:
+                if not os.path.isfile(full_path):
+                    continue
+                age = now - os.path.getmtime(full_path)
+                if age > max_age_sec:
+                    os.remove(full_path)
+            except OSError:
+                # Best-effort cleanup only.
+                continue
+
     def validateConfig(self):
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         engine = str(self._read_cfg(cfg, 'engine', 'piper')).lower()
@@ -70,6 +98,7 @@ class IGlobal(IGlobalBase):
                 raise Exception(f'Engine "{engine}" with output_format "mp3" requires ffmpeg. Binary not found: {ffmpeg_bin}')
 
     def synthesize(self, text: str) -> Dict[str, Any]:
+        self._cleanup_stale_outputs()
         ext = self._config.get('output_format', 'wav')
         filename = f'tts_{int(time.time() * 1000)}.{ext}'
         out_path = os.path.join(tempfile.gettempdir(), filename)

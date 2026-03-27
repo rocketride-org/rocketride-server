@@ -33,3 +33,5 @@ class IInstance(IInstanceBase):
                 self.instance.writeText(json.dumps(payload))
         except Exception as e:
             warning(f'TTS synthesis failed: {e}')
+            # Do not swallow synthesis failures; propagate to pipeline execution.
+            raise
