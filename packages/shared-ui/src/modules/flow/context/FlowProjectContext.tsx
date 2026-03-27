@@ -138,6 +138,9 @@ export interface IFlowProjectContext {
 
 	/** Server host URL for replacing {host} placeholders in endpoint URLs. */
 	serverHost?: string;
+
+	/** Whether the host is connected to the server. Controls run/stop button availability. */
+	isConnected?: boolean;
 }
 
 const FlowProjectContext = createContext<IFlowProjectContext | null>(null);
@@ -183,6 +186,7 @@ export interface IFlowProjectProviderProps {
 	onStopPipeline?: (source: string) => void;
 	onOpenStatus?: (source: string) => void;
 	serverHost?: string;
+	isConnected?: boolean;
 }
 
 // ============================================================================
@@ -196,7 +200,7 @@ export interface IFlowProjectProviderProps {
  * The host application passes props that are tunneled through this context
  * so deeply nested components can access them without prop drilling.
  */
-export function FlowProjectProvider({ children, project: currentProject, features = DEFAULT_FLOW_FEATURES, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost }: IFlowProjectProviderProps): ReactElement {
+export function FlowProjectProvider({ children, project: currentProject, features = DEFAULT_FLOW_FEATURES, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected }: IFlowProjectProviderProps): ReactElement {
 	// --- Toolchain state ---------------------------------------------------
 
 	const [toolchainState, setToolchainState] = useState<IToolchainState>(DEFAULT_TOOLCHAIN_STATE);
@@ -245,6 +249,7 @@ export function FlowProjectProvider({ children, project: currentProject, feature
 		onStopPipeline,
 		onOpenStatus,
 		serverHost,
+		isConnected,
 	};
 
 	return <FlowProjectContext.Provider value={value}>{children}</FlowProjectContext.Provider>;

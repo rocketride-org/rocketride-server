@@ -105,13 +105,16 @@ export interface IFlowProps {
 
 	/** Server host URL for replacing {host} placeholders in endpoint URLs. */
 	serverHost?: string;
+
+	/** Whether the host is connected to the server. Controls run/stop button availability. */
+	isConnected?: boolean;
 }
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost }: IFlowProps) {
+export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected }: IFlowProps) {
 	// --- Build inventory from service catalog --------------------------------
 	const inventory = buildInventory(servicesJson);
 
@@ -170,6 +173,7 @@ export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuse
 					onStopPipeline={onStopPipeline}
 					onOpenStatus={onOpenStatus}
 					serverHost={serverHost}
+					isConnected={isConnected}
 					features={{
 						addNode: true,
 						addAnnotation: true,

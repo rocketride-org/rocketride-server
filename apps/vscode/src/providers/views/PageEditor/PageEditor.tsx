@@ -63,6 +63,10 @@ export type PageEditorIncomingMessage =
 			type: 'validateResponse';
 			result: unknown;
 			error?: string;
+	  }
+	| {
+			type: 'connectionState';
+			isConnected: boolean;
 	  };
 
 export type PageEditorOutgoingMessage =
@@ -139,6 +143,8 @@ export const PageEditor: React.FC = () => {
 	const [preferences, setPreferences] = useState<Record<string, unknown>>({});
 	// Server host URL for {host} placeholder replacement in endpoint URLs
 	const [serverHost, setServerHost] = useState<string>('');
+	// Whether the extension is connected to the RocketRide server
+	const [isConnected, setIsConnected] = useState<boolean>(false);
 
 	const contentChangedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const pendingContentRef = useRef<string | null>(null);
@@ -231,6 +237,9 @@ export const PageEditor: React.FC = () => {
 						pendingValidate.current?.resolve(message.result as IValidateResponse);
 					}
 					pendingValidate.current = null;
+					break;
+				case 'connectionState':
+					setIsConnected(message.isConnected);
 					break;
 			}
 		},
@@ -333,7 +342,7 @@ export const PageEditor: React.FC = () => {
 
 	return (
 		<div className="pipeline-editor-container">
-			<Canvas oauth2RootUrl={oauth2RootUrl} project={content} servicesJson={servicesJson} handleValidatePipeline={handleValidatePipeline} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} onOpenLink={onOpenLink} getPreference={getPreference} setPreference={setPreference} onContentChanged={onContentChanged} onUndo={onUndo} onRedo={onRedo} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} />
+			<Canvas oauth2RootUrl={oauth2RootUrl} project={content} servicesJson={servicesJson} handleValidatePipeline={handleValidatePipeline} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} onOpenLink={onOpenLink} getPreference={getPreference} setPreference={setPreference} onContentChanged={onContentChanged} onUndo={onUndo} onRedo={onRedo} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} isConnected={isConnected} />
 		</div>
 	);
 };
