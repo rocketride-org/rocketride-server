@@ -71,7 +71,6 @@ const TAB_LABELS: Record<IntegrationTabId, string> = {
 // =============================================================================
 
 export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpenLink, displayName, host }: IEndpointInfoModalProps): ReactElement | null {
-	const [isKeyVisible, setIsKeyVisible] = useState(false);
 	const [isTokenVisible, setIsTokenVisible] = useState(false);
 	const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 	const [activeTab, setActiveTab] = useState<IntegrationTabId>('curl');
@@ -188,12 +187,9 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 					<div style={styles.configItem}>
 						<div style={styles.configLabel}>{processed['auth-text']}</div>
 						<div style={styles.configValueRow}>
-							<div style={isKeyVisible ? styles.configValue : styles.configValueMasked}>{isKeyVisible ? processed['auth-key'] : MASKED_VALUE}</div>
+							<div style={styles.configValue}>{processed['auth-key']}</div>
 							<button style={iconBtn('key')} onClick={() => handleCopy(processed['auth-key'], 'key')}>
 								{copyFeedback === 'key' ? 'Copied!' : 'Copy'}
-							</button>
-							<button style={styles.iconBtn} onClick={() => setIsKeyVisible(!isKeyVisible)}>
-								{isKeyVisible ? 'Hide' : 'Show'}
 							</button>
 						</div>
 					</div>
