@@ -12,6 +12,7 @@
 
 import React, { ReactElement, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { TabPanel } from '../tab-panel/TabPanel';
 import { IEndpointInfo } from './PipelineActions';
 import { modalStyles as styles } from './index.style';
 import { appendAuthQueryParam, buildIntegrationExamples, type IntegrationTabId } from './endpointIntegrationExamples';
@@ -65,6 +66,8 @@ const TAB_LABELS: Record<IntegrationTabId, string> = {
 	python: 'Python',
 	http: 'HTTP',
 };
+
+const INTEGRATION_TABS = TAB_ORDER.map((id) => ({ id, label: TAB_LABELS[id] }));
 
 // =============================================================================
 // Component
@@ -219,24 +222,11 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 					<div style={styles.testBox}>
 						<div style={styles.testTitle}>Integration examples</div>
 						<div style={styles.envHint}>{isWebhookEndpoint ? 'Webhook: POST JSON with Bearer auth, or use the URL with ?auth= if supported.' : 'Chat / UI: prefer opening the URL with auth in a browser or embedded webview.'}</div>
-						<div style={styles.integrationTabs}>
-							{TAB_ORDER.map((id) => (
-								<button
-									key={id}
-									type="button"
-									style={{
-										...styles.integrationTab,
-										...(activeTab === id ? styles.integrationTabActive : {}),
-									}}
-									onClick={() => setActiveTab(id)}
-								>
-									{TAB_LABELS[id]}
-								</button>
-							))}
-						</div>
-						<div style={styles.integrationCodeScroll}>
-							<div style={styles.curlBlock}>{examples[activeTab]}</div>
-						</div>
+						<TabPanel tabs={INTEGRATION_TABS} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as IntegrationTabId)}>
+							<div style={styles.integrationCodeScroll}>
+								<div style={styles.curlBlock}>{examples[activeTab]}</div>
+							</div>
+						</TabPanel>
 						<div style={styles.testActions}>
 							<button style={iconBtn(`ex-${activeTab}`)} onClick={() => handleCopy(examples[activeTab], `ex-${activeTab}`)}>
 								{copyFeedback === `ex-${activeTab}` ? 'Copied!' : 'Copy'}

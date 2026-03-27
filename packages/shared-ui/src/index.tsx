@@ -35,3 +35,6 @@ export { default as EndpointInfoModal } from './components/pipeline-actions/Endp
 export type { IEndpointInfo as EndpointInfo } from './components/pipeline-actions/PipelineActions';
 export { appendAuthQueryParam, buildIntegrationExamples } from './components/pipeline-actions/endpointIntegrationExamples';
 export type { IntegrationTabId } from './components/pipeline-actions/endpointIntegrationExamples';
+
+export { TabPanel } from './components/tab-panel/TabPanel';
+export type { ITabPanelTab, ITabPanelProps } from './components/tab-panel/TabPanel';
