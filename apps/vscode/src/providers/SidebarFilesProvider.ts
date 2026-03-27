@@ -134,23 +134,28 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 		const commands = [
 			// Pipeline file operations
 			vscode.commands.registerCommand('rocketride.sidebar.files.openFile', async (item?: PipelineFileItem) => {
-				if (!item || !item.resourceUri) {
+				const resourceUri = this.resolveCommandResourceUri(item);
+				if (!resourceUri) {
 					vscode.window.showErrorMessage('No pipeline file selected');
 					return;
 				}
 
 				try {
 					// Open with a specific custom editor
-					await vscode.commands.executeCommand('vscode.openWith', item.resourceUri, 'rocketride.PageEditor');
+					await vscode.commands.executeCommand('vscode.openWith', resourceUri, 'rocketride.PageEditor');
 				} catch (error) {
 					vscode.window.showErrorMessage(`Failed to open status page: ${error}`);
 				}
 			}),
 
 			vscode.commands.registerCommand('rocketride.sidebar.files.openStatus', async (item?: PipelineFileItem) => {
-				const resourceUri = item?.resourceUri as vscode.Uri;
-				const componentId = item?.sourceComponent?.id as string;
-				const sourceComponent = item?.sourceComponent as ParsedSourceComponent;
+				const resourceUri = this.resolveCommandResourceUri(item);
+				if (!resourceUri) {
+					vscode.window.showErrorMessage('No pipeline file selected');
+					return;
+				}
+
+				const knownContext = this.resolveKnownPipelineCommandContext(item, resourceUri);
 				const unknownTask = item?.unknownTask as UnknownTask;
 
 				try {
@@ -164,18 +169,10 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 						source = unknownTask.sourceId;
 						displayName = unknownTask.displayName || source;
 					} else {
-						// Parse the pipeline file to get the project_id (for known tasks)
-						const parsedPipeline = this.getParsedPipeline(resourceUri);
-
-						if (parsedPipeline?.isValid && parsedPipeline.projectId) {
-							// Use project_id as the pipeline ID and componentId as the source
-							projectId = parsedPipeline.projectId;
-							source = componentId;
-
-							// Create a meaningful title: component name, provider title, or component id
-							const services = this.connectionManager.getCachedServices()?.services ?? {};
-							const providerDef = sourceComponent?.provider ? (services[sourceComponent.provider] as { title?: string } | undefined) : undefined;
-							displayName = sourceComponent?.name || providerDef?.title || componentId;
+						if (knownContext?.parsedPipeline?.isValid && knownContext.parsedPipeline.projectId && knownContext.componentId) {
+							projectId = knownContext.parsedPipeline.projectId;
+							source = knownContext.componentId;
+							displayName = knownContext.displayName;
 						} else {
 							vscode.window.showErrorMessage(`Invalid pipeline file or missing project_id: ${path.basename(resourceUri.fsPath)}`);
 							return;
@@ -206,14 +203,15 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			}),
 
 			vscode.commands.registerCommand('rocketride.sidebar.files.runPipeline', async (item?: PipelineFileItem) => {
-				if (!item || !item.resourceUri) {
+				const resourceUri = this.resolveCommandResourceUri(item);
+				if (!resourceUri) {
 					vscode.window.showErrorMessage('No pipeline selected');
 					return;
 				}
 
 				try {
 					// Read the pipeline file
-					const fileContent = await vscode.workspace.fs.readFile(item.resourceUri);
+					const fileContent = await vscode.workspace.fs.readFile(resourceUri);
 					const pipelineText = Buffer.from(fileContent).toString('utf8');
 					const pipelineJson = JSON.parse(pipelineText);
 
@@ -221,9 +219,9 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					const pipelineTransformed = ConfigManager.getInstance().substituteEnvVariables(pipelineJson);
 
 					// Get project and source identifiers
-					const parsedFile = item.parsedFile || this.getParsedPipeline(item.resourceUri);
-					const projectId = parsedFile?.projectId;
-					const sourceId = item.sourceComponent?.id || '';
+					const context = this.resolveKnownPipelineCommandContext(item, resourceUri);
+					const projectId = context?.parsedPipeline?.projectId;
+					const sourceId = context?.componentId ?? '';
 
 					// Use DAP command to execute pipeline without debugging
 					await this.connectionManager.request('execute', {
@@ -322,6 +320,59 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 		// Store disposables and add to context subscriptions
 		this.disposables.push(...commands);
 		commands.forEach((command) => this.context.subscriptions.push(command));
+	}
+
+	private resolveCommandResourceUri(item?: PipelineFileItem): vscode.Uri | undefined {
+		if (item?.resourceUri) {
+			return item.resourceUri;
+		}
+
+		const activeEditorUri = vscode.window.activeTextEditor?.document.uri;
+		if (activeEditorUri && this.isPipelineUri(activeEditorUri)) {
+			return activeEditorUri;
+		}
+
+		const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+		if (activeTab instanceof vscode.TabInputText || activeTab instanceof vscode.TabInputCustom) {
+			if (this.isPipelineUri(activeTab.uri)) {
+				return activeTab.uri;
+			}
+		}
+
+		return undefined;
+	}
+
+	private isPipelineUri(uri: vscode.Uri): boolean {
+		return uri.fsPath.endsWith('.pipe') || uri.fsPath.endsWith('.pipe.json');
+	}
+
+	private resolveKnownPipelineCommandContext(
+		item: PipelineFileItem | undefined,
+		resourceUri: vscode.Uri
+	):
+		| {
+				componentId?: string;
+				displayName: string;
+				parsedPipeline?: ParsedPipelineFile;
+				sourceComponent?: ParsedSourceComponent;
+		  }
+		| undefined {
+		const parsedPipeline = item?.parsedFile || this.getParsedPipeline(resourceUri);
+		if (!parsedPipeline?.isValid) {
+			return undefined;
+		}
+
+		const componentId = item?.sourceComponent?.id ?? parsedPipeline.pipeline?.source ?? parsedPipeline.sourceComponents?.[0]?.id;
+		const sourceComponent = componentId ? item?.sourceComponent || this.getSourceComponentById(resourceUri, componentId) : undefined;
+		const services = this.connectionManager.getCachedServices()?.services ?? {};
+		const providerDef = sourceComponent?.provider ? (services[sourceComponent.provider] as { title?: string } | undefined) : undefined;
+
+		return {
+			componentId,
+			displayName: sourceComponent?.name || providerDef?.title || componentId || path.basename(resourceUri.fsPath),
+			parsedPipeline,
+			sourceComponent,
+		};
 	}
 
 	/**
