@@ -154,9 +154,6 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 							<button style={iconBtn('url')} onClick={() => handleCopy(endpointUrl, 'url')}>
 								{copyFeedback === 'url' ? 'Copied!' : 'Copy'}
 							</button>
-							<button style={styles.iconBtn} onClick={() => onOpenLink?.(endpointUrl, displayName)}>
-								Open
-							</button>
 						</div>
 					</div>
 
@@ -177,11 +174,11 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 									{urlWithAuth}
 								</a>
 							</div>
-							<button style={iconBtn('urlAuth')} onClick={() => handleCopy(urlWithAuth, 'urlAuth')}>
-								{copyFeedback === 'urlAuth' ? 'Copied!' : 'Copy'}
-							</button>
 							<button style={styles.iconBtn} onClick={() => onOpenLink?.(urlWithAuth, displayName)}>
 								Open
+							</button>
+							<button style={iconBtn('urlAuth')} onClick={() => handleCopy(urlWithAuth, 'urlAuth')}>
+								{copyFeedback === 'urlAuth' ? 'Copied!' : 'Copy'}
 							</button>
 						</div>
 					</div>
@@ -203,11 +200,11 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 							<div style={styles.configLabel}>{processed['token-text']}</div>
 							<div style={styles.configValueRow}>
 								<div style={isTokenVisible ? styles.configValue : styles.configValueMasked}>{isTokenVisible ? processed['token-key'] : MASKED_VALUE}</div>
-								<button style={iconBtn('token')} onClick={() => handleCopy(processed['token-key']!, 'token')}>
-									{copyFeedback === 'token' ? 'Copied!' : 'Copy'}
-								</button>
 								<button style={styles.iconBtn} onClick={() => setIsTokenVisible(!isTokenVisible)}>
 									{isTokenVisible ? 'Hide' : 'Show'}
+								</button>
+								<button style={iconBtn('token')} onClick={() => handleCopy(processed['token-key']!, 'token')}>
+									{copyFeedback === 'token' ? 'Copied!' : 'Copy'}
 								</button>
 							</div>
 						</div>
