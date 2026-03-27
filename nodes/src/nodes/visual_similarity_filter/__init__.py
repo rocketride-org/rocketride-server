@@ -21,33 +21,21 @@
 # SOFTWARE.
 # =============================================================================
 
-import threading
-from rocketlib import IGlobalBase, OPEN_MODE
-from ai.common.config import Config
+"""
+Visual Similarity Filter node.
 
+Filters video frames by CLIP-based visual similarity to the first frame received.
+The first frame establishes the reference embedding; every subsequent frame is
+scored and forwarded only if it meets the similarity threshold.
+"""
 
-class IGlobal(IGlobalBase):
-    """
-    Global context for the Object Detector node.
+import os
+from depends import depends  # type: ignore
 
-    Loads the HuggingFace detection model once per pipeline execution
-    and shares it across all instances via a thread lock.
-    """
+requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+depends(requirements)
 
-    detector = None
-    config = None
+from .IGlobal import IGlobal  # noqa: E402
+from .IInstance import IInstance  # noqa: E402
 
-    def beginGlobal(self):
-        self.device_lock = threading.Lock()
-        self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        self.config['type'] = self.glb.connConfig.get('profile', 'detr')
-
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        from .detector import FrameDetector
-        self.detector = FrameDetector(self.config)
-
-    def endGlobal(self):
-        self.detector = None
-        self.device_lock = None
+__all__ = ['IGlobal', 'IInstance']

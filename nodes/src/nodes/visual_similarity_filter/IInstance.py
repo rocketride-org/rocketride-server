@@ -21,8 +21,6 @@
 # SOFTWARE.
 # =============================================================================
 
-from collections import deque
-
 from rocketlib import IInstanceBase, AVI_ACTION, Entry
 from ai.common.table import Table
 
@@ -40,15 +38,10 @@ class IInstance(IInstanceBase):
         self._match_rows = []
         self._image_buf = bytearray()
         self._image_mime = 'image/png'
+        self._reference_embedding = None
 
         cfg = self.IGlobal.config
         self._fps = float(cfg.get('fps', 1.0))
-        self._pre_roll = int(cfg.get('pre_roll', 3))
-        self._post_roll = int(cfg.get('post_roll', 3))
-
-        self._ring = deque(maxlen=self._pre_roll) if self._pre_roll > 0 else None
-        self._forwarding = False
-        self._post_remaining = 0
 
     def endInstance(self):
         pass
@@ -59,15 +52,12 @@ class IInstance(IInstanceBase):
         self._total = 0
         self._forwarded = 0
         self._match_rows = []
-        self._forwarding = False
-        self._post_remaining = 0
-        if self._ring is not None:
-            self._ring.clear()
+        self._reference_embedding = None
 
     def close(self):
         if self.instance.hasListener('table') and self._match_rows:
             table = Table.generate_markdown_table(
-                headers=['Frame', 'Time', 'Label', 'Confidence'],
+                headers=['Frame', 'Time', 'Similarity'],
                 data=self._match_rows,
             )
             self.instance.writeTable(table)
@@ -93,7 +83,7 @@ class IInstance(IInstanceBase):
             self.preventDefault()
 
     # ------------------------------------------------------------------
-    # Per-frame detection + ring buffer forwarding
+    # Per-frame similarity + ring buffer forwarding
     # ------------------------------------------------------------------
 
     def _on_frame_complete(self, image_bytes: bytes, mime: str):
@@ -102,58 +92,28 @@ class IInstance(IInstanceBase):
         self._total += 1
         timestamp = idx / self._fps if self._fps > 0 else float(idx)
 
-        try:
-            detections = self.IGlobal.detector.detect(image_bytes)
-        except Exception:
-            detections = []
-
-        is_match = len(detections) > 0
-
-        if is_match:
+        # First frame: capture as reference and forward unconditionally.
+        if self._reference_embedding is None:
+            with self.IGlobal.device_lock:
+                self._reference_embedding = self.IGlobal.embedder.embed(image_bytes)
             self._matched += 1
-            best = max(detections, key=lambda d: d.score)
-            self._match_rows.append([
-                idx,
-                self._fmt_time(timestamp),
-                best.label,
-                f'{best.score:.3f}',
-            ])
-
-        if is_match and not self._forwarding:
-            self._flush_ring()
+            self._match_rows.append([idx, self._fmt_time(timestamp), '1.000'])
             self._forward_frame(image_bytes, mime)
-            self._forwarding = True
-            self._post_remaining = self._post_roll
-
-        elif is_match and self._forwarding:
-            self._forward_frame(image_bytes, mime)
-            self._post_remaining = self._post_roll
-
-        elif not is_match and self._forwarding:
-            if self._post_remaining > 0:
-                self._forward_frame(image_bytes, mime)
-                self._post_remaining -= 1
-            else:
-                self._forwarding = False
-                self._push_ring(image_bytes, mime, idx)
-
-        else:
-            self._push_ring(image_bytes, mime, idx)
-
-    # ------------------------------------------------------------------
-    # Ring buffer helpers
-    # ------------------------------------------------------------------
-
-    def _push_ring(self, image_bytes: bytes, mime: str, idx: int):
-        if self._ring is not None:
-            self._ring.append((image_bytes, mime, idx))
-
-    def _flush_ring(self):
-        if self._ring is None:
             return
-        for img, mime, _ in self._ring:
-            self._forward_frame(img, mime)
-        self._ring.clear()
+
+        # Subsequent frames: score against the reference.
+        try:
+            import numpy as np
+            with self.IGlobal.device_lock:
+                frame_emb = self.IGlobal.embedder.embed(image_bytes)
+            similarity = float(np.dot(self._reference_embedding, frame_emb))
+        except Exception:
+            similarity = 0.0
+
+        if similarity >= self.IGlobal.embedder.similarity_threshold:
+            self._matched += 1
+            self._match_rows.append([idx, self._fmt_time(timestamp), f'{similarity:.3f}'])
+            self._forward_frame(image_bytes, mime)
 
     def _forward_frame(self, image_bytes: bytes, mime: str):
         if self.instance.hasListener('image'):

@@ -1,0 +1,146 @@
+{
+	"title": "Visual Similarity Filter",
+	"protocol": "visual_similarity_filter://",
+	"classType": [
+		"video"
+	],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.visual_similarity_filter",
+	"prefix": "visual_similarity_filter",
+	"description": [
+		"Filters video frames by visual similarity using CLIP embeddings. ",
+		"The first frame received becomes the reference; every subsequent frame ",
+		"is scored against it and forwarded only if its similarity meets the threshold. ",
+		"Includes pre-roll/post-roll context around matching segments."
+	],
+	"icon": "visual-similarity.svg",
+	"lanes": {
+		"image": [
+			"image", "table"
+		]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "Image frames to filter by visual similarity.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Frames visually similar to the first frame received."
+				},
+				{
+					"lane": "table",
+					"description": "Similarity scores (frame index, timestamp, similarity) for matched frames."
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "clip-base",
+		"profiles": {
+			"clip-base": {
+				"title": "CLIP ViT-B/32",
+				"embedding_model": "openai/clip-vit-base-patch32",
+				"similarity_threshold": 0.25,
+				"fps": 1.0
+			},
+			"clip-large": {
+				"title": "CLIP ViT-L/14",
+				"embedding_model": "openai/clip-vit-large-patch14",
+				"similarity_threshold": 0.25,
+				"fps": 1.0
+			},
+			"custom": {
+				"title": "Custom model",
+				"embedding_model": "",
+				"similarity_threshold": 0.25,
+				"fps": 1.0
+			}
+		}
+	},
+	"fields": {
+		"vsf.embedding_model": {
+			"type": "string",
+			"title": "Embedding model (HuggingFace)",
+			"description": "HuggingFace CLIP-compatible model name (e.g. openai/clip-vit-base-patch32)",
+			"minLength": 2,
+			"maxLength": 128
+		},
+		"vsf.similarity_threshold": {
+			"type": "number",
+			"title": "Similarity threshold",
+			"description": "Minimum cosine similarity (0.0–1.0) for a frame to be forwarded. Frames below this score are dropped.",
+			"default": 0.25,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"vsf.fps": {
+			"type": "number",
+			"title": "Input frame rate (fps)",
+			"description": "Frame rate of the upstream frame_grabber, used to compute timestamps in the output table.",
+			"default": 1.0
+		},
+		"vsf.clip-base": {
+			"object": "clip-base",
+			"properties": [
+				"vsf.similarity_threshold",
+				"vsf.fps"
+			]
+		},
+		"vsf.clip-large": {
+			"object": "clip-large",
+			"properties": [
+				"vsf.similarity_threshold",
+				"vsf.fps"
+			]
+		},
+		"vsf.custom": {
+			"object": "custom",
+			"properties": [
+				"vsf.embedding_model",
+				"vsf.similarity_threshold",
+				"vsf.fps"
+			]
+		},
+		"vsf.profile": {
+			"title": "Embedding model",
+			"description": "CLIP model and configuration",
+			"type": "string",
+			"default": "clip-base",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "clip-base",
+					"properties": [
+						"vsf.clip-base"
+					]
+				},
+				{
+					"value": "clip-large",
+					"properties": [
+						"vsf.clip-large"
+					]
+				},
+				{
+					"value": "custom",
+					"properties": [
+						"vsf.custom"
+					]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Visual Similarity Filter",
+			"properties": [
+				"vsf.profile"
+			]
+		}
+	]
+}

@@ -21,21 +21,34 @@
 # SOFTWARE.
 # =============================================================================
 
-"""
-Object Detector node.
+import threading
+from rocketlib import IGlobalBase, OPEN_MODE
+from ai.common.config import Config
 
-Detects objects in video frames using a HuggingFace object-detection model
-(DETR, YOLOS, or custom), filters by confidence threshold and class allowlist,
-and forwards matching frames downstream with pre-roll/post-roll context.
-"""
 
-import os
-from depends import depends  # type: ignore
+class IGlobal(IGlobalBase):
+    """
+    Global context for the Visual Similarity Filter node.
 
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-depends(requirements)
+    Loads the CLIP model once per pipeline execution and shares it across
+    all instances via a thread lock. The per-instance reference embedding
+    is captured at runtime from the first frame each instance receives.
+    """
 
-from .IGlobal import IGlobal  # noqa: E402
-from .IInstance import IInstance  # noqa: E402
+    embedder = None
+    config = None
 
-__all__ = ['IGlobal', 'IInstance']
+    def beginGlobal(self):
+        self.device_lock = threading.Lock()
+        self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        self.config['type'] = self.glb.connConfig.get('profile', 'clip-base')
+
+        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
+            return
+
+        from .embedder import FrameEmbedder
+        self.embedder = FrameEmbedder(self.config)
+
+    def endGlobal(self):
+        self.embedder = None
+        self.device_lock = None
