@@ -21,20 +21,65 @@ reviews:
     - '!node_modules/**'
     - '!pnpm-lock.yaml'
     - '!vcpkg/**'
+    - '!vcpkg.json'
+    - '!**/vcpkg_installed/**'
+    - '!**/__pycache__/**'
+    - '!**/*.pyc'
+    - '!CHANGELOG.md'
   path_instructions:
     - path: '**/*.{ts,tsx,js,jsx,mjs,cjs}'
       instructions: |
         TypeScript/JavaScript: strict mode, ES2022 target, ESNext modules.
         Unused variables must be prefixed with underscore (_).
         Follow eslint flat config in eslint.config.mjs and prettier formatting.
+        Flag any use of `any` type without explicit justification.
+        Prefer async/await over raw Promise chains.
     - path: 'nodes/**/*.py'
       instructions: |
         Python pipeline nodes: use single quotes, ruff for linting/formatting,
         PEP 257 docstrings, target Python 3.10+.
+        Each node must define `INPUT_SCHEMA` and `OUTPUT_SCHEMA`.
+        Flag missing error handling in node `execute()` methods.
+        Avoid mutable default arguments.
     - path: 'packages/server/**/*.{cpp,h,hpp}'
       instructions: |
-        C++ code: C++17 standard. This is the core engine — review for
-        memory safety, thread safety, and performance.
+        C++ code: C++17 standard. This is the core engine — review strictly for:
+        - Memory safety: prefer smart pointers, flag raw `new`/`delete`
+        - Thread safety: flag shared state without mutex protection
+        - Performance: flag unnecessary copies of large objects (use const refs)
+        - RAII compliance: resources must be managed by owning types
+        Follow .clang-format for style.
+    - path: 'packages/server/**/{CMakeLists.txt,*.cmake}'
+      instructions: |
+        CMake: use modern CMake (target-based, avoid global includes/flags).
+        Prefer `target_*` commands over global `include_directories`/`add_definitions`.
+        Flag hardcoded paths or platform-specific assumptions without guards.
+    - path: '**/*.java'
+      instructions: |
+        Java code: target Java 17+. Follow standard naming conventions.
+        Prefer records and sealed classes where appropriate.
+        Flag checked exceptions swallowed silently.
+    - path: '**/*.{sh,bash}'
+      instructions: |
+        Shell scripts: POSIX-compatible unless bash-specific features are needed.
+        Always quote variables. Use `set -euo pipefail` at the top.
+        Flag any use of `eval` or unvalidated external input.
+    - path: 'docs/**/*.md'
+      instructions: |
+        Documentation: check for broken relative links, outdated CLI flags,
+        and code examples that don't match current API signatures.
+    - path: '.github/workflows/**/*.{yml,yaml}'
+      instructions: |
+        GitHub Actions: pin all third-party actions to a full commit SHA (not a tag).
+        Flag secrets referenced without `${{ secrets.* }}` syntax.
+        Prefer `permissions: read-all` with explicit write grants where needed.
+
+  finishing_touches:
+    docstrings:
+      enabled: true
+    release_notes:
+      enabled: true
+
   tools:
     eslint:
       enabled: true
@@ -50,6 +95,13 @@ reviews:
       enabled: true
     yamllint:
       enabled: true
+    semgrep:
+      enabled: true
+    checkov:
+      enabled: true
+
+chat:
+  auto_reply: true
 
 knowledge_base:
   learnings:
