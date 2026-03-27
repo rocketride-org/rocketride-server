@@ -151,6 +151,10 @@ function makeStageFilesAction() {
 			task.output = 'Staging manifest and assets to build/vscode...';
 			const pkgPath = path.join(APP_ROOT, 'package.json');
 			const pkg = JSON.parse(await readFile(pkgPath));
+			// Restore marketplace extension ID — source uses 'rocketride-vscode' for pnpm
+			// workspace resolution (avoids collision with client-typescript), but the
+			// VS Code Marketplace listing is rocketride.rocketride
+			pkg.name = 'rocketride';
 			pkg.main = './rocketride.js';
 			pkg.icon = 'rocketride-dark-icon.png';
 			pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md'];
