@@ -409,7 +409,7 @@ Only variables prefixed with `ROCKETRIDE_` are substituted. Unknown variables ar
 
 ## UI Layout (Optional)
 
-The `ui` field is optional and is used by the graphic pipeline designer. When building pipelines programmatically, include it so the visual editor renders the pipeline correctly.
+The `ui` field is optional and is used by the graphic pipeline designer. When building pipelines programmatically, it is recommended to include `ui` with at least a `position` so the visual editor renders the pipeline with a clean layout. The remaining fields (`measured`, `nodeType`, `formDataValid`) are managed by the designer and can be omitted.
 
 ```json
 "ui": {

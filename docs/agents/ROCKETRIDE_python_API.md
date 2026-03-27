@@ -99,6 +99,7 @@ ROCKETRIDE_OUTPUT_PATH=/data/output
 ```json
 {
 	"project_id": "{guid}", // Replace with your unique GUID
+	"source": "data-processor",
 	"components": [
 		{
 			"id": "data-processor",
@@ -210,8 +211,8 @@ await client.connect()
 pipeline = {
     'components': [
         {'id': 'input', 'provider': 'webhook', 'config': {}},
-        {'id': 'process', 'provider': 'transform', 'config': {}},
-        {'id': 'output', 'provider': 'response', 'config': {}}
+        {'id': 'process', 'provider': 'transform', 'config': {}, 'input': [{'lane': 'text', 'from': 'input'}]},
+        {'id': 'output', 'provider': 'response_text', 'config': {}, 'input': [{'lane': 'text', 'from': 'process'}]}
     ],
     'source': 'input',
     'project_id': '{guid}'  # Replace with your unique GUID

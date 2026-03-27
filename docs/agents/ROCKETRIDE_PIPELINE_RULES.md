@@ -201,7 +201,7 @@ Lanes are typed data channels that connect components:
 ### Lane Flow Rules
 
 1. **Type Compatibility**: Output lane from one component must match input lane of the next
-2. **Multiple Inputs**: A component can accept multiple inputs:
+1. **Multiple Inputs**: A component can accept multiple inputs:
 
 ```json
 "input": [
@@ -210,7 +210,7 @@ Lanes are typed data channels that connect components:
 ]
 ```
 
-3. **Multiple Outputs**: One component's output can go to multiple components (no special syntax needed)
+1. **Multiple Outputs**: One component's output can go to multiple components (no special syntax needed)
 
 ### Common Lane Transformations
 

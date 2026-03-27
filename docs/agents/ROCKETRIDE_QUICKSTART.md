@@ -44,7 +44,8 @@ Pipeline files **must** use the `.pipe` extension.
 			"config": {
 				"input_path": "${ROCKETRIDE_INPUT_PATH}",
 				"output_path": "${ROCKETRIDE_OUTPUT_PATH}"
-			}
+			},
+			"input": [{ "lane": "text", "from": "input" }]
 		},
 		{
 			"id": "output",
@@ -151,7 +152,8 @@ Pipeline files **must** use the `.pipe` extension.
 			"config": {
 				"input_path": "${ROCKETRIDE_INPUT_PATH}",
 				"output_path": "${ROCKETRIDE_OUTPUT_PATH}"
-			}
+			},
+			"input": [{ "lane": "text", "from": "input" }]
 		},
 		{
 			"id": "output",
