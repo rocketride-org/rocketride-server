@@ -3,8 +3,17 @@ language: en-US
 
 reviews:
   profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  review_status: true
+  collapse_walkthrough: true
+  sequence_diagrams: true
+  changed_files_summary: true
+  poem: false
+
   auto_review:
     enabled: true
+    auto_incremental_review: true
     base_branches:
       - develop
       - release/.*
@@ -15,64 +24,221 @@ reviews:
       - 'dependabot'
       - 'release'
       - 'chore(release)'
+
+  labeling_instructions:
+    - label: 'lang: c++'
+      instructions: Apply when the PR contains changes to C++ source files (.cpp, .h, .hpp) or CMake files.
+    - label: 'lang: python'
+      instructions: Apply when the PR contains changes to Python source files or node implementations.
+    - label: 'lang: typescript'
+      instructions: Apply when the PR contains changes to TypeScript or JavaScript source files.
+    - label: 'lang: java'
+      instructions: Apply when the PR contains changes to Java source files.
+    - label: 'area: engine'
+      instructions: Apply when the PR touches packages/server (C++ engine core or lib).
+    - label: 'area: nodes'
+      instructions: Apply when the PR touches nodes/src/nodes (Python pipeline nodes).
+    - label: 'area: vscode'
+      instructions: Apply when the PR touches apps/vscode.
+    - label: 'area: ui'
+      instructions: Apply when the PR touches apps/chat-ui or apps/dropper-ui.
+    - label: 'area: ci'
+      instructions: Apply when the PR touches .github/workflows or docker/.
+    - label: 'security'
+      instructions: Apply when the PR touches authentication, authorization, secret handling, or fixes a vulnerability.
+
   path_filters:
     - '!dist/**'
     - '!build/**'
     - '!node_modules/**'
     - '!pnpm-lock.yaml'
+    - '!**/pnpm-lock.yaml'
     - '!vcpkg/**'
     - '!vcpkg.json'
     - '!**/vcpkg_installed/**'
     - '!**/__pycache__/**'
     - '!**/*.pyc'
     - '!CHANGELOG.md'
+    - '!testdata/**'
+    - '!**/coverage/**'
+    - '!**/*.min.js'
+
   path_instructions:
+    # ── Global ────────────────────────────────────────────────────────────────
+    - path: '**/*'
+      instructions: |
+        General: enforce UTF-8 encoding, LF line endings, no trailing whitespace,
+        and a newline at end of file. Flag leftover TODOs that have no associated
+        issue reference. Flag any hardcoded secrets, credentials, or API keys —
+        all secrets must use environment variables or the project's secret manager.
+
+    # ── TypeScript / JavaScript ───────────────────────────────────────────────
     - path: '**/*.{ts,tsx,js,jsx,mjs,cjs}'
       instructions: |
         TypeScript/JavaScript: strict mode, ES2022 target, ESNext modules.
-        Unused variables must be prefixed with underscore (_).
-        Follow eslint flat config in eslint.config.mjs and prettier formatting.
-        Flag any use of `any` type without explicit justification.
-        Prefer async/await over raw Promise chains.
-    - path: 'nodes/**/*.py'
+        - Unused variables must be prefixed with underscore (_).
+        - Flag any use of the `any` type without explicit justification in a comment.
+        - Prefer `import type` for type-only imports.
+        - Prefer async/await over raw Promise chains.
+        - Remove all `console.log` statements from production code.
+        - Follow eslint flat config (eslint.config.mjs) and prettier formatting.
+        - Each function should have a single responsibility and be ≤ 20 lines where possible.
+        - Use PascalCase for classes/types, camelCase for functions/variables.
+        - Prefer explicit return types on exported functions.
+        - Follow eslint flat config in eslint.config.mjs and prettier formatting.
+
+    # ── React UI apps ─────────────────────────────────────────────────────────
+    - path: 'apps/{chat-ui,dropper-ui}/src/**/*.{ts,tsx}'
       instructions: |
-        Python pipeline nodes: use single quotes, ruff for linting/formatting,
-        PEP 257 docstrings, target Python 3.10+.
-        Each node must define `INPUT_SCHEMA` and `OUTPUT_SCHEMA`.
-        Flag missing error handling in node `execute()` methods.
-        Avoid mutable default arguments.
-    - path: 'packages/server/**/*.{cpp,h,hpp}'
+        React UI: enforce React hooks rules (no conditional hooks, correct deps arrays).
+        - Prefer functional components; no class components.
+        - Memoize expensive computations with useMemo/useCallback where appropriate.
+        - Flag components exceeding ~150 lines — extract sub-components.
+        - All user-facing strings must be internationalisation-ready (no hardcoded UI text).
+        - Accessibility: interactive elements need aria attributes or semantic HTML equivalents.
+
+    # ── VS Code extension ─────────────────────────────────────────────────────
+    - path: 'apps/vscode/**/*.{ts,js}'
       instructions: |
-        C++ code: C++17 standard. This is the core engine — review strictly for:
-        - Memory safety: prefer smart pointers, flag raw `new`/`delete`
-        - Thread safety: flag shared state without mutex protection
-        - Performance: flag unnecessary copies of large objects (use const refs)
-        - RAII compliance: resources must be managed by owning types
-        Follow .clang-format for style.
-    - path: 'packages/server/**/{CMakeLists.txt,*.cmake}'
+        VS Code extension: follow VS Code extension API best practices.
+        - Dispose all disposables in `deactivate()` or via context.subscriptions.
+        - Flag synchronous file I/O (use async vscode.workspace.fs APIs instead).
+        - Commands must be registered before use and listed in package.json contributions.
+        - Flag use of deprecated VS Code API methods.
+
+    # ── TypeScript client SDK ─────────────────────────────────────────────────
+    - path: 'packages/client-typescript/**/*.ts'
       instructions: |
-        CMake: use modern CMake (target-based, avoid global includes/flags).
-        Prefer `target_*` commands over global `include_directories`/`add_definitions`.
-        Flag hardcoded paths or platform-specific assumptions without guards.
-    - path: '**/*.java'
+        TypeScript SDK: this is a public API — review strictly for:
+        - Backward compatibility: no breaking changes to exported types or function signatures without major version bump.
+        - All exported symbols must have JSDoc comments.
+        - Prefer generic types over overloads where semantics are equivalent.
+        - Error types must be documented and exported.
+
+    # ── Python pipeline nodes ─────────────────────────────────────────────────
+    - path: 'nodes/src/nodes/**/*.py'
       instructions: |
-        Java code: target Java 17+. Follow standard naming conventions.
-        Prefer records and sealed classes where appropriate.
-        Flag checked exceptions swallowed silently.
+        Python pipeline nodes — each node must follow the RocketRide node contract:
+        - `IGlobal` handles dependency bootstrap and configuration.
+        - `IInstance` implements the pipeline adapter and execute() run loop.
+        - Flag missing or incomplete `IGlobal` / `IInstance` implementations.
+        - `execute()` must handle all exceptions and never raise uncaught errors to the engine.
+        - Use single quotes, ruff formatting, PEP 257 docstrings, Python 3.10+.
+        - Flag mutable default arguments.
+        - Flag missing type annotations on public methods.
+        - External I/O (HTTP, DB, file) must be async or explicitly documented as blocking.
+
+    # ── Python AI package ─────────────────────────────────────────────────────
+    - path: 'packages/ai/**/*.py'
+      instructions: |
+        Python AI package: review for correctness of model provider abstractions.
+        - Flag hardcoded model names or API endpoints that should be configurable.
+        - Async methods must use `await` consistently — no mixed sync/async patterns.
+        - Security: flag path traversal risks in file-handling code (see test_path_traversal.py pattern).
+        - Tests must cover both happy path and error/exception scenarios.
+
+    # ── Python client ─────────────────────────────────────────────────────────
+    - path: 'packages/client-python/**/*.py'
+      instructions: |
+        Python client SDK: public API — all exported functions/classes need docstrings.
+        - Flag breaking changes to the public interface.
+        - Ensure compatibility with Python 3.10+.
+        - Follow ruff linting and single-quote style.
+
+    # ── Python tests ──────────────────────────────────────────────────────────
+    - path: 'nodes/test/**/*.py'
+      instructions: |
+        Python tests: each test must be independent and not rely on execution order.
+        - Use mocks (see mocks/ directory) for external service calls.
+        - Flag tests that make real network calls without explicit skip markers.
+        - Test names must describe the scenario and expected outcome.
+        - Aim for one assertion per test concept (multiple asserts on same object is fine).
+
+    # ── C++ engine ────────────────────────────────────────────────────────────
+    - path: 'packages/server/**/*.{cpp,cc,cxx}'
+      instructions: |
+        C++ engine core — review strictly for:
+        - Memory safety: prefer smart pointers (unique_ptr, shared_ptr); flag raw `new`/`delete`.
+        - Thread safety: flag shared mutable state without mutex protection.
+        - RAII: all resources (file handles, sockets, locks) must be managed by owning types.
+        - Performance: flag unnecessary copies of large objects (pass by const ref or move).
+        - Flag `reinterpret_cast` and `const_cast` — require justification comments.
+        - No use of deprecated C APIs (e.g. sprintf → snprintf, gets → fgets).
+        - Follow .clang-format (Google style, 4-space indent, 80-col limit).
+        - C++17 standard — flag use of C++20 features unless guarded by feature macros.
+
+    - path: 'packages/server/**/*.{h,hpp}'
+      instructions: |
+        C++ headers: include guards or #pragma once required on every header.
+        - Minimise includes in headers — prefer forward declarations.
+        - Flag `using namespace` in header scope.
+        - Public API headers must have Doxygen comments on all exported symbols.
+
+    # ── CMake ─────────────────────────────────────────────────────────────────
+    - path: '**/{CMakeLists.txt,*.cmake}'
+      instructions: |
+        CMake: use modern target-based CMake (3.15+).
+        - Prefer `target_include_directories`, `target_compile_options`,
+          `target_link_libraries` over their global variants.
+        - Flag hardcoded absolute paths or platform-specific assumptions without guards.
+        - All custom targets should have a COMMENT describing what they do.
+        - vcpkg dependencies must be declared in vcpkg.json, not fetched ad-hoc.
+
+    # ── Java ──────────────────────────────────────────────────────────────────
+    - path: 'packages/java/**/*.java'
+      instructions: |
+        Java: target Java 17+.
+        - Prefer records for plain data carriers, sealed classes for restricted hierarchies.
+        - Flag checked exceptions swallowed silently (empty catch blocks).
+        - Use Optional instead of returning null from public methods.
+        - Prefer standard Java logging (java.util.logging or SLF4J) over System.out.
+        - All public API methods need Javadoc.
+
+    # ── Shell scripts ─────────────────────────────────────────────────────────
     - path: '**/*.{sh,bash}'
       instructions: |
-        Shell scripts: POSIX-compatible unless bash-specific features are needed.
-        Always quote variables. Use `set -euo pipefail` at the top.
-        Flag any use of `eval` or unvalidated external input.
-    - path: 'docs/**/*.md'
+        Shell scripts: POSIX-compatible unless bash-specific features are explicitly needed.
+        - All scripts must start with `set -euo pipefail`.
+        - Always double-quote variable expansions ("$var", not $var).
+        - Flag `eval` usage — require security justification.
+        - Flag unvalidated external input used in commands.
+        - Use mktemp for temporary files; always clean up with trap.
+
+    # ── Dockerfiles ───────────────────────────────────────────────────────────
+    - path: 'docker/Dockerfile*'
       instructions: |
-        Documentation: check for broken relative links, outdated CLI flags,
-        and code examples that don't match current API signatures.
+        Dockerfiles: follow security and efficiency best practices.
+        - Use specific image tags (never `latest`) for reproducibility.
+        - Multi-stage builds: ensure final stage is minimal (no build tools).
+        - Flag running processes as root without explicit justification.
+        - COPY only what's needed; flag broad `COPY . .` patterns.
+        - Secrets must not appear in ENV, ARG, or RUN commands.
+
+    # ── GitHub Actions ────────────────────────────────────────────────────────
     - path: '.github/workflows/**/*.{yml,yaml}'
       instructions: |
-        GitHub Actions: pin all third-party actions to a full commit SHA (not a tag).
-        Flag secrets referenced without `${{ secrets.* }}` syntax.
-        Prefer `permissions: read-all` with explicit write grants where needed.
+        GitHub Actions: security-first review.
+        - All third-party actions must be pinned to a full commit SHA (not a tag).
+        - Flag `pull_request_target` workflows that checkout PR code without sandboxing.
+        - Declare minimal permissions at workflow and job level; flag overly broad permissions.
+        - Secrets must be referenced via `${{ secrets.NAME }}` only.
+        - Flag `run:` steps that use `${{ github.event.* }}` input without sanitisation
+          (script injection risk).
+
+    # ── .pipe pipeline files ──────────────────────────────────────────────────
+    - path: '**/*.pipe'
+      instructions: |
+        RocketRide pipeline definition files: check for hardcoded credentials,
+        API keys, or tokens in node configuration — all secrets must use
+        environment variable references ($ENV_VAR or ${ENV_VAR} syntax).
+        Flag node configurations referencing deprecated or removed node types.
+
+    # ── Documentation ─────────────────────────────────────────────────────────
+    - path: '**/*.md'
+      instructions: |
+        Documentation: check for broken relative links, outdated CLI flags or
+        API signatures, and code examples that no longer match the current codebase.
+        Ensure headings follow a logical hierarchy (no skipped levels).
 
   finishing_touches:
     docstrings:
@@ -85,6 +251,20 @@ reviews:
       enabled: true
     ruff:
       enabled: true
+      configuration:
+        extend_select:
+          - E    # pycodestyle errors
+          - F    # pyflakes
+          - W    # pycodestyle warnings
+          - N    # PEP 8 naming
+          - B    # flake8-bugbear
+          - UP   # pyupgrade
+          - ANN  # flake8-annotations (missing type hints)
+          - S    # flake8-bandit (security)
+        ignore:
+          - ANN101  # Missing type annotation for `self`
+          - ANN102  # Missing type annotation for `cls`
+        line_length: 320  # matches pyproject.toml
     cppcheck:
       enabled: true
     markdownlint:
@@ -95,10 +275,23 @@ reviews:
       enabled: true
     yamllint:
       enabled: true
+    hadolint:
+      enabled: true
+    biome:
+      enabled: true
     semgrep:
       enabled: true
     checkov:
       enabled: true
+    github-checks:
+      enabled: true
+      timeout_ms: 90000
+    languagetool:
+      enabled: true
+      disabled_categories:
+        - TYPOS
+        - TYPOGRAPHY
+        - CASING
 
 chat:
   auto_reply: true
