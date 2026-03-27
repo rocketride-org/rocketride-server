@@ -31,6 +31,8 @@
  */
 
 import * as vscode from 'vscode';
+import { getLogger } from '../shared/util/output';
+import { icons } from '../shared/util/icons';
 
 /**
  * Write a file only if content has actually changed (line-ending normalized).
@@ -82,11 +84,13 @@ export async function syncServiceCatalog(workspaceRoot: vscode.Uri, services: Re
 	}
 
 	// Step 2: Remove obsolete schema files
+	const logger = getLogger();
 	try {
 		const entries = await vscode.workspace.fs.readDirectory(schemaDir);
 		for (const [fileName, fileType] of entries) {
 			if (fileType === vscode.FileType.File && !expectedFiles.has(fileName)) {
 				await vscode.workspace.fs.delete(vscode.Uri.joinPath(schemaDir, fileName));
+				logger.output(`${icons.info} Removed obsolete schema: ${fileName}`);
 			}
 		}
 	} catch {

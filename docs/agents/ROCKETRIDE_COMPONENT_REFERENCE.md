@@ -8,7 +8,7 @@
 
 When the RocketRide VS Code extension is installed, it populates a `.rocketride/` directory in your workspace:
 
-```
+```text
 .rocketride/
 ├── services-catalog.json    # Summary of ALL components (name, class, lanes, descriptions)
 ├── schema/                  # Detailed config schema for each component
@@ -52,7 +52,7 @@ Each entry in `services-catalog.json` has this structure:
 
 For detailed configuration (profiles, required fields, defaults), read the schema file:
 
-```
+```text
 .rocketride/schema/{component_name}.json
 ```
 
@@ -71,7 +71,7 @@ Each schema file contains:
 
 **Example:** To find what profiles `llm_openai` supports:
 
-```
+```text
 Read .rocketride/schema/llm_openai.json → Pipe.schema.dependencies.profile.oneOf
 ```
 
@@ -115,7 +115,7 @@ Pipelines are directed acyclic graphs (DAGs) of components connected by typed da
 
 ### Multiple Pipelines
 
-You can define multiple pipelines in a single file (e.g., an ingestion pipeline + a query pipeline sharing the same vector DB collection) or as individual `.pipe` files. When using separate files, use the same collection name in the vector DB config to share data.
+Each `.pipe` file contains a single pipeline (`{ project_id, source, components }`). To build multi-pipeline workflows (e.g., an ingestion pipeline + a query pipeline sharing the same vector DB collection), create separate `.pipe` files and use the same collection name in the vector DB config to share data between them.
 
 ---
 
@@ -208,19 +208,19 @@ This is useful in RAG pipelines where you want control over how retrieved docume
 
 **Correct — embedding before store:**
 
-```
+```text
 webhook → parse → preprocessor → embedding_transformer → qdrant
 ```
 
 **Wrong — no embedding, store has no vectors to work with:**
 
-```
+```text
 webhook → parse → preprocessor → qdrant   ← WILL NOT WORK
 ```
 
 **For search (questions), the same embedding model must be used:**
 
-```
+```text
 chat → embedding_transformer → qdrant → llm → response_answers
 ```
 
@@ -295,7 +295,7 @@ This applies to agents, but also to non-agent components like `summarization`, `
 
 An agent can invoke another agent as a tool. The sub-agent declares `control: [{ classType: "tool", from: "parent_agent_id" }]`. The sub-agent's own dependencies (LLM, memory) are controlled by the sub-agent, not the parent.
 
-```
+```text
   chat → Agent_1 → response_answers
            |
     +------+------+
@@ -431,7 +431,7 @@ The `ui` field is optional and is used by the graphic pipeline designer. When bu
 
 **Example layout for an agent pipeline:**
 
-```
+```text
   Chat (x:20, y:200)  →  Agent (x:240, y:200)  →  Response (x:460, y:200)
                               |
                    +----------+-----------+
@@ -480,61 +480,61 @@ The `ui` field is optional and is used by the graphic pipeline designer. When bu
 
 **Video to searchable text:**
 
-```
+```text
 video → frame_grabber → image → accessibility_describe → text
 ```
 
 **Audio to searchable text:**
 
-```
+```text
 audio → audio_transcribe → text
 ```
 
 **Text to LLM answer:**
 
-```
+```text
 text → question → questions → llm → answers
 ```
 
 **Document to vector storage (RAG ingest):**
 
-```
+```text
 tags → parse → text → preprocessor_langchain → documents → embedding_transformer → documents → qdrant (stored)
 ```
 
 **Question to RAG answer (simple):**
 
-```
+```text
 questions → embedding_openai → questions → qdrant → questions → llm_openai → answers
 ```
 
 **Question to RAG answer (with prompt node for context merging):**
 
-```
+```text
 questions → embedding_openai → questions → qdrant → documents + questions → prompt → questions → llm_openai → answers
 ```
 
 **Image OCR to searchable documents:**
 
-```
+```text
 tags → parse → image → ocr → text → preprocessor_langchain → documents → embedding_transformer → documents → qdrant (stored)
 ```
 
 **Text extraction with anonymization:**
 
-```
+```text
 tags → parse → text → anonymize_text → text → response_text
 ```
 
 **Document summarization (requires LLM via invoke):**
 
-```
+```text
 tags → parse → text → summarization [control: llm] → text → response_text
 ```
 
 **Structured data extraction (requires LLM via invoke):**
 
-```
+```text
 tags → parse → text → extract_data [control: llm] → answers → response_answers
 ```
 
@@ -542,21 +542,21 @@ tags → parse → text → extract_data [control: llm] → answers → response
 
 **Simple agent with tools:**
 
-```
+```text
 questions → agent_rocketride → answers
     [controlled by agent: llm_openai, memory_internal, tool_http_request, tool_python]
 ```
 
 **Agent with database tools:**
 
-```
+```text
 questions → agent_rocketride → answers
     [controlled by agent: llm_openai, memory_internal, db_postgres, db_mysql, chart_chartjs]
 ```
 
 **Multi-agent comparison (fan-out from single chat):**
 
-```
+```text
 chat → agent_rocketride → response_answers (laneName: "Wave")
 chat → agent_crewai → response_answers (laneName: "CrewAI")
 chat → agent_langchain → response_answers (laneName: "LangChain")
@@ -565,7 +565,7 @@ chat → agent_langchain → response_answers (laneName: "LangChain")
 
 **Hierarchical agents (agent as tool):**
 
-```
+```text
 questions → agent_rocketride_1 → answers
     [controlled by agent_1: llm_openai_1, memory_1, agent_rocketride_2 (as tool)]
         [controlled by agent_2: llm_openai_2, memory_2, tool_http_request]
@@ -575,14 +575,14 @@ questions → agent_rocketride_1 → answers
 
 Pipeline 1 — Ingestion (no response node):
 
-```
-dropper → video → frame_grabber → image → accessibility_describe → text → question → questions → embedding_openai → documents → qdrant (collection: "scenes")
+```text
+dropper → video → frame_grabber → [images] → accessibility_describe → [text] → preprocessor_langchain → [documents] → embedding_openai → [documents] → qdrant (collection: "scenes")
 ```
 
 Pipeline 2 — Query:
 
-```
-chat → questions → embedding_openai → questions → qdrant (collection: "scenes") → prompt → questions → llm_openai → answers → response_answers
+```text
+chat → [questions] → embedding_openai → [questions] → qdrant (collection: "scenes") → [prompt] → llm_openai → [answers] → response_answers
 ```
 
 ---
@@ -591,13 +591,13 @@ chat → questions → embedding_openai → questions → qdrant (collection: "s
 
 **List all available components:**
 
-```
+```text
 Read .rocketride/services-catalog.json
 ```
 
 **Get detailed config for a specific component:**
 
-```
+```text
 Read .rocketride/schema/{component_name}.json
 ```
 

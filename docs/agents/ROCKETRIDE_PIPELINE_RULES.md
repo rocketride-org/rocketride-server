@@ -360,7 +360,7 @@ ROCKETRIDE_COLLECTION_NAME=documents
 
 Basic linear pipeline:
 
-```
+```text
 source → processor → output
 ```
 
@@ -381,7 +381,7 @@ Example:
 
 One component can feed multiple components:
 
-```
+```text
          → processor_a →
 source →                  → output
          → processor_b →
@@ -391,7 +391,7 @@ source →                  → output
 
 Multiple components can feed into one:
 
-```
+```text
 component_a →
              → processor → output
 component_b →
@@ -450,7 +450,7 @@ Example:
 
 **Start Simple:**
 
-```
+```text
 source → processor → output
 ```
 
@@ -459,7 +459,7 @@ Add complexity incrementally.
 **Logical Grouping:**
 Group related operations:
 
-```
+```text
 source → [parse → preprocessor → embedding] → vector_db
 ```
 
@@ -513,7 +513,7 @@ source → [parse → preprocessor → embedding] → vector_db
 
 ### Pattern 1: Chat/Q&A System (RAG)
 
-```
+```text
 chat → embedding → vector_db → llm → response_answers
 ```
 
@@ -523,7 +523,7 @@ chat → embedding → vector_db → llm → response_answers
 
 ### Pattern 2: Simple Chat (No RAG)
 
-```
+```text
 chat → llm → response_answers
 ```
 
@@ -532,7 +532,7 @@ chat → llm → response_answers
 
 ### Pattern 3: Document Processing/Ingestion
 
-```
+```text
 webhook → parse → preprocessor → embedding → vector_db
 ```
 
@@ -542,7 +542,7 @@ webhook → parse → preprocessor → embedding → vector_db
 
 ### Pattern 4: Simple Document Extraction
 
-```
+```text
 webhook → parse → response_text
 ```
 
@@ -551,7 +551,7 @@ webhook → parse → response_text
 
 ### Pattern 5: OCR Pipeline
 
-```
+```text
 webhook → parse → ocr → preprocessor → embedding → vector_db
 ```
 
@@ -560,7 +560,7 @@ webhook → parse → ocr → preprocessor → embedding → vector_db
 
 ### Pattern 6: Direct LLM Analysis
 
-```
+```text
 webhook → parse → llm → response_answers
 ```
 
@@ -569,7 +569,7 @@ webhook → parse → llm → response_answers
 
 ### Pattern 7: Multi-Modal Processing
 
-```
+```text
                 → ocr →
 webhook → parse →         → merge → preprocessor → ...
                 → audio_transcribe →
@@ -580,7 +580,7 @@ webhook → parse →         → merge → preprocessor → ...
 
 ### Pattern 8: Advanced RAG with Summaries
 
-```
+```text
                 → [preprocessor → embedding → vector_db (content)]
 webhook → parse →
                 → [summarization → embedding → vector_db (summaries)]

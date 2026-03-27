@@ -80,20 +80,25 @@ export class AgentManager {
 
 		// Track which installers have already been run so we don't double-install
 		const installed = new Set<string>();
+		let workspacePrepared = false;
 
-		// Copy docs + ensure gitignore
-		await this.installDocs(extensionPath, workspaceRoot);
-		await this.ensureGitignore(workspaceRoot);
+		// Helper: ensure docs + gitignore are set up before first install
+		const prepareWorkspace = async () => {
+			if (workspacePrepared) return;
+			await this.installDocs(extensionPath, workspaceRoot);
+			await this.ensureGitignore(workspaceRoot);
+			workspacePrepared = true;
+		};
 
 		// Pass 1: auto-detect
 		if (autoDetect) {
 			const detected = await this.detectEnvironment();
-			for (const installer of detected) {
-				await this.runInstaller(installer, extensionPath, workspaceRoot);
-				installed.add(installer.name);
-			}
 			if (detected.length > 0) {
-				logger.output(`${icons.info} Auto-detect: installed stubs for ${detected.map((i) => i.name).join(', ')}`);
+				await prepareWorkspace();
+				for (const installer of detected) {
+					const ok = await this.runInstaller(installer, extensionPath, workspaceRoot);
+					if (ok) installed.add(installer.name);
+				}
 			}
 		}
 
@@ -103,8 +108,9 @@ export class AgentManager {
 
 			const configKey = INTEGRATION_CONFIG_KEYS[installer.name];
 			if (configKey && workspaceConfig.get<boolean>(configKey, false)) {
-				await this.runInstaller(installer, extensionPath, workspaceRoot);
-				installed.add(installer.name);
+				await prepareWorkspace();
+				const ok = await this.runInstaller(installer, extensionPath, workspaceRoot);
+				if (ok) installed.add(installer.name);
 			}
 		}
 
@@ -219,6 +225,24 @@ export class AgentManager {
 		} catch {
 			// Directory doesn't exist — nothing to do
 		}
+
+		// Remove .rocketride/schema/ directory
+		const schemaUri = vscode.Uri.joinPath(workspaceRoot, '.rocketride', 'schema');
+		try {
+			await vscode.workspace.fs.delete(schemaUri, { recursive: true });
+			logger.output(`${icons.info} Removed .rocketride/schema`);
+		} catch {
+			// Directory doesn't exist — nothing to do
+		}
+
+		// Remove .rocketride/services-catalog.json
+		const catalogUri = vscode.Uri.joinPath(workspaceRoot, '.rocketride', 'services-catalog.json');
+		try {
+			await vscode.workspace.fs.delete(catalogUri);
+			logger.output(`${icons.info} Removed .rocketride/services-catalog.json`);
+		} catch {
+			// File doesn't exist — nothing to do
+		}
 	}
 
 	/**
@@ -317,13 +341,15 @@ export class AgentManager {
 		return this.installers.map((i) => i.name);
 	}
 
-	private async runInstaller(installer: BaseAgentInstaller, extensionPath: string, workspaceRoot: vscode.Uri): Promise<void> {
+	private async runInstaller(installer: BaseAgentInstaller, extensionPath: string, workspaceRoot: vscode.Uri): Promise<boolean> {
 		const logger = getLogger();
 		try {
 			await installer.install(extensionPath, workspaceRoot);
 			logger.output(`${icons.info} Installed ${installer.name} agent stub → ${installer.stubTarget}`);
+			return true;
 		} catch (err) {
 			logger.output(`${icons.warning} Failed to install ${installer.name} agent stub: ${err}`);
+			return false;
 		}
 	}
 }

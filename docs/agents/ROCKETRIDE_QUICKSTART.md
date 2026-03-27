@@ -293,7 +293,7 @@ await client.disconnect();
 
 ## Complete Project Structure
 
-```
+```text
 my-rocketride-project/
 ├── .env                    # Configuration (MUST have)
 ├── pipeline.pipe           # Pipeline definition (.pipe extension required)

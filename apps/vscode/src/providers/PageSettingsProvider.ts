@@ -328,10 +328,12 @@ export class PageSettingsProvider {
 			// Install agent stubs for any newly checked integrations
 			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 			if (workspaceFolder) {
-				const agentManager = new AgentManager();
-				agentManager.installFromSettings(this.extensionUri.fsPath, workspaceFolder.uri).catch((err) => {
-					console.error('[PageSettingsProvider] Agent install failed:', err);
-				});
+				try {
+					const agentManager = new AgentManager();
+					await agentManager.installFromSettings(this.extensionUri.fsPath, workspaceFolder.uri);
+				} catch (agentErr) {
+					vscode.window.showWarningMessage(`Agent documentation install failed: ${agentErr}`);
+				}
 			}
 		} catch (error) {
 			console.error('[PageSettingsProvider] Failed to save settings:', error);

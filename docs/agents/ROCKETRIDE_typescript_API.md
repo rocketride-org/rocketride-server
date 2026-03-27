@@ -779,8 +779,8 @@ async function streamSensorData(dataGenerator: AsyncIterable<SensorReading>) {
 			await pipe.write(encoder.encode(JSON.stringify(data)));
 		}
 
-		const result = await pipe.close();
-		return result;
+		const closeResult = await pipe.close();
+		return closeResult;
 	} finally {
 		await client.disconnect();
 	}
