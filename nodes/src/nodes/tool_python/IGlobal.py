@@ -77,7 +77,7 @@ def _parse_timeout(cfg: dict) -> int | None:
         return None
     try:
         val = int(raw)
-        return val if val > 0 else None
+        return min(val, 600) if val > 0 else None
     except (TypeError, ValueError):
         return None
 

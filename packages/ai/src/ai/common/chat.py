@@ -437,7 +437,7 @@ class ChatBase:
                         # Max retries reached, raise ValueError
                         error_msg = f'Failed to get valid JSON response after {max_retries + 1} attempts. Parse error: {parse_err}. Response length: {len(response)} chars. Last response: {response[:2000]}'
                         debug(f'Error: {error_msg}')
-                        raise ValueError(error_msg)
+                        raise ValueError(error_msg) from parse_err
 
         else:
             # Create the answer and assign the text

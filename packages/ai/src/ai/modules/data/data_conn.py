@@ -331,12 +331,12 @@ class DataConn(DAPConn):
 
     async def _monitor_pipes(self):
         """
-        Background task to clean up zombie pipes that haven't been used in 60 seconds.
+        Background task to clean up zombie pipes that haven't been used in CONST_DATA_PIPE_TIMEOUT seconds (900s / 15 min).
 
         This prevents semaphore leaks when clients don't call close() and
         also handles zombie pipes that are opened but never used.
         A pipe is considered a zombie if it hasn't had any write or close activity
-        for 60 seconds since its last activity.
+        for CONST_DATA_PIPE_TIMEOUT seconds since its last activity.
         """
         while not self._shutdown_event.is_set():
             try:
@@ -528,9 +528,8 @@ class DataConn(DAPConn):
         Handle write command (no semaphore operations needed).
 
         This resets the activity timer to prevent the pipe from being
-        considered a zombie for another 60 seconds.
+        considered a zombie for another CONST_DATA_PIPE_TIMEOUT seconds (900s / 15 min).
         """
-
         # Resolve conn_pipe in the async scope so we can set in_use before dispatching
         pipe_id = args.get('pipe_id', None)
         if pipe_id is None:

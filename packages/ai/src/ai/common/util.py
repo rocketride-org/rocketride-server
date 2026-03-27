@@ -90,9 +90,8 @@ def _repair_json(value: str) -> str:
             continue
         if ch in match:
             open_stack.append(match[ch])
-        elif ch in ('}', ']'):
-            if open_stack and open_stack[-1] == ch:
-                open_stack.pop()
+        elif ch in ('}', ']') and open_stack and open_stack[-1] == ch:
+            open_stack.pop()
 
     if open_stack:
         value += ''.join(reversed(open_stack))
@@ -130,8 +129,7 @@ def parseJson(value: str) -> Any:
 
         # Now, parse the json
         try:
-            v = json.loads(value)
-            return v
+            return json.loads(value)
         except json.JSONDecodeError as e:
             # "Extra data" — multiple JSON objects concatenated. Some models emit
             # a stray partial object before the real response. Try to find the

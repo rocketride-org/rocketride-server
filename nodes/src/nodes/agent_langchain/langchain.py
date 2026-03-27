@@ -253,7 +253,8 @@ class LangChainDriver(AgentBase):
         # Agent tools end with .run_agent; everything else (python.execute,
         # http.http_request, sub-agent tools) belongs to child agents and
         # should not be directly invoked by this orchestrator.
-        agent_tools = [t for t in all_tool_descriptors if isinstance(t, dict) and str(t.get('name', '')).endswith('.run_agent')]
+        _agent_tool_suffix = f'.{self._AGENT_TOOL_NAME}'
+        agent_tools = [t for t in all_tool_descriptors if isinstance(t, dict) and str(t.get('name', '')).endswith(_agent_tool_suffix)]
 
         # Use only agent tools for the orchestrator; child agents handle
         # their own internal tools.
@@ -287,7 +288,8 @@ class LangChainDriver(AgentBase):
             if not isinstance(td, dict):
                 continue
             name = td.get('name', '')
-            desc = td.get('description', '')
+            raw_desc = td.get('description', '')
+            desc = raw_desc if isinstance(raw_desc, str) else str(raw_desc or '')
             # Extract the "Tools available to this agent:" section if present
             tools_section = ''
             tools_marker = 'Tools available to this agent:'
@@ -315,11 +317,14 @@ class LangChainDriver(AgentBase):
             '',
             'Available tools:',
             roster,
-            '',
-            'IMPORTANT: Each tool listed above is a DIFFERENT agent with different capabilities.',
-            'Match each step of your workflow to the correct tool based on the description above.',
-            'Do NOT call the same tool twice for different purposes.',
         ]
+        if agent_tools:
+            system_parts += [
+                '',
+                'IMPORTANT: Each tool listed above is a DIFFERENT agent with different capabilities.',
+                'Match each step of your workflow to the correct tool based on the description above.',
+                'Do NOT call the same tool twice for different purposes.',
+            ]
         system_message = SystemMessage(content='\n'.join(system_parts).strip())
 
         tool_names = [td.get('name', '?') for td in tool_descriptors]

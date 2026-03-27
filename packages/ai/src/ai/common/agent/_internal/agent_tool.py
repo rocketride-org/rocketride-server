@@ -129,9 +129,7 @@ class _AgentAsToolProvider(ToolsBase):
         query = payload.get('query') or payload.get('content') or payload.get('input') or payload.get('message')
         if isinstance(query, dict):
             # LLM may have passed a JSON object as the query — serialize it
-            import json as _json
-
-            query = _json.dumps(query, default=str)
+            query = json.dumps(query, default=str)
         if not isinstance(query, str) or not query.strip():
             raise ValueError('agent tool: input.query must be a non-empty string')
         # Accept common LLM variations for the context field

@@ -253,7 +253,8 @@
 		"modelOutputTokens": {
 			"type": "number",
 			"title": "Max Output Tokens",
-			"description": "Maximum tokens the model can generate in a single response. Default is 4096."
+			"description": "Maximum tokens the model can generate in a single response. Default is 4096.",
+			"default": 4096
 		},
 		"ollama.custom": {
 			"object": "custom",
