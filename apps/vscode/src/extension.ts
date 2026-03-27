@@ -45,6 +45,8 @@ import { PageDeployProvider } from './providers/PageDeployProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
 import { SidebarConnectionProvider } from './providers/SidebarConnectionProvider';
+import { AgentManager } from './agents/agent-manager';
+import { syncServiceCatalog } from './agents/services';
 
 // Core managers
 let connectionManager: ConnectionManager | undefined;
@@ -243,6 +245,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				}
 
 				//-------------------------------------
+				// Auto-install agent documentation (non-blocking)
+				//-------------------------------------
+				const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+				if (workspaceFolder) {
+					const agentMgr = new AgentManager();
+					agentMgr.autoInstall(context.extensionPath, workspaceFolder.uri).catch((error) => {
+						logger.output(`${icons.warning} Auto agent integration failed: ${error}`);
+					});
+				}
+
+				//-------------------------------------
 				// And done...
 				//-------------------------------------
 				logger.output(`${icons.info} Completed initializing`);
@@ -272,10 +285,38 @@ function sleep(ms: number): Promise<void> {
  * Registers utility commands that coordinate between providers
  */
 function registerUtilityCommands(context: vscode.ExtensionContext): void {
+	const agentManager = new AgentManager();
+
 	const commands = [
 		vscode.commands.registerCommand('rocketride.refresh', async () => {
 			await refreshAllProviders();
 			vscode.window.showInformationMessage('RocketRide views refreshed');
+		}),
+		vscode.commands.registerCommand('rocketride.agents.install', async () => {
+			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+			if (!workspaceFolder) {
+				vscode.window.showWarningMessage('No workspace folder open. Open a folder first.');
+				return;
+			}
+			try {
+				await agentManager.installAll(context.extensionPath, workspaceFolder.uri);
+				vscode.window.showInformationMessage('RocketRide agent documentation installed successfully.');
+			} catch (err) {
+				vscode.window.showErrorMessage(`Failed to install agent documentation: ${err}`);
+			}
+		}),
+		vscode.commands.registerCommand('rocketride.agents.uninstall', async () => {
+			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+			if (!workspaceFolder) {
+				vscode.window.showWarningMessage('No workspace folder open. Open a folder first.');
+				return;
+			}
+			try {
+				await agentManager.uninstallAll(workspaceFolder.uri);
+				vscode.window.showInformationMessage('RocketRide agent documentation removed.');
+			} catch (err) {
+				vscode.window.showErrorMessage(`Failed to remove agent documentation: ${err}`);
+			}
 		}),
 	];
 
@@ -289,6 +330,20 @@ function setupConnectionEventHandlers(): void {
 	// Update pipeline data when connected
 	connectionManager?.on('pipelineDataChanged', () => {
 		sidebarFiles?.refresh();
+	});
+
+	// Sync service catalog + schemas to .rocketride/ when services are fetched
+	connectionManager?.on('servicesUpdated', (payload: { services: Record<string, unknown>; servicesError?: string }) => {
+		if (payload.servicesError || !payload.services || Object.keys(payload.services).length === 0) {
+			return;
+		}
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		if (!workspaceFolder) return;
+
+		syncServiceCatalog(workspaceFolder.uri, payload.services).catch((err) => {
+			const logger = getLogger();
+			logger.output(`${icons.warning} Failed to sync service catalog: ${err}`);
+		});
 	});
 }
 

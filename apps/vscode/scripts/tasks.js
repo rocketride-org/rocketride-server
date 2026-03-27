@@ -35,6 +35,8 @@ const APP_ROOT = path.join(__dirname, '..');
 const SRC_DIR = path.join(APP_ROOT, 'src');
 const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src');
 const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
+const AGENT_DOCS_DIR = path.join(DOCS_DIR, 'agents');
+const STUBS_DIR = path.join(DOCS_DIR, 'stubs');
 const README_SRC = path.join(DOCS_DIR, 'README-vscode.md');
 const README_DEST = path.join(APP_ROOT, 'README.md');
 
@@ -153,7 +155,7 @@ function makeStageFilesAction() {
 			const pkg = JSON.parse(await readFile(pkgPath));
 			pkg.main = './rocketride.js';
 			pkg.icon = 'rocketride-dark-icon.png';
-			pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md'];
+			pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'docs/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md'];
 			await writeFile(path.join(BUILD_DIR, 'package.json'), JSON.stringify(pkg, null, 2));
 			const iconDark = path.join(APP_ROOT, 'rocketride-dark-icon.png');
 			const iconLight = path.join(APP_ROOT, 'rocketride-light-icon.png');
@@ -174,6 +176,26 @@ function makeStageFilesAction() {
 			await copyFile(path.join(PROJECT_ROOT, 'LICENSE'), path.join(BUILD_DIR, 'LICENSE'));
 			if (await exists(README_DEST)) {
 				await copyFile(README_DEST, path.join(BUILD_DIR, 'README.md'));
+			}
+
+			// Copy agent documentation and stubs into build/vscode/docs/
+			const buildDocsDir = path.join(BUILD_DIR, 'docs');
+			const buildStubsDir = path.join(BUILD_DIR, 'docs', 'stubs');
+			await mkdir(buildDocsDir);
+			await mkdir(buildStubsDir);
+
+			if (await exists(AGENT_DOCS_DIR)) {
+				const agentDocs = await glob('*.md', { cwd: AGENT_DOCS_DIR, nodir: true, absolute: true });
+				for (const doc of agentDocs) {
+					await copyFile(doc, path.join(buildDocsDir, path.basename(doc)));
+				}
+			}
+
+			if (await exists(STUBS_DIR)) {
+				const stubs = await glob('*', { cwd: STUBS_DIR, nodir: true, absolute: true });
+				for (const stub of stubs) {
+					await copyFile(stub, path.join(buildStubsDir, path.basename(stub)));
+				}
 			}
 
 			await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash);
