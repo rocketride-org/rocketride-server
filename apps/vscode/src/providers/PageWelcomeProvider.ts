@@ -164,6 +164,7 @@ export class PageWelcomeProvider {
 				apiKey,
 				hasApiKey: this.configManager.hasApiKey(),
 				autoConnect: workspaceConfig.get('autoConnect', true),
+				autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', true),
 				localEngineVersion: workspaceConfig.get('local.engineVersion', 'latest'),
 			},
 		});
@@ -185,6 +186,9 @@ export class PageWelcomeProvider {
 			}
 			if (settings.localEngineVersion !== undefined) {
 				await workspaceConfig.update('local.engineVersion', settings.localEngineVersion, vscode.ConfigurationTarget.Global);
+			}
+			if (settings.autoAgentIntegration !== undefined) {
+				await workspaceConfig.update('integrations.autoAgentIntegration', settings.autoAgentIntegration, vscode.ConfigurationTarget.Global);
 			}
 
 			// Save API key to secure storage

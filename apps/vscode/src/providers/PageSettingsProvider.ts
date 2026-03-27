@@ -39,6 +39,7 @@ import { ConfigManager } from '../config';
 import { getConnectionTreeProvider, getConnectionManager } from '../extension';
 import { EngineInstaller } from '../connection/engine-installer';
 import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
+import { AgentManager } from '../agents/agent-manager';
 
 export class PageSettingsProvider {
 	private disposables: vscode.Disposable[] = [];
@@ -222,10 +223,13 @@ export class PageSettingsProvider {
 			envVars: envVars,
 
 			// Integration settings
+			autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', true),
 			integrationCopilot: workspaceConfig.get('integrations.copilot', false),
 			integrationClaudeCode: workspaceConfig.get('integrations.claudeCode', false),
 			integrationCursor: workspaceConfig.get('integrations.cursor', false),
 			integrationWindsurf: workspaceConfig.get('integrations.windsurf', false),
+			integrationClaudeMd: workspaceConfig.get('integrations.claudeMd', false),
+			integrationAgentsMd: workspaceConfig.get('integrations.agentsMd', false),
 		};
 
 		webview.postMessage({
@@ -277,6 +281,9 @@ export class PageSettingsProvider {
 			}
 
 			// Save integration settings
+			if (settings.autoAgentIntegration !== undefined) {
+				await workspaceConfig.update('integrations.autoAgentIntegration', settings.autoAgentIntegration, vscode.ConfigurationTarget.Global);
+			}
 			if (settings.integrationCopilot !== undefined) {
 				await workspaceConfig.update('integrations.copilot', settings.integrationCopilot, vscode.ConfigurationTarget.Global);
 			}
@@ -288,6 +295,12 @@ export class PageSettingsProvider {
 			}
 			if (settings.integrationWindsurf !== undefined) {
 				await workspaceConfig.update('integrations.windsurf', settings.integrationWindsurf, vscode.ConfigurationTarget.Global);
+			}
+			if (settings.integrationClaudeMd !== undefined) {
+				await workspaceConfig.update('integrations.claudeMd', settings.integrationClaudeMd, vscode.ConfigurationTarget.Global);
+			}
+			if (settings.integrationAgentsMd !== undefined) {
+				await workspaceConfig.update('integrations.agentsMd', settings.integrationAgentsMd, vscode.ConfigurationTarget.Global);
 			}
 
 			// Save API key to secure storage whenever provided (used for cloud dev and deployment)
@@ -310,6 +323,15 @@ export class PageSettingsProvider {
 			// Reload all active webviews now that every setting has been persisted
 			for (const w of this.activeWebviews) {
 				await this.loadAllSettings(w);
+			}
+
+			// Install agent stubs for any newly checked integrations
+			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+			if (workspaceFolder) {
+				const agentManager = new AgentManager();
+				agentManager.installFromSettings(this.extensionUri.fsPath, workspaceFolder.uri).catch((err) => {
+					console.error('[PageSettingsProvider] Agent install failed:', err);
+				});
 			}
 		} catch (error) {
 			console.error('[PageSettingsProvider] Failed to save settings:', error);
