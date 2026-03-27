@@ -82,9 +82,13 @@ class IGlobal(IGlobalBase):
 
         try:
             self.driver = neo4j.GraphDatabase.driver(self.uri, auth=auth)
-            # Verify connectivity immediately so beginGlobal fails fast on bad creds.
+            # Verify DBMS connectivity and authentication.
             self.driver.verify_connectivity()
-        except (ServiceUnavailable, neo4j.exceptions.AuthError) as e:
+            # verify_connectivity() uses the home database — probe the configured
+            # database explicitly so a wrong name or missing permissions fail fast.
+            with self.driver.session(database=self.database) as session:
+                session.run('RETURN 1').consume()
+        except (ServiceUnavailable, Neo4jError) as e:
             error(f'Neo4J connection failed: {e}')
             raise
 
