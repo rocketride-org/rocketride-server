@@ -1,0 +1,270 @@
+{
+	"title": "Text To Speech",
+	"protocol": "audio_tts://",
+	"classType": ["audio"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.audio_tts",
+	"prefix": "audio_tts",
+	"description": ["Converts incoming text into speech audio using local or cloud TTS engines.", "Supports piper (local), coqui, kokoro, bark, OpenAI TTS and ElevenLabs, with file or base64 output.", "Optional websocket notification is available for downstream audio processors.", "If output format is MP3 for local/model-based engines, ffmpeg is required."],
+	"icon": "audio-player.svg",
+	"lanes": {
+		"text": ["audio", "text"]
+	},
+	"input": [
+		{
+			"lane": "text",
+			"description": "Text input for speech synthesis",
+			"output": [
+				{
+					"lane": "audio"
+				},
+				{
+					"lane": "text"
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "piper-default",
+		"profiles": {
+			"piper-default": {
+				"engine": "piper",
+				"voice_model": "",
+				"piper_bin": "piper",
+				"ffmpeg_bin": "ffmpeg",
+				"use_model_server": false,
+				"output_mode": "path",
+				"output_format": "wav",
+				"ws_enabled": false,
+				"ws_host": "localhost",
+				"ws_port": 5565,
+				"ws_route": "/audio/tts"
+			},
+			"coqui-default": {
+				"engine": "coqui",
+				"model": "coqui/XTTS-v2",
+				"ffmpeg_bin": "ffmpeg",
+				"use_model_server": true,
+				"output_mode": "path",
+				"output_format": "wav",
+				"ws_enabled": false,
+				"ws_host": "localhost",
+				"ws_port": 5565,
+				"ws_route": "/audio/tts"
+			},
+			"kokoro-default": {
+				"engine": "kokoro",
+				"model": "hexgrad/Kokoro-82M",
+				"ffmpeg_bin": "ffmpeg",
+				"use_model_server": true,
+				"output_mode": "path",
+				"output_format": "wav",
+				"ws_enabled": false,
+				"ws_host": "localhost",
+				"ws_port": 5565,
+				"ws_route": "/audio/tts"
+			},
+			"bark-default": {
+				"engine": "bark",
+				"model": "suno/bark-small",
+				"ffmpeg_bin": "ffmpeg",
+				"use_model_server": true,
+				"output_mode": "path",
+				"output_format": "wav",
+				"ws_enabled": false,
+				"ws_host": "localhost",
+				"ws_port": 5565,
+				"ws_route": "/audio/tts"
+			},
+			"openai-tts": {
+				"engine": "openai",
+				"model": "gpt-4o-mini-tts",
+				"voice": "alloy",
+				"api_key": "",
+				"ffmpeg_bin": "ffmpeg",
+				"use_model_server": false,
+				"output_mode": "base64",
+				"output_format": "mp3",
+				"ws_enabled": false,
+				"ws_host": "localhost",
+				"ws_port": 5565,
+				"ws_route": "/audio/tts"
+			},
+			"elevenlabs-default": {
+				"engine": "elevenlabs",
+				"model": "eleven_multilingual_v2",
+				"voice": "EXAVITQu4vr4xnSDxMaL",
+				"api_key": "",
+				"ffmpeg_bin": "ffmpeg",
+				"use_model_server": false,
+				"output_mode": "base64",
+				"output_format": "mp3",
+				"ws_enabled": false,
+				"ws_host": "localhost",
+				"ws_port": 5565,
+				"ws_route": "/audio/tts"
+			}
+		}
+	},
+	"fields": {
+		"tts.engine": {
+			"type": "string",
+			"title": "Engine",
+			"default": "piper",
+			"enum": [
+				["piper", "Piper (local)"],
+				["coqui", "Coqui TTS"],
+				["kokoro", "Kokoro"],
+				["bark", "Bark"],
+				["bak", "Bak (alias de Bark)"],
+				["openai", "OpenAI TTS"],
+				["elevenlabs", "ElevenLabs"]
+			]
+		},
+		"tts.voice": {
+			"type": "string",
+			"title": "Voice",
+			"default": "alloy"
+		},
+		"tts.model": {
+			"type": "string",
+			"title": "Model",
+			"default": "gpt-4o-mini-tts"
+		},
+		"tts.voice_model": {
+			"type": "string",
+			"title": "Local Voice Model Path",
+			"description": "Path to local model file, e.g. piper .onnx file"
+		},
+		"tts.piper_bin": {
+			"type": "string",
+			"title": "Piper Binary",
+			"default": "piper"
+		},
+		"tts.ffmpeg_bin": {
+			"type": "string",
+			"title": "FFmpeg Binary",
+			"description": "Required when output format is MP3 for piper/coqui/kokoro/bark",
+			"default": "ffmpeg"
+		},
+		"tts.api_key": {
+			"type": "string",
+			"title": "API Key",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tts.output_mode": {
+			"type": "string",
+			"title": "Output Mode",
+			"default": "path",
+			"enum": [
+				["path", "File path"],
+				["base64", "Base64 payload"]
+			]
+		},
+		"tts.use_model_server": {
+			"type": "boolean",
+			"title": "Use RocketRide Model Server",
+			"default": false
+		},
+		"tts.output_format": {
+			"type": "string",
+			"title": "Output Format",
+			"default": "wav",
+			"enum": [
+				["wav", "WAV"],
+				["mp3", "MP3"]
+			]
+		},
+		"tts.ws_enabled": {
+			"type": "boolean",
+			"title": "Enable WebSocket Notification",
+			"default": false
+		},
+		"tts.ws_host": {
+			"type": "string",
+			"title": "WebSocket Host",
+			"default": "localhost"
+		},
+		"tts.ws_port": {
+			"type": "number",
+			"title": "WebSocket Port",
+			"default": 5565
+		},
+		"tts.ws_route": {
+			"type": "string",
+			"title": "WebSocket Route",
+			"default": "/audio/tts"
+		},
+		"tts.default": {
+			"object": "default",
+			"properties": ["tts.engine", "tts.model", "tts.voice", "tts.voice_model", "tts.piper_bin", "tts.ffmpeg_bin", "tts.api_key", "tts.output_mode", "tts.use_model_server", "tts.output_format", "tts.ws_enabled", "tts.ws_host", "tts.ws_port", "tts.ws_route"]
+		},
+		"tts.profile": {
+			"title": "TTS Profile",
+			"type": "string",
+			"default": "piper-default",
+			"enum": [
+				["piper-default", "Piper (local)"],
+				["coqui-default", "Coqui (model server/local)"],
+				["kokoro-default", "Kokoro (model server/local)"],
+				["bark-default", "Bark (model server/local)"],
+				["openai-tts", "OpenAI TTS"],
+				["elevenlabs-default", "ElevenLabs"]
+			],
+			"conditional": [
+				{
+					"value": "piper-default",
+					"properties": ["tts.default"]
+				},
+				{
+					"value": "coqui-default",
+					"properties": ["tts.default"]
+				},
+				{
+					"value": "kokoro-default",
+					"properties": ["tts.default"]
+				},
+				{
+					"value": "bark-default",
+					"properties": ["tts.default"]
+				},
+				{
+					"value": "openai-tts",
+					"properties": ["tts.default"]
+				},
+				{
+					"value": "elevenlabs-default",
+					"properties": ["tts.default"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Text To Speech",
+			"properties": ["tts.profile"]
+		}
+	],
+	"test": {
+		"requires": ["ROCKETRIDE_TTS_TEST_ENABLED"],
+		"profiles": ["coqui-default", "kokoro-default", "bark-default"],
+		"outputs": ["text"],
+		"cases": [
+			{
+				"name": "Coqui/Kokoro/Bark return payload",
+				"text": "Hello from RocketRide",
+				"expect": {
+					"text": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	}
+}
