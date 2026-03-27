@@ -141,8 +141,12 @@ class IGlobal(IGlobalBase):
         except Exception as e:
             return False, str(e)
 
-    def validateConfig(self) -> Tuple[bool, str]:
-        """Test connectivity with a trivial read query; safe to call at save-time."""
+    def validateConfig(self) -> None:
+        """Test connectivity with a trivial read query; safe to call at save-time.
+
+        Surfaces driver error messages via ``warning()`` so the user sees exactly
+        what went wrong (wrong password, unreachable host, etc.).
+        """
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         uri = config.get('uri', 'neo4j://localhost:7687').strip()
         database = config.get('database', 'neo4j').strip() or 'neo4j'
@@ -154,15 +158,18 @@ class IGlobal(IGlobalBase):
             tmp_driver.verify_connectivity()
             with tmp_driver.session(database=database) as session:
                 session.run('RETURN 1').consume()
-            return True, ''
         except neo4j.exceptions.AuthError as e:
-            return False, f'Authentication failed: {e}'
+            warning(f'Authentication failed: {e}')
+            return
         except ServiceUnavailable as e:
-            return False, f'Could not connect to Neo4J at {uri}: {e}'
+            warning(f'Could not connect to Neo4J at {uri}: {e}')
+            return
         except Neo4jError as e:
-            return False, str(e.message or e)
+            warning(str(e.message or e))
+            return
         except Exception as e:
-            return False, str(e)
+            warning(str(e))
+            return
         finally:
             if tmp_driver is not None:
                 try:
