@@ -42,6 +42,7 @@ import { ConnectionManager } from '../connection/connection';
 import { ConfigManager } from '../config';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
+import { PipelineFileParser } from '../shared/util/pipelineParser';
 
 /**
  * Interface for tracking editor state per document
@@ -617,9 +618,18 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 	 * @param document The document with current content
 	 */
 	private updateWebview(webview: vscode.Webview, document: vscode.TextDocument): void {
+		const text = document.getText();
+		const parsed = PipelineFileParser.parseContent(text, document.uri.fsPath);
+		if (!parsed.isValid) {
+			webview.postMessage({
+				type: 'fileInvalid',
+				errors: parsed.errors,
+			});
+			return;
+		}
 		webview.postMessage({
 			type: 'update',
-			content: document.getText(),
+			content: text,
 		});
 	}
 

@@ -67,6 +67,10 @@ export type PageEditorIncomingMessage =
 	| {
 			type: 'connectionState';
 			isConnected: boolean;
+	  }
+	| {
+			type: 'fileInvalid';
+			errors: string[];
 	  };
 
 export type PageEditorOutgoingMessage =
@@ -145,6 +149,8 @@ export const PageEditor: React.FC = () => {
 	const [serverHost, setServerHost] = useState<string>('');
 	// Whether the extension is connected to the RocketRide server
 	const [isConnected, setIsConnected] = useState<boolean>(false);
+	// Parse errors when file is not a valid pipeline — null means file is valid
+	const [fileErrors, setFileErrors] = useState<string[] | null>(null);
 
 	const contentChangedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const pendingContentRef = useRef<string | null>(null);
@@ -161,8 +167,12 @@ export const PageEditor: React.FC = () => {
 			switch (message.type) {
 				case 'update':
 					if (message.content && message.content !== '') {
+						setFileErrors(null);
 						setContent(JSON.parse(message.content));
 					}
+					break;
+				case 'fileInvalid':
+					setFileErrors(message.errors);
 					break;
 				case 'taskStatusUpdate': {
 					// Drive canvas node state from status_update: merge this source's status
@@ -324,6 +334,23 @@ export const PageEditor: React.FC = () => {
 	// ========================================================================
 	// RENDER
 	// ========================================================================
+
+	if (fileErrors) {
+		return (
+			<div className="pipeline-editor-container">
+				<div className="file-invalid-overlay">
+					<div className="file-invalid-icon">&#9888;</div>
+					<h2>This is not a valid RocketRide pipeline file</h2>
+					<ul className="file-invalid-errors">
+						{fileErrors.map((error, i) => (
+							<li key={i}>{error}</li>
+						))}
+					</ul>
+					<p className="file-invalid-hint">Fix the file content and save to reload the editor.</p>
+				</div>
+			</div>
+		);
+	}
 
 	const hasServices = Object.keys(servicesJson).length > 0;
 
