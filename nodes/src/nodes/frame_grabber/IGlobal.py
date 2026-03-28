@@ -37,6 +37,11 @@ class IGlobal(IGlobalBase):
         # Put the profile (type) in there as well
         self.config['type'] = self.glb.connConfig.get('profile', 'interval')
 
+        # Translate interval (seconds between frames) to fps for VideoFrameExtractor,
+        # which only reads 'fps' and never reads 'interval'
+        if self.config.get('interval'):
+            self.config['fps'] = 1.0 / self.config['interval']
+
     def endGlobal(self):
         # Release the lock
         self.device_lock = None

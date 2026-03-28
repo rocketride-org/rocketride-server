@@ -116,3 +116,6 @@ class IInstance(IInstanceGenericLLM):
 
             # Emit a text Doc preserving the original metadata (chunkId, time_stamp, etc.)
             self.instance.writeDocuments([Doc(type='Text', page_content=answer.getText(), metadata=doc.metadata)])
+
+        # Prevent the original image documents from flowing downstream
+        self.preventDefault()

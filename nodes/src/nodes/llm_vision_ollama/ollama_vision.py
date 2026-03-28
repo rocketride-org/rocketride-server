@@ -58,6 +58,7 @@ class Chat(ChatBase):
             api_key='ollama',
             temperature=0,
             max_tokens=self._modelOutputTokens,
+            timeout=90,
         )
 
         bag['chat'] = self
@@ -115,15 +116,37 @@ class Chat(ChatBase):
         max_retries = 3
         base_delay = 1.0
         last_error = None
+        hard_timeout = 90
 
         for attempt in range(max_retries + 1):
             try:
-                response = self._llm.invoke(messages)
+                result = [None]
+                exc = [None]
+
+                def _invoke():
+                    try:
+                        result[0] = self._llm.invoke(messages)
+                    except Exception as e:
+                        exc[0] = e
+
+                import threading
+
+                t = threading.Thread(target=_invoke, daemon=True)
+                t.start()
+                t.join(timeout=hard_timeout)
+                if t.is_alive():
+                    raise TimeoutError(f'Vision inference timed out after {hard_timeout}s (attempt {attempt + 1})')
+                if exc[0]:
+                    raise exc[0]
+
+                response = result[0]
                 answer = Answer(expectJson=question.expectJson)
                 answer.setAnswer(response.content)
                 return answer
             except Exception as e:
                 last_error = e
+                if isinstance(e, TimeoutError):
+                    break  # Don't retry timeouts — same frame will hang again
                 if attempt < max_retries and self.is_retryable_error(e):
                     delay = base_delay * (2**attempt)
                     time.sleep(delay)

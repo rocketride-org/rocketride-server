@@ -156,3 +156,5 @@ class IInstance(IInstanceBase):
                 continue
 
             self.instance.writeDocuments([Doc(type='Image', page_content=thumbnail_base64, metadata=doc.metadata)])
+
+        self.preventDefault()
