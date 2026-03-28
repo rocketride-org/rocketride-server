@@ -1,6 +1,17 @@
-# RocketRide
+<p align="center">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/banner-python.svg" alt="RocketRide Python SDK" width="900">
+</p>
 
-Python SDK for the RocketRide Engine - build, run, and manage AI pipelines from Python.
+<p align="center">
+  Build, run, and manage AI pipelines from Python.
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/rocketride/"><img src="https://img.shields.io/pypi/v/rocketride?color=41b6e6&label=pypi" alt="PyPI"></a>
+  <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/license-MIT-5f2167" alt="MIT License"></a>
+  <a href="https://github.com/rocketride-org/rocketride-server"><img src="https://img.shields.io/github/stars/rocketride-org/rocketride-server?style=flat&color=1e1a34&label=GitHub&logo=github&logoColor=white" alt="GitHub"></a>
+  <a href="https://discord.gg/9hr3tdZmEG"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord"></a>
+</p>
 
 ## Quick Start
 

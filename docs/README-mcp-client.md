@@ -1,11 +1,18 @@
-# RocketRide MCP
+<p align="center">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/banner-mcp.svg" alt="RocketRide MCP Server" width="900">
+</p>
 
-[![rocketride-server MCP server](https://glama.ai/mcp/servers/rocketride-org/rocketride-server/badges/score.svg)](https://glama.ai/mcp/servers/rocketride-org/rocketride-server)
+<p align="center">
+  Let AI assistants run your RocketRide pipelines via the Model Context Protocol.
+</p>
 
-Model Context Protocol (MCP) integration for the RocketRide Engine - let AI assistants run your pipelines.
-
-> [RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline platform.
-> This package provides an MCP stdio server that lets AI assistants like Claude interact with a RocketRide engine directly - discovering tools, running pipelines, and processing documents.
+<p align="center">
+  <a href="https://pypi.org/project/rocketride-mcp/"><img src="https://img.shields.io/pypi/v/rocketride-mcp?color=41b6e6&label=pypi" alt="PyPI"></a>
+  <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/license-MIT-5f2167" alt="MIT License"></a>
+  <a href="https://github.com/rocketride-org/rocketride-server"><img src="https://img.shields.io/github/stars/rocketride-org/rocketride-server?style=flat&color=1e1a34&label=GitHub&logo=github&logoColor=white" alt="GitHub"></a>
+  <a href="https://discord.gg/9hr3tdZmEG"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://glama.ai/mcp/servers/rocketride-org/rocketride-server"><img src="https://glama.ai/mcp/servers/rocketride-org/rocketride-server/badges/score.svg" alt="Glama MCP Score"></a>
+</p>
 
 ## Quick Start
 
