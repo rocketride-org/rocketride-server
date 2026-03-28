@@ -16,11 +16,6 @@
 		"tool": {
 			"description": "Tools available to the agent (via control-plane invoke)",
 			"min": 0
-		},
-		"memory": {
-			"description": "Keyed memory for the agent (via control-plane invoke)",
-			"min": 0,
-			"max": 1
 		}
 	},
 	"lanes": {
@@ -29,18 +24,33 @@
 	"input": [
 		{
 			"lane": "questions",
-			"output": [{ "lane": "answers" }]
+			"output": [
+				{
+					"lane": "answers"
+				}
+			]
 		}
 	],
 	"preconfig": {
 		"default": "default",
 		"profiles": {
 			"default": {
+				"agent_description": "",
 				"instructions": []
 			}
 		}
 	},
 	"fields": {
+		"agent_description": {
+			"type": "string",
+			"title": "Agent description",
+			"default": "",
+			"optional": true,
+			"description": "What does this agent do? Describe its purpose and capabilities \u2014 this helps parent agents select and invoke it correctly.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
 		"instructions": {
 			"type": "array",
 			"title": "Instructions",
@@ -50,20 +60,29 @@
 				"format": "textarea"
 			}
 		},
-		"agent_deepagent.default": { "object": "default", "properties": ["instructions"] },
+		"agent_deepagent.default": {
+			"object": "default",
+			"properties": ["agent_description", "instructions"]
+		},
 		"agent_deepagent.profile": {
 			"title": "Profile",
 			"type": "string",
 			"default": "default",
 			"enum": [["default", "Default"]],
-			"conditional": [{ "value": "default", "properties": ["agent_deepagent.default"] }]
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["agent_deepagent.default"]
+				}
+			]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "Deep Agent",
-			"properties": ["instructions"]
+			"properties": ["agent_description", "instructions"]
 		}
-	]
+	],
+	"icon": "deepagent.svg"
 }
