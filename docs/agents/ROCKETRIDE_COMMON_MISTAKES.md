@@ -78,7 +78,37 @@ If you are returning multiple items from the same lane, you might want to change
 
 ---
 
-### Mistake 2: Using Variable Substitution in project_id
+### Mistake 2: Wrong Pipeline JSON Field Order (project_id at top)
+
+**Problem:**
+
+```json
+{
+  "project_id": "a7f3c2e1-9b4d-4a8e-b1c5-7d6e9f2a8b3c",
+  "source": "chat_1",
+  "components": [...]
+}
+```
+
+**Why This Happens:**
+The VS Code extension expects `components` to be the first field. When `project_id` appears first, the extension may not recognize the pipeline correctly and can discard or overwrite the `project_id`.
+
+**Solution:**
+
+```json
+{
+  "components": [...],
+  "project_id": "a7f3c2e1-9b4d-4a8e-b1c5-7d6e9f2a8b3c",
+  "viewport": { "x": 0, "y": 0, "zoom": 1 },
+  "version": 1
+}
+```
+
+**Rule:** Always put `components` first. Put `project_id`, `viewport`, and `version` at the bottom. The `source` field is managed by the extension and can be omitted when writing pipelines by hand.
+
+---
+
+### Mistake 3: Using Variable Substitution in project_id
 
 **Problem:**
 
@@ -112,7 +142,7 @@ The `project_id` is read before environment variable substitution occurs. It mus
 
 ---
 
-### Mistake 3: Wrong File Extension
+### Mistake 4: Wrong File Extension
 
 **Problem:**
 
@@ -133,7 +163,76 @@ my_pipeline.pipe  # CORRECT: Correct extension
 
 ---
 
-### Mistake 4: Invalid source Reference
+### Mistake 5: Empty Source Node Config
+
+**Problem:**
+
+```json
+{ "id": "chat_1", "provider": "chat", "config": {} }
+```
+
+**Why This Happens:**
+Source nodes require specific config fields that the VS Code extension expects. An empty `config` causes the node to render incorrectly or fail validation.
+
+**Solution:**
+
+```json
+{ "id": "chat_1", "provider": "chat", "config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "chat" } }
+```
+
+Use the provider name as the `type` value (`"webhook"`, `"dropper"`, `"chat"`, etc.).
+
+---
+
+### Mistake 6: Empty memory_internal Config
+
+**Problem:**
+
+```json
+{ "id": "memory_internal_1", "provider": "memory_internal", "config": {} }
+```
+
+**Solution:**
+
+```json
+{ "id": "memory_internal_1", "provider": "memory_internal", "config": { "type": "memory_internal" } }
+```
+
+---
+
+### Mistake 7: Separate Response Node Per Agent in Multi-Agent Pipelines
+
+**Problem:**
+
+```json
+{ "id": "response_1", "provider": "response_answers", "config": { "laneName": "answers" }, "input": [{ "lane": "answers", "from": "agent_rocketride_1" }] },
+{ "id": "response_2", "provider": "response_answers", "config": { "laneName": "answers" }, "input": [{ "lane": "answers", "from": "agent_crewai_1" }] },
+{ "id": "response_3", "provider": "response_answers", "config": { "laneName": "answers" }, "input": [{ "lane": "answers", "from": "agent_langchain_1" }] }
+```
+
+**Why This Happens:**
+Creating one response node per agent seems logical but is unnecessary and creates clutter.
+
+**Solution:** Use a **single** `response_answers` node with multiple `input` entries:
+
+```json
+{
+	"id": "response_answers_1",
+	"provider": "response_answers",
+	"config": { "laneName": "answers" },
+	"input": [
+		{ "lane": "answers", "from": "agent_rocketride_1" },
+		{ "lane": "answers", "from": "agent_crewai_1" },
+		{ "lane": "answers", "from": "agent_langchain_1" }
+	]
+}
+```
+
+All agent answers are returned together under the same response key as a list.
+
+---
+
+### Mistake 8: Invalid source Reference
 
 **Problem:**
 

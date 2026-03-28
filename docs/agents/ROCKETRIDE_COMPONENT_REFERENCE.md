@@ -85,15 +85,18 @@ Pipelines are directed acyclic graphs (DAGs) of components connected by typed da
 
 ```json
 {
+	"components": [],
 	"project_id": "<unique-uuid>",
-	"source": "<source_component_id>",
-	"components": []
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
 }
 ```
 
-- `project_id` — unique GUID per pipeline file. Must be a literal UUID, not a variable
-- `source` — ID of the entry-point component
-- `components` — array of component objects
+- `components` — array of component objects. **Must be the first field.**
+- `project_id` — unique GUID per pipeline file. Must be a literal UUID, not a variable. Goes at the bottom.
+- `viewport` — editor pan/zoom state. Goes at the bottom. Use `{ "x": 0, "y": 0, "zoom": 1 }` as default.
+- `version` — pipeline format version. Always `1`. Goes at the bottom.
+- `source` — optional. ID of the entry-point component. Managed automatically by the VS Code extension.
 
 ### Component Structure
 
@@ -103,7 +106,12 @@ Pipelines are directed acyclic graphs (DAGs) of components connected by typed da
 	"provider": "<provider_key>",
 	"config": {},
 	"input": [{ "lane": "<lane_name>", "from": "<source_component_id>" }],
-	"ui": {}
+	"ui": {
+		"position": { "x": 240, "y": 200 },
+		"measured": { "width": 150, "height": 66 },
+		"nodeType": "default",
+		"formDataValid": true
+	}
 }
 ```
 
@@ -115,7 +123,7 @@ Pipelines are directed acyclic graphs (DAGs) of components connected by typed da
 
 ### Multiple Pipelines
 
-Each `.pipe` file contains a single pipeline (`{ project_id, source, components }`). To build multi-pipeline workflows (e.g., an ingestion pipeline + a query pipeline sharing the same vector DB collection), create separate `.pipe` files and use the same collection name in the vector DB config to share data between them.
+Each `.pipe` file contains a single pipeline (`{ components, project_id, viewport, version }`). To build multi-pipeline workflows (e.g., an ingestion pipeline + a query pipeline sharing the same vector DB collection), create separate `.pipe` files and use the same collection name in the vector DB config to share data between them.
 
 ---
 
@@ -246,7 +254,7 @@ Some components require control-plane connections — typically an LLM, tools, o
 {
   "id": "agent_rocketride_1",
   "provider": "agent_rocketride",
-  "config": { "instructions": [], "max_waves": 10 },
+  "config": { "instructions": [], "max_waves": 10, "parameters": {} },
   "input": [{"lane": "questions", "from": "chat_1"}]
 }
 
@@ -291,6 +299,16 @@ A single LLM/tool/memory node can be shared by multiple invokers — just add mu
 
 This applies to agents, but also to non-agent components like `summarization`, `extract_data`, `dictionary`, `db_postgres`, and `chart_chartjs` — any component whose catalog entry has an `invoke` field.
 
+### Memory Requirements by Agent Type
+
+| Agent              | LLM                  | Memory                   | Tools    |
+| ------------------ | -------------------- | ------------------------ | -------- |
+| `agent_rocketride` | Required (exactly 1) | **Required (exactly 1)** | Optional |
+| `agent_crewai`     | Required (min 1)     | Not supported            | Optional |
+| `agent_langchain`  | Required (min 1)     | Not supported            | Optional |
+
+Only `agent_rocketride` supports a `memory_internal` control connection. `agent_crewai` and `agent_langchain` do not have a memory port — do not wire memory to them.
+
 ### Multi-Agent Pipelines
 
 An agent can invoke another agent as a tool. The sub-agent declares `control: [{ classType: "tool", from: "parent_agent_id" }]`. The sub-agent's own dependencies (LLM, memory) are controlled by the sub-agent, not the parent.
@@ -321,25 +339,30 @@ Tool components (classType `tool`) have empty `lanes` (`{}`). They are not conne
 
 ### Source Nodes
 
+Source node config must include `hideForm`, `mode`, `parameters`, and `type`:
+
 ```json
-"config": { "hideForm": true, "mode": "Source", "type": "chat" }
+"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "chat" }
 ```
+
+Replace `"chat"` with the actual provider name (`"webhook"`, `"dropper"`, etc.).
 
 ### LLM Nodes — Profile-Based
 
-The `profile` field selects the model. API keys nest under the profile key. Read the schema file for available profiles.
+The `profile` field selects the model. API keys nest under the profile key. Include `"parameters": {}`. Read the schema file for available profiles.
 
 ```json
 "config": {
   "profile": "openai-4o",
-  "openai-4o": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" }
+  "openai-4o": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" },
+  "parameters": {}
 }
 ```
 
 ### Embedding Nodes — Profile-Based
 
 ```json
-"config": { "profile": "miniLM" }
+"config": { "profile": "miniLM", "parameters": {} }
 ```
 
 ### Vector DB Nodes — Profile-Based
@@ -347,7 +370,8 @@ The `profile` field selects the model. API keys nest under the profile key. Read
 ```json
 "config": {
   "profile": "local",
-  "local": { "host": "localhost", "port": 6333, "collection": "my_collection" }
+  "local": { "host": "localhost", "port": 6333, "collection": "my_collection" },
+  "parameters": {}
 }
 ```
 
@@ -364,16 +388,28 @@ The `laneName` identifies the key in the JSON response returned to the client:
 The `instructions` array defines the system prompt:
 
 ```json
-"config": { "instructions": ["You are a helpful assistant. Use the provided context to answer questions."] }
+"config": { "instructions": ["You are a helpful assistant. Use the provided context to answer questions."], "parameters": {} }
 ```
 
 ### Agent Nodes
 
-Agent config is flat — `instructions` and `max_waves` go directly in `config`:
+Agent config is flat — `instructions` and `max_waves` go directly in `config`, plus `"parameters": {}`:
 
 ```json
-"config": { "instructions": ["You are a research assistant."], "max_waves": 10 }
+"config": { "instructions": ["You are a research assistant."], "max_waves": 10, "parameters": {} }
 ```
+
+`max_waves` applies to `agent_rocketride` only. `agent_crewai` and `agent_langchain` only use `instructions` and `parameters`.
+
+### Memory Nodes
+
+`memory_internal` requires `"type"` in config:
+
+```json
+"config": { "type": "memory_internal" }
+```
+
+**Only wire memory to `agent_rocketride`.** `agent_crewai` and `agent_langchain` do not have a memory port and cannot accept memory connections.
 
 ### Environment Variable Substitution
 
@@ -409,11 +445,11 @@ Only variables prefixed with `ROCKETRIDE_` are substituted. Unknown variables ar
 
 ## UI Layout (Optional)
 
-The `ui` field is optional and is used by the graphic pipeline designer. When building pipelines programmatically, it is recommended to include `ui` with at least a `position` so the visual editor renders the pipeline with a clean layout. The remaining fields (`measured`, `nodeType`, `formDataValid`) are managed by the designer and can be omitted.
+The `ui` field is optional and is used by the graphic pipeline designer. When building pipelines programmatically, include `ui` with a `position` so the visual editor renders the pipeline with a clean layout — **do not leave all nodes at `x:0, y:0`**.
 
 ```json
 "ui": {
-  "position": { "x": 0, "y": 0 },
+  "position": { "x": 20, "y": 200 },
   "measured": { "width": 150, "height": 66 },
   "nodeType": "default",
   "formDataValid": true
@@ -423,11 +459,47 @@ The `ui` field is optional and is used by the graphic pipeline designer. When bu
 ### Layout Rules
 
 - **Horizontal flow:** Position nodes left-to-right with ~220px horizontal spacing
-- **Starting position:** Begin at approximately x: 20, y: 200
-- **Node heights:** Use height 66 for single-lane nodes, 86 for nodes with invoke handles (agents), 121 for multi-lane nodes (databases)
+- **Starting position:** Begin at `x:20, y:200`
 - **Width:** 150px for all nodes
-- **Control-plane nodes below their invoker:** LLM, tool, and memory nodes are positioned below the agent that controls them (~160px vertical offset)
+- **Node heights:**
+  - Standard nodes (response, LLM, embedding, memory): **66**
+  - Agent nodes (`agent_rocketride`, `agent_crewai`, `agent_langchain`): **86**
+  - Tool nodes: **40**
+  - Multi-lane nodes (vector DBs): **135**
+- **Control-plane nodes go below their invoker:** LLM, tool, and memory nodes sit ~160px below the agent that controls them
 - **Multi-agent tiers:** Sub-agents and their dependencies form vertical tiers below the parent agent
+
+### Layout Example — Simple Agent Pipeline
+
+```text
+x:  20        240         460
+    Chat  →  Agent   →  Response     y: 200
+              |
+         +----+----+
+         |         |
+        LLM      Memory              y: 360
+```
+
+```json
+{ "id": "chat_1",            "ui": { "position": { "x": 20,  "y": 200 }, "measured": { "width": 150, "height": 66 } } },
+{ "id": "agent_rocketride_1","ui": { "position": { "x": 240, "y": 200 }, "measured": { "width": 150, "height": 86 } } },
+{ "id": "response_answers_1","ui": { "position": { "x": 460, "y": 200 }, "measured": { "width": 150, "height": 66 } } },
+{ "id": "llm_openai_1",      "ui": { "position": { "x": 170, "y": 360 }, "measured": { "width": 150, "height": 66 } } },
+{ "id": "memory_internal_1", "ui": { "position": { "x": 340, "y": 360 }, "measured": { "width": 150, "height": 66 } } }
+```
+
+### Layout Example — Parallel Agent Fan-Out
+
+For multiple agents reading from the same chat source, stack them vertically with ~160px spacing, then converge into a single response node:
+
+```text
+x:  20        240         460
+    Chat  →  Agent_1  →
+          →  Agent_2  →  Response    y: 200, 360, 520...
+          →  Agent_3  →
+```
+
+Space each parallel agent 160px apart on the y-axis. The response node sits at the vertical midpoint of all agents.
 
 **Example layout for an agent pipeline:**
 
