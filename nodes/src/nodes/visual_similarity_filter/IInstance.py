@@ -38,7 +38,6 @@ class IInstance(IInstanceBase):
         self._match_rows = []
         self._image_buf = bytearray()
         self._image_mime = 'image/png'
-        self._reference_embedding = None
 
         cfg = self.IGlobal.config
         self._fps = float(cfg.get('fps', 1.0))
@@ -52,7 +51,6 @@ class IInstance(IInstanceBase):
         self._total = 0
         self._forwarded = 0
         self._match_rows = []
-        self._reference_embedding = None
 
     def close(self):
         if self.instance.hasListener('table') and self._match_rows:
@@ -92,10 +90,11 @@ class IInstance(IInstanceBase):
         self._total += 1
         timestamp = idx / self._fps if self._fps > 0 else float(idx)
 
-        # First frame: capture as reference and forward unconditionally.
-        if self._reference_embedding is None:
+        # First frame ever: capture as reference and forward unconditionally.
+        if self.IGlobal.reference_embedding is None:
             with self.IGlobal.device_lock:
-                self._reference_embedding = self.IGlobal.embedder.embed(image_bytes)
+                if self.IGlobal.reference_embedding is None:  # double-checked under lock
+                    self.IGlobal.reference_embedding = self.IGlobal.embedder.embed(image_bytes)
             self._matched += 1
             self._match_rows.append([idx, self._fmt_time(timestamp), '1.000'])
             self._forward_frame(image_bytes, mime)
@@ -104,9 +103,10 @@ class IInstance(IInstanceBase):
         # Subsequent frames: score against the reference.
         try:
             import numpy as np
+
             with self.IGlobal.device_lock:
                 frame_emb = self.IGlobal.embedder.embed(image_bytes)
-            similarity = float(np.dot(self._reference_embedding, frame_emb))
+            similarity = float(np.dot(self.IGlobal.reference_embedding, frame_emb))
         except Exception:
             similarity = 0.0
 

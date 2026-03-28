@@ -37,6 +37,7 @@ class IGlobal(IGlobalBase):
 
     embedder = None
     config = None
+    reference_embedding = None
 
     def beginGlobal(self):
         self.device_lock = threading.Lock()
@@ -47,8 +48,10 @@ class IGlobal(IGlobalBase):
             return
 
         from .embedder import FrameEmbedder
+
         self.embedder = FrameEmbedder(self.config)
 
     def endGlobal(self):
         self.embedder = None
+        self.reference_embedding = None
         self.device_lock = None
