@@ -17,11 +17,6 @@
 		"tool": {
 			"description": "Tools available to the agent (via control-plane invoke)",
 			"min": 0
-		},
-		"memory": {
-			"description": "Keyed memory for the agent (via control-plane invoke)",
-			"min": 0,
-			"max": 1
 		}
 	},
 	"lanes": {
