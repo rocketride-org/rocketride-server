@@ -21,9 +21,11 @@
 # SOFTWARE.
 # =============================================================================
 
+from typing import List
 from .IGlobal import IGlobal
 from nodes.llm_base import IInstanceGenericLLM
 from rocketlib import AVI_ACTION
+from ai.common.schema import Doc
 
 
 class IInstance(IInstanceGenericLLM):
@@ -71,3 +73,22 @@ class IInstance(IInstanceGenericLLM):
             # Clear the image data
             self.image_data = None
             return self.preventDefault()
+
+    def writeDocuments(self, documents: List[Doc]):
+        from ai.common.schema import Question
+
+        for doc in documents:
+            if doc.type != 'Image' or not doc.page_content:
+                continue
+
+            question = Question()
+
+            # page_content is base64-encoded PNG (frame grabber always outputs PNG)
+            image_data_url = f'data:image/png;base64,{doc.page_content}'
+            question.addContext(image_data_url)
+            question.addQuestion(self.IGlobal._chat._prompt)
+
+            answer = self.IGlobal._chat.chat(question)
+
+            # Emit a text Doc preserving the original metadata (chunkId, time_stamp, etc.)
+            self.instance.writeDocuments([Doc(type='Text', page_content=answer.getText(), metadata=doc.metadata)])

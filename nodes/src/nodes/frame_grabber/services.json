@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"video"
-	],
+	"classType": ["video"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -24,13 +22,13 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -50,13 +48,7 @@
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
-	"description": [
-		"A component that extracts frames from video files and outputs them as image data. It ",
-		"supports a variety of video formats and allows users to specify frame extraction ",
-		"intervals (e.g., every 5 seconds or at specific time points). The component processes ",
-		"video content, extracting selected frames as image objects, which can then be passed downstream ",
-		"for further processing, analysis, or display."
-	],
+	"description": ["A component that extracts frames from video files and outputs them as image data. It ", "supports a variety of video formats and allows users to specify frame extraction ", "intervals (e.g., every 5 seconds or at specific time points). The component processes ", "video content, extracting selected frames as image objects, which can then be passed downstream ", "for further processing, analysis, or display."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -73,9 +65,7 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"video": [
-			"image", "table"
-		]
+		"video": ["image", "table", "documents"]
 	},
 	"input": [
 		{
@@ -89,6 +79,10 @@
 				{
 					"lane": "table",
 					"description": "Start times of selected frames of the video."
+				},
+				{
+					"lane": "documents",
+					"description": "Selected frames of the video as image documents with frame number and timestamp metadata."
 				}
 			]
 		}
@@ -130,46 +124,16 @@
 			"title": "Percentage change for frame",
 			"default": 0.4,
 			"enum": [
-				[
-					0.1,
-					"10%"
-				],
-				[
-					0.2,
-					"20%"
-				],
-				[
-					0.3,
-					"30%"
-				],
-				[
-					0.4,
-					"40%"
-				],
-				[
-					0.5,
-					"50%"
-				],
-				[
-					0.6,
-					"60%"
-				],
-				[
-					0.7,
-					"70%"
-				],
-				[
-					0.8,
-					"80%"
-				],
-				[
-					0.9,
-					"90%"
-				],
-				[
-					1.0,
-					"100%"
-				]
+				[0.1, "10%"],
+				[0.2, "20%"],
+				[0.3, "30%"],
+				[0.4, "40%"],
+				[0.5, "50%"],
+				[0.6, "60%"],
+				[0.7, "70%"],
+				[0.8, "80%"],
+				[0.9, "90%"],
+				[1.0, "100%"]
 			]
 		},
 		"grabber.second.interval": {
@@ -208,55 +172,33 @@
 		},
 		"grabber.interval": {
 			"object": "interval",
-			"properties": [
-				"grabber.second.interval",
-				"grabber.start_time",
-				"grabber.duration"
-			]
+			"properties": ["grabber.second.interval", "grabber.start_time", "grabber.duration"]
 		},
 		"grabber.transition": {
 			"object": "transition",
-			"properties": [
-				"grabber.percent",
-				"grabber.min_scene_gap",
-				"grabber.start_time",
-				"grabber.duration",
-				"grabber.max_frames"
-			]
+			"properties": ["grabber.percent", "grabber.min_scene_gap", "grabber.start_time", "grabber.duration", "grabber.max_frames"]
 		},
 		"grabber.key": {
 			"object": "key",
-			"properties": [
-				"grabber.start_time",
-				"grabber.duration",
-				"grabber.max_frames"
-			]
+			"properties": ["grabber.start_time", "grabber.duration", "grabber.max_frames"]
 		},
 		"grabber.profile": {
 			"title": "Frame grabber mode",
 			"type": "string",
 			"default": "interval",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "interval",
-					"properties": [
-						"grabber.interval"
-					]
+					"properties": ["grabber.interval"]
 				},
 				{
 					"value": "transition",
-					"properties": [
-						"grabber.transition"
-					]
+					"properties": ["grabber.transition"]
 				},
 				{
 					"value": "key",
-					"properties": [
-						"grabber.key"
-					]
+					"properties": ["grabber.key"]
 				}
 			]
 		}
@@ -270,9 +212,7 @@
 		{
 			"section": "Pipe",
 			"title": "Video Frame Grabber",
-			"properties": [
-				"grabber.profile"
-			]
+			"properties": ["grabber.profile"]
 		}
 	],
 	"test": {
