@@ -70,12 +70,15 @@
 	"input": [
 		{
 			"lane": "image",
+			"description": "Image data to thumbnail",
 			"output": [
 				{
-					"lane": "documents"
+					"lane": "documents",
+					"description": "Thumbnailed image as document with metadata"
 				},
 				{
-					"lane": "image"
+					"lane": "image",
+					"description": "Thumbnailed image data"
 				}
 			]
 		},

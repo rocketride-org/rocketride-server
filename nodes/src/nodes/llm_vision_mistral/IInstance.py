@@ -21,10 +21,9 @@
 # SOFTWARE.
 # =============================================================================
 
-from typing import List
 from .IGlobal import IGlobal
 from nodes.llm_base import IInstanceGenericLLM
-from rocketlib import AVI_ACTION
+from rocketlib import AVI_ACTION, warning
 from ai.common.schema import Doc
 
 
@@ -74,11 +73,15 @@ class IInstance(IInstanceGenericLLM):
             self.image_data = None
             return self.preventDefault()
 
-    def writeDocuments(self, documents: List[Doc]):
+    def writeDocuments(self, documents: list[Doc]):
         from ai.common.schema import Question
 
         for doc in documents:
-            if doc.type != 'Image' or not doc.page_content:
+            if doc.type != 'Image':
+                warning(f'Mistral Vision: skipping document with unexpected type "{doc.type}"')
+                continue
+            if not doc.page_content:
+                warning('Mistral Vision: skipping Image document with empty content')
                 continue
 
             question = Question()

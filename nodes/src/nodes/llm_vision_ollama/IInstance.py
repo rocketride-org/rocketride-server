@@ -21,10 +21,9 @@
 # SOFTWARE.
 # =============================================================================
 
-from typing import List
 from .IGlobal import IGlobal
 from nodes.llm_base import IInstanceGenericLLM
-from rocketlib import AVI_ACTION
+from rocketlib import AVI_ACTION, warning
 from ai.common.schema import Doc
 
 
@@ -82,11 +81,15 @@ class IInstance(IInstanceGenericLLM):
         else:
             raise RuntimeError(f'AVI protocol error: Unknown action {action}')
 
-    def writeDocuments(self, documents: List[Doc]):
+    def writeDocuments(self, documents: list[Doc]):
         from ai.common.schema import Question
 
         for doc in documents:
-            if doc.type != 'Image' or not doc.page_content:
+            if doc.type != 'Image':
+                warning(f'Ollama Vision: skipping document with unexpected type "{doc.type}"')
+                continue
+            if not doc.page_content:
+                warning('Ollama Vision: skipping Image document with empty content')
                 continue
 
             question = Question()
