@@ -1,0 +1,4 @@
+langchain-text-splitters>=0.3.0
+llama-index-core>=0.12.0
+psutil>=5.9.0
+sentence-transformers>=5.0.0  # optional: for bench_embedding.py
