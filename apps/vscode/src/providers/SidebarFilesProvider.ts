@@ -560,10 +560,19 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 						const root = result as Record<string, unknown>;
 						const target = root.pipeline && typeof root.pipeline === 'object' && !Array.isArray(root.pipeline) ? (root.pipeline as Record<string, unknown>) : root;
 						const hasComponents = Array.isArray(target.components);
-						const hasValidProjectId = typeof target.project_id === 'string' && target.project_id.trim().length > 0;
-						if (hasComponents && !hasValidProjectId) {
-							target.project_id = crypto.randomUUID();
-							await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(result, null, 2), 'utf8'));
+						if (hasComponents) {
+							const existingIds = new Set(
+								[...this.parsedFiles.values()]
+									.filter((f) => f.filePath !== uri.fsPath)
+									.map((f) => f.projectId)
+									.filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+							);
+							const projectId = typeof target.project_id === 'string' && target.project_id.trim() !== '' ? target.project_id : null;
+							const isDuplicate = projectId !== null && existingIds.has(projectId);
+							if (!projectId || isDuplicate) {
+								target.project_id = crypto.randomUUID();
+								await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(result, null, 2), 'utf8'));
+							}
 						}
 					}
 					// Invalid structure — leave as-is; sidebar will show Parse Error
