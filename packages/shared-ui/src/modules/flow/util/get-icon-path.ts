@@ -102,6 +102,9 @@ import httpIcon from '../../../assets/nodes/http.svg';
 import mcpIcon from '../../../assets/nodes/mcp.svg';
 import memoryIcon from '../../../assets/nodes/memory.svg';
 import xaiIcon from '../../../assets/nodes/xai.svg';
+import accessibilityDescribeIcon from '../../../assets/nodes/accessibility-describe.svg';
+import deepagentIcon from '../../../assets/nodes/deepagent.svg';
+import twelvelabsIcon from '../../../assets/nodes/twelvelabs.svg';
 
 /**
  * Static lookup table mapping icon names (without file extensions) to their
@@ -186,6 +189,9 @@ const iconMap: Record<string, string> = {
 	weaviate: weaviateIcon,
 	webhook: webhookIcon,
 	xai: xaiIcon,
+	'accessibility-describe': accessibilityDescribeIcon,
+	deepagent: deepagentIcon,
+	twelvelabs: twelvelabsIcon,
 };
 
 /**
