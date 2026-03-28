@@ -489,6 +489,17 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	/**
 	 * Handles file creation events
 	 */
+	/**
+	 * Handles newly created .pipe files.
+	 *
+	 * - Empty files are initialized with a valid pipeline template so the
+	 *   canvas editor can open them immediately.
+	 * - Non-empty files with valid pipeline JSON get a project_id assigned
+	 *   if missing or duplicated (e.g. copy-paste of another .pipe file).
+	 * - Invalid content (bad JSON, wrong structure) is left untouched —
+	 *   the sidebar will show "(Parse Error)" and the canvas will show
+	 *   an error overlay. We never overwrite the user's content.
+	 */
 	private async handleFileCreated(uri: vscode.Uri): Promise<void> {
 		try {
 			const raw = await vscode.workspace.fs.readFile(uri);
@@ -499,28 +510,29 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 				const parsed = { project_id: crypto.randomUUID(), components: [] };
 				await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
 			} else {
-				// Non-empty file — only ensure project_id if the structure is already valid
+				// Non-empty file — only touch it if the structure is already valid pipeline JSON
 				try {
 					const result = JSON.parse(text);
 					if (result && typeof result === 'object' && !Array.isArray(result)) {
 						const parsed = result as Record<string, unknown>;
 						if (Array.isArray(parsed.components)) {
+							// Collect all known project_ids from other open .pipe files
 							const existingIds = new Set([...this.parsedFiles.values()].map((f) => f.projectId).filter((id): id is string => typeof id === 'string' && id.trim() !== ''));
 							const projectId = typeof parsed.project_id === 'string' && parsed.project_id.trim() !== '' ? parsed.project_id : null;
 							const isDuplicate = projectId !== null && existingIds.has(projectId);
 							if (!projectId || isDuplicate) {
+								// Assign a fresh UUID so each pipeline file has a unique identity
 								parsed.project_id = crypto.randomUUID();
 								await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
 							}
 						}
 					}
-					// Invalid structure (not an object, no components, bad JSON) — leave as-is; sidebar will show Parse Error
 				} catch {
 					// Invalid JSON — leave as-is; sidebar will show Parse Error
 				}
 			}
 		} catch {
-			// If the file can't be read yet, just proceed with reload
+			// File can't be read yet (e.g. still being written) — proceed with reload
 		}
 		await this.loadPipelineFiles();
 	}
@@ -540,10 +552,16 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	}
 
 	/**
-	 * Handles file modification events
+	 * Handles file modification events.
+	 *
+	 * Same philosophy as handleFileCreated: empty files get a valid template,
+	 * valid pipelines get a project_id if missing/duplicated, and invalid
+	 * content is left alone for the error displays to handle.
+	 *
+	 * Supports the nested `{ pipeline: { ... } }` wrapper format that some
+	 * external tools produce, in addition to the flat format.
 	 */
 	private async handleFileChanged(uri: vscode.Uri): Promise<void> {
-		// Ensure a valid project_id exists, or initialize empty files
 		try {
 			const raw = await vscode.workspace.fs.readFile(uri);
 			const text = Buffer.from(raw).toString('utf8');
@@ -558,9 +576,12 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					const result = JSON.parse(text);
 					if (result && typeof result === 'object' && !Array.isArray(result)) {
 						const root = result as Record<string, unknown>;
+						// Support both flat `{ components, project_id }` and wrapped `{ pipeline: { components, project_id } }`
 						const target = root.pipeline && typeof root.pipeline === 'object' && !Array.isArray(root.pipeline) ? (root.pipeline as Record<string, unknown>) : root;
 						const hasComponents = Array.isArray(target.components);
 						if (hasComponents) {
+							// Collect project_ids from all OTHER files — exclude this file so it
+							// doesn't flag its own id as a duplicate on re-save
 							const existingIds = new Set(
 								[...this.parsedFiles.values()]
 									.filter((f) => f.filePath !== uri.fsPath)
