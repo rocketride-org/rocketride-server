@@ -21,7 +21,8 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IInstanceBase, AVI_ACTION, Entry
+from typing import List
+from rocketlib import IInstanceBase, AVI_ACTION, Entry, warning
 from ai.common.schema import Doc, DocMetadata
 from ai.common.image import ImageProcessor
 from .IGlobal import IGlobal
@@ -127,3 +128,15 @@ class IInstance(IInstanceBase):
 
             # Indicate that we have fully handled the image stream
             return self.preventDefault()
+
+    def writeDocuments(self, documents: List[Doc]):
+        for doc in documents:
+            if doc.type != 'Image' or not doc.page_content:
+                warning(f'Thumbnail: skipping document with unexpected type "{doc.type}"')
+                continue
+
+            image = ImageProcessor.load_image_from_base64(doc.page_content)
+            thumbnail = ImageProcessor.get_thumbnail(image)
+            thumbnail_base64 = ImageProcessor.get_base64(thumbnail)
+
+            self.instance.writeDocuments([Doc(type='Image', page_content=thumbnail_base64, metadata=doc.metadata)])
