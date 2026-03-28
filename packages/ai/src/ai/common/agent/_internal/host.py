@@ -70,16 +70,23 @@ class AgentHostServices:
                 # exposing the same tool name (e.g. two postgres instances)
                 # never collide.
                 for tool in param.tools:
-                    original_name = tool['name']
-                    namespaced = f'{tool_node}.{original_name}'
-                    tool['name'] = namespaced
+                    # Get the actual tool name id
+                    tool_id = tool.get('name')
+
+                    # Create a unique identifier for it
+                    namespaced = f'{tool_node}.{tool_id}'
+
+                    # Build a descriptor for the tool, namespaced by node id
+                    descriptor = {**tool, 'name': namespaced}
+
+                    # And save it to the tool list
                     self._tool_list[namespaced] = {
                         'node_id': tool_node,
-                        'tool': tool,
-                        'original_name': original_name,
+                        'tool_id': tool_id,
+                        'tool': descriptor,
                     }
 
-            # And done
+            # And done initializing the tool list
             return
 
         def get(self, tool_name: str) -> Any:
@@ -131,7 +138,7 @@ class AgentHostServices:
             # Build the invoke using the original (un-prefixed) name so the
             # provider's _owns_tool() match works.
             entry = self._tool_list[tool_name]
-            param = IInvokeTool.Validate(tool_name=entry['original_name'], input=input)
+            param = IInvokeTool.Validate(tool_name=entry['tool_id'], input=input)
 
             # Call the tool to validate - throws on error
             self._invoker.instance.invoke('tool', param, nodeId=entry['node_id'])
@@ -154,7 +161,7 @@ class AgentHostServices:
             # Build the invoke using the original (un-prefixed) name so the
             # provider's _owns_tool() match works.
             entry = self._tool_list[tool_name]
-            param = IInvokeTool.Invoke(tool_name=entry['original_name'], input=input)
+            param = IInvokeTool.Invoke(tool_name=entry['tool_id'], input=input)
 
             # Invoke it
             self._invoker.instance.invoke('tool', param, nodeId=entry['node_id'])
