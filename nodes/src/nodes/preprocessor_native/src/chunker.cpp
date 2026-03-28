@@ -229,8 +229,12 @@ static std::string_view strip(std::string_view sv) {
 // We track current_doc as a deque of indices into `pieces`. Since pieces are
 // contiguous views into the original text, the joined result is also a
 // contiguous view.
+//
+// char_lens must be pre-computed by the caller: char_lens[i] == utf8_len(pieces[i]).
+// This avoids O(n) rescanning inside the merge loop.
 static std::vector<std::string_view> merge_splits(
     const std::vector<std::string_view>& pieces,
+    const std::vector<int32_t>& char_lens,
     int32_t chunk_size,
     int32_t chunk_overlap
 ) {
@@ -243,20 +247,17 @@ static std::vector<std::string_view> merge_splits(
     //   - condition: total + len_ > chunk_size (since sep_len=0, the
     //     (sep_len if current else 0) term is always 0)
 
-    // Pre-compute character lengths for each piece (Python len(), not byte count)
-    std::vector<int32_t> char_lens(pieces.size());
-    for (size_t i = 0; i < pieces.size(); ++i) {
-        char_lens[i] = utf8_len(pieces[i]);
-    }
-
-    std::vector<size_t> current_doc; // indices into pieces
-    int32_t total = 0; // sum of char_lens for pieces in current_doc
+    // Track the current window as [doc_front, doc_back) indices into pieces.
+    // Avoids O(n) vector::erase from front — just advance the front pointer.
+    size_t doc_front = 0;
+    size_t doc_back = 0; // doc_back is one-past-end; empty when front == back
+    int32_t total = 0;   // sum of char_lens for pieces in [doc_front, doc_back)
 
     auto emit_doc = [&]() {
-        if (current_doc.empty()) return;
+        if (doc_front >= doc_back) return;
         // "".join(current_doc) = contiguous range from first to last piece
-        const char* start = pieces[current_doc.front()].data();
-        const char* end = pieces[current_doc.back()].data() + pieces[current_doc.back()].size();
+        const char* start = pieces[doc_front].data();
+        const char* end = pieces[doc_back - 1].data() + pieces[doc_back - 1].size();
         std::string_view joined(start, static_cast<size_t>(end - start));
         std::string_view stripped = strip(joined);
         if (!stripped.empty()) {
@@ -275,13 +276,14 @@ static std::vector<std::string_view> merge_splits(
             //   total > chunk_overlap OR (total + len_ > chunk_size AND total > 0)
             while (total > chunk_overlap ||
                    (total + len_ > chunk_size && total > 0)) {
-                if (current_doc.empty()) break;
-                total -= char_lens[current_doc.front()];
-                current_doc.erase(current_doc.begin());
+                if (doc_front >= doc_back) break;
+                total -= char_lens[doc_front];
+                ++doc_front;
             }
         }
 
-        current_doc.push_back(i);
+        // Append i to window — since we process sequentially, doc_back == i
+        doc_back = i + 1;
         total += len_;
     }
 
@@ -320,31 +322,41 @@ static std::vector<std::string_view> split_text_recursive(
 
     auto splits = split_by(text, separator);
 
+    // Pre-compute character lengths for ALL pieces in a single pass.
+    // This replaces per-piece utf8_len() calls that were O(n) each.
+    std::vector<int32_t> split_char_lens(splits.size());
+    for (size_t i = 0; i < splits.size(); ++i) {
+        split_char_lens[i] = utf8_len(splits[i]);
+    }
+
     // Accumulate small pieces; when a large piece is found, flush + recurse
     std::vector<std::string_view> good_splits;
+    std::vector<int32_t> good_char_lens;
 
-    for (auto& s : splits) {
-        if (utf8_len(s) < chunk_size) {
-            good_splits.push_back(s);
+    for (size_t i = 0; i < splits.size(); ++i) {
+        if (split_char_lens[i] < chunk_size) {
+            good_splits.push_back(splits[i]);
+            good_char_lens.push_back(split_char_lens[i]);
         } else {
             if (!good_splits.empty()) {
-                auto merged = merge_splits(good_splits, chunk_size, chunk_overlap);
+                auto merged = merge_splits(good_splits, good_char_lens, chunk_size, chunk_overlap);
                 final_chunks.insert(final_chunks.end(), merged.begin(), merged.end());
                 good_splits.clear();
+                good_char_lens.clear();
             }
             if (new_sep_start >= n_seps) {
                 // Can't split further — emit as-is
-                final_chunks.push_back(s);
+                final_chunks.push_back(splits[i]);
             } else {
                 // Recurse with deeper separator level
-                auto sub = split_text_recursive(s, chunk_size, chunk_overlap, new_sep_start);
+                auto sub = split_text_recursive(splits[i], chunk_size, chunk_overlap, new_sep_start);
                 final_chunks.insert(final_chunks.end(), sub.begin(), sub.end());
             }
         }
     }
 
     if (!good_splits.empty()) {
-        auto merged = merge_splits(good_splits, chunk_size, chunk_overlap);
+        auto merged = merge_splits(good_splits, good_char_lens, chunk_size, chunk_overlap);
         final_chunks.insert(final_chunks.end(), merged.begin(), merged.end());
     }
 
@@ -354,14 +366,27 @@ static std::vector<std::string_view> split_text_recursive(
 std::vector<Chunk> Chunker::chunk_recursive(std::string_view text, int32_t doc_id) const {
     auto views = split_text_recursive(text, config_.target_size, config_.overlap, 0);
 
+    if (views.empty()) return {};
+
+    // Build byte-to-char prefix sum in a single O(n) pass over the text.
+    // byte_to_char[i] = number of codepoints in text[0..i).
+    // This replaces per-chunk utf8_len() calls that were O(text_size * num_chunks).
+    std::vector<int32_t> byte_to_char(text.size() + 1);
+    int32_t char_count = 0;
+    for (size_t i = 0; i < text.size(); ++i) {
+        byte_to_char[i] = char_count;
+        if ((static_cast<unsigned char>(text[i]) & 0xC0) != 0x80) ++char_count;
+    }
+    byte_to_char[text.size()] = char_count;
+
     std::vector<Chunk> result;
     result.reserve(views.size());
     const char* base = text.data();
     for (auto& sv : views) {
-        int32_t byte_offset = static_cast<int32_t>(sv.data() - base);
-        // Convert byte offset to character offset (for Python compatibility)
-        int32_t char_offset = utf8_len(std::string_view(base, static_cast<size_t>(byte_offset)));
-        int32_t char_length = utf8_len(sv);
+        auto byte_offset = static_cast<size_t>(sv.data() - base);
+        auto byte_end = byte_offset + sv.size();
+        int32_t char_offset = byte_to_char[byte_offset];
+        int32_t char_length = byte_to_char[byte_end] - byte_to_char[byte_offset];
         result.push_back({doc_id, char_offset, char_length});
     }
     return result;

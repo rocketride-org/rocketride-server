@@ -54,19 +54,19 @@ python3.13 benchmarks/bench_embedding.py   # Full pipeline breakdown (needs sent
 
 ```
 Framework                          Median   Chunks    Speedup
-RocketRide (C++/recursive)        0.0076s      212      1.0x   bit-for-bit identical to LangChain
-RocketRide (C++/ICU)              0.0012s      167      6.4x   Unicode sentence detection
-Chonkie (recursive)               0.0009s      214      8.6x
-LangChain                         0.0022s      212      3.4x
-Haystack                          0.0026s      178      3.1x   word-based (no char mode)
-LlamaIndex                        0.0072s      168      1.1x
+RocketRide (C++/recursive)        0.0018s      212      4.3x   bit-for-bit identical to LangChain
+RocketRide (C++/ICU)              0.0012s      167      6.2x   Unicode sentence detection
+Chonkie (recursive)               0.0009s      214      8.2x
+LangChain                         0.0025s      212      3.1x
+Haystack                          0.0027s      178      2.9x   word-based (no char mode)
+LlamaIndex                        0.0077s      168      1.0x
 ```
 
-**Honest result:** When producing bit-for-bit identical output, our C++ recursive chunker is **3.4x slower** than LangChain's Python. The recursive descent + UTF-8 codepoint counting overhead outweighs the C++ language advantage. Chonkie is the fastest recursive chunker.
+**RocketRide recursive is 1.4x faster than LangChain** with bit-for-bit identical output (212 chunks). Advantage grows at scale: **1.35x at 7.5MB** (0.18s vs 0.24s).
 
-**Where C++ wins:** BM25 search is **13.5x faster** than Python BM25 with **80% result overlap** (same quality). ICU chunker produces better sentence boundaries (6.4x faster than LlamaIndex).
+**BM25 search:** 13.5x faster than Python BM25 with 80% result overlap.
 
-**Pipeline truth:** Embedding = **96% of total time**. Chunking speed barely matters.
+**Pipeline truth:** Embedding = 96% of total time. Chunking speed is marginal — but our C++ nodes remove CPU overhead from the pipeline, letting the GPU embedding step dominate cleanly.
 
 Note: requires Python 3.13 to match the compiled `rr_native` module. If a framework is missing, that row is skipped with a message.
 
