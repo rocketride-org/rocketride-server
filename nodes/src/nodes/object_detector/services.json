@@ -1,38 +1,29 @@
 {
 	"title": "Object Detector",
 	"protocol": "object_detector://",
-	"classType": [
-		"video"
-	],
+	"classType": ["image"],
 	"capabilities": [],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.object_detector",
 	"prefix": "object_detector",
-	"description": [
-		"Detects objects in video frames using a HuggingFace object-detection model ",
-		"(DETR, YOLOS, or custom). Filters frames by detection confidence and an optional ",
-		"class allowlist, then forwards matching frames downstream with pre-roll/post-roll ",
-		"context. Pair with the Visual Similarity Filter node for reference-image matching."
-	],
-	"icon": "object-detection.svg",
+	"description": ["Detects objects in images using a HuggingFace object-detection model ", "(DETR, YOLOS, or custom). Filters images by detection confidence and an optional ", "class allowlist, then forwards matching images downstream. ", "Pair with the Visual Similarity Filter node for reference-image matching."],
+	"icon": "thumbnail.svg",
 	"lanes": {
-		"image": [
-			"image", "table"
-		]
+		"image": ["image", "table"]
 	},
 	"input": [
 		{
 			"lane": "image",
-			"description": "Image frames to filter by object detection.",
+			"description": "Images to filter by object detection.",
 			"output": [
 				{
 					"lane": "image",
-					"description": "Frames that contain at least one detected object meeting the criteria."
+					"description": "Images that contain at least one detected object meeting the criteria."
 				},
 				{
 					"lane": "table",
-					"description": "Detection metadata (frame index, timestamp, label, confidence) for matched frames."
+					"description": "Detection metadata (frame index, timestamp, label, confidence) for matched images."
 				}
 			]
 		}
@@ -44,25 +35,19 @@
 				"title": "DETR ResNet-50",
 				"detection_model": "facebook/detr-resnet-50",
 				"min_confidence": 0.3,
-				"fps": 1.0,
-				"pre_roll": 3,
-				"post_roll": 3
+				"fps": 1.0
 			},
 			"yolos-tiny": {
 				"title": "YOLOS Tiny",
 				"detection_model": "hustvl/yolos-tiny",
 				"min_confidence": 0.3,
-				"fps": 2.0,
-				"pre_roll": 3,
-				"post_roll": 3
+				"fps": 2.0
 			},
 			"custom": {
 				"title": "Custom model",
 				"detection_model": "",
 				"min_confidence": 0.3,
-				"fps": 1.0,
-				"pre_roll": 3,
-				"post_roll": 3
+				"fps": 1.0
 			}
 		}
 	},
@@ -94,77 +79,36 @@
 			"description": "Frame rate of the upstream frame_grabber, used to compute timestamps in the output table.",
 			"default": 1.0
 		},
-		"objdet.pre_roll": {
-			"type": "number",
-			"title": "Pre-roll frames",
-			"description": "Number of frames before the first detection to include in the output.",
-			"default": 3,
-			"minimum": 0
-		},
-		"objdet.post_roll": {
-			"type": "number",
-			"title": "Post-roll frames",
-			"description": "Number of frames after the last detection in a segment to include in the output.",
-			"default": 3,
-			"minimum": 0
-		},
 		"objdet.detr": {
 			"object": "detr",
-			"properties": [
-				"objdet.class_allowlist",
-				"objdet.min_confidence",
-				"objdet.fps",
-				"objdet.pre_roll",
-				"objdet.post_roll"
-			]
+			"properties": ["objdet.class_allowlist", "objdet.min_confidence", "objdet.fps"]
 		},
 		"objdet.yolos-tiny": {
 			"object": "yolos-tiny",
-			"properties": [
-				"objdet.class_allowlist",
-				"objdet.min_confidence",
-				"objdet.fps",
-				"objdet.pre_roll",
-				"objdet.post_roll"
-			]
+			"properties": ["objdet.class_allowlist", "objdet.min_confidence", "objdet.fps"]
 		},
 		"objdet.custom": {
 			"object": "custom",
-			"properties": [
-				"objdet.detection_model",
-				"objdet.class_allowlist",
-				"objdet.min_confidence",
-				"objdet.fps",
-				"objdet.pre_roll",
-				"objdet.post_roll"
-			]
+			"properties": ["objdet.detection_model", "objdet.class_allowlist", "objdet.min_confidence", "objdet.fps"]
 		},
 		"objdet.profile": {
 			"title": "Detection model",
 			"description": "Object detection model and configuration",
 			"type": "string",
 			"default": "detr",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "detr",
-					"properties": [
-						"objdet.detr"
-					]
+					"properties": ["objdet.detr"]
 				},
 				{
 					"value": "yolos-tiny",
-					"properties": [
-						"objdet.yolos-tiny"
-					]
+					"properties": ["objdet.yolos-tiny"]
 				},
 				{
 					"value": "custom",
-					"properties": [
-						"objdet.custom"
-					]
+					"properties": ["objdet.custom"]
 				}
 			]
 		}
@@ -173,9 +117,7 @@
 		{
 			"section": "Pipe",
 			"title": "Object Detector",
-			"properties": [
-				"objdet.profile"
-			]
+			"properties": ["objdet.profile"]
 		}
 	]
 }

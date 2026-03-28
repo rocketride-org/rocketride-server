@@ -21,8 +21,6 @@
 # SOFTWARE.
 # =============================================================================
 
-from collections import deque
-
 from rocketlib import IInstanceBase, AVI_ACTION, Entry
 from ai.common.table import Table
 
@@ -43,12 +41,6 @@ class IInstance(IInstanceBase):
 
         cfg = self.IGlobal.config
         self._fps = float(cfg.get('fps', 1.0))
-        self._pre_roll = int(cfg.get('pre_roll', 3))
-        self._post_roll = int(cfg.get('post_roll', 3))
-
-        self._ring = deque(maxlen=self._pre_roll) if self._pre_roll > 0 else None
-        self._forwarding = False
-        self._post_remaining = 0
 
     def endInstance(self):
         pass
@@ -59,10 +51,6 @@ class IInstance(IInstanceBase):
         self._total = 0
         self._forwarded = 0
         self._match_rows = []
-        self._forwarding = False
-        self._post_remaining = 0
-        if self._ring is not None:
-            self._ring.clear()
 
     def close(self):
         if self.instance.hasListener('table') and self._match_rows:
@@ -93,7 +81,7 @@ class IInstance(IInstanceBase):
             self.preventDefault()
 
     # ------------------------------------------------------------------
-    # Per-frame detection + ring buffer forwarding
+    # Per-frame detection
     # ------------------------------------------------------------------
 
     def _on_frame_complete(self, image_bytes: bytes, mime: str):
@@ -107,53 +95,18 @@ class IInstance(IInstanceBase):
         except Exception:
             detections = []
 
-        is_match = len(detections) > 0
-
-        if is_match:
+        if detections:
             self._matched += 1
             best = max(detections, key=lambda d: d.score)
-            self._match_rows.append([
-                idx,
-                self._fmt_time(timestamp),
-                best.label,
-                f'{best.score:.3f}',
-            ])
-
-        if is_match and not self._forwarding:
-            self._flush_ring()
+            self._match_rows.append(
+                [
+                    idx,
+                    self._fmt_time(timestamp),
+                    best.label,
+                    f'{best.score:.3f}',
+                ]
+            )
             self._forward_frame(image_bytes, mime)
-            self._forwarding = True
-            self._post_remaining = self._post_roll
-
-        elif is_match and self._forwarding:
-            self._forward_frame(image_bytes, mime)
-            self._post_remaining = self._post_roll
-
-        elif not is_match and self._forwarding:
-            if self._post_remaining > 0:
-                self._forward_frame(image_bytes, mime)
-                self._post_remaining -= 1
-            else:
-                self._forwarding = False
-                self._push_ring(image_bytes, mime, idx)
-
-        else:
-            self._push_ring(image_bytes, mime, idx)
-
-    # ------------------------------------------------------------------
-    # Ring buffer helpers
-    # ------------------------------------------------------------------
-
-    def _push_ring(self, image_bytes: bytes, mime: str, idx: int):
-        if self._ring is not None:
-            self._ring.append((image_bytes, mime, idx))
-
-    def _flush_ring(self):
-        if self._ring is None:
-            return
-        for img, mime, _ in self._ring:
-            self._forward_frame(img, mime)
-        self._ring.clear()
 
     def _forward_frame(self, image_bytes: bytes, mime: str):
         if self.instance.hasListener('image'):
