@@ -36,7 +36,7 @@
 		"tool_python.timeout": {
 			"type": "integer",
 			"title": "Execution timeout (seconds)",
-			"description": "Maximum seconds a script may run before it is killed. Useful for long-running operations like network scans. Default is 20s, max is 600s.",
+			"description": "Maximum seconds a script may run before it is killed. Useful for long-running operations like network scans. Default is 20s, max is 1200s.",
 			"default": 20,
 			"minimum": 1,
 			"maximum": 1200,

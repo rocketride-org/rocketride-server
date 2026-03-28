@@ -502,7 +502,13 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 				needsWrite = true;
 			} else {
 				try {
-					parsed = JSON.parse(text);
+					const result = JSON.parse(text);
+					if (result === null || typeof result !== 'object' || Array.isArray(result)) {
+						parsed = { project_id: crypto.randomUUID(), components: [] };
+						needsWrite = true;
+					} else {
+						parsed = result as Record<string, unknown>;
+					}
 				} catch {
 					// Invalid JSON — overwrite with valid pipeline template
 					parsed = { project_id: crypto.randomUUID(), components: [] };
@@ -515,9 +521,10 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 				needsWrite = true;
 			}
 
-			const existingIds = new Set([...this.parsedFiles.values()].map((f) => f.projectId).filter(Boolean));
-			const isDuplicate = parsed.project_id && existingIds.has(parsed.project_id as string);
-			if (!parsed.project_id || isDuplicate) {
+			const existingIds = new Set([...this.parsedFiles.values()].map((f) => f.projectId).filter((id): id is string => typeof id === 'string' && id.trim() !== ''));
+			const projectId = typeof parsed.project_id === 'string' && parsed.project_id.trim() !== '' ? parsed.project_id : null;
+			const isDuplicate = projectId !== null && existingIds.has(projectId);
+			if (!projectId || isDuplicate) {
 				parsed.project_id = crypto.randomUUID();
 				needsWrite = true;
 			}
