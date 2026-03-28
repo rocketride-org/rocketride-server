@@ -52,7 +52,7 @@ import { useFlowGraph } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
 import { useFlowPreferences } from '../../../context/FlowPreferencesContext';
 import { INode, IService, IServiceCatalog, IProject, PIPELINE_SCHEMA_VERSION } from '../../../types';
-import { getComponentFromNode, getChildComponents } from '../../../util/graph';
+import { getComponentFromNode } from '../../../util/graph';
 
 import { IAuthTokensRef, persistTokensFromFormData, mergeAuthTokensIntoFormData, persistOAuthTokensAndSave } from './authTokenHelpers';
 import { useOAuthCallbacks } from './useOAuthCallbacks';
@@ -192,7 +192,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	const persistedAuthTokens = useRef<IAuthTokensRef>({});
 
 	// --- Context ------------------------------------------------------------
-	const { updateNode, onToolchainUpdated, nodes } = useFlowGraph();
+	const { updateNode, onToolchainUpdated } = useFlowGraph();
 	const { servicesJson, handleValidatePipeline, currentProject: _currentProject, googlePickerDeveloperKey, googlePickerClientId } = useFlowProject();
 	const { getPreference, setPreference } = useFlowPreferences();
 
@@ -314,12 +314,9 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 				// Server-side validation
 				if (handleValidatePipeline && updatedNode) {
 					const component = getComponentFromNode(updatedNode as INode);
-					// Get sibling components at the same level (same parentId)
-					const siblingComponents = getChildComponents(nodes as INode[], node.parentId);
 					const payload = {
 						version: PIPELINE_SCHEMA_VERSION,
 						component,
-						components: siblingComponents,
 					} as unknown as IProject;
 
 					const resp = await handleValidatePipeline(payload);
@@ -355,7 +352,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 				setIsSubmitting(false);
 			}
 		},
-		[node.id, node.data.config, node.parentId, nodes, name, updateNode, handleValidatePipeline, clearSecureParamsFromUrl, onToolchainUpdated, onClose]
+		[node.id, node.data.config, name, updateNode, handleValidatePipeline, clearSecureParamsFromUrl, onToolchainUpdated, onClose]
 	);
 
 	// --- Resize logic -------------------------------------------------------
