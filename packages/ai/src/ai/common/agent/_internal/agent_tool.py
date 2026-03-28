@@ -108,7 +108,9 @@ class _AgentAsToolProvider(ToolsBase):
     def _tool_query(self) -> List[ToolsBase.ToolDescriptor]:
         """Return the single tool descriptor that exposes this agent."""
         tools_available = self._connected_tools_available()
-        desc = 'Invoke this agent as a tool. Input: {query: string, context?: object}. Output: {content, meta, stack}.'
+        agent_description = getattr(self._agent, '_agent_description', '') or ''
+        base = 'Invoke this agent as a tool. Input: {query: string, context?: object}. Output: {content, meta, stack}.'
+        desc = f'This agent: {agent_description} {base}' if agent_description else base
         if tools_available:
             parts = [f'{n}: {d}' if d else n for n, d in tools_available]
             desc = f'{desc} Tools available to this agent: {"; ".join(parts)}.'
