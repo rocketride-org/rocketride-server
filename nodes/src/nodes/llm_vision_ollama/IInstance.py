@@ -82,6 +82,15 @@ class IInstance(IInstanceGenericLLM):
             raise RuntimeError(f'AVI protocol error: Unknown action {action}')
 
     def writeDocuments(self, documents: list[Doc]):
+        """Process incoming image documents and emit vision model responses as text documents.
+
+        Skips non-Image documents and documents with empty content, emitting a warning
+        for each. Valid image documents are passed to the vision model and the resulting
+        answer is forwarded downstream as a Text Doc, preserving the original metadata.
+
+        Args:
+            documents: List of Doc objects to process; only type 'Image' is handled.
+        """
         from ai.common.schema import Question
 
         for doc in documents:
@@ -99,7 +108,11 @@ class IInstance(IInstanceGenericLLM):
             question.addContext(image_data_url)
             question.addQuestion(self.IGlobal._chat._prompt)
 
-            answer = self.IGlobal._chat.chat(question)
+            try:
+                answer = self.IGlobal._chat.chat(question)
+            except Exception as e:
+                warning(f'Ollama Vision: inference failed for chunk {doc.metadata.chunkId}: {e}')
+                continue
 
             # Emit a text Doc preserving the original metadata (chunkId, time_stamp, etc.)
             self.instance.writeDocuments([Doc(type='Text', page_content=answer.getText(), metadata=doc.metadata)])

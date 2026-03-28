@@ -147,8 +147,12 @@ class IInstance(IInstanceBase):
                 warning('Thumbnail: skipping Image document with empty content')
                 continue
 
-            image = ImageProcessor.load_image_from_base64(doc.page_content)
-            thumbnail = ImageProcessor.get_thumbnail(image)
-            thumbnail_base64 = ImageProcessor.get_base64(thumbnail)
+            try:
+                image = ImageProcessor.load_image_from_base64(doc.page_content)
+                thumbnail = ImageProcessor.get_thumbnail(image)
+                thumbnail_base64 = ImageProcessor.get_base64(thumbnail)
+            except Exception as e:
+                warning(f'Thumbnail: failed to process chunk {doc.metadata.chunkId}: {e}')
+                continue
 
             self.instance.writeDocuments([Doc(type='Image', page_content=thumbnail_base64, metadata=doc.metadata)])

@@ -74,6 +74,15 @@ class IInstance(IInstanceGenericLLM):
             return self.preventDefault()
 
     def writeDocuments(self, documents: list[Doc]):
+        """Process incoming image documents and emit vision model responses as questions.
+
+        Skips non-Image documents and documents with empty content, emitting a warning
+        for each. Valid image documents are passed to the vision model and the resulting
+        answer is forwarded to downstream listeners as a Question.
+
+        Args:
+            documents: List of Doc objects to process; only type 'Image' is handled.
+        """
         from ai.common.schema import Question
 
         for doc in documents:
@@ -91,7 +100,11 @@ class IInstance(IInstanceGenericLLM):
             question.addContext(image_data_url)
             question.addQuestion(self.IGlobal._chat._prompt)
 
-            answer = self.IGlobal._chat.chat(question)
+            try:
+                answer = self.IGlobal._chat.chat(question)
+            except Exception as e:
+                warning(f'Mistral Vision: inference failed for chunk {doc.metadata.chunkId}: {e}')
+                continue
 
             # Emit a text Doc preserving the original metadata (chunkId, time_stamp, etc.)
             self.instance.writeDocuments([Doc(type='Text', page_content=answer.getText(), metadata=doc.metadata)])
