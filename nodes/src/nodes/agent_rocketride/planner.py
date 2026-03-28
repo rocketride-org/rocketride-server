@@ -48,13 +48,12 @@ from ai.common.agent.types import AgentInput, AgentHost
 # This string is injected as the LLM's persona at the start of every prompt.
 # Keeping it brief and declarative — the detailed instructions follow in the
 # numbered sections — so the model internalizes its role without noise.
-SYSTEM_ROLE = (
-    'You are RocketRide Wave, a planning agent that solves tasks step-by-step. '
-)
+SYSTEM_ROLE = 'You are RocketRide Wave, a planning agent that solves tasks step-by-step. '
 
 # ---------------------------------------------------------------------------
 # Private helpers — formatting
 # ---------------------------------------------------------------------------
+
 
 def _build_all_tool_descriptions(host: AgentHost) -> str:
     """
@@ -100,6 +99,7 @@ def _json_default(obj: Any) -> Any:
 # ---------------------------------------------------------------------------
 # Private helpers — Question builder
 # ---------------------------------------------------------------------------
+
 
 def _build_wave_question(
     *,
@@ -150,45 +150,40 @@ def _build_wave_question(
     #    pipeline), so it never appears in the host's tool registry.
     # 2. We need to document its JMESPath semantics precisely — the schema here
     #    is authoritative for what the LLM should emit when calling it.
-    peek_descriptor = json.dumps({
-        'name': 'memory.peek',
-        'description': (
-            'Extract data from a stored result using a JMESPath expression, or page through '
-            'a large value in text chunks. Use the structural summary in Previous tool results '
-            'to identify the path you need.'
-        ),
-        'inputSchema': {
-            'type': 'object',
-            'required': ['key'],
-            'properties': {
-                'key': {'type': 'string', 'description': 'Memory key to read from'},
-                'path': {
-                    'type': 'string',
-                    'description': (
-                        'JMESPath expression to extract a specific field or slice '
-                        '(e.g. "results[0].name", "rows[0:5].city", "postcodes[2]"). '
-                        'Arrays are capped at 50 items — use indexed paths for specific elements.'
-                    ),
+    peek_descriptor = json.dumps(
+        {
+            'name': 'memory.peek',
+            'description': ('Extract data from a stored result using a JMESPath expression, or page through a large value in text chunks. Use the structural summary in Previous tool results to identify the path you need.'),
+            'inputSchema': {
+                'type': 'object',
+                'required': ['key'],
+                'properties': {
+                    'key': {'type': 'string', 'description': 'Memory key to read from'},
+                    'path': {
+                        'type': 'string',
+                        'description': ('JMESPath expression to extract a specific field or slice (e.g. "results[0].name", "rows[0:5].city", "postcodes[2]"). Arrays are capped at 50 items — use indexed paths for specific elements.'),
+                    },
+                    # offset/length enable chunked reading of large raw values
+                    # when the LLM needs to page through data too large to load at once
+                    'offset': {'type': 'integer', 'description': 'Character offset for chunk reading (default 0). Only when path is omitted.'},
+                    'length': {'type': 'integer', 'description': 'Characters to return for chunk reading (default 8000). Only when path is omitted.'},
                 },
-                # offset/length enable chunked reading of large raw values
-                # when the LLM needs to page through data too large to load at once
-                'offset': {'type': 'integer', 'description': 'Character offset for chunk reading (default 0). Only when path is omitted.'},
-                'length': {'type': 'integer', 'description': 'Characters to return for chunk reading (default 8000). Only when path is omitted.'},
+            },
+            'outputSchema': {
+                'type': 'object',
+                'properties': {
+                    'preview': {'type': 'string', 'description': 'The extracted data (JMESPath result or text chunk)'},
+                    'path': {'type': 'string', 'description': 'The JMESPath expression used, if any'},
+                    'offset': {'type': 'integer', 'description': 'Character offset used (chunk mode only)'},
+                    'total_chars': {'type': 'integer', 'description': 'Total length of the value (chunk mode only)'},
+                    'truncated': {'type': 'boolean', 'description': 'True if an array result was capped'},
+                    'returned_items': {'type': 'integer', 'description': 'Number of array items returned when truncated'},
+                    'total_items': {'type': 'integer', 'description': 'Total array length when truncated'},
+                },
             },
         },
-        'outputSchema': {
-            'type': 'object',
-            'properties': {
-                'preview': {'type': 'string', 'description': 'The extracted data (JMESPath result or text chunk)'},
-                'path': {'type': 'string', 'description': 'The JMESPath expression used, if any'},
-                'offset': {'type': 'integer', 'description': 'Character offset used (chunk mode only)'},
-                'total_chars': {'type': 'integer', 'description': 'Total length of the value (chunk mode only)'},
-                'truncated': {'type': 'boolean', 'description': 'True if an array result was capped'},
-                'returned_items': {'type': 'integer', 'description': 'Number of array items returned when truncated'},
-                'total_items': {'type': 'integer', 'description': 'Total array length when truncated'},
-            },
-        },
-    }, ensure_ascii=False)
+        ensure_ascii=False,
+    )
 
     # Append memory.peek after the regular tools so the LLM sees it last —
     # it is a utility tool, not a primary data source, and ordering matters
@@ -218,7 +213,9 @@ def _build_wave_question(
     #    summary isn't enough.
     # 3. {{memory.ref:key:format:path}} (in final answer) — lets the LLM
     #    reference bulk data in the answer without ever loading it into context.
-    q.addInstruction('Memory', """\
+    q.addInstruction(
+        'Memory',
+        """\
         Every tool result is automatically stored in memory. All prior results appear in
         "Previous tool results" below, keyed by memory key. Each entry shows a structural
         summary — field names, array lengths, and sample values — so you can understand
@@ -226,7 +223,7 @@ def _build_wave_question(
 
         There are two distinct memory mechanisms. Use the right one:
 
-        ── memory.peek (tool call) ──────────────────────────────────────────────────────
+       - memory.peek (tool call)
         Use during a wave to extract specific scalar values into scratch.
           {"tool": "memory.peek", "args": {"key": "<key>", "path": "results[0].name"}}
           {"tool": "memory.peek", "args": {"key": "<key>", "path": "rows[0:5].city"}}
@@ -239,7 +236,7 @@ def _build_wave_question(
         Do NOT use memory.peek to inspect or validate bulk data before answering.
         If the structural summary tells you what you need, that is enough.
 
-        ── {{memory.ref:key:format}} (answer template) ──────────────────────────────────
+        - {{memory.ref:key:format}} (answer template)
         Use in the final answer to embed stored data. The system fetches, formats, and
         substitutes it at render time — no tool call, no context limit, no truncation.
           {{memory.ref:wave-1.r0:markdown_table}}
@@ -250,7 +247,8 @@ def _build_wave_question(
         If the structural summary confirms the data exists and looks complete, write
         done=true and embed it with {{memory.ref:key:format}} directly — do not peek it first.
 
-        Available formats: markdown_table, html_table, csv, json, text""")
+        Available formats: markdown_table, html_table, csv, json, text""",
+    )
 
     # ------------------------------------------------------------------
     # Response format
@@ -271,7 +269,9 @@ def _build_wave_question(
     # - tool_calls: parallel tool invocations for this wave.
     # - answer: the final user-facing response — strict rules on what goes here
     #   prevent the LLM from leaking planning notes or raw data into the output.
-    q.addInstruction('Response Format', """\
+    q.addInstruction(
+        'Response Format',
+        """\
         Respond with one of these shapes (valid fenced JSON only):
 
         Invoke tools:
@@ -303,7 +303,8 @@ def _build_wave_question(
           Scalar values (numbers, names, computed results) come from scratch — write them
           directly. Bulk or tabular data that was never loaded into scratch must be
           referenced with {{memory.ref:key:format}} or {{memory.ref:key:format:path}} —
-          the system will fetch, extract, and format it before delivering the answer.""")
+          the system will fetch, extract, and format it before delivering the answer.""",
+    )
 
     # ------------------------------------------------------------------
     # Behavioral rules
@@ -318,7 +319,9 @@ def _build_wave_question(
     #   structural summary already contains the needed values.
     # - "Remove peek results": keeps the context window lean by evicting
     #   transient peek results as soon as their data is captured in scratch.
-    q.addInstruction('Rules', """\
+    q.addInstruction(
+        'Rules',
+        """\
         - Think things through thoroughly. Plan accordingly. Prefer the simplest
         approach that answers the question — do not over-analyze.
         - Trust that, if a tool succeeds, it worked and gave you the correct answer.
@@ -339,7 +342,8 @@ def _build_wave_question(
         values are known, set done=true. A plan unchanged from the previous response means you
         are not making progress — stop or change approach.
         - Remove peek results in the same response you capture their data in scratch. Do not
-        carry transient peek results forward into subsequent steps.""")
+        carry transient peek results forward into subsequent steps.""",
+    )
 
     #    - No-progress: If you have made two or more tool calls that return structurally
     #    similar results (same shape, same row count, same sample values) and you are not
@@ -394,6 +398,7 @@ def _build_wave_question(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def plan(
     *,
