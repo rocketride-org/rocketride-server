@@ -59,6 +59,12 @@ class IGlobal(IGlobalTransform):
             # Get the configuration
             self.store = Store(self.glb.logicalType, connConfig, bag)
 
+            # Read collection description for tool use
+            from ai.common.config import Config
+
+            cfg = Config.getNodeConfig(self.glb.logicalType, connConfig)
+            self.collection_description: str = str(cfg.get('collection_description', '') or '').strip()
+
             # Get the info about our store
             collection = self.store.collection
             host = self.store.host

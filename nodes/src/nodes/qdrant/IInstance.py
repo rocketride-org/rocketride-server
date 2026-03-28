@@ -24,15 +24,30 @@
 # ------------------------------------------------------------------------------
 # This class controls the data for each thread of the task
 # ------------------------------------------------------------------------------
+from typing import Any
+
 from rocketlib import Entry
-from typing import List
 from .IGlobal import IGlobal
+from .qdrant_driver import QdrantDriver
 from ai.common.schema import Doc, Question
 from ai.common.transform import IInstanceTransform
 
 
 class IInstance(IInstanceTransform):
     IGlobal: IGlobal
+
+    _driver: QdrantDriver | None = None
+
+    def beginInstance(self) -> None:
+        self._driver = QdrantDriver(instance=self)
+
+    def endInstance(self) -> None:
+        self._driver = None
+
+    def invoke(self, param: Any) -> Any:  # noqa: ANN401
+        if self._driver is None:
+            raise RuntimeError('qdrant: driver not initialized')
+        return self._driver.handle_invoke(param)
 
     def writeQuestions(self, question: Question):
         """
@@ -41,7 +56,7 @@ class IInstance(IInstanceTransform):
         # Dispatch to the search handler
         self.IGlobal.store.dispatchSearch(self, question)
 
-    def writeDocuments(self, documents: List[Doc]):
+    def writeDocuments(self, documents: list[Doc]):
         """
         Take a list of documents and adds them to the vector store.
 

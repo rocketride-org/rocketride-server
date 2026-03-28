@@ -13,18 +13,16 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"store"
-	],
+	"classType": ["store", "tool"],
 	//
 	// Required:
 	//     Capabilities are flags that change the behavior of the underlying
 	//     engine
 	//
-	"capabilities": [],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
@@ -49,11 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A vector database component for Qdrant, enabling efficient storage and ", 
-		"retrieval of vector embeddings. It supports similarity search, filtering, ",
-		"and management of vector data with high performance and advanced matching capabilities."
-	],
+	"description": ["A vector database component for Qdrant, enabling efficient storage and ", "retrieval of vector embeddings. It supports similarity search, filtering, ", "and management of vector data with high performance and advanced matching capabilities."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -68,10 +62,7 @@
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": [
-		"Host/Port: ${parameters.qdrant.${profile}.host}:${parameters.qdrant.${profile}.port}",
-		"Collection: ${parameters.qdrant.${profile}.collection}"
-	],
+	"tile": ["Host/Port: ${parameters.qdrant.${profile}.host}:${parameters.qdrant.${profile}.port}", "Collection: ${parameters.qdrant.${profile}.collection}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -87,61 +78,58 @@
 	"test": {
 		"profiles": ["local"],
 		"cases": [
-		{
-			"name": "Add document to store",
-			"documents": [
-				{
-					"page_content": "The capital of France is Paris.",
-					"metadata": {
-						"objectId": "test-doc-1",
-						"nodeId": "test-node",
-						"parent": "/test",
-						"chunkId": 0,
-						"isDeleted": false
-					},
-					"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
-					"embedding_model": "test-model"
+			{
+				"name": "Add document to store",
+				"documents": [
+					{
+						"page_content": "The capital of France is Paris.",
+						"metadata": {
+							"objectId": "test-doc-1",
+							"nodeId": "test-node",
+							"parent": "/test",
+							"chunkId": 0,
+							"isDeleted": false
+						},
+						"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+						"embedding_model": "test-model"
+					}
+				],
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "capital of France"
+					}
 				}
-			],
-			"expect": {
-				"documents": {
-					"notEmpty": true,
-					"contains": "capital of France"
+			},
+			{
+				"name": "Search with question",
+				"questions": {
+					"type": "semantic",
+					"questions": [
+						{
+							"text": "What is the capital of France?",
+							"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+							"embedding_model": "test-model"
+						}
+					]
+				},
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "Paris",
+						"property": [
+							{ "path": "[0].score", "greaterThan": 0.5 },
+							{ "path": "[0].metadata.objectId", "equals": "test-doc-1" }
+						]
+					}
 				}
 			}
-		},
-	{
-		"name": "Search with question",
-		"questions": {
-			"type": "semantic",
-			"questions": [
-				{
-					"text": "What is the capital of France?",
-					"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
-					"embedding_model": "test-model"
-				}
-			]
-		},
-		"expect": {
-			"documents": {
-				"notEmpty": true,
-				"contains": "Paris",
-				"property": [
-					{"path": "[0].score", "greaterThan": 0.5},
-					{"path": "[0].metadata.objectId", "equals": "test-doc-1"}
-				]
-			}
-		}
-	}
 		]
 	},
 	"input": [
 		{
 			"lane": "documents",
-			"description": [
-				"Stores the documents into the vector database. The documents must be ",
-				"run through an embedding model prior to this step to compute the vectors."
-			],
+			"description": ["Stores the documents into the vector database. The documents must be ", "run through an embedding model prior to this step to compute the vectors."],
 			"output": []
 		},
 		{
@@ -150,26 +138,17 @@
 			"output": [
 				{
 					"lane": "documents",
-					"description": [
-						"Produces documents that are most similar to the given question."
-					],
+					"description": ["Produces documents that are most similar to the given question."],
 					"output": []
 				},
 				{
 					"lane": "answers",
-					"description": [
-						"Produces an answer with the documents that are most similar ",
-						"to the given question."
-					],
+					"description": ["Produces an answer with the documents that are most similar ", "to the given question."],
 					"output": []
 				},
 				{
 					"lane": "questions",
-					"description": [
-						"Updates the question with documents most similar to the ",
-						"question and sets up a filter so piping this to another store ",
-						"driver will limit its answers to the given subset of documents."
-					],
+					"description": ["Updates the question with documents most similar to the ", "question and sets up a filter so piping this to another store ", "driver will limit its answers to the given subset of documents."],
 					"output": []
 				}
 			]
@@ -222,45 +201,38 @@
 		"vector.local.port": {
 			"default": 6333
 		},
+		"qdrant.collection_description": {
+			"type": "string",
+			"title": "Collection description",
+			"default": "",
+			"optional": true,
+			"description": "What is stored in this collection? Describe its content and purpose — this helps the agent search more accurately.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
 		"qdrant.cloud": {
 			"object": "cloud",
-			"properties": [
-				"vector.cloud.host",
-				"vector.cloud.port",
-				"vector.apikey",
-				"vector.score",
-				"vector.collection"
-			]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.collection", "qdrant.collection_description"]
 		},
 		"qdrant.local": {
 			"object": "local",
-			"properties": [
-				"vector.local.host",
-				"vector.local.port",
-				"vector.score",
-				"vector.collection"
-			]
+			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.collection", "qdrant.collection_description"]
 		},
 		"qdrant.profile": {
 			"title": "Type of Qdrant host",
 			"description": "Connect to...",
 			"type": "string",
 			"default": "cloud",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "cloud",
-					"properties": [
-						"qdrant.cloud"
-					]
+					"properties": ["qdrant.cloud"]
 				},
 				{
 					"value": "local",
-					"properties": [
-						"qdrant.local"
-					]
+					"properties": ["qdrant.local"]
 				}
 			]
 		},
@@ -271,31 +243,20 @@
 		},
 		"qdrant.qdrant": {
 			"object": "qdrant",
-			"properties": [
-				"qdrant.profile"
-			]
+			"properties": ["qdrant.profile"]
 		},
 		"qdrant.store": {
 			"object": "store",
 			"title": "Store",
-			"properties": [
-				"qdrant.provider",
-				"qdrant.qdrant"
-			]
+			"properties": ["qdrant.provider", "qdrant.qdrant"]
 		},
 		"qdrant.target.autopipe": {
 			"object": "parameters",
-			"properties": [
-				"remote",
-				"qdrant.store",
-				"all.embedding"
-			]
+			"properties": ["remote", "qdrant.store", "all.embedding"]
 		},
 		"qdrant.target.parameters": {
 			"object": "parameters",
-			"properties": [
-				"qdrant.target.autopipe"
-			]
+			"properties": ["qdrant.target.autopipe"]
 		}
 	},
 	//
@@ -307,18 +268,12 @@
 		{
 			"section": "Pipe",
 			"title": "Qdrant Vector Store",
-			"properties": [
-				"qdrant.profile"
-			]
+			"properties": ["qdrant.profile"]
 		},
 		{
 			"section": "Transform",
 			"title": "Qdrant",
-			"properties": [
-				"type",
-				"qdrant.target.parameters",
-				"target.mode"
-			]
+			"properties": ["type", "qdrant.target.parameters", "target.mode"]
 		}
 	]
 }
