@@ -334,8 +334,6 @@ def _build_wave_question(
         not a future plan step — it happens in the same response where you recognize the
         data is ready.
         - Only use the tools listed in Available Tools. Do not invent or modify tool names.
-        - NEVER include raw tool results, API responses, JSON blobs, or memory values in the final
-        answer. Extract only what is needed to answer the question and present it naturally.
         - Check before fetching: Before any tool call — including memory.peek — check scratch and
         the result previews first. If the values you need are already there, do not fetch them.
         Missing secondary fields (units, labels, timestamps) are not blockers; if the primary
