@@ -196,6 +196,9 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	const { servicesJson, handleValidatePipeline, currentProject: _currentProject, googlePickerDeveloperKey, googlePickerClientId } = useFlowProject();
 	const { getPreference, setPreference } = useFlowPreferences();
 
+	// --- Annotation detection -----------------------------------------------
+	const isAnnotation = node.data.provider === 'annotation';
+
 	// --- Service lookup -----------------------------------------------------
 	const service: IService | undefined = (servicesJson as IServiceCatalog)?.[node.data.provider];
 
@@ -204,12 +207,13 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 
 	// --- Schema from the service catalog ------------------------------------
 	const schema = useMemo((): IServiceSchema | undefined => {
+		if (isAnnotation) return undefined;
 		const pipe = service?.Pipe;
 		if (!pipe) return undefined;
 		if (pipe.schema?.properties?.hideForm) return undefined;
 		if (Object.keys(pipe.schema?.properties ?? {}).length === 0) return undefined;
 		return pipe;
-	}, [service]);
+	}, [service, isAnnotation]);
 
 	// --- Form state ---------------------------------------------------------
 	const [name, setName] = useState(node.data.name ?? '');
@@ -217,6 +221,14 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	const [isDirty, setIsDirty] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [validationError, setValidationError] = useState<string | null>(null);
+
+	// --- Annotation-specific state ------------------------------------------
+	const [annotationContent, setAnnotationContent] = useState(() => {
+		const raw = (node.data.config?.content ?? '') as string;
+		return raw.replace(/\\n/g, '\n');
+	});
+	const [bgColor, setBgColor] = useState<string>((node.data.config?.bgColor as string) || '#fff9c4');
+	const [fgColor, setFgColor] = useState<string>((node.data.config?.fgColor as string) || '#000000');
 
 	// --- Secured field transforms -------------------------------------------
 	const securedFormData = getSecuredFormData(formValues);
@@ -237,6 +249,14 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		setFormValues(enrichedConfig);
 		setIsDirty(false);
 		setValidationError(null);
+
+		// Sync annotation-specific state
+		if (node.data.provider === 'annotation') {
+			const raw = (config.content ?? '') as string;
+			setAnnotationContent(raw.replace(/\\n/g, '\n'));
+			setBgColor((config.bgColor as string) || '#fff9c4');
+			setFgColor((config.fgColor as string) || '#000000');
+		}
 
 		// If OAuth tokens are in the URL, persist to node and save immediately
 		const hasOAuthTokens = window.location.search.includes('tokens=');
@@ -284,13 +304,25 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 
 	// --- Save: details only (no schema) ------------------------------------
 	const handleSaveDetailsOnly = useCallback(() => {
-		updateNode(node.id, {
-			name: name || undefined,
-		});
+		if (isAnnotation) {
+			updateNode(node.id, {
+				name: name || undefined,
+				config: {
+					...node.data.config,
+					content: annotationContent,
+					bgColor,
+					fgColor,
+				},
+			});
+		} else {
+			updateNode(node.id, {
+				name: name || undefined,
+			});
+		}
 		setIsDirty(false);
 		onToolchainUpdated();
 		onClose();
-	}, [node.id, name, updateNode, onToolchainUpdated, onClose]);
+	}, [node.id, node.data.config, name, isAnnotation, annotationContent, bgColor, fgColor, updateNode, onToolchainUpdated, onClose]);
 
 	// --- Save: full form with server validation ----------------------------
 	const onSubmit = useCallback(
@@ -392,7 +424,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 
 	// --- Render -------------------------------------------------------------
 
-	const title = service?.title ?? node.data.provider;
+	const title = isAnnotation ? 'Note' : (service?.title ?? node.data.provider);
 	const disableSave = !isDirty || isSubmitting;
 
 	return (
@@ -422,18 +454,66 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 				<div style={styles.body}>
 					<div style={styles.scrollArea}>
 						{/* Node name field */}
-						<TextField
-							label="Node Name"
-							value={name}
-							onChange={(e) => {
-								setName(e.target.value);
-								setIsDirty(true);
-							}}
-							placeholder={service?.title}
-							size="small"
-							fullWidth
-							sx={{ mb: 2 }}
-						/>
+						{!isAnnotation && (
+							<TextField
+								label="Node Name"
+								value={name}
+								onChange={(e) => {
+									setName(e.target.value);
+									setIsDirty(true);
+								}}
+								placeholder={service?.title}
+								size="small"
+								fullWidth
+								sx={{ mb: 2 }}
+							/>
+						)}
+
+						{/* Annotation-specific fields */}
+						{isAnnotation && (
+							<div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+								<TextField
+									label="Content (Markdown)"
+									value={annotationContent}
+									onChange={(e) => {
+										setAnnotationContent(e.target.value);
+										setIsDirty(true);
+									}}
+									placeholder="Enter markdown content..."
+									size="small"
+									fullWidth
+									multiline
+									minRows={4}
+									maxRows={12}
+								/>
+								<div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+									<div style={{ flex: 1 }}>
+										<label style={{ display: 'block', fontSize: '11px', marginBottom: '4px', opacity: 0.7 }}>Background</label>
+										<input
+											type="color"
+											value={bgColor}
+											onChange={(e) => {
+												setBgColor(e.target.value);
+												setIsDirty(true);
+											}}
+											style={{ width: '100%', height: 32, border: 'none', cursor: 'pointer', padding: 0 }}
+										/>
+									</div>
+									<div style={{ flex: 1 }}>
+										<label style={{ display: 'block', fontSize: '11px', marginBottom: '4px', opacity: 0.7 }}>Text Color</label>
+										<input
+											type="color"
+											value={fgColor}
+											onChange={(e) => {
+												setFgColor(e.target.value);
+												setIsDirty(true);
+											}}
+											style={{ width: '100%', height: 32, border: 'none', cursor: 'pointer', padding: 0 }}
+										/>
+									</div>
+								</div>
+							</div>
+						)}
 
 						{/* Configuration form (RJSF) */}
 						{schema && (
