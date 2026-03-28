@@ -50,6 +50,8 @@ SEARCH_TOOL = {
 }
 
 _SERVER_NAME = 'qdrant'
+_DEFAULT_LIMIT = 10
+_MAX_LIMIT = 100
 
 
 class QdrantDriver(ToolsBase):
@@ -87,7 +89,11 @@ class QdrantDriver(ToolsBase):
 
         args = _normalize_input(input_obj)
         query = str(args.get('query', '')).strip()
-        limit = int(args.get('limit', 10))
+        try:
+            limit = int(args.get('limit', _DEFAULT_LIMIT))
+        except (TypeError, ValueError):
+            limit = _DEFAULT_LIMIT
+        limit = max(1, min(limit, _MAX_LIMIT))
 
         if not query:
             raise ValueError('qdrant.search requires a non-empty "query" string')
@@ -155,7 +161,7 @@ def _normalize_input(input_obj: Any) -> Dict[str, Any]:
             pass
 
     if not isinstance(input_obj, dict):
-        warning(f'qdrant.search: unexpected input type {type(input_obj).__name__}: {input_obj!r}')
+        warning(f'qdrant.search: unexpected input type {type(input_obj).__name__}')
         return {}
 
     if 'input' in input_obj and isinstance(input_obj['input'], dict):
