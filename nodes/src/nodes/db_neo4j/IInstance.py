@@ -31,7 +31,6 @@ queries, and inserts data as graph nodes.
 
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, Optional
 
 from rocketlib import IInstanceBase, error, warning
@@ -42,41 +41,7 @@ from rocketlib.types import IInvokeLLM
 
 from .IGlobal import IGlobal
 from .neo4j_driver import Neo4JDriver
-
-
-# ---------------------------------------------------------------------------
-# Cypher safety check — read-only queries only
-# ---------------------------------------------------------------------------
-
-_UNSAFE_CYPHER = re.compile(
-    r'\b(?:CREATE|MERGE|DELETE|DETACH\s+DELETE|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV|'
-    r'CALL\s+apoc\.(?:create|merge|delete|periodic\.commit|refactor|load))\b',
-    re.IGNORECASE,
-)
-
-
-def _is_cypher_safe(cypher: str) -> bool:
-    """Return True when the Cypher statement is read-only (MATCH/RETURN/CALL schema only)."""
-    # Strip both single-line and block comments before checking.
-    stripped = re.sub(r'//[^\n]*', '', cypher)
-    stripped = re.sub(r'/\*.*?\*/', '', stripped, flags=re.DOTALL)
-    return not bool(_UNSAFE_CYPHER.search(stripped))
-
-
-def _parse_is_valid(value: object) -> bool:
-    """Normalise an ``isValid`` value from LLM JSON output to a Python bool.
-
-    Args:
-        value (object): Raw value from the LLM response dict — may be a
-            ``bool`` (``True``/``False``) or a ``str`` (``'true'``/``'false'``).
-
-    Returns:
-        bool: ``True`` only when the value is the boolean ``True`` or the
-            case-insensitive string ``'true'``.
-    """
-    if isinstance(value, bool):
-        return value
-    return str(value).lower() == 'true'
+from .utils import _is_cypher_safe, _parse_is_valid
 
 
 class IInstance(IInstanceBase):

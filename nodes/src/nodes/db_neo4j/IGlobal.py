@@ -39,6 +39,8 @@ from neo4j.exceptions import Neo4jError, ServiceUnavailable
 from rocketlib import IGlobalBase, debug, error, warning
 from ai.common.config import Config
 
+from .utils import _is_cypher_safe
+
 
 class IGlobal(IGlobalBase):
     """Neo4J-specific global connection state."""
@@ -126,6 +128,10 @@ class IGlobal(IGlobalBase):
         """
         if params is None:
             params = {}
+
+        # Defence-in-depth: block writes even if the caller skips the safety check.
+        if not _is_cypher_safe(cypher):
+            raise ValueError('Refusing to execute unsafe (write/admin) Cypher statement')
 
         with self.driver.session(database=self.database) as session:
             result = session.run(neo4j.Query(cypher, timeout=timeout), params)
@@ -225,10 +231,11 @@ class IGlobal(IGlobalBase):
                     rels = []
                     for record in result:
                         for rel in record.get('relationships') or []:
-                            rel_type = rel.get('type', '')
-                            # Start/end nodes are Neo4j Node objects with a 'labels' property.
-                            start_node = rel.get('startNode') or rel.get('start')
-                            end_node = rel.get('endNode') or rel.get('end')
+                            # neo4j.graph.Relationship exposes metadata as attributes,
+                            # not dict keys — rel.get('type') returns None.
+                            rel_type = getattr(rel, 'type', None) or ''
+                            start_node = getattr(rel, 'start_node', None)
+                            end_node = getattr(rel, 'end_node', None)
                             start_label = _first_label(start_node)
                             end_label = _first_label(end_node)
                             if rel_type:

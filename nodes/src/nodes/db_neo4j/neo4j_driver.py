@@ -37,6 +37,8 @@ from typing import Any, Dict, List
 
 from ai.common.tools import ToolsBase
 
+from .utils import _is_cypher_safe, _parse_is_valid, _strip_ns
+
 
 class Neo4JDriver(ToolsBase):
     """Tool-provider driver for Neo4J.
@@ -223,8 +225,6 @@ class Neo4JDriver(ToolsBase):
 
     def _invoke_get_cypher(self, input_obj: Dict[str, Any]) -> Dict[str, Any]:
         """Translate a natural-language question to Cypher without executing it."""
-        from .IInstance import _is_cypher_safe, _parse_is_valid
-
         question = self._get_question(input_obj)
         limit = self._get_limit(input_obj)
 
@@ -285,14 +285,3 @@ class Neo4JDriver(ToolsBase):
             return max(1, min(int(raw_limit), self.LIMIT_MAX)) if raw_limit is not None else self.LIMIT_DEFAULT
         except (ValueError, TypeError):
             return self.LIMIT_DEFAULT
-
-
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
-
-
-def _strip_ns(tool_name: str) -> str:
-    """Strip the 'neo4j.' namespace prefix from a tool name."""
-    prefix = 'neo4j.'
-    return tool_name[len(prefix) :] if tool_name.startswith(prefix) else tool_name
