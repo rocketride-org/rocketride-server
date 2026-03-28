@@ -32,8 +32,6 @@ Complete reference for building RocketRide pipelines across any project.
 
 ```json
 {
-	"project_id": "85be2a13-ad93-49ed-a1e1-4b0f763ca618",
-	"source": "entry_component_id",
 	"components": [
 		{
 			"id": "unique_component_id",
@@ -42,9 +40,14 @@ Complete reference for building RocketRide pipelines across any project.
 			"ui": {},
 			"input": []
 		}
-	]
+	],
+	"project_id": "85be2a13-ad93-49ed-a1e1-4b0f763ca618",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
 }
 ```
+
+**Field ordering matters:** `components` must come first. The `project_id`, `viewport`, and `version` fields go at the bottom. The `source` field is optional — the VS Code extension manages it automatically.
 
 ---
 
@@ -52,11 +55,19 @@ Complete reference for building RocketRide pipelines across any project.
 
 ### Required Fields
 
-#### `project_id` (string)
+#### `components` (array, required — must be first)
+
+- Array of component objects
+- Each component must have a unique `id`
+- Components are connected via `input` arrays
+- **Must be the first field in the JSON object**
+
+#### `project_id` (string, required — goes at the bottom)
 
 - **MUST be a unique GUID** for each pipeline file
 - **Format:** Standard UUID/GUID (e.g., `85be2a13-ad93-49ed-a1e1-4b0f763ca618`)
 - **Variable substitution NOT supported** - must be a literal GUID
+- **Placement:** Put at the bottom of the JSON, after `components`
 
 **Why This Requirement:**
 
@@ -86,17 +97,21 @@ Complete reference for building RocketRide pipelines across any project.
 
 **Note:** Do NOT reuse GUIDs from other pipelines. Each `.pipe` file must have its own unique GUID.
 
-#### `source` (string)
+#### `viewport` (object, required — goes at the bottom)
+
+- Stores the visual zoom/pan state of the pipeline editor
+- Format: `{ "x": 0, "y": 0, "zoom": 1 }`
+- Managed by the VS Code extension; use default values when creating manually
+
+#### `version` (number, required — goes at the bottom)
+
+- Pipeline format version. Always set to `1`
+
+#### `source` (string, optional)
 
 - ID of the entry point component where data enters the pipeline
-- Must match the `id` of one component in the `components` array
-- Typically a source-type component (webhook, chat, dropper, etc.)
-
-#### `components` (array)
-
-- Array of component objects
-- Each component must have a unique `id`
-- Components are connected via `input` arrays
+- Managed automatically by the VS Code extension
+- When writing pipelines by hand, you can omit this field — the extension will add it
 
 ---
 
@@ -134,8 +149,11 @@ Every component must have:
 #### `config` (object, required)
 
 - Component-specific configuration
-- Often uses profiles: `{ "profile": "profile_name", "profile_name": {...} }`
+- LLM and embedding nodes use profiles: `{ "profile": "profile_name", "profile_name": {...} }`
+- Most components also include `"parameters": {}` in their config
 - Supports environment variable substitution: `"apikey": "${ROCKETRIDE_OPENAI_KEY}"`
+- Source nodes require: `{ "hideForm": true, "mode": "Source", "parameters": {}, "type": "<provider>" }`
+- `memory_internal` requires: `{ "type": "memory_internal" }`
 
 #### `ui` (object, optional)
 
@@ -368,12 +386,14 @@ Example:
 
 ```json
 {
-	"source": "webhook_1",
 	"components": [
-		{ "id": "webhook_1", "provider": "webhook" },
-		{ "id": "parse_1", "provider": "parse", "input": [{ "lane": "tags", "from": "webhook_1" }] },
-		{ "id": "response_1", "provider": "response_text", "input": [{ "lane": "text", "from": "parse_1" }] }
-	]
+		{ "id": "webhook_1", "provider": "webhook", "config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook" } },
+		{ "id": "parse_1", "provider": "parse", "config": {}, "input": [{ "lane": "tags", "from": "webhook_1" }] },
+		{ "id": "response_1", "provider": "response_text", "config": { "laneName": "text" }, "input": [{ "lane": "text", "from": "parse_1" }] }
+	],
+	"project_id": "85be2a13-ad93-49ed-a1e1-4b0f763ca618",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
 }
 ```
 
@@ -578,7 +598,33 @@ webhook → parse →         → merge → preprocessor → ...
 **Use Case:** Process multiple content types from uploads  
 **Client Method:** `client.send_files()`
 
-### Pattern 8: Advanced RAG with Summaries
+### Pattern 8: Multi-Agent Fan-Out (Parallel Agents)
+
+```text
+         → agent_a →
+chat →   → agent_b →  → response_answers (single node, multiple inputs)
+         → agent_c →
+```
+
+**Use Case:** Run multiple agents on the same question simultaneously and collect all answers
+**Key Point:** Use a **single** `response_answers` node with multiple `input` entries — one per agent. Do NOT create a separate response node per agent.
+
+```json
+{
+	"id": "response_answers_1",
+	"provider": "response_answers",
+	"config": { "laneName": "answers" },
+	"input": [
+		{ "lane": "answers", "from": "agent_rocketride_1" },
+		{ "lane": "answers", "from": "agent_crewai_1" },
+		{ "lane": "answers", "from": "agent_langchain_1" }
+	]
+}
+```
+
+---
+
+### Pattern 9: Advanced RAG with Summaries
 
 ```text
                 → [preprocessor → embedding → vector_db (content)]
@@ -635,16 +681,19 @@ webhook → parse →
 Before deploying a pipeline:
 
 - [ ] File named with `.pipe` extension
-- [ ] `project_id` is a unique GUID (not a variable)
-- [ ] `source` field references a valid component ID
+- [ ] `components` is the first field in the JSON
+- [ ] `project_id` is a unique GUID (not a variable) and placed at the bottom
+- [ ] `viewport` and `version` fields present at the bottom
 - [ ] All component IDs are unique
 - [ ] All `provider` names are valid
+- [ ] Source node config includes `hideForm`, `mode`, `parameters`, `type`
+- [ ] `memory_internal` config includes `"type": "memory_internal"`
+- [ ] Agent config includes `"parameters": {}`
 - [ ] Lane types match between connected components
 - [ ] API keys use environment variables
 - [ ] No hardcoded secrets
 - [ ] All required services are available
 - [ ] Pipeline tested with sample data
-- [ ] Performance is acceptable
 
 ---
 
@@ -654,21 +703,22 @@ Before deploying a pipeline:
 
 ```json
 {
-	"project_id": "{guid}", // Replace with your unique GUID
-	"source": "source_1",
 	"components": [
 		{
-			"id": "source_1",
+			"id": "webhook_1",
 			"provider": "webhook",
-			"config": {}
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook" }
 		},
 		{
 			"id": "response_1",
 			"provider": "response_text",
-			"config": {},
-			"input": [{ "lane": "text", "from": "source_1" }]
+			"config": { "laneName": "text" },
+			"input": [{ "lane": "text", "from": "webhook_1" }]
 		}
-	]
+	],
+	"project_id": "85be2a13-ad93-49ed-a1e1-4b0f763ca618",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
 }
 ```
 
@@ -676,15 +726,16 @@ Before deploying a pipeline:
 
 ```json
 {
-	"project_id": "{guid}", // Replace with your unique GUID
-	"source": "chat_1",
 	"components": [
-		{ "id": "chat_1", "provider": "chat", "config": {} },
-		{ "id": "embedding_1", "provider": "embedding_transformer", "config": { "profile": "miniLM" }, "input": [{ "lane": "questions", "from": "chat_1" }] },
-		{ "id": "qdrant_1", "provider": "qdrant", "config": { "profile": "local", "local": { "collection": "docs" } }, "input": [{ "lane": "questions", "from": "embedding_1" }] },
-		{ "id": "llm_1", "provider": "llm_openai", "config": { "profile": "openai-5", "openai-5": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" } }, "input": [{ "lane": "questions", "from": "qdrant_1" }] },
-		{ "id": "response_1", "provider": "response_answers", "config": {}, "input": [{ "lane": "answers", "from": "llm_1" }] }
-	]
+		{ "id": "chat_1", "provider": "chat", "config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "chat" } },
+		{ "id": "embedding_1", "provider": "embedding_transformer", "config": { "profile": "miniLM", "parameters": {} }, "input": [{ "lane": "questions", "from": "chat_1" }] },
+		{ "id": "qdrant_1", "provider": "qdrant", "config": { "profile": "local", "local": { "collection": "docs" }, "parameters": {} }, "input": [{ "lane": "questions", "from": "embedding_1" }] },
+		{ "id": "llm_1", "provider": "llm_openai", "config": { "profile": "openai-5-2", "openai-5-2": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" }, "parameters": {} }, "input": [{ "lane": "questions", "from": "qdrant_1" }] },
+		{ "id": "response_1", "provider": "response_answers", "config": { "laneName": "answers" }, "input": [{ "lane": "answers", "from": "llm_1" }] }
+	],
+	"project_id": "85be2a13-ad93-49ed-a1e1-4b0f763ca618",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
 }
 ```
 

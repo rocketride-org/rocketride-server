@@ -7,10 +7,7 @@
 	"node": "python",
 	"path": "nodes.agent_crewai",
 	"prefix": "agent",
-	"description": [
-		"Single-agent execution using CrewAI.",
-		"Can be invoked as a tool (`<nodeId>.run_agent`) for hierarchical agent orchestration."
-	],
+	"description": ["Single-agent execution using CrewAI.", "Can be invoked as a tool (`<nodeId>.run_agent`) for hierarchical agent orchestration."],
 	"icon": "crewai.svg",
 	"invoke": {
 		"llm": {
@@ -20,11 +17,6 @@
 		"tool": {
 			"description": "Tools available to the agent (via control-plane invoke)",
 			"min": 0
-		},
-		"memory": {
-			"description": "Keyed memory for the agent (via control-plane invoke)",
-			"min": 0,
-			"max": 1
 		}
 	},
 	"lanes": {
@@ -40,11 +32,22 @@
 		"default": "default",
 		"profiles": {
 			"default": {
+				"agent_description": "",
 				"instructions": []
 			}
 		}
 	},
 	"fields": {
+		"agent_description": {
+			"type": "string",
+			"title": "Agent description",
+			"default": "",
+			"optional": true,
+			"description": "What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
 		"instructions": {
 			"type": "array",
 			"title": "Instructions",
@@ -54,7 +57,7 @@
 				"format": "textarea"
 			}
 		},
-		"agent_crewai.default": { "object": "default", "properties": ["instructions"] },
+		"agent_crewai.default": { "object": "default", "properties": ["agent_description", "instructions"] },
 		"agent_crewai.profile": {
 			"title": "Profile",
 			"type": "string",
@@ -67,7 +70,7 @@
 		{
 			"section": "Pipe",
 			"title": "CrewAI",
-			"properties": ["instructions"]
+			"properties": ["agent_description", "instructions"]
 		}
 	]
 }

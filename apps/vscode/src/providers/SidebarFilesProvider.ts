@@ -492,17 +492,48 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	private async handleFileCreated(uri: vscode.Uri): Promise<void> {
 		try {
 			const raw = await vscode.workspace.fs.readFile(uri);
-			const parsed = JSON.parse(Buffer.from(raw).toString('utf8'));
-			if (parsed?.components) {
-				const existingIds = new Set([...this.parsedFiles.values()].map((f) => f.projectId).filter(Boolean));
-				const isDuplicate = parsed.project_id && existingIds.has(parsed.project_id);
-				if (!parsed.project_id || isDuplicate) {
-					parsed.project_id = crypto.randomUUID();
-					await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
+			const text = Buffer.from(raw).toString('utf8').trim();
+			let parsed: Record<string, unknown>;
+			let needsWrite = false;
+
+			if (!text) {
+				// Empty file — initialize with valid pipeline template
+				parsed = { project_id: crypto.randomUUID(), components: [] };
+				needsWrite = true;
+			} else {
+				try {
+					const result = JSON.parse(text);
+					if (result === null || typeof result !== 'object' || Array.isArray(result)) {
+						parsed = { project_id: crypto.randomUUID(), components: [] };
+						needsWrite = true;
+					} else {
+						parsed = result as Record<string, unknown>;
+					}
+				} catch {
+					// Invalid JSON — overwrite with valid pipeline template
+					parsed = { project_id: crypto.randomUUID(), components: [] };
+					needsWrite = true;
 				}
 			}
+
+			if (!Array.isArray(parsed.components)) {
+				parsed.components = [];
+				needsWrite = true;
+			}
+
+			const existingIds = new Set([...this.parsedFiles.values()].map((f) => f.projectId).filter((id): id is string => typeof id === 'string' && id.trim() !== ''));
+			const projectId = typeof parsed.project_id === 'string' && parsed.project_id.trim() !== '' ? parsed.project_id : null;
+			const isDuplicate = projectId !== null && existingIds.has(projectId);
+			if (!projectId || isDuplicate) {
+				parsed.project_id = crypto.randomUUID();
+				needsWrite = true;
+			}
+
+			if (needsWrite) {
+				await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
+			}
 		} catch {
-			// If the file can't be read/parsed yet, just proceed with reload
+			// If the file can't be read yet, just proceed with reload
 		}
 		await this.loadPipelineFiles();
 	}
@@ -525,6 +556,24 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	 * Handles file modification events
 	 */
 	private async handleFileChanged(uri: vscode.Uri): Promise<void> {
+		// Ensure a valid project_id exists before re-parsing
+		try {
+			const raw = await vscode.workspace.fs.readFile(uri);
+			const result = JSON.parse(Buffer.from(raw).toString('utf8')) as unknown;
+			if (result && typeof result === 'object' && !Array.isArray(result)) {
+				const root = result as Record<string, unknown>;
+				const target = root.pipeline && typeof root.pipeline === 'object' && !Array.isArray(root.pipeline) ? (root.pipeline as Record<string, unknown>) : root;
+				const hasComponents = Array.isArray(target.components);
+				const hasValidProjectId = typeof target.project_id === 'string' && target.project_id.trim().length > 0;
+				if (hasComponents && !hasValidProjectId) {
+					target.project_id = crypto.randomUUID();
+					await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(result, null, 2), 'utf8'));
+				}
+			}
+		} catch {
+			// Not valid JSON yet — skip project_id assignment
+		}
+
 		// Re-parse the changed file
 		const parsedFile = await PipelineFileParser.parseFile(uri.fsPath);
 		this.parsedFiles.set(uri.fsPath, parsedFile);
