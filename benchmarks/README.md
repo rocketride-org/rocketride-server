@@ -54,18 +54,19 @@ python3.13 benchmarks/bench_embedding.py   # Full pipeline breakdown (needs sent
 
 ```
 Framework                          Median   Chunks    Speedup
-RocketRide (C++/recursive)        0.0001s      218     48.1x   same separators as LangChain
-RocketRide (C++/ICU)              0.0012s      167      6.0x   Unicode sentence detection
-LangChain                         0.0023s      212      3.1x
-LlamaIndex                        0.0071s      168      1.0x   (baseline)
-Chonkie (recursive)               0.0009s      214      7.9x
-Chonkie (token/char)              0.0041s      163      1.7x
-Haystack                          0.0026s      178      2.7x   word-based (no char mode)
+RocketRide (C++/recursive)        0.0076s      212      1.0x   bit-for-bit identical to LangChain
+RocketRide (C++/ICU)              0.0012s      167      6.4x   Unicode sentence detection
+Chonkie (recursive)               0.0009s      214      8.6x
+LangChain                         0.0022s      212      3.4x
+Haystack                          0.0026s      178      3.1x   word-based (no char mode)
+LlamaIndex                        0.0072s      168      1.1x
 ```
 
-Search: C++ BM25 is **13.5x faster** than Python BM25 with **80% result overlap** (same quality).
+**Honest result:** When producing bit-for-bit identical output, our C++ recursive chunker is **3.4x slower** than LangChain's Python. The recursive descent + UTF-8 codepoint counting overhead outweighs the C++ language advantage. Chonkie is the fastest recursive chunker.
 
-Pipeline: Embedding = **96% of total time**. Our C++ nodes optimize the other 4%.
+**Where C++ wins:** BM25 search is **13.5x faster** than Python BM25 with **80% result overlap** (same quality). ICU chunker produces better sentence boundaries (6.4x faster than LlamaIndex).
+
+**Pipeline truth:** Embedding = **96% of total time**. Chunking speed barely matters.
 
 Note: requires Python 3.13 to match the compiled `rr_native` module. If a framework is missing, that row is skipped with a message.
 

@@ -9,6 +9,27 @@
 
 namespace rr {
 
+// Count UTF-8 codepoints in a string_view. Matches Python's len(str).
+// Leading bytes: 0xxxxxxx (ASCII), 110xxxxx, 1110xxxx, 11110xxx
+// Continuation bytes (10xxxxxx) are skipped.
+static int32_t utf8_len(std::string_view sv) {
+    int32_t count = 0;
+    for (unsigned char c : sv) {
+        if ((c & 0xC0) != 0x80) ++count; // not a continuation byte
+    }
+    return count;
+}
+
+// Advance pos to the next UTF-8 codepoint boundary (skip continuation bytes).
+static size_t utf8_next(std::string_view sv, size_t pos) {
+    if (pos >= sv.size()) return sv.size();
+    ++pos;
+    while (pos < sv.size() && (static_cast<unsigned char>(sv[pos]) & 0xC0) == 0x80) {
+        ++pos;
+    }
+    return pos;
+}
+
 Chunker::Chunker(ChunkerConfig config) : config_(std::move(config)) {}
 
 Chunker::~Chunker() = default;
@@ -141,152 +162,207 @@ static std::vector<Chunk> assemble_chunks(
     return chunks;
 }
 
-// Split text by a separator, keeping the separator at the end of each piece (like LangChain keep_separator=true)
+// Split text by separator, keeping separator at the START of each subsequent
+// piece (matches LangChain keep_separator=True, which maps to "start" logic).
+// Empty pieces are filtered out.
+//
+// Example: split_by("aaa\n\nbbb\n\nccc", "\n\n") -> ["aaa", "\n\nbbb", "\n\nccc"]
 static std::vector<std::string_view> split_by(std::string_view text, std::string_view sep) {
     std::vector<std::string_view> parts;
     if (sep.empty()) {
-        // Character-level split
-        for (size_t i = 0; i < text.size(); ++i) {
-            parts.push_back(text.substr(i, 1));
+        // Character-level split by Unicode codepoints (not bytes)
+        size_t pos = 0;
+        while (pos < text.size()) {
+            size_t next = utf8_next(text, pos);
+            parts.push_back(text.substr(pos, next - pos));
+            pos = next;
         }
         return parts;
     }
-    size_t start = 0;
-    while (start < text.size()) {
-        size_t pos = text.find(sep, start);
-        if (pos == std::string_view::npos) {
-            parts.push_back(text.substr(start));
-            break;
-        }
-        // Include separator at end of this piece
-        parts.push_back(text.substr(start, pos + sep.size() - start));
-        start = pos + sep.size();
+
+    // First, find all separator positions
+    std::vector<size_t> sep_positions;
+    size_t pos = 0;
+    while ((pos = text.find(sep, pos)) != std::string_view::npos) {
+        sep_positions.push_back(pos);
+        pos += sep.size();
     }
+
+    if (sep_positions.empty()) {
+        if (!text.empty()) parts.push_back(text);
+        return parts;
+    }
+
+    // First piece: from start to first separator (no separator prefix)
+    if (sep_positions[0] > 0) {
+        parts.push_back(text.substr(0, sep_positions[0]));
+    }
+
+    // Subsequent pieces: from separator start to next separator (or end)
+    for (size_t i = 0; i < sep_positions.size(); ++i) {
+        size_t piece_start = sep_positions[i];
+        size_t piece_end = (i + 1 < sep_positions.size()) ? sep_positions[i + 1] : text.size();
+        if (piece_end > piece_start) {
+            parts.push_back(text.substr(piece_start, piece_end - piece_start));
+        }
+    }
+
     return parts;
 }
 
-// Merge small pieces into chunks of ~target_size with overlap
-static std::vector<std::string_view> merge_splits(
-    const std::vector<std::string_view>& pieces,
-    int32_t target_size,
-    int32_t overlap
-) {
-    std::vector<std::string_view> chunks;
-    if (pieces.empty()) return chunks;
-
-    // Track current chunk as contiguous range in the original text
-    const char* chunk_start = pieces[0].data();
-    size_t chunk_len = 0;
-    size_t overlap_start_idx = 0; // index into pieces where overlap begins
-
-    for (size_t i = 0; i < pieces.size(); ++i) {
-        auto& p = pieces[i];
-        size_t p_len = p.size();
-
-        if (chunk_len > 0 && static_cast<int32_t>(chunk_len + p_len) > target_size) {
-            // Emit current chunk (strip trailing whitespace like LangChain)
-            std::string_view sv(chunk_start, chunk_len);
-            while (!sv.empty() && (sv.back() == ' ' || sv.back() == '\n' || sv.back() == '\r')) {
-                sv.remove_suffix(1);
-            }
-            if (!sv.empty()) {
-                chunks.push_back(sv);
-            }
-
-            // Find overlap start: walk back from current position
-            int32_t overlap_len = 0;
-            size_t new_start_idx = i;
-            while (new_start_idx > overlap_start_idx) {
-                --new_start_idx;
-                overlap_len += static_cast<int32_t>(pieces[new_start_idx].size());
-                if (overlap_len >= overlap) {
-                    break;
-                }
-            }
-            overlap_start_idx = new_start_idx;
-            chunk_start = pieces[overlap_start_idx].data();
-            chunk_len = 0;
-            for (size_t j = overlap_start_idx; j < i; ++j) {
-                chunk_len += pieces[j].size();
-            }
-        }
-
-        // If this is the first piece or we just reset, set start
-        if (chunk_len == 0 && i >= overlap_start_idx) {
-            chunk_start = p.data();
-        }
-        chunk_len += p_len;
-    }
-
-    // Emit final chunk
-    if (chunk_len > 0) {
-        std::string_view sv(chunk_start, chunk_len);
-        while (!sv.empty() && (sv.back() == ' ' || sv.back() == '\n' || sv.back() == '\r')) {
-            sv.remove_suffix(1);
-        }
-        if (!sv.empty()) {
-            chunks.push_back(sv);
-        }
-    }
-
-    return chunks;
+static bool is_whitespace(char c) {
+    return c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == '\x0b' || c == '\x0c';
 }
 
-std::vector<Chunk> Chunker::chunk_recursive(std::string_view text, int32_t doc_id) const {
+// Strip whitespace from both ends of a string_view (matches Python str.strip())
+static std::string_view strip(std::string_view sv) {
+    while (!sv.empty() && is_whitespace(sv.front())) sv.remove_prefix(1);
+    while (!sv.empty() && is_whitespace(sv.back())) sv.remove_suffix(1);
+    return sv;
+}
+
+// Merge small pieces into chunks of ~target_size with overlap.
+// Exact replica of LangChain's _merge_splits with separator="".
+// Since separator="" and all pieces are contiguous in the original text,
+// "".join(current_doc) == contiguous range, and .strip() removes whitespace.
+//
+// We track current_doc as a deque of indices into `pieces`. Since pieces are
+// contiguous views into the original text, the joined result is also a
+// contiguous view.
+static std::vector<std::string_view> merge_splits(
+    const std::vector<std::string_view>& pieces,
+    int32_t chunk_size,
+    int32_t chunk_overlap
+) {
+    std::vector<std::string_view> docs;
+    if (pieces.empty()) return docs;
+
+    // separator = "", separator_len = 0
+    // This means:
+    //   - total is just sum of piece lengths in current_doc
+    //   - condition: total + len_ > chunk_size (since sep_len=0, the
+    //     (sep_len if current else 0) term is always 0)
+
+    // Pre-compute character lengths for each piece (Python len(), not byte count)
+    std::vector<int32_t> char_lens(pieces.size());
+    for (size_t i = 0; i < pieces.size(); ++i) {
+        char_lens[i] = utf8_len(pieces[i]);
+    }
+
+    std::vector<size_t> current_doc; // indices into pieces
+    int32_t total = 0; // sum of char_lens for pieces in current_doc
+
+    auto emit_doc = [&]() {
+        if (current_doc.empty()) return;
+        // "".join(current_doc) = contiguous range from first to last piece
+        const char* start = pieces[current_doc.front()].data();
+        const char* end = pieces[current_doc.back()].data() + pieces[current_doc.back()].size();
+        std::string_view joined(start, static_cast<size_t>(end - start));
+        std::string_view stripped = strip(joined);
+        if (!stripped.empty()) {
+            docs.push_back(stripped);
+        }
+    };
+
+    for (size_t i = 0; i < pieces.size(); ++i) {
+        int32_t len_ = char_lens[i];
+
+        if (total + len_ > chunk_size) {
+            // Emit current chunk
+            emit_doc();
+
+            // Pop from front for overlap: keep popping while
+            //   total > chunk_overlap OR (total + len_ > chunk_size AND total > 0)
+            while (total > chunk_overlap ||
+                   (total + len_ > chunk_size && total > 0)) {
+                if (current_doc.empty()) break;
+                total -= char_lens[current_doc.front()];
+                current_doc.erase(current_doc.begin());
+            }
+        }
+
+        current_doc.push_back(i);
+        total += len_;
+    }
+
+    emit_doc();
+    return docs;
+}
+
+// Recursive split — exact replica of LangChain's _split_text.
+// sep_start is the index into the separators array to start searching from.
+static std::vector<std::string_view> split_text_recursive(
+    std::string_view text,
+    int32_t chunk_size,
+    int32_t chunk_overlap,
+    int sep_start
+) {
     static const std::string_view separators[] = {"\n\n", "\n", " ", ""};
     constexpr int n_seps = 4;
 
-    // Find the right separator level
-    int sep_idx = n_seps - 1;
-    for (int i = 0; i < n_seps; ++i) {
-        if (separators[i].empty() || text.find(separators[i]) != std::string_view::npos) {
-            sep_idx = i;
+    std::vector<std::string_view> final_chunks;
+
+    // Find appropriate separator (first one found in text, starting from sep_start)
+    std::string_view separator = separators[n_seps - 1]; // fallback: ""
+    int new_sep_start = n_seps; // no further separators
+
+    for (int i = sep_start; i < n_seps; ++i) {
+        if (separators[i].empty()) {
+            separator = separators[i];
+            break;
+        }
+        if (text.find(separators[i]) != std::string_view::npos) {
+            separator = separators[i];
+            new_sep_start = i + 1;
             break;
         }
     }
 
-    auto pieces = split_by(text, separators[sep_idx]);
+    auto splits = split_by(text, separator);
 
-    // For pieces that are still too large, recurse with next separator
+    // Accumulate small pieces; when a large piece is found, flush + recurse
     std::vector<std::string_view> good_splits;
-    std::vector<std::string_view> pending;
 
-    auto flush_pending = [&]() {
-        if (pending.empty()) return;
-        auto merged = merge_splits(pending, config_.target_size, config_.overlap);
-        good_splits.insert(good_splits.end(), merged.begin(), merged.end());
-        pending.clear();
-    };
-
-    for (auto& piece : pieces) {
-        if (static_cast<int32_t>(piece.size()) <= config_.target_size) {
-            pending.push_back(piece);
+    for (auto& s : splits) {
+        if (utf8_len(s) < chunk_size) {
+            good_splits.push_back(s);
         } else {
-            flush_pending();
-            // Recurse: try next separator level
-            if (sep_idx + 1 < n_seps) {
-                // Inline recursion with next separator
-                auto sub_pieces = split_by(piece, separators[sep_idx + 1]);
-                auto sub_merged = merge_splits(sub_pieces, config_.target_size, config_.overlap);
-                good_splits.insert(good_splits.end(), sub_merged.begin(), sub_merged.end());
+            if (!good_splits.empty()) {
+                auto merged = merge_splits(good_splits, chunk_size, chunk_overlap);
+                final_chunks.insert(final_chunks.end(), merged.begin(), merged.end());
+                good_splits.clear();
+            }
+            if (new_sep_start >= n_seps) {
+                // Can't split further — emit as-is
+                final_chunks.push_back(s);
             } else {
-                // Hard cut at target_size
-                for (size_t off = 0; off < piece.size(); off += config_.target_size) {
-                    size_t len = std::min(static_cast<size_t>(config_.target_size), piece.size() - off);
-                    good_splits.push_back(piece.substr(off, len));
-                }
+                // Recurse with deeper separator level
+                auto sub = split_text_recursive(s, chunk_size, chunk_overlap, new_sep_start);
+                final_chunks.insert(final_chunks.end(), sub.begin(), sub.end());
             }
         }
     }
-    flush_pending();
 
-    // Convert string_views to Chunks with byte offsets
+    if (!good_splits.empty()) {
+        auto merged = merge_splits(good_splits, chunk_size, chunk_overlap);
+        final_chunks.insert(final_chunks.end(), merged.begin(), merged.end());
+    }
+
+    return final_chunks;
+}
+
+std::vector<Chunk> Chunker::chunk_recursive(std::string_view text, int32_t doc_id) const {
+    auto views = split_text_recursive(text, config_.target_size, config_.overlap, 0);
+
     std::vector<Chunk> result;
-    result.reserve(good_splits.size());
+    result.reserve(views.size());
     const char* base = text.data();
-    for (auto& sv : good_splits) {
-        int32_t offset = static_cast<int32_t>(sv.data() - base);
-        result.push_back({doc_id, offset, static_cast<int32_t>(sv.size())});
+    for (auto& sv : views) {
+        int32_t byte_offset = static_cast<int32_t>(sv.data() - base);
+        // Convert byte offset to character offset (for Python compatibility)
+        int32_t char_offset = utf8_len(std::string_view(base, static_cast<size_t>(byte_offset)));
+        int32_t char_length = utf8_len(sv);
+        result.push_back({doc_id, char_offset, char_length});
     }
     return result;
 }
