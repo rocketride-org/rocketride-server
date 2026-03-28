@@ -1,6 +1,4 @@
 {
 	"$schema": "https://glama.ai/mcp/schemas/server.json",
-	"name": "rocketride-mcp",
-	"description": "MCP server that connects AI assistants to RocketRide AI pipelines - dynamically exposes running pipelines as callable tools for Claude, Cursor, and other MCP clients.",
 	"maintainers": ["Rod-Christensen", "jmaionchi", "stepmikhaylov", "joshuadarron"]
 }
