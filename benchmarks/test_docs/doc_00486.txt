@@ -1,0 +1,9 @@
+# Document 486: Tutorial
+
+Machine learning workflows often involve data ingestion, preprocessing, feature extraction, model training, and inference. Each stage has distinct computational requirements.
+
+Authentication and authorization protect pipeline endpoints from unauthorized access. API keys, OAuth tokens, and role-based access control are common mechanisms.
+
+The embedding model converts text into dense vector representations. These vectors capture semantic meaning and enable similarity comparisons between documents.
+
+Authentication and authorization protect pipeline endpoints from unauthorized access. API keys, OAuth tokens, and role-based access control are common mechanisms.

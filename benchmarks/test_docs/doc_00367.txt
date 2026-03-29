@@ -1,0 +1,7 @@
+# Document 367: Tutorial
+
+Memory management is critical when processing large document collections. Streaming approaches and batch processing help control resource consumption.
+
+Pipeline configuration requires careful attention to node ordering, error handling, and resource allocation. Each node in the pipeline processes data and passes results downstream.
+
+Pipeline configuration requires careful attention to node ordering, error handling, and resource allocation. Each node in the pipeline processes data and passes results downstream.

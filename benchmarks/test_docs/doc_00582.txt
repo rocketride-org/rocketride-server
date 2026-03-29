@@ -1,0 +1,15 @@
+# Document 582: Guide
+
+Chunking strategies significantly impact retrieval quality. Too large chunks lose specificity, while too small chunks lose context. Overlap between chunks helps maintain continuity.
+
+The inverted index maps terms to document identifiers, enabling fast full-text search. Posting lists are typically sorted for efficient intersection operations.
+
+The inverted index maps terms to document identifiers, enabling fast full-text search. Posting lists are typically sorted for efficient intersection operations.
+
+Machine learning workflows often involve data ingestion, preprocessing, feature extraction, model training, and inference. Each stage has distinct computational requirements.
+
+Data processing pipelines are the backbone of modern AI systems. They transform raw data into structured formats suitable for machine learning models and analytics workloads.
+
+Vector databases enable semantic search by storing high-dimensional embeddings alongside metadata. This allows applications to find conceptually similar content rather than relying on keyword matching alone.
+
+Machine learning workflows often involve data ingestion, preprocessing, feature extraction, model training, and inference. Each stage has distinct computational requirements.

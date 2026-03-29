@@ -1,0 +1,9 @@
+# Document 702: Guide
+
+The embedding model converts text into dense vector representations. These vectors capture semantic meaning and enable similarity comparisons between documents.
+
+Pipeline configuration requires careful attention to node ordering, error handling, and resource allocation. Each node in the pipeline processes data and passes results downstream.
+
+Pipeline configuration requires careful attention to node ordering, error handling, and resource allocation. Each node in the pipeline processes data and passes results downstream.
+
+The embedding model converts text into dense vector representations. These vectors capture semantic meaning and enable similarity comparisons between documents.

@@ -1,0 +1,7 @@
+# Document 650: Analysis
+
+The inverted index maps terms to document identifiers, enabling fast full-text search. Posting lists are typically sorted for efficient intersection operations.
+
+The embedding model converts text into dense vector representations. These vectors capture semantic meaning and enable similarity comparisons between documents.
+
+The embedding model converts text into dense vector representations. These vectors capture semantic meaning and enable similarity comparisons between documents.
