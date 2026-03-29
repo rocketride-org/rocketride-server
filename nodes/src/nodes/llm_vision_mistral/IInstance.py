@@ -74,11 +74,11 @@ class IInstance(IInstanceGenericLLM):
             return self.preventDefault()
 
     def writeDocuments(self, documents: list[Doc]):
-        """Process incoming image documents and emit vision model responses as questions.
+        """Process incoming image documents and emit vision model responses as text documents.
 
         Skips non-Image documents and documents with empty content, emitting a warning
         for each. Valid image documents are passed to the vision model and the resulting
-        answer is forwarded to downstream listeners as a Question.
+        answer is forwarded downstream as a Text Doc, preserving the original metadata.
 
         Args:
             documents: List of Doc objects to process; only type 'Image' is handled.

@@ -39,8 +39,11 @@ class IGlobal(IGlobalBase):
 
         # Translate interval (seconds between frames) to fps for VideoFrameExtractor,
         # which only reads 'fps' and never reads 'interval'
-        if self.config.get('interval'):
-            self.config['fps'] = 1.0 / self.config['interval']
+        interval = self.config.get('interval')
+        if interval is not None:
+            if interval <= 0:
+                raise ValueError(f'interval must be positive, got {interval}')
+            self.config['fps'] = 1.0 / interval
 
     def endGlobal(self):
         # Release the lock
