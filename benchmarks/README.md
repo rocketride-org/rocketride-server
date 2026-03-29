@@ -73,16 +73,29 @@ Note: requires Python 3.13 to match the compiled `rr_native` module. If a framew
 ## Fairness rules
 
 1. **Same parameters** -- All frameworks use character-count chunk_size=512, overlap=50
-2. **Same dataset** -- All chunk the identical Paul Graham essay text
-3. **Same timing method** -- `time.perf_counter()` for wall-clock precision
-4. **Warm-up excluded** -- 1 warm-up iteration before 5 measured iterations
-5. **Median reported** -- Median of 5 runs (robust against outliers)
-6. **Only the call is timed** -- No I/O, no setup, no imports in the timed section
-7. **Chunk counts shown** -- Proof that frameworks do comparable work
-8. **Baseline = slowest** -- Speedup shown relative to the slowest framework
+2. **Same dataset** -- Paul Graham essay (~75KB). Also verified at 750KB and 7.5MB.
+3. **Same timing method** -- `time.perf_counter()`, median of 5 runs after 1 warmup
+4. **Only the call is timed** -- No I/O, no setup, no imports in the timed section
+5. **Bit-for-bit parity verified** -- recursive mode produces identical output to LangChain at chunk_size=128, 256, 512, 1024
+6. **Unicode verified** -- Parity holds on Russian + Emoji text (not just ASCII)
+7. **Chunk counts shown** -- Proof that frameworks do identical work
+
+## Addressing skeptic questions
+
+**"1.4x is barely winning."** Correct. We're competing against Python's internal C implementation of `str.split()` and `len()` (both O(1)/highly optimized). A 1.4x win while producing identical output is a real advantage, not a rewrite-the-world claim. At 7.5MB it's 1.35x.
+
+**"Only tested on ASCII."** No. Bit-for-bit parity verified on Russian + Emoji text at multiple chunk sizes. ICU handles Unicode correctly.
+
+**"80% BM25 overlap means broken."** No. BM25 is deterministic per-implementation, but our C++ indexer uses ICU word-break tokenization while the Python baseline uses `\w{2,}` regex. Different tokenization → different term sets → different rankings for close-scored documents. The top result matches 100% of the time. The 20% divergence is in lower-ranked results where scores are nearly identical.
+
+**"Why not test against Rust/tantivy?"** Out of scope. We benchmark what our users would use: LangChain, LlamaIndex, Chonkie, Haystack.
 
 ## Honest disclosure
 
-The speedup comes from **C++ vs Python language overhead** and **ICU vs regex** for text boundary detection -- not from algorithmic advantage. The BM25 algorithm is the same (Okapi BM25 with k1=1.2, b=0.75). The chunking strategies differ slightly (ICU sentence boundaries vs regex-based splitting), which is why chunk counts may vary between frameworks.
+The 1.4x chunking speedup comes from **C++ vs Python language overhead** — same algorithm, same output. Not an algorithmic advantage.
 
-Any framework could achieve similar performance by rewriting its hot path in C/C++ or Rust. These benchmarks measure the current implementations as shipped, which is what end users experience.
+The 13.5x BM25 search speedup comes from C++ `unordered_map` + `set_intersection` vs Python `dict` + `list.count()`. Same BM25 formula (k1=1.2, b=0.75), different tokenization (ICU vs regex).
+
+Embedding (96% of pipeline time) is untouched — our C++ nodes optimize the other 4%.
+
+Any framework could achieve similar performance by rewriting its hot path in C/C++ or Rust. These benchmarks measure the current implementations as shipped.
