@@ -27,7 +27,7 @@ MODEL_NAME = 'all-MiniLM-L6-v2'
 # Dataset
 # ---------------------------------------------------------------------------
 sys.path.insert(0, os.path.dirname(__file__))
-from datasets import paul_graham_essay
+from bench_datasets import paul_graham_essay
 
 docs = paul_graham_essay()
 text = docs[0]
