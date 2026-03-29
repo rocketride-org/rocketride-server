@@ -42,6 +42,7 @@ _LLM_MOCK_CREDENTIALS = {
     'llm_bedrock': {'accessKey': 'mock-access-key', 'secretKey': 'mock-secret-key', 'region': 'us-east-1'},
 }
 
+
 class PipelineBuilder:
     """
     Builds test pipelines for node testing.
@@ -272,3 +273,4 @@ class PipelineBuilder:
                     required.update(chain_config.requires)
         
         return list(required)
+
