@@ -155,6 +155,7 @@ void test_unicode() {
     std::string chinese = "\xe4\xbb\x8a\xe5\xa4\xa9\xe5\xa4\xa9\xe6\xb0\x94\xe5\xbe\x88\xe5\xa5\xbd\xe3\x80\x82\xe6\x88\x91\xe4\xbb\xac\xe5\x8e\xbb\xe5\x85\xac\xe5\x9b\xad\xe3\x80\x82"; // 今天天气很好。我们去公园。
 
     rr::ChunkerConfig cfg2;
+    cfg2.mode = rr::SplitMode::icu;
     cfg2.target_size = 5;
     cfg2.overlap = 0;
     cfg2.locale = "zh_CN";

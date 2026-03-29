@@ -39,7 +39,7 @@ std::vector<std::string> Indexer::tokenize(std::string_view text) const {
         std::string utf8;
         word.toUTF8String(utf8);
 
-        if (utf8.size() >= config_.min_token_len) {
+        if (word.countChar32() >= static_cast<int32_t>(config_.min_token_len)) {
             tokens.push_back(std::move(utf8));
         }
     }
@@ -67,7 +67,7 @@ void Indexer::add(uint32_t chunk_id, std::string_view text) {
     std::unique_lock lock(mutex_);
 
     if (doc_lengths_.contains(chunk_id)) {
-        return;
+        return; // duplicate chunk_id — silently skip
     }
 
     doc_lengths_[chunk_id] = static_cast<uint32_t>(tokens.size());
@@ -80,12 +80,43 @@ void Indexer::add(uint32_t chunk_id, std::string_view text) {
 }
 
 void Indexer::add_batch(const std::vector<std::pair<uint32_t, std::string_view>>& chunks) {
+    // Tokenize all chunks outside the lock (CPU-heavy, no shared state)
+    struct PreparedDoc {
+        uint32_t chunk_id;
+        std::vector<std::string> tokens;
+        std::unordered_map<std::string, uint32_t> tf_map;
+    };
+    std::vector<PreparedDoc> prepared;
+    prepared.reserve(chunks.size());
     for (auto& [id, text] : chunks) {
-        add(id, text);
+        auto tokens = tokenize(text);
+        std::unordered_map<std::string, uint32_t> tf_map;
+        for (auto& t : tokens) {
+            ++tf_map[t];
+        }
+        prepared.push_back({id, std::move(tokens), std::move(tf_map)});
+    }
+
+    // Single lock for all insertions
+    std::unique_lock lock(mutex_);
+    for (auto& doc : prepared) {
+        if (doc_lengths_.contains(doc.chunk_id)) {
+            continue; // duplicate chunk_id — silently skip
+        }
+        doc_lengths_[doc.chunk_id] = static_cast<uint32_t>(doc.tokens.size());
+        total_tokens_ += doc.tokens.size();
+        ++total_docs_;
+        for (auto& [term, freq] : doc.tf_map) {
+            index_[term].push_back({doc.chunk_id, freq});
+        }
     }
 }
 
 std::vector<SearchResult> Indexer::search(std::string_view query, int32_t top_k) const {
+    if (top_k <= 0) {
+        return {};
+    }
+
     auto query_tokens = tokenize(query);
     if (query_tokens.empty()) {
         return {};

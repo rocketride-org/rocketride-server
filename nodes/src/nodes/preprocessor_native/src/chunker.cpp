@@ -402,7 +402,9 @@ std::vector<Chunk> Chunker::chunk(std::string_view text, int32_t doc_id) const {
     }
 
     if (config_.mode == SplitMode::fast) {
-        // Fast path: boundaries are byte offsets, sizes are byte lengths
+        // Fast path: boundaries are byte offsets, sizes measured in bytes (not
+        // codepoints).  This is intentional — fast mode trades Unicode accuracy
+        // for speed.  For correct codepoint-based sizing, use SplitMode::icu.
         auto boundaries = sentence_boundaries_fast(text);
         if (boundaries.size() <= 1) return {};
 

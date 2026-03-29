@@ -152,6 +152,7 @@ class PythonBM25:
         self.doc_lens: list[int] = []
         self.avgdl: float = 0.0
         self.n: int = 0
+        self._total_tokens: int = 0
         self._token_re = re.compile(r'\w{2,}', re.UNICODE)
 
     def _tokenize(self, text: str) -> list[str]:
@@ -162,7 +163,8 @@ class PythonBM25:
         self.docs.append(tokens)
         self.doc_lens.append(len(tokens))
         self.n += 1
-        self.avgdl = sum(self.doc_lens) / self.n
+        self._total_tokens += len(tokens)
+        self.avgdl = self._total_tokens / self.n
         seen: set[str] = set()
         for t in tokens:
             if t not in seen:
@@ -191,6 +193,7 @@ class PythonBM25:
         self.doc_lens.clear()
         self.avgdl = 0.0
         self.n = 0
+        self._total_tokens = 0
 
 
 def _py_setup():
@@ -245,7 +248,7 @@ try:
 
     avg_overlap = total_overlap / len(SEARCH_QUERIES)
     print(f'\n  Average overlap: {avg_overlap:.1f}/{TOP_K} ({avg_overlap / TOP_K * 100:.0f}%)')
-    print(f'  Note: differences come from ICU vs regex tokenization (e.g. Unicode handling)')
+    print('  Note: differences come from ICU vs regex tokenization (e.g. Unicode handling)')
     print()
 except Exception as e:
     print(f'Quality check skipped: {e}\n')

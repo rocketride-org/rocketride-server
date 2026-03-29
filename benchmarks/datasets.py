@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import urllib.request
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), '.cache')
@@ -21,7 +22,12 @@ def paul_graham_essay() -> list[str]:
 
     if not os.path.exists(cached):
         print(f'Downloading Paul Graham essay from {PAUL_GRAHAM_URL} ...')
-        urllib.request.urlretrieve(PAUL_GRAHAM_URL, cached)
+        prev_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(30)
+        try:
+            urllib.request.urlretrieve(PAUL_GRAHAM_URL, cached)
+        finally:
+            socket.setdefaulttimeout(prev_timeout)
         print(f'Cached at {cached}')
 
     with open(cached, encoding='utf-8') as f:
