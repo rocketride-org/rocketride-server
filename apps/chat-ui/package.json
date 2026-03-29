@@ -1,6 +1,6 @@
 {
 	"name": "@rocketride/chat-ui",
-	"version": "2.0.0",
+	"version": "2.0.1",
 	"description": "RocketRide AI Chat Interface",
 	"private": true,
 	"copylist": {
