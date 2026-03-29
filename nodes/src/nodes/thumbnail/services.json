@@ -13,16 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"image"
-	],
+	"classType": ["image"],
 	//
 	// Required:
 	//     Capabilities are flags that change the behavior of the underlying
 	//     engine
 	//
-	"capabilities": [
-	],
+	"capabilities": [],
 	//
 	// Optional:
 	//     The node is the actual pyhsical node to instantiate - if
@@ -42,7 +39,7 @@
 	"prefix": "Thumbnail",
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
@@ -50,11 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A processing component that creates thumbnails from input images. It resizes ",
-		"and optimizes images for quick previews or compact storage, preserving aspect ",
-		"ratio and visual clarity."
-	],
+	"description": ["A processing component that creates thumbnails from input images. It resizes ", "and optimizes images for quick previews or compact storage, preserving aspect ", "ratio and visual clarity."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -71,16 +64,33 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"image": ["documents", "image"]
+		"image": ["documents", "image"],
+		"documents": ["documents"]
 	},
 	"input": [
 		{
 			"lane": "image",
-			"output": [{
-				"lane": "documents"
-			},{
-				"lane": "image"
-			}]
+			"description": "Image data to thumbnail",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Thumbnailed image as document with metadata"
+				},
+				{
+					"lane": "image",
+					"description": "Thumbnailed image data"
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Image documents to thumbnail",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Thumbnailed image documents with original metadata preserved"
+				}
+			]
 		}
 	],
 	//
@@ -89,8 +99,7 @@
 	//     current service. You may specify them here, or directly
 	//     in the shape
 	//
-	"fields": {
-	},
+	"fields": {},
 	//
 	// Required:
 	//     Defines the fields (shape) of the service. Either source or target
@@ -100,8 +109,7 @@
 		{
 			"section": "Pipe",
 			"title": "Thumbnail",
-			"properties": [
-			]
+			"properties": []
 		}
 	],
 	"test": {

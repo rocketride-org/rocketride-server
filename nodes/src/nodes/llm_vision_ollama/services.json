@@ -13,17 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"image"
-	],
+	"classType": ["image"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"invoke"
-	],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -51,12 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that connects to locally-hosted open-source vision models through Ollama ",
-		"for image analysis, description, and visual understanding tasks. Supports Llama 3.2 Vision, ",
-		"LLaVA, Moondream, MiniCPM-V, and other multimodal models. Runs entirely on-premise with no ",
-		"external API keys required — ideal for privacy-sensitive applications."
-	],
+	"description": ["A component that connects to locally-hosted open-source vision models through Ollama ", "for image analysis, description, and visual understanding tasks. Supports Llama 3.2 Vision, ", "LLaVA, Moondream, MiniCPM-V, and other multimodal models. Runs entirely on-premise with no ", "external API keys required — ideal for privacy-sensitive applications."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -72,18 +63,15 @@
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": [
-		"Model: ${parameters.image_vision_ollama.profile}"
-	],
+	"tile": ["Model: ${parameters.image_vision_ollama.profile}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"image": [
-			"text"
-		]
+		"image": ["text"],
+		"documents": ["documents"]
 	},
 	"input": [
 		{
@@ -93,6 +81,16 @@
 				{
 					"lane": "text",
 					"description": "Text analysis of the image content"
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Image documents to analyze with a local Ollama vision model",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Text analysis of each image document with original metadata (frame number, timestamp) preserved"
 				}
 			]
 		}
@@ -201,154 +199,90 @@
 		},
 		"image_vision_ollama.custom": {
 			"object": "custom",
-			"properties": [
-				"model",
-				"modelTotalTokens",
-				"llm.local.serverbase",
-				"vision.systemPrompt",
-				"vision.prompt"
-			]
+			"properties": ["model", "modelTotalTokens", "llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
 		},
 		"image_vision_ollama.llama3_2-vision-11b": {
 			"object": "llama3_2-vision-11b",
-			"properties": [
-				"llm.local.serverbase",
-				"vision.systemPrompt",
-				"vision.prompt"
-			]
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
 		},
 		"image_vision_ollama.llama3_2-vision-90b": {
 			"object": "llama3_2-vision-90b",
-			"properties": [
-				"llm.local.serverbase",
-				"vision.systemPrompt",
-				"vision.prompt"
-			]
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
 		},
 		"image_vision_ollama.llava-7b": {
 			"object": "llava-7b",
-			"properties": [
-				"llm.local.serverbase",
-				"vision.systemPrompt",
-				"vision.prompt"
-			]
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
 		},
 		"image_vision_ollama.llava-13b": {
 			"object": "llava-13b",
-			"properties": [
-				"llm.local.serverbase",
-				"vision.systemPrompt",
-				"vision.prompt"
-			]
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
 		},
 		"image_vision_ollama.llava-34b": {
 			"object": "llava-34b",
-			"properties": [
-				"llm.local.serverbase",
-				"vision.systemPrompt",
-				"vision.prompt"
-			]
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
 		},
 		"image_vision_ollama.moondream": {
 			"object": "moondream",
-			"properties": [
-				"llm.local.serverbase",
-				"vision.systemPrompt",
-				"vision.prompt"
-			]
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
 		},
 		"image_vision_ollama.minicpm-v": {
 			"object": "minicpm-v",
-			"properties": [
-				"llm.local.serverbase",
-				"vision.systemPrompt",
-				"vision.prompt"
-			]
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
 		},
 		"image_vision_ollama.qwen2_5vl-3b": {
 			"object": "qwen2_5vl-3b",
-			"properties": [
-				"llm.local.serverbase",
-				"vision.systemPrompt",
-				"vision.prompt"
-			]
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
 		},
 		"image_vision_ollama.qwen2_5vl-7b": {
 			"object": "qwen2_5vl-7b",
-			"properties": [
-				"llm.local.serverbase",
-				"vision.systemPrompt",
-				"vision.prompt"
-			]
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
 		},
 		"image_vision_ollama.profile": {
 			"title": "Vision Model",
 			"description": "Select the Ollama vision model to use",
 			"type": "string",
 			"default": "llama3_2-vision-11b",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": [
-						"image_vision_ollama.custom"
-					]
+					"properties": ["image_vision_ollama.custom"]
 				},
 				{
 					"value": "llama3_2-vision-11b",
-					"properties": [
-						"image_vision_ollama.llama3_2-vision-11b"
-					]
+					"properties": ["image_vision_ollama.llama3_2-vision-11b"]
 				},
 				{
 					"value": "llama3_2-vision-90b",
-					"properties": [
-						"image_vision_ollama.llama3_2-vision-90b"
-					]
+					"properties": ["image_vision_ollama.llama3_2-vision-90b"]
 				},
 				{
 					"value": "llava-7b",
-					"properties": [
-						"image_vision_ollama.llava-7b"
-					]
+					"properties": ["image_vision_ollama.llava-7b"]
 				},
 				{
 					"value": "llava-13b",
-					"properties": [
-						"image_vision_ollama.llava-13b"
-					]
+					"properties": ["image_vision_ollama.llava-13b"]
 				},
 				{
 					"value": "llava-34b",
-					"properties": [
-						"image_vision_ollama.llava-34b"
-					]
+					"properties": ["image_vision_ollama.llava-34b"]
 				},
 				{
 					"value": "moondream",
-					"properties": [
-						"image_vision_ollama.moondream"
-					]
+					"properties": ["image_vision_ollama.moondream"]
 				},
 				{
 					"value": "minicpm-v",
-					"properties": [
-						"image_vision_ollama.minicpm-v"
-					]
+					"properties": ["image_vision_ollama.minicpm-v"]
 				},
 				{
 					"value": "qwen2_5vl-3b",
-					"properties": [
-						"image_vision_ollama.qwen2_5vl-3b"
-					]
+					"properties": ["image_vision_ollama.qwen2_5vl-3b"]
 				},
 				{
 					"value": "qwen2_5vl-7b",
-					"properties": [
-						"image_vision_ollama.qwen2_5vl-7b"
-					]
+					"properties": ["image_vision_ollama.qwen2_5vl-7b"]
 				}
 			]
 		}
@@ -362,18 +296,12 @@
 		{
 			"section": "Pipe",
 			"title": "Ollama Vision",
-			"properties": [
-				"image_vision_ollama.profile"
-			]
+			"properties": ["image_vision_ollama.profile"]
 		}
 	],
 	"test": {
-		"profiles": [
-			"llama3_2-vision-11b"
-		],
-		"outputs": [
-			"text"
-		],
+		"profiles": ["llama3_2-vision-11b"],
+		"outputs": ["text"],
 		"timeout": 30,
 		"cases": [
 			{

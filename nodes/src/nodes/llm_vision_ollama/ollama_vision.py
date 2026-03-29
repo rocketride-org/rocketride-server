@@ -27,6 +27,7 @@ from langchain_openai import ChatOpenAI
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from rocketlib import warning
 
 
 class Chat(ChatBase):
@@ -51,14 +52,6 @@ class Chat(ChatBase):
 
         self._system_prompt = config.get('vision.systemPrompt') or config.get('systemPrompt') or ''
         self._prompt = config.get('vision.prompt') or config.get('prompt') or ''
-
-        self._llm = ChatOpenAI(
-            model=self._model,
-            base_url=self._serverbase,
-            api_key='ollama',
-            temperature=0,
-            max_tokens=self._modelOutputTokens,
-        )
 
         bag['chat'] = self
 
@@ -112,13 +105,44 @@ class Chat(ChatBase):
         )
 
         # Retry loop with exponential backoff
-        max_retries = 3
+        max_retries = 1
         base_delay = 1.0
         last_error = None
+        hard_timeout = 30
 
         for attempt in range(max_retries + 1):
             try:
-                response = self._llm.invoke(messages)
+                result = [None]
+                exc = [None]
+
+                # Fresh client per attempt — avoids exhausting the shared HTTP connection pool
+                # when daemon threads from prior timed-out attempts are still holding connections
+                llm = ChatOpenAI(
+                    model=self._model,
+                    base_url=self._serverbase,
+                    api_key='ollama',
+                    temperature=0,
+                    max_tokens=self._modelOutputTokens,
+                )
+
+                def _invoke():
+                    try:
+                        result[0] = llm.invoke(messages)
+                    except Exception as e:
+                        exc[0] = e
+
+                import threading
+
+                t = threading.Thread(target=_invoke, daemon=True)
+                t.start()
+                t.join(timeout=hard_timeout)
+                if t.is_alive():
+                    warning(f'Ollama Vision: inference timed out after {hard_timeout}s (attempt {attempt + 1}/{max_retries + 1}) — daemon thread still running')
+                    raise TimeoutError(f'Vision inference timed out after {hard_timeout}s (attempt {attempt + 1})')
+                if exc[0]:
+                    raise exc[0]
+
+                response = result[0]
                 answer = Answer(expectJson=question.expectJson)
                 answer.setAnswer(response.content)
                 return answer
