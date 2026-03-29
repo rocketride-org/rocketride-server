@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/banner-vscode.svg" alt="RocketRide for VS Code" width="900">
+  <img src="../images/banner-vscode.svg" alt="RocketRide for VS Code" width="900">
 </p>
 
 <p align="center">
@@ -7,10 +7,10 @@
 </p>
 
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=rocketride.rocketride-vscode"><img src="https://img.shields.io/visual-studio-marketplace/v/rocketride.rocketride-vscode?color=41b6e6&label=marketplace" alt="VS Code Marketplace"></a>
-  <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/license-MIT-5f2167" alt="MIT License"></a>
-  <a href="https://github.com/rocketride-org/rocketride-server"><img src="https://img.shields.io/github/stars/rocketride-org/rocketride-server?style=flat&color=1e1a34&label=GitHub&logo=github&logoColor=white" alt="GitHub"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride"><img src="https://img.shields.io/visual-studio-marketplace/v/RocketRide.rocketride?color=222223&label=marketplace" alt="VS Code Marketplace"></a>
+  <a href="https://github.com/rocketride-org/rocketride-server"><img src="https://img.shields.io/github/stars/rocketride-org/rocketride-server?style=flat&color=238636&label=GitHub&logo=github&logoColor=white" alt="GitHub"></a>
   <a href="https://discord.gg/9hr3tdZmEG"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/license-MIT-41b6e6" alt="MIT License"></a>
 </p>
 
 ## Quick Start
