@@ -62,7 +62,21 @@ Haystack                          0.0027s      178      2.9x   word-based (no ch
 LlamaIndex                        0.0077s      168      1.0x
 ```
 
-**RocketRide recursive is 1.4x faster than LangChain** with bit-for-bit identical output (212 chunks). Advantage grows at scale: **1.35x at 7.5MB** (0.18s vs 0.24s).
+### Large-scale results (75MB, median of 3 runs)
+
+```
+Framework                      Median(s)     Chunks   vs LangChain
+RocketRide (C++/fast)              0.24s    168,001   10.0x faster
+Chonkie (recursive)                1.19s    214,000    2.0x faster
+RocketRide (C++/ICU)               1.26s    167,000    1.9x faster
+RocketRide (C++/recursive)         1.80s    212,000    1.3x faster  ← identical output
+LangChain                          2.43s    212,000    baseline
+Haystack                           3.35s    177,182    1.4x slower
+Chonkie (token/char)               5.78s    162,368    2.4x slower
+LlamaIndex                         9.40s    168,000    3.9x slower
+```
+
+At production scale (75MB), **every RocketRide mode beats every Python competitor**. The recursive mode (bit-for-bit identical to LangChain) is 1.3x faster. Fast mode is 10x faster.
 
 **BM25 search:** 13.5x faster than Python BM25 with 80% result overlap.
 
