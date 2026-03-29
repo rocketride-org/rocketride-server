@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../images/banner-vscode.png" alt="RocketRide for VS Code" width="900">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/images/banner-vscode.png" alt="RocketRide for VS Code" width="900">
 </p>
 
 <p align="center">
