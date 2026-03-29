@@ -40,6 +40,9 @@ jobs:
     name: Release
     needs: [init, build]
     uses: ./.github/workflows/_release.yaml
+    permissions:
+      contents: write
+      id-token: write
     with:
       environment: release
       server_version: ${{ needs.init.outputs.server_version }}
@@ -54,6 +57,9 @@ jobs:
     needs: [init, release]
     if: needs.init.outputs.server_tag_exists == 'false'
     uses: ./.github/workflows/_docker.yaml
+    permissions:
+      contents: read
+      packages: write
     with:
       server_version: ${{ needs.init.outputs.server_version }}
     secrets: inherit
