@@ -52,15 +52,6 @@ class Chat(ChatBase):
         self._system_prompt = config.get('vision.systemPrompt') or config.get('systemPrompt') or ''
         self._prompt = config.get('vision.prompt') or config.get('prompt') or ''
 
-        self._llm = ChatOpenAI(
-            model=self._model,
-            base_url=self._serverbase,
-            api_key='ollama',
-            temperature=0,
-            max_tokens=self._modelOutputTokens,
-            timeout=90,
-        )
-
         bag['chat'] = self
 
     def _format_user_error(self, error_msg: str) -> str:
@@ -113,19 +104,29 @@ class Chat(ChatBase):
         )
 
         # Retry loop with exponential backoff
-        max_retries = 3
+        max_retries = 1
         base_delay = 1.0
         last_error = None
-        hard_timeout = 90
+        hard_timeout = 30
 
         for attempt in range(max_retries + 1):
             try:
                 result = [None]
                 exc = [None]
 
+                # Fresh client per attempt — avoids exhausting the shared HTTP connection pool
+                # when daemon threads from prior timed-out attempts are still holding connections
+                llm = ChatOpenAI(
+                    model=self._model,
+                    base_url=self._serverbase,
+                    api_key='ollama',
+                    temperature=0,
+                    max_tokens=self._modelOutputTokens,
+                )
+
                 def _invoke():
                     try:
-                        result[0] = self._llm.invoke(messages)
+                        result[0] = llm.invoke(messages)
                     except Exception as e:
                         exc[0] = e
 
@@ -145,8 +146,6 @@ class Chat(ChatBase):
                 return answer
             except Exception as e:
                 last_error = e
-                if isinstance(e, TimeoutError):
-                    break  # Don't retry timeouts — same frame will hang again
                 if attempt < max_retries and self.is_retryable_error(e):
                     delay = base_delay * (2**attempt)
                     time.sleep(delay)
