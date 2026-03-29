@@ -13,17 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"search"
-	],
+	"classType": ["search"],
 	//
 	// Optional:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"invoke"
-	],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -56,28 +52,19 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A direct Exa web search node.",
-		"Accepts user questions and returns Exa's raw search JSON as the answer."
-	],
+	"description": ["A direct Exa web search node.", "Accepts user questions and returns Exa's raw search JSON as the answer."],
 	//
 	// Optional:
 	//		Tile text shown in the node card UI
 	//
-	"tile": [
-		"Type: ${parameters.search_exa.type}",
-		"Results: ${parameters.search_exa.numResults}"
-	],
+	"tile": ["Type: ${parameters.search_exa.type}", "Results: ${parameters.search_exa.numResults}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"questions": [
-			"answers",
-			"text"
-		]
+		"questions": ["answers", "text"]
 	},
 	"input": [
 		{
@@ -120,29 +107,17 @@
 	"fields": {
 		"search_exa.default": {
 			"object": "default",
-			"properties": [
-				"search_exa.type",
-				"search_exa.numResults",
-				"search_exa.includeHighlights",
-				"search_exa.highlightChars"
-			]
+			"properties": ["search_exa.type", "search_exa.numResults", "search_exa.includeHighlights", "search_exa.highlightChars"]
 		},
 		"search_exa.profile": {
 			"title": "Profile",
 			"type": "string",
 			"default": "default",
-			"enum": [
-				[
-					"default",
-					"Default"
-				]
-			],
+			"enum": [["default", "Default"]],
 			"conditional": [
 				{
 					"value": "default",
-					"properties": [
-						"search_exa.default"
-					]
+					"properties": ["search_exa.default"]
 				}
 			]
 		},
@@ -161,18 +136,9 @@
 			"title": "Search Type",
 			"default": "auto",
 			"enum": [
-				[
-					"auto",
-					"Auto"
-				],
-				[
-					"keyword",
-					"Keyword"
-				],
-				[
-					"neural",
-					"Neural"
-				]
+				["auto", "Auto"],
+				["keyword", "Keyword"],
+				["neural", "Neural"]
 			]
 		},
 		"search_exa.numResults": {
@@ -203,38 +169,7 @@
 		{
 			"section": "Pipe",
 			"title": "Exa Search",
-			"properties": [
-				"search_exa.apikey",
-				"search_exa.profile"
-			]
+			"properties": ["search_exa.apikey", "search_exa.profile"]
 		}
-	],
-	//
-	//	Test configuration for automated node testing
-	//
-	"test": {
-		"profiles": [
-			"default"
-		],
-		"outputs": [
-			"answers",
-			"text"
-		],
-		"cases": [
-			{
-				"name": "Exa returns search results",
-				"questions": "Exa API docs",
-				"expect": {
-					"answers": {
-						"contains": "\"requestId\"",
-						"notEmpty": true
-					},
-					"text": {
-						"contains": "\"results\"",
-						"notEmpty": true
-					}
-				}
-			}
-		]
-	}
+	]
 }

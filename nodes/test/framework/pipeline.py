@@ -42,11 +42,6 @@ _LLM_MOCK_CREDENTIALS = {
     'llm_bedrock': {'accessKey': 'mock-access-key', 'secretKey': 'mock-secret-key', 'region': 'us-east-1'},
 }
 
-_SEARCH_MOCK_CREDENTIALS = {
-    'search_exa': {'apikey': 'exa-mock-placeholder-for-tests'},
-}
-
-
 class PipelineBuilder:
     """
     Builds test pipelines for node testing.
@@ -88,13 +83,12 @@ class PipelineBuilder:
         config = {}
         if profile:
             config['profile'] = profile
+        # Inject placeholder credentials for LLM nodes when using mocks
         if os.environ.get('ROCKETRIDE_MOCK') and provider in _LLM_MOCK_CREDENTIALS:
             if profile:
                 overrides = config.get(profile, {})
                 if isinstance(overrides, dict):
                     config[profile] = {**overrides, **_LLM_MOCK_CREDENTIALS[provider]}
-        if os.environ.get('ROCKETRIDE_MOCK') and provider in _SEARCH_MOCK_CREDENTIALS:
-            config.update(_SEARCH_MOCK_CREDENTIALS[provider])
         return config
     
     def _build_chain_component(self, provider: str, component_id: str,
