@@ -1,7 +1,0 @@
-# Document 331: Guide
-
-The embedding model converts text into dense vector representations. These vectors capture semantic meaning and enable similarity comparisons between documents.
-
-Authentication and authorization protect pipeline endpoints from unauthorized access. API keys, OAuth tokens, and role-based access control are common mechanisms.
-
-Error handling in distributed pipelines must account for network failures, timeout conditions, and partial results. Retry logic with exponential backoff is a common pattern.

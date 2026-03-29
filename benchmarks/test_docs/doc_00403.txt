@@ -1,9 +1,0 @@
-# Document 403: Reference
-
-The embedding model converts text into dense vector representations. These vectors capture semantic meaning and enable similarity comparisons between documents.
-
-Data processing pipelines are the backbone of modern AI systems. They transform raw data into structured formats suitable for machine learning models and analytics workloads.
-
-Machine learning workflows often involve data ingestion, preprocessing, feature extraction, model training, and inference. Each stage has distinct computational requirements.
-
-Machine learning workflows often involve data ingestion, preprocessing, feature extraction, model training, and inference. Each stage has distinct computational requirements.

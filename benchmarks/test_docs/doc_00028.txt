@@ -1,9 +1,0 @@
-# Document 28: Analysis
-
-Authentication and authorization protect pipeline endpoints from unauthorized access. API keys, OAuth tokens, and role-based access control are common mechanisms.
-
-The embedding model converts text into dense vector representations. These vectors capture semantic meaning and enable similarity comparisons between documents.
-
-Authentication and authorization protect pipeline endpoints from unauthorized access. API keys, OAuth tokens, and role-based access control are common mechanisms.
-
-Authentication and authorization protect pipeline endpoints from unauthorized access. API keys, OAuth tokens, and role-based access control are common mechanisms.

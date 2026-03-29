@@ -1,9 +1,0 @@
-# Document 54: Guide
-
-Chunking strategies significantly impact retrieval quality. Too large chunks lose specificity, while too small chunks lose context. Overlap between chunks helps maintain continuity.
-
-The embedding model converts text into dense vector representations. These vectors capture semantic meaning and enable similarity comparisons between documents.
-
-Chunking strategies significantly impact retrieval quality. Too large chunks lose specificity, while too small chunks lose context. Overlap between chunks helps maintain continuity.
-
-Machine learning workflows often involve data ingestion, preprocessing, feature extraction, model training, and inference. Each stage has distinct computational requirements.
