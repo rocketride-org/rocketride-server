@@ -3,8 +3,8 @@ Tests for environment variable exfiltration fix in _resolve_pipeline.
 
 Validates that the allowlist-based restriction on ${VAR} expansion in
 pipeline configs prevents sensitive env vars (AWS keys, DB URLs, tokens)
-from being resolved, while still allowing approved ROCKETRIDE_/PIPELINE_/
-NODE_/ROCKET_ prefixed variables.
+from being resolved, while still allowing approved ROCKETRIDE_ prefixed
+variables.
 """
 
 import json
@@ -16,18 +16,18 @@ from unittest.mock import patch
 
 class _FakeTask:
     """
-    Minimal stand-in that carries only _resolve_pipeline and ALLOWED_ENV_PREFIXES
+    Minimal stand-in that carries only _resolve_pipeline and ALLOWED_ENV_PREFIX
     from the real Task class, avoiding heavyweight __init__ dependencies.
     """
 
-    ALLOWED_ENV_PREFIXES = ('ROCKETRIDE_', 'PIPELINE_', 'NODE_', 'ROCKET_')
+    ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
 
     def _resolve_pipeline(self, pipeline):
         pipeline_str = json.dumps(pipeline)
 
         def replacer(match):
             env_var = match.group(1)
-            if env_var.startswith(self.ALLOWED_ENV_PREFIXES):
+            if env_var.startswith(self.ALLOWED_ENV_PREFIX):
                 return os.environ.get(env_var, match.group(0))
             return '<REDACTED>'
 
@@ -46,13 +46,12 @@ def task():
 
 
 class TestAllowedEnvVars:
-    """Env vars with approved prefixes should be resolved normally."""
+    """Env vars with the ROCKETRIDE_ prefix should be resolved normally."""
 
     @pytest.mark.parametrize('var_name,value', [
         ('ROCKETRIDE_API_KEY', 'rr-key-123'),
-        ('PIPELINE_MODE', 'batch'),
-        ('NODE_ENV', 'production'),
-        ('ROCKET_DEBUG', 'true'),
+        ('ROCKETRIDE_HOST', 'localhost'),
+        ('ROCKETRIDE_DEBUG', 'true'),
     ])
     def test_allowed_prefix_resolves(self, task, var_name, value):
         with patch.dict(os.environ, {var_name: value}):
@@ -69,10 +68,10 @@ class TestAllowedEnvVars:
     def test_multiple_allowed_vars(self, task):
         env = {
             'ROCKETRIDE_HOST': 'localhost',
-            'PIPELINE_PORT': '8080',
+            'ROCKETRIDE_PORT': '8080',
         }
         with patch.dict(os.environ, env):
-            pipeline = {'url': '${ROCKETRIDE_HOST}:${PIPELINE_PORT}'}
+            pipeline = {'url': '${ROCKETRIDE_HOST}:${ROCKETRIDE_PORT}'}
             result = task._resolve_pipeline(pipeline)
             assert result['url'] == 'localhost:8080'
 
@@ -96,6 +95,9 @@ class TestBlockedEnvVars:
         'SSH_PRIVATE_KEY',
         'OPENAI_API_KEY',
         'STRIPE_SECRET_KEY',
+        'PIPELINE_MODE',
+        'NODE_ENV',
+        'ROCKET_DEBUG',
     ])
     def test_sensitive_var_redacted(self, task, var_name):
         with patch.dict(os.environ, {var_name: 'super-secret-value'}):
@@ -130,13 +132,13 @@ class TestBlockedEnvVars:
             pipeline = {
                 'components': [
                     {'config': {'db': '${DATABASE_URL}'}},
-                    {'config': {'safe': '${PIPELINE_MODE}'}},
+                    {'config': {'safe': '${ROCKETRIDE_MODE}'}},
                 ],
             }
             result = task._resolve_pipeline(pipeline)
             assert result['components'][0]['config']['db'] == '<REDACTED>'
-            # PIPELINE_MODE not in env -> keeps placeholder
-            assert result['components'][1]['config']['safe'] == '${PIPELINE_MODE}'
+            # ROCKETRIDE_MODE not in env -> keeps placeholder
+            assert result['components'][1]['config']['safe'] == '${ROCKETRIDE_MODE}'
 
     def test_inline_mixed_text(self, task):
         """Blocked var embedded in a larger string is still redacted."""
@@ -144,7 +146,7 @@ class TestBlockedEnvVars:
             'ROCKETRIDE_HOST': 'myhost',
             'AWS_SECRET_ACCESS_KEY': 'secret123',
         }):
-            pipeline = {'cmd': 'connect ${ROCKETRIDE_HOST} with ${AWS_SECRET_ACCESS_KEY}'}
+            pipeline = {'cmd': 'connect ${ROCKETRIDE_HOST} using ${AWS_SECRET_ACCESS_KEY}'}
             result = task._resolve_pipeline(pipeline)
             assert 'myhost' in result['cmd']
             assert 'secret123' not in result['cmd']
