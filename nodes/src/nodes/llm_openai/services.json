@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"llm"
-	],
+	"classType": ["llm"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"invoke"
-	],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,15 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that connects to OpenAI's latest GPT models for advanced natural language ",
-		"processing. It supports tasks such as text generation, summarization, question ",
-		"answering, and chat-based interactions. With access to state-of-the-art language ",
-		"models like GPT-5, GPT-4o, GPT-4o-mini, and GPT-4 Turbo, this component enables ",
-		"high-quality, context-aware responses and creative text generation. Configurable with ",
-		"API keys and deployment options, it allows seamless integration into AI-driven ",
-		"workflows with scalable performance and enhanced multimodal capabilities."
-	],
+	"description": ["A component that connects to OpenAI's latest GPT models for advanced natural language ", "processing. It supports tasks such as text generation, summarization, question ", "answering, and chat-based interactions. With access to state-of-the-art language ", "models like GPT-5.4, GPT-5, GPT-4o, and GPT-4o-mini, this component enables ", "high-quality, context-aware responses and creative text generation. Configurable with ", "API keys and deployment options, it allows seamless integration into AI-driven ", "workflows with scalable performance and enhanced multimodal capabilities."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -75,18 +63,14 @@
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": [
-		"Model: ${parameters.llm_openai.profile}"
-	],
+	"tile": ["Model: ${parameters.llm_openai.profile}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"questions": [
-			"answers"
-		]
+		"questions": ["answers"]
 	},
 	"input": [
 		{
@@ -106,7 +90,7 @@
 	"preconfig": {
 		// Define the values that will be merged into any profile configuration
 		// specified, unless the profile is 'absolute'
-		"default": "openai-5-2",
+		"default": "openai-5-4",
 		// Defines profiles used with the "profile": key
 		"profiles": {
 			"custom": {
@@ -114,24 +98,48 @@
 				"modelTotalTokens": 16384,
 				"apikey": ""
 			},
-		"openai-4o": {
+			"openai-5-4": {
+				"title": "GPT-5.4",
+				"model": "gpt-5.4",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			},
+			"openai-5-4-pro": {
+				"title": "GPT-5.4 Pro",
+				"model": "gpt-5.4-pro",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			},
+			"openai-5-4-mini": {
+				"title": "GPT-5.4-mini",
+				"model": "gpt-5.4-mini",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			},
+			"openai-5-4-nano": {
+				"title": "GPT-5.4-nano",
+				"model": "gpt-5.4-nano",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			},
+			"openai-4o": {
 				"title": "GPT-4o",
-			"model": "gpt-4o",
-			"modelTotalTokens": 128000,
-			"apikey": ""
-		},
-		"openai-4o-mini": {
+				"model": "gpt-4o",
+				"modelTotalTokens": 128000,
+				"apikey": ""
+			},
+			"openai-4o-mini": {
 				"title": "GPT-4o-mini",
-			"model": "gpt-4o-mini",
-			"modelTotalTokens": 128000,
-			"apikey": ""
-		},
+				"model": "gpt-4o-mini",
+				"modelTotalTokens": 128000,
+				"apikey": ""
+			},
 			"openai-5": {
 				"title": "GPT-5",
 				"model": "gpt-5",
-			"modelTotalTokens": 128000,
-			"apikey": ""
-		},
+				"modelTotalTokens": 128000,
+				"apikey": ""
+			},
 			"openai-5-1": {
 				"title": "GPT-5.1",
 				"model": "gpt-5.1",
@@ -153,9 +161,9 @@
 			"openai-5-nano": {
 				"title": "GPT-5-nano",
 				"model": "gpt-5-nano",
-			"modelTotalTokens": 128000,
-			"apikey": ""
-		}
+				"modelTotalTokens": 128000,
+				"apikey": ""
+			}
 		}
 	},
 	//
@@ -177,13 +185,33 @@
 		},
 		"openai.custom": {
 			"object": "custom",
+			"properties": ["model", "modelTotalTokens", "llm.cloud.apikey"]
+		},
+
+		"openai.openai-5-4": {
+			"object": "openai-5-4",
 			"properties": [
-				"model",
-				"modelTotalTokens",
 				"llm.cloud.apikey"
 			]
 		},
-		
+		"openai.openai-5-4-pro": {
+			"object": "openai-5-4-pro",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"openai.openai-5-4-mini": {
+			"object": "openai-5-4-mini",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"openai.openai-5-4-nano": {
+			"object": "openai-5-4-nano",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
 		"openai.openai-4o": {
 			"object": "openai-4o",
 			"properties": [
@@ -209,9 +237,9 @@
 			]
 		},
 		"openai.openai-5-2": {
-      		"object": "openai-5-2",
-      		"properties": [
-        		"llm.cloud.apikey"
+			"object": "openai-5-2",
+			"properties": [
+				"llm.cloud.apikey"
 			]
 		},
 		"openai.openai-5-mini": {
@@ -230,7 +258,7 @@
 			"title": "Model",
 			"description": "LLM model",
 			"type": "string",
-			"default": "openai-5-2",
+			"default": "openai-5-4",
 			"enum": [
 				"*>preconfig.profiles.*.title"
 			],
@@ -239,6 +267,30 @@
 					"value": "custom",
 					"properties": [
 						"openai.custom"
+					]
+				},
+				{
+					"value": "openai-5-4",
+					"properties": [
+						"openai.openai-5-4"
+					]
+				},
+				{
+					"value": "openai-5-4-pro",
+					"properties": [
+						"openai.openai-5-4-pro"
+					]
+				},
+				{
+					"value": "openai-5-4-mini",
+					"properties": [
+						"openai.openai-5-4-mini"
+					]
+				},
+				{
+					"value": "openai-5-4-nano",
+					"properties": [
+						"openai.openai-5-4-nano"
 					]
 				},
 				{
@@ -268,7 +320,7 @@
 				{
 					"value": "openai-5-2",
 					"properties": [
-					  "openai.openai-5-2"
+						"openai.openai-5-2"
 					]
 				},
 				{
@@ -285,6 +337,8 @@
 				}
 			]
 		}
+			]
+		}
 	},
 	//
 	// Required:
@@ -295,13 +349,11 @@
 		{
 			"section": "Pipe",
 			"title": "OpenAI",
-			"properties": [
-				"openai.profile"
-			]
+			"properties": ["openai.profile"]
 		}
 	],
 	"test": {
-		"profiles": ["openai-5-mini"],
+		"profiles": ["openai-5-4-mini"],
 		"outputs": ["answers"],
 		"cases": [
 			{
