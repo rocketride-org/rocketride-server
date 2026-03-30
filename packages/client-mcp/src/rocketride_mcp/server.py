@@ -35,6 +35,8 @@ import mcp.types as types
 from rocketride import RocketRideClient
 
 from .config import load_settings
+from .prompts import list_prompts, get_prompt
+from .resources import list_resources, read_resource
 from .tools import get_tools, format_tools, execute_tool
 
 # Global client instance
@@ -121,6 +123,26 @@ async def run_server() -> None:
         if resp.get('isError'):
             raise RuntimeError(resp['content'][0]['text'])
         return [types.TextContent(type='text', text=resp['content'][0]['text'])]
+
+    # --- Resources -----------------------------------------------------------
+
+    @server.list_resources()  # type: ignore[untyped-decorator,no-untyped-call]
+    async def handle_list_resources() -> list[types.Resource]:
+        return await list_resources(_client)
+
+    @server.read_resource()  # type: ignore[untyped-decorator]
+    async def handle_read_resource(uri: Any) -> str:
+        return await read_resource(_client, str(uri))
+
+    # --- Prompts -------------------------------------------------------------
+
+    @server.list_prompts()  # type: ignore[untyped-decorator,no-untyped-call]
+    async def handle_list_prompts() -> list[types.Prompt]:
+        return list_prompts()
+
+    @server.get_prompt()  # type: ignore[untyped-decorator]
+    async def handle_get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
+        return get_prompt(name, arguments)
 
     try:
         async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
