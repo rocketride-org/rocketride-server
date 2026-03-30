@@ -303,6 +303,12 @@
 				"command": "rocketride.agents.uninstall",
 				"title": "Remove Agent Documentation",
 				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.templates.create",
+				"title": "Create Pipeline from Template",
+				"icon": "$(add)",
+				"category": "RocketRide"
 			}
 		],
 		"menus": {
@@ -346,6 +352,11 @@
 					"command": "rocketride.sidebar.files.createFile",
 					"when": "view == rocketride.provider.files",
 					"group": "navigation@2"
+				},
+				{
+					"command": "rocketride.templates.create",
+					"when": "view == rocketride.provider.templates",
+					"group": "navigation"
 				}
 			],
 			"view/item/context": [
@@ -375,6 +386,12 @@
 					"id": "rocketride.provider.files",
 					"name": "Pipelines",
 					"when": "rocketride.loaded"
+				},
+				{
+					"type": "tree",
+					"id": "rocketride.provider.templates",
+					"name": "Templates",
+					"when": "rocketride.loaded"
 				}
 			]
 		},
@@ -386,6 +403,10 @@
 			{
 				"view": "rocketride.provider.files",
 				"contents": "No pipeline files found"
+			},
+			{
+				"view": "rocketride.provider.templates",
+				"contents": "Loading templates..."
 			}
 		]
 	},

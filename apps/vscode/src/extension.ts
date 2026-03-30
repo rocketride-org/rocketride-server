@@ -47,6 +47,7 @@ import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
 import { SidebarConnectionProvider } from './providers/SidebarConnectionProvider';
 import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
+import { SidebarTemplatesProvider, registerTemplateCreateCommand, scaffoldStarterPipeline } from './providers/SidebarTemplatesProvider';
 
 // Core managers
 let connectionManager: ConnectionManager | undefined;
@@ -165,7 +166,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 				sidebarConnection = new SidebarConnectionProvider(context);
 
-				context.subscriptions.push(pipelineFilesTreeDataProvider, connectionWebviewProvider, sidebarConnection);
+				const sidebarTemplates = new SidebarTemplatesProvider();
+				const templatesTreeDataProvider = vscode.window.registerTreeDataProvider('rocketride.provider.templates', sidebarTemplates);
+				const templateCreateCmd = registerTemplateCreateCommand();
+
+				context.subscriptions.push(pipelineFilesTreeDataProvider, connectionWebviewProvider, sidebarConnection, templatesTreeDataProvider, templateCreateCmd);
 
 				//-------------------------------------
 				// Create webview providers
@@ -234,6 +239,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 					progress.report({ increment: 110, message: 'Showing welcome...' });
 					barStatus.setNeedsSetup();
 					pageWelcome!.show();
+
+					// Scaffold a getting-started.pipe from the RAG Chat template
+					scaffoldStarterPipeline().catch((err) => {
+						logger.output(`${icons.warning} Failed to scaffold starter pipeline: ${err}`);
+					});
 				} else {
 					// Normal flow: auto-connect
 					logger.output(`${icons.info} Initializing connections...`);
