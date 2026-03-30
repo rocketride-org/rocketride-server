@@ -148,6 +148,9 @@ class IGlobal(IGlobalBase):
         Unlike ``_run_query`` this method does **not** enforce the read-only safety
         check, allowing mutations such as CREATE, MERGE, SET, and DELETE.
 
+        Uses ``session.execute_write()`` to ensure proper routing in Neo4j
+        cluster deployments (causal cluster, Aura).
+
         Args:
             cypher (str): The Cypher statement to execute (may contain write clauses).
             params (Optional[Dict]): Query parameters to bind into the Cypher statement.
@@ -163,9 +166,12 @@ class IGlobal(IGlobalBase):
         if params is None:
             params = {}
 
-        with self.driver.session(database=self.database) as session:
-            result = session.run(neo4j.Query(cypher, timeout=timeout), params)
+        def _write_tx(tx: Any) -> List[Dict]:
+            result = tx.run(neo4j.Query(cypher, timeout=timeout), params)
             return [_record_to_dict(record) for record in result]
+
+        with self.driver.session(database=self.database) as session:
+            return session.execute_write(_write_tx)
 
     def _validate_query(self, cypher: str) -> Tuple[bool, str]:
         """Run EXPLAIN on a Cypher statement to check syntax without executing it.
