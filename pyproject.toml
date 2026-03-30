@@ -79,4 +79,5 @@ addopts = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
+    "cobalt: marks tests as Cobalt AI evaluation experiments",
 ]
