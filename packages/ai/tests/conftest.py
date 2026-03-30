@@ -34,7 +34,7 @@ sys.modules['depends'] = mock_depends
 class MockFastAPIModule:
     """Mock module that creates sub-modules on demand to handle any fastapi import."""
 
-    def __init__(self, name):
+    def __init__(self, name=''):
         self._name = name
 
     def __getattr__(self, name):
@@ -43,8 +43,11 @@ class MockFastAPIModule:
         sys.modules[full_name] = submodule
         return submodule
 
+    def __iter__(self):
+        return iter([])
+
     def __call__(self, *args, **kwargs):
         return MagicMock()
 
 
-sys.modules['fastapi'] = MockFastAPIModule('fastapi')
+sys.modules['fastapi'] = MockFastAPIModule()
