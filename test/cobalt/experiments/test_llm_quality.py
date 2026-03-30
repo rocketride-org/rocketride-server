@@ -42,30 +42,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from evaluators.relevance import evaluate_relevance
 from evaluators.format_check import evaluate_format
 
-# Test dataset: input queries with expected reference answers
-QA_DATASET = [
-    {
-        'input': 'What is machine learning?',
-        'expected': 'Machine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed. It focuses on developing algorithms that can access data and use it to learn for themselves.',
-    },
-    {
-        'input': 'Explain neural networks',
-        'expected': 'Neural networks are computing systems inspired by biological neural networks in the human brain. They consist of interconnected nodes organized in layers that process information using connectionist approaches to computation.',
-    },
-    {
-        'input': 'What is NLP?',
-        'expected': 'Natural language processing is a field of artificial intelligence that focuses on the interaction between computers and humans through natural language. It involves programming computers to process and analyze large amounts of natural language data.',
-    },
-    {
-        'input': 'What is reinforcement learning?',
-        'expected': 'Reinforcement learning is a type of machine learning where an agent learns to make decisions by performing actions in an environment to maximize cumulative reward. The agent learns through trial and error, receiving feedback in the form of rewards or penalties.',
-    },
-    {
-        'input': 'Define transfer learning',
-        'expected': 'Transfer learning is a machine learning technique where a model trained on one task is reused as the starting point for a model on a second task. It leverages knowledge gained from solving one problem and applies it to a different but related problem.',
-    },
-]
-
 # Simulated LLM pipeline responses (mocked to avoid real API calls)
 SIMULATED_RESPONSES = {
     'What is machine learning?': 'Machine learning is a branch of artificial intelligence focused on building systems that learn from data. These algorithms improve their performance over time without being explicitly programmed for each task.',
@@ -92,7 +68,7 @@ def _simulate_pipeline_response(query: str) -> str:
 class TestLLMOutputQuality:
     """Cobalt-style experiments for LLM output evaluation."""
 
-    def test_response_relevance(self, mock_rocketride_client):
+    def test_response_relevance(self, mock_rocketride_client, sample_qa_dataset):
         """Test that LLM responses are relevant to the input query.
 
         Evaluates each dataset item by comparing the simulated pipeline
@@ -100,7 +76,7 @@ class TestLLMOutputQuality:
         and length-ratio scoring.
         """
         scores = []
-        for item in QA_DATASET:
+        for item in sample_qa_dataset:
             # Simulate pipeline execution
             mock_rocketride_client.run_pipeline.return_value = {
                 'status': 'completed',
@@ -119,16 +95,17 @@ class TestLLMOutputQuality:
             assert evaluation['score'] > 0.2, f'Response to "{item["input"]}" has very low relevance: {evaluation["reasoning"]}'
 
         avg_score = sum(scores) / len(scores)
-        assert avg_score >= 0.5, f'Average relevance score {avg_score:.2f} is below threshold 0.5'
+        # Threshold matches cobalt.toml [thresholds] avg = 0.7
+        assert avg_score >= 0.7, f'Average relevance score {avg_score:.2f} is below threshold 0.7'
 
-    def test_response_completeness(self, mock_rocketride_client):
+    def test_response_completeness(self, mock_rocketride_client, sample_qa_dataset):
         """Test that responses cover key aspects of the question.
 
         Completeness is measured by checking that the response contains
         a meaningful number of content words from the expected answer,
         indicating it addresses the core concepts of the question.
         """
-        for item in QA_DATASET:
+        for item in sample_qa_dataset:
             mock_rocketride_client.run_pipeline.return_value = {
                 'status': 'completed',
                 'output': _simulate_pipeline_response(item['input']),
@@ -146,13 +123,13 @@ class TestLLMOutputQuality:
             evaluation = evaluate_relevance(output, item['expected'])
             assert evaluation['score'] >= 0.3, f'Response to "{item["input"]}" appears incomplete: {evaluation["reasoning"]}'
 
-    def test_response_format(self, mock_rocketride_client):
+    def test_response_format(self, mock_rocketride_client, sample_qa_dataset):
         """Test that responses follow expected prose formatting.
 
         LLM Q&A responses should be in prose format with proper
         sentence structure and punctuation, not lists or code blocks.
         """
-        for item in QA_DATASET:
+        for item in sample_qa_dataset:
             mock_rocketride_client.run_pipeline.return_value = {
                 'status': 'completed',
                 'output': _simulate_pipeline_response(item['input']),
@@ -166,7 +143,7 @@ class TestLLMOutputQuality:
             evaluation = evaluate_format(output, expected_format='prose')
             assert evaluation['passed'], f'Response to "{item["input"]}" has unexpected format: {evaluation["reasoning"]}'
 
-    def test_factual_accuracy(self, mock_rocketride_client):
+    def test_factual_accuracy(self, mock_rocketride_client, sample_qa_dataset):
         """Test factual accuracy using keyword overlap with reference answers.
 
         Measures how well the actual response aligns with the expected
@@ -174,7 +151,7 @@ class TestLLMOutputQuality:
         a proxy for factual consistency.
         """
         scores = []
-        for item in QA_DATASET:
+        for item in sample_qa_dataset:
             mock_rocketride_client.run_pipeline.return_value = {
                 'status': 'completed',
                 'output': _simulate_pipeline_response(item['input']),
@@ -191,7 +168,7 @@ class TestLLMOutputQuality:
         avg_score = sum(scores) / len(scores)
         assert avg_score >= 0.3, f'Average factual accuracy score {avg_score:.2f} is below threshold 0.3'
 
-    def test_quality_threshold(self, mock_rocketride_client):
+    def test_quality_threshold(self, mock_rocketride_client, sample_qa_dataset):
         """Test that average quality across all dimensions meets threshold.
 
         Aggregates relevance, format, and accuracy scores to produce
@@ -200,7 +177,7 @@ class TestLLMOutputQuality:
         """
         quality_scores = []
 
-        for item in QA_DATASET:
+        for item in sample_qa_dataset:
             mock_rocketride_client.run_pipeline.return_value = {
                 'status': 'completed',
                 'output': _simulate_pipeline_response(item['input']),
@@ -219,7 +196,8 @@ class TestLLMOutputQuality:
             quality_scores.append(composite)
 
         avg_quality = sum(quality_scores) / len(quality_scores)
-        assert avg_quality >= 0.5, f'Average composite quality {avg_quality:.2f} does not meet threshold 0.5'
+        # Threshold matches cobalt.toml [thresholds] avg = 0.7
+        assert avg_quality >= 0.7, f'Average composite quality {avg_quality:.2f} does not meet threshold 0.7'
 
     def test_empty_input_handling(self, mock_rocketride_client):
         """Test that the pipeline handles empty input gracefully.

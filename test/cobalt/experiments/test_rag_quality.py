@@ -218,7 +218,8 @@ class TestRAGEndToEnd:
             composite_scores.append(composite)
 
         avg_quality = sum(composite_scores) / len(composite_scores)
-        assert avg_quality >= 0.5, f'Average end-to-end RAG quality {avg_quality:.2f} does not meet threshold 0.5'
+        # Threshold matches cobalt.toml [thresholds] avg = 0.7
+        assert avg_quality >= 0.7, f'Average end-to-end RAG quality {avg_quality:.2f} does not meet threshold 0.7'
 
     def test_no_documents_fallback(self, mock_rocketride_client):
         """Test graceful handling when no relevant documents are retrieved.

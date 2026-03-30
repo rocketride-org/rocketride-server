@@ -33,6 +33,8 @@ external API calls.
 
 import re
 
+from . import STOP_WORDS
+
 
 def _split_sentences(text: str) -> list[str]:
     """Split text into sentences using basic punctuation rules.
@@ -56,73 +58,8 @@ def _extract_content_words(text: str) -> set[str]:
     Returns:
         A set of lowercase content words.
     """
-    stop_words = {
-        'a',
-        'an',
-        'the',
-        'is',
-        'are',
-        'was',
-        'were',
-        'be',
-        'been',
-        'being',
-        'have',
-        'has',
-        'had',
-        'do',
-        'does',
-        'did',
-        'will',
-        'would',
-        'could',
-        'should',
-        'may',
-        'might',
-        'shall',
-        'can',
-        'to',
-        'of',
-        'in',
-        'for',
-        'on',
-        'with',
-        'at',
-        'by',
-        'from',
-        'as',
-        'into',
-        'through',
-        'during',
-        'before',
-        'after',
-        'and',
-        'but',
-        'or',
-        'nor',
-        'not',
-        'so',
-        'yet',
-        'both',
-        'either',
-        'neither',
-        'it',
-        'its',
-        'that',
-        'this',
-        'these',
-        'those',
-        'their',
-        'them',
-        'they',
-        'what',
-        'which',
-        'who',
-        'whom',
-        'whose',
-    }
     words = set(re.findall(r'[a-z0-9]+', text.lower()))
-    return words - stop_words
+    return words - STOP_WORDS
 
 
 def _sentence_grounded_in_context(sentence: str, context_words: set[str]) -> float:

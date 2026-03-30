@@ -30,6 +30,8 @@ any external API calls.
 
 import re
 
+from . import STOP_WORDS
+
 
 def _tokenize(text: str) -> set[str]:
     """Tokenize text into a set of lowercase alphanumeric words.
@@ -56,74 +58,8 @@ def _compute_keyword_overlap(output_tokens: set[str], expected_tokens: set[str])
     Returns:
         A float between 0.0 and 1.0 representing keyword overlap.
     """
-    stop_words = {
-        'a',
-        'an',
-        'the',
-        'is',
-        'are',
-        'was',
-        'were',
-        'be',
-        'been',
-        'being',
-        'have',
-        'has',
-        'had',
-        'do',
-        'does',
-        'did',
-        'will',
-        'would',
-        'could',
-        'should',
-        'may',
-        'might',
-        'shall',
-        'can',
-        'to',
-        'of',
-        'in',
-        'for',
-        'on',
-        'with',
-        'at',
-        'by',
-        'from',
-        'as',
-        'into',
-        'through',
-        'during',
-        'before',
-        'after',
-        'and',
-        'but',
-        'or',
-        'nor',
-        'not',
-        'so',
-        'yet',
-        'both',
-        'either',
-        'neither',
-        'it',
-        'its',
-        'that',
-        'this',
-        'these',
-        'those',
-        'their',
-        'them',
-        'they',
-        'what',
-        'which',
-        'who',
-        'whom',
-        'whose',
-    }
-
-    output_filtered = output_tokens - stop_words
-    expected_filtered = expected_tokens - stop_words
+    output_filtered = output_tokens - STOP_WORDS
+    expected_filtered = expected_tokens - STOP_WORDS
 
     if not expected_filtered:
         return 1.0 if not output_filtered else 0.0
