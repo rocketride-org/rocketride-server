@@ -116,105 +116,106 @@ class IInstance(IInstanceBase):
             os.close(tmp_fd)
 
             cap = cv2.VideoCapture(tmp_path)
-            if not cap.isOpened():
-                logger.error('Failed to open video file for frame extraction')
-                return
+            try:
+                if not cap.isOpened():
+                    logger.error('Failed to open video file for frame extraction')
+                    return
 
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            if fps <= 0:
-                fps = 30.0  # Fallback to a reasonable default
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                if fps <= 0:
+                    fps = 30.0  # Fallback to a reasonable default
 
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            video_duration = total_frames / fps
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                video_duration = total_frames / fps
 
-            # Determine extraction boundaries.
-            start_time = self.IGlobal.start_time
-            duration = self.IGlobal.duration
-            if duration <= 0:
-                end_time = video_duration
-            else:
-                end_time = min(start_time + duration, video_duration)
+                # Determine extraction boundaries.
+                start_time = self.IGlobal.start_time
+                duration = self.IGlobal.duration
+                if duration <= 0:
+                    end_time = video_duration
+                else:
+                    end_time = min(start_time + duration, video_duration)
 
-            interval = self.IGlobal.frame_interval
-            max_frames = self.IGlobal.max_frames
+                interval = self.IGlobal.frame_interval
+                max_frames = self.IGlobal.max_frames
 
-            # Seek to start position if needed.
-            if start_time > 0:
-                start_frame = int(start_time * fps)
-                cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+                # Seek to start position if needed.
+                if start_time > 0:
+                    start_frame = int(start_time * fps)
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-            frames_extracted = 0
-            frame_interval_frames = max(1, int(interval * fps))
+                frames_extracted = 0
+                frame_interval_frames = max(1, int(interval * fps))
 
-            current_frame_pos = int(start_time * fps) if start_time > 0 else 0
+                current_frame_pos = int(start_time * fps) if start_time > 0 else 0
 
-            while True:
-                # Check max frames limit.
-                if max_frames > 0 and frames_extracted >= max_frames:
-                    break
+                while True:
+                    # Check max frames limit.
+                    if max_frames > 0 and frames_extracted >= max_frames:
+                        break
 
-                # Check if we've gone past end time.
-                current_time = current_frame_pos / fps
-                if current_time >= end_time:
-                    break
+                    # Check if we've gone past end time.
+                    current_time = current_frame_pos / fps
+                    if current_time >= end_time:
+                        break
 
-                # Set position and read the frame.
-                cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame_pos)
-                ret, frame = cap.read()
-                if not ret:
-                    break
+                    # Set position and read the frame.
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame_pos)
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
 
-                # Calculate the timestamp for this frame.
-                time_stamp = current_frame_pos / fps
+                    # Calculate the timestamp for this frame.
+                    time_stamp = current_frame_pos / fps
 
-                # Convert BGR (OpenCV default) to RGB for the embedding model.
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    # Convert BGR (OpenCV default) to RGB for the embedding model.
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-                # Convert numpy array to PIL Image for the embedding model.
-                from PIL import Image as PILImage
+                    # Convert numpy array to PIL Image for the embedding model.
+                    from PIL import Image as PILImage
 
-                pil_image = PILImage.fromarray(frame_rgb)
+                    pil_image = PILImage.fromarray(frame_rgb)
 
-                # Generate the embedding with device lock for thread safety.
-                with self.IGlobal.device_lock:
-                    embedding = self.IGlobal.embedding.create_image_embedding(pil_image)
+                    # Generate the embedding with device lock for thread safety.
+                    with self.IGlobal.device_lock:
+                        embedding = self.IGlobal.embedding.create_image_embedding(pil_image)
 
-                # Encode the frame as base64 PNG for document storage.
-                _, png_buffer = cv2.imencode('.png', frame)
-                frame_base64 = base64.b64encode(png_buffer.tobytes()).decode('utf-8')
+                    # Encode the frame as base64 PNG for document storage.
+                    _, png_buffer = cv2.imencode('.png', frame)
+                    frame_base64 = base64.b64encode(png_buffer.tobytes()).decode('utf-8')
 
-                # Create metadata with frame number and timestamp.
-                metadata = DocMetadata(
-                    self,
-                    chunkId=self._frame_chunk_id,
-                    isTable=False,
-                    tableId=0,
-                    isDeleted=False,
+                    # Create metadata with frame number and timestamp.
+                    metadata = DocMetadata(
+                        self,
+                        chunkId=self._frame_chunk_id,
+                        isTable=False,
+                        tableId=0,
+                        isDeleted=False,
+                    )
+                    metadata.time_stamp = time_stamp
+                    metadata.frame_number = frames_extracted
+
+                    # Create the document with the frame image and embedding.
+                    doc = Doc(type='Image', page_content=frame_base64, metadata=metadata)
+                    doc.embedding = embedding if isinstance(embedding, list) else embedding.tolist()
+                    doc.embedding_model = self.IGlobal.embedding.model_name
+
+                    # Pass the document to the next pipeline stage.
+                    self.instance.writeDocuments([doc])
+
+                    self._frame_chunk_id += 1
+                    frames_extracted += 1
+
+                    # Advance to the next frame position.
+                    current_frame_pos += frame_interval_frames
+
+                logger.info(
+                    'Video embedding complete: extracted %d frames, interval=%.1fs',
+                    frames_extracted,
+                    interval,
                 )
-                metadata.time_stamp = time_stamp
-                metadata.frame_number = frames_extracted
-
-                # Create the document with the frame image and embedding.
-                doc = Doc(type='Image', page_content=frame_base64, metadata=metadata)
-                doc.embedding = embedding if isinstance(embedding, list) else embedding.tolist()
-                doc.embedding_model = self.IGlobal.embedding.model_name
-
-                # Pass the document to the next pipeline stage.
-                self.instance.writeDocuments([doc])
-
-                self._frame_chunk_id += 1
-                frames_extracted += 1
-
-                # Advance to the next frame position.
-                current_frame_pos += frame_interval_frames
-
-            cap.release()
-
-            logger.info(
-                'Video embedding complete: extracted %d frames, interval=%.1fs',
-                frames_extracted,
-                interval,
-            )
+            finally:
+                cap.release()
 
         finally:
             # Clean up the temporary file.
