@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/images/banner-mcp.png" alt="RocketRide MCP Server" width="900">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/banner-mcp.png" alt="RocketRide MCP Server" width="900">
 </p>
 
 <p align="center">
