@@ -343,8 +343,9 @@ async def test_server_registers_list_resources_handler(env_rocketride: None) -> 
                 if 'stop' not in str(e):
                     raise
 
-    # The handler for list resources should have been registered
-    assert types.ListResourcesRequest in server_mod.__dict__.get('_test_handlers', {}) or True  # handler is internal
+    # The handler for list resources should have been registered.
+    # The mcp library registers handlers internally on the Server object,
+    # so we verify the run_server function completed registration without error.
 
 
 async def test_server_registers_list_prompts_handler(env_rocketride: None) -> None:

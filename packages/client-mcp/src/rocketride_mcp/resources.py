@@ -84,8 +84,9 @@ async def list_resources(client: RocketRideClient | None) -> list[types.Resource
 async def read_resource(client: RocketRideClient | None, uri: str) -> str:
     """Fetch and return the JSON payload for a given resource URI.
 
-    Raises ``ValueError`` for unknown URIs and ``RuntimeError`` when
-    the RocketRide client is not connected.
+    Returns a JSON error payload when the RocketRide client is not
+    connected (``client is None``).  Raises ``ValueError`` only for
+    unknown URIs.
     """
     uri_str = str(uri)
 
