@@ -137,31 +137,31 @@
 			"openai-5": {
 				"title": "GPT-5",
 				"model": "gpt-5",
-				"modelTotalTokens": 128000,
+				"modelTotalTokens": 400000,
 				"apikey": ""
 			},
 			"openai-5-1": {
 				"title": "GPT-5.1",
 				"model": "gpt-5.1",
-				"modelTotalTokens": 128000,
+				"modelTotalTokens": 400000,
 				"apikey": ""
 			},
 			"openai-5-2": {
 				"title": "GPT-5.2",
 				"model": "gpt-5.2",
-				"modelTotalTokens": 128000,
+				"modelTotalTokens": 400000,
 				"apikey": ""
 			},
 			"openai-5-mini": {
 				"title": "GPT-5-mini",
 				"model": "gpt-5-mini",
-				"modelTotalTokens": 128000,
+				"modelTotalTokens": 400000,
 				"apikey": ""
 			},
 			"openai-5-nano": {
 				"title": "GPT-5-nano",
 				"model": "gpt-5-nano",
-				"modelTotalTokens": 128000,
+				"modelTotalTokens": 400000,
 				"apikey": ""
 			}
 		}
@@ -303,7 +303,7 @@
 		}
 	],
 	"test": {
-		"profiles": ["openai-5-4", "openai-5-4-pro", "openai-5-4-mini", "openai-5-4-nano"],
+		"profiles": ["openai-5-2", "openai-5-4", "openai-5-4-pro", "openai-5-4-mini", "openai-5-4-nano"],
 		"outputs": ["answers"],
 		"cases": [
 			{
