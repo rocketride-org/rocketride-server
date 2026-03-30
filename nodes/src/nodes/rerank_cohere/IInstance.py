@@ -67,11 +67,14 @@ class IInstance(IInstanceBase):
             raise ValueError('No documents found in question to rerank')
 
         doc_texts = []
-        for doc in question.documents:
+        original_indices = []
+        for idx, doc in enumerate(question.documents):
             if hasattr(doc, 'page_content') and doc.page_content:
                 doc_texts.append(doc.page_content)
+                original_indices.append(idx)
             elif isinstance(doc, dict) and doc.get('page_content'):
                 doc_texts.append(doc['page_content'])
+                original_indices.append(idx)
 
         if not doc_texts:
             raise ValueError('No document content found to rerank')
@@ -85,7 +88,9 @@ class IInstance(IInstanceBase):
         # Build reranked Doc objects preserving original metadata
         reranked_docs = []
         for result in reranked:
-            original_idx = result['index']
+            # Map the rerank result index (into doc_texts) back to the
+            # original question.documents index.
+            original_idx = original_indices[result['index']]
             original_doc = question.documents[original_idx]
 
             # Build a new Doc with the updated score
@@ -107,7 +112,7 @@ class IInstance(IInstanceBase):
         if reranked_docs:
             self.instance.writeDocuments(reranked_docs)
 
-            # Also write an answer with the reranked documents attached
-            # to the question for downstream LLM consumption
-            question.documents = reranked_docs
-            self.instance.writeAnswers(question)
+        # Always forward the question with reranked documents (possibly empty)
+        # so downstream nodes can proceed even when min_score filters all docs.
+        question.documents = reranked_docs
+        self.instance.writeAnswers(question)
