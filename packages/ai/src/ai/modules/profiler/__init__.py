@@ -15,6 +15,7 @@ Usage:
     # GET /profile/report
 """
 
+import html as html_module
 from typing import Dict, Any
 from ai.web import WebServer
 from fastapi import Request, Query
@@ -146,16 +147,14 @@ def _setup_profiling_endpoints(server: WebServer, profiler: WebServerProfiler):
         The report is formatted for easy reading and analysis.
         """
         report = profiler.get_full_report()
-        return HTMLResponse(content=f'<pre>{report}</pre>', media_type='text/html')
+        return HTMLResponse(content=f'<pre>{html_module.escape(report)}</pre>', media_type='text/html')
 
-    # Register the endpoints — require authentication to prevent unauthorized
-    # access to profiling controls and performance data (internal function names,
-    # call counts, timing information).
-    server.add_route('/profile', get_profile_dashboard, ['GET'], public=True)
-    server.add_route('/profile/start', start_profiling, ['POST'], public=True)
-    server.add_route('/profile/stop', stop_profiling, ['POST'], public=True)
-    server.add_route('/profile/status', get_profile_status, ['GET'], public=True)
-    server.add_route('/profile/report', get_profile_report, ['GET'], public=True)
+    # Register the endpoints with detailed OpenAPI documentation
+    server.add_route('/profile', get_profile_dashboard, ['GET'])
+    server.add_route('/profile/start', start_profiling, ['POST'])
+    server.add_route('/profile/stop', stop_profiling, ['POST'])
+    server.add_route('/profile/status', get_profile_status, ['GET'])
+    server.add_route('/profile/report', get_profile_report, ['GET'])
 
 
 def get_status() -> Dict[str, Any]:
