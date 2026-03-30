@@ -54,20 +54,28 @@ _NUMERIC_RE = re.compile(r'/\d+')
 def _normalise_path(request: Request) -> str:
     """Return the route template for *request*, falling back to regex normalisation.
 
-    Tries FastAPI/Starlette route matching first so that paths like
+    Prefers the resolved ``route`` object that Starlette/FastAPI places in
+    ``request.scope`` after routing completes.  Falls back to manual route
+    matching and finally regex normalisation so that paths like
     ``/pipeline/3fa85f64-…`` become ``/pipeline/{id}`` rather than a
     unique label per request (which would cause a Prometheus cardinality
     explosion).
     """
     raw_path = request.url.path
+
+    # Prefer the route already resolved by Starlette/FastAPI routing.
+    route = request.scope.get('route')
+    if route is not None and hasattr(route, 'path'):
+        return route.path
+
+    # Fallback: iterate app routes manually.
     scope = {'type': 'http', 'method': request.method, 'path': raw_path}
-
-    for route in getattr(request.app, 'routes', []):
-        match, _ = route.matches(scope)
+    for app_route in getattr(request.app, 'routes', []):
+        match, _ = app_route.matches(scope)
         if match == Match.FULL:
-            return getattr(route, 'path', raw_path)
+            return getattr(app_route, 'path', raw_path)
 
-    # Fallback: replace UUIDs and bare numeric segments with placeholders.
+    # Last resort: replace UUIDs and bare numeric segments with placeholders.
     path = _UUID_RE.sub('/{id}', raw_path)
     path = _NUMERIC_RE.sub('/{id}', path)
     return path
