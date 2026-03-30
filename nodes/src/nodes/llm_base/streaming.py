@@ -61,7 +61,7 @@ class _InstanceLike(Protocol):
     """
 
     class _Instance(Protocol):
-        def sendSSE(self, type: str, **data) -> None: ...
+        def sendSSE(self, event_type: str, **data) -> None: ...
 
     instance: _Instance
 
@@ -176,7 +176,10 @@ class StreamingHandler:
                 text = self._extract_chunk_text(chunk, self._provider)
                 if text:
                     accumulated_text += text
-                    output_tokens += 1  # rough per-chunk estimate
+                    # Fallback chunk count: incremented per chunk as a rough
+                    # approximation until _update_token_counts overwrites it
+                    # with real usage data from the provider SDK (if available).
+                    output_tokens += 1
                     self._emit_token(text)
 
                 # Try to pull token usage from stream metadata
@@ -222,9 +225,9 @@ class StreamingHandler:
 
             # OpenAI / DeepSeek / XAI / Perplexity (OpenAI-compatible)
             if p in ('openai', 'deepseek', 'xai', 'perplexity'):
-                delta = getattr(chunk, 'choices', [{}])
-                if delta and len(delta) > 0:
-                    choice = delta[0]
+                choices = getattr(chunk, 'choices', [{}])
+                if choices and len(choices) > 0:
+                    choice = choices[0]
                     d = getattr(choice, 'delta', None)
                     if d is not None:
                         content = getattr(d, 'content', None)

@@ -84,13 +84,12 @@ def get_provider_name(logical_type: str) -> Optional[str]:
         return None
 
     # Handle dotted module paths like "nodes.llm_openai.IInstance"
+    # and bare logical types like "llm_openai".  The split covers both
+    # cases: a bare "llm_openai" yields a single-element list that is
+    # matched on the first iteration.
     for segment in logical_type.split('.'):
         if segment.startswith('llm_'):
             return segment[4:]  # strip "llm_"
-
-    # Fallback: try the whole string
-    if logical_type.startswith('llm_'):
-        return logical_type[4:]
 
     return None
 
