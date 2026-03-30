@@ -254,14 +254,17 @@ class ExecutionMixin(DAPClient):
 
         # Load pipeline configuration from file if needed
         if not pipeline:
-            with open(filepath, 'r', encoding='utf-8') as file:
-                # Prefer JSON5 for better developer experience (comments, trailing commas)
-                if json5:
-                    parsed = json5.load(file)
-                else:
-                    parsed = json.load(file)
-                # .pipe files wrap the config in { "pipeline": { ... } } — unwrap if present
-                pipeline_config = parsed.get('pipeline', parsed) if isinstance(parsed, dict) else parsed
+            try:
+                with open(filepath, 'r', encoding='utf-8') as file:
+                    # Prefer JSON5 for better developer experience (comments, trailing commas)
+                    if json5:
+                        parsed = json5.load(file)
+                    else:
+                        parsed = json.load(file)
+                    # .pipe files wrap the config in { "pipeline": { ... } } — unwrap if present
+                    pipeline_config = parsed.get('pipeline', parsed) if isinstance(parsed, dict) else parsed
+            except FileNotFoundError:
+                raise FileNotFoundError(f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration.")
         else:
             pipeline_config = pipeline
 
