@@ -85,11 +85,11 @@ class IGlobal(IGlobalBase):
                 warning(f'Invalid voice: {voice}. Must be one of: {", ".join(sorted(VALID_VOICES))}')
                 return
 
-            # Simple API validation using provider-driven exceptions
+            # Validate API key with a lightweight call (no billable audio generation)
             try:
                 client = OpenAI(api_key=apikey)
-                # Make a minimal request to validate the API key and model
-                client.audio.speech.create(model=model, voice=voice, input='test', response_format='mp3')
+                # List models to verify the API key is valid without generating audio
+                client.models.list()
             except APIStatusError as e:
                 status = getattr(e, 'status_code', None) or getattr(e, 'status', None)
                 message = str(e)
