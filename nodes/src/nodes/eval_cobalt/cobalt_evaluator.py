@@ -60,12 +60,14 @@ class CobaltEvaluator:
     _apikey: str
     _custom_fn: Optional[Callable] = None
 
-    def __init__(self, config: Dict[str, Any], bag: Dict[str, Any]) -> None:
+    def __init__(self, config: Dict[str, Any], bag: Dict[str, Any], custom_fn: Optional[Callable] = None) -> None:
         """Initialize the evaluator from node configuration.
 
         Args:
             config: Node configuration dictionary (eval_type, threshold, model, criteria, apikey).
             bag: Pipeline bag dictionary (shared state across nodes).
+            custom_fn: Optional callable for custom evaluation. Should accept (output, expected)
+                and return a dict with at minimum a 'score' key (float 0-1), or a numeric score.
         """
         self._eval_type = config.get('eval_type', 'similarity')
         if self._eval_type not in _VALID_EVAL_TYPES:
@@ -76,6 +78,7 @@ class CobaltEvaluator:
         self._model = config.get('model', 'gpt-4')
         self._criteria = config.get('criteria', 'Is the output correct, complete, and well-structured?')
         self._apikey = config.get('apikey', '')
+        self._custom_fn = custom_fn
 
         debug(f'CobaltEvaluator initialized: type={self._eval_type} threshold={self._threshold}')
 

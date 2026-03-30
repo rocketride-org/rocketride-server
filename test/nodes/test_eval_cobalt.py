@@ -28,6 +28,7 @@ All tests use mocks — no real Cobalt AI or external API calls are made.
 
 import copy
 import os
+import pathlib
 import sys
 from types import ModuleType
 from unittest.mock import MagicMock, patch
@@ -109,7 +110,8 @@ def _setup_mocks():
 MockAnswer = _setup_mocks()
 
 # Now import the module under test
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'nodes', 'src', 'nodes'))
+_NODES_DIR = str(pathlib.Path(__file__).resolve().parent.parent.parent / 'nodes' / 'src' / 'nodes')
+sys.path.insert(0, _NODES_DIR)
 from eval_cobalt.cobalt_evaluator import CobaltEvaluator
 
 
