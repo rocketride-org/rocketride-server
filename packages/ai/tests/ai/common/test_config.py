@@ -15,8 +15,6 @@ if str(src_path) not in sys.path:
 class MockIJson(dict):
     """Mock IJson class that supports isinstance checks and dict methods."""
 
-    pass
-
 
 # Mock external dependencies BEFORE importing ai modules
 mock_rocketlib = MagicMock()
@@ -35,8 +33,18 @@ class TestGetNodeConfigDeprecatedProfiles:
     """Test cases for deprecated profile warning functionality."""
 
     def _make_service_with_profile(self, profile_name: str, profile_config: Dict[str, Any], default_profile: Optional[str] = None) -> Dict[str, Any]:
-        """Helper to create a mock service definition."""
-        return {'preconfig': {'default': default_profile or profile_name, 'profiles': {profile_name: profile_config}}}
+        """
+        Helper to create a mock service definition.
+
+        Ensures the default profile exists in profiles by inserting it when missing.
+        """
+        profiles = {profile_name: profile_config}
+        resolved_default = default_profile or profile_name
+
+        if resolved_default not in profiles:
+            profiles[resolved_default] = profile_config
+
+        return {'preconfig': {'default': resolved_default, 'profiles': profiles}}
 
     def test_deprecated_default_profile_emits_warning(self):
         """Test that a deprecated default profile emits a warning with migration message."""

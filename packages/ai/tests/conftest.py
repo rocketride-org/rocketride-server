@@ -16,8 +16,6 @@ from unittest.mock import MagicMock
 class MockIJson(dict):
     """Mock IJson class that supports isinstance checks and dict methods."""
 
-    pass
-
 
 # Mock rocketlib module
 mock_rocketlib = MagicMock()
