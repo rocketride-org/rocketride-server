@@ -142,6 +142,7 @@ class CostTracker:
             return {
                 'within_budget': True,
                 'used': used,
+                'limit': None,
                 'remaining': float('inf'),
                 'percent_used': 0.0,
                 'alert_threshold_reached': False,
@@ -153,6 +154,7 @@ class CostTracker:
         return {
             'within_budget': used <= limit,
             'used': used,
+            'limit': limit,
             'remaining': max(0.0, remaining),
             'percent_used': percent_used,
             'alert_threshold_reached': percent_used >= self._alert_threshold_pct,

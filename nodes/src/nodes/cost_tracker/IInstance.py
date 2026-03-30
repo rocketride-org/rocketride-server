@@ -48,6 +48,7 @@ class IInstance(IInstanceBase):
         tracker = self.IGlobal.tracker
         if tracker is None:
             # Tracker not initialised (e.g. CONFIG mode) -- pass through
+            self.instance.writeAnswers(answer)
             return
 
         # Deep-copy so downstream mutations never corrupt our accounting
@@ -95,16 +96,15 @@ class IInstance(IInstanceBase):
         budget_status = tracker.check_budget()
 
         if budget_status.get('alert_threshold_reached') and budget_status.get('within_budget'):
-            debug(f'Cost Tracker: alert threshold reached -- {budget_status["percent_used"]:.1f}% of budget used (${budget_status["used"]:.6f} / ${budget_status["used"] + budget_status["remaining"]:.6f})')
+            debug(f'Cost Tracker: alert threshold reached -- {budget_status["percent_used"]:.1f}% of budget used (${budget_status["used"]:.6f} / ${budget_status["limit"]:.6f})')
 
         if not budget_status.get('within_budget', True):
             if tracker.policy == 'block':
-                debug(f'Cost Tracker: BLOCKING answer -- budget exceeded (${budget_status["used"]:.6f} spent, limit ${budget_status["used"] - budget_status["remaining"]:.6f})')
+                debug(f'Cost Tracker: BLOCKING answer -- budget exceeded (${budget_status["used"]:.6f} spent, limit ${budget_status["limit"]:.6f})')
                 # Prevent the answer from propagating downstream
                 self.preventDefault()
                 return
-            else:
-                debug(f'Cost Tracker: WARNING -- budget exceeded (${budget_status["used"]:.6f} spent)')
+            debug(f'Cost Tracker: WARNING -- budget exceeded (${budget_status["used"]:.6f} spent)')
 
         # Forward the (annotated) answer downstream
         self.instance.writeAnswers(answer)

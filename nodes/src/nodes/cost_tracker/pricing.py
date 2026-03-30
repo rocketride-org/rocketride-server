@@ -70,10 +70,10 @@ def find_model_pricing(model_name: str, custom_pricing: Optional[Dict[str, Dict[
 
     normalized = model_name.strip().lower()
 
-    # Build merged lookup: custom overrides default
+    # Build merged lookup: custom overrides default (normalize keys to lowercase)
     merged: Dict[str, Dict[str, float]] = dict(PRICING)
     if custom_pricing:
-        merged.update(custom_pricing)
+        merged.update({k.strip().lower(): v for k, v in custom_pricing.items()})
 
     # 1. Exact match
     if normalized in merged:
