@@ -1,0 +1,1 @@
+# Cost Tracker — no external dependencies

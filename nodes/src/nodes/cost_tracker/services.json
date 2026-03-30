@@ -1,0 +1,243 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Cost Tracker",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "cost_tracker://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"tracker"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most nodes
+	//
+	"path": "nodes.cost_tracker",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "cost_tracker",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": [
+		"A filter component that calculates and tracks per-request LLM costs with ",
+		"budget enforcement. Place it after any LLM node in a pipeline to monitor ",
+		"token usage and spending. Supports all 13 built-in LLM providers, custom ",
+		"pricing overrides, configurable budget limits, and alert thresholds. ",
+		"When the budget is exceeded the node can either warn (log and continue) ",
+		"or block (prevent the answer from propagating downstream)."
+	],
+	//
+	// Optional:
+	//		The icon is the icon to display in the UI for this node
+	//
+	"icon": "util-infrastructure.svg",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": [
+		"Policy: ${parameters.cost_tracker.profile}"
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"answers": [
+			"answers"
+		]
+	},
+	"input": [
+		{
+			"lane": "answers",
+			"description": "LLM answers with token-usage metadata",
+			"output": [
+				{
+					"lane": "answers",
+					"description": "Answers annotated with cost metadata"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "monitor",
+		"profiles": {
+			"monitor": {
+				"title": "Monitor",
+				"budget_limit_usd": null,
+				"alert_threshold_pct": 80,
+				"policy": "warn",
+				"custom_pricing_json": ""
+			},
+			"budget": {
+				"title": "Budget",
+				"budget_limit_usd": 10.00,
+				"alert_threshold_pct": 80,
+				"policy": "block",
+				"custom_pricing_json": ""
+			},
+			"custom": {
+				"title": "Custom",
+				"budget_limit_usd": null,
+				"alert_threshold_pct": 80,
+				"policy": "warn",
+				"custom_pricing_json": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"budget_limit_usd": {
+			"type": "number",
+			"title": "Budget Limit (USD)",
+			"description": "Maximum spend in USD. Leave empty for unlimited."
+		},
+		"alert_threshold_pct": {
+			"type": "number",
+			"title": "Alert Threshold (%)",
+			"description": "Log a warning when this percentage of the budget is consumed.",
+			"default": 80
+		},
+		"policy": {
+			"type": "string",
+			"title": "Over-budget Policy",
+			"description": "Action when budget is exceeded: warn (log and continue) or block (drop answer).",
+			"enum": [
+				["warn", "Warn"],
+				["block", "Block"]
+			],
+			"default": "warn"
+		},
+		"custom_pricing_json": {
+			"type": "string",
+			"title": "Custom Pricing (JSON)",
+			"description": "Optional JSON object mapping model names to {input, output} prices per 1M tokens."
+		},
+		"cost_tracker.monitor": {
+			"object": "monitor",
+			"properties": [
+				"alert_threshold_pct",
+				"custom_pricing_json"
+			]
+		},
+		"cost_tracker.budget": {
+			"object": "budget",
+			"properties": [
+				"budget_limit_usd",
+				"alert_threshold_pct",
+				"policy",
+				"custom_pricing_json"
+			]
+		},
+		"cost_tracker.custom": {
+			"object": "custom",
+			"properties": [
+				"budget_limit_usd",
+				"alert_threshold_pct",
+				"policy",
+				"custom_pricing_json"
+			]
+		},
+		"cost_tracker.profile": {
+			"title": "Mode",
+			"description": "Cost tracking mode",
+			"type": "string",
+			"default": "monitor",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "monitor",
+					"properties": [
+						"cost_tracker.monitor"
+					]
+				},
+				{
+					"value": "budget",
+					"properties": [
+						"cost_tracker.budget"
+					]
+				},
+				{
+					"value": "custom",
+					"properties": [
+						"cost_tracker.custom"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Cost Tracker",
+			"properties": [
+				"cost_tracker.profile"
+			]
+		}
+	],
+	"test": {
+		"profiles": ["monitor"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "Cost tracker passes answers through",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
+}
