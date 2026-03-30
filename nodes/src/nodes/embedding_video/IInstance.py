@@ -112,8 +112,8 @@ class IInstance(IInstanceBase):
         # OpenCV's VideoCapture requires a file path or device index.
         tmp_fd, tmp_path = tempfile.mkstemp(suffix='.mp4')
         try:
-            os.write(tmp_fd, video_bytes)
-            os.close(tmp_fd)
+            with os.fdopen(tmp_fd, 'wb') as f:
+                f.write(video_bytes)
 
             cap = cv2.VideoCapture(tmp_path)
             try:
