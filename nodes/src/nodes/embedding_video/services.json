@@ -155,6 +155,12 @@
 			"title": "Duration (in seconds) for frame extraction (0=end of video)",
 			"default": 0
 		},
+		"embedding_video.maxVideoSizeMB": {
+			"type": "number",
+			"title": "Maximum video file size (MB)",
+			"description": "Maximum allowed video file size in megabytes. Videos exceeding this limit will be rejected.",
+			"default": 500
+		},
 		"embedding_video.extraction": {
 			"object": "extraction",
 			"title": "Frame Extraction",
@@ -162,7 +168,8 @@
 				"embedding_video.interval",
 				"embedding_video.max_frames",
 				"embedding_video.start_time",
-				"embedding_video.duration"
+				"embedding_video.duration",
+				"embedding_video.maxVideoSizeMB"
 			]
 		}
 	},
