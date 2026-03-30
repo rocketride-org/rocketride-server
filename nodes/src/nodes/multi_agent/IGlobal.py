@@ -16,7 +16,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from rocketlib import IGlobalBase
+from rocketlib import IGlobalBase, OPEN_MODE
+from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
@@ -32,10 +33,13 @@ class IGlobal(IGlobalBase):
         """Load node configuration for the multi-agent orchestrator.
 
         Configuration fields (``agents_json``, ``communication_protocol``,
-        ``max_rounds``, ``merge_strategy``) are read from the engine's
-        connConfig and stored for IInstance to use on each request.
+        ``max_rounds``, ``merge_strategy``) are read via
+        ``Config.getNodeConfig()`` which handles profile merging, and
+        stored for IInstance to use on each request.
         """
-        self.config = getattr(self.glb, 'connConfig', {}) or {}
+        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
+            return
+        self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
     def endGlobal(self) -> None:
         """Release configuration when the pipe closes."""

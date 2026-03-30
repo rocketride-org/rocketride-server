@@ -16,6 +16,7 @@ loop, and writes the unified answer to the ``answers`` lane.
 from __future__ import annotations
 
 import copy
+import threading
 
 from rocketlib import IInstanceBase
 from ai.common.schema import Question, Answer
@@ -58,11 +59,17 @@ class IInstance(IInstanceBase):
             question_text = str(question)
 
         # LLM callback — routes through the engine's invoke seam.
+        # A lock serializes LLM calls because self.instance.invoke() is not
+        # guaranteed thread-safe when called from multiple ThreadPoolExecutor
+        # workers in parallel/supervisor execution modes.
+        _llm_lock = threading.Lock()
+
         def call_llm(system_prompt: str, user_prompt: str) -> str:
             q = Question()
             q.role = system_prompt
             q.addQuestion(user_prompt)
-            result = self.instance.invoke('llm', {'op': 'ask', 'question': q})
+            with _llm_lock:
+                result = self.instance.invoke('llm', {'op': 'ask', 'question': q})
             if isinstance(result, Answer):
                 return result.getText()
             if hasattr(result, 'getText'):
