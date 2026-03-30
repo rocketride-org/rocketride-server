@@ -432,6 +432,19 @@ class TransportWebSocket(TransportBase):
 
             self._debug_message('WebSocket disconnected successfully')
 
+            # Stop accepting new messages and cancel in-flight message tasks before notifying
+            # This prevents _receive_data from interleaving with on_disconnected callback
+            self._connected = False
+            if hasattr(self, '_message_tasks'):
+                tasks_to_cancel = []
+                with self._message_tasks_lock:
+                    tasks_to_cancel = [t for t in self._message_tasks if not t.done()]
+                    for task in tasks_to_cancel:
+                        task.cancel()
+                    self._message_tasks.clear()
+                if tasks_to_cancel:
+                    await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+
             # Notify about disconnection (use caller-provided reason/has_error when given)
             await self._transport_disconnected(reason or 'Disconnected by request', has_error)
             callback_called = True
@@ -455,19 +468,12 @@ class TransportWebSocket(TransportBase):
                 callback_called = True
 
         finally:
-            # Always clean up resources
-            self._connected = False
+            # Always clean up remaining resources
             self._websocket = None
             self._receive_task = None
             if hasattr(self, '_message_tasks'):
-                tasks_to_cancel = []
                 with self._message_tasks_lock:
-                    tasks_to_cancel = [t for t in self._message_tasks if not t.done()]
-                    for task in tasks_to_cancel:
-                        task.cancel()
                     self._message_tasks.clear()
-                if tasks_to_cancel:
-                    await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
 
     async def send(self, message: Dict[str, Any]) -> None:
         """
