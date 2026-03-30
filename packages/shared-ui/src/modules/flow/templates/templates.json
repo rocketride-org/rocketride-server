@@ -77,6 +77,277 @@
 			}
 		]
 	},
+	"summarizer": {
+		"title": "Document Summarizer",
+		"description": "Upload a document via webhook, parse, chunk, and summarize with an LLM",
+		"requires": {
+			"llm": {
+				"classType": "llm",
+				"label": "LLM Provider"
+			}
+		},
+		"components": [
+			{
+				"id": "webhook_1",
+				"provider": "webhook",
+				"position": { "x": 0, "y": 0 },
+				"input": [],
+				"control": []
+			},
+			{
+				"id": "parse_1",
+				"provider": "parse",
+				"position": { "x": 240, "y": 0 },
+				"input": [{ "lane": "tags", "from": "webhook_1" }],
+				"control": []
+			},
+			{
+				"id": "preprocessor_langchain_1",
+				"provider": "preprocessor_langchain",
+				"position": { "x": 480, "y": 0 },
+				"input": [{ "lane": "text", "from": "parse_1" }],
+				"control": []
+			},
+			{
+				"id": "summarization_1",
+				"provider": "summarization",
+				"position": { "x": 720, "y": 0 },
+				"input": [{ "lane": "documents", "from": "preprocessor_langchain_1" }],
+				"control": []
+			},
+			{
+				"id": "llm_1",
+				"ref": "llm",
+				"position": { "x": 480, "y": 180 },
+				"input": [],
+				"control": [{ "classType": "llm", "from": "summarization_1" }]
+			},
+			{
+				"id": "response_text_1",
+				"provider": "response_text",
+				"position": { "x": 960, "y": 0 },
+				"input": [{ "lane": "text", "from": "summarization_1" }],
+				"control": []
+			}
+		]
+	},
+	"data-extractor": {
+		"title": "Data Extractor",
+		"description": "Extract structured JSON from documents using an LLM (invoices, contracts, receipts)",
+		"requires": {
+			"llm": {
+				"classType": "llm",
+				"label": "LLM Provider"
+			}
+		},
+		"components": [
+			{
+				"id": "webhook_1",
+				"provider": "webhook",
+				"position": { "x": 0, "y": 0 },
+				"input": [],
+				"control": []
+			},
+			{
+				"id": "parse_1",
+				"provider": "parse",
+				"position": { "x": 240, "y": 0 },
+				"input": [{ "lane": "tags", "from": "webhook_1" }],
+				"control": []
+			},
+			{
+				"id": "extract_data_1",
+				"provider": "extract_data",
+				"position": { "x": 480, "y": 0 },
+				"input": [{ "lane": "text", "from": "parse_1" }],
+				"control": []
+			},
+			{
+				"id": "llm_1",
+				"ref": "llm",
+				"position": { "x": 240, "y": 180 },
+				"input": [],
+				"control": [{ "classType": "llm", "from": "extract_data_1" }]
+			},
+			{
+				"id": "response_table_1",
+				"provider": "response_table",
+				"position": { "x": 720, "y": 0 },
+				"input": [{ "lane": "table", "from": "extract_data_1" }],
+				"control": []
+			}
+		]
+	},
+	"web-scraper-rag": {
+		"title": "Web Scraper to RAG",
+		"description": "Scrape a URL with Firecrawl, parse, embed, and search with chat",
+		"requires": {
+			"store": {
+				"classType": "store",
+				"label": "Vector Store"
+			},
+			"llm": {
+				"classType": "llm",
+				"label": "LLM Provider"
+			}
+		},
+		"components": [
+			{
+				"id": "tool_firecrawl_1",
+				"provider": "tool_firecrawl",
+				"position": { "x": 0, "y": -160 },
+				"input": [],
+				"control": []
+			},
+			{
+				"id": "preprocessor_langchain_1",
+				"provider": "preprocessor_langchain",
+				"position": { "x": 280, "y": -160 },
+				"input": [{ "lane": "text", "from": "tool_firecrawl_1" }],
+				"control": []
+			},
+			{
+				"id": "embedding_transformer_1",
+				"provider": "embedding_transformer",
+				"position": { "x": 540, "y": -160 },
+				"input": [{ "lane": "documents", "from": "preprocessor_langchain_1" }],
+				"control": []
+			},
+			{
+				"id": "store_1",
+				"ref": "store",
+				"position": { "x": 800, "y": -60 },
+				"input": [
+					{ "lane": "documents", "from": "embedding_transformer_1" },
+					{ "lane": "questions", "from": "chat_1" }
+				],
+				"control": []
+			},
+			{
+				"id": "chat_1",
+				"provider": "chat",
+				"position": { "x": 0, "y": 40 },
+				"input": [],
+				"control": []
+			},
+			{
+				"id": "llm_1",
+				"ref": "llm",
+				"position": { "x": 1040, "y": -20 },
+				"input": [{ "lane": "questions", "from": "store_1" }],
+				"control": []
+			},
+			{
+				"id": "response_answers_1",
+				"provider": "response_answers",
+				"position": { "x": 1280, "y": -20 },
+				"input": [{ "lane": "answers", "from": "llm_1" }],
+				"control": []
+			}
+		]
+	},
+	"audio-transcription": {
+		"title": "Audio Transcription",
+		"description": "Upload audio files, transcribe with Whisper, and return text",
+		"requires": {},
+		"components": [
+			{
+				"id": "webhook_1",
+				"provider": "webhook",
+				"position": { "x": 0, "y": 0 },
+				"input": [],
+				"control": []
+			},
+			{
+				"id": "audio_transcribe_1",
+				"provider": "audio_transcribe",
+				"position": { "x": 280, "y": 0 },
+				"input": [{ "lane": "tags", "from": "webhook_1" }],
+				"control": []
+			},
+			{
+				"id": "response_text_1",
+				"provider": "response_text",
+				"position": { "x": 560, "y": 0 },
+				"input": [{ "lane": "text", "from": "audio_transcribe_1" }],
+				"control": []
+			}
+		]
+	},
+	"multi-agent-crew": {
+		"title": "Multi-Agent Crew",
+		"description": "Two agents with tools, memory, and a shared LLM — research and execute",
+		"requires": {
+			"llm": {
+				"classType": "llm",
+				"label": "LLM Provider"
+			}
+		},
+		"components": [
+			{
+				"id": "chat_1",
+				"provider": "chat",
+				"position": { "x": 0, "y": 0 },
+				"input": [],
+				"control": []
+			},
+			{
+				"id": "agent_rocketride_1",
+				"provider": "agent_rocketride",
+				"position": { "x": 280, "y": -60 },
+				"input": [{ "lane": "questions", "from": "chat_1" }],
+				"control": []
+			},
+			{
+				"id": "agent_rocketride_2",
+				"provider": "agent_rocketride",
+				"position": { "x": 280, "y": 140 },
+				"input": [{ "lane": "questions", "from": "chat_1" }],
+				"control": []
+			},
+			{
+				"id": "memory_internal_1",
+				"provider": "memory_internal",
+				"position": { "x": 0, "y": 280 },
+				"input": [],
+				"control": [
+					{ "classType": "memory", "from": "agent_rocketride_1" },
+					{ "classType": "memory", "from": "agent_rocketride_2" }
+				]
+			},
+			{
+				"id": "tool_http_request_1",
+				"provider": "tool_http_request",
+				"position": { "x": 560, "y": 140 },
+				"input": [],
+				"control": [{ "classType": "tool", "from": "agent_rocketride_1" }]
+			},
+			{
+				"id": "tool_python_1",
+				"provider": "tool_python",
+				"position": { "x": 560, "y": 280 },
+				"input": [],
+				"control": [{ "classType": "tool", "from": "agent_rocketride_2" }]
+			},
+			{
+				"id": "llm_1",
+				"ref": "llm",
+				"position": { "x": 280, "y": 380 },
+				"input": [],
+				"control": [
+					{ "classType": "llm", "from": "agent_rocketride_1" },
+					{ "classType": "llm", "from": "agent_rocketride_2" }
+				]
+			},
+			{
+				"id": "response_answers_1",
+				"provider": "response_answers",
+				"position": { "x": 560, "y": -60 },
+				"input": [{ "lane": "answers", "from": "agent_rocketride_1" }],
+				"control": []
+			}
+		]
+	},
 	"document-parser": {
 		"title": "Document Parser",
 		"description": "Parse incoming webhook data and return structured table and text responses",
