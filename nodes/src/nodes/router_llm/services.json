@@ -1,0 +1,160 @@
+{
+	"title": "Model Router",
+	"protocol": "router_llm://",
+	"classType": [
+		"router"
+	],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.router_llm",
+	"prefix": "router_llm",
+	"description": [
+		"An intelligent LLM model router that selects the optimal provider and model ",
+		"based on configurable routing strategies. Supports complexity-based routing ",
+		"(simple queries to cheap models, complex to powerful ones), cost-aware routing ",
+		"(switches to cheaper models when budget threshold is hit), latency-optimized ",
+		"routing, ordered fallback chains, and random A/B traffic splitting for model ",
+		"comparison experiments."
+	],
+	"icon": "util-infrastructure.svg",
+	"lanes": {
+		"questions": [
+			"questions"
+		]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"description": "Incoming questions to be routed to the optimal model",
+			"output": [
+				{
+					"lane": "questions",
+					"description": "Questions annotated with routing metadata (provider, model, tier, reason)"
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "complexity",
+		"profiles": {
+			"complexity": {
+				"title": "Complexity-based routing",
+				"strategy": "complexity",
+				"primary_model": "claude-opus",
+				"fallback_models": "",
+				"budget_limit": 0,
+				"ab_split_percent": 50,
+				"complexity_threshold": 50
+			},
+			"cost_aware": {
+				"title": "Cost-aware routing",
+				"strategy": "cost_aware",
+				"primary_model": "claude-sonnet",
+				"fallback_models": "",
+				"budget_limit": 10.0,
+				"ab_split_percent": 50,
+				"complexity_threshold": 50
+			},
+			"latency": {
+				"title": "Latency-optimized routing",
+				"strategy": "latency",
+				"primary_model": "gemini-flash",
+				"fallback_models": "",
+				"budget_limit": 0,
+				"ab_split_percent": 50,
+				"complexity_threshold": 50
+			},
+			"fallback_chain": {
+				"title": "Fallback chain routing",
+				"strategy": "fallback_chain",
+				"primary_model": "claude-opus",
+				"fallback_models": "claude-sonnet,claude-haiku",
+				"budget_limit": 0,
+				"ab_split_percent": 50,
+				"complexity_threshold": 50
+			},
+			"ab_test": {
+				"title": "A/B test routing",
+				"strategy": "ab_test",
+				"primary_model": "claude-sonnet",
+				"fallback_models": "gpt-5-mini",
+				"budget_limit": 0,
+				"ab_split_percent": 50,
+				"complexity_threshold": 50
+			}
+		}
+	},
+	"fields": {
+		"router.strategy": {
+			"type": "string",
+			"title": "Routing strategy",
+			"description": "The routing strategy to use for model selection",
+			"default": "complexity",
+			"enum": [
+				["complexity", "Complexity-based"],
+				["cost_aware", "Cost-aware"],
+				["latency", "Latency-optimized"],
+				["fallback_chain", "Fallback chain"],
+				["ab_test", "A/B test"]
+			]
+		},
+		"router.primary_model": {
+			"type": "string",
+			"title": "Primary model",
+			"description": "The primary model to route to (e.g. claude-sonnet, gpt-5, gemini-pro)",
+			"default": "claude-sonnet"
+		},
+		"router.fallback_models": {
+			"type": "string",
+			"title": "Fallback models",
+			"description": "Comma-separated list of fallback models (e.g. claude-haiku,gpt-5-nano)",
+			"default": ""
+		},
+		"router.budget_limit": {
+			"type": "number",
+			"title": "Budget limit ($)",
+			"description": "Maximum cumulative cost before switching to cheaper models (0 = unlimited)",
+			"default": 0
+		},
+		"router.ab_split_percent": {
+			"type": "number",
+			"title": "A/B split percentage",
+			"description": "Percentage of traffic routed to group A (primary model). Remainder goes to group B (first fallback).",
+			"default": 50,
+			"minimum": 0,
+			"maximum": 100
+		},
+		"router.complexity_threshold": {
+			"type": "number",
+			"title": "Complexity threshold",
+			"description": "Score threshold above which queries are considered complex and routed to powerful models",
+			"default": 50,
+			"minimum": 1
+		},
+		"router.profile": {
+			"title": "Profile",
+			"description": "Routing profile",
+			"type": "string",
+			"default": "complexity",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Model Router",
+			"properties": [
+				"router.profile",
+				"router.strategy",
+				"router.primary_model",
+				"router.fallback_models",
+				"router.budget_limit",
+				"router.ab_split_percent",
+				"router.complexity_threshold"
+			]
+		}
+	]
+}
