@@ -48,7 +48,7 @@ class CobaltEvaluator:
     """Evaluate LLM outputs using Cobalt AI's testing framework.
 
     Provides three evaluation strategies:
-      - semantic similarity (TF-IDF cosine similarity)
+      - semantic similarity (Jaccard similarity fallback when cobalt-ai not installed)
       - LLM-as-judge (GPT-4 / Claude scoring with criteria)
       - custom function (arbitrary Python callable returning a score)
     """
@@ -84,7 +84,7 @@ class CobaltEvaluator:
     # ------------------------------------------------------------------
 
     def evaluate_semantic(self, output: str, expected: str, threshold: Optional[float] = None) -> Dict[str, Any]:
-        """Evaluate output against expected text using TF-IDF cosine similarity.
+        """Evaluate output against expected text using semantic similarity.
 
         Args:
             output: The LLM-generated output text.
@@ -203,7 +203,7 @@ class CobaltEvaluator:
         if eval_type == 'llm_judge':
             return self.evaluate_llm_judge(output, expected)
         elif eval_type == 'custom':
-            return self.evaluate_custom(output, expected)
+            return self.evaluate_custom(output, expected, eval_fn=self._custom_fn)
         else:
             return self.evaluate_semantic(output, expected)
 
@@ -236,7 +236,8 @@ class CobaltEvaluator:
     def _fallback_semantic(output: str, expected: str, threshold: float) -> Dict[str, Any]:
         """Compute a basic Jaccard similarity fallback when cobalt-ai is not available.
 
-        Uses sklearn-style TF-IDF vectorization for a lightweight comparison.
+        Tokenizes both strings into word sets and computes the Jaccard index
+        (intersection over union) for a lightweight comparison.
 
         Args:
             output: The LLM-generated output text.

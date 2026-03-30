@@ -69,6 +69,7 @@ class IInstance(IInstanceBase):
 
         # Extract text from the answer
         output_text = ''
+        json_data = None
         if answer.isJson():
             import json
 
@@ -77,10 +78,22 @@ class IInstance(IInstanceBase):
         else:
             output_text = answer.getText() or ''
 
-        # Expected text is empty by default — the evaluator uses its
-        # configured threshold for pass/fail in similarity mode, and
-        # criteria for LLM-judge mode
+        # Try to extract expected text from answer metadata or context.
+        # For LLM judge mode, expected can remain empty (judge evaluates
+        # standalone quality). For similarity mode, a missing expected
+        # value will produce a zero score.
         expected = ''
+        if hasattr(answer, 'expected'):
+            expected = answer.expected or ''
+        elif hasattr(answer, 'metadata') and isinstance(getattr(answer, 'metadata', None), dict):
+            expected = answer.metadata.get('expected', '')
+        elif hasattr(answer, 'context') and isinstance(getattr(answer, 'context', None), str):
+            expected = answer.context
+        elif isinstance(json_data, dict):
+            expected = json_data.get('expected', '') or json_data.get('context', '')
+
+        if not expected and evaluator._eval_type == 'similarity':
+            debug('Cobalt evaluator: no expected text found for similarity mode; score will be 0')
 
         result = evaluator.evaluate(output_text, expected)
 
