@@ -101,25 +101,25 @@
 			"openai-5-4": {
 				"title": "GPT-5.4",
 				"model": "gpt-5.4",
-				"modelTotalTokens": 1048576,
+				"modelTotalTokens": 1050000,
 				"apikey": ""
 			},
 			"openai-5-4-pro": {
 				"title": "GPT-5.4 Pro",
 				"model": "gpt-5.4-pro",
-				"modelTotalTokens": 1048576,
+				"modelTotalTokens": 1050000,
 				"apikey": ""
 			},
 			"openai-5-4-mini": {
 				"title": "GPT-5.4-mini",
 				"model": "gpt-5.4-mini",
-				"modelTotalTokens": 1048576,
+				"modelTotalTokens": 400000,
 				"apikey": ""
 			},
 			"openai-5-4-nano": {
 				"title": "GPT-5.4-nano",
 				"model": "gpt-5.4-nano",
-				"modelTotalTokens": 1048576,
+				"modelTotalTokens": 400000,
 				"apikey": ""
 			},
 			"openai-4o": {
@@ -190,153 +190,103 @@
 
 		"openai.openai-5-4": {
 			"object": "openai-5-4",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"openai.openai-5-4-pro": {
 			"object": "openai-5-4-pro",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"openai.openai-5-4-mini": {
 			"object": "openai-5-4-mini",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"openai.openai-5-4-nano": {
 			"object": "openai-5-4-nano",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"openai.openai-4o": {
 			"object": "openai-4o",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"openai.openai-4o-mini": {
 			"object": "openai-4o-mini",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"openai.openai-5": {
 			"object": "openai-5",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"openai.openai-5-1": {
 			"object": "openai-5-1",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"openai.openai-5-2": {
 			"object": "openai-5-2",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"openai.openai-5-mini": {
 			"object": "openai-5-mini",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"openai.openai-5-nano": {
 			"object": "openai-5-nano",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"openai.profile": {
 			"title": "Model",
 			"description": "LLM model",
 			"type": "string",
 			"default": "openai-5-4",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": [
-						"openai.custom"
-					]
+					"properties": ["openai.custom"]
 				},
 				{
 					"value": "openai-5-4",
-					"properties": [
-						"openai.openai-5-4"
-					]
+					"properties": ["openai.openai-5-4"]
 				},
 				{
 					"value": "openai-5-4-pro",
-					"properties": [
-						"openai.openai-5-4-pro"
-					]
+					"properties": ["openai.openai-5-4-pro"]
 				},
 				{
 					"value": "openai-5-4-mini",
-					"properties": [
-						"openai.openai-5-4-mini"
-					]
+					"properties": ["openai.openai-5-4-mini"]
 				},
 				{
 					"value": "openai-5-4-nano",
-					"properties": [
-						"openai.openai-5-4-nano"
-					]
+					"properties": ["openai.openai-5-4-nano"]
 				},
 				{
 					"value": "openai-4o",
-					"properties": [
-						"openai.openai-4o"
-					]
+					"properties": ["openai.openai-4o"]
 				},
 				{
 					"value": "openai-4o-mini",
-					"properties": [
-						"openai.openai-4o-mini"
-					]
+					"properties": ["openai.openai-4o-mini"]
 				},
 				{
 					"value": "openai-5",
-					"properties": [
-						"openai.openai-5"
-					]
+					"properties": ["openai.openai-5"]
 				},
 				{
 					"value": "openai-5-1",
-					"properties": [
-						"openai.openai-5-1"
-					]
+					"properties": ["openai.openai-5-1"]
 				},
 				{
 					"value": "openai-5-2",
-					"properties": [
-						"openai.openai-5-2"
-					]
+					"properties": ["openai.openai-5-2"]
 				},
 				{
 					"value": "openai-5-mini",
-					"properties": [
-						"openai.openai-5-mini"
-					]
+					"properties": ["openai.openai-5-mini"]
 				},
 				{
 					"value": "openai-5-nano",
-					"properties": [
-						"openai.openai-5-nano"
-					]
+					"properties": ["openai.openai-5-nano"]
 				}
-			]
-		}
 			]
 		}
 	},
