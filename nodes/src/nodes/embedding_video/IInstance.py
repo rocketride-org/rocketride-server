@@ -110,7 +110,8 @@ class IInstance(IInstanceBase):
 
         # Write video bytes to a temporary file for OpenCV to read.
         # OpenCV's VideoCapture requires a file path or device index.
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix='.mp4')
+        suffix = SUPPORTED_VIDEO_TYPES.get(self._mime_type, '.mp4')
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix)
         try:
             with os.fdopen(tmp_fd, 'wb') as f:
                 f.write(video_bytes)
