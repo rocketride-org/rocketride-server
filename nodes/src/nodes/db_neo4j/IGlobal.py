@@ -60,6 +60,8 @@ class IGlobal(IGlobalBase):
     # label: str = 'Row'
     db_description: str = ''
     max_validation_attempts: int = 5
+    enable_run_cypher: bool = False
+    allow_destructive: bool = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -79,6 +81,9 @@ class IGlobal(IGlobalBase):
             self.max_validation_attempts = int(config.get('max_attempts', 5))
         except (ValueError, TypeError):
             self.max_validation_attempts = 5
+
+        self.enable_run_cypher = bool(config.get('enableRunCypher', False))
+        self.allow_destructive = bool(config.get('allowDestructive', False))
 
         auth = self._build_auth(config)
 

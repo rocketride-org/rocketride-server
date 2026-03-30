@@ -37,7 +37,13 @@ from typing import Any, Dict, List
 
 from ai.common.tools import ToolsBase
 
-from .utils import _is_cypher_safe, _parse_is_valid, _strip_ns, _validate_identifier
+from .utils import (
+    _is_cypher_safe,
+    _is_destructive_cypher,
+    _parse_is_valid,
+    _strip_ns,
+    _validate_identifier,
+)
 
 
 class Neo4JDriver(ToolsBase):
@@ -335,6 +341,14 @@ class Neo4JDriver(ToolsBase):
             cypher = input_obj.get('cypher')
             if not cypher or not isinstance(cypher, str) or not cypher.strip():
                 raise ValueError('"cypher" is required and must be a non-empty string')
+
+            # Gate: enableRunCypher must be explicitly true.
+            if not self._instance.IGlobal.enable_run_cypher:
+                raise ValueError('run_cypher is disabled — set enableRunCypher to true in the Neo4J node configuration to allow raw Cypher execution')
+
+            # Gate: destructive queries require allowDestructive as well.
+            if _is_destructive_cypher(cypher) and not self._instance.IGlobal.allow_destructive:
+                raise ValueError('Destructive Cypher operations (DELETE, DROP, REMOVE, SET) are blocked — set allowDestructive to true in the Neo4J node configuration to permit them')
 
         else:
             raise ValueError(f'Unknown tool {tool_name!r}')

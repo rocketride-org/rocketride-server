@@ -221,6 +221,18 @@
 			"maximum": 20,
 			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query"
 		},
+		"neo4jdb.enableRunCypher": {
+			"type": "boolean",
+			"title": "Enable raw Cypher execution",
+			"default": false,
+			"description": "When enabled, allows the LLM agent to execute arbitrary Cypher queries via the run_cypher tool. When disabled (default), only structured create_node and create_relationship tools are available for writes."
+		},
+		"neo4jdb.allowDestructive": {
+			"type": "boolean",
+			"title": "Allow destructive queries",
+			"default": false,
+			"description": "When enabled (requires enableRunCypher), allows destructive Cypher operations such as DELETE, DETACH DELETE, DROP, REMOVE, and SET in run_cypher. Both toggles must be true to permit destructive writes."
+		},
 		"neo4jdb.default": {
 			"object": "default",
 			"properties": [
@@ -229,7 +241,9 @@
 				"neo4jdb.auth_method",
 				"neo4jdb.database",
 				// "neo4jdb.label",
-				"neo4jdb.max_attempts"
+				"neo4jdb.max_attempts",
+				"neo4jdb.enableRunCypher",
+				"neo4jdb.allowDestructive"
 			]
 		},
 		"neo4jdb.profile": {

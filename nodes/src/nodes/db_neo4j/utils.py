@@ -55,6 +55,29 @@ def _parse_is_valid(value: object) -> bool:
     return str(value).lower() == 'true'
 
 
+_DESTRUCTIVE_CYPHER = re.compile(
+    r'\b(?:DELETE|DETACH\s+DELETE|DROP|REMOVE|SET)\b',
+    re.IGNORECASE,
+)
+
+
+def _is_destructive_cypher(cypher: str) -> bool:
+    """Return True when the Cypher statement contains destructive operations.
+
+    Checks for DELETE, DETACH DELETE, DROP, REMOVE, and SET keywords after
+    stripping comments.
+
+    Args:
+        cypher (str): The Cypher statement to inspect.
+
+    Returns:
+        bool: ``True`` if the statement contains destructive clauses.
+    """
+    stripped = re.sub(r'//[^\n]*', '', cypher)
+    stripped = re.sub(r'/\*.*?\*/', '', stripped, flags=re.DOTALL)
+    return bool(_DESTRUCTIVE_CYPHER.search(stripped))
+
+
 def _is_cypher_safe(cypher: str) -> bool:
     """Return True when the Cypher statement is read-only (MATCH/RETURN/CALL schema only).
 
