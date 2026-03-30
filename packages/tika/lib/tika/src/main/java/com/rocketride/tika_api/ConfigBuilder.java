@@ -431,6 +431,7 @@ public class ConfigBuilder {
 			languages = getParam(doc, lang, "languages", "string");
 		
 		removeParser(doc, "org.apache.tika.parser.ocr.TesseractOCRParser"); // Explicitely removed it, otherwise it will throw error
+		removeParser(doc, "org.apache.tika.parser.external.CompositeExternalParser"); // Avoid startup probes for optional tools like sox on clean installs
 
 		// Output the xml
 		logger.debug(xmlToString(doc, 4));
