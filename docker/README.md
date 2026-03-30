@@ -8,6 +8,9 @@
 ## Quick Start
 
 ```bash
+# Change into the docker directory
+cd docker
+
 # Copy the environment template and adjust if needed
 cp .env.example .env
 
