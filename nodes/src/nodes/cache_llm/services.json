@@ -1,0 +1,284 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "LLM Cache",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "cache_llm://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"cache"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most nodes
+	//
+	"path": "nodes.cache_llm",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "LLM Cache",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": [
+		"A caching component for LLM responses that reduces API costs and latency by ",
+		"storing and reusing previous LLM responses. Supports Redis for production ",
+		"deployments and an in-memory backend for local development and testing. ",
+		"Cache keys are generated from the query text, model, temperature, and system ",
+		"prompt using SHA256 hashing. Configurable TTL, max size (memory backend), ",
+		"and automatic eviction policies ensure efficient resource usage."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "cache.svg",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": [
+		"Backend: ${parameters.cache_llm.${profile}.backend}",
+		"TTL: ${parameters.cache_llm.${profile}.ttl}s"
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": [
+			"questions",
+			"answers"
+		]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"description": "Receives questions, checks the cache, and either returns a cached answer or passes the question through to the downstream LLM.",
+			"output": [
+				{
+					"lane": "questions",
+					"description": [
+						"Passes questions through to the downstream LLM node ",
+						"when no cached response is available."
+					],
+					"output": []
+				},
+				{
+					"lane": "answers",
+					"description": [
+						"Returns cached answers directly when a cache hit occurs, ",
+						"or forwards answers from the downstream LLM after caching them."
+					],
+					"output": []
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "memory",
+		"profiles": {
+			"redis": {
+				"title": "Redis Cache",
+				"backend": "redis",
+				"host": "localhost",
+				"port": "6379",
+				"password": "",
+				"db": "0",
+				"ttl": "3600",
+				"max_size": "1000"
+			},
+			"memory": {
+				"title": "In-Memory Cache",
+				"backend": "memory",
+				"ttl": "3600",
+				"max_size": "1000"
+			},
+			"custom": {
+				"title": "Custom Configuration",
+				"backend": "memory",
+				"host": "",
+				"port": "6379",
+				"password": "",
+				"db": "0",
+				"ttl": "3600",
+				"max_size": "1000"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"cache.backend": {
+			"type": "string",
+			"title": "Backend",
+			"description": "Cache backend type (redis or memory)"
+		},
+		"cache.host": {
+			"type": "string",
+			"title": "Host",
+			"description": "Redis host address",
+			"default": "localhost"
+		},
+		"cache.port": {
+			"type": "string",
+			"title": "Port",
+			"description": "Redis port",
+			"default": "6379"
+		},
+		"cache.password": {
+			"type": "string",
+			"title": "Password",
+			"description": "Redis password (optional)"
+		},
+		"cache.db": {
+			"type": "string",
+			"title": "Database",
+			"description": "Redis database number",
+			"default": "0"
+		},
+		"cache.ttl": {
+			"type": "string",
+			"title": "TTL (seconds)",
+			"description": "Cache entry time-to-live in seconds",
+			"default": "3600"
+		},
+		"cache.max_size": {
+			"type": "string",
+			"title": "Max Size",
+			"description": "Maximum number of cached entries (memory backend only)",
+			"default": "1000"
+		},
+		"cache_llm.redis": {
+			"object": "redis",
+			"properties": [
+				"cache.host",
+				"cache.port",
+				"cache.password",
+				"cache.db",
+				"cache.ttl"
+			]
+		},
+		"cache_llm.memory": {
+			"object": "memory",
+			"properties": [
+				"cache.ttl",
+				"cache.max_size"
+			]
+		},
+		"cache_llm.custom": {
+			"object": "custom",
+			"properties": [
+				"cache.backend",
+				"cache.host",
+				"cache.port",
+				"cache.password",
+				"cache.db",
+				"cache.ttl",
+				"cache.max_size"
+			]
+		},
+		"cache_llm.profile": {
+			"title": "Cache Backend",
+			"description": "Select cache backend",
+			"type": "string",
+			"default": "memory",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "redis",
+					"properties": [
+						"cache_llm.redis"
+					]
+				},
+				{
+					"value": "memory",
+					"properties": [
+						"cache_llm.memory"
+					]
+				},
+				{
+					"value": "custom",
+					"properties": [
+						"cache_llm.custom"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "LLM Cache",
+			"properties": [
+				"cache_llm.profile"
+			]
+		}
+	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["memory"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "Cache miss then hit",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
+}
