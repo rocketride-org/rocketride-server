@@ -29,21 +29,22 @@ mock_depends = ModuleType('depends')
 mock_depends.depends = MagicMock()
 sys.modules['depends'] = mock_depends
 
-# Mock fastapi module with submodule structure
-mock_fastapi = MagicMock()
-mock_fastapi.FastAPI = MagicMock()
-mock_fastapi.Request = MagicMock()
-mock_fastapi.Body = MagicMock()
-mock_fastapi.Header = MagicMock()
-mock_fastapi.Query = MagicMock()
-mock_fastapi.UploadFile = MagicMock()
-mock_fastapi.File = MagicMock()
 
-mock_fastapi_middleware = MagicMock()
-mock_fastapi_middleware.cors = MagicMock()
-mock_fastapi_middleware.cors.CORSMiddleware = MagicMock()
-mock_fastapi.middleware = mock_fastapi_middleware
+# Mock fastapi module with recursive submodule structure
+class MockFastAPIModule:
+    """Mock module that creates sub-modules on demand to handle any fastapi import."""
 
-sys.modules['fastapi'] = mock_fastapi
-sys.modules['fastapi.middleware'] = mock_fastapi_middleware
-sys.modules['fastapi.middleware.cors'] = mock_fastapi_middleware.cors
+    def __init__(self, name):
+        self._name = name
+
+    def __getattr__(self, name):
+        full_name = f'{self._name}.{name}' if self._name else name
+        submodule = MockFastAPIModule(full_name)
+        sys.modules[full_name] = submodule
+        return submodule
+
+    def __call__(self, *args, **kwargs):
+        return MagicMock()
+
+
+sys.modules['fastapi'] = MockFastAPIModule('fastapi')
