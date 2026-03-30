@@ -52,12 +52,6 @@ class IGlobal(IGlobalBase):
     provides the shared OpenAI client for all instances.
     """
 
-    _client = None
-    _model: str = 'tts-1'
-    _voice: str = 'alloy'
-    _speed: float = 1.0
-    _response_format: str = 'mp3'
-
     def validateConfig(self):
         """Validate the configuration for the OpenAI TTS node."""
         try:
@@ -136,6 +130,13 @@ class IGlobal(IGlobalBase):
         Reads configuration values, validates parameters, and creates
         the shared OpenAI client for TTS operations.
         """
+        # Initialize instance state (avoid class-level mutable defaults)
+        self._client = None
+        self._model = 'tts-1'
+        self._voice = 'alloy'
+        self._speed = 1.0
+        self._response_format = 'mp3'
+
         # Are we in config mode?
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
