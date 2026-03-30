@@ -74,4 +74,3 @@ class McpDriver(ToolsBase):
             raise ValueError('Tool input must be a JSON object (dict)')
 
         return self._call_tool(server_name, bare_tool, arguments)
-

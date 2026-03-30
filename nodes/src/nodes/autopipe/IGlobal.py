@@ -168,7 +168,6 @@ class IGlobal(IGlobalBase):
                 providerStore, configStore = Config.getMultiProviderConfig('store', autopipeConfig)
                 pushLocal(getFilter('vector_1', providerStore, configStore))
 
-
             pass
 
         # Now, add all the filters we figured out

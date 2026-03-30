@@ -21,6 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
+
 def is_permission_scan_enabled(service_config: dict) -> bool:
     """
     Check if the permissions are enabled for the endpoint.

@@ -357,4 +357,3 @@ def _match_jsonrpc_id(msg: dict, *, req_id: int) -> Any | None:  # noqa: ANN401
         message = msg['error'].get('message')
         raise McpProtocolError(f'MCP error (id={req_id}) code={code} message={message}')
     return msg.get('result')
-

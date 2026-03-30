@@ -48,4 +48,3 @@ class IInstance(IInstanceBase):
         if driver is None:
             raise RuntimeError('mcp_client: driver not initialized')
         return driver.handle_invoke(param)
-

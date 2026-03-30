@@ -46,6 +46,7 @@ from .executor import execute_wave, resolve_answer_refs
 # Can be overridden via the ``max_waves`` node configuration field.
 _DEFAULT_MAX_WAVES = 10
 
+
 class RocketRideDriver(AgentBase):
     """
     RocketRide Wave framework driver.

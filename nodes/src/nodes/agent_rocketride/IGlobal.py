@@ -42,6 +42,7 @@ class IGlobal(IGlobalBase):
         config handling is needed here.
         """
         from .rocketride_agent import RocketRideDriver
+
         self.agent = RocketRideDriver(self)
 
     def endGlobal(self) -> None:

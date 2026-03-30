@@ -40,8 +40,14 @@ from ai.common.tools import ToolsBase
 MAX_DATA_ROWS = 200
 
 VALID_CHART_TYPES = [
-    'bar', 'line', 'pie', 'doughnut', 'radar',
-    'polarArea', 'scatter', 'bubble',
+    'bar',
+    'line',
+    'pie',
+    'doughnut',
+    'radar',
+    'polarArea',
+    'scatter',
+    'bubble',
 ]
 
 INPUT_SCHEMA: Dict[str, Any] = {
@@ -52,10 +58,7 @@ INPUT_SCHEMA: Dict[str, Any] = {
             # Accept both array and object forms — LLMs may produce either.
             # chart_type is optional; the renderer defaults to Bar when omitted or unknown.
             'oneOf': [{'type': 'array'}, {'type': 'object'}],
-            'description': (
-                'The raw data to chart. Can be an array of objects, '
-                'key-value pairs, or any structured data.'
-            ),
+            'description': ('The raw data to chart. Can be an array of objects, key-value pairs, or any structured data.'),
         },
         'chart_type': {
             'type': 'string',
@@ -134,16 +137,11 @@ class ChartjsDriver(ToolsBase):
 
         chart_type = input_obj.get('chart_type')
         if chart_type and chart_type not in VALID_CHART_TYPES:
-            raise ValueError(
-                f'"chart_type" must be one of {VALID_CHART_TYPES}; got {chart_type!r}'
-            )
+            raise ValueError(f'"chart_type" must be one of {VALID_CHART_TYPES}; got {chart_type!r}')
 
     def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:  # noqa: ANN401
         if self._llm_invoke is None:
-            raise RuntimeError(
-                'Chart generator requires an LLM node connected to the pipeline. '
-                'No LLM invoker was bound.'
-            )
+            raise RuntimeError('Chart generator requires an LLM node connected to the pipeline. No LLM invoker was bound.')
 
         self._tool_validate(tool_name=tool_name, input_obj=input_obj)
 
@@ -159,20 +157,17 @@ class ChartjsDriver(ToolsBase):
 
         q.addInstruction(
             'Output format',
-            'Produce ONLY a valid Chart.js v4 JSON configuration object. '
-            'No markdown fences, no explanation — just the raw JSON object.',
+            'Produce ONLY a valid Chart.js v4 JSON configuration object. No markdown fences, no explanation — just the raw JSON object.',
         )
 
         q.addInstruction(
             'Required fields',
-            'The JSON must include "type", "data" (with "labels" and "datasets"), and "options". '
-            'Set responsive to true and maintainAspectRatio to true in options.',
+            'The JSON must include "type", "data" (with "labels" and "datasets"), and "options". Set responsive to true and maintainAspectRatio to true in options.',
         )
 
         q.addInstruction(
             'Styling',
-            'Use readable colors with good contrast. '
-            'Include a legend if there are multiple datasets.',
+            'Use readable colors with good contrast. Include a legend if there are multiple datasets.',
         )
 
         q.addInstruction(
@@ -193,14 +188,11 @@ class ChartjsDriver(ToolsBase):
             q.addContext(f'Description: {description}')
 
         q.addGoal(
-            'Generate a Chart.js v4 configuration for the provided data'
-            + (f' as a {chart_type} chart' if chart_type else '')
-            + '.',
+            'Generate a Chart.js v4 configuration for the provided data' + (f' as a {chart_type} chart' if chart_type else '') + '.',
         )
 
         q.addQuestion(
-            'Generate the Chart.js configuration JSON for the data above.'
-            if not description else description,
+            'Generate the Chart.js configuration JSON for the data above.' if not description else description,
         )
 
         response_text = self._llm_invoke(q)

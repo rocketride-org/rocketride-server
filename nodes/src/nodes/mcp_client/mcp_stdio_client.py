@@ -256,4 +256,3 @@ class McpStdioClient:
                 message = msg['error'].get('message')
                 raise McpProtocolError(f'MCP error (id={req_id}) code={code} message={message}')
             return msg.get('result')
-

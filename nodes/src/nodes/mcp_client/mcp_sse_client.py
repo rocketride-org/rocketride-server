@@ -89,7 +89,7 @@ class McpSseClient:
 
         self._reader_thread: threading.Thread | None = None
         self._stop = threading.Event()
-        self._incoming: "queue.Queue[dict]" = queue.Queue()
+        self._incoming: 'queue.Queue[dict]' = queue.Queue()
         self._endpoint_url: str | None = None
         self._resp = None
 
@@ -313,11 +313,7 @@ class McpSseClient:
             # Validate the resolved URL stays on the same origin to prevent
             # auth-token theft via malicious absolute-URL redirects.
             if self._origin(resolved) != base:
-                raise McpProtocolError(
-                    f'MCP endpoint redirect rejected: '
-                    f'resolved origin {self._origin(resolved)!r} '
-                    f'does not match SSE origin {base!r}'
-                )
+                raise McpProtocolError(f'MCP endpoint redirect rejected: resolved origin {self._origin(resolved)!r} does not match SSE origin {base!r}')
             self._endpoint_url = resolved
             return
 
@@ -352,4 +348,3 @@ class McpSseClient:
         elif scheme == 'http' and netloc.endswith(':80'):
             netloc = netloc[:-3]
         return f'{scheme}://{netloc}'
-
