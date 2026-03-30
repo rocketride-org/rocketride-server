@@ -1,0 +1,98 @@
+{
+	"title": "Bland AI",
+	"protocol": "tool_bland_ai://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_bland_ai",
+	"prefix": "bland",
+	"icon": "phone.svg",
+	"description": [
+		"Make and manage AI-powered phone calls via Bland AI.",
+		"The agent can initiate outbound calls, retrieve call transcripts, and analyze completed calls.",
+		"Requires a Bland AI API key from https://www.bland.ai"
+	],
+	"tile": ["Tool: ${parameters.bland_ai.serverName}.bland_ai"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default",
+				"serverName": "bland"
+			}
+		}
+	},
+	"fields": {
+		"bland_ai.serverName": {
+			"hidden": true,
+			"type": "string",
+			"title": "Server name",
+			"description": "Namespace prefix for the tools: <serverName>.make_call, <serverName>.get_call, <serverName>.analyze_call",
+			"default": "bland"
+		},
+		"bland_ai.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Bland AI API key (org_xxx). Get one at https://www.bland.ai",
+			"default": ""
+		},
+		"bland_ai.voice": {
+			"type": "string",
+			"title": "Default Voice",
+			"description": "Default AI voice for calls",
+			"default": "June",
+			"enum": [
+				["June", "June (warm, female)"],
+				["Josh", "Josh (friendly, male)"],
+				["Nat", "Nat (calm, female)"],
+				["Paige", "Paige (gentle, female)"],
+				["Derek", "Derek (professional, male)"],
+				["Florian", "Florian (warm, male)"]
+			]
+		},
+		"bland_ai.maxDuration": {
+			"type": "number",
+			"title": "Max Call Duration (minutes)",
+			"description": "Maximum call length in minutes",
+			"default": 5
+		},
+		"bland_ai.record": {
+			"type": "boolean",
+			"title": "Record Calls",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"bland_ai.language": {
+			"type": "string",
+			"title": "Language",
+			"default": "en",
+			"enum": [
+				["en", "English"],
+				["es", "Spanish"],
+				["fr", "French"],
+				["de", "German"],
+				["zh", "Chinese"],
+				["ja", "Japanese"]
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Bland AI Voice Agent",
+			"properties": [
+				"type",
+				"bland_ai.apikey",
+				"bland_ai.voice",
+				"bland_ai.maxDuration",
+				"bland_ai.record",
+				"bland_ai.language"
+			]
+		}
+	]
+}
