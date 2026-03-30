@@ -13,12 +13,18 @@ if str(src_path) not in sys.path:
 from unittest.mock import MagicMock
 
 
+class MockIJson(dict):
+    """Mock IJson class that supports isinstance checks and dict methods."""
+
+    pass
+
+
 # Mock rocketlib module
 mock_rocketlib = MagicMock()
 mock_rocketlib.debug = MagicMock()
 mock_rocketlib.warning = MagicMock()
 mock_rocketlib.getServiceDefinition = MagicMock()
-mock_rocketlib.IJson = MagicMock()
+mock_rocketlib.IJson = MockIJson
 sys.modules['rocketlib'] = mock_rocketlib
 
 # Mock depends module

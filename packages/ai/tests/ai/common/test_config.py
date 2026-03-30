@@ -2,7 +2,8 @@
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from typing import Any, Dict, Optional
+from unittest.mock import MagicMock
 
 
 # Ensure src is in path
@@ -11,11 +12,17 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 
+class MockIJson(dict):
+    """Mock IJson class that supports isinstance checks and dict methods."""
+
+    pass
+
+
 # Mock external dependencies BEFORE importing ai modules
 mock_rocketlib = MagicMock()
 mock_rocketlib.getServiceDefinition = MagicMock()
 mock_rocketlib.warning = MagicMock()
-mock_rocketlib.IJson = MagicMock()
+mock_rocketlib.IJson = MockIJson
 sys.modules['rocketlib'] = mock_rocketlib
 sys.modules['depends'] = MagicMock()
 sys.modules['json5'] = MagicMock()
@@ -27,7 +34,7 @@ from ai.common.config import Config
 class TestGetNodeConfigDeprecatedProfiles:
     """Test cases for deprecated profile warning functionality."""
 
-    def _make_service_with_profile(self, profile_name, profile_config, default_profile=None):
+    def _make_service_with_profile(self, profile_name: str, profile_config: Dict[str, Any], default_profile: Optional[str] = None) -> Dict[str, Any]:
         """Helper to create a mock service definition."""
         return {'preconfig': {'default': default_profile or profile_name, 'profiles': {profile_name: profile_config}}}
 
