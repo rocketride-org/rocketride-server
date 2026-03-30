@@ -1,0 +1,266 @@
+# -- Global configuration
+global:
+  # -- List of image pull secrets for private registries
+  imagePullSecrets: []
+  # -- Override default storage class for all PVCs
+  storageClass: ""
+
+# -- Engine (core RocketRide data processing server)
+engine:
+  # -- Number of engine replicas (ignored if autoscaling.enabled is true)
+  replicaCount: 2
+
+  image:
+    # -- Engine container image repository
+    repository: ghcr.io/rocketride-org/rocketride-engine
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+    # -- Engine image tag (defaults to Chart appVersion)
+    tag: ""
+
+  # -- Service account configuration for the engine pods
+  serviceAccount:
+    # -- Create a dedicated service account
+    create: true
+    # -- Service account name (auto-generated if empty)
+    name: ""
+    # -- Annotations for the service account (e.g. IAM role bindings)
+    annotations: {}
+
+  service:
+    # -- Kubernetes service type
+    type: ClusterIP
+    # -- Service port for the engine API
+    port: 5565
+    # -- Target port on the container
+    targetPort: 5565
+
+  # -- Resource requests and limits for engine pods
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+  # -- Readiness probe configuration
+  readinessProbe:
+    httpGet:
+      path: /ping
+      port: 5565
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+
+  # -- Liveness probe configuration
+  livenessProbe:
+    httpGet:
+      path: /ping
+      port: 5565
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+
+  # -- Startup probe configuration (allows longer initial startup)
+  startupProbe:
+    httpGet:
+      path: /ping
+      port: 5565
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 30
+
+  # -- Horizontal Pod Autoscaler configuration
+  autoscaling:
+    # -- Enable HPA for the engine deployment
+    enabled: false
+    # -- Minimum number of replicas
+    minReplicas: 2
+    # -- Maximum number of replicas
+    maxReplicas: 10
+    # -- Target CPU utilization percentage
+    targetCPUUtilizationPercentage: 70
+    # -- Target memory utilization percentage
+    targetMemoryUtilizationPercentage: 80
+
+  # -- Extra environment variables for engine pods (key-value pairs added to ConfigMap)
+  env:
+    # -- Log level (debug, info, warn, error)
+    LOG_LEVEL: "info"
+    # -- Number of worker threads
+    WORKER_THREADS: "4"
+
+  # -- Name of an existing Secret to use instead of creating one
+  # If set, the chart will not create a Secret resource
+  existingSecret: ""
+
+  # -- Secret values (only used when existingSecret is empty)
+  # These will be base64-encoded and stored in a Kubernetes Secret
+  secrets: {}
+    # OPENAI_API_KEY: ""
+    # ANTHROPIC_API_KEY: ""
+    # HUGGINGFACE_TOKEN: ""
+
+  # -- Additional volume mounts for the engine container
+  volumeMounts: []
+
+  # -- Additional volumes for the engine pod
+  volumes: []
+
+  # -- Node selector for engine pods
+  nodeSelector: {}
+
+  # -- Tolerations for engine pods
+  tolerations: []
+
+  # -- Affinity rules for engine pods
+  affinity: {}
+
+  # -- Pod-level annotations
+  podAnnotations: {}
+
+  # -- Pod-level security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+  # -- Container-level security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+
+# -- Ingress configuration
+ingress:
+  # -- Enable ingress resource
+  enabled: false
+  # -- Ingress class name (e.g. nginx, traefik)
+  className: ""
+  # -- Ingress annotations
+  annotations: {}
+    # kubernetes.io/tls-acme: "true"
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  # -- Ingress host rules
+  hosts:
+    - host: rocketride.local
+      paths:
+        - path: /
+          pathType: Prefix
+  # -- TLS configuration
+  tls: []
+  #  - secretName: rocketride-tls
+  #    hosts:
+  #      - rocketride.local
+
+# -- PostgreSQL with pgvector extension
+postgres:
+  # -- Enable PostgreSQL deployment
+  enabled: true
+
+  image:
+    # -- PostgreSQL + pgvector image repository
+    repository: ankane/pgvector
+    # -- Image tag (pinned version)
+    tag: "v0.8.0"
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+
+  # -- Persistent volume claim size for PostgreSQL data
+  storage: 10Gi
+
+  # -- Name of an existing Secret containing postgres credentials
+  # Must contain keys: POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+  existingSecret: ""
+
+  # -- PostgreSQL credentials (only used when existingSecret is empty)
+  auth:
+    username: rocketride
+    password: rocketride
+    database: rocketride
+
+  # -- Resource requests and limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  # -- Service port
+  service:
+    port: 5432
+
+# -- Milvus vector database
+milvus:
+  # -- Enable Milvus deployment
+  enabled: false
+
+  image:
+    # -- Milvus image repository
+    repository: milvusdb/milvus
+    # -- Image tag (pinned version)
+    tag: "v2.4.17"
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+
+  # -- Persistent volume claim size for Milvus data
+  storage: 10Gi
+
+  # -- Milvus etcd dependency
+  etcd:
+    image:
+      repository: quay.io/coreos/etcd
+      tag: "v3.5.16"
+    storage: 2Gi
+
+  # -- Milvus MinIO dependency
+  minio:
+    image:
+      repository: minio/minio
+      tag: "RELEASE.2024-11-07T00-52-20Z"
+    storage: 10Gi
+    # -- MinIO credentials
+    auth:
+      rootUser: minioadmin
+      rootPassword: minioadmin
+
+# -- ChromaDB vector database
+chroma:
+  # -- Enable ChromaDB deployment
+  enabled: false
+
+  image:
+    # -- ChromaDB image repository
+    repository: chromadb/chroma
+    # -- Image tag (pinned version)
+    tag: "0.6.3"
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+
+  # -- Persistent volume claim size for ChromaDB data
+  storage: 5Gi
+
+  # -- Resource requests and limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # -- Service port
+  service:
+    port: 8000

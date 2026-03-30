@@ -1,0 +1,94 @@
+{{- if .Values.chroma.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "rocketride.fullname" . }}-chroma
+  labels:
+    {{- include "rocketride.labels" . | nindent 4 }}
+    app.kubernetes.io/component: chroma
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.chroma.service.port }}
+      targetPort: chroma
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "rocketride.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: chroma
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "rocketride.fullname" . }}-chroma-data
+  labels:
+    {{- include "rocketride.labels" . | nindent 4 }}
+    app.kubernetes.io/component: chroma
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.global.storageClass }}
+  storageClassName: {{ .Values.global.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.chroma.storage }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rocketride.fullname" . }}-chroma
+  labels:
+    {{- include "rocketride.labels" . | nindent 4 }}
+    app.kubernetes.io/component: chroma
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "rocketride.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: chroma
+  template:
+    metadata:
+      labels:
+        {{- include "rocketride.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: chroma
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: chroma
+          image: "{{ .Values.chroma.image.repository }}:{{ .Values.chroma.image.tag }}"
+          imagePullPolicy: {{ .Values.chroma.image.pullPolicy }}
+          ports:
+            - name: chroma
+              containerPort: 8000
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /api/v1/heartbeat
+              port: chroma
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/v1/heartbeat
+              port: chroma
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.chroma.resources | nindent 12 }}
+          volumeMounts:
+            - name: chroma-data
+              mountPath: /chroma/chroma
+      volumes:
+        - name: chroma-data
+          persistentVolumeClaim:
+            claimName: {{ include "rocketride.fullname" . }}-chroma-data
+{{- end }}
