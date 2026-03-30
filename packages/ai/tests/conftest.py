@@ -40,7 +40,17 @@ class MockFastAPIModule:
     def __getattr__(self, name):
         full_name = f'{self._name}.{name}' if self._name else name
         submodule = MockFastAPIModule(full_name)
+
+        # Register the submodule in sys.modules
         sys.modules[full_name] = submodule
+
+        # Also register parent modules in the chain so imports work
+        parts = full_name.split('.')
+        for i in range(1, len(parts)):
+            parent_name = '.'.join(parts[:i])
+            if parent_name not in sys.modules:
+                sys.modules[parent_name] = MockFastAPIModule(parent_name)
+
         return submodule
 
     def __iter__(self):
