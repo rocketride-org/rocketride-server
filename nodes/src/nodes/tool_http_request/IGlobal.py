@@ -32,6 +32,7 @@ is responsible for supplying the full request details.
 
 from __future__ import annotations
 
+import json as _json
 import re
 from typing import List, Set
 
@@ -65,12 +66,14 @@ class IGlobal(IGlobalBase):
         server_name = str((cfg.get('serverName') or 'http')).strip()
 
         enabled_methods, url_patterns = self._build_guardrails(cfg)
+        ssrf_allowed_private = self._build_ssrf_allowlist(cfg)
 
         try:
             self.driver = HttpDriver(
                 server_name=server_name,
                 enabled_methods=enabled_methods,
                 url_patterns=url_patterns,
+                ssrf_allowed_private=ssrf_allowed_private,
             )
         except Exception as e:
             warning(str(e))
@@ -86,10 +89,9 @@ class IGlobal(IGlobalBase):
 
         raw_whitelist = cfg.get('urlWhitelist') or []
         if not isinstance(raw_whitelist, list):
-            import json
             try:
-                raw_whitelist = json.loads(str(raw_whitelist))
-            except (json.JSONDecodeError, TypeError, ValueError):
+                raw_whitelist = _json.loads(str(raw_whitelist))
+            except (_json.JSONDecodeError, TypeError, ValueError):
                 raw_whitelist = []
         patterns: List[re.Pattern] = []
         for row in raw_whitelist:
@@ -103,6 +105,26 @@ class IGlobal(IGlobalBase):
                     warning(f'Invalid URL whitelist regex {pat_str!r}: {e}')
 
         return enabled, patterns
+
+    @staticmethod
+    def _build_ssrf_allowlist(cfg: dict) -> List[str]:
+        """Read the SSRF private-IP allowlist from the node config.
+
+        Expects ``cfg['ssrfAllowlist']`` to be a JSON array of strings
+        (CIDR notation), e.g. ``["192.168.1.0/24", "10.0.0.5/32"]``.
+        """
+        raw = cfg.get('ssrfAllowlist') or []
+        if not isinstance(raw, list):
+            try:
+                raw = _json.loads(str(raw))
+            except (_json.JSONDecodeError, TypeError, ValueError):
+                raw = []
+        result: List[str] = []
+        for entry in raw:
+            val = str(entry).strip() if entry else ''
+            if val:
+                result.append(val)
+        return result
 
     def validateConfig(self) -> None:
         try:

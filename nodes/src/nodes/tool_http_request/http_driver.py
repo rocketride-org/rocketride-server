@@ -170,12 +170,14 @@ class HttpDriver(ToolsBase):
         server_name: str,
         enabled_methods: Set[str],
         url_patterns: List[re.Pattern],
+        ssrf_allowed_private: List[str] | None = None,
     ):
         self._server_name = (server_name or '').strip() or 'http'
         self._tool_name = 'http_request'
         self._namespaced = f'{self._server_name}.{self._tool_name}'
         self._enabled_methods = enabled_methods
         self._url_patterns = url_patterns
+        self._ssrf_allowed_private = ssrf_allowed_private or []
 
     # ------------------------------------------------------------------
     # ToolsBase hooks
@@ -250,19 +252,14 @@ class HttpDriver(ToolsBase):
         if method.upper() not in VALID_METHODS:
             raise ValueError(f'method must be one of {sorted(VALID_METHODS)}; got {method!r}')
         if method.upper() not in self._enabled_methods:
-            raise ValueError(
-                f'HTTP method "{method.upper()}" is not allowed. '
-                f'Enabled methods: {", ".join(sorted(self._enabled_methods))}'
-            )
+            raise ValueError(f'HTTP method "{method.upper()}" is not allowed. Enabled methods: {", ".join(sorted(self._enabled_methods))}')
 
         # --- Guardrail: URL whitelist (empty list = allow all) ---
         url = input_obj.get('url')
         if not url or not isinstance(url, str):
             raise ValueError('url is required and must be a non-empty string')
         if self._url_patterns and not any(p.search(url) for p in self._url_patterns):
-            raise ValueError(
-                f'URL "{url}" does not match any allowed URL pattern.'
-            )
+            raise ValueError(f'URL "{url}" does not match any allowed URL pattern.')
 
         # --- Standard field validation ---
         auth = input_obj.get('auth')
@@ -280,9 +277,7 @@ class HttpDriver(ToolsBase):
                 raw = body.get('raw') or {}
                 ct = (raw.get('content_type') or 'application/json').strip().lower()
                 if ct not in VALID_RAW_CONTENT_TYPES:
-                    raise ValueError(
-                        f'body.raw.content_type must be one of {sorted(VALID_RAW_CONTENT_TYPES)}; got {ct!r}'
-                    )
+                    raise ValueError(f'body.raw.content_type must be one of {sorted(VALID_RAW_CONTENT_TYPES)}; got {ct!r}')
 
     def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:  # noqa: ANN401
         if not isinstance(input_obj, dict):
@@ -300,4 +295,5 @@ class HttpDriver(ToolsBase):
             auth=input_obj.get('auth'),
             body=input_obj.get('body'),
             timeout=input_obj.get('timeout'),
+            ssrf_allowed_private=self._ssrf_allowed_private or None,
         )
