@@ -60,11 +60,11 @@ class IGlobal(IGlobalBase):
             # Simple API validation using provider-driven exceptions
             try:
                 client = OpenAI(api_key=apikey)
-                
+
                 # Newer models use max_completion_tokens instead of max_tokens
                 newer_models = ['gpt-5', 'gpt-5.1', 'gpt-5-mini', 'gpt-5-nano']
                 uses_max_completion_tokens = any(model.startswith(m) for m in newer_models)
-                
+
                 # Make sure model is using the correct parameters
                 if uses_max_completion_tokens:
                     client.chat.completions.create(model=model, messages=[{'role': 'user', 'content': 'Hi'}], max_completion_tokens=10)

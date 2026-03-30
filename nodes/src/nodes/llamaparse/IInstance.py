@@ -278,19 +278,9 @@ class IInstance(IInstanceBase):
             if not text or len(text.strip()) == 0:
                 debug('LlamaParse Instance: No text content extracted, creating fallback message')
                 if mime_type.startswith('image/'):
-                    text = (
-                        f'# Image Processing Result\n\n'
-                        f'This image was processed by LlamaParse but no text content was extracted.\n\n'
-                        f'**File Type:** {mime_type}\n**File Size:** {len(document_data)} bytes\n\n'
-                        f'*Note: This may indicate that the image contains no readable text or the OCR processing was unsuccessful.*'
-                    )
+                    text = f'# Image Processing Result\n\nThis image was processed by LlamaParse but no text content was extracted.\n\n**File Type:** {mime_type}\n**File Size:** {len(document_data)} bytes\n\n*Note: This may indicate that the image contains no readable text or the OCR processing was unsuccessful.*'
                 else:
-                    text = (
-                        f'# Document Processing Result\n\n'
-                        f'This document was processed by LlamaParse but no text content was extracted.\n\n'
-                        f'**File Type:** {mime_type}\n**File Size:** {len(document_data)} bytes\n\n'
-                        f'*Note: This may indicate that the document is empty or the parsing was unsuccessful.*'
-                    )
+                    text = f'# Document Processing Result\n\nThis document was processed by LlamaParse but no text content was extracted.\n\n**File Type:** {mime_type}\n**File Size:** {len(document_data)} bytes\n\n*Note: This may indicate that the document is empty or the parsing was unsuccessful.*'
 
             # Extract tables from the parsed text and structured data
             self.extract_tables_from_text(text)
@@ -329,12 +319,7 @@ class IInstance(IInstanceBase):
             debug(f'LlamaParse Instance: Full traceback: {traceback.format_exc()}')
 
             # Create error message as markdown
-            error_text = (
-                f'# LlamaParse Processing Error\n\n'
-                f'**Error Type:** {type(e).__name__}\n**Error Message:** {str(e)}\n\n'
-                f'**File Type:** {mime_type}\n**File Size:** {len(document_data)} bytes\n\n'
-                f'*The document could not be processed due to an error in the LlamaParse service.*'
-            )
+            error_text = f'# LlamaParse Processing Error\n\n**Error Type:** {type(e).__name__}\n**Error Message:** {str(e)}\n\n**File Type:** {mime_type}\n**File Size:** {len(document_data)} bytes\n\n*The document could not be processed due to an error in the LlamaParse service.*'
 
             # Write error message to text lane
             if self.instance.hasListener('text'):

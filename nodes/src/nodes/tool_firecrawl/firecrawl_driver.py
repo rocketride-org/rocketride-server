@@ -92,7 +92,7 @@ class FirecrawlDriver(ToolsBase):
     def _bare_name(self, tool_name: str) -> str:
         """Strip server prefix, accepting both bare and namespaced tool names."""
         prefix = f'{self._server_name}.'
-        return tool_name[len(prefix):] if tool_name.startswith(prefix) else tool_name
+        return tool_name[len(prefix) :] if tool_name.startswith(prefix) else tool_name
 
     # ------------------------------------------------------------------
     # ToolsBase hooks
@@ -102,10 +102,7 @@ class FirecrawlDriver(ToolsBase):
         # Return namespaced descriptors (<server>.<tool>) so multiple Firecrawl nodes
         # do not produce colliding tool names. _tool_validate and _tool_invoke use
         # _bare_name() to strip the prefix when looking up _TOOLS_BY_BARE_NAME.
-        return [
-            {**tool, 'name': f'{self._server_name}.{tool["name"]}'}
-            for tool in _TOOLS_BY_BARE_NAME.values()
-        ]
+        return [{**tool, 'name': f'{self._server_name}.{tool["name"]}'} for tool in _TOOLS_BY_BARE_NAME.values()]
 
     def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
         tool = _TOOLS_BY_BARE_NAME.get(self._bare_name(tool_name))
@@ -145,9 +142,7 @@ class FirecrawlDriver(ToolsBase):
         # v2 SDK: app.scrape(url) returns a Document Pydantic model
         result = firecrawl_wrapper(lambda: self._app.scrape(url))
 
-        content = getattr(result, 'markdown', None) \
-            or getattr(result, 'html', None) \
-            or ''
+        content = getattr(result, 'markdown', None) or getattr(result, 'html', None) or ''
         if not isinstance(content, str):
             content = json.dumps(content)
 
@@ -212,6 +207,7 @@ def _normalize_tool_input(input_obj: Any) -> Dict[str, Any]:
     if isinstance(input_obj, str):
         try:
             import json as _json
+
             parsed = _json.loads(input_obj)
             if isinstance(parsed, dict):
                 input_obj = parsed

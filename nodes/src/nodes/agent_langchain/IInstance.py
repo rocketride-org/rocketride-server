@@ -46,4 +46,3 @@ class IInstance(IInstanceBase):
         if isinstance(op, str) and op.startswith('tool.'):
             return self.IGlobal.agent.handle_invoke(self, param)
         return super().invoke(param)
-

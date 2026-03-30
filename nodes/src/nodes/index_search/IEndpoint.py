@@ -27,9 +27,9 @@ Endpoint transform for the index_search node.
 Defines the pipeline endpoint; configuration and lifecycle are handled by
 IGlobal and IInstance.
 """
+
 from ai.common.transform import IEndpointTransform
 
 
 class IEndpoint(IEndpointTransform):
     """Endpoint for index_search (Elasticsearch and OpenSearch). No extra config."""
-

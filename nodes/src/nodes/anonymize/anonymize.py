@@ -21,6 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
+
 def anonymize(text: str, matches, anonymize_char: str = '*') -> str:
     """Replace specified segments with a sequence of anonymization characters.
 

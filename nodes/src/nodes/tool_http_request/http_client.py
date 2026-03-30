@@ -95,6 +95,7 @@ def execute_request(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _resolve_path_params(url: str, path_params: Optional[Dict[str, str]]) -> str:
     """Replace ``:name`` placeholders in the URL with values from *path_params*."""
     if not path_params:

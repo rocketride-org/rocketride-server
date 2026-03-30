@@ -27,6 +27,7 @@ index_search node: Elasticsearch and OpenSearch.
 Exposes IEndpoint, IGlobal, IInstance for the pipeline and getStore() for
 direct access to the Elasticsearch Store class when the backend is Elasticsearch.
 """
+
 from .IEndpoint import IEndpoint
 from .IGlobal import IGlobal
 from .IInstance import IInstance
@@ -45,4 +46,3 @@ __all__ = [
     'IInstance',
     'getStore',
 ]
-

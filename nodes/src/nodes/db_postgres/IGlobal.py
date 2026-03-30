@@ -40,11 +40,11 @@ class IGlobal(DatabaseGlobalBase):
         # Config.getNodeConfig() strips the node namespace prefix before returning;
         # keys are unprefixed here by design (e.g. 'host', not 'postgresdb.host').
         return {
-            'host':     config.get('host', 'localhost').strip(),
-            'user':     config.get('user', 'postgres').strip(),
+            'host': config.get('host', 'localhost').strip(),
+            'user': config.get('user', 'postgres').strip(),
             'password': config.get('password', ''),  # Do not strip — whitespace is valid in passwords
             'database': config.get('database', 'postgres').strip(),
-            'table':    config.get('table', 'table').strip(),
+            'table': config.get('table', 'table').strip(),
         }
 
     def _build_connection_url(self, params: Dict[str, str]) -> str:

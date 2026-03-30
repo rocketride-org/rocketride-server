@@ -67,7 +67,7 @@ HAZARD_PROMPTS = {
 
 # Spatial format prompt modifiers
 SPATIAL_PROMPTS = {
-    'clock': '\n\nUse clock positions for spatial references (12 o\'clock = straight ahead).',
+    'clock': "\n\nUse clock positions for spatial references (12 o'clock = straight ahead).",
     'relative': '\n\nUse relative directions (left, right, ahead, behind) for spatial references.',
     'both': '\n\nUse both clock positions and relative directions for spatial references.',
 }
@@ -98,31 +98,18 @@ class Chat(ChatBase):
         spatial_format = config.get('accessibility.spatialFormat', 'clock')
 
         # Build system prompt with config modifiers
-        self._system_prompt = (
-            config.get('accessibility.systemPrompt')
-            or config.get('systemPrompt')
-            or DEFAULT_SYSTEM_PROMPT
-        )
+        self._system_prompt = config.get('accessibility.systemPrompt') or config.get('systemPrompt') or DEFAULT_SYSTEM_PROMPT
         self._system_prompt += HAZARD_PROMPTS.get(hazard_priority, '')
         self._system_prompt += SPATIAL_PROMPTS.get(spatial_format, '')
 
-        self._prompt = (
-            config.get('accessibility.prompt')
-            or config.get('prompt')
-            or DEFAULT_PROMPT
-        )
+        self._prompt = config.get('accessibility.prompt') or config.get('prompt') or DEFAULT_PROMPT
 
         if not api_key:
-            raise ValueError(
-                'Missing Google AI API key. Get one at https://aistudio.google.com/apikey'
-            )
+            raise ValueError('Missing Google AI API key. Get one at https://aistudio.google.com/apikey')
 
         # Validate the API key format
         if api_key.startswith('sk-'):
-            raise ValueError(
-                'Invalid API key format. This appears to be an OpenAI key. '
-                'Please provide a Google AI API key.'
-            )
+            raise ValueError('Invalid API key format. This appears to be an OpenAI key. Please provide a Google AI API key.')
 
         try:
             self._client = genai.Client(api_key=api_key)
@@ -157,7 +144,7 @@ class Chat(ChatBase):
         if any(phrase in error_lower for phrase in ['invalid input', 'bad request', '400']):
             return 'Invalid input. Please check your image format and prompt.'
         if any(phrase in error_lower for phrase in ['model not found', 'unavailable', 'not supported']):
-            return f'Model \'{self._model}\' is currently unavailable. Please try a different model.'
+            return f"Model '{self._model}' is currently unavailable. Please try a different model."
         if any(phrase in error_lower for phrase in ['timeout', 'timed out']):
             return 'Request timed out. Please try again.'
         if any(phrase in error_lower for phrase in ['content policy', 'safety', 'blocked']):
@@ -199,9 +186,7 @@ class Chat(ChatBase):
             mime_type = header.split(':')[1].split(';')[0]
             image_bytes = base64.b64decode(b64_data)
         except (ValueError, IndexError, base64.binascii.Error) as e:
-            raise ValueError(
-                'Malformed image data URL. Expected format: data:<mime>;base64,<data>'
-            ) from e
+            raise ValueError('Malformed image data URL. Expected format: data:<mime>;base64,<data>') from e
 
         # Build request contents once (deterministic, no need to rebuild per retry)
         contents = [
@@ -233,7 +218,7 @@ class Chat(ChatBase):
             except Exception as e:
                 last_error = e
                 if attempt < max_retries and self._shouldRetry(e):
-                    delay = base_delay * (2 ** attempt)
+                    delay = base_delay * (2**attempt)
                     time.sleep(delay)
                     continue
                 break

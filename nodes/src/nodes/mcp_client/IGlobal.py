@@ -138,10 +138,7 @@ class IGlobal(IGlobalBase):
                     self._client = McpStreamableHttpClient(endpoint=endpoint, headers=headers)
 
             else:
-                raise Exception(
-                    f'mcp_client transport {self.transport!r} not supported '
-                    '(use stdio, streamable-http, or sse)'
-                )
+                raise Exception(f'mcp_client transport {self.transport!r} not supported (use stdio, streamable-http, or sse)')
 
             self._client.start()
             tools = self._client.list_tools()
@@ -248,10 +245,7 @@ class IGlobal(IGlobalBase):
 
     def call_tool(self, *, server_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         if server_name != self.serverName:
-            raise Exception(
-                f'Unknown MCP serverName {server_name!r} (this node configured as {self.serverName!r})'
-            )
+            raise Exception(f'Unknown MCP serverName {server_name!r} (this node configured as {self.serverName!r})')
         if self._client is None:
             raise Exception('MCP client is not connected')
         return self._client.call_tool(name=tool_name, arguments=arguments or {})
-

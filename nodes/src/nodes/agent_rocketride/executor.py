@@ -81,6 +81,7 @@ _REF_PATTERN = re.compile(r'\{\{memory\.ref:([^}:]+)(?::([^}:]+))?(?::([^}]+))?\
 # Structural summary (_describe)
 # ---------------------------------------------------------------------------
 
+
 def _describe(value: Any, depth: int = 0) -> str:
     """Return a compact structural summary of *value* for LLM context.
 
@@ -118,9 +119,7 @@ def _describe(value: Any, depth: int = 0) -> str:
         if isinstance(first, dict):
             # Collect field names from up to 5 rows to handle sparse rows
             # where early rows may be missing fields that appear later.
-            keys = list(dict.fromkeys(
-                k for row in value[:5] if isinstance(row, dict) for k in row
-            ))
+            keys = list(dict.fromkeys(k for row in value[:5] if isinstance(row, dict) for k in row))
             lines = [f'{n} items, fields: {keys}']
             # Show first 2 rows as sample data so the LLM can see real values
             for i, row in enumerate(value[:2]):
@@ -151,6 +150,7 @@ def _describe_dict(d: dict, depth: int) -> str:
 # ---------------------------------------------------------------------------
 # Template resolution
 # ---------------------------------------------------------------------------
+
 
 def _memory_get(key: str, host: AgentHost) -> Any:
     """Fetch a raw value from the memory store.
@@ -298,6 +298,7 @@ def resolve_answer_refs(answer: str, host: AgentHost) -> str:
 # Wave result storage
 # ---------------------------------------------------------------------------
 
+
 def _auto_key(wave_name: str, idx: int) -> str:
     """Generate a memory key scoped to a wave and call index.
 
@@ -335,6 +336,7 @@ def _store_and_preview(tool: str, key: str, result: Any, host: AgentHost) -> Dic
 # Wave executor
 # ---------------------------------------------------------------------------
 
+
 def _execute_wave_calls(
     wave: List[Dict[str, Any]],
     *,
@@ -356,10 +358,7 @@ def _execute_wave_calls(
 
     # Tag each call with its auto-generated memory key before parallelism so
     # the key assignment is deterministic and order-preserving.
-    tagged: List[Dict[str, Any]] = [
-        {**call, '_key': _auto_key(wave_name, i)}
-        for i, call in enumerate(wave)
-    ]
+    tagged: List[Dict[str, Any]] = [{**call, '_key': _auto_key(wave_name, i)} for i, call in enumerate(wave)]
 
     def _run_one(call: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a single tool call and return a result dict."""
@@ -411,8 +410,11 @@ def _execute_wave_calls(
                         total_items = len(value)
                         preview = json.dumps(value[:_PEEK_MAX_ARRAY_ITEMS], ensure_ascii=False)
                         return {
-                            'tool': tool, 'key': key, 'path': path,
-                            'preview': preview, 'truncated': True,
+                            'tool': tool,
+                            'key': key,
+                            'path': path,
+                            'preview': preview,
+                            'truncated': True,
                             'returned_items': _PEEK_MAX_ARRAY_ITEMS,
                             'total_items': total_items,
                         }
@@ -426,10 +428,14 @@ def _execute_wave_calls(
                     value = json.dumps(value, ensure_ascii=False, indent=2)
                 offset = int(args.get('offset', 0))
                 length = int(args.get('length', _PEEK_DEFAULT_LENGTH))
-                chunk = value[offset:offset + length]
+                chunk = value[offset : offset + length]
                 return {
-                    'tool': tool, 'key': key, 'preview': chunk,
-                    'offset': offset, 'length': len(chunk), 'total_chars': len(value),
+                    'tool': tool,
+                    'key': key,
+                    'preview': chunk,
+                    'offset': offset,
+                    'length': len(chunk),
+                    'total_chars': len(value),
                 }
 
             # Regular tool — route through the host's tool pipeline which

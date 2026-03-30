@@ -70,9 +70,7 @@ class IInstance(IInstanceBase):
         if driver._llm_invoke is None:
             llm_invoker = _make_llm_invoker(self.instance)
             if llm_invoker is None:
-                raise RuntimeError(
-                    'Chart generator requires an LLM node connected to the pipeline.'
-                )
+                raise RuntimeError('Chart generator requires an LLM node connected to the pipeline.')
             driver.set_llm_invoker(llm_invoker)
 
         return driver.handle_invoke(param)

@@ -103,9 +103,7 @@ class Store(DocumentStoreBase):
 
         similarity = config.get('similarity', 'cosine')
         if similarity not in ('cosine', 'l2_norm', 'dot_product'):
-            raise Exception(
-                'Similarity must be one of: cosine, l2_norm, dot_product'
-            )
+            raise Exception('Similarity must be one of: cosine, l2_norm, dot_product')
         self.similarity = similarity
 
         # Use explicit scheme from host if present; else derive from mode (self-managed -> http)
@@ -539,9 +537,7 @@ class Store(DocumentStoreBase):
                     err = op.get('error', {})
                     reason = err.get('reason') or err.get('type') or str(err) or str(e)
                     doc_id = op.get('_id', '?')
-                    raise Exception(
-                        f'Elasticsearch index failed (id={doc_id}): {reason}'
-                    ) from e
+                    raise Exception(f'Elasticsearch index failed (id={doc_id}): {reason}') from e
                 raise
 
         # For each document
@@ -798,9 +794,7 @@ class Store(DocumentStoreBase):
             op = 'or'
         slop = max(int(match_operator_slop or 0), 0)
         if op == 'exact':
-            base_query: Dict[str, Any] = {
-                'match_phrase': {CONTENT_FIELD: {'query': query, 'slop': slop}}
-            }
+            base_query: Dict[str, Any] = {'match_phrase': {CONTENT_FIELD: {'query': query, 'slop': slop}}}
         elif op == 'and':
             base_query = {'match': {CONTENT_FIELD: {'query': query, 'operator': 'and'}}}
         elif op == 'or':
@@ -818,4 +812,3 @@ class Store(DocumentStoreBase):
             frag_size = max(int(highlight_fragment_size or 0), 0) or DEFAULT_HIGHLIGHT_FRAGMENT_SIZE
             body['highlight'] = _build_highlight_config(CONTENT_FIELD, frag_size)
         return body
-

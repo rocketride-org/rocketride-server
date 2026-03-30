@@ -198,12 +198,7 @@ class CrewDriver(AgentBase):
         agent_obj = Agent(
             role='Assistant',
             goal='Solve the user request using available tools when helpful.',
-            backstory=(
-                'You are an agent node in a tool-invocation hierarchy. '
-                'You may call tools wired to you via the host tools interface. '
-                'When a tool is needed, call it; otherwise respond directly. '
-                'Follow any additional instructions exactly.'
-            ),
+            backstory=('You are an agent node in a tool-invocation hierarchy. You may call tools wired to you via the host tools interface. When a tool is needed, call it; otherwise respond directly. Follow any additional instructions exactly.'),
             tools=tools_for_agent,
             llm=llm,
             verbose=False,

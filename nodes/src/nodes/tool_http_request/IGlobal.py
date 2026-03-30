@@ -87,6 +87,7 @@ class IGlobal(IGlobalBase):
         raw_whitelist = cfg.get('urlWhitelist') or []
         if not isinstance(raw_whitelist, list):
             import json
+
             try:
                 raw_whitelist = json.loads(str(raw_whitelist))
             except (json.JSONDecodeError, TypeError, ValueError):

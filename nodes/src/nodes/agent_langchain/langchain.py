@@ -67,7 +67,7 @@ class LangChainDriver(AgentBase):
             def _identifying_params(self) -> Dict[str, Any]:
                 return {'framework': 'rocketride', 'adapter': 'tool_calling_json'}
 
-            def bind_tools(self, tools: Any, **kwargs: Any) -> "RocketRideToolCallingChatModel":
+            def bind_tools(self, tools: Any, **kwargs: Any) -> 'RocketRideToolCallingChatModel':
                 try:
                     self._bound_tools = _normalize_bound_tools(tools)
                 except Exception:
@@ -448,4 +448,3 @@ def _safe_str(v: Any) -> str:
         return '' if v is None else str(v)
     except Exception:
         return ''
-

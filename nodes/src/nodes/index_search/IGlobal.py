@@ -72,9 +72,9 @@ def _normalize_opensearch_host(host: str, use_auth: bool) -> str:
 def _parse_mode_opensearch(mode_raw: str) -> str:
     """Parse OpenSearch mode config into MODE_INDEX or MODE_VSTORE."""
     mode = (str(mode_raw or '').strip()).lower()
-    if mode in ("false", "index", ""):
+    if mode in ('false', 'index', ''):
         return MODE_INDEX
-    if mode in ("true", "vstore"):
+    if mode in ('true', 'vstore'):
         return MODE_VSTORE
     raise ValueError(f'Invalid mode: {mode_raw}')
 
@@ -84,9 +84,9 @@ def _parse_mode_elasticsearch(mode_raw: Any) -> str:
     if isinstance(mode_raw, bool):
         return MODE_VSTORE if mode_raw else MODE_INDEX
     mode = str(mode_raw).strip().lower()
-    if mode in ("false", "index", ""):
+    if mode in ('false', 'index', ''):
         return MODE_INDEX
-    if mode in ("true", "vstore", "vector_database"):
+    if mode in ('true', 'vstore', 'vector_database'):
         return MODE_VSTORE
     return MODE_VSTORE
 
@@ -162,7 +162,7 @@ class IGlobal(IGlobalTransform):
         username = (auth_cfg.get('username') or connConfig.get('username') or '').strip()
         password = auth_cfg.get('password') or connConfig.get('password') or ''
 
-        use_auth = auth_cfg.get("enabled")
+        use_auth = auth_cfg.get('enabled')
         if use_auth is None:
             use_auth = bool(username or password)
 
@@ -211,9 +211,7 @@ class IGlobal(IGlobalTransform):
             mode = config.get('mode', 'self-managed')
 
             if not INDEX_NAME_RE.fullmatch(index):
-                warning(
-                    'Index name is invalid. Use 1-255 lowercase chars: letters, digits, \'_\', \'-\', \'.\'; no \'/\' or spaces'
-                )
+                warning("Index name is invalid. Use 1-255 lowercase chars: letters, digits, '_', '-', '.'; no '/' or spaces")
                 return
             if port == 0:
                 warning('Port cannot be 0')
@@ -259,9 +257,7 @@ class IGlobal(IGlobalTransform):
                 warning('Host is required for OpenSearch')
                 return
             if collection and not INDEX_NAME_RE.fullmatch(collection):
-                warning(
-                    'Collection name is invalid. Use 1-255 chars: letters, digits, \'_\', \'-\', \'.\'; no \'/\' or spaces'
-                )
+                warning("Collection name is invalid. Use 1-255 chars: letters, digits, '_', '-', '.'; no '/' or spaces")
                 return
             if use_auth:
                 if not username:
@@ -331,9 +327,7 @@ class IGlobal(IGlobalTransform):
         """Load search options from config (match operator, slop, highlight, fragment size)."""
         from .constants import VALID_MATCH_OPERATORS
 
-        match_operator_raw = (
-            (connConfig.get('matchOperator') or connConfig.get('match_operator') or '').strip().lower()
-        )
+        match_operator_raw = (connConfig.get('matchOperator') or connConfig.get('match_operator') or '').strip().lower()
         if match_operator_raw not in (*VALID_MATCH_OPERATORS, ''):
             warning(f"matchOperator must be 'and', 'or', or 'exact'; got: {match_operator_raw}")
             match_operator_raw = ''
@@ -341,22 +335,14 @@ class IGlobal(IGlobalTransform):
 
         try:
             slop_val = connConfig.get('slop')
-            self.search_exact_slop = (
-                int(slop_val or 0) if self.search_match_operator == 'exact' else 0
-            )
+            self.search_exact_slop = int(slop_val or 0) if self.search_match_operator == 'exact' else 0
         except Exception:
             self.search_exact_slop = 0
 
         self.search_highlight_enabled = bool(connConfig.get('highlight', False))
         if self.search_highlight_enabled:
-            self.search_highlight_fragment_size = int(
-                connConfig.get('fragment_size') or DEFAULT_HIGHLIGHT_FRAGMENT_SIZE
-            )
-        debug(
-            f'Search options: enabled={self.search_enabled} matchOperator={self.search_match_operator} '
-            f'slop={self.search_exact_slop} highlight={self.search_highlight_enabled} '
-            f'fragment_size={self.search_highlight_fragment_size}'
-        )
+            self.search_highlight_fragment_size = int(connConfig.get('fragment_size') or DEFAULT_HIGHLIGHT_FRAGMENT_SIZE)
+        debug(f'Search options: enabled={self.search_enabled} matchOperator={self.search_match_operator} slop={self.search_exact_slop} highlight={self.search_highlight_enabled} fragment_size={self.search_highlight_fragment_size}')
 
 
 def _format_error(e: Exception) -> str:
@@ -379,4 +365,3 @@ def _format_error(e: Exception) -> str:
             pass
 
     return error_str
-
