@@ -261,12 +261,21 @@ class MultiAgentOrchestrator:
                     agent_name = self._agents[0].name
                 else:
                     continue
+            # Normalize depends_on to always be a list (LLM may return
+            # None, a single string, or a scalar instead of a list).
+            raw_deps = item.get('depends_on')
+            if raw_deps is None:
+                deps: List[str] = []
+            elif isinstance(raw_deps, list):
+                deps = [str(d) for d in raw_deps if d]
+            else:
+                deps = [str(raw_deps)] if raw_deps else []
             tasks.append(
                 SubTask(
                     id=str(item.get('id', f'task-{len(tasks)}')),
                     description=str(item.get('description', '')),
                     assigned_agent=agent_name,
-                    depends_on=[str(d) for d in item.get('depends_on', []) if d],
+                    depends_on=deps,
                 )
             )
 

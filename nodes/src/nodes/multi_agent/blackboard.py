@@ -14,6 +14,7 @@ orchestration.
 
 from __future__ import annotations
 
+import copy
 import threading
 import time
 from dataclasses import dataclass
@@ -62,12 +63,14 @@ class SharedBlackboard:
             value: Arbitrary value.
         """
         with self._lock:
+            # Deep copy to prevent external mutation of stored state and history
+            value = copy.deepcopy(value)
             self._store[key] = value
             self._history.append(
                 BlackboardEntry(
                     agent_name=agent_name,
                     key=key,
-                    value=value,
+                    value=copy.deepcopy(value),
                     timestamp=time.time(),
                 )
             )

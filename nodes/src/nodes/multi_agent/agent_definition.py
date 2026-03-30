@@ -70,11 +70,11 @@ class AgentDefinition:
         arbitrary data injection.
 
         Raises:
-            ValueError: If *data* is not a dict or contains unknown keys.
-            TypeError: If field types are wrong.
+            TypeError: If *data* is not a dict or field types are wrong.
+            ValueError: If *data* contains unknown keys.
         """
         if not isinstance(data, dict):
-            raise ValueError(f'Agent definition must be a dict, got {type(data).__name__}')
+            raise TypeError(f'Agent definition must be a dict, got {type(data).__name__}')
         unknown = set(data.keys()) - _ALLOWED_KEYS
         if unknown:
             raise ValueError(f'Unknown keys in agent definition: {unknown}')
