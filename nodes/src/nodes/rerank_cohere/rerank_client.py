@@ -90,6 +90,11 @@ class RerankClient:
         self._top_n = config.get('top_n', 5)
         self._min_score = config.get('min_score', 0.0)
 
+        if self._top_n < 1:
+            raise ValueError(f'top_n must be >= 1, got {self._top_n}')
+        if not (0.0 <= self._min_score <= 1.0):
+            raise ValueError(f'min_score must be between 0.0 and 1.0, got {self._min_score}')
+
         apikey = config.get('apikey', '')
         if not apikey:
             raise ValueError('Cohere API key is required')

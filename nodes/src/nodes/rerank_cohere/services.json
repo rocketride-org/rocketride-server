@@ -116,9 +116,9 @@
 				"min_score": 0.0,
 				"apikey": ""
 			},
-			"rerank-v3.0": {
+			"rerank-english-v3.0": {
 				"title": "Rerank v3.0",
-				"model": "rerank-v3.0",
+				"model": "rerank-english-v3.0",
 				"top_n": 5,
 				"min_score": 0.0,
 				"apikey": ""
@@ -155,7 +155,7 @@
 			]
 		},
 		"rerank_cohere.rerank-v3.0": {
-			"object": "rerank-v3.0",
+			"object": "rerank-english-v3.0",
 			"properties": [
 				"llm.cloud.apikey"
 			]
@@ -185,7 +185,7 @@
 					]
 				},
 				{
-					"value": "rerank-v3.0",
+					"value": "rerank-english-v3.0",
 					"properties": [
 						"rerank_cohere.rerank-v3.0"
 					]
