@@ -116,33 +116,33 @@
 		"profiles": {
 			"keyword": {
 				"title": "Keyword Match",
-				"condition_type": "contains",
+				"type": "contains",
 				"keywords": "",
 				"mode": "any",
 				"default_lane": "questions"
 			},
 			"regex": {
 				"title": "Regex Pattern",
-				"condition_type": "regex",
-				"regex_pattern": "",
+				"type": "regex",
+				"pattern": "",
 				"default_lane": "questions"
 			},
 			"score": {
 				"title": "Score Threshold",
-				"condition_type": "score_threshold",
+				"type": "score_threshold",
 				"threshold": "0.5",
 				"operator": ">=",
 				"default_lane": "questions"
 			},
 			"sentiment": {
 				"title": "Sentiment Filter",
-				"condition_type": "sentiment",
+				"type": "sentiment",
 				"expected_sentiment": "positive",
 				"default_lane": "questions"
 			},
 			"custom": {
 				"title": "Custom Rules",
-				"condition_type": "custom",
+				"type": "custom",
 				"default_lane": "questions"
 			}
 		}
@@ -232,7 +232,7 @@
 				["all", "All (match every keyword)"]
 			]
 		},
-		"regex_pattern": {
+		"pattern": {
 			"type": "string",
 			"title": "Regex Pattern",
 			"description": "Regular expression pattern to match against text",
@@ -285,7 +285,7 @@
 		},
 		"branch.regex": {
 			"object": "regex",
-			"properties": ["regex_pattern", "default_lane"]
+			"properties": ["pattern", "default_lane"]
 		},
 		"branch.score": {
 			"object": "score",
@@ -297,7 +297,7 @@
 		},
 		"branch.custom": {
 			"object": "custom",
-			"properties": ["condition_type", "keywords", "regex_pattern", "threshold", "operator", "field_name", "field_value", "default_lane"]
+			"properties": ["condition_type", "keywords", "pattern", "threshold", "operator", "field_name", "field_value", "default_lane"]
 		},
 		"branch.profile": {
 			"title": "Profile",

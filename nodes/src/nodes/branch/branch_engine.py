@@ -273,10 +273,10 @@ class BranchEngine:
         if not text:
             return {'matched': True, 'condition': 'sentiment', 'details': 'neutral'}
 
-        words = set(re.findall(r'[a-z]+', text.lower()))
+        words = re.findall(r'[a-z]+', text.lower())
 
-        pos_count = len(words & _POSITIVE_WORDS)
-        neg_count = len(words & _NEGATIVE_WORDS)
+        pos_count = sum(1 for w in words if w in _POSITIVE_WORDS)
+        neg_count = sum(1 for w in words if w in _NEGATIVE_WORDS)
 
         if pos_count > neg_count:
             label = 'positive'
