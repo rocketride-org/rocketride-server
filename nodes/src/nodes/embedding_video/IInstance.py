@@ -80,6 +80,12 @@ class IInstance(IInstanceBase):
 
         elif action == AVI_ACTION.WRITE:
             if self._video_data is not None:
+                max_size = self.IGlobal.max_video_size_bytes
+                if len(self._video_data) + len(buffer) > max_size:
+                    max_mb = max_size / (1024 * 1024)
+                    logger.error('Video exceeds maximum allowed size of %.0f MB, rejecting', max_mb)
+                    self._video_data = None
+                    return
                 self._video_data += buffer
 
         elif action == AVI_ACTION.END:

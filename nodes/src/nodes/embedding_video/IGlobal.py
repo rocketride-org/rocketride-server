@@ -71,6 +71,7 @@ class IGlobal(IGlobalBase):
         self.max_frames = config.get('max_frames', 50)
         self.start_time = config.get('start_time', 0)
         self.duration = config.get('duration', 0)
+        self.max_video_size_bytes = config.get('maxVideoSizeMB', 500) * 1024 * 1024
 
         # Mutex for device access during video processing.
         self.device_lock = threading.Lock()
