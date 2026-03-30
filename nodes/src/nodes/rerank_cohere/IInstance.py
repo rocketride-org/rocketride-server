@@ -24,6 +24,8 @@
 # ------------------------------------------------------------------------------
 # This class controls the data for each thread of the task
 # ------------------------------------------------------------------------------
+import copy
+
 from rocketlib import IInstanceBase
 from ai.common.schema import Doc, Question
 from .IGlobal import IGlobal
@@ -41,6 +43,9 @@ class IInstance(IInstanceBase):
         documents are written to the documents output lane, and an answer
         with the reranked documents is written to the answers output lane.
         """
+        # Deep copy to avoid mutating the shared question object in fan-out pipelines
+        question = copy.deepcopy(question)
+
         reranker = self.IGlobal._reranker
         if reranker is None:
             raise Exception('Reranker not initialized')

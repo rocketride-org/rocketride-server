@@ -89,6 +89,12 @@ class IGlobal(IGlobalBase):
             # we don't actually need to load the driver for that
             pass
         else:
+            # Ensure cohere dependency is installed before importing rerank_client
+            from depends import depends
+
+            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+            depends(requirements)
+
             # Import the rerank client
             from .rerank_client import RerankClient
 
