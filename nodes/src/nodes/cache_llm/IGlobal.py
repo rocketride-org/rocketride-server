@@ -32,9 +32,6 @@ import os
 
 
 class IGlobal(IGlobalBase):
-    cache = None
-    cache_hits: int = 0
-    cache_misses: int = 0
     _stats_lock = threading.Lock()
 
     def validateConfig(self):
@@ -94,6 +91,11 @@ class IGlobal(IGlobalBase):
             return
 
     def beginGlobal(self):
+        # Initialize instance attributes (avoid class-level mutable state)
+        self.cache = None
+        self.cache_hits = 0
+        self.cache_misses = 0
+
         # Are we in config mode or some other mode?
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             # We are going to get a call to configureService but
@@ -111,10 +113,6 @@ class IGlobal(IGlobalBase):
 
             # Create the cache client
             self.cache = CacheClient(config, bag)
-
-            # Reset counters
-            self.cache_hits = 0
-            self.cache_misses = 0
 
     def endGlobal(self):
         # Release the cache client

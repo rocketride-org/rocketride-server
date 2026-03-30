@@ -263,7 +263,7 @@ class CacheClient:
             return copy.deepcopy(entry['response'])
 
     def _memory_set(self, key: str, response: dict, ttl: int) -> None:
-        """Set in in-memory store, enforcing max_size with LRU-style eviction."""
+        """Set in in-memory store, enforcing max_size with FIFO eviction."""
         with self._lock:
             # If key already exists, update it in place (no size change)
             if key in self._memory_store:
