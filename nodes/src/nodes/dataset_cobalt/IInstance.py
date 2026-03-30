@@ -64,18 +64,16 @@ class IInstance(IInstanceBase):
             if text:
                 q.addQuestion(text)
 
-            # Enrich metadata on the question context
+            # Attach metadata to the question without injecting expected
+            # answers into the prompt context (which the LLM would see).
+            # Store expected output and dataset ID in question metadata only.
             metadata = item.get('metadata', {})
-            expected = metadata.get('expected', '')
-            dataset_id = metadata.get('dataset_id', '')
-
-            if expected:
-                q.addContext(f'Expected output: {expected}')
-
-            if dataset_id:
-                q.addContext(f'Dataset item ID: {dataset_id}')
-
-            q.addContext('Source: cobalt-dataset')
+            if hasattr(q, 'metadata') and isinstance(q.metadata, dict):
+                q.metadata.update(metadata)
+            elif hasattr(q, 'metadata'):
+                q.metadata = dict(metadata)
+            else:
+                q.metadata = dict(metadata)
 
             self.instance.writeQuestions(q)
 

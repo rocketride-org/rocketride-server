@@ -162,7 +162,7 @@
 			"description": "Absolute path to the dataset file (JSON, CSV, or JSONL format)."
 		},
 		"dataset.items": {
-			"type": "string",
+			"type": "array",
 			"title": "Inline Items (JSON)",
 			"description": "JSON array of dataset items, e.g. [{\"input\": \"...\", \"expected\": \"...\"}].",
 			"format": "textarea",

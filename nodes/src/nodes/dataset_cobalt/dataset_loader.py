@@ -128,10 +128,10 @@ class DatasetLoader:
         Raises:
             ValueError: If items is empty or not a list.
         """
-        from cobalt import Dataset
-
         if not items or not isinstance(items, list):
             raise ValueError('Inline items must be a non-empty list of dicts')
+
+        from cobalt import Dataset
 
         debug(f'Cobalt DatasetLoader: Loading {len(items)} inline items')
         dataset = Dataset.from_items(items)
@@ -246,10 +246,10 @@ class DatasetLoader:
         """
         questions = []
         for item in items:
-            text = item.get('input', item.get('text', item.get('question', '')))
+            text = item.get('input') or item.get('text') or item.get('question') or ''
             metadata = {
-                'expected': item.get('expected', item.get('output', '')),
-                'dataset_id': item.get('id', ''),
+                'expected': item.get('expected') or item.get('output') or '',
+                'dataset_id': item.get('id') or '',
                 'cobalt_source': True,
             }
             # Preserve any extra fields from the original item as metadata
