@@ -55,9 +55,9 @@ class IGlobal(IGlobalBase):
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        server_name = str((cfg.get('serverName') or 'vectordb')).strip()
-        backend = str((cfg.get('backend') or 'pinecone')).strip().lower()
-        collection_description = str((cfg.get('collection_description') or '')).strip()
+        server_name = str(cfg.get('serverName') or 'vectordb').strip()
+        backend = str(cfg.get('backend') or 'pinecone').strip().lower()
+        collection_description = str(cfg.get('collection_description') or '').strip()
         enable_search = cfg.get('enableSearch', True)
         enable_upsert = cfg.get('enableUpsert', False)
         enable_delete = cfg.get('enableDelete', False)
@@ -103,10 +103,10 @@ class IGlobal(IGlobalBase):
     def validateConfig(self) -> None:
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            backend = str((cfg.get('backend') or '')).strip().lower()
+            backend = str(cfg.get('backend') or '').strip().lower()
             if backend not in _BACKEND_MODULES:
                 warning(f'Unsupported backend {backend!r}. Supported: {", ".join(sorted(_BACKEND_MODULES))}')
-            server_name = str((cfg.get('serverName') or '')).strip()
+            server_name = str(cfg.get('serverName') or '').strip()
             if not server_name:
                 warning('serverName is required')
         except Exception as e:
