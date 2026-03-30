@@ -10,8 +10,8 @@
 	"icon": "vectordb.svg",
 	"description": [
 		"A generic tool interface that exposes vector database operations (search, upsert, delete) ",
-		"to LLM agents. Works with any configured vector DB backend — Pinecone, ChromaDB, Qdrant, ",
-		"Weaviate, or pgvector — through a unified tool abstraction."
+		"to LLM agents. Works with any configured vector DB backend — Pinecone, ChromaDB, or Qdrant ",
+		"— through a unified tool abstraction."
 	],
 	"tile": ["Backend: ${parameters.tool_vectordb.backend}", "Tool: ${parameters.tool_vectordb.serverName}.vectordb"],
 	"lanes": {},
