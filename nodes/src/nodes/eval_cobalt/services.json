@@ -1,0 +1,234 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Cobalt Evaluator",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "eval_cobalt://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"eval"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most nodes
+	//
+	"path": "nodes.eval_cobalt",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "eval",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": [
+		"Evaluates AI/LLM outputs using Cobalt's testing framework. Supports semantic similarity, ",
+		"LLM-as-judge, and custom function evaluators for quality scoring and threshold enforcement. ",
+		"Acts as a quality gate in pipelines — scoring each answer and emitting evaluation metadata ",
+		"(score, pass/fail, reasoning) alongside the original answer for downstream consumption."
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"answers": [
+			"answers"
+		]
+	},
+	"input": [
+		{
+			"lane": "answers",
+			"output": [
+				{
+					"lane": "answers"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "similarity",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"similarity": {
+				"title": "Semantic Similarity  - TF-IDF cosine similarity scorer",
+				"eval_type": "similarity",
+				"threshold": 0.7
+			},
+			"llm_judge": {
+				"title": "LLM Judge           - AI-powered quality evaluation",
+				"eval_type": "llm_judge",
+				"threshold": 0.7,
+				"model": "gpt-4",
+				"criteria": "Is the output correct, complete, and well-structured?",
+				"apikey": ""
+			},
+			"custom": {
+				"title": "Custom Function      - User-defined evaluation logic",
+				"eval_type": "custom",
+				"threshold": 0.7
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"cobalt_eval.eval_type": {
+			"type": "string",
+			"title": "Evaluator type",
+			"description": "The type of evaluation to perform on LLM outputs"
+		},
+		"cobalt_eval.threshold": {
+			"type": "number",
+			"title": "Pass threshold",
+			"description": "Minimum score (0.0 - 1.0) for an evaluation to pass",
+			"minimum": 0.0,
+			"maximum": 1.0,
+			"default": 0.7
+		},
+		"cobalt_eval.model": {
+			"type": "string",
+			"title": "Judge model",
+			"description": "LLM model to use for judge evaluation (e.g. gpt-4, claude-3)"
+		},
+		"cobalt_eval.criteria": {
+			"type": "string",
+			"title": "Evaluation criteria",
+			"description": "Criteria prompt for the LLM judge to evaluate against"
+		},
+		"cobalt_eval.similarity": {
+			"object": "similarity",
+			"properties": [
+				"cobalt_eval.threshold"
+			]
+		},
+		"cobalt_eval.llm_judge": {
+			"object": "llm_judge",
+			"properties": [
+				"cobalt_eval.threshold",
+				"cobalt_eval.model",
+				"cobalt_eval.criteria",
+				"llm.cloud.apikey"
+			]
+		},
+		"cobalt_eval.custom": {
+			"object": "custom",
+			"properties": [
+				"cobalt_eval.threshold"
+			]
+		},
+		"cobalt_eval.profile": {
+			"title": "Evaluator",
+			"description": "Cobalt evaluator profile",
+			"type": "string",
+			"default": "similarity",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "similarity",
+					"properties": [
+						"cobalt_eval.similarity"
+					]
+				},
+				{
+					"value": "llm_judge",
+					"properties": [
+						"cobalt_eval.llm_judge"
+					]
+				},
+				{
+					"value": "custom",
+					"properties": [
+						"cobalt_eval.custom"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Cobalt Evaluator",
+			"properties": [
+				"cobalt_eval.profile"
+			]
+		}
+	],
+	//
+	// Optional:
+	//		Test cases for validating the evaluator
+	//
+	"tests": [
+		{
+			"title": "Semantic similarity - high similarity",
+			"eval_type": "similarity",
+			"threshold": 0.5,
+			"input": "The capital of France is Paris",
+			"expected": "Paris is the capital of France",
+			"expect_pass": true
+		},
+		{
+			"title": "Semantic similarity - low similarity",
+			"eval_type": "similarity",
+			"threshold": 0.9,
+			"input": "The weather is sunny today",
+			"expected": "Python is a programming language",
+			"expect_pass": false
+		},
+		{
+			"title": "Custom evaluator - always pass",
+			"eval_type": "custom",
+			"threshold": 0.5,
+			"input": "Any output text",
+			"expected": "Any expected text",
+			"expect_pass": true
+		}
+	]
+}
