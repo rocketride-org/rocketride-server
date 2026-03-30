@@ -1,0 +1,62 @@
+{
+  "name": "Portfolio Cascade",
+  "description": "When a new company joins the graph, fan out to update GDS algorithms, founder recommendations, and emergence patterns in parallel",
+  "version": "1.0.0",
+  "nodes": [
+    {"id": "trigger", "type": "source/webhook", "label": "New Company Trigger", "config": {}},
+    {"id": "gds_community", "type": "db_neo4j", "label": "Update Communities", "config": {
+      "uri_env": "NEO4J_URI",
+      "user_env": "NEO4J_USER",
+      "password_env": "NEO4J_PASSWORD",
+      "query": "MATCH (c:Company)-[r:PATTERN_MATCH]->(other:Company) WITH c, r.shared_signal AS signal, count(r) AS cnt ORDER BY cnt DESC WITH c, collect(signal)[0] AS dominant SET c.communityId = CASE dominant WHEN 'MARGIN_COMPRESSION' THEN 0 WHEN 'CONCENTRATION_RISK' THEN 1 WHEN 'BURN_ACCELERATION' THEN 2 ELSE 3 END RETURN count(c) AS updated"
+    }},
+    {"id": "gds_similarity", "type": "db_neo4j", "label": "Recompute Similarity", "config": {
+      "uri_env": "NEO4J_URI",
+      "user_env": "NEO4J_USER",
+      "password_env": "NEO4J_PASSWORD",
+      "query": "MATCH (a:Company)-[:PATTERN_MATCH]-(s)-[:PATTERN_MATCH]-(b:Company) WHERE a <> b AND id(a) < id(b) WITH a, b, count(DISTINCT s) AS intersection MATCH (a)-[:PATTERN_MATCH]-(na) WITH a,b,intersection,collect(DISTINCT na) AS an MATCH (b)-[:PATTERN_MATCH]-(nb) WITH a,b,intersection,an,collect(DISTINCT nb) AS bn WITH a,b,intersection, size([x IN an WHERE x IN bn|x])+intersection AS u WHERE u>0 WITH a,b,toFloat(intersection)/u AS j WHERE j>0.2 MERGE (a)-[r:SIMILAR_TO]->(b) SET r.similarity=round(j,3) RETURN count(*) AS edges"
+    }},
+    {"id": "gds_pagerank", "type": "db_neo4j", "label": "Update Influence", "config": {
+      "uri_env": "NEO4J_URI",
+      "user_env": "NEO4J_USER",
+      "password_env": "NEO4J_PASSWORD",
+      "query": "MATCH (c:Company) OPTIONAL MATCH (c)-[r:PATTERN_MATCH]-() WITH c, count(r) AS degree SET c.influence = toFloat(degree)/50.0 RETURN count(c) AS updated"
+    }},
+    {"id": "sync", "type": "preprocessor_code", "label": "GDS Sync Barrier", "config": {
+      "language": "python",
+      "code": "return json.dumps({'gds_complete': True, 'inputs': [input_a, input_b, input_c]})"
+    }},
+    {"id": "founder_recs", "type": "db_neo4j", "label": "Update Founder Recommendations", "config": {
+      "uri_env": "NEO4J_URI",
+      "user_env": "NEO4J_USER",
+      "password_env": "NEO4J_PASSWORD",
+      "query": "MATCH (c1:Company)-[sim:SIMILAR_TO]->(c2:Company) WHERE sim.similarity > 0.3 MATCH (c1)-[:FOUNDED_BY]->(f1:Founder) MATCH (c2)-[:FOUNDED_BY]->(f2:Founder) WHERE NOT (f1)-[:RECOMMENDED_CONNECTION]->(f2) CREATE (f1)-[:RECOMMENDED_CONNECTION {reason: 'Graph algorithm: ' + toString(round(sim.similarity*100,1)) + '% structural similarity', pattern_confidence: sim.similarity*100, connection_type: 'complementary_expertise', source: 'gds_cascade', generated_at: datetime()}]->(f2) RETURN count(*) AS new_connections"
+    }},
+    {"id": "emergence", "type": "db_neo4j", "label": "Detect Emergence Patterns", "config": {
+      "uri_env": "NEO4J_URI",
+      "user_env": "NEO4J_USER",
+      "password_env": "NEO4J_PASSWORD",
+      "query": "MATCH (c:Company) WHERE c.overall_severity IN ['CRITICAL','HIGH'] WITH c, split(replace(replace(c.signals,'[',''),']',''),',') AS sigs UNWIND sigs AS sig WITH trim(replace(sig,'\"','')) AS signal, collect(DISTINCT c.name) AS companies WHERE size(companies) >= 3 AND signal <> '' RETURN signal, companies, size(companies) AS count ORDER BY count DESC"
+    }},
+    {"id": "notify", "type": "llm_openai", "label": "Generate Cascade Summary", "config": {
+      "model": "deepseek-ai/DeepSeek-V3.2",
+      "base_url_env": "GMI_BASE",
+      "api_key_env": "GMI_API_KEY",
+      "system": "Summarize the portfolio cascade results in 2-3 sentences. What changed? Which founders should be notified?"
+    }},
+    {"id": "output", "type": "infrastructure/output", "label": "Cascade Report", "config": {}}
+  ],
+  "edges": [
+    {"source": "trigger", "target": "gds_community"},
+    {"source": "trigger", "target": "gds_similarity"},
+    {"source": "trigger", "target": "gds_pagerank"},
+    {"source": "gds_community", "target": "sync"},
+    {"source": "gds_similarity", "target": "sync"},
+    {"source": "gds_pagerank", "target": "sync"},
+    {"source": "sync", "target": "founder_recs"},
+    {"source": "sync", "target": "emergence"},
+    {"source": "founder_recs", "target": "notify"},
+    {"source": "emergence", "target": "notify"},
+    {"source": "notify", "target": "output"}
+  ]
+}
