@@ -35,7 +35,7 @@ class IGlobal(IGlobalBase):
 
             # Simple API validation using provider-driven exceptions
             try:
-                kwargs = dict(api_key=apikey)
+                kwargs = {'api_key': apikey}
                 if base_url:
                     kwargs['base_url'] = base_url
 
