@@ -24,7 +24,7 @@
 import os
 from typing import TYPE_CHECKING, Any, Dict, List
 
-from rocketlib import IGlobalBase, debug, warning
+from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
 from ai.common.config import Config
 
 if TYPE_CHECKING:
@@ -80,7 +80,14 @@ class IGlobal(IGlobalBase):
             return
 
     def beginGlobal(self):
-        """Initialize the DatasetLoader and load the dataset."""
+        """Initialize the DatasetLoader and load the dataset.
+
+        In CONFIG mode (pipeline save) this is a no-op to avoid loading
+        datasets during configuration saves.
+        """
+        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
+            return
+
         debug('Cobalt Dataset Global: Starting global initialization')
 
         from depends import depends
@@ -125,12 +132,22 @@ class IGlobal(IGlobalBase):
     def _extractConfig(self) -> Dict[str, Any]:
         """Extract and validate node configuration.
 
+        When Config.getNodeConfig returns a dict wrapped under a 'default'
+        key (the engine's convention for nodes that expose a single config
+        panel), this method unwraps it so callers always see a flat dict.
+        Note: any non-default top-level keys in the raw config are discarded
+        during unwrap; this is intentional because the engine only persists
+        user-editable fields inside 'default'.
+
         Returns:
             Processed config dictionary.
         """
         current_conn_config = getattr(self.IEndpoint.endpoint, 'connConfig', self.glb.connConfig)
         config = Config.getNodeConfig(self.glb.logicalType, current_conn_config)
 
+        # Unwrap 'default' envelope — the engine nests user-editable fields
+        # under this key for single-panel nodes. Non-default keys (if any)
+        # are engine metadata and are intentionally discarded here.
         if 'default' in config:
             config = config.get('default', {})
 

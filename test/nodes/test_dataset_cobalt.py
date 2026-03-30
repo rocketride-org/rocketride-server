@@ -233,16 +233,18 @@ def _make_loader(source_type='file', file_path='', sample_size=0, items=None, **
 class TestLoadFromJsonFile:
     """Test loading from JSON file (mocked)."""
 
+    @patch('os.getcwd', return_value='/data')
     @patch('os.path.isfile', return_value=True)
-    def test_load_json_returns_items(self, mock_isfile):
+    def test_load_json_returns_items(self, mock_isfile, mock_cwd):
         loader = _make_loader(file_path='/data/test.json')
         items = loader.load_from_file('/data/test.json')
         assert len(items) == 2
         assert items[0]['input'] == 'json-q1'
         assert items[1]['expected'] == 'json-a2'
 
+    @patch('os.getcwd', return_value='/data')
     @patch('os.path.isfile', return_value=True)
-    def test_load_json_via_load_method(self, mock_isfile):
+    def test_load_json_via_load_method(self, mock_isfile, mock_cwd):
         loader = _make_loader(source_type='file', file_path='/data/test.json')
         items = loader.load()
         assert len(items) == 2
@@ -251,8 +253,9 @@ class TestLoadFromJsonFile:
 class TestLoadFromCsvFile:
     """Test loading from CSV file (mocked)."""
 
+    @patch('os.getcwd', return_value='/data')
     @patch('os.path.isfile', return_value=True)
-    def test_load_csv_returns_items(self, mock_isfile):
+    def test_load_csv_returns_items(self, mock_isfile, mock_cwd):
         loader = _make_loader(file_path='/data/test.csv')
         items = loader.load_from_file('/data/test.csv')
         assert len(items) == 3
@@ -262,8 +265,9 @@ class TestLoadFromCsvFile:
 class TestLoadFromJsonlFile:
     """Test loading from JSONL file (mocked)."""
 
+    @patch('os.getcwd', return_value='/data')
     @patch('os.path.isfile', return_value=True)
-    def test_load_jsonl_returns_items(self, mock_isfile):
+    def test_load_jsonl_returns_items(self, mock_isfile, mock_cwd):
         loader = _make_loader(file_path='/data/test.jsonl')
         items = loader.load_from_file('/data/test.jsonl')
         assert len(items) == 2
@@ -437,8 +441,16 @@ class TestMissingFileError:
         with pytest.raises(ValueError, match='traversal'):
             loader.load_from_file('/data/../../../etc/passwd')
 
+    @patch('os.getcwd', return_value='/safe/workdir')
     @patch('os.path.isfile', return_value=True)
-    def test_unsupported_extension_raises(self, mock_isfile):
+    def test_absolute_path_outside_workdir_raises(self, mock_isfile, mock_cwd):
+        loader = _make_loader(file_path='/etc/secrets.json')
+        with pytest.raises(ValueError, match='Absolute path not allowed'):
+            loader.load_from_file('/etc/secrets.json')
+
+    @patch('os.getcwd', return_value='/data')
+    @patch('os.path.isfile', return_value=True)
+    def test_unsupported_extension_raises(self, mock_isfile, mock_cwd):
         loader = _make_loader(file_path='/data/test.xml')
         with pytest.raises(ValueError, match='Unsupported'):
             loader.load_from_file('/data/test.xml')
@@ -538,8 +550,9 @@ class TestIGlobalLifecycle:
         g.glb.logicalType = 'dataset_cobalt'
         return g
 
+    @patch('os.getcwd', return_value='/data')
     @patch('os.path.isfile', return_value=True)
-    def test_begin_and_end_global(self, mock_isfile):
+    def test_begin_and_end_global(self, mock_isfile, mock_cwd):
         config = {'source_type': 'file', 'file_path': '/data/test.json', 'sample_size': 0}
         g = self._make_global(config)
 
@@ -563,8 +576,9 @@ class TestIGlobalLifecycle:
         assert len(g._questions) == 1
         assert g._questions[0]['text'] == 'inline-q1'
 
+    @patch('os.getcwd', return_value='/missing')
     @patch('os.path.isfile', return_value=False)
-    def test_begin_global_missing_file_graceful(self, mock_isfile):
+    def test_begin_global_missing_file_graceful(self, mock_isfile, mock_cwd):
         config = {'source_type': 'file', 'file_path': '/missing/data.json', 'sample_size': 0}
         g = self._make_global(config)
 
@@ -572,6 +586,15 @@ class TestIGlobalLifecycle:
         g.beginGlobal()
         assert g._dataset == []
         assert g._questions == []
+
+    def test_begin_global_config_mode_skips(self):
+        config = {'source_type': 'inline', 'items': [{'input': 'q1', 'expected': 'a1'}], 'sample_size': 0}
+        g = self._make_global(config)
+        g.IEndpoint.endpoint.openMode = sys.modules['rocketlib'].OPEN_MODE.CONFIG
+
+        g.beginGlobal()
+        # Should not load anything in CONFIG mode
+        assert not hasattr(g, '_loader') or g._loader is None
 
     def test_validate_config_negative_sample(self):
         config = {'source_type': 'inline', 'sample_size': -5}

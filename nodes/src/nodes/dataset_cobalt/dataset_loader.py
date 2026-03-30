@@ -87,6 +87,14 @@ class DatasetLoader:
 
         normalized = os.path.normpath(path)
 
+        # Reject absolute paths outside the working directory for security.
+        # Only paths under the current working directory (or relative paths
+        # that resolve into it) are permitted.
+        if os.path.isabs(normalized):
+            cwd = os.getcwd()
+            if not normalized.startswith(cwd):
+                raise ValueError(f'Absolute path not allowed outside working directory: {path}')
+
         if not os.path.isfile(normalized):
             raise FileNotFoundError(f'Dataset file not found: {normalized}')
 
@@ -135,6 +143,10 @@ class DatasetLoader:
         Transformations are applied in order: filter -> sample -> slice.
         Each step is optional and controlled by config values.
 
+        When cobalt-ai is installed, its Dataset class is used for transforms.
+        Otherwise, a pure-Python fallback handles filter/sample/slice without
+        requiring the cobalt dependency.
+
         Args:
             items: List of dataset item dicts to transform.
             config: Configuration with optional keys:
@@ -147,11 +159,19 @@ class DatasetLoader:
         Returns:
             Transformed list of dataset item dicts.
         """
-        from cobalt import Dataset
-
         if not items:
             return items
 
+        try:
+            from cobalt import Dataset
+
+            return self._apply_transforms_cobalt(items, config, Dataset)
+        except ImportError:
+            debug('Cobalt DatasetLoader: cobalt-ai not installed, using Python fallback for transforms')
+            return self._apply_transforms_fallback(items, config)
+
+    def _apply_transforms_cobalt(self, items: List[Dict[str, Any]], config: Dict[str, Any], Dataset: Any) -> List[Dict[str, Any]]:
+        """Apply transforms using cobalt's Dataset class."""
         dataset = Dataset.from_items(items)
 
         # Apply filter if configured
@@ -179,6 +199,37 @@ class DatasetLoader:
 
         result = list(dataset)
         debug(f'Cobalt DatasetLoader: After transforms, {len(result)} items remain')
+        return result
+
+    def _apply_transforms_fallback(self, items: List[Dict[str, Any]], config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Apply transforms using pure Python (no cobalt dependency required)."""
+        import random
+
+        result = list(items)
+
+        # Apply filter if configured
+        filter_field = config.get('filter_field', '')
+        filter_value = config.get('filter_value', '')
+        if filter_field and filter_value:
+            debug(f'Cobalt DatasetLoader: Filtering on {filter_field}={filter_value} (fallback)')
+            result = [x for x in result if str(x.get(filter_field, '')) == str(filter_value)]
+
+        # Apply sample if configured, bounded to dataset size
+        sample_size = int(config.get('sample_size', 0))
+        if sample_size > 0:
+            bounded_size = min(sample_size, len(result))
+            debug(f'Cobalt DatasetLoader: Sampling {bounded_size} items (fallback)')
+            if bounded_size > 0 and bounded_size < len(result):
+                result = random.sample(result, bounded_size)
+
+        # Apply slice if configured
+        slice_start = int(config.get('slice_start', 0))
+        slice_end = int(config.get('slice_end', 0))
+        if slice_end > slice_start:
+            debug(f'Cobalt DatasetLoader: Slicing [{slice_start}:{slice_end}] (fallback)')
+            result = result[slice_start:slice_end]
+
+        debug(f'Cobalt DatasetLoader: After transforms (fallback), {len(result)} items remain')
         return result
 
     def to_questions(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
