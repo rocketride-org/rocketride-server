@@ -1,0 +1,4 @@
+#
+# No external requirements - uses only stdlib modules
+# (threading, uuid, time, json, urllib)
+#
