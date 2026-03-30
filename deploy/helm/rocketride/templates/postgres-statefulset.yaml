@@ -71,11 +71,9 @@ spec:
           readinessProbe:
             exec:
               command:
-                - pg_isready
-                - -U
-                - {{ .Values.postgres.auth.username }}
-                - -d
-                - {{ .Values.postgres.auth.database }}
+                - sh
+                - -c
+                - pg_isready -U $(POSTGRES_USER) -d $(POSTGRES_DB)
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
@@ -83,11 +81,9 @@ spec:
           livenessProbe:
             exec:
               command:
-                - pg_isready
-                - -U
-                - {{ .Values.postgres.auth.username }}
-                - -d
-                - {{ .Values.postgres.auth.database }}
+                - sh
+                - -c
+                - pg_isready -U $(POSTGRES_USER) -d $(POSTGRES_DB)
             initialDelaySeconds: 30
             periodSeconds: 15
             timeoutSeconds: 5
