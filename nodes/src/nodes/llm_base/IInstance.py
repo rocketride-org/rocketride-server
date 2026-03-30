@@ -39,7 +39,9 @@ class IInstanceGenericLLM(IInstanceBase):
             # Derive the provider name from the module path, e.g.
             # ``nodes.src.nodes.llm_openai.IInstance`` -> ``openai``.
             provider = type(self).__module__.rsplit('.', 1)[0].rsplit('.', 1)[-1]
-            if provider.startswith('llm_'):
+            if provider.startswith('llm_vision_'):
+                provider = provider[len('llm_vision_'):]
+            elif provider.startswith('llm_'):
                 provider = provider[4:]
             self.__class__._resilience_policy = create_resilience_policy(provider)
         return self._resilience_policy

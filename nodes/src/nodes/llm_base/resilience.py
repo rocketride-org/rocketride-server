@@ -409,8 +409,9 @@ class LLMResiliencePolicy:
             result = _inner()
             self._breaker.record_success()
             return result
-        except Exception:
-            self._breaker.record_failure()
+        except Exception as exc:
+            if _is_retryable(exc, self.retryable_types):
+                self._breaker.record_failure()
             raise
 
     async def execute_async(self, fn: Callable, *args: Any, **kwargs: Any) -> Any:
@@ -426,8 +427,9 @@ class LLMResiliencePolicy:
             result = await _inner()
             self._breaker.record_success()
             return result
-        except Exception:
-            self._breaker.record_failure()
+        except Exception as exc:
+            if _is_retryable(exc, self.retryable_types):
+                self._breaker.record_failure()
             raise
 
 

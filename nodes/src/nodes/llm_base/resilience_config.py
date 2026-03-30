@@ -66,9 +66,12 @@ def _env_int(key: str, default: int) -> int:
     if raw is None:
         return default
     try:
-        return int(raw)
+        value = int(raw)
     except ValueError:
         return default
+    if value < 0:
+        return default
+    return value
 
 
 def _env_float(key: str, default: float) -> float:
@@ -76,9 +79,12 @@ def _env_float(key: str, default: float) -> float:
     if raw is None:
         return default
     try:
-        return float(raw)
+        value = float(raw)
     except ValueError:
         return default
+    if value < 0:
+        return default
+    return value
 
 
 def get_default_config() -> ResilienceConfig:
