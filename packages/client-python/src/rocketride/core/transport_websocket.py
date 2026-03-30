@@ -460,8 +460,14 @@ class TransportWebSocket(TransportBase):
             self._websocket = None
             self._receive_task = None
             if hasattr(self, '_message_tasks'):
+                tasks_to_cancel = []
                 with self._message_tasks_lock:
+                    tasks_to_cancel = [t for t in self._message_tasks if not t.done()]
+                    for task in tasks_to_cancel:
+                        task.cancel()
                     self._message_tasks.clear()
+                if tasks_to_cancel:
+                    await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
 
     async def send(self, message: Dict[str, Any]) -> None:
         """
