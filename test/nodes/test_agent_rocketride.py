@@ -284,7 +284,7 @@ class TestPlannerHelpers:
         """_json_default should convert datetime objects to ISO format."""
         import datetime
 
-        dt = datetime.datetime(2026, 1, 15, 10, 30, 0)
+        dt = datetime.datetime(2026, 1, 15, 10, 30, 0, tzinfo=datetime.timezone.utc)
         result = _json_default(dt)
         assert '2026-01-15' in result
         assert '10:30' in result

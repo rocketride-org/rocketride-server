@@ -445,13 +445,13 @@ def _reset_warnings():
     _warned_messages.clear()
 
 
-@pytest.fixture()
+@pytest.fixture
 def warned_messages():
     """Provide access to warning messages captured during the test."""
     return _warned_messages
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_config():
     """Provide and reset the MockConfig singleton."""
     MockConfig.reset()
@@ -459,7 +459,7 @@ def mock_config():
     MockConfig.reset()
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_glb():
     """Create a mock ``glb`` object with common attributes."""
     glb = MagicMock()
@@ -468,7 +468,7 @@ def mock_glb():
     return glb
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_endpoint():
     """Create a mock IEndpoint with bag and openMode."""
     endpoint = MagicMock()
@@ -477,7 +477,7 @@ def mock_endpoint():
     return endpoint
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_endpoint_config():
     """Create a mock IEndpoint in CONFIG mode."""
     endpoint = MagicMock()
@@ -486,7 +486,7 @@ def mock_endpoint_config():
     return endpoint
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_chat_response():
     """Provide a factory for creating mock chat responses."""
 
@@ -496,7 +496,7 @@ def mock_chat_response():
     return _factory
 
 
-@pytest.fixture()
+@pytest.fixture
 def make_question():
     """Provide a factory for creating MockQuestion instances."""
 
@@ -506,7 +506,7 @@ def make_question():
     return _factory
 
 
-@pytest.fixture()
+@pytest.fixture
 def make_doc():
     """Provide a factory for creating MockDoc instances."""
 
