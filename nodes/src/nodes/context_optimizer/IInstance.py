@@ -66,9 +66,7 @@ class IInstance(IInstanceBase):
             docs.append({'content': content, '_original': doc})
 
         # Convert history to optimizer format
-        history = []
-        for h in question.history or []:
-            history.append({'role': h.role, 'content': h.content})
+        history = [{'role': h.role, 'content': h.content} for h in (question.history or [])]
 
         # ---- Run optimization ----
         result = optimizer.optimize(

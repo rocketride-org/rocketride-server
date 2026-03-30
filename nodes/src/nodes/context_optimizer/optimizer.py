@@ -298,8 +298,7 @@ class ContextOptimizer:
         omitted = len(messages) - 1 - len(recent)
         summary_placeholder['content'] = f'[Earlier conversation summarized: {omitted} messages omitted]'
 
-        result = [first_msg, summary_placeholder] + recent
-        return result
+        return [first_msg, summary_placeholder, *recent]
 
     # ------------------------------------------------------------------
     # Document ranking

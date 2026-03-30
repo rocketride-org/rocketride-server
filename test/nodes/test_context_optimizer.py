@@ -347,7 +347,7 @@ class TestTruncation:
             # Budget that should fit at least first sentence but not all
             result = optimizer.truncate_to_budget(text, first_tokens + 1)
             # Result should end at a sentence boundary
-            assert result.endswith('.') or result.endswith('sentence')
+            assert result.endswith(('.', 'sentence'))
 
     def test_truncation_does_not_cut_mid_word(self, optimizer):
         """Even in fallback mode, result should be decodeable."""

@@ -109,7 +109,7 @@
 		"default": "auto",
 		"profiles": {
 			"auto": {
-				"title": "Auto - Detect model from pipeline",
+				"title": "Auto - Use configured default model",
 				"model_name": "gpt-5",
 				"max_context_tokens": 0,
 				"system_prompt_budget_pct": 10,
