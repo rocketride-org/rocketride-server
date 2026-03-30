@@ -73,9 +73,9 @@ spec:
               command:
                 - pg_isready
                 - -U
-                - $(POSTGRES_USER)
+                - {{ .Values.postgres.auth.username }}
                 - -d
-                - $(POSTGRES_DB)
+                - {{ .Values.postgres.auth.database }}
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
@@ -85,9 +85,9 @@ spec:
               command:
                 - pg_isready
                 - -U
-                - $(POSTGRES_USER)
+                - {{ .Values.postgres.auth.username }}
                 - -d
-                - $(POSTGRES_DB)
+                - {{ .Values.postgres.auth.database }}
             initialDelaySeconds: 30
             periodSeconds: 15
             timeoutSeconds: 5
