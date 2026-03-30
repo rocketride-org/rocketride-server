@@ -30,6 +30,7 @@
 # ------------------------------------------------------------------------------
 
 import hashlib
+import threading
 from typing import Any, Dict, List, Optional
 
 # Built-in model tier classification
@@ -139,7 +140,8 @@ class ModelRouter:
         self.ab_split_percent: int = int(config.get('ab_split_percent', 50))
         self.complexity_threshold: int = int(config.get('complexity_threshold', 50))
 
-        # Runtime state
+        # Runtime state — guarded by _lock for thread safety across pipeline threads
+        self._lock = threading.Lock()
         self._cumulative_cost: float = 0.0
         self._request_count: int = 0
 
@@ -177,15 +179,18 @@ class ModelRouter:
 
     def record_cost(self, amount: float) -> None:
         """Record a cost incurred by a model call (used by cost_aware strategy)."""
-        self._cumulative_cost += amount
+        with self._lock:
+            self._cumulative_cost += amount
 
     @property
     def cumulative_cost(self) -> float:
-        return self._cumulative_cost
+        with self._lock:
+            return self._cumulative_cost
 
     @property
     def request_count(self) -> int:
-        return self._request_count
+        with self._lock:
+            return self._request_count
 
     # ------------------------------------------------------------------
     # Strategy implementations
@@ -194,7 +199,8 @@ class ModelRouter:
     def _route_complexity(self, text: str) -> Dict[str, Any]:
         """Route based on estimated query complexity."""
         score = _estimate_complexity(text, self.complexity_threshold)
-        self._request_count += 1
+        with self._lock:
+            self._request_count += 1
 
         if score >= self.complexity_threshold:
             # Complex query -> tier 1 (powerful)
@@ -214,28 +220,28 @@ class ModelRouter:
 
     def _route_cost_aware(self, text: str) -> Dict[str, Any]:
         """Route based on cumulative cost against budget."""
-        self._request_count += 1
+        with self._lock:
+            self._request_count += 1
+            current_cost = self._cumulative_cost
 
-        if self.budget_limit > 0 and self._cumulative_cost >= self.budget_limit:
-            # Budget exhausted -> cheapest model
+        if self.budget_limit > 0 and current_cost >= self.budget_limit:
             info = _get_model_info('gemini-flash')
-            info['reason'] = f'budget exhausted (spent ${self._cumulative_cost:.4f} of ${self.budget_limit:.4f}), routed to cheapest model'
+            info['reason'] = f'budget exhausted (spent ${current_cost:.4f} of ${self.budget_limit:.4f}), routed to cheapest model'
             return info
 
-        if self.budget_limit > 0 and self._cumulative_cost >= self.budget_limit * 0.8:
-            # Nearing budget -> balanced model
+        if self.budget_limit > 0 and current_cost >= self.budget_limit * 0.8:
             info = _get_model_info('claude-sonnet')
-            info['reason'] = f'approaching budget limit (spent ${self._cumulative_cost:.4f} of ${self.budget_limit:.4f}), routed to balanced model'
+            info['reason'] = f'approaching budget limit (spent ${current_cost:.4f} of ${self.budget_limit:.4f}), routed to balanced model'
             return info
 
-        # Under budget -> use primary model
         info = _get_model_info(self.primary_model)
-        info['reason'] = f'within budget (spent ${self._cumulative_cost:.4f} of ${self.budget_limit:.4f}), using primary model'
+        info['reason'] = f'within budget (spent ${current_cost:.4f} of ${self.budget_limit:.4f}), using primary model'
         return info
 
     def _route_latency(self, text: str) -> Dict[str, Any]:
         """Route to the fastest (lowest-tier) model for real-time use."""
-        self._request_count += 1
+        with self._lock:
+            self._request_count += 1
         info = _get_model_info('gemini-flash')
         info['reason'] = 'latency strategy selected fastest model'
         return info
@@ -247,7 +253,8 @@ class ModelRouter:
         on failure.  Here we return the primary model with the full
         chain attached so downstream code can retry.
         """
-        self._request_count += 1
+        with self._lock:
+            self._request_count += 1
 
         chain = [self.primary_model] + self.fallback_models
         # Deduplicate while preserving order
@@ -270,7 +277,8 @@ class ModelRouter:
         to the same bucket (deterministic per session/query, not random
         per request).
         """
-        self._request_count += 1
+        with self._lock:
+            self._request_count += 1
 
         # Deterministic bucket via hash
         digest = hashlib.sha256(text.encode('utf-8')).hexdigest()
