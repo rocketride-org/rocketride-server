@@ -38,17 +38,24 @@ class IGlobal(IGlobalBase):
     def validateConfig(self, syntaxOnly: bool) -> None:
         """Validate the routing configuration.
 
+        When syntaxOnly is True, only lightweight checks are performed
+        (e.g. verifying the strategy name). Expensive validation such as
+        parsing fallback model lists is skipped.
+
         Checks that the strategy is one of the known routing strategies
         and that fallback_chain strategy has at least one fallback model.
         """
+        from rocketlib.error import APERR, Ec
+
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         strategy = config.get('strategy', 'complexity')
 
         valid_strategies = {'complexity', 'cost_aware', 'latency', 'fallback_chain', 'ab_test'}
         if strategy not in valid_strategies:
-            from rocketlib.error import APERR, Ec
-
             raise APERR(Ec.InvalidParam, f'Invalid routing strategy "{strategy}". Must be one of: {", ".join(sorted(valid_strategies))}')
+
+        if syntaxOnly:
+            return
 
         if strategy == 'fallback_chain':
             fallback_raw = config.get('fallback_models', '')
@@ -59,8 +66,6 @@ class IGlobal(IGlobalBase):
             else:
                 models = []
             if not models:
-                from rocketlib.error import APERR, Ec
-
                 raise APERR(Ec.InvalidParam, 'fallback_chain strategy requires at least one model in fallback_models')
 
     def beginGlobal(self) -> None:

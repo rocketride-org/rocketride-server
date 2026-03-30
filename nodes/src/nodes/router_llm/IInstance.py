@@ -38,7 +38,7 @@ from .IGlobal import IGlobal
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
-    def open(self, object: Entry):
+    def open(self, obj: Entry):
         """Initialize state for a new object."""
         pass
 
@@ -54,7 +54,11 @@ class IInstance(IInstanceBase):
         # Extract the question text for routing analysis
         question_text = ''
         if hasattr(routed_question, 'questions') and routed_question.questions:
-            question_text = routed_question.questions[0].text if hasattr(routed_question.questions[0], 'text') else str(routed_question.questions[0])
+            first = routed_question.questions[0]
+            if hasattr(first, 'text'):
+                question_text = first.text
+            else:
+                question_text = str(first)
         elif hasattr(routed_question, 'getPrompt'):
             question_text = routed_question.getPrompt()
 
