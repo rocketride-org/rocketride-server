@@ -1,0 +1,238 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Cohere Rerank",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "rerank_cohere://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"rerank"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most nodes
+	//
+	"path": "nodes.rerank_cohere",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "rerank",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": [
+		"A reranking component powered by Cohere's Rerank API that improves ",
+		"search quality by reordering retrieved documents based on their ",
+		"relevance to a given query. Supports the latest rerank-v3.5 model ",
+		"with configurable top-K selection and minimum score thresholds."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "cohere.svg",
+	//
+	// Optional:
+	//	  Documentation link for this driver
+	//
+	"documentation": "https://docs.cohere.com/reference/rerank",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": [
+		"Model: ${parameters.rerank_cohere.profile}",
+		"Top K: ${parameters.rerank_cohere.${profile}.top_n}"
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": [
+			"documents",
+			"answers"
+		]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"description": "Takes questions with retrieved documents and reranks them by relevance.",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Produces reranked documents ordered by relevance score."
+				},
+				{
+					"lane": "answers",
+					"description": "Produces an answer with reranked documents."
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "rerank-v3.5",
+		"profiles": {
+			"rerank-v3.5": {
+				"title": "Rerank v3.5",
+				"model": "rerank-v3.5",
+				"top_n": 5,
+				"min_score": 0.0,
+				"apikey": ""
+			},
+			"rerank-v3.0": {
+				"title": "Rerank v3.0",
+				"model": "rerank-v3.0",
+				"top_n": 5,
+				"min_score": 0.0,
+				"apikey": ""
+			},
+			"custom": {
+				"model": "",
+				"top_n": 5,
+				"min_score": 0.0,
+				"apikey": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"top_n": {
+			"type": "number",
+			"title": "Top N",
+			"description": "Number of top results to return"
+		},
+		"min_score": {
+			"type": "number",
+			"title": "Min Score",
+			"description": "Minimum relevance score threshold (0.0-1.0)"
+		},
+		"rerank_cohere.rerank-v3.5": {
+			"object": "rerank-v3.5",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"rerank_cohere.rerank-v3.0": {
+			"object": "rerank-v3.0",
+			"properties": [
+				"llm.cloud.apikey"
+			]
+		},
+		"rerank_cohere.custom": {
+			"object": "custom",
+			"properties": [
+				"model",
+				"top_n",
+				"min_score",
+				"llm.cloud.apikey"
+			]
+		},
+		"rerank_cohere.profile": {
+			"title": "Model",
+			"description": "Rerank model",
+			"type": "string",
+			"default": "rerank-v3.5",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "rerank-v3.5",
+					"properties": [
+						"rerank_cohere.rerank-v3.5"
+					]
+				},
+				{
+					"value": "rerank-v3.0",
+					"properties": [
+						"rerank_cohere.rerank-v3.0"
+					]
+				},
+				{
+					"value": "custom",
+					"properties": [
+						"rerank_cohere.custom"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Cohere Rerank",
+			"properties": [
+				"rerank_cohere.profile"
+			]
+		}
+	],
+	"test": {
+		"profiles": ["rerank-v3.5"],
+		"outputs": ["documents"],
+		"cases": [
+			{
+				"name": "Rerank returns scored documents",
+				"questions": {
+					"type": "semantic",
+					"questions": [
+						{
+							"text": "What is machine learning?"
+						}
+					]
+				},
+				"expect": {
+					"documents": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	}
+}
