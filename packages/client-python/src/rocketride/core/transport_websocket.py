@@ -55,6 +55,7 @@ Usage (Internal):
 
 import json
 import asyncio
+import threading
 from typing import Dict, Any, Union, Optional
 from .constants import CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT, CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 
@@ -119,7 +120,7 @@ class TransportWebSocket(TransportBase):
         self._uri = uri
         self._auth = kwargs.get('auth', None)
         self._message_tasks: set = set()
-        self._message_tasks_lock = asyncio.Lock()
+        self._message_tasks_lock = threading.Lock()
 
     def get_auth(self) -> Optional[str]:
         """Return auth credential for use by connect flow (e.g. first DAP auth command)."""
@@ -136,6 +137,11 @@ class TransportWebSocket(TransportBase):
     def set_uri(self, uri: str) -> None:
         """Update connection URI. Takes effect on the next connect()."""
         self._uri = uri
+
+    def _on_message_task_done(self, task: asyncio.Task) -> None:
+        """Callback for when a message processing task completes."""
+        with self._message_tasks_lock:
+            self._message_tasks.discard(task)
 
     def _is_fastapi_websocket(self) -> bool:
         """
@@ -243,9 +249,9 @@ class TransportWebSocket(TransportBase):
 
                 # Process each message in its own task so others can be processed concurrently
                 task = asyncio.create_task(self._receive_data(data))
-                async with self._message_tasks_lock:
+                with self._message_tasks_lock:
                     self._message_tasks.add(task)
-                task.add_done_callback(lambda t: self._message_tasks.discard(t))
+                task.add_done_callback(self._on_message_task_done)
 
         except asyncio.CancelledError:
             self._debug_message('WebSocket receive loop cancelled')
@@ -454,7 +460,7 @@ class TransportWebSocket(TransportBase):
             self._websocket = None
             self._receive_task = None
             if hasattr(self, '_message_tasks'):
-                async with self._message_tasks_lock:
+                with self._message_tasks_lock:
                     self._message_tasks.clear()
 
     async def send(self, message: Dict[str, Any]) -> None:
