@@ -1,0 +1,206 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Video",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "embedding_video://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["embedding"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["gpu"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.embedding_video",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "embedding",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["A processing component that generates vector embeddings from video content ", "by extracting frames at configurable intervals and encoding them using ", "vision models such as CLIP. It transforms visual features from video frames ", "into numerical representations that capture the semantic and structural ", "characteristics of the video. These embeddings enable similarity search, ", "clustering, and integration into multimodal RAG workflows. Ideal for use ", "cases involving video retrieval, semantic search, and content understanding."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "embedding-video.svg",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"video": ["documents"]
+	},
+	"input": [
+		{
+			"lane": "video",
+			"description": "Video to extract frames from and embed.",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Documents containing frame embeddings with timestamp metadata."
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "openai-patch16",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"custom": {
+				"title": "Custom model"
+			},
+			"openai-patch16": {
+				"title": "OpenAI CLIP - 16x16 - good performance, lower memory",
+				"model": "openai/clip-vit-base-patch16"
+			},
+			"openai-patch32": {
+				"title": "OpenAI CLIP - 32x32 - lower performance, better recognition",
+				"model": "openai/clip-vit-base-patch32"
+			},
+			"google16x224": {
+				"title": "Google ViT - 16x16 - fast, accurate, general-purpose",
+				"model": "google/vit-base-patch16-224"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"embedding_video.model": {
+			"type": "string",
+			"title": "Model name",
+			"minLength": 2,
+			"maxLength": 32,
+			"description": "Hugging Face model to use for frame embedding"
+		},
+		"embedding_video.custom": {
+			"object": "custom",
+			"title": "",
+			"properties": ["embedding_video.model"]
+		},
+		"embedding_video.profile": {
+			"title": "Model",
+			"description": "Embedding model for video frames",
+			"type": "string",
+			"default": "openai-patch16",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": ["embedding_video.custom"]
+				}
+			]
+		},
+		"embedding_video.interval": {
+			"type": "number",
+			"title": "Interval (in seconds) between frames",
+			"description": "Time in seconds between extracted frames",
+			"default": 5
+		},
+		"embedding_video.max_frames": {
+			"type": "number",
+			"title": "Maximum number of frames to extract (0=unlimited)",
+			"description": "Limit the total number of frames extracted from the video. Set to 0 for unlimited.",
+			"default": 50
+		},
+		"embedding_video.start_time": {
+			"type": "number",
+			"title": "Start time (in seconds) for frame extraction (0=beginning)",
+			"default": 0
+		},
+		"embedding_video.duration": {
+			"type": "number",
+			"title": "Duration (in seconds) for frame extraction (0=end of video)",
+			"default": 0
+		},
+		"embedding_video.extraction": {
+			"object": "extraction",
+			"title": "Frame Extraction",
+			"properties": [
+				"embedding_video.interval",
+				"embedding_video.max_frames",
+				"embedding_video.start_time",
+				"embedding_video.duration"
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Video Embedding",
+			"properties": ["embedding_video.profile", "embedding_video.extraction"]
+		}
+	],
+	//
+	//	Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["openai-patch16"],
+		"outputs": ["documents"],
+		"timeout": 180,
+		"cases": [
+			{
+				"name": "Embed video frames",
+				"video": "video/BBC - Tear down this wall.mp4",
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"property": [
+							{
+								"path": "[0].embedding",
+								"minLength": 384
+							}
+						]
+					}
+				}
+			}
+		]
+	}
+}
