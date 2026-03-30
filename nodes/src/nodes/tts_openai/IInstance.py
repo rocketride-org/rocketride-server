@@ -81,4 +81,19 @@ class IInstance(IInstanceBase):
             debug(f'TTS: generated {len(audio_data)} bytes of {self.IGlobal._response_format} audio')
 
         except Exception as e:
-            warning(f'TTS: failed to generate speech: {e}')
+            # Import OpenAI error types for granular handling
+            try:
+                from openai import RateLimitError, APIConnectionError
+            except ImportError:
+                RateLimitError = None
+                APIConnectionError = None
+
+            # Rate-limit and connection errors are transient; warn but don't re-raise
+            if RateLimitError is not None and isinstance(e, RateLimitError):
+                warning(f'TTS: rate limited by OpenAI, skipping this request: {e}')
+            elif APIConnectionError is not None and isinstance(e, APIConnectionError):
+                warning(f'TTS: connection error (transient), skipping this request: {e}')
+            else:
+                # Non-transient errors must propagate so the pipeline knows it failed
+                warning(f'TTS: failed to generate speech: {e}')
+                raise
