@@ -17,6 +17,7 @@ from rocketride import CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 from ai.constants import CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_HOST, CONST_WEB_WS_MAX_SIZE
 from ai.web import exception, error, Result
 from ai.account import Account, AccountInfo, Reporter
+from ai.modules import ALL as ALLOWED_MODULES
 from .middleware import AuthMiddleware
 from .endpoints import use, ping, version, shutdown, status
 from .denied import (
@@ -729,6 +730,12 @@ class WebServer:
         """
         # Clean it up
         moduleName = moduleName.lower().strip()
+
+        # Validate against allowlist to prevent arbitrary module injection.
+        # Without this check, an attacker could load arbitrary Python modules
+        # via importlib.import_module(), leading to remote code execution.
+        if moduleName not in ALLOWED_MODULES:
+            raise ValueError(f'Module {moduleName!r} is not allowed. Permitted modules: {", ".join(sorted(ALLOWED_MODULES))}')
 
         # If it is already loaded, return success
         if moduleName in self.app.state.modules:

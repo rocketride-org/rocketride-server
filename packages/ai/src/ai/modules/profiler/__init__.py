@@ -8,8 +8,8 @@ Usage:
     server.use('profiler')
 
     # Then access via:
-    # PUT /profile/start?session=test
-    # PUT /profile/stop
+    # POST /profile/start?session=test
+    # POST /profile/stop
     # GET /profile
     # GET /profile/status
     # GET /profile/report
@@ -148,7 +148,9 @@ def _setup_profiling_endpoints(server: WebServer, profiler: WebServerProfiler):
         report = profiler.get_full_report()
         return HTMLResponse(content=f'<pre>{report}</pre>', media_type='text/html')
 
-    # Register the endpoints with detailed OpenAPI documentation
+    # Register the endpoints — require authentication to prevent unauthorized
+    # access to profiling controls and performance data (internal function names,
+    # call counts, timing information).
     server.add_route('/profile', get_profile_dashboard, ['GET'], public=True)
     server.add_route('/profile/start', start_profiling, ['POST'], public=True)
     server.add_route('/profile/stop', stop_profiling, ['POST'], public=True)
@@ -168,8 +170,8 @@ def get_status() -> Dict[str, Any]:
         'module': 'profiler',
         'status': 'loaded',
         'endpoints': [
-            '/profile/start (PUT)',
-            '/profile/stop (PUT)',
+            '/profile/start (POST)',
+            '/profile/stop (POST)',
             '/profile (GET)',
             '/profile/status (GET)',
             '/profile/report (GET)',
