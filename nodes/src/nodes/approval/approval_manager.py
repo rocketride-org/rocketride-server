@@ -56,6 +56,7 @@ class ApprovalManager:
         self._lock = threading.Lock()
         self._timeout_seconds = timeout_seconds
         self._timeout_action = timeout_action  # 'approve' or 'reject'
+        self._pending_count: int = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -96,10 +97,10 @@ class ApprovalManager:
         }
 
         with self._lock:
-            pending_count = sum(1 for r in self._requests.values() if r['status'] == 'pending')
-            if pending_count >= MAX_PENDING_REQUESTS:
+            if self._pending_count >= MAX_PENDING_REQUESTS:
                 raise ValueError(f'Maximum pending requests ({MAX_PENDING_REQUESTS}) reached')
             self._requests[approval_id] = request
+            self._pending_count += 1
 
         return request
 
@@ -144,6 +145,7 @@ class ApprovalManager:
             request['reviewer'] = reviewer
             request['review_comment'] = comment
             request['reviewed_at'] = time.monotonic()
+            self._pending_count -= 1
             return dict(request)
 
     def reject(self, approval_id: str, reviewer: str, reason: Optional[str] = None) -> Dict[str, Any]:
@@ -170,6 +172,7 @@ class ApprovalManager:
             request['reviewer'] = reviewer
             request['review_comment'] = reason
             request['reviewed_at'] = time.monotonic()
+            self._pending_count -= 1
             return dict(request)
 
     def list_pending(self) -> List[Dict[str, Any]]:
@@ -216,3 +219,4 @@ class ApprovalManager:
             request['reviewer'] = '__timeout__'
             request['review_comment'] = f'Auto-{request["status"]} after {request["timeout_seconds"]}s timeout'
             request['reviewed_at'] = time.monotonic()
+            self._pending_count -= 1

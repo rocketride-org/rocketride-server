@@ -32,6 +32,7 @@
 # ------------------------------------------------------------------------------
 
 import copy
+import uuid
 from rocketlib import IInstanceBase, Entry
 from ai.common.schema import Answer
 from .IGlobal import IGlobal
@@ -62,8 +63,8 @@ class IInstance(IInstanceBase):
         else:
             content = answer.getText()
 
-        # Build an item_id from the answer -- use the approval_id as the canonical key
-        item_id = str(id(answer))
+        # Build a stable item_id using UUID (not memory address which can be reused)
+        item_id = str(uuid.uuid4())
 
         # Create the approval request
         request = self.IGlobal.approval_manager.request_approval(

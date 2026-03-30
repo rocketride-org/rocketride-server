@@ -43,7 +43,10 @@ class IGlobal(IGlobalBase):
         # Read this node's merged profile configuration
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        timeout_seconds = int(config.get('timeout_seconds', 3600))
+        try:
+            timeout_seconds = int(config.get('timeout_seconds', 3600))
+        except (TypeError, ValueError):
+            timeout_seconds = 3600
         timeout_action = config.get('timeout_action', 'approve')
         notification_type = config.get('notification_type', 'log')
         webhook_url = config.get('webhook_url', None)
