@@ -1,0 +1,14 @@
+apiVersion: v2
+name: rocketride
+description: A Helm chart for RocketRide data processing engine
+type: application
+version: 0.1.0
+appVersion: "3.1.1"
+keywords:
+  - ai
+  - ml
+  - pipeline
+  - data-processing
+home: https://github.com/rocketride-org/rocketride-server
+maintainers:
+  - name: RocketRide Team
