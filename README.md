@@ -101,7 +101,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 
 ## Observability
 
-Selecting running pipelines allows for in depth analytics. Trace call trees, token usage, memory consumption, and more to optimize your pipelines before scaling and deploying. Find the models, agents, and tools best fit for your task.
+Selecting running pipelines allows for in-depth analytics. Trace call trees, token usage, memory consumption, and more to optimize your pipelines before scaling and deploying. Find the models, agents, and tools best fit for your task.
 
 <p align="center">
   <img src="./images/tracing.gif" alt="Pipeline observability and tracing">
