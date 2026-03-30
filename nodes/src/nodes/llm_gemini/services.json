@@ -92,42 +92,42 @@
 		"profiles": {
 			"custom": {
 				"model": "",
-				"modelTotalTokens": 1048576,
+				"modelTotalTokens": 1114112,
 				"outputTokens": 65536,
 				"apikey": ""
 			},
 			"gemini-3.1-pro-preview": {
 				"model": "models/gemini-3.1-pro-preview",
 				"title": "Gemini 3.1 Pro",
-				"modelTotalTokens": 1048576,
+				"modelTotalTokens": 1114112,
 				"outputTokens": 65536,
 				"apikey": ""
 			},
 			"gemini-3.1-flash-image-preview": {
 				"model": "models/gemini-3.1-flash-image-preview",
 				"title": "Gemini 3.1 Flash Image",
-				"modelTotalTokens": 131072,
+				"modelTotalTokens": 163840,
 				"outputTokens": 32768,
 				"apikey": ""
 			},
 			"gemini-3.1-flash-lite-preview": {
 				"model": "models/gemini-3.1-flash-lite-preview",
 				"title": "Gemini 3.1 Flash Lite",
-				"modelTotalTokens": 1048576,
+				"modelTotalTokens": 1114112,
 				"outputTokens": 65536,
 				"apikey": ""
 			},
 			"gemini-3-flash-preview": {
 				"model": "models/gemini-3-flash-preview",
 				"title": "Gemini 3 Flash",
-				"modelTotalTokens": 1048576,
+				"modelTotalTokens": 1064000,
 				"outputTokens": 65536,
 				"apikey": ""
 			},
 			"gemini-3-pro-image-preview": {
 				"model": "models/gemini-3-pro-image-preview",
 				"title": "Gemini 3 Pro Image",
-				"modelTotalTokens": 66560,
+				"modelTotalTokens": 98304,
 				"outputTokens": 32768,
 				"apikey": ""
 			},
@@ -162,7 +162,7 @@
 			"gemini-3-pro-preview": {
 				"model": "models/gemini-3.1-pro-preview",
 				"title": "Gemini 3 Pro (Deprecated)",
-				"modelTotalTokens": 1048576,
+				"modelTotalTokens": 1114112,
 				"outputTokens": 65536,
 				"apikey": "",
 				"deprecated": true,
@@ -171,7 +171,7 @@
 			"gemini-3-pro-image": {
 				"model": "models/gemini-3-pro-image-preview",
 				"title": "Gemini 3 Pro Image (Deprecated)",
-				"modelTotalTokens": 66560,
+				"modelTotalTokens": 98304,
 				"outputTokens": 32768,
 				"apikey": "",
 				"deprecated": true,
