@@ -16,7 +16,7 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional
 
-from rocketlib import debug, error
+from rocketlib import debug, warning
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 
@@ -175,7 +175,15 @@ class AgentBase(ABC):
         except Exception as e:
             error_type = type(e).__name__
             error_message = str(e)
-            error(f'agent base _run failed run_id={run_id} type={error_type} message={error_message}')
+            # Use warning() instead of error() so the engine does not treat
+            # this as a fatal node failure.  When a pipeline has multiple
+            # parallel execution paths, calling error() would cause the C++
+            # engine to abort ALL paths — even those that are still running
+            # successfully.  The failure details are already captured in the
+            # answer payload written to the answers lane, so downstream nodes
+            # and the UI still see the error context.
+            # See: https://github.com/rocketride-org/rocketride-server/issues/444
+            warning(f'agent base _run failed run_id={run_id} type={error_type} message={error_message}')
             ended_at = now_iso()
             answer_payload = {
                 'content': error_message or f'{error_type} (no message)',
@@ -185,6 +193,7 @@ class AgentBase(ABC):
                     'run_id': run_id,
                     'started_at': started_at,
                     'ended_at': ended_at,
+                    'status': 'error',
                     **({'task_id': task_id} if task_id else {}),
                 },
                 'stack': [],

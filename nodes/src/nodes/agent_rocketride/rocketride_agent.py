@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from rocketlib import debug, error
+from rocketlib import debug, warning
 from rocketlib.types import IInvokeLLM
 
 from ai.common.agent import AgentBase, extract_text, safe_str
@@ -45,6 +45,7 @@ from .executor import execute_wave, resolve_answer_refs
 # Prevents runaway loops if the LLM fails to converge on done=true.
 # Can be overridden via the ``max_waves`` node configuration field.
 _DEFAULT_MAX_WAVES = 10
+
 
 class RocketRideDriver(AgentBase):
     """
@@ -134,7 +135,11 @@ class RocketRideDriver(AgentBase):
                     current_scratch=current_scratch,
                 )
             except Exception as exc:
-                error(f'rocketride wave plan failed run_id={run_id}: {exc}')
+                # Use warning() instead of error() to prevent the engine from
+                # aborting the entire pipeline when this execution path fails.
+                # Other parallel paths should continue unaffected.
+                # See: https://github.com/rocketride-org/rocketride-server/issues/444
+                warning(f'rocketride wave plan failed run_id={run_id}: {exc}')
                 return f'LLM error: {exc}', trace
 
             # Update scratch from the LLM response.  Fall back to the previous
