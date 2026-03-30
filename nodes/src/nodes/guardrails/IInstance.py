@@ -27,7 +27,6 @@ import logging
 from rocketlib import IInstanceBase, Entry
 from ai.common.schema import Question, Answer
 from .IGlobal import IGlobal
-from .guardrails_engine import GuardrailsViolation
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +77,11 @@ class IInstance(IInstanceBase):
         # Run input guardrails
         result = engine.evaluate(full_text, mode='input')
 
-        # Attach guardrails metadata to the question
-        question.addContext(f'[guardrails:input] passed={result["passed"]}, action={result["action"]}, violations={len(result["violations"])}')
-
         if result['action'] == 'block':
-            raise GuardrailsViolation(result['violations'])
+            for violation in result['violations']:
+                logger.warning('Guardrails input blocked: %s — %s', violation['rule'], violation['details'])
+            self.preventDefault()
+            return
 
         if result['action'] == 'warn':
             for violation in result['violations']:
@@ -123,7 +122,10 @@ class IInstance(IInstanceBase):
         result = engine.evaluate(text, mode='output', context=context)
 
         if result['action'] == 'block':
-            raise GuardrailsViolation(result['violations'])
+            for violation in result['violations']:
+                logger.warning('Guardrails output blocked: %s — %s', violation['rule'], violation['details'])
+            self.preventDefault()
+            return
 
         if result['action'] == 'warn':
             for violation in result['violations']:
@@ -142,12 +144,15 @@ class IInstance(IInstanceBase):
             documents: List of Doc objects from the pipeline.
         """
         for doc in documents:
+            body = None
             if hasattr(doc, 'page_content'):
-                self.source_documents.append(str(doc.page_content))
+                body = doc.page_content
             elif isinstance(doc, dict) and 'page_content' in doc:
-                self.source_documents.append(str(doc['page_content']))
+                body = doc['page_content']
             elif isinstance(doc, str):
-                self.source_documents.append(doc)
+                body = doc
+            if body:
+                self.source_documents.append(str(body))
 
         # Forward documents downstream
         self.instance.writeDocuments(documents)

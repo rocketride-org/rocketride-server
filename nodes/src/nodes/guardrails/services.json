@@ -144,6 +144,8 @@
 				"enable_pii_detection": true,
 				"enable_hallucination_check": false,
 				"max_input_length": 0,
+				"max_tokens_estimate": 0,
+				"expected_format": "",
 				"blocked_topics": [],
 				"allowed_topics": []
 			},
@@ -155,6 +157,8 @@
 				"enable_pii_detection": true,
 				"enable_hallucination_check": true,
 				"max_input_length": 50000,
+				"max_tokens_estimate": 4096,
+				"expected_format": "",
 				"blocked_topics": [],
 				"allowed_topics": []
 			},
@@ -166,6 +170,8 @@
 				"enable_pii_detection": true,
 				"enable_hallucination_check": true,
 				"max_input_length": 0,
+				"max_tokens_estimate": 0,
+				"expected_format": "",
 				"blocked_topics": [],
 				"allowed_topics": []
 			}
