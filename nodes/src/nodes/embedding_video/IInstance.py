@@ -107,6 +107,7 @@ class IInstance(IInstanceBase):
         import cv2
         import tempfile
         import os
+        from PIL import Image as PILImage
 
         # Write video bytes to a temporary file for OpenCV to read.
         # OpenCV's VideoCapture requires a file path or device index.
@@ -173,8 +174,6 @@ class IInstance(IInstanceBase):
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
                     # Convert numpy array to PIL Image for the embedding model.
-                    from PIL import Image as PILImage
-
                     pil_image = PILImage.fromarray(frame_rgb)
 
                     # Generate the embedding with device lock for thread safety.
