@@ -42,7 +42,9 @@
 			"type": "number",
 			"title": "Number of Results",
 			"description": "Maximum number of search results to return (1-50)",
-			"default": 10
+			"default": 10,
+			"minimum": 1,
+			"maximum": 50
 		},
 		"tool_exa_search.useAutoprompt": {
 			"type": "boolean",
