@@ -29,7 +29,7 @@ mock_depends = ModuleType('depends')
 mock_depends.depends = MagicMock()
 sys.modules['depends'] = mock_depends
 
-# Mock fastapi module
+# Mock fastapi module with submodule structure
 mock_fastapi = MagicMock()
 mock_fastapi.FastAPI = MagicMock()
 mock_fastapi.Request = MagicMock()
@@ -38,4 +38,12 @@ mock_fastapi.Header = MagicMock()
 mock_fastapi.Query = MagicMock()
 mock_fastapi.UploadFile = MagicMock()
 mock_fastapi.File = MagicMock()
+
+mock_fastapi_middleware = MagicMock()
+mock_fastapi_middleware.cors = MagicMock()
+mock_fastapi_middleware.cors.CORSMiddleware = MagicMock()
+mock_fastapi.middleware = mock_fastapi_middleware
+
 sys.modules['fastapi'] = mock_fastapi
+sys.modules['fastapi.middleware'] = mock_fastapi_middleware
+sys.modules['fastapi.middleware.cors'] = mock_fastapi_middleware.cors
