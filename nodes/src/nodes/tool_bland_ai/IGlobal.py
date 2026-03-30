@@ -37,6 +37,15 @@ from rocketlib import IGlobalBase, OPEN_MODE, warning
 from .bland_driver import BlandDriver
 
 
+def _parse_bool(raw: object, default: bool = True) -> bool:
+    """Safely parse a boolean from config values (bool, str, or other)."""
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        return raw.strip().lower() in {'1', 'true', 'yes', 'on'}
+    return bool(raw) if raw is not None else default
+
+
 class IGlobal(IGlobalBase):
     """Global state for tool_bland_ai."""
 
@@ -48,16 +57,16 @@ class IGlobal(IGlobalBase):
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        api_key = str(cfg.get("apikey") or "").strip()
+        api_key = str(cfg.get('apikey') or '').strip()
         if not api_key:
-            warning("Bland AI API key is required. Get one at https://www.bland.ai")
-            raise ValueError("Bland AI API key not configured")
+            warning('Bland AI API key is required. Get one at https://www.bland.ai')
+            raise ValueError('Bland AI API key not configured')
 
-        server_name = str(cfg.get("serverName") or "bland").strip()
-        default_voice = str(cfg.get("voice") or "June").strip()
-        max_duration = int(cfg.get("maxDuration") or 5)
-        record = bool(cfg.get("record", True))
-        language = str(cfg.get("language") or "en").strip()
+        server_name = str(cfg.get('serverName') or 'bland').strip()
+        default_voice = str(cfg.get('voice') or 'June').strip()
+        max_duration = int(cfg.get('maxDuration') or 5)
+        record = _parse_bool(cfg.get('record', True))
+        language = str(cfg.get('language') or 'en').strip()
 
         try:
             self.driver = BlandDriver(
@@ -75,9 +84,9 @@ class IGlobal(IGlobalBase):
     def validateConfig(self) -> None:
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            api_key = str(cfg.get("apikey") or "").strip()
+            api_key = str(cfg.get('apikey') or '').strip()
             if not api_key:
-                warning("API key is required")
+                warning('API key is required')
         except Exception as e:
             warning(str(e))
 

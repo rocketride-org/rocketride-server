@@ -34,7 +34,7 @@ from typing import Any, Dict, Optional
 
 import requests
 
-BLAND_BASE_URL = "https://api.bland.ai/v1"
+BLAND_BASE_URL = 'https://api.bland.ai/v1'
 
 
 def make_call(
@@ -42,12 +42,12 @@ def make_call(
     *,
     phone_number: str,
     task: str,
-    voice: str = "June",
-    first_sentence: str = "",
+    voice: str = 'June',
+    first_sentence: str = '',
     max_duration: int = 5,
     record: bool = True,
-    language: str = "en",
-    webhook: str = "",
+    language: str = 'en',
+    webhook: str = '',
     request_data: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Initiate an outbound phone call via Bland AI.
@@ -55,27 +55,29 @@ def make_call(
     Returns {"status": "success", "call_id": "...", "message": "..."} on success.
     """
     payload: Dict[str, Any] = {
-        "phone_number": phone_number,
-        "task": task,
-        "voice": voice,
-        "model": "base",
-        "language": language,
-        "max_duration": max_duration,
-        "record": record,
-        "wait_for_greeting": True,
-        "temperature": 0.7,
+        'phone_number': phone_number,
+        'task': task,
+        'voice': voice,
+        'model': 'base',
+        'language': language,
+        'max_duration': max_duration,
+        'record': record,
+        'wait_for_greeting': True,
+        'temperature': 0.7,
     }
 
     if first_sentence:
-        payload["first_sentence"] = first_sentence
-    if webhook and webhook.startswith("https://"):
-        payload["webhook"] = webhook
+        payload['first_sentence'] = first_sentence
+    if webhook:
+        if not webhook.startswith('https://'):
+            raise ValueError('webhook must be an HTTPS URL')
+        payload['webhook'] = webhook
     if request_data:
-        payload["request_data"] = request_data
+        payload['request_data'] = request_data
 
     resp = requests.post(
-        f"{BLAND_BASE_URL}/calls",
-        headers={"authorization": api_key, "Content-Type": "application/json"},
+        f'{BLAND_BASE_URL}/calls',
+        headers={'authorization': api_key, 'Content-Type': 'application/json'},
         json=payload,
         timeout=30,
     )
@@ -86,8 +88,8 @@ def make_call(
 def get_call(api_key: str, call_id: str) -> Dict[str, Any]:
     """Get full details for a call including transcript, recording, and analysis."""
     resp = requests.get(
-        f"{BLAND_BASE_URL}/calls/{call_id}",
-        headers={"authorization": api_key},
+        f'{BLAND_BASE_URL}/calls/{call_id}',
+        headers={'authorization': api_key},
         timeout=15,
     )
     resp.raise_for_status()
@@ -97,21 +99,21 @@ def get_call(api_key: str, call_id: str) -> Dict[str, Any]:
 def analyze_call(
     api_key: str,
     call_id: str,
-    goal: str = "Analyze the phone call",
+    goal: str = 'Analyze the phone call',
     questions: Optional[list] = None,
 ) -> Dict[str, Any]:
     """Run post-call AI analysis on a completed call."""
     if questions is None:
         questions = [
-            ["What was the caller's mood?", "string"],
-            ["What key information was discussed?", "string"],
-            ["Were there any action items?", "string"],
+            ['What was the caller\'s mood?', 'string'],
+            ['What key information was discussed?', 'string'],
+            ['Were there any action items?', 'string'],
         ]
 
     resp = requests.post(
-        f"{BLAND_BASE_URL}/calls/{call_id}/analyze",
-        headers={"authorization": api_key, "Content-Type": "application/json"},
-        json={"goal": goal, "questions": questions},
+        f'{BLAND_BASE_URL}/calls/{call_id}/analyze',
+        headers={'authorization': api_key, 'Content-Type': 'application/json'},
+        json={'goal': goal, 'questions': questions},
         timeout=30,
     )
     resp.raise_for_status()
@@ -121,8 +123,8 @@ def analyze_call(
 def stop_call(api_key: str, call_id: str) -> Dict[str, Any]:
     """Stop an ongoing call."""
     resp = requests.post(
-        f"{BLAND_BASE_URL}/calls/{call_id}/stop",
-        headers={"authorization": api_key},
+        f'{BLAND_BASE_URL}/calls/{call_id}/stop',
+        headers={'authorization': api_key},
         timeout=15,
     )
     resp.raise_for_status()
@@ -132,8 +134,8 @@ def stop_call(api_key: str, call_id: str) -> Dict[str, Any]:
 def list_calls(api_key: str, limit: int = 20) -> Dict[str, Any]:
     """List recent calls."""
     resp = requests.get(
-        f"{BLAND_BASE_URL}/calls?limit={limit}",
-        headers={"authorization": api_key},
+        f'{BLAND_BASE_URL}/calls?limit={limit}',
+        headers={'authorization': api_key},
         timeout=15,
     )
     resp.raise_for_status()

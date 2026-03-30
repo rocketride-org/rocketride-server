@@ -46,65 +46,65 @@ from . import bland_client
 # ---------------------------------------------------------------------------
 
 MAKE_CALL_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "required": ["phone_number", "task"],
-    "properties": {
-        "phone_number": {
-            "type": "string",
-            "description": "Phone number in E.164 format (e.g. +14155551234)",
+    'type': 'object',
+    'required': ['phone_number', 'task'],
+    'properties': {
+        'phone_number': {
+            'type': 'string',
+            'description': 'Phone number in E.164 format (e.g. +14155551234)',
         },
-        "task": {
-            "type": "string",
-            "description": "Instructions for the AI voice agent — what to say, ask, and accomplish on the call",
+        'task': {
+            'type': 'string',
+            'description': 'Instructions for the AI voice agent — what to say, ask, and accomplish on the call',
         },
-        "first_sentence": {
-            "type": "string",
-            "description": "Optional opening sentence for the agent",
+        'first_sentence': {
+            'type': 'string',
+            'description': 'Optional opening sentence for the agent',
         },
-        "voice": {
-            "type": "string",
-            "description": "Voice ID (June, Josh, Nat, Paige, Derek, Florian)",
+        'voice': {
+            'type': 'string',
+            'description': 'Voice ID (June, Josh, Nat, Paige, Derek, Florian)',
         },
-        "webhook": {
-            "type": "string",
-            "description": "HTTPS URL to receive call results when the call ends",
+        'webhook': {
+            'type': 'string',
+            'description': 'HTTPS URL to receive call results when the call ends',
         },
-        "max_duration": {
-            "type": "number",
-            "description": "Max call length in minutes (default 5)",
+        'max_duration': {
+            'type': 'number',
+            'description': 'Max call length in minutes (default 5)',
         },
     },
 }
 
 GET_CALL_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "required": ["call_id"],
-    "properties": {
-        "call_id": {
-            "type": "string",
-            "description": "The call ID returned by make_call",
+    'type': 'object',
+    'required': ['call_id'],
+    'properties': {
+        'call_id': {
+            'type': 'string',
+            'description': 'The call ID returned by make_call',
         },
     },
 }
 
 ANALYZE_CALL_SCHEMA: Dict[str, Any] = {
-    "type": "object",
-    "required": ["call_id"],
-    "properties": {
-        "call_id": {
-            "type": "string",
-            "description": "The call ID to analyze",
+    'type': 'object',
+    'required': ['call_id'],
+    'properties': {
+        'call_id': {
+            'type': 'string',
+            'description': 'The call ID to analyze',
         },
-        "goal": {
-            "type": "string",
-            "description": "Overall purpose of the call (provides context for analysis)",
+        'goal': {
+            'type': 'string',
+            'description': 'Overall purpose of the call (provides context for analysis)',
         },
-        "questions": {
-            "type": "array",
-            "description": "Array of [question, expected_type] pairs to analyze",
-            "items": {
-                "type": "array",
-                "items": {"type": "string"},
+        'questions': {
+            'type': 'array',
+            'description': 'Array of [question, expected_type] pairs to analyze',
+            'items': {
+                'type': 'array',
+                'items': {'type': 'string'},
             },
         },
     },
@@ -119,12 +119,12 @@ class BlandDriver(ToolsBase):
         *,
         server_name: str,
         api_key: str,
-        default_voice: str = "June",
+        default_voice: str = 'June',
         max_duration: int = 5,
         record: bool = True,
-        language: str = "en",
-    ):
-        self._server_name = (server_name or "").strip() or "bland"
+        language: str = 'en',
+    ) -> None:
+        self._server_name = (server_name or '').strip() or 'bland'
         self._api_key = api_key
         self._default_voice = default_voice
         self._max_duration = max_duration
@@ -132,29 +132,29 @@ class BlandDriver(ToolsBase):
         self._language = language
 
         self._tools = {
-            "make_call": {
-                "description": (
-                    "Initiate an AI-powered outbound phone call via Bland AI. "
-                    "Required: phone_number (E.164 format) and task (instructions for the AI agent). "
-                    "Optional: first_sentence, voice, webhook (HTTPS), max_duration. "
-                    "Returns call_id to track the call."
+            'make_call': {
+                'description': (
+                    'Initiate an AI-powered outbound phone call via Bland AI. '
+                    'Required: phone_number (E.164 format) and task (instructions for the AI agent). '
+                    'Optional: first_sentence, voice, webhook (HTTPS), max_duration. '
+                    'Returns call_id to track the call.'
                 ),
-                "schema": MAKE_CALL_SCHEMA,
+                'schema': MAKE_CALL_SCHEMA,
             },
-            "get_call": {
-                "description": (
-                    "Get details for a Bland AI call including status, transcript, "
-                    "recording URL, duration, and summary. Required: call_id."
+            'get_call': {
+                'description': (
+                    'Get details for a Bland AI call including status, transcript, '
+                    'recording URL, duration, and summary. Required: call_id.'
                 ),
-                "schema": GET_CALL_SCHEMA,
+                'schema': GET_CALL_SCHEMA,
             },
-            "analyze_call": {
-                "description": (
-                    "Run AI analysis on a completed Bland AI call. "
-                    "Provide a goal and questions to extract structured insights from the transcript. "
-                    "Required: call_id. Optional: goal, questions."
+            'analyze_call': {
+                'description': (
+                    'Run AI analysis on a completed Bland AI call. '
+                    'Provide a goal and questions to extract structured insights from the transcript. '
+                    'Required: call_id. Optional: goal, questions.'
                 ),
-                "schema": ANALYZE_CALL_SCHEMA,
+                'schema': ANALYZE_CALL_SCHEMA,
             },
         }
 
@@ -165,65 +165,77 @@ class BlandDriver(ToolsBase):
     def _tool_query(self) -> List[Dict[str, Any]]:
         return [
             {
-                "name": f"{self._server_name}.{tool_name}",
-                "description": info["description"],
-                "inputSchema": info["schema"],
+                'name': f'{self._server_name}.{tool_name}',
+                'description': info['description'],
+                'inputSchema': info['schema'],
             }
             for tool_name, info in self._tools.items()
         ]
 
-    def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:
+    def _tool_validate(self, *, tool_name: str, input_obj: Any) -> None:  # noqa: ANN401
         # Strip namespace prefix
-        bare_name = tool_name.split(".", 1)[-1] if "." in tool_name else tool_name
+        bare_name = tool_name.split('.', 1)[-1] if '.' in tool_name else tool_name
         if bare_name not in self._tools:
             raise ValueError(
-                f"Unknown tool {tool_name!r}. "
-                f"Available: {', '.join(f'{self._server_name}.{t}' for t in self._tools)}"
+                f'Unknown tool {tool_name!r}. '
+                f'Available: {", ".join(f"{self._server_name}.{t}" for t in self._tools)}'
             )
 
         if not isinstance(input_obj, dict):
-            raise ValueError("Tool input must be a JSON object")
+            raise TypeError('Tool input must be a JSON object')
 
-        if bare_name == "make_call":
-            if not input_obj.get("phone_number"):
-                raise ValueError("phone_number is required")
-            if not input_obj.get("task"):
-                raise ValueError("task is required (instructions for the AI voice agent)")
+        if bare_name == 'make_call':
+            phone_number = str(input_obj.get('phone_number') or '').strip()
+            task = str(input_obj.get('task') or '').strip()
+            if not phone_number:
+                raise ValueError('phone_number is required')
+            if not task:
+                raise ValueError('task is required (instructions for the AI voice agent)')
 
-        elif bare_name in ("get_call", "analyze_call"):
-            if not input_obj.get("call_id"):
-                raise ValueError("call_id is required")
+            if 'max_duration' in input_obj:
+                raw_duration = input_obj.get('max_duration')
+                try:
+                    duration = int(raw_duration)
+                except (TypeError, ValueError):
+                    raise ValueError('max_duration must be a positive integer') from None
+                if duration <= 0:
+                    raise ValueError('max_duration must be a positive integer')
 
-    def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:
+        elif bare_name in ('get_call', 'analyze_call'):
+            call_id = str(input_obj.get('call_id') or '').strip()
+            if not call_id:
+                raise ValueError('call_id is required')
+
+    def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:  # noqa: ANN401
         if not isinstance(input_obj, dict):
-            raise ValueError("Tool input must be a JSON object")
+            raise TypeError('Tool input must be a JSON object')
 
         self._tool_validate(tool_name=tool_name, input_obj=input_obj)
 
-        bare_name = tool_name.split(".", 1)[-1] if "." in tool_name else tool_name
+        bare_name = tool_name.split('.', 1)[-1] if '.' in tool_name else tool_name
 
-        if bare_name == "make_call":
+        if bare_name == 'make_call':
             return bland_client.make_call(
                 self._api_key,
-                phone_number=input_obj["phone_number"],
-                task=input_obj["task"],
-                voice=input_obj.get("voice", self._default_voice),
-                first_sentence=input_obj.get("first_sentence", ""),
-                max_duration=input_obj.get("max_duration", self._max_duration),
+                phone_number=input_obj['phone_number'],
+                task=input_obj['task'],
+                voice=input_obj.get('voice', self._default_voice),
+                first_sentence=input_obj.get('first_sentence', ''),
+                max_duration=input_obj.get('max_duration', self._max_duration),
                 record=self._record,
                 language=self._language,
-                webhook=input_obj.get("webhook", ""),
+                webhook=input_obj.get('webhook', ''),
             )
 
-        elif bare_name == "get_call":
-            return bland_client.get_call(self._api_key, input_obj["call_id"])
+        if bare_name == 'get_call':
+            return bland_client.get_call(self._api_key, input_obj['call_id'])
 
-        elif bare_name == "analyze_call":
+        if bare_name == 'analyze_call':
             return bland_client.analyze_call(
                 self._api_key,
-                input_obj["call_id"],
-                goal=input_obj.get("goal", "Analyze the phone call"),
-                questions=input_obj.get("questions"),
+                input_obj['call_id'],
+                goal=input_obj.get('goal', 'Analyze the phone call'),
+                questions=input_obj.get('questions'),
             )
 
-        raise ValueError(f"Unknown tool: {tool_name}")
+        raise ValueError(f'Unknown tool: {tool_name}')

@@ -36,7 +36,11 @@
 			"type": "string",
 			"title": "API Key",
 			"description": "Bland AI API key (org_xxx). Get one at https://www.bland.ai",
-			"default": ""
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
 		},
 		"bland_ai.voice": {
 			"type": "string",
