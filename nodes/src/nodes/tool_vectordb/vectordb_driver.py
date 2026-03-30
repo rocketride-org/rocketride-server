@@ -370,8 +370,9 @@ def _normalize_input(input_obj: Any) -> Dict[str, Any]:
             parsed = json.loads(input_obj)
             if isinstance(parsed, dict):
                 input_obj = parsed
-        except Exception:
-            pass
+        except (json.JSONDecodeError, ValueError) as exc:
+            warning(f'tool_vectordb: malformed JSON input, returning empty dict: {exc}')
+            return {}
 
     if not isinstance(input_obj, dict):
         warning(f'tool_vectordb: unexpected input type {type(input_obj).__name__}')
