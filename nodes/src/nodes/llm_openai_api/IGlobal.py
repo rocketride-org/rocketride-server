@@ -88,8 +88,7 @@ class IGlobal(IGlobalBase):
             from .openai_client import Chat
 
             bag = self.IEndpoint.endpoint.bag
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            self._chat = Chat(self.glb.logicalType, config, bag)
+            self._chat = Chat(self.glb.logicalType, self.glb.connConfig, bag)
 
     def endGlobal(self):
         self._chat = None
