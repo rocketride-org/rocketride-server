@@ -1,0 +1,293 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Guardrails",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "guardrails://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["guard"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.guardrails",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "guardrails",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A comprehensive input/output guardrails filter for AI safety. ",
+		"Checks questions before they reach the LLM (prompt injection, topic restriction, ",
+		"input length) and checks answers after the LLM responds (hallucination detection, ",
+		"content safety, PII leak detection, format compliance).</br>",
+		"</br>",
+		"<b>Policy modes</b>: block (reject violations), warn (log and continue), log (silent logging)."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "util-guard.svg",
+	//
+	// Optional:
+	//	 The tile is the displayable name of this node
+	//
+	"tile": [],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": ["questions"],
+		"answers": ["answers"],
+		"documents": ["documents"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"description": "Questions to check with input guardrails before forwarding to the LLM",
+			"min": 0,
+			"output": [
+				{
+					"lane": "questions",
+					"description": "Questions that passed guardrails checks"
+				}
+			]
+		},
+		{
+			"lane": "answers",
+			"description": "Answers to check with output guardrails before forwarding to the client",
+			"min": 0,
+			"output": [
+				{
+					"lane": "answers",
+					"description": "Answers that passed guardrails checks"
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Source documents used as ground truth for hallucination detection",
+			"min": 0,
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Source documents passed through"
+				}
+			]
+		}
+	],
+	//
+	//	Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["basic"],
+		"cases": [
+			{
+				"questions": {
+					"questions": [{"text": "What is the weather today?"}]
+				},
+				"expect": {
+					"questions": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "basic",
+		"profiles": {
+			"basic": {
+				"title": "Basic — Prompt injection + PII detection",
+				"policy_mode": "warn",
+				"enable_prompt_injection": true,
+				"enable_content_safety": false,
+				"enable_pii_detection": true,
+				"enable_hallucination_check": false,
+				"max_input_length": 0,
+				"blocked_topics": [],
+				"allowed_topics": []
+			},
+			"strict": {
+				"title": "Strict — All checks enabled, block on violation",
+				"policy_mode": "block",
+				"enable_prompt_injection": true,
+				"enable_content_safety": true,
+				"enable_pii_detection": true,
+				"enable_hallucination_check": true,
+				"max_input_length": 50000,
+				"blocked_topics": [],
+				"allowed_topics": []
+			},
+			"custom": {
+				"title": "Custom — Configure checks individually",
+				"policy_mode": "warn",
+				"enable_prompt_injection": true,
+				"enable_content_safety": true,
+				"enable_pii_detection": true,
+				"enable_hallucination_check": true,
+				"max_input_length": 0,
+				"blocked_topics": [],
+				"allowed_topics": []
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"guardrails.policy_mode": {
+			"type": "string",
+			"title": "Policy mode",
+			"description": "How to handle violations: block (reject), warn (log + continue), log (silent)",
+			"default": "warn",
+			"enum": [
+				["block", "Block — Reject on violation"],
+				["warn", "Warn — Log and continue"],
+				["log", "Log — Silent logging only"]
+			]
+		},
+		"guardrails.enable_prompt_injection": {
+			"type": "boolean",
+			"title": "Enable prompt injection detection",
+			"description": "Detect and flag prompt injection attempts in input",
+			"default": true
+		},
+		"guardrails.enable_content_safety": {
+			"type": "boolean",
+			"title": "Enable content safety check",
+			"description": "Detect harmful or unsafe content in output",
+			"default": true
+		},
+		"guardrails.enable_pii_detection": {
+			"type": "boolean",
+			"title": "Enable PII detection",
+			"description": "Detect personal identifiable information (emails, phones, SSNs, credit cards) in output",
+			"default": true
+		},
+		"guardrails.enable_hallucination_check": {
+			"type": "boolean",
+			"title": "Enable hallucination check",
+			"description": "Verify that output claims are grounded in source documents",
+			"default": false
+		},
+		"guardrails.max_input_length": {
+			"type": "number",
+			"title": "Max input length (chars)",
+			"description": "Maximum character count for input text (0 = no limit)",
+			"default": 0
+		},
+		"guardrails.blocked_topics": {
+			"type": "array",
+			"title": "Blocked topics",
+			"description": "Keywords for topics that should be rejected",
+			"items": {
+				"type": "string"
+			}
+		},
+		"guardrails.allowed_topics": {
+			"type": "array",
+			"title": "Allowed topics",
+			"description": "If set, input must contain at least one of these keywords",
+			"items": {
+				"type": "string"
+			}
+		},
+		"guardrails.custom": {
+			"object": "custom",
+			"properties": [
+				"guardrails.policy_mode",
+				"guardrails.enable_prompt_injection",
+				"guardrails.enable_content_safety",
+				"guardrails.enable_pii_detection",
+				"guardrails.enable_hallucination_check",
+				"guardrails.max_input_length",
+				"guardrails.blocked_topics",
+				"guardrails.allowed_topics"
+			]
+		},
+		"guardrails.basic": {
+			"object": "basic",
+			"properties": ["guardrails.policy_mode"]
+		},
+		"guardrails.strict": {
+			"object": "strict",
+			"properties": ["guardrails.policy_mode"]
+		},
+		"guardrails.profile": {
+			"title": "Profile",
+			"description": "Guardrails profile",
+			"type": "string",
+			"default": "basic",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "basic",
+					"properties": ["guardrails.basic"]
+				},
+				{
+					"value": "strict",
+					"properties": ["guardrails.strict"]
+				},
+				{
+					"value": "custom",
+					"properties": ["guardrails.custom"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Guardrails",
+			"properties": ["guardrails.profile"]
+		}
+	]
+}
