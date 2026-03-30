@@ -2,7 +2,7 @@ import json5
 import sys
 import os
 from typing import Dict, Any
-from rocketlib import getServiceDefinition, IJson
+from rocketlib import getServiceDefinition, IJson, warning
 
 
 class Config:
@@ -145,7 +145,14 @@ class Config:
                 raise Exception(f'Default profile {profile} is not defined in {logicalType}')
 
             # Get the settings for this default name
-            defaultConfig = preconfig['profiles'].get(profile)
+            profileConfig = preconfig['profiles'].get(profile)
+
+            # Check if default profile is deprecated
+            if isinstance(profileConfig, dict) and profileConfig.get('deprecated'):
+                migration_msg = profileConfig.get('migration', 'Please use a current profile instead.')
+                warning(f'Default profile "{profile}" is deprecated. {migration_msg}')
+
+            defaultConfig = profileConfig if isinstance(profileConfig, dict) else profileConfig
 
             # Use the connConfig directly as it is not using profiles
             userConfig = connConfig
@@ -158,8 +165,16 @@ class Config:
             if profile not in preconfig['profiles']:
                 raise Exception(f'Profile {profile} is not defined in {logicalType}')
 
+            # Get the profile config
+            profileConfig = preconfig['profiles'][profile]
+
+            # Check if profile is deprecated
+            if isinstance(profileConfig, dict) and profileConfig.get('deprecated'):
+                migration_msg = profileConfig.get('migration', 'Please use a current profile instead.')
+                warning(f'Profile "{profile}" is deprecated. {migration_msg}')
+
             # Get the default from the profile
-            defaultConfig = preconfig['profiles'].get(profile, {})
+            defaultConfig = profileConfig if isinstance(profileConfig, dict) else profileConfig
 
             # Get the user specified profile
             userConfig = connConfig.get(profile, {})

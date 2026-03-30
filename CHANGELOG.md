@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Config**: `Config.getNodeConfig()` now emits warnings when deprecated profiles are used, with migration guidance from the profile's `migration` field
+
 ## [1.0.3] - 2026-03-01
 
 ### Added
+
 - Docker image for one-click deploy (#126)
 
 ### Fixed
+
 - Performance metrics reset on tab switch (#137)
 - Engine crash on malformed pipeline input (#134)
 
