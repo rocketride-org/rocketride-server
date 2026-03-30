@@ -203,7 +203,7 @@ sys.modules['cohere.errors'] = _mock_cohere_errors
 _mock_cohere.errors = _mock_cohere_errors
 
 # Now import the node code
-from rerank_cohere.rerank_client import RerankClient  # noqa: E402
+from rerank_cohere.rerank_client import RerankClient, RerankError, RerankAuthenticationError, RerankRateLimitError, RerankBadRequestError, RerankServerError  # noqa: E402
 from rerank_cohere.IGlobal import IGlobal  # noqa: E402
 from rerank_cohere.IInstance import IInstance  # noqa: E402
 
@@ -330,35 +330,35 @@ class TestRerankClient:
             client.rerank(query='q', documents=[])
 
     def test_rerank_invalid_api_key(self):
-        """UnauthorizedError from Cohere is wrapped as ValueError."""
+        """UnauthorizedError from Cohere is raised as RerankAuthenticationError."""
         client = self._make_client()
         client._client.rerank.side_effect = _MockUnauthorizedError('invalid key')
 
-        with pytest.raises(ValueError, match='Invalid Cohere API key'):
+        with pytest.raises(RerankAuthenticationError, match='Invalid Cohere API key'):
             client.rerank(query='q', documents=['d'])
 
     def test_rerank_rate_limit(self):
-        """TooManyRequestsError is wrapped as ValueError."""
+        """TooManyRequestsError is raised as RerankRateLimitError."""
         client = self._make_client()
         client._client.rerank.side_effect = _MockTooManyRequestsError('rate limited')
 
-        with pytest.raises(ValueError, match='Cohere rate limit exceeded'):
+        with pytest.raises(RerankRateLimitError, match='Cohere rate limit exceeded'):
             client.rerank(query='q', documents=['d'])
 
     def test_rerank_bad_request(self):
-        """BadRequestError is wrapped as ValueError."""
+        """BadRequestError is raised as RerankBadRequestError."""
         client = self._make_client()
         client._client.rerank.side_effect = _MockBadRequestError('bad request')
 
-        with pytest.raises(ValueError, match='Bad request to Cohere API'):
+        with pytest.raises(RerankBadRequestError, match='Invalid rerank request'):
             client.rerank(query='q', documents=['d'])
 
     def test_rerank_server_error(self):
-        """InternalServerError is wrapped as ValueError."""
+        """InternalServerError is raised as RerankServerError."""
         client = self._make_client()
         client._client.rerank.side_effect = _MockInternalServerError('server error')
 
-        with pytest.raises(ValueError, match='Cohere server error'):
+        with pytest.raises(RerankServerError, match='Cohere server error'):
             client.rerank(query='q', documents=['d'])
 
     def test_rerank_with_threshold_filters_low_scores(self):
@@ -624,8 +624,7 @@ class TestIInstance:
         ]
         inst = self._make_instance(rerank_results=rerank_results)
 
-        metadata = Mock()
-        metadata.objectId = 'obj-123'
+        metadata = {'objectId': 'obj-123', 'source': 'test-file.txt'}
         question = _MockQuestion()
         question.addQuestion('query')
         question.addDocuments(_MockDoc(page_content='doc content', metadata=metadata))
@@ -633,7 +632,9 @@ class TestIInstance:
         inst.writeQuestions(question)
 
         docs = inst.instance.writeDocuments.call_args[0][0]
-        assert docs[0].metadata is metadata
+        # After deep copy, metadata is equal but not the same object
+        assert docs[0].metadata == metadata
+        assert docs[0].metadata['objectId'] == 'obj-123'
 
     def test_write_questions_empty_rerank_results(self):
         """WriteQuestions with no rerank results does not call writeDocuments."""
@@ -664,3 +665,84 @@ class TestIInstance:
 
         call_kwargs = inst.IGlobal._reranker.rerank_with_threshold.call_args
         assert call_kwargs.kwargs['query'] == 'dict query'
+
+    def test_write_questions_does_not_mutate_original(self):
+        """WriteQuestions must not mutate the original question object (fan-out safety)."""
+        rerank_results = [
+            {'index': 0, 'relevance_score': 0.90, 'document': 'doc A'},
+        ]
+        inst = self._make_instance(rerank_results=rerank_results)
+
+        question = _MockQuestion()
+        question.addQuestion('What is AI?')
+        original_doc = _MockDoc(page_content='doc A', metadata={'source': 'test'})
+        question.addDocuments(original_doc)
+
+        # Capture the original documents list before the call
+        original_documents = list(question.documents)
+
+        inst.writeQuestions(question)
+
+        # The original question's documents must be unchanged
+        assert question.documents == original_documents
+        assert len(question.documents) == 1
+        assert question.documents[0] is original_doc
+
+
+# ===========================================================================
+# Exception Hierarchy & Circuit Breaker Compatibility Tests
+# ===========================================================================
+
+
+class TestRerankExceptions:
+    """Tests for custom exception types and circuit breaker compatibility."""
+
+    def test_all_errors_inherit_from_rerank_error(self):
+        """All custom rerank exceptions inherit from RerankError."""
+        assert issubclass(RerankAuthenticationError, RerankError)
+        assert issubclass(RerankRateLimitError, RerankError)
+        assert issubclass(RerankBadRequestError, RerankError)
+        assert issubclass(RerankServerError, RerankError)
+
+    def test_rerank_error_inherits_from_exception(self):
+        """RerankError inherits from Exception (not ValueError)."""
+        assert issubclass(RerankError, Exception)
+        assert not issubclass(RerankError, ValueError)
+
+    def test_circuit_breaker_retryable_heuristic_rate_limit(self):
+        """RerankRateLimitError class name contains 'RateLimit' for circuit breaker."""
+        assert 'RateLimit' in RerankRateLimitError.__name__
+
+    def test_circuit_breaker_retryable_heuristic_server_error(self):
+        """RerankServerError class name contains 'ServerError' for circuit breaker."""
+        assert 'ServerError' in RerankServerError.__name__
+
+    def test_circuit_breaker_non_retryable_heuristic_auth(self):
+        """RerankAuthenticationError class name contains 'Authentication' for circuit breaker."""
+        assert 'Authentication' in RerankAuthenticationError.__name__
+
+    def test_circuit_breaker_non_retryable_heuristic_bad_request(self):
+        """RerankBadRequestError class name contains 'BadRequest' for circuit breaker."""
+        assert 'BadRequest' in RerankBadRequestError.__name__
+
+    def test_exception_preserves_original_cause(self):
+        """Custom exceptions preserve the original Cohere exception via __cause__."""
+        client_config = {
+            'model': 'rerank-v3.5',
+            'top_n': 3,
+            'min_score': 0.0,
+            'apikey': 'test-api-key',
+        }
+        response = _make_mock_rerank_response([])
+        mock_cohere_client = _make_cohere_client_mock(response)
+
+        with patch('rerank_cohere.rerank_client.CohereClient', return_value=mock_cohere_client):
+            client = RerankClient('rerank_cohere', client_config, {})
+
+        original_error = _MockUnauthorizedError('original error')
+        client._client.rerank.side_effect = original_error
+
+        with pytest.raises(RerankAuthenticationError) as exc_info:
+            client.rerank(query='q', documents=['d'])
+
+        assert exc_info.value.__cause__ is original_error

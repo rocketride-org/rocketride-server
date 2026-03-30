@@ -30,6 +30,44 @@ from cohere import ClientV2 as CohereClient
 from cohere.errors import BadRequestError, UnauthorizedError, TooManyRequestsError, InternalServerError
 
 
+# ---------------------------------------------------------------------------
+# Custom exception hierarchy for circuit breaker compatibility.
+# The class names contain 'RateLimit', 'Authentication', etc. so that
+# PR #4's _is_retryable heuristic (which inspects type(exc).__name__)
+# can correctly classify them.
+# ---------------------------------------------------------------------------
+
+
+class RerankError(Exception):
+    """Base error for rerank operations."""
+
+    pass
+
+
+class RerankAuthenticationError(RerankError):
+    """Non-retryable: Invalid API key."""
+
+    pass
+
+
+class RerankRateLimitError(RerankError):
+    """Retryable: Rate limit exceeded."""
+
+    pass
+
+
+class RerankBadRequestError(RerankError):
+    """Non-retryable: Invalid request parameters."""
+
+    pass
+
+
+class RerankServerError(RerankError):
+    """Retryable: Server-side error."""
+
+    pass
+
+
 class RerankClient:
     """
     Wraps the Cohere Rerank API for use in RocketRide pipelines.
@@ -92,13 +130,13 @@ class RerankClient:
                 top_n=effective_top_n,
             )
         except UnauthorizedError as e:
-            raise ValueError(f'Invalid Cohere API key: {e}') from e
+            raise RerankAuthenticationError(f'Invalid Cohere API key: {e}') from e
         except TooManyRequestsError as e:
-            raise ValueError(f'Cohere rate limit exceeded. Please try again later: {e}') from e
+            raise RerankRateLimitError(f'Cohere rate limit exceeded: {e}') from e
         except BadRequestError as e:
-            raise ValueError(f'Bad request to Cohere API: {e}') from e
+            raise RerankBadRequestError(f'Invalid rerank request: {e}') from e
         except InternalServerError as e:
-            raise ValueError(f'Cohere server error: {e}') from e
+            raise RerankServerError(f'Cohere server error: {e}') from e
 
         results = []
         for result in response.results:
