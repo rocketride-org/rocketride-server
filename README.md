@@ -10,9 +10,7 @@
 </p>
 
 <p>
-  A high-performance data processing engine built on a C++ core with a Python-extensible node system.<br/>
-  With 50+ pipeline nodes, native AI/ML support, and SDKs for TypeScript, Python, and MCP,<br/>
-  it lets you process, transform, and analyze data at scale - entirely on your own infrastructure.
+ RocketRide is an open-source data pipeline builder and runtime built for AI and ML workloads. With 50+ pipeline nodes spanning 13 LLM providers, 8 vector databases, OCR, NER, and more — pipelines are defined as portable JSON, built visually in VS Code, and executed by a multithreaded C++ runtime. From real-time data processing to multimodal AI search, RocketRide runs entirely on your own infrastructure.
 </p>
 
 <p>
@@ -46,6 +44,17 @@ _Design, test, and ship complex AI workflows from a visual canvas, right where y
 
 _Drop pipelines into any Python or TypeScript app with a few lines of code, no infrastructure glue required._
 
+## Features
+
+- **VS Code Extension** — Build, visualize, and monitor pipelines directly in your editor. The visual pipeline builder lets you drag, connect, and configure nodes without writing boilerplate. Real-time observability tracks token usage, LLM calls, latency, and execution — all without leaving VS Code. Pipelines are defined as portable JSON, meaning they're version-controllable, shareable, and runnable anywhere.
+- **High-performance C++ runtime** — RocketRide's runtime is built in C++ with native multithreading, purpose-built for the throughput demands of AI and data workloads. No bottlenecks, no compromises for production scale.
+- **50+ pipeline nodes** — A comprehensive library of pre-built nodes covering 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, chunking strategies, embedding models, and more. All nodes are Python-extensible, so you can build and publish your own.
+- **Multi-agent workflows** — Orchestrate and scale complex agent pipelines with built-in support for CrewAI and LangChain. Chain agents, share memory across pipeline runs, and manage multi-step reasoning workflows at scale. Switch between agentic frameworks with a few clicks for your task.
+- **Coding agent ready** — Install the VS Code extension and RocketRide automatically detects and configures your coding agent — Claude, Cursor, and more. Your agent can build, modify, and deploy pipelines through natural language.
+- **TypeScript, Python & MCP SDKs** — Integrate pipelines into native applications, expose them as callable tools for AI assistants, or build programmatic pipeline workflows into your existing codebase.
+- **Zero dependency headaches** — RocketRide manages Python environments, C++ toolchains, Java/Tika, and all node dependencies automatically. Clone, build, run — no manual setup, no version conflicts, no glue scripts.
+- **One-click deploy** — Run on Docker, on-prem, or RocketRide Cloud (coming soon). RocketRide's architecture is designed for production from day one — not retrofitted from a demo.
+
 ## Quick Start
 
 1. Install the extension for your IDE. Search for RocketRide in the extension marketplace:
@@ -63,38 +72,21 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
    - **Local (Recommended)** - This pulls the server directly into your IDE without any additional setup.
    - **On-Premises** - Run the server on your own hardware for full control and data residency. Pull the image and deploy to Docker or clone this repo and [build from source](CONTRIBUTING.md#getting-started).
 
-4. Create a `.pipe` file and start building
-
-## Features
-
-- **Stay in your IDE** - Build, debug, test, and scale heavy AI and data workloads with an intuitive visual builder in the environment you're used to. Stop using your browser.
-- **High-performance C++ engine** - Native multithreading. No bottleneck. Purpose-built for throughput, not prototypes.
-- **Multi-agent workflows** - Orchestrate and scale agents with built-in support for CrewAI and LangChain.
-- **50+ pipeline nodes** - Python-extensible, with 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more.
-- **TypeScript, Python & MCP SDKs** - Integrate pipelines into native applications or expose them as tools for AI assistants.
-- **One-click deploy** - Run on Docker or on-prem. Our architecture is made for production, not demos.
-
 ## Building Your First Pipe
 
 1. All pipelines are recognized with the `*.pipe` format. Each pipeline and configuration is a JSON object - but the extension in your IDE will render within our visual builder canvas.
 
-2. All pipelines begin with source node: _webhook_, _chat_, or _dropper_. For specific usage, examples, and inspiration on how to build pipelines, check out our [guides and documentation](https://docs.rocketride.org/)
-
-   - [Advanced RAG](https://docs.rocketride.org/examples/advanced-rag-pipeline/)
-   - [Video Frame Grabber](https://docs.rocketride.org/examples/video-key-frame-grabber/)
-   - [Audio Transcription](https://docs.rocketride.org/examples/audio-transcription-simple/)
+2. All pipelines begin with source node: _webhook_, _chat_, or _dropper_. For specific usage, examples, and inspiration on how to build pipelines, check out our [guides and documentation](https://docs.rocketride.org/).
 
 3. Connect input lanes and output lanes by type to properly wire your pipeline. Some nodes like agents or LLMs can be invoked as tools for use by a parent node as shown below:
 
 <p align="center">
-  <img src="./images/agent_pipeline.png" alt="Pipeline canvas example">
+  <img src="./images/first_pipe.gif" alt="Pipeline canvas example" width="100%">
 </p>
 
 4. You can run a pipeline from the canvas by pressing the ▶️ button on the source node or from the `Connection Manager` directly.
 
-5. View all available and running pipelines below the `Connection Manager`. Selecting running pipelines allows for in depth analytics. Trace call trees, token usage, memory consumption, and more to optimize your pipelines before scaling and deploying.
-
-6. Deploy your pipelines on your own infrastructure.
+5. Deploy your pipelines on your own infrastructure.
 
    - **Docker** - Download the RocketRide server image and create a container. Requires [Docker](https://docs.docker.com/get-docker/) to be installed.
 
@@ -103,9 +95,17 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
      docker create --name rocketride-engine -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
      ```
 
-7. Run your pipelines as standalone processes or integrate them into your existing [Python](https://docs.rocketride.org/sdk/python-sdk) and [TypeScript/JS](https://docs.rocketride.org/sdk/node-sdk) applications utilizing our SDK.
+   - **Local deployment** - Download the runtime of your choice as a standalone process in the 'Deploy' page of the `Connection Manager`
 
-8. Use it, commit it, ship it.
+6. Run your pipelines as standalone processes or integrate them into your existing [Python](https://docs.rocketride.org/sdk/python-sdk) and [TypeScript/JS](https://docs.rocketride.org/sdk/node-sdk) applications utilizing our SDK.
+
+## Observability
+
+Selecting running pipelines allows for in depth analytics. Trace call trees, token usage, memory consumption, and more to optimize your pipelines before scaling and deploying. Find the models, agents, and tools best fit for your task.
+
+<p align="center">
+  <img src="./images/tracing.gif" alt="Pipeline observability and tracing">
+</p>
 
 ## Contributors
 
