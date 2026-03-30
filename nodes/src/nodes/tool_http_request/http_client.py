@@ -32,10 +32,12 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import requests
 from requests.auth import HTTPBasicAuth
+
+from library.ssrf_protection import validate_url
 
 DEFAULT_TIMEOUT_SECONDS = 30
 MAX_TIMEOUT_SECONDS = 300
@@ -51,13 +53,23 @@ def execute_request(
     auth: Optional[Dict[str, Any]] = None,
     body: Optional[Dict[str, Any]] = None,
     timeout: Optional[float] = None,
+    ssrf_allowed_private: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Execute an HTTP request and return a structured response.
 
-    Raises ``requests.RequestException`` on transport-level failures.
-    """
+    Parameters
+    ----------
+    ssrf_allowed_private:
+        Optional list of CIDR strings that should be permitted even though
+        they fall within normally-blocked private/reserved IP ranges.
 
+    Raises ``requests.RequestException`` on transport-level failures and
+    ``SSRFError`` if the URL targets a blocked IP range.
+    """
     resolved_url = _resolve_path_params(url, path_params)
+
+    # --- SSRF protection: validate the resolved URL before connecting ---
+    validate_url(resolved_url, allowed_private=ssrf_allowed_private)
 
     req_headers = dict(headers or {})
     req_auth = None
@@ -94,6 +106,7 @@ def execute_request(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _resolve_path_params(url: str, path_params: Optional[Dict[str, str]]) -> str:
     """Replace ``:name`` placeholders in the URL with values from *path_params*."""
