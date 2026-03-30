@@ -303,7 +303,7 @@
 		}
 	],
 	"test": {
-		"profiles": ["openai-5-4-mini"],
+		"profiles": ["openai-5-4", "openai-5-4-pro", "openai-5-4-mini", "openai-5-4-nano"],
 		"outputs": ["answers"],
 		"cases": [
 			{
