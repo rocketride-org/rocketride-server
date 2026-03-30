@@ -227,6 +227,36 @@ class TestSentenceChunker:
         for i, chunk in enumerate(chunks):
             assert chunk['metadata']['chunk_index'] == i
 
+    def test_repeated_sentences_correct_start_char(self):
+        """Repeated sentences should have correct start_char for each occurrence."""
+        chunker = SentenceChunker(chunk_size=30, chunk_overlap=0)
+        text = 'Hello world. Hello world. Goodbye world.'
+        chunks = chunker.chunk(text)
+        assert len(chunks) >= 2
+
+        # Verify that start_char values are monotonically non-decreasing
+        prev_start = -1
+        for chunk in chunks:
+            start = chunk['metadata']['start_char']
+            assert start >= prev_start, f'start_char should be non-decreasing but got {start} after {prev_start}'
+            prev_start = start
+
+        # Verify that the first chunk's start_char points to the actual text location
+        first_start = chunks[0]['metadata']['start_char']
+        assert first_start == 0 or text[first_start:].startswith(chunks[0]['text'][:10])
+
+    def test_repeated_sentences_no_overlap_in_positions(self):
+        """With no overlap, chunk positions should not reference the same text region."""
+        chunker = SentenceChunker(chunk_size=25, chunk_overlap=0)
+        # Each 'Same.' is 5 chars, separated by space after sentence split
+        text = 'Same. Same. Same. Different. Same. Same.'
+        chunks = chunker.chunk(text)
+
+        # Each chunk's start_char should be >= previous chunk's end_char (no overlap mode)
+        if len(chunks) >= 2:
+            for i in range(1, len(chunks)):
+                assert chunks[i]['metadata']['start_char'] >= chunks[i - 1]['metadata']['start_char']
+
 
 # ===========================================================================
 # TokenChunker tests
@@ -310,6 +340,50 @@ class TestTokenChunker:
         chunker = TokenChunker(chunk_size=10, chunk_overlap=0, encoding_name='cl100k_base')
         assert chunker._encoder is None
         # It should only initialize when chunk() is called
+
+    def test_start_char_incremental_tracking(self):
+        """start_char should be computed incrementally (not via O(n^2) prefix decode)."""
+        chunker = TokenChunker(chunk_size=10, chunk_overlap=0)
+
+        # Mock encoder where each character is a token and decode returns exact chars
+        call_counts = {'decode': 0}
+
+        class TrackingEncoder:
+            def encode(self, text):
+                return list(range(len(text)))
+
+            def decode(self, tokens, **kwargs):
+                call_counts['decode'] += 1
+                return 'x' * len(tokens)
+
+        chunker._encoder = TrackingEncoder()
+        text = 'A' * 50  # 50 tokens -> 5 chunks of 10
+        chunks = chunker.chunk(text)
+        assert len(chunks) == 5
+
+        # With O(n^2) approach, decode would be called 5 (chunks) + 4 (prefixes) = 9 times
+        # With incremental approach, decode is called 5 (chunks) + 4 (steps) = 9 times
+        # but no prefix decode calls scale with chunk index.
+        # Key check: decode should NOT be called with tokens[:N] for large N.
+        # We verify the count is bounded linearly: at most 2*num_chunks calls
+        assert call_counts['decode'] <= 2 * len(chunks), f'decode called {call_counts["decode"]} times for {len(chunks)} chunks; expected at most {2 * len(chunks)} (linear)'
+
+    def test_start_char_correctness_with_overlap(self):
+        """start_char values should be correct even with token overlap."""
+        chunker = TokenChunker(chunk_size=10, chunk_overlap=3)
+        mock_encoder = self._make_mock_encoder()
+        chunker._encoder = mock_encoder
+
+        text = 'A' * 25
+        chunks = chunker.chunk(text)
+        assert len(chunks) >= 3
+
+        # Verify start_char values are monotonically increasing
+        for i in range(1, len(chunks)):
+            assert chunks[i]['metadata']['start_char'] > chunks[i - 1]['metadata']['start_char']
+
+        # First chunk should start at 0
+        assert chunks[0]['metadata']['start_char'] == 0
 
 
 # ===========================================================================

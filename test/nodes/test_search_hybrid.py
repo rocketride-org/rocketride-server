@@ -249,6 +249,63 @@ class TestReciprocalRankFusion:
         # Both should have the same score since they're each rank 1 in one list
         assert results[0]['rrf_score'] == results[1]['rrf_score']
 
+    def test_alpha_weighted_rrf(self):
+        """Weights parameter should scale RRF contributions per list."""
+        list1 = [{'id': 'a', 'text': 'doc a'}, {'id': 'b', 'text': 'doc b'}]
+        list2 = [{'id': 'b', 'text': 'doc b'}, {'id': 'a', 'text': 'doc a'}]
+
+        # With alpha=0.8: vector (list1) weight=0.8, BM25 (list2) weight=0.2
+        results_weighted = HybridSearchEngine.reciprocal_rank_fusion(
+            list1,
+            list2,
+            k=60,
+            weights=[0.8, 0.2],
+        )
+        score_map_weighted = {r['id']: r['rrf_score'] for r in results_weighted}
+
+        # 'a' is rank 1 in list1 (weight 0.8), rank 2 in list2 (weight 0.2)
+        # 'b' is rank 2 in list1 (weight 0.8), rank 1 in list2 (weight 0.2)
+        # With heavy vector weight, 'a' should score higher than 'b'
+        assert score_map_weighted['a'] > score_map_weighted['b']
+
+    def test_alpha_weighted_rrf_reversed(self):
+        """With alpha=0.2 (low vector weight), BM25 rank 1 doc should win."""
+        list1 = [{'id': 'a', 'text': 'doc a'}, {'id': 'b', 'text': 'doc b'}]
+        list2 = [{'id': 'b', 'text': 'doc b'}, {'id': 'a', 'text': 'doc a'}]
+
+        # With alpha=0.2: vector (list1) weight=0.2, BM25 (list2) weight=0.8
+        results = HybridSearchEngine.reciprocal_rank_fusion(
+            list1,
+            list2,
+            k=60,
+            weights=[0.2, 0.8],
+        )
+        score_map = {r['id']: r['rrf_score'] for r in results}
+
+        # 'b' is rank 1 in list2 (weight 0.8), so it should score higher
+        assert score_map['b'] > score_map['a']
+
+    def test_equal_weights_match_unweighted(self):
+        """Weights of [1.0, 1.0] should produce the same result as no weights."""
+        list1 = [{'id': 'a', 'text': 'doc a'}, {'id': 'b', 'text': 'doc b'}]
+        list2 = [{'id': 'c', 'text': 'doc c'}, {'id': 'a', 'text': 'doc a'}]
+
+        results_unweighted = HybridSearchEngine.reciprocal_rank_fusion(list1, list2, k=60)
+        results_weighted = HybridSearchEngine.reciprocal_rank_fusion(list1, list2, k=60, weights=[1.0, 1.0])
+
+        scores_unweighted = {r['id']: r['rrf_score'] for r in results_unweighted}
+        scores_weighted = {r['id']: r['rrf_score'] for r in results_weighted}
+
+        for doc_id in scores_unweighted:
+            assert abs(scores_unweighted[doc_id] - scores_weighted[doc_id]) < 1e-10
+
+    def test_weights_length_mismatch_raises(self):
+        """Weights list with wrong length should raise ValueError."""
+        list1 = [{'id': 'a', 'text': 'doc a'}]
+        list2 = [{'id': 'b', 'text': 'doc b'}]
+        with pytest.raises(ValueError, match='weights length must match'):
+            HybridSearchEngine.reciprocal_rank_fusion(list1, list2, k=60, weights=[0.5])
+
 
 # ===========================================================================
 # Full hybrid search tests
@@ -310,6 +367,28 @@ class TestFullHybridSearch:
         vector_scores = [0.9, 0.8, 0.7, 0.6, 0.5]
         results = engine.search('learning', SAMPLE_DOCS, vector_scores=vector_scores, top_k=2)
         assert len(results) <= 2
+
+    def test_alpha_weights_vector_higher(self):
+        """alpha=0.8 should give vector results more influence than BM25."""
+        # doc1 has best BM25 match for 'machine learning'
+        # doc5 has highest vector score
+        vector_scores = [0.1, 0.2, 0.3, 0.4, 0.9]
+
+        engine_vector_heavy = HybridSearchEngine(alpha=0.8)
+        results_heavy = engine_vector_heavy.search('machine learning', SAMPLE_DOCS, vector_scores=vector_scores, top_k=5)
+
+        engine_bm25_heavy = HybridSearchEngine(alpha=0.2)
+        results_bm25 = engine_bm25_heavy.search('machine learning', SAMPLE_DOCS, vector_scores=vector_scores, top_k=5)
+
+        # With high alpha (vector-heavy), doc5 (highest vector score) should rank higher
+        # than with low alpha (BM25-heavy)
+        heavy_ids = [r['id'] for r in results_heavy]
+        bm25_ids = [r['id'] for r in results_bm25]
+
+        # doc5 should rank better (lower index) in vector-heavy results
+        doc5_rank_heavy = heavy_ids.index('doc5') if 'doc5' in heavy_ids else len(heavy_ids)
+        doc5_rank_bm25 = bm25_ids.index('doc5') if 'doc5' in bm25_ids else len(bm25_ids)
+        assert doc5_rank_heavy <= doc5_rank_bm25
 
 
 # ===========================================================================

@@ -106,32 +106,39 @@ class HybridSearchEngine:
         *result_lists: List[Dict[str, Any]],
         k: int = 60,
         id_key: str = 'id',
+        weights: Optional[List[float]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Merge multiple ranked result lists using Reciprocal Rank Fusion (RRF).
 
-        RRF score = sum(1 / (k + rank_i)) across all result lists.
+        RRF score = sum(weight_i / (k + rank_i)) across all result lists.
         This method is rank-based and does not depend on score magnitudes.
 
         Args:
             *result_lists: Variable number of ranked result lists.
             k: RRF constant (default 60). Higher values reduce the impact of high rankings.
             id_key: Key used to identify and deduplicate documents across lists.
+            weights: Optional list of weights for each result list. If None, all lists
+                     are weighted equally (weight=1.0). Length must match result_lists.
 
         Returns:
             Merged, deduplicated list sorted by RRF score descending.
         """
+        if weights is not None and len(weights) != len(result_lists):
+            raise ValueError('weights length must match the number of result lists')
+
         rrf_scores: Dict[str, float] = {}
         doc_map: Dict[str, Dict[str, Any]] = {}
 
-        for result_list in result_lists:
+        for list_idx, result_list in enumerate(result_lists):
+            weight = weights[list_idx] if weights is not None else 1.0
             for rank, doc in enumerate(result_list):
                 doc_id = str(doc.get(id_key, ''))
                 if not doc_id:
                     # Use text content as fallback identifier
                     doc_id = str(doc.get('text', f'__unnamed_{rank}'))
 
-                rrf_score = 1.0 / (k + rank + 1)  # rank is 0-indexed, RRF uses 1-indexed
+                rrf_score = weight * (1.0 / (k + rank + 1))  # rank is 0-indexed, RRF uses 1-indexed
                 rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + rrf_score
 
                 # Keep the first occurrence of each document
@@ -197,11 +204,12 @@ class HybridSearchEngine:
         if self.alpha == 1.0 or not bm25_results:
             return vector_results[:top_k]
 
-        # Merge using RRF
+        # Merge using RRF, weighting vector by alpha and BM25 by (1 - alpha)
         merged = self.reciprocal_rank_fusion(
             vector_results,
             bm25_results,
             k=rrf_k,
+            weights=[self.alpha, 1.0 - self.alpha],
         )
 
         return merged[:top_k]

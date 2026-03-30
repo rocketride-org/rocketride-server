@@ -194,16 +194,24 @@ class SentenceChunker(ChunkingStrategy):
         chunk_index = 0
         current_sentences: list[str] = []
         current_len = 0
-
+        # Track where each sentence starts in the original text to handle repeated sentences
+        sentence_positions: list[int] = []
+        search_start = 0
+        sentence_start_map: list[int] = []
         for sentence in sentences:
+            pos = text.find(sentence, search_start)
+            if pos == -1:
+                pos = search_start
+            sentence_start_map.append(pos)
+            search_start = pos + len(sentence)
+
+        for sent_idx, sentence in enumerate(sentences):
             sentence_len = len(sentence)
 
             # If adding this sentence exceeds chunk_size and we have content, finalize current
             if current_sentences and current_len + (1 if current_len > 0 else 0) + sentence_len > self.chunk_size:
                 chunk_text = ' '.join(current_sentences)
-                start_char = text.find(current_sentences[0])
-                if start_char == -1:
-                    start_char = 0
+                start_char = sentence_positions[0] if sentence_positions else 0
                 end_char = start_char + len(chunk_text)
 
                 result.append(
@@ -221,18 +229,23 @@ class SentenceChunker(ChunkingStrategy):
                 # Compute overlap: keep trailing sentences that fit within overlap
                 if self.chunk_overlap > 0:
                     overlap_sentences: list[str] = []
+                    overlap_positions: list[int] = []
                     overlap_len = 0
-                    for s in reversed(current_sentences):
+                    for i in range(len(current_sentences) - 1, -1, -1):
+                        s = current_sentences[i]
                         candidate = len(s) + (1 if overlap_len > 0 else 0) + overlap_len
                         if candidate <= self.chunk_overlap:
                             overlap_sentences.insert(0, s)
+                            overlap_positions.insert(0, sentence_positions[i])
                             overlap_len = candidate
                         else:
                             break
                     current_sentences = overlap_sentences
+                    sentence_positions = overlap_positions
                     current_len = overlap_len
                 else:
                     current_sentences = []
+                    sentence_positions = []
                     current_len = 0
 
             # Add the sentence
@@ -240,13 +253,12 @@ class SentenceChunker(ChunkingStrategy):
                 current_len += 1  # space separator
             current_len += sentence_len
             current_sentences.append(sentence)
+            sentence_positions.append(sentence_start_map[sent_idx])
 
         # Emit the final chunk
         if current_sentences:
             chunk_text = ' '.join(current_sentences)
-            start_char = text.find(current_sentences[0])
-            if start_char == -1:
-                start_char = 0
+            start_char = sentence_positions[0] if sentence_positions else 0
             end_char = start_char + len(chunk_text)
 
             result.append(
@@ -307,6 +319,12 @@ class TokenChunker(ChunkingStrategy):
         if step <= 0:
             step = 1
 
+        # Pre-compute cumulative character lengths for each token position to avoid
+        # O(n^2) prefix decoding. We decode each step-sized segment once and track
+        # the running character offset.
+        # Cache: token start index -> cumulative character position
+        char_pos_cache: dict[int, int] = {0: 0}
+
         while start < len(tokens):
             end = min(start + self.chunk_size, len(tokens))
             chunk_tokens = tokens[start:end]
@@ -317,13 +335,13 @@ class TokenChunker(ChunkingStrategy):
             except Exception:
                 chunk_text = encoder.decode(chunk_tokens, errors='replace')
 
-            # Compute approximate character positions
-            # Decode the prefix before this chunk to find start_char
-            if start > 0:
+            # Use cached character position for start_char (O(1) lookup)
+            start_char = char_pos_cache.get(start)
+            if start_char is None:
+                # Fallback: decode prefix (should not happen with correct step caching)
                 prefix_text = encoder.decode(tokens[:start])
                 start_char = len(prefix_text)
-            else:
-                start_char = 0
+                char_pos_cache[start] = start_char
             end_char = start_char + len(chunk_text)
 
             result.append(
@@ -337,6 +355,17 @@ class TokenChunker(ChunkingStrategy):
                 }
             )
             chunk_index += 1
+
+            # Pre-compute the character position for the next step start
+            next_start = start + step
+            if next_start not in char_pos_cache and next_start < len(tokens):
+                # Decode only the step-sized segment to get its character length
+                step_tokens = tokens[start:next_start]
+                try:
+                    step_text = encoder.decode(step_tokens)
+                except Exception:
+                    step_text = encoder.decode(step_tokens, errors='replace')
+                char_pos_cache[next_start] = start_char + len(step_text)
 
             # Advance by step (chunk_size - overlap)
             start += step

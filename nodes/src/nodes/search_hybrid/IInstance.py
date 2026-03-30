@@ -51,9 +51,6 @@ class IInstance(IInstanceBase):
             debug('Hybrid search engine not initialized; passing question through')
             return
 
-        # Deep copy to avoid mutating the input
-        question = copy.deepcopy(question)
-
         # Extract query text from the first question
         query_text = ''
         if question.questions:
