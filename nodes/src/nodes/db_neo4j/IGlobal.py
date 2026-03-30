@@ -112,7 +112,7 @@ class IGlobal(IGlobalBase):
     # ------------------------------------------------------------------
 
     def _run_query(self, cypher: str, params: Optional[Dict] = None, *, timeout: float = QUERY_TIMEOUT) -> List[Dict]:
-        """Execute a Cypher query and return rows as a list of plain dicts.
+        """Execute a read-only Cypher query and return rows as a list of plain dicts.
 
         Args:
             cypher (str): The Cypher query to execute.
@@ -132,6 +132,31 @@ class IGlobal(IGlobalBase):
         # Defence-in-depth: block writes even if the caller skips the safety check.
         if not _is_cypher_safe(cypher):
             raise ValueError('Refusing to execute unsafe (write/admin) Cypher statement')
+
+        with self.driver.session(database=self.database) as session:
+            result = session.run(neo4j.Query(cypher, timeout=timeout), params)
+            return [_record_to_dict(record) for record in result]
+
+    def _run_write_query(self, cypher: str, params: Optional[Dict] = None, *, timeout: float = QUERY_TIMEOUT) -> List[Dict]:
+        """Execute a write Cypher query (CREATE, MERGE, etc.) and return result rows.
+
+        Unlike ``_run_query`` this method does **not** enforce the read-only safety
+        check, allowing mutations such as CREATE, MERGE, SET, and DELETE.
+
+        Args:
+            cypher (str): The Cypher statement to execute (may contain write clauses).
+            params (Optional[Dict]): Query parameters to bind into the Cypher statement.
+            timeout (float): Maximum seconds the query may run before being aborted.
+                Defaults to ``QUERY_TIMEOUT``.
+
+        Returns:
+            List[Dict]: Result rows, each serialised to a plain Python dict.
+
+        Raises:
+            neo4j.exceptions.Neo4jError: If the driver reports a query or connection error.
+        """
+        if params is None:
+            params = {}
 
         with self.driver.session(database=self.database) as session:
             result = session.run(neo4j.Query(cypher, timeout=timeout), params)

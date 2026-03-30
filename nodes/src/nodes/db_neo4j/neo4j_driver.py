@@ -62,7 +62,7 @@ class Neo4JDriver(ToolsBase):
     # ------------------------------------------------------------------
 
     def _tool_query(self) -> List[Dict[str, Any]]:
-        """Return the MCP tool descriptors for the three Neo4J tools."""
+        """Return the MCP tool descriptors for Neo4J tools (read + write)."""
         db_desc = getattr(self._instance.IGlobal, 'db_description', '') or ''
         desc_prefix = f'{db_desc} ' if db_desc else ''
 
@@ -159,6 +159,116 @@ class Neo4JDriver(ToolsBase):
                     },
                 },
             },
+            {
+                'name': 'neo4j.create_node',
+                'summary': 'Create a node in the Neo4J graph database with a given label and properties.',
+                'description': (
+                    f'{desc_prefix}'
+                    'Creates a new node (or merges on a key property to avoid duplicates) in the '
+                    'Neo4J graph database. Specify the label and a dictionary of properties. '
+                    'If merge_key is provided, MERGE is used instead of CREATE so that existing '
+                    'nodes with the same key value are updated rather than duplicated.'
+                ),
+                'inputSchema': {
+                    'type': 'object',
+                    'required': ['label', 'properties'],
+                    'properties': {
+                        'label': {
+                            'type': 'string',
+                            'description': 'Node label (e.g. Person, Company, Event)',
+                        },
+                        'properties': {
+                            'type': 'object',
+                            'description': 'Property key-value pairs to set on the node',
+                        },
+                        'merge_key': {
+                            'type': 'string',
+                            'description': 'Optional property name to use as the MERGE identity key (idempotent upsert). If omitted, CREATE is used.',
+                        },
+                    },
+                },
+                'outputSchema': {
+                    'type': 'object',
+                    'properties': {
+                        'node': {'type': 'object', 'description': 'The created/merged node with its properties.'},
+                        'error': {'type': 'string', 'description': 'Error message if creation failed.'},
+                    },
+                },
+            },
+            {
+                'name': 'neo4j.create_relationship',
+                'summary': 'Create a relationship between two nodes in the Neo4J graph database.',
+                'description': (f'{desc_prefix}Creates a directed relationship between two nodes identified by their labels and a match property. Uses MERGE to avoid duplicate relationships.'),
+                'inputSchema': {
+                    'type': 'object',
+                    'required': ['from_label', 'from_match', 'to_label', 'to_match', 'rel_type'],
+                    'properties': {
+                        'from_label': {
+                            'type': 'string',
+                            'description': 'Label of the source node (e.g. Person)',
+                        },
+                        'from_match': {
+                            'type': 'object',
+                            'description': 'Properties to match the source node (e.g. {"name": "Alice"})',
+                        },
+                        'to_label': {
+                            'type': 'string',
+                            'description': 'Label of the target node (e.g. Company)',
+                        },
+                        'to_match': {
+                            'type': 'object',
+                            'description': 'Properties to match the target node (e.g. {"name": "Acme"})',
+                        },
+                        'rel_type': {
+                            'type': 'string',
+                            'description': 'Relationship type (e.g. WORKS_AT, KNOWS, LOCATED_IN)',
+                        },
+                        'properties': {
+                            'type': 'object',
+                            'description': 'Optional properties to set on the relationship',
+                        },
+                    },
+                },
+                'outputSchema': {
+                    'type': 'object',
+                    'properties': {
+                        'relationship': {'type': 'object', 'description': 'The created relationship.'},
+                        'error': {'type': 'string', 'description': 'Error message if creation failed.'},
+                    },
+                },
+            },
+            {
+                'name': 'neo4j.run_cypher',
+                'summary': 'Execute a raw Cypher query (read or write) against the Neo4J database.',
+                'description': (
+                    f'{desc_prefix}Executes an arbitrary Cypher statement, including write operations (CREATE, MERGE, SET, DELETE). Use with caution — prefer the dedicated create_node and create_relationship tools for simple mutations. Use this for complex graph operations, bulk imports, or advanced traversals.'
+                ),
+                'inputSchema': {
+                    'type': 'object',
+                    'required': ['cypher'],
+                    'properties': {
+                        'cypher': {
+                            'type': 'string',
+                            'description': 'The Cypher statement to execute',
+                        },
+                        'params': {
+                            'type': 'object',
+                            'description': 'Optional parameter map to bind into the Cypher statement',
+                        },
+                    },
+                },
+                'outputSchema': {
+                    'type': 'object',
+                    'properties': {
+                        'rows': {
+                            'type': 'array',
+                            'description': 'Result rows returned by the query.',
+                            'items': {'type': 'object'},
+                        },
+                        'error': {'type': 'string', 'description': 'Error message if execution failed.'},
+                    },
+                },
+            },
         ]
 
     def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:
@@ -177,6 +287,12 @@ class Neo4JDriver(ToolsBase):
             return self._invoke_get_cypher(input_obj)
         elif name == 'get_data':
             return self._invoke_get_data(input_obj)
+        elif name == 'create_node':
+            return self._invoke_create_node(input_obj)
+        elif name == 'create_relationship':
+            return self._invoke_create_relationship(input_obj)
+        elif name == 'run_cypher':
+            return self._invoke_run_cypher(input_obj)
         else:
             raise ValueError(f'Unknown tool {tool_name!r}')
 
@@ -195,8 +311,33 @@ class Neo4JDriver(ToolsBase):
             if not question or not isinstance(question, str) or not question.strip():
                 raise ValueError('"question" is required and must be a non-empty string')
 
+        elif name == 'create_node':
+            if not isinstance(input_obj, dict):
+                raise ValueError('Tool input must be a JSON object')
+            if not input_obj.get('label') or not isinstance(input_obj['label'], str):
+                raise ValueError('"label" is required and must be a non-empty string')
+            if not isinstance(input_obj.get('properties'), dict):
+                raise ValueError('"properties" is required and must be a JSON object')
+
+        elif name == 'create_relationship':
+            if not isinstance(input_obj, dict):
+                raise ValueError('Tool input must be a JSON object')
+            for field in ('from_label', 'to_label', 'rel_type'):
+                if not input_obj.get(field) or not isinstance(input_obj[field], str):
+                    raise ValueError(f'"{field}" is required and must be a non-empty string')
+            for field in ('from_match', 'to_match'):
+                if not isinstance(input_obj.get(field), dict) or not input_obj[field]:
+                    raise ValueError(f'"{field}" is required and must be a non-empty JSON object')
+
+        elif name == 'run_cypher':
+            if not isinstance(input_obj, dict):
+                raise ValueError('Tool input must be a JSON object')
+            cypher = input_obj.get('cypher')
+            if not cypher or not isinstance(cypher, str) or not cypher.strip():
+                raise ValueError('"cypher" is required and must be a non-empty string')
+
         else:
-            raise ValueError(f'Unknown tool {tool_name!r} (expected get_schema, get_cypher, or get_data)')
+            raise ValueError(f'Unknown tool {tool_name!r}')
 
     # ------------------------------------------------------------------
     # Tool implementations
@@ -255,6 +396,82 @@ class Neo4JDriver(ToolsBase):
             return {'error': str(e), 'cypher': cypher, 'rows': []}
 
         return {'rows': rows, 'cypher': cypher, 'row_limit': limit}
+
+    # ------------------------------------------------------------------
+    # Write tool implementations
+    # ------------------------------------------------------------------
+
+    def _invoke_create_node(self, input_obj: Dict[str, Any]) -> Dict[str, Any]:
+        """Create (or merge) a node with the given label and properties."""
+        label = input_obj['label'].strip()
+        props = input_obj['properties']
+        merge_key = input_obj.get('merge_key')
+
+        # Sanitise label: only allow alphanumeric and underscore.
+        if not label.isidentifier():
+            return {'error': f'Invalid node label: {label!r}'}
+
+        try:
+            if merge_key and merge_key in props:
+                cypher = f'MERGE (n:{label} {{{merge_key}: $merge_val}}) SET n += $props RETURN n'
+                params = {'merge_val': props[merge_key], 'props': props}
+            else:
+                cypher = f'CREATE (n:{label}) SET n = $props RETURN n'
+                params = {'props': props}
+
+            rows = self._instance.IGlobal._run_write_query(cypher, params)
+            return {'node': rows[0] if rows else {}}
+        except Exception as e:
+            return {'error': str(e)}
+
+    def _invoke_create_relationship(self, input_obj: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a relationship between two nodes matched by properties."""
+        from_label = input_obj['from_label'].strip()
+        from_match = input_obj['from_match']
+        to_label = input_obj['to_label'].strip()
+        to_match = input_obj['to_match']
+        rel_type = input_obj['rel_type'].strip()
+        rel_props = input_obj.get('properties') or {}
+
+        # Sanitise identifiers.
+        for ident in (from_label, to_label, rel_type):
+            if not ident.isidentifier():
+                return {'error': f'Invalid identifier: {ident!r}'}
+
+        try:
+            # Build MATCH clauses using parameterised property lookups.
+            from_conditions = ' AND '.join(f'a.{k} = $from_{k}' for k in from_match)
+            to_conditions = ' AND '.join(f'b.{k} = $to_{k}' for k in to_match)
+
+            cypher = f'MATCH (a:{from_label}) WHERE {from_conditions} MATCH (b:{to_label}) WHERE {to_conditions} MERGE (a)-[r:{rel_type}]->(b) '
+            if rel_props:
+                cypher += 'SET r += $rel_props '
+            cypher += 'RETURN type(r) AS type, properties(r) AS properties'
+
+            params: Dict[str, Any] = {}
+            for k, v in from_match.items():
+                params[f'from_{k}'] = v
+            for k, v in to_match.items():
+                params[f'to_{k}'] = v
+            if rel_props:
+                params['rel_props'] = rel_props
+
+            rows = self._instance.IGlobal._run_write_query(cypher, params)
+            return {'relationship': rows[0] if rows else {}}
+        except Exception as e:
+            return {'error': str(e)}
+
+    def _invoke_run_cypher(self, input_obj: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute an arbitrary Cypher statement (read or write)."""
+        cypher = input_obj['cypher'].strip()
+        params = input_obj.get('params') or {}
+
+        try:
+            # Use write path so both reads and writes succeed.
+            rows = self._instance.IGlobal._run_write_query(cypher, params)
+            return {'rows': rows}
+        except Exception as e:
+            return {'error': str(e)}
 
     # ------------------------------------------------------------------
     # Input helpers

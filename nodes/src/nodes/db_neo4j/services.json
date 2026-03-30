@@ -56,8 +56,9 @@
 	"description": [
 		"A processing component that connects to a Neo4J graph database. ",
 		"Accepts natural-language questions, translates them to Cypher queries ",
-		"via an LLM, and returns results to the pipeline. Designed for knowledge graph retrieval, ",
-		"entity linking, and graph-based RAG workflows."
+		"via an LLM, and returns results to the pipeline. Supports graph mutations ",
+		"(node/relationship creation) and raw Cypher execution for knowledge graph ",
+		"construction, entity linking, and graph-based RAG workflows."
 	],
 	//
 	// Optional:
