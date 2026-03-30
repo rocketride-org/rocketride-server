@@ -60,7 +60,7 @@ class Chat(ChatBase):
         elif isinstance(error, APIConnectionError):
             return True
         else:
-            return False
+            return super().is_retryable_error(error)
 
     def map_exception(self, error):
         """
