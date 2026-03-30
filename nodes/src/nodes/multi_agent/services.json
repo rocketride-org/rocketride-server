@@ -1,0 +1,134 @@
+{
+	"title": "Multi-Agent",
+	"protocol": "multi_agent://",
+	"classType": ["agent"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.multi_agent",
+	"prefix": "agent",
+	"description": [
+		"Multi-agent orchestration using the supervisor pattern.",
+		"A coordinator agent decomposes tasks and delegates to specialised worker agents.",
+		"Supports blackboard, message-passing, and delegation communication protocols,",
+		"with sequential, parallel, or dependency-aware execution modes."
+	],
+	"icon": "multi_agent.svg",
+	"invoke": {
+		"llm": {
+			"description": "LLM used by the supervisor and worker agents",
+			"min": 1,
+			"max": 1
+		}
+	},
+	"lanes": {
+		"questions": ["answers"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [{ "lane": "answers" }]
+		}
+	],
+	"preconfig": {
+		"default": "supervisor",
+		"profiles": {
+			"supervisor": {
+				"agents_json": "[]",
+				"communication_protocol": "delegation",
+				"max_rounds": 10,
+				"merge_strategy": "concatenate",
+				"execution_mode": "supervisor"
+			},
+			"sequential": {
+				"agents_json": "[]",
+				"communication_protocol": "delegation",
+				"max_rounds": 10,
+				"merge_strategy": "concatenate",
+				"execution_mode": "sequential"
+			},
+			"parallel": {
+				"agents_json": "[]",
+				"communication_protocol": "blackboard",
+				"max_rounds": 10,
+				"merge_strategy": "summarize",
+				"execution_mode": "parallel"
+			}
+		}
+	},
+	"fields": {
+		"agents_json": {
+			"type": "string",
+			"title": "Agent Definitions (JSON)",
+			"default": "[]",
+			"description": "JSON array of agent definitions. Each agent: {\"name\": \"...\", \"role\": \"...\", \"instructions\": \"...\", \"tools\": [], \"model\": \"\"}",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"communication_protocol": {
+			"type": "string",
+			"title": "Communication Protocol",
+			"default": "delegation",
+			"enum": [
+				["delegation", "Delegation (supervisor assigns, workers report)"],
+				["blackboard", "Blackboard (shared state all agents read/write)"],
+				["message_passing", "Message Passing (agents send messages to each other)"]
+			],
+			"description": "How agents communicate during orchestration."
+		},
+		"max_rounds": {
+			"type": "integer",
+			"title": "Max Rounds",
+			"description": "Maximum number of orchestration rounds before forced termination.",
+			"default": 10,
+			"minimum": 1,
+			"maximum": 100
+		},
+		"merge_strategy": {
+			"type": "string",
+			"title": "Merge Strategy",
+			"default": "concatenate",
+			"enum": [
+				["concatenate", "Concatenate (join outputs with agent headers)"],
+				["summarize", "Summarize (LLM synthesizes a coherent answer)"],
+				["vote", "Vote (LLM picks the best answer)"]
+			],
+			"description": "How to combine agent outputs into the final answer."
+		},
+		"multi_agent.supervisor": {
+			"object": "supervisor",
+			"properties": ["agents_json", "communication_protocol", "max_rounds", "merge_strategy"]
+		},
+		"multi_agent.sequential": {
+			"object": "sequential",
+			"properties": ["agents_json", "communication_protocol", "max_rounds", "merge_strategy"]
+		},
+		"multi_agent.parallel": {
+			"object": "parallel",
+			"properties": ["agents_json", "communication_protocol", "max_rounds", "merge_strategy"]
+		},
+		"multi_agent.profile": {
+			"title": "Profile",
+			"type": "string",
+			"default": "supervisor",
+			"enum": [
+				["supervisor", "Supervisor (default)"],
+				["sequential", "Sequential"],
+				["parallel", "Parallel"]
+			],
+			"conditional": [
+				{ "value": "supervisor", "properties": ["multi_agent.supervisor"] },
+				{ "value": "sequential", "properties": ["multi_agent.sequential"] },
+				{ "value": "parallel", "properties": ["multi_agent.parallel"] }
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Multi-Agent Orchestration",
+			"properties": ["agents_json", "communication_protocol", "max_rounds", "merge_strategy"]
+		}
+	]
+}

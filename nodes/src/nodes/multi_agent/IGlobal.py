@@ -1,0 +1,42 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+# =============================================================================
+
+"""
+Multi-Agent orchestration node — global (per-pipe) state and configuration.
+
+IGlobal holds the node-level configuration that is created once when the
+pipeline starts and shared across all instances (concurrent requests).
+The actual :class:`MultiAgentOrchestrator` is created per-request in
+IInstance because it carries per-run state (blackboard, message queues).
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict
+
+from rocketlib import IGlobalBase
+
+
+class IGlobal(IGlobalBase):
+    """Per-pipe global state for the Multi-Agent orchestration node.
+
+    Attributes:
+        config: The node configuration dict, loaded in :meth:`beginGlobal`.
+    """
+
+    config: Dict[str, Any] = None
+
+    def beginGlobal(self) -> None:
+        """Load node configuration for the multi-agent orchestrator.
+
+        Configuration fields (``agents_json``, ``communication_protocol``,
+        ``max_rounds``, ``merge_strategy``) are read from the engine's
+        connConfig and stored for IInstance to use on each request.
+        """
+        self.config = getattr(self.glb, 'connConfig', {}) or {}
+
+    def endGlobal(self) -> None:
+        """Release configuration when the pipe closes."""
+        self.config = None

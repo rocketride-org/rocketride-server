@@ -1,0 +1,1 @@
+# No external dependencies — multi-agent orchestration uses only stdlib + engine libs
