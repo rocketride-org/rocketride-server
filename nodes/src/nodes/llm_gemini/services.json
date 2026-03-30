@@ -125,7 +125,7 @@
 				"apikey": ""
 			},
 			"gemini-3-pro-image-preview": {
-				"model": "models/gemini-3.1-pro-preview",
+				"model": "models/gemini-3-pro-image-preview",
 				"title": "Gemini 3 Pro Image",
 				"modelTotalTokens": 66560,
 				"outputTokens": 32768,
