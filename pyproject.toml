@@ -67,7 +67,7 @@ convention = "pep257"
 
 [tool.pytest.ini_options]
 # Pytest configuration
-testpaths = ["tests"]
+testpaths = ["tests", "test"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
