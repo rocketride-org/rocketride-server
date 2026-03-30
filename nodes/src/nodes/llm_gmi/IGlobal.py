@@ -43,7 +43,7 @@ VALIDATION_PROMPT = 'Hi'
 class IGlobal(IGlobalBase):
     """Global handler for the GMI Cloud LLM node."""
 
-    chat: Optional[ChatBase] = None
+    _chat: Optional[ChatBase] = None
 
     def validateConfig(self):
         """Validate the GMI Cloud API configuration at save time."""
@@ -119,7 +119,7 @@ class IGlobal(IGlobalBase):
         self._chat = Chat(self.glb.logicalType, config, bag)
 
     def endGlobal(self):
-        self.chat = None
+        self._chat = None
 
     def _format_error(self, status, etype, emsg, fallback: str) -> str:
         """Compose a user-facing error string."""
