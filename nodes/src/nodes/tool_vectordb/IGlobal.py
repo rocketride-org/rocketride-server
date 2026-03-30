@@ -71,7 +71,7 @@ class IGlobal(IGlobalBase):
         # The backend store is initialized via the same connConfig that
         # carries the vector DB connection parameters.
         bag = self.IEndpoint.endpoint.bag
-        conn_config = self.getConnConfig()
+        conn_config = self.glb.connConfig
         store = self._create_store(backend, conn_config, bag)
 
         try:
