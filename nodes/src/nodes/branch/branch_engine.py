@@ -153,12 +153,19 @@ class BranchEngine:
             return {'matched': False, 'condition': 'regex', 'details': 'empty text or pattern'}
 
         try:
-            match = re.search(pattern, text)
+            # Timeout protects against catastrophic backtracking (ReDoS) from
+            # user-supplied patterns. Python 3.11+ supports the timeout kwarg.
+            import sys
+            kwargs = {'timeout': 2.0} if sys.version_info >= (3, 11) else {}
+            match = re.search(pattern, text, **kwargs)
             matched = match is not None
             details = f'pattern={pattern}, match={match.group() if match else None}'
         except re.error as exc:
             matched = False
             details = f'invalid regex: {exc}'
+        except TimeoutError:
+            matched = False
+            details = f'regex timed out (pattern too complex): {pattern[:50]}'
 
         return {'matched': matched, 'condition': 'regex', 'details': details}
 
