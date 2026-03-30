@@ -28,7 +28,8 @@ engine — pipeline execution, LLM usage, vector-DB operations, and HTTP
 request instrumentation.
 """
 
-from prometheus_client import Counter, Gauge, Histogram, CollectorRegistry, generate_latest, CONTENT_TYPE_LATEST, make_asgi_app
+import prometheus_client
+from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST, make_asgi_app
 
 __all__ = [
     'PIPELINE_EXECUTIONS',
@@ -47,9 +48,10 @@ __all__ = [
 
 # ---------------------------------------------------------------------------
 # Registry — use the default global registry so instrumentation libraries
-# (e.g. opentelemetry-exporter-prometheus) can merge seamlessly.
+# (e.g. opentelemetry-exporter-prometheus) merge seamlessly and the
+# built-in process/platform collectors are included automatically.
 # ---------------------------------------------------------------------------
-REGISTRY = CollectorRegistry()
+REGISTRY = prometheus_client.REGISTRY
 
 # ---------------------------------------------------------------------------
 # Pipeline metrics
@@ -58,14 +60,12 @@ PIPELINE_EXECUTIONS = Counter(
     'rocketride_pipeline_executions_total',
     'Total number of pipeline executions',
     ['pipeline_name', 'status'],
-    registry=REGISTRY,
 )
 
 PIPELINE_DURATION = Histogram(
     'rocketride_pipeline_duration_seconds',
     'Duration of pipeline executions in seconds',
     ['pipeline_name'],
-    registry=REGISTRY,
 )
 
 # ---------------------------------------------------------------------------
@@ -75,21 +75,21 @@ LLM_REQUESTS = Counter(
     'rocketride_llm_requests_total',
     'Total number of LLM requests',
     ['provider', 'model', 'status'],
-    registry=REGISTRY,
 )
 
 LLM_TOKENS = Counter(
     'rocketride_llm_tokens_total',
     'Total number of LLM tokens consumed',
     ['provider', 'model', 'token_type'],
-    registry=REGISTRY,
 )
 
+# Custom buckets tuned for LLM calls which can take anywhere from 100ms
+# (cache hit / small model) to 120s (complex multi-turn reasoning).
 LLM_REQUEST_DURATION = Histogram(
     'rocketride_llm_request_duration_seconds',
-    'Duration of LLM requests in seconds',
+    'Duration of LLM API requests',
     ['provider', 'model'],
-    registry=REGISTRY,
+    buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0],
 )
 
 # ---------------------------------------------------------------------------
@@ -99,7 +99,6 @@ VECTORDB_OPERATIONS = Counter(
     'rocketride_vectordb_operations_total',
     'Total number of vector DB operations',
     ['provider', 'operation'],
-    registry=REGISTRY,
 )
 
 # ---------------------------------------------------------------------------
@@ -108,7 +107,6 @@ VECTORDB_OPERATIONS = Counter(
 ACTIVE_TASKS = Gauge(
     'rocketride_active_tasks',
     'Number of currently running tasks',
-    registry=REGISTRY,
 )
 
 # ---------------------------------------------------------------------------
@@ -118,14 +116,12 @@ HTTP_REQUESTS = Counter(
     'rocketride_http_requests_total',
     'Total number of HTTP requests',
     ['method', 'endpoint', 'status_code'],
-    registry=REGISTRY,
 )
 
 HTTP_REQUEST_DURATION = Histogram(
     'rocketride_http_request_duration_seconds',
     'Duration of HTTP requests in seconds',
     ['method', 'endpoint'],
-    registry=REGISTRY,
 )
 
 

@@ -49,12 +49,29 @@ def is_metrics_public() -> bool:
 
     Controlled by ``ROCKETRIDE_METRICS_PUBLIC`` (default ``true``).
     Set to ``false`` to require authentication for scraping.
+
+    Security note: when set to ``true``, the /metrics endpoint is
+    unauthenticated.  In production deployments this endpoint should sit
+    behind a reverse proxy (e.g. nginx, Envoy) that enforces rate
+    limiting and IP allowlisting so that only the Prometheus scraper can
+    reach it.  Setting the variable to ``false`` requires the standard
+    RocketRide auth token on every scrape request.
     """
+    # ROCKETRIDE_METRICS_PUBLIC controls whether the /metrics endpoint is
+    # exposed without authentication.  The default (true) is convenient for
+    # development but in production you should either set this to false or
+    # put the endpoint behind a rate-limiting reverse proxy.
     return os.environ.get('ROCKETRIDE_METRICS_PUBLIC', 'true').lower() in ('true', '1', 'yes')
 
 
 async def metrics_endpoint() -> Response:
     """Return current Prometheus metrics in text exposition format.
+
+    .. warning::
+
+        In production, this endpoint should be protected by rate limiting
+        at the reverse-proxy layer (or by setting ``ROCKETRIDE_METRICS_PUBLIC=false``
+        and requiring authentication) to prevent abuse.
 
     Returns:
         Response: Prometheus-formatted metrics payload.

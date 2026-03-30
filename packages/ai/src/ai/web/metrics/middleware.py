@@ -33,15 +33,44 @@ Usage — add *after* the auth middleware so the route path is resolved::
     app.add_middleware(MetricsMiddleware)
 """
 
+import re
 import time
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.routing import Match
 
 from .prometheus_metrics import HTTP_REQUESTS, HTTP_REQUEST_DURATION
 from .tracing import get_tracer
 
 __all__ = ['MetricsMiddleware']
+
+# Patterns used to normalise dynamic path segments when route matching
+# is unavailable (e.g. catch-all or mounted sub-apps).
+_UUID_RE = re.compile(r'/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', re.IGNORECASE)
+_NUMERIC_RE = re.compile(r'/\d+')
+
+
+def _normalise_path(request: Request) -> str:
+    """Return the route template for *request*, falling back to regex normalisation.
+
+    Tries FastAPI/Starlette route matching first so that paths like
+    ``/pipeline/3fa85f64-…`` become ``/pipeline/{id}`` rather than a
+    unique label per request (which would cause a Prometheus cardinality
+    explosion).
+    """
+    raw_path = request.url.path
+    scope = {'type': 'http', 'method': request.method, 'path': raw_path}
+
+    for route in getattr(request.app, 'routes', []):
+        match, _ = route.matches(scope)
+        if match == Match.FULL:
+            return getattr(route, 'path', raw_path)
+
+    # Fallback: replace UUIDs and bare numeric segments with placeholders.
+    path = _UUID_RE.sub('/{id}', raw_path)
+    path = _NUMERIC_RE.sub('/{id}', path)
+    return path
 
 
 class MetricsMiddleware(BaseHTTPMiddleware):
@@ -49,7 +78,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         method = request.method
-        path = request.url.path
+        path = _normalise_path(request)
         tracer = get_tracer('rocketride.http')
 
         start = time.perf_counter()
