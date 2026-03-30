@@ -43,7 +43,7 @@ import random
 import threading
 import time
 from enum import Enum
-from typing import Any, Callable, Optional, Set, Tuple, Type
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type
 
 try:
     import rocketlib
@@ -221,7 +221,16 @@ _DEFAULT_NON_RETRYABLE_NAMES: Set[str] = {
 
 
 def _is_retryable(exc: BaseException, retryable_types: Optional[Tuple[Type[BaseException], ...]] = None) -> bool:
-    """Decide whether *exc* should be retried.
+    """Classify whether an exception is retryable using class-name heuristics.
+
+    Uses exception class names (e.g., 'RateLimitError', 'AuthenticationError') to avoid
+    hard imports of provider SDKs. This is a pragmatic choice that works across all
+    LLM providers without coupling to their specific exception hierarchies.
+
+    Known limitation: If a provider SDK renames its exception classes or if two SDKs
+    use the same class name with different retry semantics, this heuristic may
+    misclassify. In practice, the major providers (OpenAI, Anthropic, Google, etc.)
+    use consistent naming conventions that make this reliable.
 
     If *retryable_types* is provided, membership is checked first.  Otherwise
     we fall back to class-name heuristics so that callers don't need to import
@@ -276,6 +285,10 @@ def retry_with_backoff(
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            # NOTE: time.sleep() blocks the calling pipeline thread. Since the C++ engine
+            # has a finite thread pool, a provider outage causing retries with max_delay=60s
+            # could temporarily reduce available threads. This is acceptable for LLM calls
+            # (which already take seconds) but should be considered when tuning max_delay.
             last_exc: Optional[BaseException] = None
             for attempt in range(max_retries + 1):
                 try:
@@ -325,7 +338,9 @@ def retry_with_backoff(
 # Module-level registry of per-provider circuit breakers.  This ensures that
 # all instances of a given provider share one breaker, even when instantiated
 # by different pipelines running in parallel threads.
-_provider_breakers: dict[str, CircuitBreaker] = {}
+# Provider breaker registry. In practice, bounded by the number of LLM providers
+# (openai, anthropic, gemini, etc.) — typically < 15 entries.
+_provider_breakers: Dict[str, CircuitBreaker] = {}
 _provider_breakers_lock = threading.Lock()
 
 
