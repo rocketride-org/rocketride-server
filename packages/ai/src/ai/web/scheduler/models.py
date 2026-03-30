@@ -39,7 +39,13 @@ class ScheduleCreate(BaseModel):
     @field_validator('cron_expression')
     @classmethod
     def validate_cron_expression(cls, v: str) -> str:
-        """Validate that the cron expression has exactly 5 fields."""
+        """Validate that the cron expression has exactly 5 fields.
+
+        This is intentionally a lightweight structural check (field count only).
+        Full semantic validation (e.g. range checks for each field) is deferred
+        to the scheduler backend (APScheduler / croniter) which raises on
+        invalid expressions at schedule-add time.
+        """
         parts = v.strip().split()
         if len(parts) != 5:
             raise ValueError('Cron expression must have exactly 5 fields (minute hour day month weekday)')

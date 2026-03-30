@@ -24,15 +24,19 @@
 # NOTE: These endpoints are protected by AuthMiddleware which checks
 # all non-public routes. Do NOT register these as public routes.
 
+from __future__ import annotations
+
 import logging
+from typing import Optional
 
 from ai.web import Body, Request, Result, error, exception, response
 from ai.web.scheduler.models import ScheduleCreate, ScheduleList
+from ai.web.scheduler.scheduler import PipelineScheduler
 
 logger = logging.getLogger(__name__)
 
 
-def _get_scheduler(request: Request):
+def _get_scheduler(request: Request) -> Optional[PipelineScheduler]:
     """Retrieve the PipelineScheduler from app state, or None if not initialised."""
     return getattr(request.app.state, 'scheduler', None)
 

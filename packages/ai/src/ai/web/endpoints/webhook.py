@@ -142,6 +142,7 @@ async def webhook_trigger(request: Request, pipeline_id: str, body: Optional[Dic
                 'pipeline_id': pipeline_id,
                 'status': 'accepted',
                 'created_at': now.isoformat(),
+                'input_data': body,
                 '_monotonic_created': time.monotonic(),
             }
 
