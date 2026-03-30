@@ -33,6 +33,8 @@ jobs:
           if [ -f packages/ai/setup.py ] || [ -f packages/ai/pyproject.toml ]; then pip install -e packages/ai/ 2>/dev/null || true; fi
 
       - name: Run tests with coverage
+        id: tests
+        continue-on-error: true
         run: |
           pytest \
             --cov=nodes \
@@ -41,13 +43,17 @@ jobs:
             --cov-report=term-missing \
             --junitxml=junit.xml \
             -q \
-            nodes/test/ test/ \
-            || true  # Don't fail the workflow if some tests fail — coverage still uploads
+            nodes/test/ test/
 
       - name: Upload coverage to Codecov
+        if: always()
         uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5.5.4
         with:
           files: coverage.xml
           fail_ci_if_error: false
           flags: python
           token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Fail if tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1

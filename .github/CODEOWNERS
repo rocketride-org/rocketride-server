@@ -15,8 +15,7 @@ packages/client-typescript/ @jmaionchi @stepmikhaylov
 packages/client-python/ @jmaionchi @stepmikhaylov
 packages/client-mcp/ @jmaionchi @stepmikhaylov
 
-# CI/CD — requires DevOps review
-.github/ @kwit75
+# CI/CD — requires DevOps review (/.github/ covered by DevOps maintainers rule above)
 docker/ @kwit75
 
 # Security-sensitive files

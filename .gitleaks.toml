@@ -54,8 +54,9 @@ paths = [
     '''vendor/''',
 ]
 regexes = [
-    # Placeholder / example tokens used in documentation and tests
-    '''(?i)(example|test|dummy|fake|placeholder|changeme|xxxx|your[-_]?)''',
+    # Placeholder / example secret values — match only when the value itself is a known placeholder
+    # Requires the placeholder word to appear as the assigned value (after = or : or quotes)
+    '''(?i)(?:password|apikey|api_key|secret|token|auth)\s*[=:]\s*["']?(?:changeme|placeholder|example[-_]?(?:key|token|secret|password)?|dummy[-_]?(?:key|token|secret|password)?|fake[-_]?(?:key|token|secret|password)?|xxxx+|your[-_]?(?:key|token|secret|password|api[-_]?key))["']?''',
     # GitHub Actions expression syntax (not real secrets)
     '''\$\{\{.*\}\}''',
 ]
