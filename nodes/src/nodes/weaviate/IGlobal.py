@@ -27,7 +27,7 @@ from ai.common.config import Config
 from ai.common.transform import IGlobalTransform
 from rocketlib import OPEN_MODE
 from rocketlib import warning
-from library.ssrf_protection import validate_url
+from library.ssrf_protection import build_ssrf_safe_url, validate_url
 
 
 # Module-level regex constant for collection name validation (official rule)
@@ -119,10 +119,12 @@ class IGlobal(IGlobalTransform):
             if is_cloud:
                 # Cloud: REST + API key only; do not probe gRPC
                 url = base_url.rstrip('/') + '/v1/meta'
-                # SSRF protection: validate the user-supplied host before making requests
-                validate_url(url)
+                # SSRF protection: validate and pin to resolved IP to prevent TOCTOU
+                _url, hostname, resolved_ips = validate_url(url)
+                safe_url, host_headers = build_ssrf_safe_url(url, hostname, resolved_ips)
                 headers = {'Authorization': f'Bearer {apikey}'} if apikey else {}
-                r = httpx.get(url, headers=headers, timeout=3)
+                headers.update(host_headers)
+                r = httpx.get(safe_url, headers=headers, timeout=3, follow_redirects=False)
                 r.raise_for_status()
                 return
             else:

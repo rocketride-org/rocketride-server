@@ -28,7 +28,7 @@ from typing import Dict, Any, List
 import requests
 from rocketlib import configureLogger, IGlobalBase, monitorStatus, IJson, Lvl
 from ai.common.config import Config
-from library.ssrf_protection import validate_url
+from library.ssrf_protection import build_ssrf_safe_url, validate_url
 
 
 class IGlobal(IGlobalBase):
@@ -68,16 +68,22 @@ class IGlobal(IGlobalBase):
         self.urlControl = f'http://{self._host}:{self._port}/remote?pipe={self._pipeId}'
         self.urlProcess = f'ws://{self._host}:{self._port}/remote/pipe?pipe={self._pipeId}'
 
-        # SSRF protection: validate the user-supplied host before making requests
-        validate_url(self.urlControl)
+        # SSRF protection: validate and pin to resolved IP to prevent TOCTOU
+        _url, hostname, resolved_ips = validate_url(self.urlControl)
+        safe_control_url, host_headers = build_ssrf_safe_url(self.urlControl, hostname, resolved_ips)
+        # Merge Host header into request headers for all subsequent calls
+        self.headers.update(host_headers)
+        # Store the IP-pinned base for use in all requests
+        self._safe_control_url = safe_control_url
+        safe_use_url, _ = build_ssrf_safe_url(f'http://{self._host}:{self._port}/use?name=remote', hostname, resolved_ips)
 
         # Update the monitor
         monitorStatus('Loading remote pipe')
 
-        requests.post(f'http://{self._host}:{self._port}/use?name=remote', headers=self.headers).raise_for_status()
+        requests.post(safe_use_url, headers=self.headers, allow_redirects=False).raise_for_status()
 
         # Issue the request
-        response = requests.post(self.urlControl, json=IJson.toDict(self._pipeline), headers=self.headers)
+        response = requests.post(self._safe_control_url, json=IJson.toDict(self._pipeline), headers=self.headers, allow_redirects=False)
 
         # Check for success
         if response.status_code != 200:
@@ -85,7 +91,7 @@ class IGlobal(IGlobalBase):
 
     def endGlobal(self):
         # Issue the request
-        response = requests.delete(self.urlControl, headers=self.headers)
+        response = requests.delete(self._safe_control_url, headers=self.headers, allow_redirects=False)
 
         # Check for success
         if response.status_code != 200:

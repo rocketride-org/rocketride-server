@@ -52,8 +52,8 @@ import ipaddress
 import logging
 import os
 import socket
-from typing import List, Optional, Sequence, Tuple
-from urllib.parse import urlparse
+from typing import Dict, List, Optional, Sequence, Tuple
+from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +175,36 @@ def validate_url(
     resolved_ips = _resolve_and_check(hostname, port, allow_nets)
 
     return url, hostname, resolved_ips
+
+
+def build_ssrf_safe_url(
+    url: str,
+    hostname: str,
+    resolved_ips: List[str],
+) -> Tuple[str, Dict[str, str]]:
+    """Replace the hostname in *url* with a resolved IP and return a Host header.
+
+    This prevents TOCTOU DNS rebinding: the caller connects directly to a
+    validated IP while sending the original ``Host`` header so virtual-hosted
+    servers still route the request correctly.
+
+    Returns
+    -------
+    tuple[str, dict[str, str]]
+        A 2-tuple of ``(ip_url, extra_headers)`` where *ip_url* has the
+        hostname replaced with the first resolved IP and *extra_headers*
+        contains at minimum ``{'Host': '<original_host_with_port>'}``.
+    """
+    parsed = urlparse(url)
+    ip = resolved_ips[0]
+    # Preserve the port in the Host header when it is non-default.
+    host_header = parsed.netloc  # includes port if present
+    # For IPv6 IPs, wrap in brackets for the URL netloc.
+    ip_netloc = f'[{ip}]' if ':' in ip else ip
+    if parsed.port:
+        ip_netloc = f'{ip_netloc}:{parsed.port}'
+    ip_url = urlunparse(parsed._replace(netloc=ip_netloc))
+    return ip_url, {'Host': host_header}
 
 
 def resolve_and_validate(
