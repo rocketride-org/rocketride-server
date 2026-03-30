@@ -17,7 +17,7 @@
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF OTHER DEALINGS IN THE
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
 
@@ -33,14 +33,16 @@ from __future__ import annotations
 import re
 import time
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse, urlunparse
 
 import requests
 from requests.auth import HTTPBasicAuth
 
-from library.ssrf_protection import validate_url
+from library.ssrf_protection import SSRFError, validate_url
 
 DEFAULT_TIMEOUT_SECONDS = 30
 MAX_TIMEOUT_SECONDS = 300
+MAX_REDIRECTS = 10
 
 
 def execute_request(
@@ -68,8 +70,10 @@ def execute_request(
     """
     resolved_url = _resolve_path_params(url, path_params)
 
-    # --- SSRF protection: validate the resolved URL before connecting ---
-    validate_url(resolved_url, allowed_private=ssrf_allowed_private)
+    # --- SSRF protection: validate and resolve DNS once ---
+    # Returns (url, hostname, resolved_ips) so we can pin the connection
+    # to the validated IP, preventing TOCTOU DNS rebinding attacks.
+    _validated_url, original_hostname, resolved_ips = validate_url(resolved_url, allowed_private=ssrf_allowed_private)
 
     req_headers = dict(headers or {})
     req_auth = None
@@ -81,23 +85,63 @@ def execute_request(
     merged_params = dict(query_params or {})
     merged_params.update(extra_params)
 
+    # Pin connection to the validated IP to prevent TOCTOU DNS rebinding.
+    pinned_url = _pin_url_to_ip(resolved_url, original_hostname, resolved_ips[0])
+    req_headers.setdefault('Host', original_hostname)
+
     req_kwargs: Dict[str, Any] = {
         'method': method.upper(),
-        'url': resolved_url,
+        'url': pinned_url,
         'headers': req_headers,
         'params': merged_params or None,
         'auth': req_auth,
+        'allow_redirects': False,  # Handle redirects manually for SSRF safety
     }
 
     _apply_body(body, req_headers, req_kwargs)
 
-    if timeout is not None and timeout > 0:
-        req_kwargs['timeout'] = min(timeout, MAX_TIMEOUT_SECONDS)
-    else:
-        req_kwargs['timeout'] = DEFAULT_TIMEOUT_SECONDS
+    effective_timeout = min(timeout, MAX_TIMEOUT_SECONDS) if timeout is not None and timeout > 0 else DEFAULT_TIMEOUT_SECONDS
+    req_kwargs['timeout'] = effective_timeout
 
     start = time.monotonic()
     resp = requests.request(**req_kwargs)
+
+    # --- Manual redirect loop: validate each Location before following ---
+    redirects_followed = 0
+    while resp.is_redirect and redirects_followed < MAX_REDIRECTS:
+        location = resp.headers.get('Location')
+        if not location:
+            break
+
+        # Resolve relative redirects against the current URL
+        if not location.startswith(('http://', 'https://')):
+            parsed_current = urlparse(req_kwargs['url'])
+            location = urlunparse((parsed_current.scheme, parsed_current.netloc, location, '', '', ''))
+
+        # Validate the redirect target against SSRF rules
+        _redirect_url, redirect_hostname, redirect_ips = validate_url(location, allowed_private=ssrf_allowed_private)
+
+        # Pin the redirect to its validated IP as well
+        pinned_redirect = _pin_url_to_ip(location, redirect_hostname, redirect_ips[0])
+        redirect_headers = dict(req_headers)
+        redirect_headers['Host'] = redirect_hostname
+
+        req_kwargs = {
+            'method': 'GET',  # Redirects always become GET (per HTTP spec for 301/302/303)
+            'url': pinned_redirect,
+            'headers': redirect_headers,
+            'params': None,
+            'auth': req_auth,
+            'allow_redirects': False,
+            'timeout': effective_timeout,
+        }
+
+        resp = requests.request(**req_kwargs)
+        redirects_followed += 1
+
+    if resp.is_redirect and redirects_followed >= MAX_REDIRECTS:
+        raise SSRFError(f'SSRF protection: too many redirects (>{MAX_REDIRECTS}).')
+
     elapsed_ms = round((time.monotonic() - start) * 1000)
 
     return _build_response(resp, elapsed_ms)
@@ -106,6 +150,22 @@ def execute_request(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _pin_url_to_ip(url: str, hostname: str, ip: str) -> str:
+    """Replace the hostname in *url* with *ip* to pin the connection.
+
+    For IPv6 addresses the IP is wrapped in brackets as required by URL syntax.
+    """
+    parsed = urlparse(url)
+    # Wrap IPv6 addresses in brackets
+    ip_host = f'[{ip}]' if ':' in ip else ip
+    # Preserve the port if one was explicitly specified
+    if parsed.port:
+        new_netloc = f'{ip_host}:{parsed.port}'
+    else:
+        new_netloc = ip_host
+    return urlunparse((parsed.scheme, new_netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
 
 
 def _resolve_path_params(url: str, path_params: Optional[Dict[str, str]]) -> str:

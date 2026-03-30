@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2024 RocketRide Inc.
+# Copyright (c) 2026 Aparavi Software AG
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -49,10 +49,13 @@ Usage::
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
 import socket
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Blocked networks (RFC 1918, loopback, link-local, metadata, etc.)
@@ -121,8 +124,8 @@ def validate_url(
     url: str,
     *,
     allowed_private: Optional[Sequence[str]] = None,
-) -> str:
-    """Validate *url* against SSRF rules and return the resolved URL.
+) -> Tuple[str, str, List[str]]:
+    """Validate *url* against SSRF rules and return the URL with resolved IPs.
 
     Parameters
     ----------
@@ -136,8 +139,11 @@ def validate_url(
 
     Returns
     -------
-    str
-        The original *url* unchanged, if validation passes.
+    tuple[str, str, list[str]]
+        A 3-tuple of ``(url, hostname, resolved_ips)`` where *resolved_ips*
+        are the validated IP addresses.  Callers should connect directly to
+        one of these IPs (setting the ``Host`` header to *hostname*) to
+        prevent TOCTOU DNS rebinding attacks.
 
     Raises
     ------
@@ -166,9 +172,9 @@ def validate_url(
 
     # -- DNS resolution + IP check ------------------------------------------
     port = parsed.port or (443 if scheme == 'https' else 80)
-    _resolve_and_check(hostname, port, allow_nets)
+    resolved_ips = _resolve_and_check(hostname, port, allow_nets)
 
-    return url
+    return url, hostname, resolved_ips
 
 
 def resolve_and_validate(
@@ -206,7 +212,7 @@ def _build_allowlist(
                 try:
                     nets.append(ipaddress.ip_network(cidr, strict=False))
                 except ValueError:
-                    pass  # silently skip malformed entries
+                    logger.warning('SSRF allowlist: ignoring malformed CIDR entry %r from %s', cidr, SSRF_ALLOWLIST_ENV)
 
     # Per-call allowlist
     for cidr in extra or []:
@@ -215,7 +221,7 @@ def _build_allowlist(
             try:
                 nets.append(ipaddress.ip_network(cidr_s, strict=False))
             except ValueError:
-                pass
+                logger.warning('SSRF allowlist: ignoring malformed CIDR entry %r from per-call allowlist', cidr_s)
 
     return nets
 

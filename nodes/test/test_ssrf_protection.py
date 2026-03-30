@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2024 RocketRide Inc.
+# Copyright (c) 2026 Aparavi Software AG
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -163,8 +163,10 @@ class TestAllowedPublic:
     )
     def test_public_ip_allowed(self, ip):
         with patch('ssrf_protection.socket.getaddrinfo', _fake_getaddrinfo(ip)):
-            result = validate_url('http://example.com/')
-            assert result == 'http://example.com/'
+            url, hostname, resolved_ips = validate_url('http://example.com/')
+            assert url == 'http://example.com/'
+            assert hostname == 'example.com'
+            assert ip in resolved_ips
 
 
 # ---------------------------------------------------------------------------
@@ -228,11 +230,12 @@ class TestAllowlist:
 
     def test_allowlist_permits_specific_ip(self):
         with patch('ssrf_protection.socket.getaddrinfo', _fake_getaddrinfo('192.168.1.100')):
-            result = validate_url(
+            url, hostname, resolved_ips = validate_url(
                 'http://internal-api.local/',
                 allowed_private=['192.168.1.0/24'],
             )
-            assert result == 'http://internal-api.local/'
+            assert url == 'http://internal-api.local/'
+            assert '192.168.1.100' in resolved_ips
 
     def test_allowlist_does_not_permit_other_range(self):
         with patch('ssrf_protection.socket.getaddrinfo', _fake_getaddrinfo('10.0.0.1')):
@@ -245,14 +248,14 @@ class TestAllowlist:
     def test_env_allowlist(self):
         with patch.dict(os.environ, {'ROCKETRIDE_SSRF_ALLOWLIST': '10.0.0.0/8'}):
             with patch('ssrf_protection.socket.getaddrinfo', _fake_getaddrinfo('10.0.0.5')):
-                result = validate_url('http://internal.corp/')
-                assert result == 'http://internal.corp/'
+                url, _hostname, _ips = validate_url('http://internal.corp/')
+                assert url == 'http://internal.corp/'
 
     def test_env_allowlist_multiple(self):
         with patch.dict(os.environ, {'ROCKETRIDE_SSRF_ALLOWLIST': '10.0.0.0/8, 172.16.0.0/12'}):
             with patch('ssrf_protection.socket.getaddrinfo', _fake_getaddrinfo('172.16.5.1')):
-                result = validate_url('http://internal.corp/')
-                assert result == 'http://internal.corp/'
+                url, _hostname, _ips = validate_url('http://internal.corp/')
+                assert url == 'http://internal.corp/'
 
 
 # ---------------------------------------------------------------------------
@@ -302,3 +305,57 @@ class TestInternalHelpers:
         nets = _build_allowlist(['not-a-cidr', '10.0.0.0/8'])
         assert len(nets) == 1
         assert str(nets[0]) == '10.0.0.0/8'
+
+    def test_build_allowlist_malformed_logs_warning(self):
+        """Malformed CIDR entries should produce a warning log."""
+        with patch.dict(os.environ, {'ROCKETRIDE_SSRF_ALLOWLIST': 'bad-cidr, 10.0.0.0/8'}):
+            with patch('ssrf_protection.logger') as mock_logger:
+                nets = _build_allowlist(None)
+                assert len(nets) == 1
+                mock_logger.warning.assert_called_once()
+                assert 'bad-cidr' in mock_logger.warning.call_args[0][1]
+
+    def test_validate_url_returns_resolved_ips(self):
+        """validate_url should return (url, hostname, resolved_ips) tuple."""
+        with patch('ssrf_protection.socket.getaddrinfo', _fake_getaddrinfo('8.8.8.8')):
+            url, hostname, resolved_ips = validate_url('http://example.com/path')
+            assert url == 'http://example.com/path'
+            assert hostname == 'example.com'
+            assert resolved_ips == ['8.8.8.8']
+
+
+# ---------------------------------------------------------------------------
+# Tests: redirect-based SSRF bypass prevention
+# ---------------------------------------------------------------------------
+
+
+class TestRedirectSSRFBypass:
+    """Redirect-based SSRF attacks must be blocked.
+
+    An attacker can host a public URL that 302-redirects to a private IP
+    (e.g. the cloud metadata endpoint 169.254.169.254).  The HTTP client
+    must validate each redirect target before following it.
+    """
+
+    def test_redirect_to_private_ip_blocked(self):
+        """A redirect from a public IP to a private IP must be rejected."""
+        with patch('ssrf_protection.socket.getaddrinfo', _fake_getaddrinfo('169.254.169.254')):
+            with pytest.raises(SSRFError, match='private/reserved range'):
+                validate_url('http://169.254.169.254/latest/meta-data/')
+
+    def test_redirect_to_metadata_ip_blocked(self):
+        """Cloud metadata endpoint via redirect must be blocked."""
+        with pytest.raises(SSRFError, match='private/reserved range'):
+            validate_url('http://169.254.169.254/latest/meta-data/')
+
+    def test_redirect_to_loopback_blocked(self):
+        """Redirect to 127.0.0.1 must be blocked."""
+        with pytest.raises(SSRFError, match='private/reserved range'):
+            validate_url('http://127.0.0.1/admin')
+
+    def test_redirect_to_public_ip_allowed(self):
+        """Redirect to a public IP should succeed."""
+        with patch('ssrf_protection.socket.getaddrinfo', _fake_getaddrinfo('93.184.216.34')):
+            url, hostname, resolved_ips = validate_url('http://safe-redirect.example.com/')
+            assert url == 'http://safe-redirect.example.com/'
+            assert '93.184.216.34' in resolved_ips
