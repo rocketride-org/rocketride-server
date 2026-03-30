@@ -28,18 +28,13 @@ and IInstance operations (writeQuestions, writeDocuments, renderObject).
 """
 
 import sys
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 # ---------------------------------------------------------------------------
-# Import the node under test
+# Import the node under test (path setup handled by conftest.py)
 # ---------------------------------------------------------------------------
-
-_nodes_src = os.path.join(os.path.dirname(__file__), '..', '..', 'nodes', 'src')
-if _nodes_src not in sys.path:
-    sys.path.insert(0, os.path.abspath(_nodes_src))
 
 from nodes.chroma.IGlobal import IGlobal  # noqa: E402
 from nodes.chroma.IInstance import IInstance  # noqa: E402
@@ -61,7 +56,7 @@ class TestChromaIGlobal:
         ig.getConnConfig = MagicMock(return_value={})
 
         ig.beginGlobal()
-        assert not hasattr(ig, 'store') or ig.store is None
+        assert getattr(ig, 'store', None) is None
 
     def test_begin_global_write_mode_creates_store(self, mock_endpoint):
         """In WRITE mode, beginGlobal should create a Store and set subKey."""

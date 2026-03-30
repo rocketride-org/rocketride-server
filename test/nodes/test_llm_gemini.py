@@ -32,9 +32,15 @@ import sys
 import types
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
-# Provider SDK mocks — Google GenAI and google.api_core
+# Provider SDK mocks — Google GenAI and google.api_core.
+# Originals are saved so they can be restored after the test module runs.
 # ---------------------------------------------------------------------------
+
+_SDK_MODULES = ['google', 'google.genai', 'google.api_core', 'google.api_core.exceptions', 'google.auth', 'google.auth.exceptions']
+_saved_sdk_modules = {name: sys.modules[name] for name in _SDK_MODULES if name in sys.modules}
 
 # Mock google.genai
 _mock_google = types.ModuleType('google')
@@ -137,15 +143,21 @@ sys.modules['google.api_core.exceptions'] = _mock_google_api_core_exceptions
 sys.modules['google.auth'] = _mock_google_auth
 sys.modules['google.auth.exceptions'] = _mock_google_auth_exceptions
 
-# ---------------------------------------------------------------------------
-# Import the node under test
-# ---------------------------------------------------------------------------
 
-import os
+@pytest.fixture(autouse=True, scope='module')
+def _restore_google_sdk_modules():
+    """Restore original SDK modules after all tests in this module run."""
+    yield
+    for name in _SDK_MODULES:
+        if name in _saved_sdk_modules:
+            sys.modules[name] = _saved_sdk_modules[name]
+        elif name in sys.modules:
+            del sys.modules[name]
 
-_nodes_src = os.path.join(os.path.dirname(__file__), '..', '..', 'nodes', 'src')
-if _nodes_src not in sys.path:
-    sys.path.insert(0, os.path.abspath(_nodes_src))
+
+# ---------------------------------------------------------------------------
+# Import the node under test (path setup handled by conftest.py)
+# ---------------------------------------------------------------------------
 
 from nodes.llm_gemini.IGlobal import IGlobal  # noqa: E402
 from nodes.llm_gemini.IInstance import IInstance  # noqa: E402
@@ -359,7 +371,7 @@ class TestGeminiBeginEndGlobal:
         ig.IEndpoint = mock_endpoint_config
 
         ig.beginGlobal()
-        assert not hasattr(ig, '_chat') or ig._chat is None or ig.chat is None
+        assert getattr(ig, '_chat', None) is None
 
     def test_begin_global_write_mode_creates_chat(self, mock_config, mock_endpoint):
         """In WRITE mode, beginGlobal should create a Chat instance."""

@@ -28,15 +28,18 @@ IGlobal.beginGlobal / endGlobal lifecycle, and IInstance operations.
 """
 
 import sys
-import os
 import types
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 # ---------------------------------------------------------------------------
-# Provider SDK mocks — Pinecone
+# Provider SDK mocks — Pinecone.
+# Originals are saved so they can be restored after the test module runs.
 # ---------------------------------------------------------------------------
+
+_SDK_MODULES = ['pinecone', 'pinecone.grpc', 'pinecone.core', 'pinecone.core.client', 'pinecone.core.client.exceptions']
+_saved_sdk_modules = {name: sys.modules[name] for name in _SDK_MODULES if name in sys.modules}
 
 _mock_pinecone = types.ModuleType('pinecone')
 
@@ -79,13 +82,21 @@ sys.modules['pinecone.core'] = _mock_pinecone_core
 sys.modules['pinecone.core.client'] = _mock_pinecone_core_client
 sys.modules['pinecone.core.client.exceptions'] = _mock_pinecone_core_client_exceptions
 
-# ---------------------------------------------------------------------------
-# Import the node under test
-# ---------------------------------------------------------------------------
 
-_nodes_src = os.path.join(os.path.dirname(__file__), '..', '..', 'nodes', 'src')
-if _nodes_src not in sys.path:
-    sys.path.insert(0, os.path.abspath(_nodes_src))
+@pytest.fixture(autouse=True, scope='module')
+def _restore_pinecone_sdk_modules():
+    """Restore original SDK modules after all tests in this module run."""
+    yield
+    for name in _SDK_MODULES:
+        if name in _saved_sdk_modules:
+            sys.modules[name] = _saved_sdk_modules[name]
+        elif name in sys.modules:
+            del sys.modules[name]
+
+
+# ---------------------------------------------------------------------------
+# Import the node under test (path setup handled by conftest.py)
+# ---------------------------------------------------------------------------
 
 from nodes.pinecone.IGlobal import IGlobal  # noqa: E402
 from nodes.pinecone.IInstance import IInstance  # noqa: E402

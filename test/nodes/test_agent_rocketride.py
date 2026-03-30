@@ -30,7 +30,6 @@ _build_wave_question, plan).
 """
 
 import sys
-import os
 import json
 import types
 from unittest.mock import MagicMock, patch
@@ -38,8 +37,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Additional mocks for agent module dependencies
+# Additional mocks for agent module dependencies.
+# Originals are saved so they can be restored after the test module runs.
 # ---------------------------------------------------------------------------
+
+_SDK_MODULES = ['ai.common.agent._internal.agent_base']
+_saved_sdk_modules = {name: sys.modules[name] for name in _SDK_MODULES if name in sys.modules}
 
 # Mock ai.common.agent._internal.agent_base and agent_tool
 _ai_common_agent_base = types.ModuleType('ai.common.agent._internal.agent_base')
@@ -64,13 +67,21 @@ _ai_common_agent_base.AgentBase = MockAgentBase
 sys.modules['ai.common.agent._internal'] = sys.modules.get('ai.common.agent._internal', types.ModuleType('ai.common.agent._internal'))
 sys.modules['ai.common.agent._internal.agent_base'] = _ai_common_agent_base
 
-# ---------------------------------------------------------------------------
-# Import the node under test
-# ---------------------------------------------------------------------------
 
-_nodes_src = os.path.join(os.path.dirname(__file__), '..', '..', 'nodes', 'src')
-if _nodes_src not in sys.path:
-    sys.path.insert(0, os.path.abspath(_nodes_src))
+@pytest.fixture(autouse=True, scope='module')
+def _restore_agent_sdk_modules():
+    """Restore original SDK modules after all tests in this module run."""
+    yield
+    for name in _SDK_MODULES:
+        if name in _saved_sdk_modules:
+            sys.modules[name] = _saved_sdk_modules[name]
+        elif name in sys.modules:
+            del sys.modules[name]
+
+
+# ---------------------------------------------------------------------------
+# Import the node under test (path setup handled by conftest.py)
+# ---------------------------------------------------------------------------
 
 from nodes.agent_rocketride.IGlobal import IGlobal  # noqa: E402
 from nodes.agent_rocketride.IInstance import IInstance  # noqa: E402

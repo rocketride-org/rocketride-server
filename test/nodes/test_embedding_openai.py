@@ -28,16 +28,11 @@ Covers IGlobal.beginGlobal / endGlobal lifecycle, and IInstance operations
 """
 
 import sys
-import os
 from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
-# Import the node under test
+# Import the node under test (path setup handled by conftest.py)
 # ---------------------------------------------------------------------------
-
-_nodes_src = os.path.join(os.path.dirname(__file__), '..', '..', 'nodes', 'src')
-if _nodes_src not in sys.path:
-    sys.path.insert(0, os.path.abspath(_nodes_src))
 
 from nodes.embedding_openai.IGlobal import IGlobal  # noqa: E402
 from nodes.embedding_openai.IInstance import IInstance  # noqa: E402

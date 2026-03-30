@@ -28,13 +28,46 @@ and provider SDKs are native/C++ or require live credentials.  This conftest
 installs the mock modules into ``sys.modules`` before any node code is imported,
 ensuring that ``from rocketlib import ...`` and ``from ai.common...`` resolve
 to lightweight test doubles.
+
+Mock installation happens at module scope (import time) so that test module
+imports can resolve.  A session-scoped autouse fixture restores the original
+``sys.modules`` entries on teardown, preventing test bleed between files.
 """
 
+import os as _os
 import sys
 import types
 import enum
 from unittest.mock import MagicMock
 import pytest
+
+
+# ---------------------------------------------------------------------------
+# Module names that will be mocked in sys.modules
+# ---------------------------------------------------------------------------
+
+_MOCKED_MODULE_NAMES = [
+    'engLib',
+    'rocketlib',
+    'rocketlib.types',
+    'ai',
+    'ai.common',
+    'ai.common.schema',
+    'ai.common.config',
+    'ai.common.chat',
+    'ai.common.embedding',
+    'ai.common.tools',
+    'ai.common.store',
+    'ai.common.transform',
+    'ai.common.agent',
+    'ai.common.agent._internal',
+    'ai.common.agent._internal.host',
+    'ai.common.agent.types',
+    'depends',
+]
+
+# Save originals *before* any mutation so teardown can restore them.
+_original_modules = {name: sys.modules[name] for name in _MOCKED_MODULE_NAMES if name in sys.modules}
 
 
 # ---------------------------------------------------------------------------
@@ -371,11 +404,32 @@ sys.modules['depends'] = _mock_depends
 #    without side-effects.
 # ---------------------------------------------------------------------------
 
-import os as _os
-
 _nodes_src = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), '..', '..', 'nodes', 'src'))
 if _nodes_src not in sys.path:
     sys.path.insert(0, _nodes_src)
+
+
+# ---------------------------------------------------------------------------
+# Session-scoped fixture: restore sys.modules on teardown
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True, scope='session')
+def _restore_mock_modules():
+    """Restore original sys.modules entries after the test session ends.
+
+    The mocks are installed at module scope (above) so that test module
+    imports resolve.  This fixture only handles cleanup, preventing the
+    mocked entries from leaking into other test sessions or conftest
+    scopes.
+    """
+    yield
+
+    for mod_name in _MOCKED_MODULE_NAMES:
+        if mod_name in _original_modules:
+            sys.modules[mod_name] = _original_modules[mod_name]
+        elif mod_name in sys.modules:
+            del sys.modules[mod_name]
 
 
 # ---------------------------------------------------------------------------

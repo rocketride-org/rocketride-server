@@ -29,7 +29,6 @@ validation), shortcut normalization, tool query/descriptor, IGlobal lifecycle
 """
 
 import sys
-import os
 import re
 import types
 from unittest.mock import MagicMock
@@ -37,20 +36,32 @@ from unittest.mock import MagicMock
 import pytest
 
 # ---------------------------------------------------------------------------
-# Mock http_client.execute_request (avoids real HTTP calls)
+# Mock http_client.execute_request (avoids real HTTP calls).
+# Originals are saved so they can be restored after the test module runs.
 # ---------------------------------------------------------------------------
+
+_SDK_MODULES = ['nodes.tool_http_request.http_client']
+_saved_sdk_modules = {name: sys.modules[name] for name in _SDK_MODULES if name in sys.modules}
 
 _mock_http_client = types.ModuleType('nodes.tool_http_request.http_client')
 _mock_http_client.execute_request = MagicMock(return_value={'status': 200, 'body': 'ok'})
 sys.modules['nodes.tool_http_request.http_client'] = _mock_http_client
 
-# ---------------------------------------------------------------------------
-# Import the node under test
-# ---------------------------------------------------------------------------
 
-_nodes_src = os.path.join(os.path.dirname(__file__), '..', '..', 'nodes', 'src')
-if _nodes_src not in sys.path:
-    sys.path.insert(0, os.path.abspath(_nodes_src))
+@pytest.fixture(autouse=True, scope='module')
+def _restore_http_sdk_modules():
+    """Restore original SDK modules after all tests in this module run."""
+    yield
+    for name in _SDK_MODULES:
+        if name in _saved_sdk_modules:
+            sys.modules[name] = _saved_sdk_modules[name]
+        elif name in sys.modules:
+            del sys.modules[name]
+
+
+# ---------------------------------------------------------------------------
+# Import the node under test (path setup handled by conftest.py)
+# ---------------------------------------------------------------------------
 
 from nodes.tool_http_request.http_driver import HttpDriver, VALID_METHODS, VALID_AUTH_TYPES  # noqa: E402
 from nodes.tool_http_request.IGlobal import IGlobal  # noqa: E402

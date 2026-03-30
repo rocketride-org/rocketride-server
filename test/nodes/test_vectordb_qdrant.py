@@ -29,15 +29,18 @@ IInstance operations, and the module-level _format_error helper.
 """
 
 import sys
-import os
 import types
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 # ---------------------------------------------------------------------------
-# Provider SDK mocks — Qdrant
+# Provider SDK mocks — Qdrant.
+# Originals are saved so they can be restored after the test module runs.
 # ---------------------------------------------------------------------------
+
+_SDK_MODULES = ['qdrant_client', 'httpx']
+_saved_sdk_modules = {name: sys.modules[name] for name in _SDK_MODULES if name in sys.modules}
 
 _mock_qdrant_client = types.ModuleType('qdrant_client')
 
@@ -77,13 +80,21 @@ _mock_httpx.HTTPStatusError = _FakeHTTPStatusError
 _mock_httpx.RequestError = _FakeRequestError
 sys.modules['httpx'] = _mock_httpx
 
-# ---------------------------------------------------------------------------
-# Import the node under test
-# ---------------------------------------------------------------------------
 
-_nodes_src = os.path.join(os.path.dirname(__file__), '..', '..', 'nodes', 'src')
-if _nodes_src not in sys.path:
-    sys.path.insert(0, os.path.abspath(_nodes_src))
+@pytest.fixture(autouse=True, scope='module')
+def _restore_qdrant_sdk_modules():
+    """Restore original SDK modules after all tests in this module run."""
+    yield
+    for name in _SDK_MODULES:
+        if name in _saved_sdk_modules:
+            sys.modules[name] = _saved_sdk_modules[name]
+        elif name in sys.modules:
+            del sys.modules[name]
+
+
+# ---------------------------------------------------------------------------
+# Import the node under test (path setup handled by conftest.py)
+# ---------------------------------------------------------------------------
 
 from nodes.qdrant.IGlobal import IGlobal, QDRANT_COLLECTION_RE, _format_error  # noqa: E402
 from nodes.qdrant.IInstance import IInstance  # noqa: E402
@@ -278,7 +289,7 @@ class TestQdrantBeginEndGlobal:
         ig.getConnConfig = MagicMock(return_value={})
 
         ig.beginGlobal()
-        assert not hasattr(ig, 'store') or ig.store is None
+        assert getattr(ig, 'store', None) is None
 
     def test_end_global_clears_store(self):
         """EndGlobal should set store to None."""
