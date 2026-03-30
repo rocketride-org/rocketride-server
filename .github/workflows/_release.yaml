@@ -184,7 +184,7 @@ jobs:
           VSIX=$(find release-assets -name '*.vsix' | head -n1)
           echo "Publishing ${VSIX}"
           OUTPUT=$(ovsx publish "${VSIX}" -p "$OVSX_PAT" 2>&1) && exit 0
-          if echo "$OUTPUT" | grep -qi "already exists"; then
+          if echo "$OUTPUT" | grep -qiE "already exists|already published"; then
             echo "Version already exists on Open VSX — skipping"
           else
             echo "$OUTPUT"
