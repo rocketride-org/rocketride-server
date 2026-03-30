@@ -21,10 +21,12 @@
 # SOFTWARE.
 # =============================================================================
 
+import asyncio
 import hashlib
 import hmac
 import logging
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -41,6 +43,18 @@ _MAX_CONCURRENT = int(os.environ.get('ROCKETRIDE_MAX_WEBHOOK_CONCURRENT', '20'))
 # In-flight tracking
 _active_tasks: Dict[str, Dict[str, Any]] = {}
 _running_count: int = 0
+_running_lock = asyncio.Lock()
+
+# TTL for completed/expired task entries (seconds).
+_TASK_TTL = 3600  # 1 hour
+
+
+def _cleanup_expired_tasks() -> None:
+    """Remove task entries older than _TASK_TTL to prevent unbounded growth."""
+    now = time.monotonic()
+    expired = [k for k, v in _active_tasks.items() if now - v.get('_monotonic_created', 0) > _TASK_TTL]
+    for k in expired:
+        del _active_tasks[k]
 
 
 def _verify_signature(payload: bytes, signature: str, secret: str) -> bool:
@@ -83,6 +97,11 @@ async def webhook_trigger(request: Request, pipeline_id: str, body: Optional[Dic
 
     try:
         # ----------------------------------------------------------------
+        # 0. Housekeeping — prune expired task entries
+        # ----------------------------------------------------------------
+        _cleanup_expired_tasks()
+
+        # ----------------------------------------------------------------
         # 1. Verify webhook secret / signature
         # ----------------------------------------------------------------
         secret = os.environ.get('ROCKETRIDE_WEBHOOK_SECRET', '')
@@ -105,38 +124,43 @@ async def webhook_trigger(request: Request, pipeline_id: str, body: Optional[Dic
             return error(message='pipeline_id is required', httpStatus=400)
 
         # ----------------------------------------------------------------
-        # 3. Rate-limit check
+        # 3. Rate-limit check (atomic via asyncio.Lock)
         # ----------------------------------------------------------------
-        if _running_count >= _MAX_CONCURRENT:
-            return error(message=f'Too many concurrent webhook executions (limit: {_MAX_CONCURRENT})', httpStatus=429)
+        async with _running_lock:
+            if _running_count >= _MAX_CONCURRENT:
+                return error(message=f'Too many concurrent webhook executions (limit: {_MAX_CONCURRENT})', httpStatus=429)
+            _running_count += 1
 
-        # ----------------------------------------------------------------
-        # 4. Create a task token and start execution
-        # ----------------------------------------------------------------
-        token = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
+        try:
+            # ----------------------------------------------------------------
+            # 4. Create a task token and start execution
+            # ----------------------------------------------------------------
+            token = str(uuid.uuid4())
+            now = datetime.now(timezone.utc)
 
-        _active_tasks[token] = {
-            'pipeline_id': pipeline_id,
-            'status': 'accepted',
-            'created_at': now.isoformat(),
-        }
+            _active_tasks[token] = {
+                'pipeline_id': pipeline_id,
+                'status': 'accepted',
+                'created_at': now.isoformat(),
+                '_monotonic_created': time.monotonic(),
+            }
 
-        _running_count += 1
+            # In a full implementation this would dispatch to the pipeline
+            # engine asynchronously. For now we record the task and mark it
+            # as accepted so the caller can poll /webhook/{id}/status/{token}.
+            logger.info('Webhook triggered pipeline %s — token=%s', pipeline_id, token)
 
-        # In a full implementation this would dispatch to the pipeline
-        # engine asynchronously. For now we record the task and mark it
-        # as accepted so the caller can poll /webhook/{id}/status/{token}.
-        logger.info('Webhook triggered pipeline %s — token=%s', pipeline_id, token)
+            webhook_resp = WebhookResponse(
+                token=token,
+                pipeline_id=pipeline_id,
+                status='accepted',
+                created_at=now,
+            )
 
-        webhook_resp = WebhookResponse(
-            token=token,
-            pipeline_id=pipeline_id,
-            status='accepted',
-            created_at=now,
-        )
-
-        return response(data=webhook_resp.model_dump(mode='json'))
+            return response(data=webhook_resp.model_dump(mode='json'))
+        finally:
+            async with _running_lock:
+                _running_count -= 1
 
     except Exception as e:
         return exception(e)

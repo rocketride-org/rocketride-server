@@ -26,10 +26,12 @@
 All tests use mocks -- no real server, scheduler, or database is required.
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -99,7 +101,7 @@ _inject('ai.web.middleware', MagicMock())
 # Now import the real modules that we will test.
 # These go through ai.web which triggers depends() and pulls in FastAPI etc.
 from ai.web.scheduler.models import ScheduleCreate, ScheduleList, ScheduleResponse, WebhookResponse  # noqa: E402
-from ai.web.endpoints.webhook import _verify_signature, webhook_trigger, webhook_status, _active_tasks  # noqa: E402
+from ai.web.endpoints.webhook import _verify_signature, webhook_trigger, webhook_status, _active_tasks, _cleanup_expired_tasks, _TASK_TTL  # noqa: E402
 
 
 def teardown_module() -> None:
@@ -189,10 +191,11 @@ class TestWebhookTrigger:
     def setup_method(self):
         """Clear active tasks between tests."""
         _active_tasks.clear()
-        # Reset running count
+        # Reset running count and lock
         import ai.web.endpoints.webhook as wh_mod
 
         wh_mod._running_count = 0
+        wh_mod._running_lock = asyncio.Lock()
 
     @pytest.mark.asyncio
     async def test_missing_secret_env_var(self):
@@ -483,16 +486,19 @@ class TestPipelineScheduler:
                 name='hourly',
             )
             assert schedule_id is not None
-            assert schedule_id in sched._schedule_metadata
             sched._scheduler.add_job.assert_called_once()
+            # Metadata should be stored in the job's kwargs
+            call_kwargs = sched._scheduler.add_job.call_args
+            job_kwargs = call_kwargs.kwargs.get('kwargs', {})
+            assert job_kwargs['pipeline_id'] == 'my-pipeline'
+            assert job_kwargs['cron_expression'] == '0 * * * *'
+            assert job_kwargs['name'] == 'hourly'
 
     def test_remove_schedule_success(self):
         sched = self._make_scheduler()
-        sched._schedule_metadata['sched-1'] = {'pipeline_id': 'p1'}
         result = sched.remove_schedule('sched-1')
         assert result is True
         sched._scheduler.remove_job.assert_called_once_with('sched-1')
-        assert 'sched-1' not in sched._schedule_metadata
 
     def test_remove_schedule_not_found(self):
         sched = self._make_scheduler()
@@ -513,13 +519,13 @@ class TestPipelineScheduler:
         mock_job.id = 'sched-1'
         mock_job.name = 'hourly'
         mock_job.next_run_time = now
-        sched._scheduler.get_jobs.return_value = [mock_job]
-        sched._schedule_metadata['sched-1'] = {
+        mock_job.kwargs = {
             'pipeline_id': 'p1',
             'cron_expression': '0 * * * *',
             'name': 'hourly',
-            'created_at': now,
+            'created_at': now.isoformat(),
         }
+        sched._scheduler.get_jobs.return_value = [mock_job]
         result = sched.list_schedules()
         assert len(result) == 1
         assert result[0].id == 'sched-1'
@@ -532,13 +538,13 @@ class TestPipelineScheduler:
         mock_job.id = 'sched-1'
         mock_job.name = 'hourly'
         mock_job.next_run_time = now
-        sched._scheduler.get_job.return_value = mock_job
-        sched._schedule_metadata['sched-1'] = {
+        mock_job.kwargs = {
             'pipeline_id': 'p1',
             'cron_expression': '0 * * * *',
             'name': 'hourly',
-            'created_at': now,
+            'created_at': now.isoformat(),
         }
+        sched._scheduler.get_job.return_value = mock_job
         result = sched.get_schedule('sched-1')
         assert result is not None
         assert result.pipeline_id == 'p1'
@@ -640,7 +646,7 @@ class TestConcurrentJobLimit:
             )
             sched._running_jobs = 2  # At limit
 
-            await sched._execute_pipeline('my-pipeline', None)
+            await sched._execute_pipeline(pipeline_id='my-pipeline', input_data=None)
 
             # The executor should NOT have been called
             executor.assert_not_called()
@@ -662,7 +668,7 @@ class TestConcurrentJobLimit:
             )
             sched._running_jobs = 0
 
-            await sched._execute_pipeline('my-pipeline', {'key': 'value'})
+            await sched._execute_pipeline(pipeline_id='my-pipeline', input_data={'key': 'value'})
 
             executor.assert_called_once_with('my-pipeline', {'key': 'value'})
             # running_jobs should be back to 0 after completion
@@ -686,6 +692,176 @@ class TestConcurrentJobLimit:
             sched._running_jobs = 0
 
             # Should not raise -- errors are caught and logged
-            await sched._execute_pipeline('my-pipeline', None)
+            await sched._execute_pipeline(pipeline_id='my-pipeline', input_data=None)
 
             assert sched._running_jobs == 0
+
+
+# ===========================================================================
+# Webhook _running_count decrement verification
+# ===========================================================================
+
+
+class TestRunningCountDecrement:
+    """Verify that _running_count is properly decremented after webhook execution."""
+
+    def setup_method(self):
+        _active_tasks.clear()
+        import ai.web.endpoints.webhook as wh_mod
+
+        wh_mod._running_count = 0
+        wh_mod._running_lock = asyncio.Lock()
+
+    @pytest.mark.asyncio
+    async def test_running_count_decremented_after_success(self):
+        """After a successful webhook trigger, _running_count must return to 0."""
+        import ai.web.endpoints.webhook as wh_mod
+
+        payload = b'{}'
+        sig = _make_signature(payload)
+        req = _make_request(headers={'x-webhook-signature': sig}, body=payload)
+        with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}):
+            result = await webhook_trigger(req, 'my-pipeline', {})
+        body = json.loads(result.body.decode())
+        assert body['status'] == 'OK'
+        # The count must be back to 0 after the call completes
+        assert wh_mod._running_count == 0
+
+    @pytest.mark.asyncio
+    async def test_running_count_decremented_after_multiple_calls(self):
+        """Multiple sequential calls must each decrement properly."""
+        import ai.web.endpoints.webhook as wh_mod
+
+        for _ in range(5):
+            payload = b'{}'
+            sig = _make_signature(payload)
+            req = _make_request(headers={'x-webhook-signature': sig}, body=payload)
+            with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}):
+                await webhook_trigger(req, 'my-pipeline', {})
+
+        assert wh_mod._running_count == 0
+
+
+# ===========================================================================
+# Expired task cleanup tests
+# ===========================================================================
+
+
+class TestExpiredTaskCleanup:
+    """Verify that expired tasks are cleaned up from _active_tasks."""
+
+    def setup_method(self):
+        _active_tasks.clear()
+        import ai.web.endpoints.webhook as wh_mod
+
+        wh_mod._running_count = 0
+        wh_mod._running_lock = asyncio.Lock()
+
+    def test_cleanup_removes_old_tasks(self):
+        """Tasks older than _TASK_TTL should be removed."""
+        # Insert a task with an old monotonic timestamp
+        _active_tasks['old-token'] = {
+            'pipeline_id': 'p1',
+            'status': 'accepted',
+            'created_at': '2024-01-01T00:00:00+00:00',
+            '_monotonic_created': time.monotonic() - _TASK_TTL - 100,
+        }
+        _active_tasks['new-token'] = {
+            'pipeline_id': 'p2',
+            'status': 'accepted',
+            'created_at': '2024-01-01T01:00:00+00:00',
+            '_monotonic_created': time.monotonic(),
+        }
+        _cleanup_expired_tasks()
+        assert 'old-token' not in _active_tasks
+        assert 'new-token' in _active_tasks
+
+    def test_cleanup_preserves_recent_tasks(self):
+        """Tasks within the TTL should be preserved."""
+        _active_tasks['recent-token'] = {
+            'pipeline_id': 'p1',
+            'status': 'accepted',
+            'created_at': '2024-01-01T00:00:00+00:00',
+            '_monotonic_created': time.monotonic(),
+        }
+        _cleanup_expired_tasks()
+        assert 'recent-token' in _active_tasks
+
+    def test_cleanup_handles_empty_dict(self):
+        """Cleanup on an empty dict should not raise."""
+        _cleanup_expired_tasks()
+        assert len(_active_tasks) == 0
+
+
+# ===========================================================================
+# Scheduler metadata persistence in kwargs tests
+# ===========================================================================
+
+
+class TestSchedulerMetadataPersistence:
+    """Verify that scheduler metadata is stored in job kwargs and survives recovery."""
+
+    def _make_scheduler(self, *, max_concurrent: int = 10):
+        """Build a PipelineScheduler with a fully mocked APScheduler backend."""
+        with (
+            patch('ai.web.scheduler.scheduler.SQLAlchemyJobStore'),
+            patch('ai.web.scheduler.scheduler.AsyncIOScheduler') as MockAsyncScheduler,
+        ):
+            mock_aps = MagicMock()
+            mock_aps.running = False
+            mock_aps.get_jobs.return_value = []
+            MockAsyncScheduler.return_value = mock_aps
+
+            from ai.web.scheduler.scheduler import PipelineScheduler
+
+            sched = PipelineScheduler(
+                pipeline_executor=AsyncMock(return_value='token-123'),
+                db_path=':memory:',
+                max_concurrent_jobs=max_concurrent,
+            )
+            sched._scheduler = mock_aps
+            return sched
+
+    def test_metadata_recovered_from_job_kwargs(self):
+        """list_schedules should read metadata from job.kwargs (simulating restart)."""
+        sched = self._make_scheduler()
+        now = datetime.now(timezone.utc)
+        mock_job = MagicMock()
+        mock_job.id = 'recovered-1'
+        mock_job.name = 'hourly'
+        mock_job.next_run_time = now
+        mock_job.kwargs = {
+            'pipeline_id': 'p1',
+            'cron_expression': '0 * * * *',
+            'name': 'hourly',
+            'created_at': now.isoformat(),
+        }
+        sched._scheduler.get_jobs.return_value = [mock_job]
+
+        # No _schedule_metadata dict — this simulates a restart scenario
+        result = sched.list_schedules()
+        assert len(result) == 1
+        assert result[0].pipeline_id == 'p1'
+        assert result[0].cron_expression == '0 * * * *'
+        assert result[0].name == 'hourly'
+
+    def test_get_schedule_from_kwargs_after_restart(self):
+        """get_schedule should work using job.kwargs alone (no in-memory metadata)."""
+        sched = self._make_scheduler()
+        now = datetime.now(timezone.utc)
+        mock_job = MagicMock()
+        mock_job.id = 'recovered-2'
+        mock_job.name = 'daily'
+        mock_job.next_run_time = now
+        mock_job.kwargs = {
+            'pipeline_id': 'p2',
+            'cron_expression': '0 0 * * *',
+            'name': 'daily',
+            'created_at': now.isoformat(),
+        }
+        sched._scheduler.get_job.return_value = mock_job
+
+        result = sched.get_schedule('recovered-2')
+        assert result is not None
+        assert result.pipeline_id == 'p2'
+        assert result.cron_expression == '0 0 * * *'

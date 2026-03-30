@@ -21,6 +21,9 @@
 # SOFTWARE.
 # =============================================================================
 
+# NOTE: These endpoints are protected by AuthMiddleware which checks
+# all non-public routes. Do NOT register these as public routes.
+
 import logging
 
 from ai.web import Body, Request, Result, error, exception, response

@@ -21,8 +21,10 @@
 # SOFTWARE.
 # =============================================================================
 
+import asyncio
 import logging
 import os
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine, Dict, List, Optional
@@ -61,24 +63,24 @@ class PipelineScheduler:
             pipeline_executor: Async callable that executes a pipeline.
                                Signature: (pipeline_id, input_data) -> task_token
             db_path: Path to the SQLite database file for job persistence.
-                     Defaults to ROCKETRIDE_SCHEDULER_DB env var or './scheduler_jobs.db'.
+                     Defaults to ROCKETRIDE_SCHEDULER_DB env var or tempdir/rocketride_scheduler.db.
             max_concurrent_jobs: Maximum concurrent scheduled jobs allowed.
                                  Defaults to ROCKETRIDE_MAX_SCHEDULED_JOBS env var or 10.
         """
         self._pipeline_executor = pipeline_executor
-        self._schedule_metadata: Dict[str, Dict[str, Any]] = {}
 
         # Resolve configuration from explicit args > env vars > defaults
         if db_path is None:
-            db_path = os.environ.get('ROCKETRIDE_SCHEDULER_DB', './scheduler_jobs.db')
+            db_path = os.environ.get('ROCKETRIDE_SCHEDULER_DB', os.path.join(tempfile.gettempdir(), 'rocketride_scheduler.db'))
         self._db_path = db_path
 
         if max_concurrent_jobs is None:
             max_concurrent_jobs = int(os.environ.get('ROCKETRIDE_MAX_SCHEDULED_JOBS', str(CONST_DEFAULT_MAX_CONCURRENT_JOBS)))
         self._max_concurrent_jobs = max_concurrent_jobs
 
-        # Track running job count
+        # Track running job count (guarded by _jobs_lock for async safety)
         self._running_jobs = 0
+        self._jobs_lock = asyncio.Lock()
 
         # Build the APScheduler
         jobstores = {'default': SQLAlchemyJobStore(url=f'sqlite:///{self._db_path}')}
@@ -142,23 +144,23 @@ class PipelineScheduler:
         # Guard against overly aggressive schedules
         self._validate_min_interval(trigger)
 
-        # Register the job with APScheduler
+        # Store metadata in the job's kwargs so it survives APScheduler
+        # SQLite persistence and is available after a restart.
+        job_name = name or f'pipeline-{pipeline_id}'
         self._scheduler.add_job(
             self._execute_pipeline,
             trigger=trigger,
             id=schedule_id,
-            name=name or f'pipeline-{pipeline_id}',
-            args=[pipeline_id, input_data],
+            name=job_name,
+            kwargs={
+                'pipeline_id': pipeline_id,
+                'input_data': input_data,
+                'name': job_name,
+                'cron_expression': cron_expression,
+                'created_at': datetime.now(timezone.utc).isoformat(),
+            },
             replace_existing=False,
         )
-
-        # Store metadata that APScheduler does not track natively
-        self._schedule_metadata[schedule_id] = {
-            'pipeline_id': pipeline_id,
-            'cron_expression': cron_expression,
-            'name': name,
-            'created_at': datetime.now(timezone.utc),
-        }
 
         logger.info('Schedule added: id=%s pipeline=%s cron=%s', schedule_id, pipeline_id, cron_expression)
         return schedule_id
@@ -167,7 +169,6 @@ class PipelineScheduler:
         """Remove a schedule by ID. Returns True if removed, False if not found."""
         try:
             self._scheduler.remove_job(schedule_id)
-            self._schedule_metadata.pop(schedule_id, None)
             logger.info('Schedule removed: id=%s', schedule_id)
             return True
         except Exception:
@@ -175,19 +176,25 @@ class PipelineScheduler:
             return False
 
     def list_schedules(self) -> List[ScheduleResponse]:
-        """Return all registered schedules."""
+        """Return all registered schedules.
+
+        Metadata is stored in the job's kwargs so it survives APScheduler
+        SQLite persistence and is available after restarts.
+        """
         results: List[ScheduleResponse] = []
         for job in self._scheduler.get_jobs():
-            meta = self._schedule_metadata.get(job.id, {})
+            kwargs = job.kwargs or {}
+            created_at_raw = kwargs.get('created_at')
+            created_at = datetime.fromisoformat(created_at_raw) if isinstance(created_at_raw, str) else (created_at_raw or datetime.now(timezone.utc))
             results.append(
                 ScheduleResponse(
                     id=job.id,
-                    pipeline_id=meta.get('pipeline_id', ''),
-                    cron_expression=meta.get('cron_expression', ''),
-                    name=meta.get('name', job.name),
+                    pipeline_id=kwargs.get('pipeline_id', ''),
+                    cron_expression=kwargs.get('cron_expression', ''),
+                    name=kwargs.get('name', job.name),
                     enabled=job.next_run_time is not None,
                     next_run_time=job.next_run_time,
-                    created_at=meta.get('created_at', datetime.now(timezone.utc)),
+                    created_at=created_at,
                 )
             )
         return results
@@ -197,15 +204,17 @@ class PipelineScheduler:
         job = self._scheduler.get_job(schedule_id)
         if job is None:
             return None
-        meta = self._schedule_metadata.get(schedule_id, {})
+        kwargs = job.kwargs or {}
+        created_at_raw = kwargs.get('created_at')
+        created_at = datetime.fromisoformat(created_at_raw) if isinstance(created_at_raw, str) else (created_at_raw or datetime.now(timezone.utc))
         return ScheduleResponse(
             id=job.id,
-            pipeline_id=meta.get('pipeline_id', ''),
-            cron_expression=meta.get('cron_expression', ''),
-            name=meta.get('name', job.name),
+            pipeline_id=kwargs.get('pipeline_id', ''),
+            cron_expression=kwargs.get('cron_expression', ''),
+            name=kwargs.get('name', job.name),
             enabled=job.next_run_time is not None,
             next_run_time=job.next_run_time,
-            created_at=meta.get('created_at', datetime.now(timezone.utc)),
+            created_at=created_at,
         )
 
     def pause_schedule(self, schedule_id: str) -> bool:
@@ -262,20 +271,29 @@ class PipelineScheduler:
             if interval < CONST_MIN_INTERVAL_SECONDS:
                 raise ValueError(f'Cron expression fires too frequently (every {interval}s). Minimum interval is {CONST_MIN_INTERVAL_SECONDS}s.')
 
-    async def _execute_pipeline(self, pipeline_id: str, input_data: Optional[Dict[str, Any]]) -> None:
-        """Execute a pipeline when a scheduled job fires."""
-        if self._running_jobs >= self._max_concurrent_jobs:
-            logger.warning('Skipping scheduled run for pipeline %s — at max concurrent limit (%d)', pipeline_id, self._max_concurrent_jobs)
-            return
+    async def _execute_pipeline(self, **kwargs: Any) -> None:
+        """Execute a pipeline when a scheduled job fires.
 
-        self._running_jobs += 1
+        Args are passed via kwargs so that metadata (pipeline_id, input_data,
+        name, cron_expression, created_at) persists in the APScheduler job store.
+        """
+        pipeline_id = kwargs.get('pipeline_id', '')
+        input_data = kwargs.get('input_data')
+
+        async with self._jobs_lock:
+            if self._running_jobs >= self._max_concurrent_jobs:
+                logger.warning('Skipping scheduled run for pipeline %s — at max concurrent limit (%d)', pipeline_id, self._max_concurrent_jobs)
+                return
+            self._running_jobs += 1
+
         try:
             token = await self._pipeline_executor(pipeline_id, input_data)
             logger.info('Scheduled pipeline %s started — token=%s', pipeline_id, token)
         except Exception:
             logger.exception('Scheduled pipeline %s failed', pipeline_id)
         finally:
-            self._running_jobs -= 1
+            async with self._jobs_lock:
+                self._running_jobs -= 1
 
     def _on_job_executed(self, event) -> None:  # noqa: ANN001
         """Handle successful job completion."""
