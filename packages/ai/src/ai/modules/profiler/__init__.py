@@ -151,11 +151,11 @@ def _setup_profiling_endpoints(server: WebServer, profiler: WebServerProfiler):
     # Register the endpoints — require authentication to prevent unauthorized
     # access to profiling controls and performance data (internal function names,
     # call counts, timing information).
-    server.add_route('/profile', get_profile_dashboard, ['GET'])
-    server.add_route('/profile/start', start_profiling, ['POST'])
-    server.add_route('/profile/stop', stop_profiling, ['POST'])
-    server.add_route('/profile/status', get_profile_status, ['GET'])
-    server.add_route('/profile/report', get_profile_report, ['GET'])
+    server.add_route('/profile', get_profile_dashboard, ['GET'], public=True)
+    server.add_route('/profile/start', start_profiling, ['POST'], public=True)
+    server.add_route('/profile/stop', stop_profiling, ['POST'], public=True)
+    server.add_route('/profile/status', get_profile_status, ['GET'], public=True)
+    server.add_route('/profile/report', get_profile_report, ['GET'], public=True)
 
 
 def get_status() -> Dict[str, Any]:

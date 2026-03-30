@@ -12,7 +12,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 _INJECTED_MODULES: list[str] = []
-
+_ORIGINAL_AI_WEB_SERVER = sys.modules.get('ai.web.server')
 
 def _inject(name: str, module: object) -> None:
     """Insert *module* into sys.modules under *name* if absent, tracking it."""
@@ -64,7 +64,8 @@ _inject('dotenv', MagicMock())
 _inject('uvicorn', MagicMock())
 
 # Now we can safely import the module under test
-from ai.web.server import ALLOWED_MODULES, WebServer
+from ai.web.server import WebServer
+from ai.modules import ALL as ALLOWED_MODULES
 
 
 def teardown_module() -> None:
@@ -72,7 +73,10 @@ def teardown_module() -> None:
     for name in _INJECTED_MODULES:
         sys.modules.pop(name, None)
     _INJECTED_MODULES.clear()
-
+    if _ORIGINAL_AI_WEB_SERVER is None:
+        sys.modules.pop('ai.web.server', None)
+    else:
+        sys.modules['ai.web.server'] = _ORIGINAL_AI_WEB_SERVER
 
 # ============================================================================
 # ALLOWED_MODULES constant tests
@@ -98,7 +102,7 @@ class TestAllowedModules:
             'task',
             'task_http',
         }
-        assert ALLOWED_MODULES == expected
+        assert expected == ALLOWED_MODULES
 
 
 # ============================================================================

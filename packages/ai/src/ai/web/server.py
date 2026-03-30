@@ -17,6 +17,7 @@ from rocketride import CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 from ai.constants import CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_HOST, CONST_WEB_WS_MAX_SIZE
 from ai.web import exception, error, Result
 from ai.account import Account, AccountInfo, Reporter
+from ai.modules import ALL as ALLOWED_MODULES
 from .middleware import AuthMiddleware
 from .endpoints import use, ping, version, shutdown, status
 from .denied import (
@@ -27,23 +28,6 @@ from .denied import (
 )
 
 __all__ = ['WebServer', 'AccountInfo']
-
-# Explicit allowlist of modules that can be loaded via the /use endpoint.
-# This prevents arbitrary module injection through importlib.import_module().
-ALLOWED_MODULES = frozenset(
-    {
-        'chat',
-        'clients',
-        'data',
-        'dropper',
-        'pipe',
-        'profiler',
-        'remote',
-        'services',
-        'task',
-        'task_http',
-    }
-)
 
 # Remove event loop - use default which should be ProactorEventLoop
 # # Check if running on Windows
