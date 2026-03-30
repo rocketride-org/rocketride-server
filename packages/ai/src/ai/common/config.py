@@ -148,11 +148,11 @@ class Config:
             profileConfig = preconfig['profiles'].get(profile)
 
             # Check if default profile is deprecated
-            if isinstance(profileConfig, dict) and profileConfig.get('deprecated'):
+            if isinstance(profileConfig, (dict, IJson)) and profileConfig.get('deprecated'):
                 migration_msg = profileConfig.get('migration', 'Please use a current profile instead.')
                 warning(f'Default profile "{profile}" is deprecated. {migration_msg}')
 
-            defaultConfig = profileConfig if isinstance(profileConfig, dict) else profileConfig
+            defaultConfig = profileConfig
 
             # Use the connConfig directly as it is not using profiles
             userConfig = connConfig
@@ -169,12 +169,12 @@ class Config:
             profileConfig = preconfig['profiles'][profile]
 
             # Check if profile is deprecated
-            if isinstance(profileConfig, dict) and profileConfig.get('deprecated'):
+            if isinstance(profileConfig, (dict, IJson)) and profileConfig.get('deprecated'):
                 migration_msg = profileConfig.get('migration', 'Please use a current profile instead.')
                 warning(f'Profile "{profile}" is deprecated. {migration_msg}')
 
             # Get the default from the profile
-            defaultConfig = profileConfig if isinstance(profileConfig, dict) else profileConfig
+            defaultConfig = profileConfig
 
             # Get the user specified profile
             userConfig = connConfig.get(profile, {})
