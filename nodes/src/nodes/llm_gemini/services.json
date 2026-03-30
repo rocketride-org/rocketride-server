@@ -131,33 +131,69 @@
 				"outputTokens": 32768,
 				"apikey": ""
 			},
-			"gemini-2_5-pro": {
+			"gemini-2.5-pro": {
 				"model": "models/gemini-2.5-pro",
 				"title": "Gemini 2.5 Pro",
 				"modelTotalTokens": 1114112,
 				"outputTokens": 65536,
 				"apikey": ""
 			},
-			"gemini-2_5-flash": {
+			"gemini-2.5-flash": {
 				"model": "models/gemini-2.5-flash",
 				"title": "Gemini 2.5 Flash",
 				"modelTotalTokens": 1114112,
 				"outputTokens": 65536,
 				"apikey": ""
 			},
-			"gemini-2_5-flash-lite": {
+			"gemini-2.5-flash-lite": {
 				"model": "models/gemini-2.5-flash-lite",
 				"title": "Gemini 2.5 Flash Lite",
 				"modelTotalTokens": 1114112,
 				"outputTokens": 65536,
 				"apikey": ""
 			},
-			"gemini-2_5-flash-image": {
+			"gemini-2.5-flash-image": {
 				"model": "models/gemini-2.5-flash-image",
 				"title": "Gemini 2.5 Flash Image",
 				"modelTotalTokens": 98304,
 				"outputTokens": 32768,
 				"apikey": ""
+			},
+			"gemini-3-pro-preview": {
+				"model": "models/gemini-3.1-pro-preview",
+				"title": "Gemini 3 Pro (Deprecated)",
+				"modelTotalTokens": 1048576,
+				"outputTokens": 65536,
+				"apikey": "",
+				"deprecated": true,
+				"migration": "Please use 'gemini-3.1-pro-preview' instead"
+			},
+			"gemini-3-pro-image": {
+				"model": "models/gemini-3-pro-image-preview",
+				"title": "Gemini 3 Pro Image (Deprecated)",
+				"modelTotalTokens": 66560,
+				"outputTokens": 32768,
+				"apikey": "",
+				"deprecated": true,
+				"migration": "Please use 'gemini-3-pro-image-preview' instead"
+			},
+			"gemini-2_0-flash": {
+				"model": "models/gemini-2.5-flash",
+				"title": "Gemini 2.0 Flash (Deprecated)",
+				"modelTotalTokens": 1114112,
+				"outputTokens": 65536,
+				"apikey": "",
+				"deprecated": true,
+				"migration": "Please use 'gemini-2.5-flash' instead"
+			},
+			"gemini-2_0-flash-lite": {
+				"model": "models/gemini-2.5-flash-lite",
+				"title": "Gemini 2.0 Flash Lite (Deprecated)",
+				"modelTotalTokens": 1114112,
+				"outputTokens": 65536,
+				"apikey": "",
+				"deprecated": true,
+				"migration": "Please use 'gemini-2.5-flash-lite' instead"
 			}
 		}
 	},
@@ -174,6 +210,105 @@
 			"title": "Model",
 			"description": "Gemini model"
 		},
+		"gemini.modelTotalTokens": {
+			"type": "number",
+			"title": "Total Tokens",
+			"description": "Maximum number of input + output tokens"
+		},
+		"gemini.outputTokens": {
+			"type": "number",
+			"title": "Output Tokens",
+			"description": "Maximum number of output tokens"
+		},
+		"gemini.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Google AI Developer API key",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"gemini.gemini-3.1-pro-preview": {
+			"object": "gemini-3.1-pro-preview",
+			"properties": ["gemini.apikey"]
+		},
+		"gemini.gemini-3.1-flash-image-preview": {
+			"object": "gemini-3.1-flash-image-preview",
+			"properties": ["gemini.apikey"]
+		},
+		"gemini.gemini-3.1-flash-lite-preview": {
+			"object": "gemini-3.1-flash-lite-preview",
+			"properties": ["gemini.apikey"]
+		},
+		"gemini.gemini-3-flash-preview": {
+			"object": "gemini-3-flash-preview",
+			"properties": ["gemini.apikey"]
+		},
+		"gemini.gemini-3-pro-image-preview": {
+			"object": "gemini-3-pro-image-preview",
+			"properties": ["gemini.apikey"]
+		},
+		"gemini.gemini-2.5-pro": {
+			"object": "gemini-2.5-pro",
+			"properties": ["gemini.apikey"]
+		},
+		"gemini.gemini-2.5-flash": {
+			"object": "gemini-2.5-flash",
+			"properties": ["gemini.apikey"]
+		},
+		"gemini.gemini-2.5-flash-lite": {
+			"object": "gemini-2.5-flash-lite",
+			"properties": ["gemini.apikey"]
+		},
+		"gemini.gemini-2.5-flash-image": {
+			"object": "gemini-2.5-flash-image",
+			"properties": ["gemini.apikey"]
+		},
+		"gemini.gemini-3-pro-preview": {
+			"object": "gemini-3-pro-preview",
+			"properties": ["gemini.apikey"]
+		},
+		"gemini.gemini-3-pro-image": {
+			"object": "gemini-3-pro-image",
+			"properties": ["gemini.apikey"]
+		},
+		"gemini.gemini-2_0-flash": {
+			"object": "gemini-2_0-flash",
+			"properties": ["gemini.apikey"]
+		},
+		"gemini.gemini-2_0-flash-lite": {
+			"object": "gemini-2_0-flash-lite",
+			"properties": ["gemini.apikey"]
+		},
+		"gemini.custom": {
+			"object": "custom",
+			"properties": ["gemini.model", "gemini.modelTotalTokens", "gemini.outputTokens", "gemini.apikey"]
+		},
+		"gemini.profile": {
+			"title": "Model",
+			"description": "Gemini LLM model",
+			"type": "string",
+			"default": "gemini-3.1-pro-preview",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{"value": "custom", "properties": ["gemini.custom"]},
+				{"value": "gemini-3.1-pro-preview", "properties": ["gemini.gemini-3.1-pro-preview"]},
+				{"value": "gemini-3.1-flash-image-preview", "properties": ["gemini.gemini-3.1-flash-image-preview"]},
+				{"value": "gemini-3.1-flash-lite-preview", "properties": ["gemini.gemini-3.1-flash-lite-preview"]},
+				{"value": "gemini-3-flash-preview", "properties": ["gemini.gemini-3-flash-preview"]},
+				{"value": "gemini-3-pro-image-preview", "properties": ["gemini.gemini-3-pro-image-preview"]},
+				{"value": "gemini-2.5-pro", "properties": ["gemini.gemini-2.5-pro"]},
+				{"value": "gemini-2.5-flash", "properties": ["gemini.gemini-2.5-flash"]},
+				{"value": "gemini-2.5-flash-lite", "properties": ["gemini.gemini-2.5-flash-lite"]},
+				{"value": "gemini-2.5-flash-image", "properties": ["gemini.gemini-2.5-flash-image"]},
+				{"value": "gemini-3-pro-preview", "properties": ["gemini.gemini-3-pro-preview"]},
+				{"value": "gemini-3-pro-image", "properties": ["gemini.gemini-3-pro-image"]},
+				{"value": "gemini-2_0-flash", "properties": ["gemini.gemini-2_0-flash"]},
+				{"value": "gemini-2_0-flash-lite", "properties": ["gemini.gemini-2_0-flash-lite"]}
+			]
+		}
+	},
 		"gemini.modelTotalTokens": {
 			"type": "number",
 			"title": "Total Tokens",
