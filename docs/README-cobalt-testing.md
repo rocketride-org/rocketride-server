@@ -17,7 +17,7 @@ RocketRide's pipeline nodes handle LLM calls, vector database queries, embedding
 
 ## Directory Structure
 
-```
+```text
 test/cobalt/
   cobalt.toml                     # Cobalt configuration (thresholds, concurrency)
   conftest.py                     # Shared pytest fixtures (mock client, datasets)

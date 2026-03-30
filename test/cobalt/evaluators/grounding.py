@@ -103,7 +103,7 @@ def evaluate_grounding(output: str, context: str, threshold: float = 0.5) -> dic
         return {'score': 1.0, 'passed': True, 'reasoning': 'Both output and context are empty.', 'details': []}
 
     if not output:
-        return {'score': 1.0, 'passed': True, 'reasoning': 'Output is empty; nothing to ground.', 'details': []}
+        return {'score': 0.0, 'passed': False, 'reasoning': 'Output is empty; nothing to ground.', 'details': []}
 
     if not context:
         return {'score': 0.0, 'passed': False, 'reasoning': 'No context provided but output contains claims.', 'details': []}
@@ -112,7 +112,7 @@ def evaluate_grounding(output: str, context: str, threshold: float = 0.5) -> dic
     sentences = _split_sentences(output)
 
     if not sentences:
-        return {'score': 1.0, 'passed': True, 'reasoning': 'No parseable sentences in output.', 'details': []}
+        return {'score': 0.0, 'passed': False, 'reasoning': 'No parseable sentences in output.', 'details': []}
 
     sentence_scores = []
     for sentence in sentences:
