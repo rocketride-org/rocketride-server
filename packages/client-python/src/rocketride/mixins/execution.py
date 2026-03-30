@@ -53,6 +53,7 @@ Usage:
     await client.terminate(token)
 """
 
+import asyncio
 import json
 import re
 import copy
@@ -254,17 +255,16 @@ class ExecutionMixin(DAPClient):
 
         # Load pipeline configuration from file if needed
         if not pipeline:
+
+            def _load_pipeline_config(path: str):
+                with open(path, 'r', encoding='utf-8') as file:
+                    parsed = json5.load(file) if json5 else json.load(file)
+                return parsed.get('pipeline', parsed) if isinstance(parsed, dict) else parsed
+
             try:
-                with open(filepath, 'r', encoding='utf-8') as file:
-                    # Prefer JSON5 for better developer experience (comments, trailing commas)
-                    if json5:
-                        parsed = json5.load(file)
-                    else:
-                        parsed = json.load(file)
-                    # .pipe files wrap the config in { "pipeline": { ... } } — unwrap if present
-                    pipeline_config = parsed.get('pipeline', parsed) if isinstance(parsed, dict) else parsed
-            except FileNotFoundError:
-                raise FileNotFoundError(f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration.")
+                pipeline_config = await asyncio.to_thread(_load_pipeline_config, filepath)
+            except FileNotFoundError as err:
+                raise FileNotFoundError(f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration.") from err
         else:
             pipeline_config = pipeline
 
