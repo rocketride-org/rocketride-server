@@ -277,7 +277,6 @@ class ExecutionMixin(DAPClient):
 
         # Build execution request with all parameters
         arguments = {
-            'apikey': self._apikey,
             'pipeline': processed_config,  # Use processed config with variables substituted
             'args': args or [],  # Default to empty args list
         }
