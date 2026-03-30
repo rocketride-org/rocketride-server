@@ -1,0 +1,93 @@
+{
+	"title": "Exa Search",
+	"protocol": "tool_exa_search://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_exa_search",
+	"prefix": "exa",
+	"icon": "exa.svg",
+	"description": [
+		"Exposes Exa semantic web search as an agent tool.",
+		"Performs real-time web searches via the Exa API and returns structured results with titles, URLs, text content, relevance scores, and dates."
+	],
+	"tile": [],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Exa Search",
+				"apikey": "",
+				"numResults": 10,
+				"useAutoprompt": true,
+				"searchType": "auto",
+				"includeText": true
+			}
+		}
+	},
+	"fields": {
+		"tool_exa_search.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Exa API key (from https://exa.ai)",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tool_exa_search.numResults": {
+			"type": "number",
+			"title": "Number of Results",
+			"description": "Maximum number of search results to return (1-50)",
+			"default": 10
+		},
+		"tool_exa_search.useAutoprompt": {
+			"type": "boolean",
+			"title": "Use Autoprompt",
+			"description": "Let Exa optimize the query for better results",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"tool_exa_search.searchType": {
+			"type": "string",
+			"title": "Search Type",
+			"description": "Type of search to perform",
+			"default": "auto",
+			"enum": [
+				["auto", "Auto"],
+				["neural", "Neural"],
+				["keyword", "Keyword"]
+			]
+		},
+		"tool_exa_search.includeText": {
+			"type": "boolean",
+			"title": "Include Text Content",
+			"description": "Include full text content in results (uses get_contents)",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Exa Search",
+			"properties": [
+				"type",
+				"tool_exa_search.apikey",
+				"tool_exa_search.numResults",
+				"tool_exa_search.useAutoprompt",
+				"tool_exa_search.searchType",
+				"tool_exa_search.includeText"
+			]
+		}
+	]
+}
