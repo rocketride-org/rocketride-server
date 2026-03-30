@@ -13,11 +13,15 @@ and stores answers back into the session for future retrieval.
 from __future__ import annotations
 
 import copy
+import threading
 
 from rocketlib import IInstanceBase, Entry, debug
 from ai.common.schema import Question, Answer
 
 from .IGlobal import IGlobal
+
+# Module-level lock for atomic answer_count increments across instances
+_answer_count_lock = threading.Lock()
 
 
 class IInstance(IInstanceBase):
@@ -103,10 +107,12 @@ class IInstance(IInstanceBase):
             answer_text = answer.getText() if hasattr(answer, 'getText') else str(answer)
             store.put(session_id, 'last_answer', answer_text)
 
-            # Store answer count
-            count_result = store.get(session_id, 'answer_count')
-            current_count = count_result.get('value', 0) if count_result.get('ok') else 0
-            store.put(session_id, 'answer_count', current_count + 1)
+            # Atomic answer_count increment: lock ensures the read-modify-write
+            # is not interleaved with another thread's increment.
+            with _answer_count_lock:
+                count_result = store.get(session_id, 'answer_count')
+                current_count = count_result.get('value', 0) if count_result.get('ok') else 0
+                store.put(session_id, 'answer_count', current_count + 1)
 
             debug(f'Stored answer in session {session_id}')
 

@@ -31,7 +31,7 @@ class IGlobal(IGlobalBase):
         from depends import depends  # type: ignore
 
         # Load the requirements
-        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
         depends(requirements)
 
         # Load node configuration
@@ -52,6 +52,14 @@ class IGlobal(IGlobalBase):
         )
 
     def endGlobal(self) -> None:
-        """Release resources."""
+        """Release resources and close backend connections."""
+        if self.store is not None:
+            backend = self.store.backend
+            # Close Redis connection if the backend is Redis-backed
+            if hasattr(backend, '_client'):
+                try:
+                    backend._client.close()
+                except Exception:
+                    pass
         self.store = None
         self.config = None

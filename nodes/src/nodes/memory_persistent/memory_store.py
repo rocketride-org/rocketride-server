@@ -284,8 +284,7 @@ class RedisBackend(MemoryBackend):
         ]
         # Also expire all data keys
         members = self._client.smembers(self._keys_key(session_id))
-        for member in members:
-            keys_to_expire.append(self._data_key(session_id, member))
+        keys_to_expire.extend(self._data_key(session_id, member) for member in members)
         for k in keys_to_expire:
             self._client.expire(k, ttl_seconds)
 
