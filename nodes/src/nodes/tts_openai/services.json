@@ -1,0 +1,229 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Text to Speech",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tts_openai://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["audio"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.tts_openai",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "tts_openai",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A component that converts text into natural-sounding speech using OpenAI's ",
+		"text-to-speech API. It supports multiple models (tts-1, tts-1-hd) and voices ",
+		"(alloy, echo, fable, onyx, nova, shimmer) with configurable speed and output ",
+		"format. The component accepts text input and produces audio output suitable for ",
+		"downstream audio processing or playback nodes."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "tts-openai.svg",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": [
+		"Voice: ${parameters.tts_openai.voice}"
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"text": ["audio"]
+	},
+	"input": [
+		{
+			"lane": "text",
+			"output": [
+				{
+					"lane": "audio"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "tts-1",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"tts-1": {
+				"title": "TTS-1",
+				"model": "tts-1",
+				"voice": "alloy",
+				"speed": 1.0,
+				"response_format": "mp3",
+				"apikey": ""
+			},
+			"tts-1-hd": {
+				"title": "TTS-1 HD",
+				"model": "tts-1-hd",
+				"voice": "alloy",
+				"speed": 1.0,
+				"response_format": "mp3",
+				"apikey": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"tts_openai.voice": {
+			"type": "string",
+			"title": "Voice",
+			"description": "The voice to use for speech synthesis",
+			"enum": [
+				["alloy", "Alloy - Neutral and balanced"],
+				["echo", "Echo - Warm and rounded"],
+				["fable", "Fable - Expressive and dramatic"],
+				["onyx", "Onyx - Deep and authoritative"],
+				["nova", "Nova - Friendly and upbeat"],
+				["shimmer", "Shimmer - Clear and bright"]
+			],
+			"default": "alloy"
+		},
+		"tts_openai.speed": {
+			"type": "number",
+			"title": "Speed",
+			"description": "The speed of the generated audio (0.25 to 4.0)",
+			"default": 1.0
+		},
+		"tts_openai.response_format": {
+			"type": "string",
+			"title": "Output Format",
+			"description": "The audio format for the generated speech",
+			"enum": [
+				["mp3", "MP3 - Compressed audio"],
+				["opus", "Opus - Low latency streaming"],
+				["aac", "AAC - Digital audio compression"],
+				["flac", "FLAC - Lossless audio"],
+				["wav", "WAV - Uncompressed audio"],
+				["pcm", "PCM - Raw audio samples"]
+			],
+			"default": "mp3"
+		},
+		"tts_openai.tts-1": {
+			"object": "tts-1",
+			"properties": [
+				"llm.cloud.apikey",
+				"tts_openai.voice",
+				"tts_openai.speed",
+				"tts_openai.response_format"
+			]
+		},
+		"tts_openai.tts-1-hd": {
+			"object": "tts-1-hd",
+			"properties": [
+				"llm.cloud.apikey",
+				"tts_openai.voice",
+				"tts_openai.speed",
+				"tts_openai.response_format"
+			]
+		},
+		"tts_openai.profile": {
+			"title": "Model",
+			"description": "TTS model",
+			"type": "string",
+			"default": "tts-1",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "tts-1",
+					"properties": [
+						"tts_openai.tts-1"
+					]
+				},
+				{
+					"value": "tts-1-hd",
+					"properties": [
+						"tts_openai.tts-1-hd"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Text to Speech",
+			"properties": [
+				"tts_openai.profile"
+			]
+		}
+	],
+	"test": {
+		"profiles": ["tts-1"],
+		"outputs": ["audio"],
+		"cases": [
+			{
+				"name": "TTS generates audio from text",
+				"text": "Hello, this is a test of text to speech.",
+				"expect": {
+					"audio": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	}
+}
