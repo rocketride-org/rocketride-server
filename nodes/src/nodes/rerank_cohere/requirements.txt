@@ -1,0 +1,2 @@
+# Cohere Rerank
+cohere>=5.0.0
