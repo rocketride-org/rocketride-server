@@ -48,7 +48,6 @@ from ai.common.tools import ToolsBase
 # ---------------------------------------------------------------------------
 
 EXA_SEARCH_URL = 'https://api.exa.ai/search'
-EXA_CONTENTS_URL = 'https://api.exa.ai/contents'
 
 VALID_SEARCH_TYPES = {'auto', 'neural', 'keyword'}
 
