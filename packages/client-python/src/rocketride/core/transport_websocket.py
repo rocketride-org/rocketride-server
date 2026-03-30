@@ -471,9 +471,8 @@ class TransportWebSocket(TransportBase):
             # Always clean up remaining resources
             self._websocket = None
             self._receive_task = None
-            if hasattr(self, '_message_tasks'):
-                with self._message_tasks_lock:
-                    self._message_tasks.clear()
+            with self._message_tasks_lock:
+                self._message_tasks.clear()
 
     async def send(self, message: Dict[str, Any]) -> None:
         """
