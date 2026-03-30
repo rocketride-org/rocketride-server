@@ -37,7 +37,7 @@ from typing import Any, Dict, List
 
 from ai.common.tools import ToolsBase
 
-from .utils import _is_cypher_safe, _parse_is_valid, _strip_ns
+from .utils import _is_cypher_safe, _parse_is_valid, _strip_ns, _validate_identifier
 
 
 class Neo4JDriver(ToolsBase):
@@ -411,6 +411,14 @@ class Neo4JDriver(ToolsBase):
         if not label.isidentifier():
             return {'error': f'Invalid node label: {label!r}'}
 
+        # Validate all property keys to prevent Cypher injection.
+        for key in props:
+            _validate_identifier(key, 'property key')
+
+        # Validate merge_key if provided.
+        if merge_key:
+            _validate_identifier(merge_key, 'merge_key')
+
         try:
             if merge_key and merge_key in props:
                 cypher = f'MERGE (n:{label} {{{merge_key}: $merge_val}}) SET n += $props RETURN n'
@@ -437,6 +445,14 @@ class Neo4JDriver(ToolsBase):
         for ident in (from_label, to_label, rel_type):
             if not ident.isidentifier():
                 return {'error': f'Invalid identifier: {ident!r}'}
+
+        # Validate all property keys from match dicts to prevent Cypher injection.
+        for key in from_match:
+            _validate_identifier(key, 'from_match property key')
+        for key in to_match:
+            _validate_identifier(key, 'to_match property key')
+        for key in rel_props:
+            _validate_identifier(key, 'relationship property key')
 
         try:
             # Build MATCH clauses using parameterised property lookups.

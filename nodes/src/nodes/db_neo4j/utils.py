@@ -71,6 +71,25 @@ def _is_cypher_safe(cypher: str) -> bool:
     return not bool(_UNSAFE_CYPHER.search(stripped))
 
 
+def _validate_identifier(value: str, context: str = 'identifier') -> None:
+    """Raise ValueError if *value* is not a safe Cypher identifier.
+
+    Only Python identifiers (alphanumeric + underscore, not starting with a
+    digit) are accepted.  This prevents Cypher injection via property keys
+    that are interpolated into query strings.
+
+    Args:
+        value (str): The candidate identifier.
+        context (str): Human-readable label used in the error message
+            (e.g. ``'property key'``, ``'merge_key'``).
+
+    Raises:
+        ValueError: If *value* is not a valid Python identifier.
+    """
+    if not isinstance(value, str) or not value.isidentifier():
+        raise ValueError(f'Invalid {context}: {value!r} — only alphanumeric characters and underscores are allowed')
+
+
 def _strip_ns(tool_name: str) -> str:
     """Strip the ``'neo4j.'`` namespace prefix from a tool name.
 
