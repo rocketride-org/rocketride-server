@@ -20,7 +20,7 @@ services:
       - "${ENGINE_PORT:-5565}:5565"
     environment:
       - ROCKETRIDE_LOG_LEVEL=${ROCKETRIDE_LOG_LEVEL:-info}
-      - POSTGRES_URL=postgresql://${POSTGRES_USER:-rocketride}:${POSTGRES_PASSWORD:-rocketride}@postgres:5432/${POSTGRES_DB:-rocketride}
+      - POSTGRES_URL=postgresql://${POSTGRES_USER:-rocketride}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-rocketride}
       - MILVUS_HOST=milvus
       - MILVUS_PORT=19530
       - CHROMA_HOST=chroma
@@ -52,10 +52,10 @@ services:
 
   # ── PostgreSQL + pgvector ────────────────────────────────────────────────
   postgres:
-    image: ankane/pgvector:latest
+    image: ankane/pgvector:v0.8.0
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-rocketride}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rocketride}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       POSTGRES_DB: ${POSTGRES_DB:-rocketride}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
@@ -98,10 +98,10 @@ services:
 
   # ── MinIO (Milvus object storage) ───────────────────────────────────────
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme}
     command: minio server /data --console-address ":9001"
     ports:
       - "${MINIO_API_PORT:-9000}:9000"
@@ -120,7 +120,7 @@ services:
 
   # ── Milvus (vector database) ────────────────────────────────────────────
   milvus:
-    image: milvusdb/milvus:latest
+    image: milvusdb/milvus:v2.4.17
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
@@ -147,7 +147,7 @@ services:
 
   # ── ChromaDB (vector database) ──────────────────────────────────────────
   chroma:
-    image: chromadb/chroma:latest
+    image: chromadb/chroma:0.6.3
     environment:
       IS_PERSISTENT: "TRUE"
       ANONYMIZED_TELEMETRY: "FALSE"

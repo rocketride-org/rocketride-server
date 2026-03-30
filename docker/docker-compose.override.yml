@@ -17,24 +17,6 @@ services:
       # Hot-reload Python nodes during development
       - ../nodes/src/nodes:/opt/rocketride/ai/nodes:ro
 
-  postgres:
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-
   etcd:
     ports:
       - "${ETCD_PORT:-2379}:2379"
-
-  minio:
-    ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
-
-  milvus:
-    ports:
-      - "${MILVUS_PORT:-19530}:19530"
-      - "${MILVUS_GRPC_PORT:-9091}:9091"
-
-  chroma:
-    ports:
-      - "${CHROMA_PORT:-8000}:8000"

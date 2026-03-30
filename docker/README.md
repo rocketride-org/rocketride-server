@@ -58,7 +58,7 @@ development. It provides:
 
 - **Hot-reloading** of Python nodes via a bind mount from `nodes/src/nodes/`
 - **Debug logging** enabled by default
-- **All ports** forwarded to the host
+- **etcd port** (2379) forwarded to the host for debugging
 
 To run without dev overrides (e.g., for staging-like testing):
 
@@ -66,10 +66,19 @@ To run without dev overrides (e.g., for staging-like testing):
 docker compose -f docker-compose.yml up
 ```
 
+## Image Versions
+
+All Docker images are pinned to specific versions in `docker-compose.yml` to
+ensure reproducible builds. Check upstream release pages periodically and update
+the tags when newer stable versions are available.
+
 ## Configuration
 
 All configurable values are set via environment variables. See `.env.example`
 for the full list. Copy it to `.env` and customise as needed.
+
+**Security note**: Default passwords in `.env.example` are placeholder values.
+Change all passwords before any non-local deployment.
 
 ## Volumes
 

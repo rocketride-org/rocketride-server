@@ -5,27 +5,6 @@
 # Copyright (c) 2026 RocketRide
 # ---------------------------------------------------------------------------
 
-# === Builder stage =========================================================
-FROM ubuntu:jammy AS builder
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       build-essential \
-       cmake \
-       ca-certificates \
-       git \
-       python3 \
-       python3-pip \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /build
-COPY . /build
-
-# The actual build is expected to happen outside Docker (CI or ./builder).
-# This stage exists so the image can be extended for in-container builds in
-# the future.  For now we simply forward the pre-built artefacts to the
-# runtime stage below.
-
 # === Runtime stage =========================================================
 FROM ubuntu:jammy
 
