@@ -16,4 +16,10 @@ from unittest.mock import MagicMock
 # Mock rocketlib module
 mock_rocketlib = MagicMock()
 mock_rocketlib.debug = MagicMock()
+mock_rocketlib.warning = MagicMock()
+mock_rocketlib.getServiceDefinition = MagicMock()
+mock_rocketlib.IJson = MagicMock()
 sys.modules['rocketlib'] = mock_rocketlib
+
+# Mock depends module
+sys.modules['depends'] = MagicMock()
