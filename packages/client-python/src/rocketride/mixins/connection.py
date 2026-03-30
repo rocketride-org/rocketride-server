@@ -345,7 +345,7 @@ class ConnectionMixin(DAPClient):
         parsed = urllib.parse.urlparse(uri)
 
         if not parsed.port and 'rocketride.ai' not in (parsed.hostname or ''):
-            parsed = parsed._replace(netloc=f'{parsed.hostname}:{CONST_DEFAULT_WEB_PORT}')
+            parsed = parsed._replace(netloc=f'{parsed.hostname or "localhost"}:{CONST_DEFAULT_WEB_PORT}')
 
         return parsed.geturl()
 
