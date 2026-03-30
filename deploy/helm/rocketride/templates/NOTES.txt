@@ -36,8 +36,10 @@ Components deployed:
 {{- if .Values.chroma.enabled }}
   - ChromaDB: 1 replica
 {{- end }}
+{{- if .Values.milvus }}
 {{- if .Values.milvus.enabled }}
-  - Milvus: enabled (external chart recommended for production)
+  - Milvus: enabled (deployed via subchart)
+{{- end }}
 {{- end }}
 
 Verify the deployment:

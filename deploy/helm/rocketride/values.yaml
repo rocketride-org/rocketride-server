@@ -186,7 +186,7 @@ postgres:
   # -- PostgreSQL credentials (only used when existingSecret is empty)
   auth:
     username: rocketride
-    password: rocketride
+    password: changeme
     database: rocketride
 
   # -- Resource requests and limits
@@ -203,38 +203,13 @@ postgres:
     port: 5432
 
 # -- Milvus vector database
-milvus:
-  # -- Enable Milvus deployment
-  enabled: false
-
-  image:
-    # -- Milvus image repository
-    repository: milvusdb/milvus
-    # -- Image tag (pinned version)
-    tag: "v2.4.17"
-    # -- Image pull policy
-    pullPolicy: IfNotPresent
-
-  # -- Persistent volume claim size for Milvus data
-  storage: 10Gi
-
-  # -- Milvus etcd dependency
-  etcd:
-    image:
-      repository: quay.io/coreos/etcd
-      tag: "v3.5.16"
-    storage: 2Gi
-
-  # -- Milvus MinIO dependency
-  minio:
-    image:
-      repository: minio/minio
-      tag: "RELEASE.2024-11-07T00-52-20Z"
-    storage: 10Gi
-    # -- MinIO credentials
-    auth:
-      rootUser: minioadmin
-      rootPassword: minioadmin
+# Milvus is NOT deployed by this chart. To use Milvus, add the official
+# Milvus Helm chart as a subchart dependency in Chart.yaml:
+#   dependencies:
+#     - name: milvus
+#       version: "4.x.x"
+#       repository: https://zilliztech.github.io/milvus-helm
+#       condition: milvus.enabled
 
 # -- ChromaDB vector database
 chroma:
