@@ -24,10 +24,14 @@
 # ------------------------------------------------------------------------------
 # This class controls the data for each thread of the task
 # ------------------------------------------------------------------------------
+import logging
+
 from rocketlib import IInstanceBase
 from ai.common.schema import Question, Answer
 from .IGlobal import IGlobal
 from .cache_client import CacheClient
+
+logger = logging.getLogger(__name__)
 
 
 class IInstance(IInstanceBase):
@@ -53,7 +57,21 @@ class IInstance(IInstanceBase):
         if question.questions:
             query_text = ' '.join(q.text for q in question.questions if q.text)
 
-        model = ''
+        # The cache node is a pipeline filter that sits before the LLM node, so
+        # it does not have direct access to the downstream LLM's model config.
+        # Use the pipeline's logicalType as a namespace discriminator so that
+        # identical queries routed through different pipeline configurations
+        # (which may target different LLM models) produce distinct cache keys.
+        # Also incorporate the embedding_model hint from question texts when
+        # available, as it can differentiate model-specific requests.
+        pipeline_context = getattr(self.IGlobal.glb, 'logicalType', '') or ''
+        embedding_models = ''
+        if question.questions:
+            models = [q.embedding_model for q in question.questions if getattr(q, 'embedding_model', None)]
+            if models:
+                embedding_models = ','.join(models)
+
+        model = f'{pipeline_context}:{embedding_models}' if embedding_models else pipeline_context
         temperature = 0.0
         system_prompt = question.role or ''
 
@@ -64,7 +82,8 @@ class IInstance(IInstanceBase):
         cached = cache.get(cache_key)
         if cached is not None:
             # Cache hit -- reconstruct the answer and write it directly
-            self.IGlobal.cache_hits += 1
+            with self.IGlobal._stats_lock:
+                self.IGlobal.cache_hits += 1
 
             answer = Answer()
             cached_answer = cached.get('answer', '')
@@ -78,7 +97,12 @@ class IInstance(IInstanceBase):
             return
 
         # Cache miss -- store the key so writeAnswers can cache the response
-        self.IGlobal.cache_misses += 1
+        with self.IGlobal._stats_lock:
+            self.IGlobal.cache_misses += 1
+
+        if self._pending_cache_key is not None:
+            logger.warning('Pending cache key overwritten — possible pipeline re-entry')
+
         self._pending_cache_key = cache_key
         self.instance.writeQuestions(question)
 

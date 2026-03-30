@@ -24,6 +24,8 @@
 # ------------------------------------------------------------------------------
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
+import threading
+
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 from ai.common.config import Config
 import os
@@ -33,6 +35,7 @@ class IGlobal(IGlobalBase):
     cache = None
     cache_hits: int = 0
     cache_misses: int = 0
+    _stats_lock = threading.Lock()
 
     def validateConfig(self):
         """Validate the configuration for the LLM Cache node."""

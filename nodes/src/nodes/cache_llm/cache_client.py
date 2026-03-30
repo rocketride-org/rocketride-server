@@ -26,9 +26,12 @@
 import copy
 import hashlib
 import json
+import logging
 import threading
 import time
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     import redis
@@ -86,17 +89,22 @@ class CacheClient:
             )
             # Verify connectivity
             self._redis_client.ping()
-        except Exception:
-            # Fall back to no-cache mode on connection failure
+        except Exception as e:
+            logger.warning('Redis connection failed, falling back to no-cache: %s', e)
             self._redis_client = None
 
     @staticmethod
     def _generate_key(query: str, model: str = '', temperature: float = 0.0, system_prompt: str = '') -> str:
         """Generate a deterministic SHA256 cache key from normalized inputs.
 
+        Note: Cache keys are **case-sensitive** by design. For example,
+        "What is AI?" and "what is ai?" produce different keys. This is
+        intentional because LLM responses can differ based on casing, and
+        normalizing case would risk returning incorrect cached answers.
+
         Args:
             query: The question/prompt text.
-            model: The LLM model name.
+            model: The LLM model name (or pipeline context identifier).
             temperature: The sampling temperature.
             system_prompt: The system prompt.
 
@@ -105,7 +113,7 @@ class CacheClient:
         """
 
         # Normalize inputs: convert None to empty string, strip whitespace,
-        # collapse internal whitespace, and lowercase for consistency
+        # collapse internal whitespace (but preserve case -- see docstring)
         def normalize(value: Any) -> str:
             if value is None:
                 return ''
@@ -197,18 +205,19 @@ class CacheClient:
             if raw is None:
                 return None
             return json.loads(raw)
-        except Exception:
+        except Exception as e:
+            logger.warning('Redis GET failed, treating as cache miss: %s', e)
             return None
 
     def _redis_set(self, key: str, response: dict, ttl: int) -> None:
-        """Set in Redis, silently ignoring errors."""
+        """Set in Redis, logging errors but not raising."""
         if self._redis_client is None:
             return
         try:
             serialized = json.dumps(response, ensure_ascii=True)
             self._redis_client.setex(self._key_prefix + key, ttl, serialized)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning('Redis SET failed, response will not be cached: %s', e)
 
     def _redis_invalidate(self, key: str) -> None:
         """Delete a key from Redis."""
@@ -216,8 +225,8 @@ class CacheClient:
             return
         try:
             self._redis_client.delete(self._key_prefix + key)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning('Redis DELETE failed: %s', e)
 
     def _redis_clear(self) -> None:
         """Delete all keys with our prefix from Redis."""
@@ -231,8 +240,8 @@ class CacheClient:
                     self._redis_client.delete(*keys)
                 if cursor == 0:
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning('Redis CLEAR (SCAN+DELETE) failed: %s', e)
 
     # -------------------------------------------------------------------------
     # In-memory backend

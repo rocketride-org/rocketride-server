@@ -430,17 +430,23 @@ class TestCacheHitPath:
         iglobal.cache = CacheClient({'backend': 'memory', 'ttl': 3600, 'max_size': 1000})
         iglobal.cache_hits = 0
         iglobal.cache_misses = 0
+        iglobal._stats_lock = threading.Lock()
+        # The cache key now includes logicalType as the model component
+        iglobal.glb = Mock()
+        iglobal.glb.logicalType = 'cache_llm'
         inst.IGlobal = iglobal
         inst.instance = Mock()
 
-        # Pre-populate cache
-        cache_key = CacheClient._generate_key('What is AI?', '', 0.0, '')
+        # Pre-populate cache -- model param must match what writeQuestions generates
+        # (logicalType is 'cache_llm', no embedding_model on question texts)
+        cache_key = CacheClient._generate_key('What is AI?', 'cache_llm', 0.0, '')
         iglobal.cache.set(cache_key, {'answer': 'Artificial Intelligence', 'expectJson': False})
 
         # Build a mock question
         question = Mock()
         question_text = Mock()
         question_text.text = 'What is AI?'
+        question_text.embedding_model = None
         question.questions = [question_text]
         question.role = ''
 
@@ -467,6 +473,9 @@ class TestCacheMissPath:
         iglobal.cache = CacheClient({'backend': 'memory', 'ttl': 3600, 'max_size': 1000})
         iglobal.cache_hits = 0
         iglobal.cache_misses = 0
+        iglobal._stats_lock = threading.Lock()
+        iglobal.glb = Mock()
+        iglobal.glb.logicalType = 'cache_llm'
         inst.IGlobal = iglobal
         inst.instance = Mock()
 
@@ -474,6 +483,7 @@ class TestCacheMissPath:
         question = Mock()
         question_text = Mock()
         question_text.text = 'What is ML?'
+        question_text.embedding_model = None
         question.questions = [question_text]
         question.role = ''
 
