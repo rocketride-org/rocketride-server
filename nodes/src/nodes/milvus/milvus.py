@@ -48,6 +48,11 @@ from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
 
 
+def _escape_milvus_str(value: object) -> str:
+    """Escape a value for safe interpolation into a Milvus filter expression."""
+    return str(value).replace('\\', '\\\\').replace("'", "\\'")
+
+
 class Store(DocumentStoreBase):
     apikey: str = ''
     collection: str = ''
@@ -184,24 +189,24 @@ class Store(DocumentStoreBase):
         must_conditions = []
 
         if docFilter.nodeId is not None:
-            must_conditions.append(f"meta['nodeId'] == '{docFilter.nodeId}'")
+            must_conditions.append(f"meta['nodeId'] == '{_escape_milvus_str(docFilter.nodeId)}'")
 
         if docFilter.isTable is not None:
-            must_conditions.append(f"meta['isTable'] == {docFilter.isTable}")
+            (must_conditions.append(f"meta['isTable'] == '{_escape_milvus_str(docFilter.isTable)}'"),)
 
         if docFilter.tableIds is not None:
-            table_ids = ', '.join(map(str, docFilter.tableIds))
+            table_ids = ', '.join(f"'{_escape_milvus_str(t)}'" for t in docFilter.tableIds)
             must_conditions.append(f"meta['tableId'] in [{table_ids}]")
 
         if docFilter.parent is not None:
-            must_conditions.append(f"meta['parent'] == '{docFilter.parent}'")
+            must_conditions.append(f"meta['parent'] == '{_escape_milvus_str(docFilter.parent)}'")
 
         if docFilter.permissions is not None:
-            permission_ids = ', '.join(map(str, docFilter.permissions))
+            permission_ids = ', '.join(f"'{_escape_milvus_str(p)}'" for p in docFilter.permissions)
             must_conditions.append(f"meta['permissionId'] in [{permission_ids}]")
 
         if docFilter.objectIds is not None:
-            object_ids = ', '.join(json.dumps(str(oid)) for oid in docFilter.objectIds)
+            object_ids = ', '.join(f"'{_escape_milvus_str(o)}'" for o in docFilter.objectIds)
             must_conditions.append(f"meta['objectId'] in [{object_ids}]")
 
         # If we are not going after deleted docs, add a condition
@@ -304,7 +309,7 @@ class Store(DocumentStoreBase):
         must_conditions = self._convertFilter(docFilter=docFilter)
 
         # Append it
-        must_conditions.append(f"content like '%{query}%'")
+        must_conditions.append(f"content like '%{_escape_milvus_str(query)}%'")
 
         # Combine all conditions into a single filter expression
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
@@ -472,7 +477,7 @@ class Store(DocumentStoreBase):
 
         # If a permissionId list was specified
         if objectIds:
-            objectIdsJoint = ', '.join(json.dumps(str(oid)) for oid in objectIds)
+            objectIdsJoint = ', '.join(f"'{_escape_milvus_str(o)}'" for o in objectIds)
             must_conditions.append(f"meta['objectId'] in [{objectIdsJoint}]")
 
         # TODO: Add time out
@@ -497,7 +502,7 @@ class Store(DocumentStoreBase):
 
         # If a permissionId list was specified
         if objectIds:
-            objectIdsJoint = ', '.join(json.dumps(str(oid)) for oid in objectIds)
+            objectIdsJoint = ', '.join(f"'{_escape_milvus_str(o)}'" for o in objectIds)
             must_conditions.append(f"meta['objectId'] in [{objectIdsJoint}]")
 
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
@@ -529,7 +534,7 @@ class Store(DocumentStoreBase):
 
         # If a permissionId list was specified
         if objectIds:
-            objectIdsJoint = ', '.join(json.dumps(str(oid)) for oid in objectIds)
+            objectIdsJoint = ', '.join(f"'{_escape_milvus_str(o)}'" for o in objectIds)
             must_conditions.append(f"meta['objectId'] in [{objectIdsJoint}]")
 
         filter_expression = ' and '.join(must_conditions) if must_conditions else None
@@ -566,7 +571,7 @@ class Store(DocumentStoreBase):
         offset = 0
         while True:
             # Build filter for getting a set of chunks within the offset range
-            must_condition = f"(meta['objectId'] == '{objectId}') && ({offset - 1} < meta['chunkId'] < {offset + self.renderChunkSize})"
+            must_condition = f"(meta['objectId'] == '{_escape_milvus_str(objectId)}') && ({offset - 1} < meta['chunkId'] < {offset + self.renderChunkSize})"
 
             results = self.client.query(collection_name=self.collection, filter=must_condition)
 
