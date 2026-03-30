@@ -53,6 +53,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
+from library.ssrf_protection import validate_url
+
 
 class McpProtocolError(RuntimeError):
     pass
@@ -109,6 +111,9 @@ class McpStreamableHttpClient:
     def start(self) -> None:
         if self._started:
             raise RuntimeError('MCP streamable-http client already started')
+
+        # SSRF protection: validate the user-supplied endpoint before any requests
+        validate_url(self._endpoint)
 
         init_result, resp_headers = self._request_with_headers(
             'initialize',
@@ -357,4 +362,3 @@ def _match_jsonrpc_id(msg: dict, *, req_id: int) -> Any | None:  # noqa: ANN401
         message = msg['error'].get('message')
         raise McpProtocolError(f'MCP error (id={req_id}) code={code} message={message}')
     return msg.get('result')
-

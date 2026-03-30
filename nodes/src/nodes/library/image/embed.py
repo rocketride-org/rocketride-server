@@ -28,6 +28,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urlunparse, ParseResult
 
 from rocketlib import debug
+from library.ssrf_protection import validate_url
 
 
 def embed_images_in_html(html_content: str, default_scheme: str, default_site: str) -> str:
@@ -57,6 +58,9 @@ def embed_images_in_html(html_content: str, default_scheme: str, default_site: s
 
             # Download the image
             debug(f'Processing image URL: {image_url}')
+
+            # SSRF protection: validate the image URL before fetching
+            validate_url(image_url)
 
             # Check if the image URL is valid
             response = requests.get(image_url)

@@ -50,6 +50,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from library.ssrf_protection import validate_url
+
 
 class McpProtocolError(RuntimeError):
     pass
@@ -89,7 +91,7 @@ class McpSseClient:
 
         self._reader_thread: threading.Thread | None = None
         self._stop = threading.Event()
-        self._incoming: "queue.Queue[dict]" = queue.Queue()
+        self._incoming: 'queue.Queue[dict]' = queue.Queue()
         self._endpoint_url: str | None = None
         self._resp = None
 
@@ -102,6 +104,9 @@ class McpSseClient:
     def start(self) -> None:
         if self._reader_thread is not None:
             raise RuntimeError('MCP SSE client already started')
+
+        # SSRF protection: validate the user-supplied SSE endpoint before any requests
+        validate_url(self._sse_endpoint)
 
         self._stop.clear()
         self._reader_thread = threading.Thread(target=self._reader_loop, name='McpSseReader', daemon=True)
@@ -313,11 +318,9 @@ class McpSseClient:
             # Validate the resolved URL stays on the same origin to prevent
             # auth-token theft via malicious absolute-URL redirects.
             if self._origin(resolved) != base:
-                raise McpProtocolError(
-                    f'MCP endpoint redirect rejected: '
-                    f'resolved origin {self._origin(resolved)!r} '
-                    f'does not match SSE origin {base!r}'
-                )
+                raise McpProtocolError(f'MCP endpoint redirect rejected: resolved origin {self._origin(resolved)!r} does not match SSE origin {base!r}')
+            # SSRF protection: validate the server-provided endpoint URL
+            validate_url(resolved)
             self._endpoint_url = resolved
             return
 
@@ -352,4 +355,3 @@ class McpSseClient:
         elif scheme == 'http' and netloc.endswith(':80'):
             netloc = netloc[:-3]
         return f'{scheme}://{netloc}'
-
