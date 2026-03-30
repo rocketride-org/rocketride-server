@@ -198,8 +198,8 @@ class CircuitBreaker:
 # Retryable / non-retryable exception classification
 # ---------------------------------------------------------------------------
 
-# Exception class *names* we consider retryable (matched by class name so we
-# don't need hard imports of every SDK).
+# Exception class name *keywords* we consider retryable. Matched via substring
+# so that prefixed variants (e.g. RerankRateLimitError) also match.
 _DEFAULT_RETRYABLE_NAMES: Set[str] = {
     'RateLimitError',
     'APIConnectionError',
@@ -223,14 +223,14 @@ _DEFAULT_NON_RETRYABLE_NAMES: Set[str] = {
 def _is_retryable(exc: BaseException, retryable_types: Optional[Tuple[Type[BaseException], ...]] = None) -> bool:
     """Classify whether an exception is retryable using class-name heuristics.
 
-    Uses exception class names (e.g., 'RateLimitError', 'AuthenticationError') to avoid
-    hard imports of provider SDKs. This is a pragmatic choice that works across all
-    LLM providers without coupling to their specific exception hierarchies.
+    Uses exception class name **substring matching** (e.g., 'RateLimitError' matches
+    both 'RateLimitError' and 'RerankRateLimitError') to avoid hard imports of
+    provider SDKs. This is a pragmatic choice that works across all LLM providers
+    and custom node exception hierarchies without coupling to specific imports.
 
-    Known limitation: If a provider SDK renames its exception classes or if two SDKs
-    use the same class name with different retry semantics, this heuristic may
-    misclassify. In practice, the major providers (OpenAI, Anthropic, Google, etc.)
-    use consistent naming conventions that make this reliable.
+    Known limitation: If a provider SDK uses a class name that accidentally contains
+    a keyword (e.g., a 'NotFoundError' that should be retryable), this heuristic may
+    misclassify. In practice, the naming conventions are consistent across providers.
 
     If *retryable_types* is provided, membership is checked first.  Otherwise
     we fall back to class-name heuristics so that callers don't need to import
@@ -239,9 +239,11 @@ def _is_retryable(exc: BaseException, retryable_types: Optional[Tuple[Type[BaseE
     if retryable_types is not None:
         return isinstance(exc, retryable_types)
     name = type(exc).__name__
-    if name in _DEFAULT_NON_RETRYABLE_NAMES:
+    # Use substring matching so that prefixed variants (e.g. RerankRateLimitError)
+    # are correctly classified alongside the canonical names (RateLimitError).
+    if any(keyword in name for keyword in _DEFAULT_NON_RETRYABLE_NAMES):
         return False
-    if name in _DEFAULT_RETRYABLE_NAMES:
+    if any(keyword in name for keyword in _DEFAULT_RETRYABLE_NAMES):
         return True
     # Treat generic connection / timeout errors as retryable.
     if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
