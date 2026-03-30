@@ -291,7 +291,13 @@ def _request_with_retry(
                 debug(f'Exa request timeout, retrying in {delay}s (attempt {attempt + 1}/{max_retries})')
                 time.sleep(delay)
                 continue
-            raise
+            raise RuntimeError('Exa search: request timed out after all retries') from None
+
+        except requests.RequestException as exc:
+            # Re-raise with a sanitized message so the API key in headers is never leaked.
+            status = getattr(getattr(exc, 'response', None), 'status_code', None)
+            detail = f' (HTTP {status})' if status else ''
+            raise RuntimeError(f'Exa search request failed{detail}: {type(exc).__name__}') from None
 
     # Should not reach here, but just in case
     raise RuntimeError('Exa search: max retries exceeded')
