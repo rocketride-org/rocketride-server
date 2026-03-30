@@ -1,4 +1,4 @@
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase, OPEN_MODE, warning, debug
 from ai.common.config import Config
 from ai.common.chat import ChatBase
 import os
@@ -16,7 +16,7 @@ class IGlobal(IGlobalBase):
             # Load dependencies
             from depends import depends
 
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+            requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
             depends(requirements)
 
             from openai import OpenAI, APIStatusError, OpenAIError, AuthenticationError, RateLimitError, APIConnectionError
@@ -29,10 +29,9 @@ class IGlobal(IGlobalBase):
             modelTotalTokens = config.get('modelTotalTokens')
 
             # Only validate tokens > 0 if provided
-            if modelTotalTokens is not None:
-                if modelTotalTokens <= 0:
-                    warning('Token limit must be greater than 0')
-                    return
+            if modelTotalTokens is not None and modelTotalTokens <= 0:
+                warning('Token limit must be greater than 0')
+                return
 
             # Simple API validation using provider-driven exceptions
             try:
@@ -63,8 +62,8 @@ class IGlobal(IGlobalBase):
                             parts.append(emsg)
                         if parts:
                             message = ' '.join(parts)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    debug(f'JSON parse failed while formatting API error: {exc}')
                 message = re.sub(r'\s+', ' ', message).strip()
                 if len(message) > 500:
                     message = message[:500].rstrip() + '…'

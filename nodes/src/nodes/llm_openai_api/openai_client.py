@@ -32,12 +32,12 @@ class Chat(ChatBase):
         base_url = config.get('base_url') or None
 
         # Build kwargs for ChatOpenAI
-        kwargs = dict(
-            model=self._model,
-            api_key=apikey,
-            temperature=0,
-            max_tokens=self._modelOutputTokens,
-        )
+        kwargs = {
+            "model": self._model,
+            "api_key": apikey,
+            "temperature": 0,
+            "max_tokens": self._modelOutputTokens,
+        }
         if base_url:
             kwargs['base_url'] = base_url
 
@@ -51,16 +51,11 @@ class Chat(ChatBase):
         """
         Determine if the error is retryable.
         """
-        if isinstance(error, AuthenticationError):
+        if isinstance(error, (AuthenticationError, APIError)):
             return False
-        elif isinstance(error, APIError):
-            return False
-        elif isinstance(error, RateLimitError):
+        if isinstance(error, (RateLimitError, APIConnectionError)):
             return True
-        elif isinstance(error, APIConnectionError):
-            return True
-        else:
-            return super().is_retryable_error(error)
+        return super().is_retryable_error(error)
 
     def map_exception(self, error):
         """
@@ -68,11 +63,10 @@ class Chat(ChatBase):
         """
         if isinstance(error, AuthenticationError):
             return ValueError('Invalid API key.')
-        elif isinstance(error, APIError):
+        if isinstance(error, APIError):
             return ValueError('An error occurred with the API.')
-        elif isinstance(error, RateLimitError):
+        if isinstance(error, RateLimitError):
             return ValueError('Rate limit exceeded. Please try again later.')
-        elif isinstance(error, APIConnectionError):
+        if isinstance(error, APIConnectionError):
             return ValueError('Failed to connect to the API.')
-        else:
-            return super().map_exception(error)
+        return super().map_exception(error)
