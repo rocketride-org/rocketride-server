@@ -119,6 +119,7 @@ class TransportWebSocket(TransportBase):
         self._uri = uri
         self._auth = kwargs.get('auth', None)
         self._message_tasks: set = set()
+        self._message_tasks_lock = asyncio.Lock()
 
     def get_auth(self) -> Optional[str]:
         """Return auth credential for use by connect flow (e.g. first DAP auth command)."""
@@ -242,7 +243,8 @@ class TransportWebSocket(TransportBase):
 
                 # Process each message in its own task so others can be processed concurrently
                 task = asyncio.create_task(self._receive_data(data))
-                self._message_tasks.add(task)
+                async with self._message_tasks_lock:
+                    self._message_tasks.add(task)
                 task.add_done_callback(lambda t: self._message_tasks.discard(t))
 
         except asyncio.CancelledError:
@@ -452,7 +454,8 @@ class TransportWebSocket(TransportBase):
             self._websocket = None
             self._receive_task = None
             if hasattr(self, '_message_tasks'):
-                self._message_tasks.clear()
+                async with self._message_tasks_lock:
+                    self._message_tasks.clear()
 
     async def send(self, message: Dict[str, Any]) -> None:
         """
