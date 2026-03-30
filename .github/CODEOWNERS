@@ -3,3 +3,23 @@
 
 # DevOps maintainers
 /.github/ @kwit75
+
+# C++ engine — requires engine team review
+packages/server/ @jmaionchi @Rod-Christensen
+
+# Python nodes — requires ML team review
+nodes/ @stepmikhaylov @jmaionchi
+
+# Client SDKs
+packages/client-typescript/ @jmaionchi @stepmikhaylov
+packages/client-python/ @jmaionchi @stepmikhaylov
+packages/client-mcp/ @jmaionchi @stepmikhaylov
+
+# CI/CD — requires DevOps review
+.github/ @kwit75
+docker/ @kwit75
+
+# Security-sensitive files
+packages/ai/src/ai/web/middleware.py @jmaionchi @Rod-Christensen
+packages/ai/src/ai/account/ @jmaionchi @Rod-Christensen
+SECURITY.md @jmaionchi @Rod-Christensen

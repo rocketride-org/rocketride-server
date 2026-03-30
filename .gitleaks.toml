@@ -35,7 +35,7 @@ paths = ['''services.*\.json$''']
         '''\$\{[A-Z_]+\}''',
     ]
 
-# Global allowlist — skip lock files, build output, test fixtures
+# Global allowlist — skip lock files, build output, test fixtures, and docs
 [allowlist]
 paths = [
     '''pnpm-lock\.yaml''',
@@ -46,4 +46,16 @@ paths = [
     '''downloads/''',
     '''node_modules/''',
     '''\.claude/''',
+    '''testdata/''',
+    '''test/fixtures/''',
+    '''docs/''',
+    '''apps/vscode/docs/''',
+    '''\.venv/''',
+    '''vendor/''',
+]
+regexes = [
+    # Placeholder / example tokens used in documentation and tests
+    '''(?i)(example|test|dummy|fake|placeholder|changeme|xxxx|your[-_]?)''',
+    # GitHub Actions expression syntax (not real secrets)
+    '''\$\{\{.*\}\}''',
 ]

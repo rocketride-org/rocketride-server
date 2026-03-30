@@ -1,0 +1,20 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 2%
+    patch:
+      default:
+        target: 80%
+  ignore:
+    - "testdata/**"
+    - "docs/**"
+    - "scripts/**"
+    - "**/test_*.py"
+    - "**/conftest.py"
+
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default
+  require_changes: true
