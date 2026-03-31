@@ -1,0 +1,48 @@
+{
+	"title": "v0 by Vercel",
+	"protocol": "tool_v0://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_v0",
+	"prefix": "v0",
+	"icon": "vercel.svg",
+	"description": [
+		"Generates React UI components from natural-language prompts using Vercel's v0 API.",
+		"Provides generate_ui (create component) and refine_ui (iterate on existing generation)."
+	],
+	"tile": ["Tool: v0.generate_ui"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "v0 by Vercel",
+				"apikey": ""
+			}
+		}
+	},
+	"fields": {
+		"tool_v0.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Vercel v0 API key",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "v0 by Vercel",
+			"properties": [
+				"type",
+				"tool_v0.apikey"
+			]
+		}
+	]
+}
