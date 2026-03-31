@@ -262,7 +262,11 @@ class ExecutionMixin(DAPClient):
                 return parsed.get('pipeline', parsed) if isinstance(parsed, dict) else parsed
 
             try:
-                pipeline_config = await asyncio.to_thread(_load_pipeline_config, filepath)
+                if hasattr(asyncio, 'to_thread'):
+                    pipeline_config = await asyncio.to_thread(_load_pipeline_config, filepath)
+                else:
+                    loop = asyncio.get_running_loop()
+                    pipeline_config = await loop.run_in_executor(None, _load_pipeline_config, filepath)
             except FileNotFoundError as err:
                 raise FileNotFoundError(f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration.") from err
         else:
