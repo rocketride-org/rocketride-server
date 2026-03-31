@@ -142,6 +142,8 @@ class RerankClient:
             raise RerankBadRequestError(f'Invalid rerank request: {e}') from e
         except InternalServerError as e:
             raise RerankServerError(f'Cohere server error: {e}') from e
+        except Exception as e:
+            raise RerankServerError(f'Unexpected Cohere error: {e}') from e
 
         results = []
         for result in response.results:

@@ -27,7 +27,6 @@
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 from ai.common.config import Config
 import os
-import re
 
 
 class IGlobal(IGlobalBase):
@@ -36,6 +35,10 @@ class IGlobal(IGlobalBase):
     def validateConfig(self):
         """
         Validate the configuration for the Cohere Rerank node.
+
+        Only checks presence and format of required fields.  Does NOT make
+        a live API call — a Cohere outage or rate-limit at config time would
+        otherwise surface a misleading error to the user.
         """
         try:
             # Load dependencies
@@ -43,9 +46,6 @@ class IGlobal(IGlobalBase):
 
             requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
             depends(requirements)
-
-            from cohere import ClientV2 as CohereClient
-            from cohere.errors import UnauthorizedError, BadRequestError
 
             # Get config
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
@@ -56,26 +56,8 @@ class IGlobal(IGlobalBase):
                 warning('Cohere API key is required')
                 return
 
-            # Validate the API key with a minimal rerank call
-            try:
-                client = CohereClient(api_key=apikey)
-                client.rerank(
-                    model=model,
-                    query='test',
-                    documents=['test document'],
-                    top_n=1,
-                )
-            except UnauthorizedError as e:
-                message = re.sub(r'\s+', ' ', str(e)).strip()
-                if len(message) > 500:
-                    message = message[:500].rstrip() + '...'
-                warning(message)
-                return
-            except BadRequestError as e:
-                message = re.sub(r'\s+', ' ', str(e)).strip()
-                if len(message) > 500:
-                    message = message[:500].rstrip() + '...'
-                warning(message)
+            if not model or not model.strip():
+                warning('Cohere model name must not be empty')
                 return
 
         except Exception as e:

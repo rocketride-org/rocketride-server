@@ -115,4 +115,4 @@ class IInstance(IInstanceBase):
         # Always forward the question with reranked documents (possibly empty)
         # so downstream nodes can proceed even when min_score filters all docs.
         question.documents = reranked_docs
-        self.instance.writeAnswers(question)
+        self.instance.writeQuestions(question)

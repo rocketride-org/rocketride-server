@@ -71,8 +71,7 @@
 	//      the configuration should be used to display information
 	//
 	"tile": [
-		"Model: ${parameters.rerank_cohere.profile}",
-		"Top K: ${parameters.rerank_cohere.${profile}.top_n}"
+		"Model: ${parameters.rerank_cohere.profile}"
 	],
 	//
 	//	Optional:
@@ -124,6 +123,7 @@
 				"apikey": ""
 			},
 			"custom": {
+				"title": "Custom",
 				"model": "",
 				"top_n": 5,
 				"min_score": 0.0,
@@ -141,12 +141,15 @@
 		"top_n": {
 			"type": "number",
 			"title": "Top N",
-			"description": "Number of top results to return"
+			"description": "Number of top results to return",
+			"minimum": 1
 		},
 		"min_score": {
 			"type": "number",
 			"title": "Min Score",
-			"description": "Minimum relevance score threshold (0.0-1.0)"
+			"description": "Minimum relevance score threshold (0.0-1.0)",
+			"minimum": 0.0,
+			"maximum": 1.0
 		},
 		"rerank_cohere.rerank-v3.5": {
 			"object": "rerank-v3.5",
