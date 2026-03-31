@@ -67,8 +67,6 @@ _BUILTINS = {
 def _resolve(name: str, context: dict):
     """Resolve a dotted name against *context*, falling back to built-ins."""
     name = name.strip()
-    if name in _BUILTINS:
-        return _BUILTINS[name]()
 
     parts = name.split('.')
     value = context
@@ -78,6 +76,9 @@ def _resolve(name: str, context: dict):
         else:
             value = getattr(value, part, _MISSING)
         if value is _MISSING:
+            # Fall back to built-in helpers if not found in context
+            if name in _BUILTINS:
+                return _BUILTINS[name]()
             return ''
     return value
 
