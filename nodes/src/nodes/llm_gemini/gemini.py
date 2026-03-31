@@ -24,6 +24,7 @@
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.validation import sanitize_prompt
 from google import genai
 
 
@@ -136,6 +137,9 @@ class Chat(ChatBase):
             This method assumes self._model is set by the parent class.
             The model should be a valid Gemini model identifier (e.g., 'gemini-pro').
         """
+        # Sanitize control characters before sending to API
+        prompt = sanitize_prompt(prompt)
+
         # Generate content using the configured model
         response = self._client.models.generate_content(model=self._model, contents=prompt)
 

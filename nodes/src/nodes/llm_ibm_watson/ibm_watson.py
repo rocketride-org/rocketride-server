@@ -25,16 +25,27 @@ import re
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.validation import sanitize_prompt
 from ibm_watsonx_ai import Credentials
 from ibm_watsonx_ai.foundation_models import ModelInference
 from ibm_watsonx_ai.foundation_models.schema import TextChatParameters
 
 
 # Known IBM Cloud regions for Watson services
-_VALID_LOCATIONS = frozenset({
-    'us-south', 'us-east', 'eu-gb', 'eu-de', 'eu-es',
-    'jp-tok', 'jp-osa', 'au-syd', 'ca-tor', 'br-sao',
-})
+_VALID_LOCATIONS = frozenset(
+    {
+        'us-south',
+        'us-east',
+        'eu-gb',
+        'eu-de',
+        'eu-es',
+        'jp-tok',
+        'jp-osa',
+        'au-syd',
+        'ca-tor',
+        'br-sao',
+    }
+)
 
 _LOCATION_RE = re.compile(r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?$')
 
@@ -58,10 +69,7 @@ def _validate_location(location):
     if not _LOCATION_RE.match(location):
         raise ValueError(f'Invalid location format: {location!r}')
     if location not in _VALID_LOCATIONS:
-        raise ValueError(
-            f'Unknown IBM Cloud location: {location!r}. '
-            f'Valid locations: {", ".join(sorted(_VALID_LOCATIONS))}'
-        )
+        raise ValueError(f'Unknown IBM Cloud location: {location!r}. Valid locations: {", ".join(sorted(_VALID_LOCATIONS))}')
     return f'https://{location}.ml.cloud.ibm.com'
 
 
@@ -133,6 +141,9 @@ class Chat(ChatBase):
         """
         if not prompt:
             raise ValueError('Prompt is empty.')
+
+        # Sanitize control characters before sending to API
+        prompt = sanitize_prompt(prompt)
 
         messages = [{'role': 'user', 'content': prompt}]
 

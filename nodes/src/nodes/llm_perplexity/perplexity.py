@@ -40,6 +40,7 @@ from typing import Any, Dict
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.validation import sanitize_prompt
 from langchain_openai import ChatOpenAI
 
 
@@ -185,8 +186,11 @@ class Chat(ChatBase):
 
         for attempt in range(max_retries + 1):  # +1 for initial attempt
             try:
+                # Sanitize the prompt to remove control characters
+                prompt = sanitize_prompt(question.getPrompt())
+
                 # Ask the model
-                results = self._llm.invoke(question.getPrompt())
+                results = self._llm.invoke(prompt)
 
                 # Create and return the answer
                 answer = Answer(expectJson=question.expectJson)
