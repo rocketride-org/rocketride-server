@@ -63,7 +63,7 @@ class WebServer:
     Manage and run a FastAPI web server with exception handling, SSL support, and event loop management.
     """
 
-    def __init__(self, config: Dict[str, Any] = {}, **kwargs):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, **kwargs):
         """
         Initialize the WebServer instance with the FastAPI app and configuration.
 
@@ -156,7 +156,7 @@ class WebServer:
         )
 
         # Store the server configuration
-        self.config = config
+        self.config = config if config is not None else {}
 
         # Register a global exception handler for catching unexpected errors
         self.app.exception_handler(Exception)(self._general_exception_handler)
@@ -709,7 +709,7 @@ class WebServer:
             self._private_paths.append(path)
             self._compiled_private_paths = None
 
-    def use(self, moduleName: str, config: Dict[str, Any] = {}):
+    def use(self, moduleName: str, config: Optional[Dict[str, Any]] = None):
         """
         Dynamically loads a service module and enables its API endpoints.
 
@@ -745,7 +745,7 @@ class WebServer:
         moduleHandle = importlib.import_module(f'ai.modules.{moduleName}')
 
         # Init the module and register the module's endpoints with the server
-        moduleHandle.initModule(self, config)
+        moduleHandle.initModule(self, config if config is not None else {})
 
         # Add it to the module handle
         self.app.state.modules[moduleName] = moduleHandle
