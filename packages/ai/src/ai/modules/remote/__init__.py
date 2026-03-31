@@ -6,7 +6,7 @@ from .remote_delete import remote_delete
 from .remote_pipe import remote_pipe
 
 
-def initModule(server: WebServer, config: Autopipe = {}):
+def initModule(server: WebServer, config: Autopipe = None):
     """
     Initialize the module by registering API routes for search and configuration.
 

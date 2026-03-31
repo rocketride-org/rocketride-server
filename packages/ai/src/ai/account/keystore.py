@@ -1,4 +1,4 @@
-from typing import Dict, Tuple, Any, List
+from typing import Dict, Optional, Tuple, Any, List
 from rocketlib import ILoader
 
 
@@ -16,7 +16,7 @@ class KeyStore:
     - Enforcing access control based on API keys
     """
 
-    def __init__(self, config: Dict[str, Any] = {}, **kwargs) -> None:
+    def __init__(self, config: Optional[Dict[str, Any]] = None, **kwargs) -> None:
         """
         Initialize the keystore with configuration and optional parameters.
 
@@ -32,7 +32,7 @@ class KeyStore:
         self.token_map: Dict[str, Tuple[str, str, str, str]] = {}
 
         # Initialize the base class with the provided configuration
-        super().__init__(config, **kwargs)
+        super().__init__(config if config is not None else {}, **kwargs)
 
     async def assign_node(self, apikey: str, pipeline: str) -> Tuple[str, str]:
         """

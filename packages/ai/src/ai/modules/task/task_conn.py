@@ -164,10 +164,12 @@ class TaskConn(
         self._account_info: Optional[AccountInfo] = None
         self._authenticated = False
 
-    async def on_receive(self, message: Dict[str, Any] = {}) -> None:
+    async def on_receive(self, message: Optional[Dict[str, Any]] = None) -> None:
         """
         Intercept DAP dispatch: if not authenticated, only allow auth command; otherwise require auth first.
         """
+        if message is None:
+            message = {}
         if message.get('type') == 'request' and message.get('command') == 'auth':
             await super().on_receive(message)
             if not self._authenticated:
