@@ -41,7 +41,7 @@ from typing import Any, Dict, Tuple
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from ai.common.validation import sanitize_prompt
+from ai.common.validation import validate_prompt
 from mistralai.client import Mistral
 
 
@@ -244,8 +244,8 @@ class Chat(ChatBase):
 
         for attempt in range(max_retries + 1):
             try:
-                # Sanitize the prompt to remove control characters
-                prompt = sanitize_prompt(question.getPrompt())
+                # Validate + sanitize prompt (matches shared ChatBase behavior)
+                prompt = validate_prompt(question.getPrompt(), self.getTotalTokens(), self.getTokens)
 
                 # Create the chat message
                 messages = [{'role': 'user', 'content': prompt}]

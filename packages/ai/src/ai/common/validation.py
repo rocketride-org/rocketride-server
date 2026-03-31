@@ -72,6 +72,10 @@ def validate_prompt(prompt: str, max_tokens: int, token_counter) -> str:
     # Sanitize control characters
     prompt = sanitize_prompt(prompt)
 
+    # Re-check after sanitization to catch control-only prompts
+    if not prompt.strip():
+        raise ValueError('Prompt is empty after sanitization.')
+
     # Check token count - warn but don't block (ChatBase.chat_string already
     # has a softer check; this catches the truly egregious cases early)
     try:
@@ -123,6 +127,9 @@ def validate_max_tokens(output_tokens: int, total_tokens: int) -> int:
     """
     if not isinstance(output_tokens, int) or output_tokens < 1:
         raise ValueError(f'Output tokens must be a positive integer, got {output_tokens!r}.')
+
+    if not isinstance(total_tokens, int) or total_tokens < 1:
+        raise ValueError(f'Total tokens must be a positive integer, got {total_tokens!r}.')
 
     if output_tokens > MAX_OUTPUT_TOKENS:
         debug(f'Warning: Output tokens ({output_tokens}) exceeds maximum known limit ({MAX_OUTPUT_TOKENS}). Clamping to {MAX_OUTPUT_TOKENS}.')

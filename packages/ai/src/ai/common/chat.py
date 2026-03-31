@@ -67,12 +67,12 @@ class ChatBase:
         self._modelTotalTokens = config.get('modelTotalTokens', 16384)  # Default to 16K if not specified
         self._modelOutputTokens = config.get('modelOutputTokens', 4096)  # Default to 4K if not specified
 
+        # Validate and clamp output tokens against known safe maximums
+        self._modelOutputTokens = validate_max_tokens(self._modelOutputTokens, self._modelTotalTokens)
+
         # We really can't work with a model that has a very small output window
         if self._modelOutputTokens < 1024:
             raise ValueError(f'Model output tokens ({self._modelOutputTokens}) must be at least 1024')
-
-        # Validate and clamp output tokens against known safe maximums
-        self._modelOutputTokens = validate_max_tokens(self._modelOutputTokens, self._modelTotalTokens)
 
         # Log the configuration for debugging and monitoring purposes
         # This helps track which model and limits are being used in production
