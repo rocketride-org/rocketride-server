@@ -7,7 +7,7 @@
 	"node": "python",
 	"path": "nodes.audio_tts",
 	"prefix": "audio_tts",
-	"description": ["Converts incoming text into speech audio using local or cloud TTS engines.", "Output is driven by wiring: audio lane streams PCM chunks; text lane emits JSON with mime type and base64 (no server file path — suitable when the engine runs remotely).", "Encoding (WAV vs MP3) is chosen automatically from connected output lanes (not a form field).", "With --modelserver: Coqui/Kokoro/Bark (HF transformers), Piper (ONNX in-process), OpenAI TTS, and ElevenLabs are served or proxied where loaders exist; without it, each engine runs or calls APIs from the engine host.", "Every profile uses curated dropdowns — see ``requirements.txt`` + ``depends()`` on load: ``piper-tts``, ``transformers``, ``lameenc`` (MP3 in-process), ``imageio-ffmpeg`` (ffmpeg fallback), ``requests``, etc."],
+	"description": ["Converts incoming text into speech audio using local or cloud TTS engines.", "Output is driven by wiring: audio lane streams PCM chunks; text lane emits JSON with mime type and base64 (no server file path — suitable when the engine runs remotely).", "Encoding (WAV vs MP3) is chosen automatically from connected output lanes (not a form field).", "Routing: without a model server, the engine runs locally and chooses CPU/GPU on the engine host; each profile downloads its weights/voices there. With --modelserver, Bark uses HF transformers on the server; Kokoro uses the kokoro loader; Piper uses the Piper loader; OpenAI/ElevenLabs may be proxied.", "Every profile uses curated dropdowns — see ``requirements.txt`` + ``depends()`` on load: ``piper-tts``, ``transformers``, ``kokoro``, ``lameenc``, ``imageio-ffmpeg``, ``requests``, etc."],
 	"icon": "audio-player.svg",
 	"lanes": {
 		"text": ["audio", "text"]
@@ -33,13 +33,10 @@
 				"engine": "piper",
 				"piper_voice": "en_US-lessac-medium"
 			},
-			"coqui-default": {
-				"engine": "coqui",
-				"coqui_model": "coqui/XTTS-v2"
-			},
 			"kokoro-default": {
 				"engine": "kokoro",
-				"kokoro_model": "hexgrad/Kokoro-82M"
+				"kokoro_lang_code": "a",
+				"kokoro_voice": "af_heart"
 			},
 			"bark-default": {
 				"engine": "bark",
@@ -60,19 +57,84 @@
 		}
 	},
 	"fields": {
-		"audio_tts.coqui_model": {
+		"audio_tts.kokoro_lang_code": {
 			"type": "string",
-			"title": "Model",
-			"description": "Hugging Face model for Coqui (text-to-audio).",
-			"default": "coqui/XTTS-v2",
-			"enum": [["coqui/XTTS-v2", "Coqui XTTS v2"]]
+			"title": "Language",
+			"description": "Must match the Kokoro voice family (see hexgrad/Kokoro-82M VOICES.md).",
+			"default": "a",
+			"enum": [
+				["a", "American English"],
+				["b", "British English"],
+				["e", "Spanish"],
+				["f", "French"],
+				["h", "Hindi"],
+				["i", "Italian"],
+				["j", "Japanese (may need misaki[ja])"],
+				["p", "Brazilian Portuguese"],
+				["z", "Mandarin Chinese (may need misaki[zh])"]
+			]
 		},
-		"audio_tts.kokoro_model": {
+		"audio_tts.kokoro_voice": {
 			"type": "string",
-			"title": "Model",
-			"description": "Hugging Face model for Kokoro.",
-			"default": "hexgrad/Kokoro-82M",
-			"enum": [["hexgrad/Kokoro-82M", "Kokoro 82M"]]
+			"title": "Voice",
+			"description": "Kokoro voice id; pair with Language (e.g. af_* / am_* with American English).",
+			"default": "af_heart",
+			"enum": [
+				["af_heart", "American — af_heart"],
+				["af_bella", "American — af_bella"],
+				["af_nicole", "American — af_nicole"],
+				["af_sarah", "American — af_sarah"],
+				["af_sky", "American — af_sky"],
+				["af_alloy", "American — af_alloy"],
+				["af_aoede", "American — af_aoede"],
+				["af_jessica", "American — af_jessica"],
+				["af_kore", "American — af_kore"],
+				["af_nova", "American — af_nova"],
+				["af_river", "American — af_river"],
+				["am_adam", "American — am_adam"],
+				["am_echo", "American — am_echo"],
+				["am_eric", "American — am_eric"],
+				["am_fenrir", "American — am_fenrir"],
+				["am_liam", "American — am_liam"],
+				["am_michael", "American — am_michael"],
+				["am_onyx", "American — am_onyx"],
+				["am_puck", "American — am_puck"],
+				["am_santa", "American — am_santa"],
+				["bf_emma", "British — bf_emma"],
+				["bf_isabella", "British — bf_isabella"],
+				["bf_alice", "British — bf_alice"],
+				["bf_lily", "British — bf_lily"],
+				["bm_george", "British — bm_george"],
+				["bm_lewis", "British — bm_lewis"],
+				["bm_daniel", "British — bm_daniel"],
+				["bm_fable", "British — bm_fable"],
+				["jf_alpha", "Japanese — jf_alpha"],
+				["jf_gongitsune", "Japanese — jf_gongitsune"],
+				["jf_nezumi", "Japanese — jf_nezumi"],
+				["jf_tebukuro", "Japanese — jf_tebukuro"],
+				["jm_kumo", "Japanese — jm_kumo"],
+				["zf_xiaobei", "Mandarin — zf_xiaobei"],
+				["zf_xiaoni", "Mandarin — zf_xiaoni"],
+				["zf_xiaoxiao", "Mandarin — zf_xiaoxiao"],
+				["zf_xiaoyi", "Mandarin — zf_xiaoyi"],
+				["zm_yunjian", "Mandarin — zm_yunjian"],
+				["zm_yunxi", "Mandarin — zm_yunxi"],
+				["zm_yunxia", "Mandarin — zm_yunxia"],
+				["zm_yunyang", "Mandarin — zm_yunyang"],
+				["ef_dora", "Spanish — ef_dora"],
+				["em_alex", "Spanish — em_alex"],
+				["em_santa", "Spanish — em_santa"],
+				["ff_siwis", "French — ff_siwis"],
+				["hf_alpha", "Hindi — hf_alpha"],
+				["hf_beta", "Hindi — hf_beta"],
+				["hm_omega", "Hindi — hm_omega"],
+				["hm_psi", "Hindi — hm_psi"],
+				["if_sara", "Italian — if_sara"],
+				["im_nicola", "Italian — im_nicola"],
+				["pf_dora", "Portuguese — pf_dora"],
+				["pm_alex", "Portuguese — pm_alex"],
+				["pm_santa", "Portuguese — pm_santa"]
+			]
 		},
 		"audio_tts.bark_model": {
 			"type": "string",
@@ -175,13 +237,9 @@
 			"object": "piper",
 			"properties": ["audio_tts.piper_voice"]
 		},
-		"audio_tts.form.coqui": {
-			"object": "coqui-default",
-			"properties": ["audio_tts.coqui_model"]
-		},
 		"audio_tts.form.kokoro": {
 			"object": "kokoro-default",
-			"properties": ["audio_tts.kokoro_model"]
+			"properties": ["audio_tts.kokoro_lang_code", "audio_tts.kokoro_voice"]
 		},
 		"audio_tts.form.bark": {
 			"object": "bark-default",
@@ -201,7 +259,6 @@
 			"default": "piper",
 			"enum": [
 				["piper", "Piper"],
-				["coqui-default", "Coqui TTS"],
 				["kokoro-default", "Kokoro"],
 				["bark-default", "Bark"],
 				["openai-tts", "OpenAI TTS"],
@@ -211,10 +268,6 @@
 				{
 					"value": "piper",
 					"properties": ["audio_tts.form.piper"]
-				},
-				{
-					"value": "coqui-default",
-					"properties": ["audio_tts.form.coqui"]
 				},
 				{
 					"value": "kokoro-default",
@@ -244,11 +297,11 @@
 	],
 	"test": {
 		"requires": ["ROCKETRIDE_TTS_TEST_ENABLED"],
-		"profiles": ["coqui-default", "kokoro-default", "bark-default"],
+		"profiles": ["kokoro-default", "bark-default"],
 		"outputs": ["text"],
 		"cases": [
 			{
-				"name": "Coqui/Kokoro/Bark return payload",
+				"name": "Kokoro/Bark return payload",
 				"text": "Hello from RocketRide",
 				"expect": {
 					"text": {

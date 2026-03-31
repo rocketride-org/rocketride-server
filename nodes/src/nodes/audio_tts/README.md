@@ -17,7 +17,6 @@ Text-to-speech node for RocketRide pipelines.
 
 - Local / model-based:
   - `piper`
-  - `coqui`
   - `kokoro`
   - `bark` (`bak` is accepted as alias)
 - Cloud:
@@ -28,9 +27,11 @@ Text-to-speech node for RocketRide pipelines.
 
 When the engine runs with **`--modelserver`**, this node routes **every** backend through the model server where a matching loader exists. You do **not** toggle “use model server” per field.
 
+**Placement rule:** Without a model server, the pipeline engine can run locally and each engine picks **CPU vs GPU on the engine host**. With **`--modelserver`**, Piper / Bark / Kokoro (and cloud loaders) use the **model server** where implemented. **`depends(requirements.txt)`** still installs **pip packages** on the engine.
+
 ### Local / Hub model weights (GPU on the server)
 
-**Coqui, Kokoro, Bark** use `ai.common.models.transformers.pipeline(..., device=None)`. Weights download on the **model server host** (Hugging Face cache there), and inference runs there. The node **reuses a single pipeline client** per loaded global (same HF `model` id) so the server is not asked to load once per utterance.
+**Bark** uses `ai.common.models.transformers.pipeline(..., device=None)` with Hugging Face `text-to-audio`. **Kokoro** uses **`kokoro.KPipeline`**. With **`--modelserver`**, Bark uses a **remote HF pipeline**; Kokoro uses **`KokoroLoader`**. **Without** **`--modelserver`**, Bark loads HF locally; Kokoro uses **local `KPipeline` per `kokoro_lang_code`**.
 
 ### Piper (ONNX + `piper-tts`)
 
@@ -44,14 +45,15 @@ With **`--modelserver`**, the node uses **`model_type=piper`**: Hub ONNX cache a
 
 On **`beginGlobal`**, the node calls **`depends(requirements.txt)`** so **all profiles** pull their declared pip deps:
 
-| Area                      | Packages (see `requirements.txt`)                                                                            |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| **Piper**                 | `piper-tts` — **`PiperVoice`** in-process                                                                    |
-| **Coqui / Kokoro / Bark** | `transformers` — HF **`pipeline`** in-process (**PyTorch** still comes from the engine / model-server image) |
-| **OpenAI / ElevenLabs**   | `requests` — HTTPS to vendor APIs in-process                                                                 |
-| **MP3 (Piper + HF)**      | `lameenc` — WAV→MP3 in-process; `imageio-ffmpeg` — bundled **ffmpeg** only as fallback (subprocess)          |
+| Area                          | Packages (see `requirements.txt`)                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Piper**                     | `piper-tts` — **`PiperVoice`** in-process                                                                                                                                                                                                                                                                                                                                                          |
+| **Bark**                      | `transformers` — HF **`pipeline`** `text-to-audio` (**PyTorch** from the engine image)                                                                                                                                                                                                                                                                                                             |
+| **Kokoro**                    | `kokoro` + `soundfile` + **`en_core_web_sm`** (spaCy model wheel) — **`KPipeline`** + **misaki** English G2P. Without that model, misaki may run **`spacy.cli.download`**, which uses **wasabi** and can **`sys.exit(1)`**, surfacing as a cryptic **`Exception: 1`** in the engine. Match **Language** + **Voice** to [VOICES.md](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md). |
+| **OpenAI / ElevenLabs**       | `requests` — HTTPS to vendor APIs in-process                                                                                                                                                                                                                                                                                                                                                       |
+| **MP3 (Piper + HF + Kokoro)** | `lameenc` — WAV→MP3 in-process; `imageio-ffmpeg` — bundled **ffmpeg** as fallback (subprocess)                                                                                                                                                                                                                                                                                                     |
 
-The model server’s Piper worker installs **`requirements_piper.txt`** (`piper-tts`, Hub helpers); HF loads use the server’s transformers/torch stack.
+The model server installs loader deps on demand (**`requirements_piper.txt`**, **`requirements_kokoro.txt`**, etc.); HF **Bark** uses the server’s transformers/torch stack.
 
 ## Key configuration fields
 
@@ -59,7 +61,8 @@ The UI uses **`audio_tts.*`** field ids; merged node config still exposes short 
 
 - `engine` — set by the profile in `preconfig` (not a separate dropdown).
 - **Piper:** **`piper_voice`** — **Voice model** dropdown (presets from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) via Hugging Face Hub). The ONNX file is downloaded and cached on first use; there is no custom path field in the form. Profile id **`piper`** matches the nested config key in the pipe (`piper: { … }`).
-- **Coqui / Kokoro / Bark:** **`coqui_model`**, **`kokoro_model`**, **`bark_model`** — each profile has its own dropdown of Hugging Face ids (curated list in `services.json`). Legacy pipes may still use the single key **`model`**; the node maps it when the new keys are absent.
+- **Bark:** **`bark_model`** — Hugging Face id (curated). Legacy **`model`** still merges when the new keys are absent.
+- **Kokoro:** **`kokoro_lang_code`**, **`kokoro_voice`** — must match Kokoro’s voice table (not `transformers`).
 - **OpenAI:** **`openai_model`**, **`openai_voice`**, **`api_key`** (dropdowns for model and voice). Legacy **`model`** / **`voice`** are still read if present.
 - **ElevenLabs:** **`elevenlabs_model`**, **`elevenlabs_voice`**, **`api_key`**. Legacy **`model`** / **`voice`** still merge for old configs.
 
@@ -72,10 +75,17 @@ The pipeline often runs on a **server**. A filesystem path on that machine is **
 
 Downstream nodes (e.g. response / webhook) can turn `base64` into a download link or attachment if your product needs that.
 
+## Troubleshooting Kokoro + `wasabi` / `Exception: 1`
+
+If you see **`Exception: 1`** with a stack frame under **`wasabi/printer.py`** while using **Kokoro** (especially English `kokoro_lang_code` **`a`** / **`b`**): **misaki** initializes **spaCy** and, if **`en_core_web_sm`** is not installed, calls **`spacy.cli.download`**. That CLI path uses **wasabi** and may end with **`sys.exit(1)`**, which embedded pipeline hosts often report as a bare **`1`**.
+
+**Fix:** Ensure the spaCy English small model is installed before running the pipeline. This repo’s **`requirements.txt`** pulls the **`en_core_web_sm-3.8.0`** wheel; re-run / redeploy so **`depends()`** installs it, or manually: `python -m spacy download en_core_web_sm` (match the **spaCy** version in your environment). Non-English Kokoro languages use other misaki paths (e.g. espeak) and may hit different missing-dependency errors.
+
 ## Cross-platform notes
 
 - Python implementation is compatible with Windows, Linux, and macOS.
 - **Piper:** **`piper-tts`** / **`PiperVoice`** in-process.
-- **Coqui / Kokoro / Bark:** **`transformers`** pipeline in-process; **torch** from the engine bundle.
+- **Bark:** **`transformers`** + **torch** (engine bundle).
+- **Kokoro:** **`kokoro`** + **torch** (via that stack); **espeak-ng** may be needed for some languages (see Kokoro docs).
 - **Cloud:** **`requests`** only.
 - **MP3:** **`lameenc`** first (no ffmpeg); fallback **`ffmpeg`** via **`imageio-ffmpeg`** or `PATH`.

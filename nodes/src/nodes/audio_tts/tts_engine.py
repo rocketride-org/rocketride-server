@@ -28,12 +28,15 @@ class TTSEngine:
         """Initialize TTS engine wrapper with normalized node configuration."""
         self.config = config
         self._piper_remote_client: Optional[Any] = None
+        self._kokoro_remote_client: Optional[Any] = None
         self._openai_remote_client: Optional[Any] = None
         self._elevenlabs_remote_client: Optional[Any] = None
         self._hf_pipeline: Optional[Any] = None
         self._hf_pipeline_key: Optional[tuple] = None
         self._piper_voice: Optional[Any] = None
         self._piper_voice_onnx: Optional[str] = None
+        self._kokoro_pipeline: Optional[Any] = None
+        self._kokoro_cache_lang: Optional[str] = None
 
     def _dispose_hf_pipeline(self) -> None:
         pipe = self._hf_pipeline
@@ -51,8 +54,11 @@ class TTSEngine:
         self._dispose_hf_pipeline()
         self._piper_voice = None
         self._piper_voice_onnx = None
+        self._kokoro_pipeline = None
+        self._kokoro_cache_lang = None
         for client in (
             self._piper_remote_client,
+            self._kokoro_remote_client,
             self._openai_remote_client,
             self._elevenlabs_remote_client,
         ):
@@ -62,6 +68,7 @@ class TTSEngine:
                 except Exception:
                     pass
         self._piper_remote_client = None
+        self._kokoro_remote_client = None
         self._openai_remote_client = None
         self._elevenlabs_remote_client = None
 
@@ -69,8 +76,6 @@ class TTSEngine:
         engine = str(self.config.get('engine', 'piper')).lower()
         if engine == 'piper':
             return self._piper(text)
-        if engine == 'coqui':
-            return self._coqui(text)
         if engine == 'kokoro':
             return self._kokoro(text)
         if engine in ('bark', 'bak'):
@@ -101,6 +106,28 @@ class TTSEngine:
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except FileNotFoundError as e:
             raise RuntimeError(f'MP3 output needs ``lameenc`` (see node ``requirements.txt``) or ffmpeg ({ffmpeg_bin!r}). Install ``lameenc`` via depends(), or ffmpeg (e.g. brew install ffmpeg), or rely on ``imageio-ffmpeg`` when packaged with the engine.') from e
+
+    def _save_mono_float_audio(self, audio_arr: np.ndarray, sampling_rate: int, out_path: str, output_format: str) -> None:
+        """Write mono float32 [-1,1] samples to WAV or MP3 (via temp WAV + transcoding)."""
+        output_format = output_format.lower()
+        audio_arr = np.clip(np.asarray(audio_arr, dtype=np.float32), -1.0, 1.0)
+        if audio_arr.size == 0:
+            raise ValueError('TTS returned empty audio')
+        wav_path = out_path
+        if output_format == 'mp3':
+            fd, wav_path = tempfile.mkstemp(suffix='.wav')
+            os.close(fd)
+        with wave.open(wav_path, 'wb') as wavf:
+            wavf.setnchannels(1)
+            wavf.setsampwidth(2)
+            wavf.setframerate(int(sampling_rate))
+            wavf.writeframes((audio_arr * 32767).astype(np.int16).tobytes())
+        if output_format == 'mp3':
+            self._transcode_wav_to_mp3(wav_path, out_path)
+            try:
+                os.remove(wav_path)
+            except OSError:
+                pass
 
     def _transformers_tts(self, text: str, model_default: str) -> Dict[str, Any]:
         from ai.common.models.transformers import pipeline as rr_pipeline
@@ -138,31 +165,96 @@ class TTSEngine:
             raise ValueError('TTS model returned empty audio')
         audio_arr = np.clip(audio_arr, -1.0, 1.0)
 
-        wav_path = out_path
-        if output_format == 'mp3':
-            fd, wav_path = tempfile.mkstemp(suffix='.wav')
-            os.close(fd)
-
-        with wave.open(wav_path, 'wb') as wavf:
-            wavf.setnchannels(1)
-            wavf.setsampwidth(2)
-            wavf.setframerate(sampling_rate)
-            wavf.writeframes((audio_arr * 32767).astype(np.int16).tobytes())
-
-        if output_format == 'mp3':
-            self._transcode_wav_to_mp3(wav_path, out_path)
-            try:
-                os.remove(wav_path)
-            except OSError:
-                pass
+        self._save_mono_float_audio(audio_arr, sampling_rate, out_path, output_format)
 
         return {'path': out_path, 'mime_type': _mime_from_format(output_format)}
 
-    def _coqui(self, text: str) -> Dict[str, Any]:
-        return self._transformers_tts(text, model_default='coqui/XTTS-v2')
+    def _ensure_kokoro_remote_client(self) -> None:
+        if self._kokoro_remote_client is not None:
+            return
+        from ai.common.models.base import ModelClient, get_model_server_address
+
+        addr = get_model_server_address()
+        if not addr:
+            raise RuntimeError('Kokoro model server mode requires --modelserver')
+        host, port = addr
+        lang = str(self.config.get('kokoro_lang_code', 'a') or 'a').strip()
+        client = ModelClient(port, host)
+        client.load_model(
+            'hexgrad/Kokoro-82M',
+            'kokoro',
+            {
+                'lang_code': lang,
+                'repo_id': 'hexgrad/Kokoro-82M',
+            },
+        )
+        self._kokoro_remote_client = client
 
     def _kokoro(self, text: str) -> Dict[str, Any]:
-        return self._transformers_tts(text, model_default='hexgrad/Kokoro-82M')
+        """Kokoro-82M via the ``kokoro`` PyPI package (not HuggingFace ``transformers`` AutoModel)."""
+        voice = str(self.config.get('kokoro_voice', 'af_heart') or 'af_heart').strip()
+        out_path = self.config.get('output_path')
+        output_format = str(self.config.get('output_format', 'wav')).lower()
+        sampling_rate = 24000
+
+        if self.config.get('kokoro_use_model_server'):
+            self._ensure_kokoro_remote_client()
+            body = self._kokoro_remote_client.send_command(
+                'inference',
+                {
+                    'inputs': [{'text': text, 'voice': voice, 'speed': 1}],
+                    'output_fields': ['wav_base64', 'mime_type'],
+                },
+            )
+            rows = body.get('result') or []
+            if not rows:
+                raise ValueError('Kokoro model server returned no result')
+            row = rows[0]
+            wav_bytes = base64.b64decode(row['wav_base64'])
+            if output_format == 'mp3':
+                fd, wav_path = tempfile.mkstemp(suffix='.wav')
+                os.close(fd)
+                try:
+                    with open(wav_path, 'wb') as f:
+                        f.write(wav_bytes)
+                    self._transcode_wav_to_mp3(wav_path, out_path)
+                finally:
+                    try:
+                        os.remove(wav_path)
+                    except OSError:
+                        pass
+            else:
+                with open(out_path, 'wb') as f:
+                    f.write(wav_bytes)
+            return {'path': out_path, 'mime_type': _mime_from_format(output_format)}
+
+        try:
+            from kokoro import KPipeline
+        except ImportError as e:
+            raise RuntimeError('Kokoro requires ``kokoro`` (and usually ``soundfile``). Install ``nodes/audio_tts/requirements.txt`` via depends(). For some languages you may need extra misaki extras (see Kokoro docs).') from e
+
+        lang = str(self.config.get('kokoro_lang_code', 'a') or 'a').strip()
+
+        if self._kokoro_pipeline is None or self._kokoro_cache_lang != lang:
+            self._kokoro_pipeline = KPipeline(lang_code=lang)
+            self._kokoro_cache_lang = lang
+
+        chunks: list[np.ndarray] = []
+        for _gs, _ps, audio in self._kokoro_pipeline(text, voice=voice, speed=1):
+            arr = np.asarray(audio, dtype=np.float32)
+            if arr.size == 0:
+                continue
+            if arr.ndim > 1:
+                arr = arr.reshape(-1)
+            chunks.append(arr)
+
+        if not chunks:
+            raise ValueError('Kokoro returned no audio samples')
+        audio_arr = np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
+
+        self._save_mono_float_audio(audio_arr, sampling_rate, out_path, output_format)
+
+        return {'path': out_path, 'mime_type': _mime_from_format(output_format)}
 
     def _bark(self, text: str) -> Dict[str, Any]:
         return self._transformers_tts(text, model_default='suno/bark-small')

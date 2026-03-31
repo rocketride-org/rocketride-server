@@ -26,12 +26,6 @@ class IGlobal(IGlobalBase):
     def _resolve_tts_model(self, cfg: Dict[str, Any], engine: str) -> str:
         """Map profile-specific keys (+ legacy ``model``) to the HF/API id TTSEngine expects."""
         e = engine.lower()
-        if e == 'coqui':
-            v = self._read_cfg(cfg, 'coqui_model', '') or self._read_cfg(cfg, 'model', '')
-            return str(v or 'coqui/XTTS-v2').strip()
-        if e == 'kokoro':
-            v = self._read_cfg(cfg, 'kokoro_model', '') or self._read_cfg(cfg, 'model', '')
-            return str(v or 'hexgrad/Kokoro-82M').strip()
         if e in ('bark', 'bak'):
             v = self._read_cfg(cfg, 'bark_model', '') or self._read_cfg(cfg, 'model', '')
             return str(v or 'suno/bark-small').strip()
@@ -69,8 +63,12 @@ class IGlobal(IGlobalBase):
 
         piper_voice = str(self._read_cfg(cfg, 'piper_voice', '') or '').strip()
         voice_model = ''
+        # Model placement: without a model-server address, the engine runs locally and each
+        # engine uses CPU/GPU on the engine host. With --modelserver (address set), Piper /
+        # Bark / Kokoro (and cloud loaders) use the model server where implemented.
         _ms = get_model_server_address() is not None
         piper_use_model_server = engine == 'piper' and _ms
+        kokoro_use_model_server = engine == 'kokoro' and _ms
         openai_use_model_server = engine == 'openai' and _ms
         elevenlabs_use_model_server = engine == 'elevenlabs' and _ms
 
@@ -88,9 +86,12 @@ class IGlobal(IGlobalBase):
             'voice_model': voice_model,
             'piper_voice': piper_voice,
             'piper_use_model_server': piper_use_model_server,
+            'kokoro_use_model_server': kokoro_use_model_server,
             'openai_use_model_server': openai_use_model_server,
             'elevenlabs_use_model_server': elevenlabs_use_model_server,
             'model': self._resolve_tts_model(cfg, engine),
+            'kokoro_lang_code': str(self._read_cfg(cfg, 'kokoro_lang_code', 'a') or 'a').strip(),
+            'kokoro_voice': str(self._read_cfg(cfg, 'kokoro_voice', 'af_heart') or 'af_heart').strip(),
             'api_key': self._read_cfg(cfg, 'api_key', ''),
             # Retained for model-server load options / identity; local Piper uses ``PiperVoice`` in-process.
             'piper_bin': 'piper',
@@ -136,6 +137,10 @@ class IGlobal(IGlobalBase):
             pv = str(self._read_cfg(cfg, 'piper_voice', '') or '').strip()
             if not pv:
                 raise Exception('Piper: choose a voice preset from the list (downloads on first run)')
+        if engine == 'kokoro':
+            kv = str(self._read_cfg(cfg, 'kokoro_voice', '') or '').strip()
+            if not kv:
+                raise Exception('Kokoro: choose a voice from the list')
 
     def synthesize(self, text: str, output_format: str) -> Dict[str, Any]:
         self._cleanup_stale_outputs()

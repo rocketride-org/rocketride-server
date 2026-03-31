@@ -8,37 +8,50 @@ This document describes how the **Text To Speech** RocketRide node is wired: con
 
 - **Curated UI:** Every profile uses **dropdowns** (`services.json` enums) for models/voices — no free-text Hub/API ids in the form for normal use.
 - **Pip-managed deps:** `beginGlobal` calls **`depends(requirements.txt)`** so the engine installs declared packages for this node (same pattern as other nodes).
-- **In-process synthesis where possible:** No reliance on a standalone `piper` shell binary; Piper uses **`piper.PiperVoice`**. HF engines use **`transformers` pipeline** in-process. Cloud engines use **`requests`**.
+- **In-process synthesis where possible:** Piper uses **`piper.PiperVoice`**. **Bark** uses **`transformers` pipeline** (`text-to-audio`). **Kokoro** uses **`kokoro.KPipeline`**. Cloud engines use **`requests`**.
 - **MP3 without mandatory system ffmpeg:** Prefer **`lameenc`** (LAME in-process). Fallback: **`ffmpeg`** subprocess using **`imageio-ffmpeg`**’s bundled binary or `PATH`.
 - **`--modelserver`:** When set, engines that have loaders are proxied through the **model server** (DAP); the node does not expose a separate “use model server” toggle.
+- **GPU + downloads:** With **`--modelserver`**, **Bark** and **Kokoro** (and Piper/OpenAI/ElevenLabs where proxied) load on the **model server**. Without **`--modelserver`**, local engines download on the **engine** host.
+
+### Model placement rule (every profile)
+
+| Mode                                                        | Where the engine runs                                                                                                    | GPU / downloads                                                                                                                                                                                                                                      |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **No model server** (`get_model_server_address()` is unset) | Pipeline engine host (often “local”)                                                                                     | Each engine picks CPU vs GPU on **that** host; Hub / Piper / Kokoro caches download **there** on first use.                                                                                                                                          |
+| **`--modelserver` active** (address is set)                 | Same engine process, but TTS **weights and voice files** are not loaded from Hub/cache in the node for supported engines | **Per profile:** Piper → `PiperLoader`; **Bark** → `transformers` `PipelineProxy`; Kokoro → `KokoroLoader`; OpenAI/ElevenLabs → cloud loaders when proxied. The engine still runs `depends(requirements.txt)` (pip packages for codecs/client code). |
+
+CLI flag name in deployments is typically **`--modelserver`** (one word); behavior is “if a model-server endpoint is configured, route downloadable models there.”
 
 ---
 
 ## Layout (main files)
 
-| Piece                                              | Role                                                                                                                       |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `services.json`                                    | Profiles, enums, `preconfig`, conditional forms (`audio_tts.form.*`).                                                      |
-| `IGlobal.py`                                       | `depends(requirements.txt)`, merge profile config → `TTSEngine` config, Piper Hub cache path when local.                   |
-| `tts_engine.py`                                    | Dispatch by `engine`: Piper / Coqui / Kokoro / Bark / OpenAI / ElevenLabs; MP3 transcoding; optional model-server clients. |
-| `piper_catalog.py`                                 | Thin re-export of Hub cache for Piper ONNX voices.                                                                         |
-| `piper_native.py` (under `ai.common.models.audio`) | `PiperVoice.load` + `synthesize_wav` to file.                                                                              |
-| `wav_to_mp3.py` (under `ai.common.models.audio`)   | `lameenc` WAV→MP3; boolean “try” for fallback.                                                                             |
-| `piper_loader.py` (model server)                   | Lazy **`PiperVoice`** per loaded model; inference writes temp WAV in-process.                                              |
-| `requirements.txt`                                 | Single manifest for the node’s pip installs (see table below).                                                             |
+| Piece                                              | Role                                                                                                               |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `services.json`                                    | Profiles, enums, `preconfig`, conditional forms (`audio_tts.form.*`).                                              |
+| `IGlobal.py`                                       | `depends(requirements.txt)`, merge profile config → `TTSEngine` config, Piper Hub cache path when local.           |
+| `tts_engine.py`                                    | Dispatch by `engine`: Piper / Kokoro / Bark / OpenAI / ElevenLabs; MP3 transcoding; optional model-server clients. |
+| `piper_catalog.py`                                 | Thin re-export of Hub cache for Piper ONNX voices.                                                                 |
+| `piper_native.py` (under `ai.common.models.audio`) | `PiperVoice.load` + `synthesize_wav` to file.                                                                      |
+| `wav_to_mp3.py` (under `ai.common.models.audio`)   | `lameenc` WAV→MP3; boolean “try” for fallback.                                                                     |
+| `piper_loader.py` (model server)                   | Lazy **`PiperVoice`** per loaded model; inference writes temp WAV in-process.                                      |
+| `kokoro_loader.py` (model server)                  | **`KPipeline`** per `lang_code` / repo; GPU via `allocate_gpu`; WAV base64 like Piper.                             |
+| `requirements.txt`                                 | Single manifest for the node’s pip installs (see table below).                                                     |
 
 ---
 
 ## `requirements.txt` (what gets installed via `depends`)
 
-| Dependency          | Used by                                                         |
-| ------------------- | --------------------------------------------------------------- |
-| `requests`, `numpy` | HTTP TTS, array handling                                        |
-| `huggingface_hub`   | Piper voice cache / Hub                                         |
-| `piper-tts`         | Piper **`PiperVoice`** (ONNX + espeak data in package)          |
-| `transformers`      | Coqui / Kokoro / Bark **`pipeline(..., task='text-to-audio')`** |
-| `lameenc`           | MP3 encoding without external ffmpeg when possible              |
-| `imageio-ffmpeg`    | Locate bundled **ffmpeg** for fallback transcoding              |
+| Dependency             | Used by                                                                                                         |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `requests`, `numpy`    | HTTP TTS, array handling                                                                                        |
+| `huggingface_hub`      | Piper voice cache / Hub                                                                                         |
+| `piper-tts`            | Piper **`PiperVoice`** (ONNX + espeak data in package)                                                          |
+| `transformers`         | Bark **`pipeline(..., task='text-to-audio')`**                                                                  |
+| `kokoro`, `soundfile`  | Kokoro **`KPipeline`** (Kokoro-82M weights via `kokoro` PyPI)                                                   |
+| `en_core_web_sm` wheel | Kokoro EN G2P (**misaki** / **spaCy**); avoids `spacy.cli.download` → **wasabi** `sys.exit(1)` (“Exception: 1”) |
+| `lameenc`              | MP3 encoding without external ffmpeg when possible                                                              |
+| `imageio-ffmpeg`       | Locate bundled **ffmpeg** for fallback transcoding                                                              |
 
 **PyTorch** is **not** pinned here: it is expected from the **engine / model-server** image (same as other HF nodes).
 
@@ -85,9 +98,13 @@ flowchart TB
   P -->|yes| PM["ModelClient → PiperLoader on server\n(base64 WAV back)"]
   P -->|no| PL["piper_native: PiperVoice\n→ WAV file"]
 
-  B -->|coqui / kokoro / bark| H{HF remote?}
+  B -->|bark| H{HF remote?}
   H -->|model server| HM["transformers pipeline\non server host"]
   H -->|local| HL["transformers pipeline\nin engine process"]
+
+  B -->|kokoro| K{kokoro_use_model_server?}
+  K -->|yes| KM["ModelClient → KokoroLoader\n(base64 WAV back)"]
+  K -->|no| KL["kokoro.KPipeline\n(in engine process)"]
 
   B -->|openai| O{openai_use_model_server?}
   O -->|yes| OM["ModelClient → openai_tts loader"]
@@ -99,6 +116,8 @@ flowchart TB
 
   PL --> M["MP3? lameenc → else ffmpeg"]
   HL --> M
+  KL --> M
+  KM --> M2
   PM --> M2["MP3? lameenc → else ffmpeg"]
   HM --> M
   OM --> OM2["Usually already MP3"]
