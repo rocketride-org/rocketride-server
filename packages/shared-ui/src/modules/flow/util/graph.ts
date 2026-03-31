@@ -146,7 +146,8 @@ export const getNodesFromProject = (project: IProject): INode[] => {
 				...(raw.ui ?? {}),
 			};
 			// Fallback: read position from component root (template/legacy format)
-			if (ui.position.x === 0 && ui.position.y === 0 && (raw as Record<string, unknown>).position) {
+			// Only apply if ui.position was NOT explicitly set in raw.ui
+			if (!raw.ui?.position && (raw as Record<string, unknown>).position) {
 				const rawPos = (raw as Record<string, unknown>).position as { x?: number; y?: number };
 				if (rawPos?.x !== undefined || rawPos?.y !== undefined) {
 					ui.position = { x: rawPos.x ?? 0, y: rawPos.y ?? 0 };
