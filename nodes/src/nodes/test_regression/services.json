@@ -1,0 +1,195 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Test: Regression",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "test_regression://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": [
+		"test"
+	],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.test_regression",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "TestRegression",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": [
+		"A pipeline regression testing component that captures output snapshots and compares ",
+		"them against golden files to detect unintended changes. Supports exact, fuzzy, and ",
+		"semantic comparison modes with configurable similarity thresholds. Golden files are ",
+		"keyed by SHA-256 content hashes for deterministic snapshot management. Produces unified ",
+		"diffs when regressions are detected, enabling fast root-cause analysis."
+	],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "test.svg",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	"tile": [
+		"Mode: ${parameters.test_regression.matchMode}"
+	],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"text": [
+			"text"
+		]
+	},
+	"input": [
+		{
+			"lane": "text",
+			"output": [
+				{
+					"lane": "text"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"snapshotDir": ".snapshots",
+				"matchMode": "exact",
+				"similarityThreshold": 0.95,
+				"updateSnapshots": false
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"test_regression.snapshotDir": {
+			"type": "string",
+			"title": "Snapshot directory path for golden files",
+			"default": ".snapshots",
+			"optional": false
+		},
+		"test_regression.matchMode": {
+			"type": "string",
+			"title": "Comparison mode for regression checks",
+			"default": "exact",
+			"enum": [
+				[
+					"exact",
+					"Exact Match - Byte-for-byte JSON equality"
+				],
+				[
+					"fuzzy",
+					"Fuzzy Match - SequenceMatcher ratio comparison"
+				],
+				[
+					"semantic",
+					"Semantic Match - TF-IDF cosine similarity"
+				]
+			],
+			"optional": false
+		},
+		"test_regression.similarityThreshold": {
+			"type": "number",
+			"title": "Similarity threshold for fuzzy/semantic modes (0.0 to 1.0)",
+			"default": 0.95,
+			"optional": false
+		},
+		"test_regression.updateSnapshots": {
+			"type": "boolean",
+			"title": "Update golden snapshots instead of comparing",
+			"default": false,
+			"optional": false
+		},
+		"test_regression.default": {
+			"object": "default",
+			"properties": [
+				"test_regression.snapshotDir",
+				"test_regression.matchMode",
+				"test_regression.similarityThreshold",
+				"test_regression.updateSnapshots"
+			]
+		},
+		"test_regression.profile": {
+			"hidden": true,
+			"type": "string",
+			"default": "default",
+			"enum": [
+				[
+					"default",
+					"Default"
+				]
+			],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": [
+						"test_regression.default"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Regression Testing",
+			"properties": [
+				"test_regression.profile"
+			]
+		}
+	]
+}
