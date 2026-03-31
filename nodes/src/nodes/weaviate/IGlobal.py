@@ -55,6 +55,22 @@ class IGlobal(IGlobalTransform):
             # Get the passed configuration
             connConfig = self.getConnConfig()
 
+            # SSRF validation: validate the connection URL before creating
+            # the Store (which opens a real network connection in __init__)
+            config = Config.getNodeConfig(self.glb.logicalType, connConfig)
+            host = (config.get('host', '')).strip()
+            port = config.get('port')
+            profile = config.get('mode')
+
+            if profile == 'cloud':
+                cloud_url = host if host.startswith('https://') else f'https://{host}'
+                validate_url(cloud_url)
+            else:
+                local_url = host if host.startswith('http') else f'http://{host}'
+                if port:
+                    local_url = f'{local_url}:{port}'
+                validate_url(local_url)
+
             # Get the configuration
             self.store = Store(self.glb.logicalType, connConfig, bag)
 
@@ -122,10 +138,12 @@ class IGlobal(IGlobalTransform):
                 url = base_url.rstrip('/') + '/v1/meta'
                 validate_url(url)
                 headers = {'Authorization': f'Bearer {apikey}'} if apikey else {}
-                r = httpx.get(url, headers=headers, timeout=3)
+                r = httpx.get(url, headers=headers, timeout=3, follow_redirects=False)
                 r.raise_for_status()
                 return
             else:
+                # Local: validate URL before connecting
+                validate_url(base_url)
                 # Local: use SDK client and a lightweight call (no API key)
                 client = weaviate.connect_to_local(
                     host=host,
