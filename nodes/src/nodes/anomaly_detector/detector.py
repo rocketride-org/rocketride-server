@@ -29,9 +29,12 @@ detection with a thread-safe sliding window for streaming pipeline data.
 """
 
 import math
+import re
 import threading
 from collections import deque
 from typing import Any, Dict
+
+from rocketlib import debug
 
 
 class AnomalyDetector:
@@ -135,29 +138,36 @@ class AnomalyDetector:
 
     def _detect_rolling_avg(self, value: float, window: list) -> Dict[str, Any]:
         """
-        Detect anomalies using rolling average deviation.
+        Detect anomalies using rolling (moving) average deviation.
 
-        Measures how far a value deviates from the rolling mean,
-        normalized by the rolling standard deviation.
+        Computes a local mean from the most recent N values (where N defaults
+        to half the window size) and measures how far the new value deviates
+        from that local mean, normalized by the full window standard deviation.
         """
         if len(window) < 2:
             return {'score': 0.0, 'severity': 'normal', 'is_anomalous': False, 'details': 'insufficient data'}
 
-        mean = sum(window) / len(window)
-        variance = sum((x - mean) ** 2 for x in window) / len(window)
+        # Use a sliding sub-window for the local (moving) average
+        rolling_n = max(2, self.window_size // 2)
+        recent = window[-rolling_n:]
+        local_mean = sum(recent) / len(recent)
+
+        # Full window std dev for normalization
+        full_mean = sum(window) / len(window)
+        variance = sum((x - full_mean) ** 2 for x in window) / len(window)
         std_dev = math.sqrt(variance)
 
         if std_dev == 0:
             return {'score': 0.0, 'severity': 'normal', 'is_anomalous': False, 'details': 'zero variance'}
 
-        deviation = abs(value - mean) / std_dev
+        deviation = abs(value - local_mean) / std_dev
         severity = self._classify_severity(deviation)
 
         return {
             'score': round(deviation, 4),
             'severity': severity,
             'is_anomalous': deviation >= self.warning_threshold,
-            'details': f'deviation={deviation:.4f} rolling_mean={mean:.4f} rolling_std={std_dev:.4f}',
+            'details': f'deviation={deviation:.4f} local_mean={local_mean:.4f} rolling_n={len(recent)} std={std_dev:.4f}',
         }
 
     def detect(self, value: float) -> Dict[str, Any]:
@@ -181,17 +191,26 @@ class AnomalyDetector:
         self._add_value(value)
         return result
 
+    _NUMERIC_PATTERN = re.compile(r'-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?')
+
     def evaluate_text(self, text: str) -> str:
         """
         Evaluate text for anomalous numeric values.
 
-        Attempts to parse a float from the text. If successful, runs detection
-        and returns the original text annotated with the result. Otherwise
-        passes the text through unchanged.
+        First tries to parse the entire text as a float. If that fails,
+        extracts the first numeric value via regex. If no number can be
+        found, logs a debug message and passes the text through unchanged.
         """
+        value = None
         try:
             value = float(text.strip())
         except (ValueError, AttributeError):
+            match = self._NUMERIC_PATTERN.search(text if isinstance(text, str) else '')
+            if match:
+                value = float(match.group())
+
+        if value is None:
+            debug(f'    Anomaly detector: skipping non-numeric text (length={len(text) if isinstance(text, str) else 0})')
             return text
 
         result = self.detect(value)

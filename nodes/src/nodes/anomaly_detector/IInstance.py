@@ -48,6 +48,9 @@ class IInstance(IInstanceBase):
         Attempts to parse numeric values from text, runs anomaly detection,
         and annotates the output with detection results.
         """
+        if self.IGlobal.detector is None:
+            self.instance.writeText(text)
+            return
         result = self.IGlobal.detector.evaluate_text(text)
         self.instance.writeText(result)
 
@@ -58,6 +61,10 @@ class IInstance(IInstanceBase):
         Reads the configured metric field from each document's metadata,
         runs anomaly detection, and adds results to document metadata.
         """
+        if self.IGlobal.detector is None:
+            self.instance.writeDocuments(documents)
+            return
+
         enriched_docs = []
 
         for doc in documents:
