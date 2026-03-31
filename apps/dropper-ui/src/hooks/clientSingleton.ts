@@ -6,10 +6,10 @@
 
 /**
  * RocketRide Client Singleton Module
- *
+ * 
  * Manages a single, shared WebSocket connection to RocketRideservices across
  * the entire application. This singleton pattern ensures:
- *
+ * 
  * Benefits:
  * - Only one WebSocket connection exists (no duplicate connections)
  * - Connection persists across component mount/unmount cycles
@@ -17,25 +17,25 @@
  * - Multiple components can share the same connection
  * - Automatic reconnection handling
  * - Centralized event broadcasting
- *
+ * 
  * Architecture:
  * - Singleton instance stored outside React lifecycle
  * - Pub/sub pattern for event distribution
  * - Promise-based connection management
  * - Session-based authentication caching
- *
+ * 
  * Event Types:
  * - Connection events: broadcast when WebSocket connects
  * - Disconnection events: broadcast when WebSocket disconnects
  * - Message events: broadcast for all incoming RocketRidemessages
  * - Status events: broadcast for UI status updates
- *
+ * 
  * Authentication Flow:
  * 1. Check session storage for cached token
  * 2. In dev mode: use API key from config
  * 3. In production: check URL params or fetch from /api/auth
  * 4. Cache token in session storage for reuse
- *
+ * 
  * @module clientSingleton
  */
 
@@ -93,23 +93,23 @@ let lastConnectionError: { reason: string; hasError: boolean } | null = null;
 
 /**
  * Retrieves authentication token from various sources
- *
+ * 
  * Token Priority:
  * 1. Session storage (cached from previous retrieval)
  * 2. Dev mode: API key from configuration
  * 3. Production: URL parameter or /api/auth endpoint
- *
+ * 
  * Caching:
  * - Tokens are cached in sessionStorage for reuse
  * - Reduces authentication requests
  * - Cleared on browser tab close
- *
+ * 
  * URL Cleanup:
  * - Removes token from URL bar after extraction (security)
  * - Uses history.replaceState to avoid adding to browser history
- *
+ * 
  * @returns Authentication token string or null if unavailable
- *
+ * 
  * @example
  * ```typescript
  * const token = await getAuthToken();
@@ -144,7 +144,7 @@ async function getAuthToken(): Promise<string | null> {
 		} else {
 			// Token found in URL - clean up URL bar for security
 			if (window.location.search.includes('token=')) {
-				window.history.replaceState({}, '', window.location.pathname);
+				window.history.replaceState({}, "", window.location.pathname);
 			}
 		}
 	}
@@ -160,12 +160,12 @@ async function getAuthToken(): Promise<string | null> {
 
 /**
  * Broadcasts incoming RocketRideevents to all subscribed listeners
- *
+ * 
  * Error Handling:
  * - Individual subscriber errors are caught and logged
  * - One failing subscriber doesn't affect others
  * - Ensures all subscribers receive the event
- *
+ * 
  * @param message - Event message from RocketRideclient
  */
 async function handleEvent(message: any): Promise<void> {
@@ -180,12 +180,12 @@ async function handleEvent(message: any): Promise<void> {
 
 /**
  * Broadcasts connection event to all subscribed listeners
- *
+ * 
  * Flow:
  * 1. Clears any status messages (connection successful)
  * 2. Notifies all connection subscribers
  * 3. Allows subscribers to perform setup (e.g., initialize pipelines)
- *
+ * 
  * @param client - The connected RocketRideClient instance
  */
 async function handleConnected(client: RocketRideClient): Promise<void> {
@@ -212,17 +212,17 @@ async function handleConnected(client: RocketRideClient): Promise<void> {
 
 /**
  * Broadcasts disconnection event to all subscribed listeners
- *
+ * 
  * Flow:
  * 1. Shows descriptive error message from server
  * 2. Notifies all disconnection subscribers
  * 3. SDK will automatically attempt reconnection
- *
+ * 
  * Server Error Messages:
  * - HTTP 400: Pipeline not running
  * - HTTP 401: Authentication error
  * - Other: Connection lost or network errors
- *
+ * 
  * @param reason - Reason for disconnection (from server or network)
  * @param hasError - Whether disconnection was due to an error
  */
@@ -253,14 +253,14 @@ async function handleDisconnected(reason: string, hasError: boolean): Promise<vo
 
 /**
  * Starts the RocketRideclient singleton with persistent connection
- *
+ * 
  * This function initializes the client once and enables automatic reconnection.
  * If the client is already started, this function does nothing (idempotent).
  * With persist, the client retries from initial failure and calls onConnectError.
- *
+ * 
  * @param authToken - Optional authentication token. If not provided, calls getAuthToken()
  * @throws Error if authentication token cannot be obtained
- *
+ * 
  * @example
  * ```typescript
  * // In App.tsx
@@ -274,16 +274,15 @@ export async function startClient(authToken?: string): Promise<void> {
 	}
 
 	// Get authentication token
-	const token = authToken || (await getAuthToken());
-
+	const token = authToken || await getAuthToken();
+	
 	if (!token) {
 		throw new Error("Sorry, I couldn't get you authenticated. Please contact your system admin.");
 	}
 
 	// Create client first (before config) so we can reference it in callbacks
-	// eslint-disable-next-line prefer-const
 	let client: RocketRideClient;
-
+	
 	const config: RocketRideClientConfig = {
 		auth: token,
 		uri: API_CONFIG.ROCKETRIDE_URI || (typeof window !== 'undefined' ? window.location.origin : ''),
@@ -295,7 +294,8 @@ export async function startClient(authToken?: string): Promise<void> {
 		onDisconnected: async (reason?: string, hasError?: boolean) => {
 			await handleDisconnected(reason || 'Connection lost', hasError || false);
 		},
-		onConnectError: (error: ConnectionException) => handleDisconnected(error.message, true).catch((e) => console.error('handleDisconnected:', e)),
+		onConnectError: (error: ConnectionException) =>
+			handleDisconnected(error.message, true).catch((e) => console.error('handleDisconnected:', e)),
 		env: API_CONFIG,
 	};
 
@@ -306,12 +306,12 @@ export async function startClient(authToken?: string): Promise<void> {
 
 /**
  * Gets the current RocketRideclient instance
- *
+ * 
  * Returns the singleton client instance if started, null otherwise.
  * Does not create or start the client - use startClient() first.
- *
+ * 
  * @returns The RocketRideClient instance or null if not started
- *
+ * 
  * @example
  * ```typescript
  * const client = getClient();
@@ -326,10 +326,10 @@ export function getClient(): RocketRideClient | null {
 
 /**
  * Stops the RocketRideclient and disables persistent connection
- *
+ * 
  * Disconnects from the server and clears the singleton instance.
  * After calling this, you must call startClient() again to reconnect.
- *
+ * 
  * @example
  * ```typescript
  * await stopClient();
@@ -348,18 +348,18 @@ export async function stopClient(): Promise<void> {
 
 /**
  * Subscribes to client events with automatic cleanup
- *
+ * 
  * Subscription Pattern:
  * - Register callbacks for events, connection, disconnection, status
  * - Returns unsubscribe function for cleanup
  * - Safe to call during component unmount
- *
+ * 
  * Callback Types:
  * - onEvent: Called for each RocketRidemessage
  * - onConnected: Called once when connection established
  * - onDisconnected: Called when connection lost
  * - onStatusChange: Called for UI status updates
- *
+ * 
  * Usage Pattern:
  * ```typescript
  * useEffect(() => {
@@ -368,15 +368,20 @@ export async function stopClient(): Promise<void> {
  *     onConnected: (client) => console.log('Connected'),
  *     onDisconnected: (reason) => console.log('Disconnected:', reason)
  *   });
- *
+ *   
  *   return () => unsubscribe(); // Cleanup on unmount
  * }, []);
  * ```
- *
+ * 
  * @param callbacks - Object containing optional callback functions
  * @returns Unsubscribe function to remove all callbacks
  */
-export function subscribeToClient(callbacks: { onEvent?: EventSubscriber; onConnected?: ConnectionSubscriber; onDisconnected?: DisconnectionSubscriber; onStatusChange?: StatusSubscriber }): () => void {
+export function subscribeToClient(callbacks: {
+	onEvent?: EventSubscriber;
+	onConnected?: ConnectionSubscriber;
+	onDisconnected?: DisconnectionSubscriber;
+	onStatusChange?: StatusSubscriber;
+}): () => void {
 	const { onEvent, onConnected, onDisconnected, onStatusChange } = callbacks;
 
 	// Add callbacks to subscriber sets

@@ -37,7 +37,10 @@ import { icons } from '../shared/util/icons';
 import { ConfigManager } from '../config';
 import { GenericEvent, GenericResponse, GenericRequest } from '../shared/types/protocol';
 
-import { LaunchRequest, AttachRequest } from '../shared/types/protocol';
+import {
+	LaunchRequest,
+	AttachRequest
+} from '../shared/types/protocol';
 
 /**
  * Debug Adapter with individual RocketRideClient connection
@@ -98,7 +101,7 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 				this.emitEvent({
 					type: 'event',
 					event: 'terminated',
-					body: {},
+					body: {}
 				});
 			},
 			onConnectError: async (error: ConnectionException) => {
@@ -116,7 +119,7 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 				this.emitEvent({
 					type: 'event',
 					event: 'terminated',
-					body: {},
+					body: {}
 				});
 			},
 		});
@@ -125,14 +128,14 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 	private emitResponse(message: GenericResponse): void {
 		this.messageEmitter.fire({
 			...message,
-			seq: this.getNextSeq(),
+			seq: this.getNextSeq()
 		});
 	}
 
 	private emitEvent(message: GenericEvent): void {
 		this.messageEmitter.fire({
 			...message,
-			seq: this.getNextSeq(),
+			seq: this.getNextSeq()
 		});
 	}
 
@@ -257,6 +260,7 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 			if (this.isLaunchRequest(message)) {
 				message.arguments.pipeline = this.pipeline;
 				message.arguments.args = this.configManager.getEffectiveEngineArgs();
+
 			} else if (this.isAttachRequest(message)) {
 				this.token = message.arguments?.token;
 			}
@@ -264,7 +268,11 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 			// Include token in the request
 			message.token = this.token;
 
-			const response = await this.client.dapRequest(message.command, message.arguments, message.token);
+			const response = await this.client.dapRequest(
+				message.command,
+				message.arguments,
+				message.token
+			);
 
 			// Cast DAPMessage to GenericResponse
 			const genericResponse = response as unknown as GenericResponse;
@@ -278,13 +286,14 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 			}
 
 			this.emitResponse(genericResponse);
+
 		} catch (error) {
 			this.emitResponse({
 				type: 'response',
 				request_seq: message.seq,
 				command: message.command,
 				success: false,
-				message: error instanceof Error ? error.message : String(error),
+				message: error instanceof Error ? error.message : String(error)
 			});
 		}
 	}
