@@ -1,0 +1,104 @@
+{
+	"title": "Batch Processor",
+	"protocol": "batch_processor://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.batch_processor",
+	"prefix": "batch",
+	"icon": "batch.svg",
+	"description": [
+		"Processes large datasets through pipeline steps in parallel batches.",
+		"Accepts JSON arrays, CSV, or line-delimited input and fans out each item",
+		"with configurable concurrency, per-item retry logic, and rate limiting.",
+		"Collects results into an array with per-item status (success/failed/skipped).",
+		"Errors on individual items do not halt the batch — the node always completes."
+	],
+	"tile": ["Batch: concurrency=${parameters.batch_processor.concurrency}"],
+	"lanes": {
+		"text": ["text"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default",
+				"concurrency": 4,
+				"retryCount": 2,
+				"rateLimitPerSecond": 10,
+				"inputFormat": "json_array"
+			}
+		}
+	},
+	"fields": {
+		"batch_processor.concurrency": {
+			"type": "integer",
+			"title": "Concurrency",
+			"description": "Maximum number of items processed in parallel.",
+			"default": 4,
+			"minimum": 1,
+			"maximum": 64
+		},
+		"batch_processor.retryCount": {
+			"type": "integer",
+			"title": "Retry count",
+			"description": "Number of retries for each failed item before marking it as failed.",
+			"default": 2,
+			"minimum": 0,
+			"maximum": 10
+		},
+		"batch_processor.retryDelayMs": {
+			"type": "integer",
+			"title": "Retry delay (ms)",
+			"description": "Base delay in milliseconds between retries. Uses exponential backoff.",
+			"default": 500,
+			"minimum": 0,
+			"maximum": 30000
+		},
+		"batch_processor.rateLimitPerSecond": {
+			"type": "integer",
+			"title": "Rate limit (req/s)",
+			"description": "Maximum items dispatched per second. 0 = unlimited.",
+			"default": 10,
+			"minimum": 0,
+			"maximum": 1000
+		},
+		"batch_processor.inputFormat": {
+			"type": "string",
+			"title": "Input format",
+			"description": "How to interpret the incoming payload.",
+			"default": "json_array",
+			"enum": [
+				["json_array", "JSON Array"],
+				["csv", "CSV (one record per line, first line = header)"],
+				["line_delimited", "Line-delimited (one item per line)"]
+			]
+		},
+		"batch_processor.stopOnFailure": {
+			"type": "boolean",
+			"title": "Stop on failure",
+			"description": "If true, abort the entire batch when a single item exceeds its retry limit.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Batch Processor",
+			"properties": [
+				"type",
+				"batch_processor.inputFormat",
+				"batch_processor.concurrency",
+				"batch_processor.rateLimitPerSecond",
+				"batch_processor.retryCount",
+				"batch_processor.retryDelayMs",
+				"batch_processor.stopOnFailure"
+			]
+		}
+	]
+}
