@@ -109,13 +109,32 @@
 				"type": "object",
 				"properties": ["http_request.whitelistPattern"]
 			}
+		},
+
+		"http_request.rateLimitPerSecond": {
+			"type": "number",
+			"title": "Max requests per second",
+			"description": "Maximum number of HTTP requests allowed per second. Uses a token-bucket algorithm for smooth enforcement.",
+			"default": 10
+		},
+		"http_request.rateLimitPerMinute": {
+			"type": "number",
+			"title": "Max requests per minute",
+			"description": "Maximum number of HTTP requests allowed per minute. Provides a broader throttle beyond the per-second limit.",
+			"default": 100
+		},
+		"http_request.maxConcurrentRequests": {
+			"type": "number",
+			"title": "Max concurrent requests",
+			"description": "Maximum number of HTTP requests that can be in-flight simultaneously.",
+			"default": 5
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "HTTP Request",
-			"properties": ["type", "http_request.allowGET", "http_request.allowPOST", "http_request.allowPUT", "http_request.allowPATCH", "http_request.allowDELETE", "http_request.allowHEAD", "http_request.allowOPTIONS", "http_request.urlWhitelist"]
+			"properties": ["type", "http_request.allowGET", "http_request.allowPOST", "http_request.allowPUT", "http_request.allowPATCH", "http_request.allowDELETE", "http_request.allowHEAD", "http_request.allowOPTIONS", "http_request.urlWhitelist", "http_request.rateLimitPerSecond", "http_request.rateLimitPerMinute", "http_request.maxConcurrentRequests"]
 		}
 	]
 }

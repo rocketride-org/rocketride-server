@@ -25,7 +25,7 @@
 HTTP Request tool node - global (shared) state.
 
 Reads config and stores security guardrails (allowed methods + URL whitelist)
-for IInstance tool methods.
+and rate limiter for IInstance tool methods.
 """
 
 from __future__ import annotations
@@ -33,6 +33,8 @@ from __future__ import annotations
 import re
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
+
+from .rate_limiter import DEFAULT_MAX_CONCURRENT, DEFAULT_MAX_PER_MINUTE, DEFAULT_MAX_PER_SECOND, RateLimiter
 
 _METHOD_FLAGS = {
     'GET': 'allowGET',
@@ -50,6 +52,7 @@ class IGlobal(IGlobalBase):
 
     enabled_methods: set[str] | None = None
     url_patterns: list[re.Pattern] | None = None
+    rate_limiter: RateLimiter | None = None
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -57,6 +60,7 @@ class IGlobal(IGlobalBase):
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         self.enabled_methods, self.url_patterns = self._build_guardrails(cfg)
+        self.rate_limiter = self._build_rate_limiter(cfg)
 
     @staticmethod
     def _build_guardrails(cfg: dict) -> tuple[set[str], list[re.Pattern]]:
@@ -89,6 +93,26 @@ class IGlobal(IGlobalBase):
 
         return enabled, patterns
 
+    @staticmethod
+    def _build_rate_limiter(cfg: dict) -> RateLimiter:
+        """Create a ``RateLimiter`` from the node configuration."""
+
+        def _int_or_default(key: str, default: int) -> int:
+            raw = cfg.get(key)
+            if raw is None:
+                return default
+            try:
+                val = int(raw)
+                return val if val > 0 else default
+            except (TypeError, ValueError):
+                return default
+
+        return RateLimiter(
+            max_per_second=_int_or_default('rateLimitPerSecond', DEFAULT_MAX_PER_SECOND),
+            max_per_minute=_int_or_default('rateLimitPerMinute', DEFAULT_MAX_PER_MINUTE),
+            max_concurrent=_int_or_default('maxConcurrentRequests', DEFAULT_MAX_CONCURRENT),
+        )
+
     def validateConfig(self) -> None:
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
@@ -105,3 +129,4 @@ class IGlobal(IGlobalBase):
     def endGlobal(self) -> None:
         self.enabled_methods = set()
         self.url_patterns = []
+        self.rate_limiter = None
