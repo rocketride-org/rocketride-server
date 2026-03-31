@@ -464,7 +464,7 @@ export class RocketRideClient extends DAPClient {
 			this._reconnectTimeout = undefined;
 			this.debugMessage('Connection successful');
 		} catch (error) {
-			const err = error instanceof Error ? error : new Error(String(error));
+			const err = error instanceof ConnectionException ? error : new ConnectionException({ message: String(error) });
 			this.debugMessage(`Connection failed: ${err}`);
 			await this.onConnectError(err);
 
@@ -495,7 +495,7 @@ export class RocketRideClient extends DAPClient {
 
 		if (this._maxRetryTime !== undefined && this._retryStartTime !== undefined) {
 			if (Date.now() - this._retryStartTime >= this._maxRetryTime) {
-				this.onConnectError(new Error('Max retry time exceeded'));
+				this.onConnectError(new ConnectionException({ message: 'Max retry time exceeded' }));
 				return;
 			}
 		}
@@ -1307,11 +1307,10 @@ export class RocketRideClient extends DAPClient {
 	 * Handle connection attempt failure.
 	 * Calls the user callback and chains to parent.
 	 */
-	async onConnectError(error: Error): Promise<void> {
+	async onConnectError(error: ConnectionException): Promise<void> {
 		if (this._callerOnConnectError) {
 			try {
-				const connectionError = error instanceof ConnectionException ? error : new ConnectionException({ message: String(error) });
-				await this._callerOnConnectError(connectionError);
+				await this._callerOnConnectError(error);
 			} catch (e) {
 				this.debugMessage(`Error in user onConnectError handler: ${e}`);
 			}
