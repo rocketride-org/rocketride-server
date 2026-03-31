@@ -63,6 +63,8 @@ class Store(DocumentStoreBase):
     vectorSizePos: int = 1
     vectorIndexType: str = 'IVF_FLAT'
     scalarIndexType: str = 'STL_SORT'
+    timeout: int = 60
+    bulkInsertBatchSize: int = 50
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -88,6 +90,8 @@ class Store(DocumentStoreBase):
 
         self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
         self.threshold_search = config.get('score', 0.5)
+        self.timeout = config.get('timeout', self.timeout)
+        self.bulkInsertBatchSize = config.get('bulkInsertBatchSize', self.bulkInsertBatchSize)
 
         profile = config.get('mode')
 
@@ -98,15 +102,19 @@ class Store(DocumentStoreBase):
         else:
             raise Exception('The metric you provided in the config.json does not match required milvus configurations')
 
-        # Establish a connection // TODO: Revise alternative setup as this connection action is only necessary for the flush() method
-        if profile != 'local':
-            # Init the store
-            if self.host.startswith('https:') or self.host.startswith('http:'):
-                self.client = MilvusClient(uri=self.host, token=self.apikey, timeout=20)
+        # Establish a connection to the Milvus instance
+        try:
+            if profile != 'local':
+                # Init the store
+                if self.host.startswith('https:') or self.host.startswith('http:'):
+                    self.client = MilvusClient(uri=self.host, token=self.apikey, timeout=self.timeout)
+                else:
+                    self.client = MilvusClient(uri=f'https://{self.host}', token=self.apikey, timeout=self.timeout)
             else:
-                self.client = MilvusClient(uri=f'https://{self.host}', token=self.apikey, timeout=20)
-        else:
-            self.client = MilvusClient(uri=f'http://{self.host}:{self.port}', timeout=20)
+                self.client = MilvusClient(uri=f'http://{self.host}:{self.port}', timeout=self.timeout)
+        except Exception as e:
+            self.client = None
+            raise Exception(f'Failed to connect to Milvus at {self.host}: {e}')
 
         return
 
