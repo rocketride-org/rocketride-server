@@ -43,7 +43,7 @@ class IInstance(IInstanceBase):
     def _get_template_context(self) -> dict:
         """Build the context dictionary for template rendering."""
         config = self.IGlobal.config
-        variables = config.get('variables', {})
+        variables = dict(config.get('variables', {}))
         if not isinstance(variables, dict):
             variables = {}
 
@@ -82,3 +82,4 @@ class IInstance(IInstanceBase):
 
         except Exception as e:
             debug(f'Error in prompt_template node: {e}')
+            raise
