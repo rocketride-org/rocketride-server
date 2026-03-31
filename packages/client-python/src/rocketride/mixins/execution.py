@@ -270,7 +270,8 @@ class ExecutionMixin(DAPClient):
             except FileNotFoundError as err:
                 raise FileNotFoundError(f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration.") from err
         else:
-            pipeline_config = pipeline
+            # Keep behavior consistent with filepath-based loading
+            pipeline_config = pipeline.get('pipeline', pipeline) if isinstance(pipeline, dict) else pipeline
 
         # Create a deep copy to avoid modifying the original
         processed_config = copy.deepcopy(pipeline_config)
