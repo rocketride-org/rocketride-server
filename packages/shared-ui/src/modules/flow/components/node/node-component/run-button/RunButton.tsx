@@ -6,10 +6,11 @@
 /**
  * RunButton — Play/stop button that slides out from the left edge of source nodes.
  *
- * Three visual states:
- *   - **Play** (idle): accent-colored play icon; clicking saves + runs the pipeline.
+ * Four visual states:
+ *   - **Run Pipeline** (idle): accent-colored play icon; clicking saves + runs the pipeline.
  *   - **Stop** (running): red stop icon; clicking aborts the pipeline.
- *   - **Pending** (transitioning): spinning icon while waiting for state change.
+ *   - **Stopping...** (stop pending): disabled spinning icon while pipeline is stopping.
+ *   - **Pending** (run pending): spinning icon while waiting for state change.
  *
  * On hover the button slides further left and expands to reveal its label.
  * Includes debounce guards to prevent double-clicks.
@@ -54,10 +55,10 @@ const styles = {
 		boxShadow: '0px 2px 1px -1px rgba(0, 0, 0, 0.15), 0px 1px 1px 0px rgba(0, 0, 0, 0.1), 0px 1px 3px 0px rgba(0, 0, 0, 0.08)',
 		border: 'none',
 		outline: '1px solid var(--rr-border)',
-		transition: 'left 0.2s, width 0.2s, background-color 0.2s',
+		transition: 'left 0.3s ease, width 0.3s ease, background-color 0.2s ease',
 		'&:hover': {
-			left: 'calc(-3rem - 1px)',
-			width: '3rem',
+			left: 'calc(-5.5rem - 1px)',
+			width: '5.5rem',
 			backgroundColor: 'var(--rr-accent, #007acc)',
 			'& .run-btn-label': {
 				opacity: 1,
@@ -69,7 +70,20 @@ const styles = {
 			},
 		},
 		'&.stop-button:hover': {
+			left: 'calc(-3.5rem - 1px)',
+			width: '3.5rem',
 			backgroundColor: 'error.main',
+		},
+		'&.stopping-button': {
+			cursor: 'default',
+			pointerEvents: 'none',
+			opacity: 0.7,
+			left: 'calc(-5rem - 1px)',
+			width: '5rem',
+			'& .run-btn-label': {
+				opacity: 1,
+				width: 'auto',
+			},
 		},
 	},
 	button: {
@@ -82,7 +96,7 @@ const styles = {
 	},
 	label: {
 		opacity: 0,
-		transition: 'width 0.2s',
+		transition: 'opacity 0.3s ease, width 0.3s ease',
 		pointerEvents: 'none',
 		whiteSpace: 'nowrap',
 		fontSize: '0.65rem',
@@ -96,6 +110,7 @@ const styles = {
 
 export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 	const [isPending, setIsPending] = useState(false);
+	const [isStopping, setIsStopping] = useState(false);
 	const isProcessingClick = useRef(false);
 
 	const { currentProject, taskStatuses, onRunPipeline, onStopPipeline, isConnected } = useFlowProject();
@@ -136,30 +151,36 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 	const handleStop = useCallback(
 		(e?: React.MouseEvent) => {
 			e?.stopPropagation();
-			if (isPending || isProcessingClick.current || !onStopPipeline) return;
+			if (isPending || isStopping || isProcessingClick.current || !onStopPipeline) return;
 
 			isProcessingClick.current = true;
-			setIsPending(true);
+			setIsStopping(true);
 			onStopPipeline(nodeId);
 		},
-		[isPending, onStopPipeline, nodeId]
+		[isPending, isStopping, onStopPipeline, nodeId]
 	);
 
 	// ── Clear pending on state transitions ─────────────────────────────────
 	const prevIsRunning = useRef(isRunning);
 	useEffect(() => {
-		if (isPending && prevIsRunning.current !== isRunning) {
-			setIsPending(false);
-			isProcessingClick.current = false;
+		if (prevIsRunning.current !== isRunning) {
+			if (isPending) {
+				setIsPending(false);
+				isProcessingClick.current = false;
+			}
+			if (isStopping) {
+				setIsStopping(false);
+				isProcessingClick.current = false;
+			}
 		}
 		prevIsRunning.current = isRunning;
-	}, [isRunning, isPending]);
+	}, [isRunning, isPending, isStopping]);
 
 	useEffect(() => {
-		if (!isPending) {
+		if (!isPending && !isStopping) {
 			isProcessingClick.current = false;
 		}
-	}, [isPending]);
+	}, [isPending, isStopping]);
 
 	// ── Render ─────────────────────────────────────────────────────────────
 	// Hide the button entirely when not connected — can't run or stop without a server
@@ -168,6 +189,26 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 	}
 
 	if (isRunning) {
+		if (isStopping) {
+			return (
+				<Box
+					sx={styles.buttonWrapper}
+					className="stopping-button"
+					onDoubleClick={(e) => {
+						e.stopPropagation();
+						e.preventDefault();
+					}}
+				>
+					<IconButton sx={styles.button}>
+						<Autorenew color="warning" sx={styles.icon} className="rotate" />
+					</IconButton>
+					<Typography sx={styles.label} className="run-btn-label">
+						Stopping...
+					</Typography>
+				</Box>
+			);
+		}
+
 		return (
 			<Box
 				sx={styles.buttonWrapper}
@@ -178,7 +219,9 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 					e.preventDefault();
 				}}
 			>
-				<IconButton sx={styles.button}>{isPending ? <Autorenew color="warning" sx={styles.icon} className="rotate" /> : <StopCircle color="error" sx={styles.icon} />}</IconButton>
+				<IconButton sx={styles.button}>
+					<StopCircle color="error" sx={styles.icon} />
+				</IconButton>
 				<Typography sx={styles.label} className="run-btn-label">
 					Stop
 				</Typography>
@@ -197,7 +240,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 		>
 			<IconButton sx={styles.button}>{isPending ? <Autorenew color="warning" sx={styles.icon} className="rotate" /> : <PlayArrow sx={{ ...styles.icon, color: 'var(--rr-accent, #007acc)' }} />}</IconButton>
 			<Typography sx={styles.label} className="run-btn-label">
-				Play
+				Run Pipeline
 			</Typography>
 		</Box>
 	);
