@@ -74,6 +74,9 @@ class PreProcessor(PreProcessorBase):
         """
         Parse a quoted, comma-separated string into a list of actual separator strings.
         """
+        _MAX_SEPARATOR_INPUT_LEN = 1024
+        if len(user_input) > _MAX_SEPARATOR_INPUT_LEN:
+            raise ValueError(f'Separator input too long ({len(user_input)} chars, max {_MAX_SEPARATOR_INPUT_LEN})')
         try:
             # Convert user input into a list
             separators = ast.literal_eval(f'[{user_input}]')
