@@ -27,7 +27,7 @@
 import copy
 
 from rocketlib import IInstanceBase
-from ai.common.schema import Doc, Question
+from ai.common.schema import Answer, Doc, Question
 from .IGlobal import IGlobal
 
 
@@ -112,7 +112,9 @@ class IInstance(IInstanceBase):
         if reranked_docs:
             self.instance.writeDocuments(reranked_docs)
 
-        # Always forward the question with reranked documents (possibly empty)
-        # so downstream nodes can proceed even when min_score filters all docs.
-        question.documents = reranked_docs
-        self.instance.writeQuestions(question)
+        # Build an Answer containing the reranked document texts so downstream
+        # nodes on the "answers" lane receive the results.
+        answer = Answer()
+        answer_text = '\n\n'.join(doc.page_content for doc in reranked_docs if doc.page_content)
+        answer.setAnswer(answer_text)
+        self.instance.writeAnswers(answer)
