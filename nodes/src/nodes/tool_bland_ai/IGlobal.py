@@ -95,6 +95,15 @@ class IGlobal(IGlobalBase):
             api_key = str(cfg.get('apikey') or '').strip()
             if not api_key:
                 warning('API key is required')
+            raw_max = cfg.get('maxDuration', 5)
+            if isinstance(raw_max, bool):
+                warning('maxDuration must be a positive integer')
+            else:
+                try:
+                    if int(raw_max) <= 0:
+                        warning('maxDuration must be a positive integer')
+                except (TypeError, ValueError):
+                    warning('maxDuration must be a positive integer')
         except Exception as e:
             warning(str(e))
 
