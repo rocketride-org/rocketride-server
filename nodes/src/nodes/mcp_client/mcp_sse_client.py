@@ -53,6 +53,21 @@ from typing import Any, Dict, List, Optional
 from nodes.library.internet.ssrf_guard import validate_url
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject HTTP redirects to prevent SSRF bypass via 30x responses.
+
+    Python's urllib follows redirects by default, which allows a malicious
+    server to redirect to internal/cloud-metadata endpoints after the initial
+    ``validate_url`` check has passed.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001, ANN201
+        raise urllib.error.HTTPError(newurl, code, f'HTTP redirect to {newurl!r} blocked (SSRF protection)', headers, fp)
+
+
+_no_redirect_opener = urllib.request.build_opener(_NoRedirectHandler)
+
+
 class McpProtocolError(RuntimeError):
     pass
 
@@ -198,7 +213,7 @@ class McpSseClient:
         headers['Content-Type'] = 'application/json'
         req = urllib.request.Request(self._endpoint_url, data=data, headers=headers, method='POST')
         try:
-            with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
+            with _no_redirect_opener.open(req, timeout=self._timeout_s) as resp:
                 # The MCP SSE transport uses 202 Accepted; accept any 2xx.
                 status = getattr(resp, 'status', 200)
                 if not (200 <= int(status) < 300):
@@ -259,7 +274,7 @@ class McpSseClient:
     def _reader_loop(self) -> None:
         try:
             req = urllib.request.Request(self._sse_endpoint, headers=dict(self._headers), method='GET')
-            self._resp = urllib.request.urlopen(req, timeout=self._timeout_s)
+            self._resp = _no_redirect_opener.open(req, timeout=self._timeout_s)
 
             event_name: str | None = None
             data_lines: List[str] = []

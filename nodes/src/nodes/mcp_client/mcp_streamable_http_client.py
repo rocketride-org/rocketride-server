@@ -56,6 +56,21 @@ from typing import Any, Dict, Iterable, List, Optional
 from nodes.library.internet.ssrf_guard import validate_url
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject HTTP redirects to prevent SSRF bypass via 30x responses.
+
+    Python's urllib follows redirects by default, which allows a malicious
+    server to redirect to internal/cloud-metadata endpoints after the initial
+    ``validate_url`` check has passed.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001, ANN201
+        raise urllib.error.HTTPError(newurl, code, f'HTTP redirect to {newurl!r} blocked (SSRF protection)', headers, fp)
+
+
+_no_redirect_opener = urllib.request.build_opener(_NoRedirectHandler)
+
+
 class McpProtocolError(RuntimeError):
     pass
 
@@ -145,7 +160,7 @@ class McpStreamableHttpClient:
         headers['Mcp-Session-Id'] = sid
         req = urllib.request.Request(self._endpoint, headers=headers, method='DELETE')
         try:
-            with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
+            with _no_redirect_opener.open(req, timeout=self._timeout_s) as resp:
                 _ = resp.read()
         except urllib.error.HTTPError as e:
             # 405 is allowed by spec (server may not allow clients to terminate).
@@ -215,7 +230,7 @@ class McpStreamableHttpClient:
 
         req = urllib.request.Request(self._endpoint, data=data, headers=headers, method='POST')
         try:
-            with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
+            with _no_redirect_opener.open(req, timeout=self._timeout_s) as resp:
                 status = int(getattr(resp, 'status', 200))
                 body = resp.read() or b''
                 # For notifications/responses-only, spec requires 202 on accept (no body).
@@ -238,7 +253,7 @@ class McpStreamableHttpClient:
 
         req = urllib.request.Request(self._endpoint, data=data, headers=headers, method='POST')
         try:
-            with urllib.request.urlopen(req, timeout=self._timeout_s) as resp:
+            with _no_redirect_opener.open(req, timeout=self._timeout_s) as resp:
                 status = int(getattr(resp, 'status', 200))
                 resp_headers = {k: v for (k, v) in (resp.headers.items() if resp.headers else [])}
                 if status == 202:

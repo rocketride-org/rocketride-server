@@ -300,3 +300,78 @@ class TestRemoteClientSSRF:
         with patch.object(mod, 'validate_url', side_effect=ValueError('Blocked')):
             with pytest.raises(ValueError, match='Blocked'):
                 obj.beginGlobal()
+
+    def test_requests_called_with_allow_redirects_false(self):
+        """All requests.post and requests.delete calls must set allow_redirects=False."""
+        mock_config_cls = MagicMock()
+        mock_config_cls.getNodeConfig.return_value = {
+            'remote': {
+                'remote': {
+                    'remote': {
+                        'host': 'remote.example.com',
+                        'port': '5565',
+                        'apikey': 'test-key',
+                    }
+                }
+            },
+            'pipeline': 'test-pipe',
+            'input': ['tags'],
+            'output': ['documents'],
+        }
+        sys.modules['ai.common.config'].Config = mock_config_cls
+
+        mock_requests = MagicMock()
+        mock_requests.post.return_value = MagicMock(status_code=200)
+        mock_requests.delete.return_value = MagicMock(status_code=200)
+
+        with patch.dict(sys.modules, {'requests': mock_requests}):
+            mod = _load_file_as_module(REMOTE_IGLOBAL_FILE)
+
+        obj = mod.IGlobal()
+        obj.glb = MagicMock()
+        obj.glb.logicalType = 'remote'
+        obj.glb.connConfig = {}
+        obj.IEndpoint = MagicMock()
+        obj.IEndpoint.endpoint.jobConfig = {'taskId': 'test-task-id'}
+
+        with patch.object(mod, 'validate_url'):
+            obj.beginGlobal()
+
+        # Verify all POST calls used allow_redirects=False
+        for call in mock_requests.post.call_args_list:
+            assert call.kwargs.get('allow_redirects') is False, f'requests.post call missing allow_redirects=False: {call}'
+
+        # Now test endGlobal for DELETE
+        obj.endGlobal()
+        for call in mock_requests.delete.call_args_list:
+            assert call.kwargs.get('allow_redirects') is False, f'requests.delete call missing allow_redirects=False: {call}'
+
+
+# =============================================================================
+# 6. Redirect blocking: MCP clients reject HTTP redirects
+# =============================================================================
+
+
+class TestMcpRedirectBlocking:
+    """Verify that MCP clients block HTTP redirects (SSRF bypass prevention)."""
+
+    def test_sse_client_has_no_redirect_opener(self):
+        """McpSseClient module must define _no_redirect_opener."""
+        mod = _load_file_as_module(MCP_SSE_FILE)
+        assert hasattr(mod, '_no_redirect_opener'), 'mcp_sse_client.py must define _no_redirect_opener'
+        assert hasattr(mod, '_NoRedirectHandler'), 'mcp_sse_client.py must define _NoRedirectHandler'
+
+    def test_streamable_http_client_has_no_redirect_opener(self):
+        """McpStreamableHttpClient module must define _no_redirect_opener."""
+        mod = _load_file_as_module(MCP_HTTP_FILE)
+        assert hasattr(mod, '_no_redirect_opener'), 'mcp_streamable_http_client.py must define _no_redirect_opener'
+        assert hasattr(mod, '_NoRedirectHandler'), 'mcp_streamable_http_client.py must define _NoRedirectHandler'
+
+    def test_no_redirect_handler_raises_on_redirect(self):
+        """_NoRedirectHandler.redirect_request must raise HTTPError."""
+        mod = _load_file_as_module(MCP_SSE_FILE)
+        handler = mod._NoRedirectHandler()
+        import urllib.error
+
+        with pytest.raises(urllib.error.HTTPError, match='SSRF protection'):
+            handler.redirect_request(None, None, 302, 'Found', {}, 'http://169.254.169.254/meta')

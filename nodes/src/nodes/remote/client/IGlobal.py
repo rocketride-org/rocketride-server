@@ -74,18 +74,22 @@ class IGlobal(IGlobalBase):
         # Update the monitor
         monitorStatus('Loading remote pipe')
 
-        requests.post(f'http://{self._host}:{self._port}/use?name=remote', headers=self.headers).raise_for_status()
+        # SSRF protection: validate the /use endpoint before making the request
+        use_url = f'http://{self._host}:{self._port}/use?name=remote'
+        validate_url(use_url)
+        # Disable redirects to prevent SSRF bypass via 30x responses
+        requests.post(use_url, headers=self.headers, allow_redirects=False).raise_for_status()
 
-        # Issue the request
-        response = requests.post(self.urlControl, json=IJson.toDict(self._pipeline), headers=self.headers)
+        # Issue the request (redirects disabled to prevent SSRF bypass)
+        response = requests.post(self.urlControl, json=IJson.toDict(self._pipeline), headers=self.headers, allow_redirects=False)
 
         # Check for success
         if response.status_code != 200:
             raise Exception(f'Unable to create pipe on {self.urlControl}: {response.text}')
 
     def endGlobal(self):
-        # Issue the request
-        response = requests.delete(self.urlControl, headers=self.headers)
+        # Issue the request (redirects disabled to prevent SSRF bypass)
+        response = requests.delete(self.urlControl, headers=self.headers, allow_redirects=False)
 
         # Check for success
         if response.status_code != 200:
