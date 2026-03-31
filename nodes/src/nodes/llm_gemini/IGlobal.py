@@ -175,7 +175,7 @@ class IGlobal(IGlobalBase):
 
     def endGlobal(self):
         """Clean up the global chat instance."""
-        self.chat = None
+        self._chat = None
 
     def _format_error(self, status_or_code, etype_or_status, emsg, fallback: str) -> str:
         """Compose a user-facing error string for Gemini.
