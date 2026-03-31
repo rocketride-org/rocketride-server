@@ -1,0 +1,113 @@
+{
+	"title": "Anomaly Detector",
+	"protocol": "anomaly_detector://",
+	"classType": ["filter"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.anomaly_detector",
+	"prefix": "anomaly_detector",
+	"icon": "util-text.svg",
+	"description": [
+		"A filter component that monitors pipeline output values over time and ",
+		"detects statistical anomalies using z-score, IQR, or rolling average ",
+		"deviation. It maintains a sliding window of recent outputs for baseline ",
+		"computation and flags anomalous values with severity levels (info, ",
+		"warning, critical). Configurable sensitivity, window size, and detection ",
+		"method allow fine-tuned monitoring of token counts, response lengths, ",
+		"latency, and sentiment scores."
+	],
+	"lanes": {
+		"text": ["text"]
+	},
+	"input": [
+		{
+			"lane": "text",
+			"description": "Pipeline output to monitor for anomalies",
+			"min": 1,
+			"output": [
+				{
+					"lane": "text",
+					"description": "Output annotated with anomaly metadata"
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default (z-score)",
+				"method": "zscore",
+				"sensitivity": 2.0,
+				"windowSize": 100,
+				"metric": "response_length"
+			}
+		}
+	},
+	"fields": {
+		"anomaly_detector.method": {
+			"type": "string",
+			"title": "Detection method",
+			"description": "Statistical method used to detect anomalies.",
+			"default": "zscore",
+			"enum": ["zscore", "iqr", "rolling_avg"]
+		},
+		"anomaly_detector.sensitivity": {
+			"type": "number",
+			"title": "Sensitivity threshold",
+			"description": "How many standard deviations (z-score), IQR multipliers, or rolling-average ratios before a value is flagged. Lower values flag more anomalies.",
+			"default": 2.0,
+			"minimum": 0.1,
+			"maximum": 10.0
+		},
+		"anomaly_detector.windowSize": {
+			"type": "integer",
+			"title": "Window size",
+			"description": "Number of recent observations kept for baseline computation.",
+			"default": 100,
+			"minimum": 10,
+			"maximum": 10000
+		},
+		"anomaly_detector.metric": {
+			"type": "string",
+			"title": "Metric to monitor",
+			"description": "Which numeric property of the pipeline output to track.",
+			"default": "response_length",
+			"enum": ["token_count", "response_length", "latency", "sentiment_score"]
+		},
+		"anomaly_detector.warningThreshold": {
+			"type": "number",
+			"title": "Warning threshold multiplier",
+			"description": "Multiplier applied to sensitivity to escalate from info to warning severity. Default 1.5x.",
+			"default": 1.5,
+			"minimum": 1.0,
+			"maximum": 5.0,
+			"optional": true
+		},
+		"anomaly_detector.criticalThreshold": {
+			"type": "number",
+			"title": "Critical threshold multiplier",
+			"description": "Multiplier applied to sensitivity to escalate from warning to critical severity. Default 2.0x.",
+			"default": 2.0,
+			"minimum": 1.0,
+			"maximum": 10.0,
+			"optional": true
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Anomaly Detector",
+			"properties": [
+				"type",
+				"anomaly_detector.method",
+				"anomaly_detector.sensitivity",
+				"anomaly_detector.windowSize",
+				"anomaly_detector.metric",
+				"anomaly_detector.warningThreshold",
+				"anomaly_detector.criticalThreshold"
+			]
+		}
+	]
+}
