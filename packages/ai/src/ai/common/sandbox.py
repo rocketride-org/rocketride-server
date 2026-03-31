@@ -44,7 +44,6 @@ Runs agent-supplied code via RestrictedPython inside a controlled namespace with
 from __future__ import annotations
 
 import importlib
-import re
 import subprocess
 import operator
 import sys
@@ -300,28 +299,16 @@ def execute_sandboxed(
     return response
 
 
-_VALID_PACKAGE_RE = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$')
-_MAX_PACKAGE_NAME_LEN = 128
-_pip_lock = threading.Lock()
-
-
 def _pip_install(package: str) -> None:
     """Auto-install a package via pip. Only called for non-default allowlisted modules."""
-    if not isinstance(package, str) or not package:
-        raise ValueError(f'Invalid package name: {package!r}')
-    if len(package) > _MAX_PACKAGE_NAME_LEN:
-        raise ValueError(f'Package name too long ({len(package)} chars, max {_MAX_PACKAGE_NAME_LEN})')
-    if not _VALID_PACKAGE_RE.match(package):
-        raise ValueError(f'Invalid package name {package!r}: must contain only alphanumeric characters, dots, hyphens, and underscores, and must start/end with an alphanumeric character')
-    with _pip_lock:
-        subprocess.check_call(
-            [sys.executable, '-m', 'pip', 'install', '--quiet', package],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            timeout=60,
-        )
-        # Clear the import cache so the freshly installed module is found
-        importlib.invalidate_caches()
+    subprocess.check_call(
+        [sys.executable, '-m', 'pip', 'install', '--quiet', package],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        timeout=60,
+    )
+    # Clear the import cache so the freshly installed module is found
+    importlib.invalidate_caches()
 
 
 def _truncate(text: str, max_size: int = _MAX_OUTPUT) -> str:

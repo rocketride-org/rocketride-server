@@ -830,7 +830,6 @@ export class RocketRideCLI {
 				console.error(`\nCleanup timed out after ${FORCE_EXIT_TIMEOUT_MS}ms, forcing exit`);
 				process.exit(128 + (signal === 'SIGINT' ? 2 : 15));
 			}, FORCE_EXIT_TIMEOUT_MS);
-			forceExitTimer.unref();
 
 			try {
 				await this.cleanupClient();

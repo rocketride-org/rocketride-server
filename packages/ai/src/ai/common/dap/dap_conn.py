@@ -43,7 +43,7 @@ class DAPConn(DAPBase):
         # Initialize base DAP functionality
         super().__init__(module, **kwargs)
 
-    async def on_receive(self, message: Optional[Dict[str, Any]] = None) -> None:
+    async def on_receive(self, message: Dict[str, Any] = {}) -> None:
         """
         Dispatch a received DAP message to the appropriate handler method.
 
@@ -58,8 +58,6 @@ class DAPConn(DAPBase):
         Args:
             message (Dict[str, Any]): The parsed DAP message containing type, command, seq, and arguments
         """
-        if message is None:
-            message = {}
         # Extract message type to determine handling approach
         message_type = message.get('type', '')
 
