@@ -28,7 +28,7 @@ import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, Dis
 import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
-import { AuthenticationException } from './exceptions/index.js';
+import { AuthenticationException, ConnectionException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
 let clientId = 0;
@@ -1360,7 +1360,8 @@ export class RocketRideClient extends DAPClient {
 	async onConnectError(error: Error): Promise<void> {
 		if (this._callerOnConnectError) {
 			try {
-				await this._callerOnConnectError(error instanceof Error ? error.message : String(error));
+				const connectionError = error instanceof ConnectionException ? error : new ConnectionException({ message: String(error) });
+				await this._callerOnConnectError(connectionError);
 			} catch (e) {
 				this.debugMessage(`Error in user onConnectError handler: ${e}`);
 			}
