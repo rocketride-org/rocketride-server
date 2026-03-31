@@ -179,8 +179,8 @@
 		]
 	},
 	"web-scraper-rag": {
-		"title": "Web Scraper to RAG",
-		"description": "Scrape a URL with Firecrawl, parse, embed, and search with chat",
+		"title": "Web Ingest + RAG",
+		"description": "Upload documents via webhook, parse, embed into vector store, then chat with LLM",
 		"requires": {
 			"store": {
 				"classType": "store",
@@ -193,30 +193,40 @@
 		},
 		"components": [
 			{
-				"id": "tool_firecrawl_1",
-				"provider": "tool_firecrawl",
+				"id": "webhook_1",
+				"provider": "webhook",
 				"position": { "x": 0, "y": -160 },
 				"input": [],
 				"control": []
 			},
 			{
+				"id": "parse_1",
+				"provider": "parse",
+				"position": { "x": 240, "y": -200 },
+				"input": [{ "lane": "tags", "from": "webhook_1" }],
+				"control": []
+			},
+			{
 				"id": "preprocessor_langchain_1",
 				"provider": "preprocessor_langchain",
-				"position": { "x": 280, "y": -160 },
-				"input": [{ "lane": "text", "from": "tool_firecrawl_1" }],
+				"position": { "x": 480, "y": -160 },
+				"input": [
+					{ "lane": "text", "from": "parse_1" },
+					{ "lane": "text", "from": "webhook_1" }
+				],
 				"control": []
 			},
 			{
 				"id": "embedding_transformer_1",
 				"provider": "embedding_transformer",
-				"position": { "x": 540, "y": -160 },
+				"position": { "x": 720, "y": -160 },
 				"input": [{ "lane": "documents", "from": "preprocessor_langchain_1" }],
 				"control": []
 			},
 			{
 				"id": "store_1",
 				"ref": "store",
-				"position": { "x": 800, "y": -60 },
+				"position": { "x": 960, "y": -60 },
 				"input": [
 					{ "lane": "documents", "from": "embedding_transformer_1" },
 					{ "lane": "questions", "from": "chat_1" }
@@ -233,14 +243,14 @@
 			{
 				"id": "llm_1",
 				"ref": "llm",
-				"position": { "x": 1040, "y": -20 },
+				"position": { "x": 1200, "y": -20 },
 				"input": [{ "lane": "questions", "from": "store_1" }],
 				"control": []
 			},
 			{
 				"id": "response_answers_1",
 				"provider": "response_answers",
-				"position": { "x": 1280, "y": -20 },
+				"position": { "x": 1440, "y": -20 },
 				"input": [{ "lane": "answers", "from": "llm_1" }],
 				"control": []
 			}

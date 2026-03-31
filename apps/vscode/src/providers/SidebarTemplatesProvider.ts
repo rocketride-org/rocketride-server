@@ -173,32 +173,36 @@ const TEMPLATES: Record<string, TemplateInfo> = {
 		],
 	},
 	'web-scraper-rag': {
-		title: 'Web Scraper to RAG',
-		description: 'Scrape a URL with Firecrawl, parse, embed, and search with chat',
+		title: 'Web Ingest + RAG',
+		description: 'Upload documents via webhook, parse, embed into vector store, then chat with LLM',
 		requires: {
 			store: { classType: 'store', label: 'Vector Store' },
 			llm: { classType: 'llm', label: 'LLM Provider' },
 		},
 		components: [
-			{ id: 'tool_firecrawl_1', provider: 'tool_firecrawl', position: { x: 0, y: -160 }, input: [], control: [] },
+			{ id: 'webhook_1', provider: 'webhook', position: { x: 0, y: -160 }, input: [], control: [] },
+			{ id: 'parse_1', provider: 'parse', position: { x: 240, y: -200 }, input: [{ lane: 'tags', from: 'webhook_1' }], control: [] },
 			{
 				id: 'preprocessor_langchain_1',
 				provider: 'preprocessor_langchain',
-				position: { x: 280, y: -160 },
-				input: [{ lane: 'text', from: 'tool_firecrawl_1' }],
+				position: { x: 480, y: -160 },
+				input: [
+					{ lane: 'text', from: 'parse_1' },
+					{ lane: 'text', from: 'webhook_1' },
+				],
 				control: [],
 			},
 			{
 				id: 'embedding_transformer_1',
 				provider: 'embedding_transformer',
-				position: { x: 540, y: -160 },
+				position: { x: 720, y: -160 },
 				input: [{ lane: 'documents', from: 'preprocessor_langchain_1' }],
 				control: [],
 			},
 			{
 				id: 'store_1',
 				ref: 'store',
-				position: { x: 800, y: -60 },
+				position: { x: 960, y: -60 },
 				input: [
 					{ lane: 'documents', from: 'embedding_transformer_1' },
 					{ lane: 'questions', from: 'chat_1' },
@@ -206,8 +210,8 @@ const TEMPLATES: Record<string, TemplateInfo> = {
 				control: [],
 			},
 			{ id: 'chat_1', provider: 'chat', position: { x: 0, y: 40 }, input: [], control: [] },
-			{ id: 'llm_1', ref: 'llm', position: { x: 1040, y: -20 }, input: [{ lane: 'questions', from: 'store_1' }], control: [] },
-			{ id: 'response_answers_1', provider: 'response_answers', position: { x: 1280, y: -20 }, input: [{ lane: 'answers', from: 'llm_1' }], control: [] },
+			{ id: 'llm_1', ref: 'llm', position: { x: 1200, y: -20 }, input: [{ lane: 'questions', from: 'store_1' }], control: [] },
+			{ id: 'response_answers_1', provider: 'response_answers', position: { x: 1440, y: -20 }, input: [{ lane: 'answers', from: 'llm_1' }], control: [] },
 		],
 	},
 	'audio-transcription': {
@@ -470,17 +474,28 @@ export function registerTemplateCreateCommand(): vscode.Disposable {
 			components,
 		};
 
+		// Resolve the pipeline directory (honor user setting)
+		const pipelinePath = vscode.workspace.getConfiguration('rocketride').get<string>('defaultPipelinePath', '');
+		const baseDir = pipelinePath ? vscode.Uri.joinPath(workspaceFolder.uri, pipelinePath) : workspaceFolder.uri;
+
+		// Ensure directory exists
+		try {
+			await vscode.workspace.fs.createDirectory(baseDir);
+		} catch {
+			// Already exists or can't create — proceed anyway
+		}
+
 		// Find a unique filename
 		let fileName = `${slug}.pipe`;
 		let counter = 1;
-		let fileUri = vscode.Uri.joinPath(workspaceFolder.uri, fileName);
+		let fileUri = vscode.Uri.joinPath(baseDir, fileName);
 		for (;;) {
 			try {
 				await vscode.workspace.fs.stat(fileUri);
 				// File exists, try next
 				counter++;
 				fileName = `${slug}-${counter}.pipe`;
-				fileUri = vscode.Uri.joinPath(workspaceFolder.uri, fileName);
+				fileUri = vscode.Uri.joinPath(baseDir, fileName);
 			} catch {
 				break; // doesn't exist, use this name
 			}
@@ -508,7 +523,14 @@ export async function scaffoldStarterPipeline(): Promise<void> {
 	const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
 	if (!workspaceFolder) return;
 
-	const starterFile = vscode.Uri.joinPath(workspaceFolder.uri, 'getting-started.pipe');
+	const pipelinePath = vscode.workspace.getConfiguration('rocketride').get<string>('defaultPipelinePath', '');
+	const baseDir = pipelinePath ? vscode.Uri.joinPath(workspaceFolder.uri, pipelinePath) : workspaceFolder.uri;
+	try {
+		await vscode.workspace.fs.createDirectory(baseDir);
+	} catch {
+		// Already exists
+	}
+	const starterFile = vscode.Uri.joinPath(baseDir, 'getting-started.pipe');
 
 	try {
 		await vscode.workspace.fs.stat(starterFile);
