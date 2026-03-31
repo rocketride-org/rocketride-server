@@ -92,7 +92,7 @@
 				"mode": "remote",
 				"host": "localhost",
 				"port": 5565,
-				"apikey": "xxx"
+				"apikey": ""
 			}
 		}
 	},
