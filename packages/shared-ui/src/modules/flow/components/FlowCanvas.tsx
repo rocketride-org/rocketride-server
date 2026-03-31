@@ -132,6 +132,19 @@ export default function Canvas(): ReactElement {
 	// --- Auto-layout -------------------------------------------------------
 	const { autoLayout, isLayouting } = useAutoLayout(nodes, edges, setNodes, onToolchainUpdated);
 
+	// Auto-apply tidy layout on first load (when nodes appear from a file)
+	const hasAutoLayouted = React.useRef(false);
+	React.useEffect(() => {
+		if (nodes.length > 0 && !hasAutoLayouted.current && !isLayouting) {
+			hasAutoLayouted.current = true;
+			// Delay to let nodes measure first
+			const timer = setTimeout(() => {
+				autoLayout();
+			}, 500);
+			return () => clearTimeout(timer);
+		}
+	}, [nodes.length, isLayouting, autoLayout]);
+
 	// --- Template instantiation (must live here, not in the dialog) ---------
 	const { instantiateTemplate: rawInstantiateTemplate, requestFitView } = useTemplateInstantiator();
 	const [configSnackbar, setConfigSnackbar] = useState<string | null>(null);

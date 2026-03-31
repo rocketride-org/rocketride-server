@@ -35,8 +35,8 @@
 	/* ================================================================== */
 
 	--rr-bg-default: var(--vscode-editor-background, #ffffff);
-	--rr-bg-paper: var(--vscode-editor-background);
-	--rr-bg-surface-alt: var(--vscode-editor-background);
+	--rr-bg-paper: var(--vscode-input-background, #2d2d30);
+	--rr-bg-surface-alt: var(--vscode-input-background, #2d2d30);
 
 	/* ================================================================== */
 	/* Title bar                                                           */
@@ -84,8 +84,8 @@
 	/* Borders                                                             */
 	/* ================================================================== */
 
-	--rr-border: var(--vscode-widget-border, #dcdcdc);
-	--rr-border-hover: var(--vscode-widget-border, #aaaaaa);
+	--rr-border: var(--vscode-contrastBorder, var(--vscode-widget-border, #555555));
+	--rr-border-hover: var(--vscode-contrastActiveBorder, var(--vscode-widget-border, #888888));
 	--rr-border-focus: var(--vscode-focusBorder, #0078d4);
 	--rr-border-input: var(--vscode-input-border, #858585);
 	--rr-border-paper: none;
@@ -133,9 +133,9 @@
 	/* Shadows                                                             */
 	/* ================================================================== */
 
-	--rr-shadow-idle: 0 0 0 1px var(--rr-border);
-	--rr-shadow-hover: 0 0 0 1.5px var(--rr-border-hover);
-	--rr-shadow-selected: 0 0 0 1.5px var(--rr-border-focus);
+	--rr-shadow-idle: 0 0 0 1px var(--rr-border), 0 2px 8px rgba(0, 0, 0, 0.3);
+	--rr-shadow-hover: 0 0 0 1.5px var(--rr-border-hover), 0 4px 12px rgba(0, 0, 0, 0.4);
+	--rr-shadow-selected: 0 0 0 1.5px var(--rr-border-focus), 0 4px 12px rgba(0, 0, 0, 0.4);
 
 	/* ================================================================== */
 	/* Grey ramp                                                           */

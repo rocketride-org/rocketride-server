@@ -112,7 +112,7 @@
 				"id": "summarization_1",
 				"provider": "summarization",
 				"position": { "x": 720, "y": 0 },
-				"input": [{ "lane": "documents", "from": "preprocessor_langchain_1" }],
+				"input": [{ "lane": "text", "from": "preprocessor_langchain_1" }],
 				"control": []
 			},
 			{
@@ -173,7 +173,7 @@
 				"id": "response_table_1",
 				"provider": "response_table",
 				"position": { "x": 720, "y": 0 },
-				"input": [{ "lane": "table", "from": "extract_data_1" }],
+				"input": [{ "lane": "answers", "from": "extract_data_1" }],
 				"control": []
 			}
 		]
@@ -262,7 +262,7 @@
 				"id": "audio_transcribe_1",
 				"provider": "audio_transcribe",
 				"position": { "x": 280, "y": 0 },
-				"input": [{ "lane": "tags", "from": "webhook_1" }],
+				"input": [{ "lane": "audio", "from": "webhook_1" }],
 				"control": []
 			},
 			{

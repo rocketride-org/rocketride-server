@@ -145,6 +145,13 @@ export const getNodesFromProject = (project: IProject): INode[] => {
 				formDataValid: true,
 				...(raw.ui ?? {}),
 			};
+			// Fallback: read position from component root (template/legacy format)
+			if (ui.position.x === 0 && ui.position.y === 0 && (raw as Record<string, unknown>).position) {
+				const rawPos = (raw as Record<string, unknown>).position as { x?: number; y?: number };
+				if (rawPos?.x !== undefined || rawPos?.y !== undefined) {
+					ui.position = { x: rawPos.x ?? 0, y: rawPos.y ?? 0 };
+				}
+			}
 			const component: IProjectComponent = { ...raw, ui };
 
 			// -----------------------------------------------------------------

@@ -378,6 +378,12 @@
 					"type": "webview",
 					"id": "rocketride.provider.connection",
 					"name": "Connection Manager"
+				},
+				{
+					"type": "tree",
+					"id": "rocketride.provider.templates",
+					"name": "Templates",
+					"when": "rocketride.loaded"
 				}
 			],
 			"explorer": [
@@ -385,12 +391,6 @@
 					"type": "tree",
 					"id": "rocketride.provider.files",
 					"name": "Pipelines",
-					"when": "rocketride.loaded"
-				},
-				{
-					"type": "tree",
-					"id": "rocketride.provider.templates",
-					"name": "Templates",
 					"when": "rocketride.loaded"
 				}
 			]
