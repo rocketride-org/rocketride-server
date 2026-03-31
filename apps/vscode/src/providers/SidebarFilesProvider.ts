@@ -39,7 +39,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { getStatusPageProvider, getPageEditorProvider } from '../extension';
 import { getLogger } from '../shared/util/output';
-import { PipelineFileParser, ParsedPipelineFile, ParsedSourceComponent } from '../shared/util/pipelineParser';
+import { PipelineFileParser, ParsedPipelineFile, ParsedSourceComponent, ServiceClassInfo } from '../shared/util/pipelineParser';
 import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
 import { GenericEvent, GenericResponse } from '../shared/types';
@@ -397,9 +397,11 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			this.refresh();
 		});
 
-		// Refresh tree when service definitions arrive so component names resolve
+		// Re-parse all files when service definitions arrive so that source
+		// components are correctly identified via classType (the service catalog
+		// is unavailable at initial load time for files parsed before connect).
 		const servicesUpdatedListener = this.connectionManager.addListener('servicesUpdated', () => {
-			this.refresh();
+			this.loadPipelineFiles();
 		});
 
 		// Keep track of disposables
@@ -445,6 +447,14 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 									sourceId: task.source,
 								});
 							}
+						}
+						break;
+
+					case 'restart':
+						// Pipeline restarted — treat the same as begin so it stays tracked
+						this.activePipelines.add(key);
+						if (!this.isKnownTask(projectId, sourceId)) {
+							this.unknownTasks.set(key, { projectId, sourceId });
 						}
 						break;
 
@@ -605,8 +615,8 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			// File can't be read — skip
 		}
 
-		// Re-parse the changed file
-		const parsedFile = await PipelineFileParser.parseFile(uri.fsPath);
+		// Re-parse the changed file (pass service catalog so classType-based source detection works)
+		const parsedFile = await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap());
 		this.parsedFiles.set(uri.fsPath, parsedFile);
 
 		// If this file is valid and has sources, remove any matching unknown tasks
@@ -1117,8 +1127,8 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			const fileName = path.basename(uri.fsPath);
 			const relativePath = vscode.workspace.asRelativePath(uri);
 
-			// Parse the pipeline file
-			const parsedFile = await PipelineFileParser.parseFile(uri.fsPath);
+			// Parse the pipeline file (pass service catalog so classType-based source detection works)
+			const parsedFile = await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap());
 			this.parsedFiles.set(uri.fsPath, parsedFile);
 
 			// If this file is valid and has sources, remove any matching unknown tasks
@@ -1190,6 +1200,15 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			return parsedFile.sourceComponents.find((c) => c.id === componentId);
 		}
 		return undefined;
+	}
+
+	/**
+	 * Returns the cached service catalog as a lightweight map suitable for
+	 * source-component detection in the pipeline parser.
+	 */
+	private getServiceClassInfoMap(): Record<string, ServiceClassInfo> | undefined {
+		const cached = this.connectionManager.getCachedServices();
+		return cached?.services as Record<string, ServiceClassInfo> | undefined;
 	}
 
 	/**
