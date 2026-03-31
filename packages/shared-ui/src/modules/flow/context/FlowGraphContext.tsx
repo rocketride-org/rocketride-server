@@ -807,12 +807,20 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		(project: IProject) => {
 			isLoadingRef.current = true;
 
-			const newNodes = getNodesFromProject(project);
-			const sortedNodes = sortNodesParentFirst(newNodes as FlowNode[]);
-			const newEdges = getEdgesFromNodes(sortedNodes);
+			try {
+				const newNodes = getNodesFromProject(project);
+				const sortedNodes = sortNodesParentFirst(newNodes as FlowNode[]);
+				const newEdges = getEdgesFromNodes(sortedNodes);
 
-			setNodes(sortedNodes);
-			setEdges(newEdges);
+				setNodes(sortedNodes);
+				setEdges(newEdges);
+			} catch (error) {
+				// Prevent malformed pipeline data from crashing the canvas.
+				// Clear nodes/edges so the user sees an empty canvas rather than a crash.
+				console.error('[FlowGraphContext] Failed to load project data:', error);
+				setNodes([]);
+				setEdges([]);
+			}
 
 			isLoadingRef.current = false;
 		},

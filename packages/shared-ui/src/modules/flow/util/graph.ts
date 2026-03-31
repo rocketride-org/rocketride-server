@@ -242,15 +242,20 @@ export const getNodesFromProject = (project: IProject): INode[] => {
 export const getEdgesFromNodes = (nodes: INodeLike[]): Edge[] => {
 	const edges: Edge[] = [];
 
+	// Build a set of valid node IDs for reference validation
+	const nodeIdSet = new Set(nodes.map((n) => n.id));
+
 	for (const node of nodes) {
 		const { data } = node;
 
 		// -----------------------------------------------------------------
 		// Build invoke-type edges from control connections (trigger/control flow).
 		// These connect diamond-shaped handles between nodes.
+		// Skip malformed entries to prevent canvas crashes from invalid pipe data.
 		// -----------------------------------------------------------------
 		if (data.control?.length) {
 			data.control.forEach((control: IControlConnection) => {
+				if (!control.from || !nodeIdSet.has(control.from)) return;
 				edges.push({
 					...DEFAULT_EDGE,
 					id: uuid(),
@@ -265,9 +270,11 @@ export const getEdgesFromNodes = (nodes: INodeLike[]): Edge[] => {
 		// -----------------------------------------------------------------
 		// Build lane-type edges from input connections (data flow).
 		// These connect circular handles between nodes.
+		// Skip malformed entries to prevent canvas crashes from invalid pipe data.
 		// -----------------------------------------------------------------
 		if (data.input?.length) {
 			data.input.forEach((input: IInputConnection) => {
+				if (!input.from || !nodeIdSet.has(input.from) || !input.lane) return;
 				edges.push({
 					...DEFAULT_EDGE,
 					id: uuid(),

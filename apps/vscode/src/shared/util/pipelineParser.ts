@@ -184,6 +184,40 @@ export class PipelineFileParser {
 			if (duplicates.length > 0) {
 				errors.push(`Duplicate component IDs found: ${(duplicates as string[]).join(', ')}`);
 			}
+
+			// Validate connection references on each component
+			const idSet = new Set(componentIds as string[]);
+			record.components.forEach((component: unknown, index: number) => {
+				const comp = component as Record<string, unknown>;
+				const compId = (comp.id as string) || `index ${index}`;
+
+				// Validate input connections
+				if (Array.isArray(comp.input)) {
+					comp.input.forEach((conn: unknown, connIdx: number) => {
+						const c = conn as Record<string, unknown>;
+						if (!c.from || typeof c.from !== 'string') {
+							errors.push(`Component "${compId}" input connection at index ${connIdx} is missing a valid "from" field`);
+						} else if (!idSet.has(c.from)) {
+							errors.push(`Component "${compId}" input connection references non-existent component "${c.from}"`);
+						}
+						if (!c.lane || typeof c.lane !== 'string') {
+							errors.push(`Component "${compId}" input connection at index ${connIdx} is missing a valid "lane" field`);
+						}
+					});
+				}
+
+				// Validate control connections
+				if (Array.isArray(comp.control)) {
+					comp.control.forEach((conn: unknown, connIdx: number) => {
+						const c = conn as Record<string, unknown>;
+						if (!c.from || typeof c.from !== 'string') {
+							errors.push(`Component "${compId}" control connection at index ${connIdx} is missing a valid "from" field`);
+						} else if (!idSet.has(c.from)) {
+							errors.push(`Component "${compId}" control connection references non-existent component "${c.from}"`);
+						}
+					});
+				}
+			});
 		}
 
 		return {

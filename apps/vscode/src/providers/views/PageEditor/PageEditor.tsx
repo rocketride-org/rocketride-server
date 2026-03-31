@@ -167,8 +167,13 @@ export const PageEditor: React.FC = () => {
 			switch (message.type) {
 				case 'update':
 					if (message.content && message.content !== '') {
-						setFileErrors(null);
-						setContent(JSON.parse(message.content));
+						try {
+							const parsed = JSON.parse(message.content);
+							setFileErrors(null);
+							setContent(parsed);
+						} catch (e) {
+							setFileErrors([`Failed to parse pipeline JSON: ${e instanceof Error ? e.message : 'Unknown error'}`]);
+						}
 					}
 					break;
 				case 'fileInvalid':
