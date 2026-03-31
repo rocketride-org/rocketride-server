@@ -1,0 +1,96 @@
+{
+	"title": "Batch Processor",
+	"protocol": "batch_processor://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.batch_processor",
+	"prefix": "batch",
+	"icon": "batch.svg",
+	"description": [
+		"Processes large datasets by splitting input into individual items and running each through the pipeline.",
+		"Supports JSON arrays, CSV, and line-delimited input formats.",
+		"Provides configurable concurrency, rate limiting, retry with exponential backoff, and per-item error isolation."
+	],
+	"tile": ["Tool: ${parameters.batch.serverName}.batch_process"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default",
+				"serverName": "batch"
+			}
+		}
+	},
+	"fields": {
+		"batch.serverName": {
+			"hidden": true,
+			"type": "string",
+			"title": "Server name",
+			"description": "Namespace prefix for the tool: <serverName>.batch_process",
+			"default": "batch"
+		},
+		"batch.concurrency": {
+			"type": "number",
+			"title": "Concurrency",
+			"description": "Maximum number of items processed in parallel.",
+			"default": 5
+		},
+		"batch.retryCount": {
+			"type": "number",
+			"title": "Retry count",
+			"description": "Number of retry attempts per failed item (0 = no retries).",
+			"default": 3
+		},
+		"batch.retryDelayMs": {
+			"type": "number",
+			"title": "Retry delay (ms)",
+			"description": "Base delay between retries in milliseconds. Doubles on each attempt (exponential backoff).",
+			"default": 1000
+		},
+		"batch.rateLimitPerSecond": {
+			"type": "number",
+			"title": "Rate limit (per second)",
+			"description": "Maximum items dispatched per second (0 = unlimited).",
+			"default": 0
+		},
+		"batch.inputFormat": {
+			"type": "string",
+			"title": "Input format",
+			"description": "How to interpret the input payload.",
+			"default": "json_array",
+			"enum": [
+				["json_array", "JSON Array"],
+				["csv", "CSV (comma-separated, first row = headers)"],
+				["lines", "Line-delimited (one item per line)"]
+			]
+		},
+		"batch.stopOnFailure": {
+			"type": "boolean",
+			"title": "Stop on failure",
+			"description": "If true, abort remaining items when any single item fails after exhausting retries.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Batch Processor",
+			"properties": [
+				"type",
+				"batch.concurrency",
+				"batch.retryCount",
+				"batch.retryDelayMs",
+				"batch.rateLimitPerSecond",
+				"batch.inputFormat",
+				"batch.stopOnFailure"
+			]
+		}
+	]
+}
