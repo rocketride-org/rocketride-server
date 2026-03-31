@@ -20,28 +20,56 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
 
 ### Branching Strategy
 
-- `main` - Stable release branch
-- `develop` - Integration branch for features
-- `feature/*` - Feature development branches
-- `bugfix/*` - Bug fix branches
-- `hotfix/*` - Critical fix branches
+- `main` — Stable release branch
+- `develop` — Integration branch (target all PRs here)
+- `release/*` — Release preparation branches
+
+All other branches **must** follow the naming convention:
+
+```text
+<type>/RR-<issue-number>-<short-description>
+```
+
+| Type        | Use                     |
+| ----------- | ----------------------- |
+| `feat/`     | New functionality       |
+| `fix/`      | Bug fix                 |
+| `hotfix/`   | Critical production fix |
+| `docs/`     | Documentation only      |
+| `refactor/` | Code cleanup            |
+| `chore/`    | Tooling, deps, build    |
+
+**Examples:**
+
+- `fix/RR-123-sql-injection-prevention`
+- `feat/RR-456-add-nomic-embeddings`
+- `chore/RR-789-pin-release-deps`
+
+> A GitHub Ruleset enforces this convention — pushes with non-conforming branch names will be rejected.
 
 ### Making Changes
 
-1. Create a new branch from `develop`:
+1. **Open or find an issue** — every PR must be linked to an issue
+2. Create a branch from the issue:
+
    ```bash
+   # Preferred: use GitHub CLI (auto-links the branch to the issue)
+   gh issue develop 123 --name "fix/RR-123-short-description" --checkout
+
+   # Or manually:
    git checkout develop
    git pull origin develop
-   git checkout -b feature/your-feature-name
+   git checkout -b fix/RR-123-short-description
    ```
 
-2. Make your changes, ensuring:
+3. Make your changes, ensuring:
+
    - Code follows the project style guidelines
    - All tests pass
    - New code has appropriate tests
    - Documentation is updated as needed
 
-3. Commit your changes with clear, descriptive messages:
+4. Commit your changes with clear, descriptive messages:
    ```bash
    git add .
    git commit -m "feat: add new feature description"
@@ -62,19 +90,23 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 ### Pull Request Process
 
 1. Push your branch to GitHub:
+
    ```bash
-   git push origin feature/your-feature-name
+   git push origin fix/RR-123-short-description
    ```
 
 2. Open a Pull Request against the `develop` branch
 
-3. Fill out the PR template with:
+3. **Link the issue** — use `Fixes #123`, `Closes #123`, or `Resolves #123` in the PR description (required by CI)
+
+4. Fill out the PR template with:
+
    - Description of changes
-   - Related issue numbers
+   - Linked issue number
    - Testing performed
    - Breaking changes (if any)
 
-4. Wait for code review and address feedback
+5. Wait for code review and address feedback
 
 ## Code Style Guidelines
 
@@ -108,16 +140,18 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```bash
 # All tests
-pnpm run test
+./builder test
 
-# C++ tests only
-pnpm run test:native
+# C++ engine tests only
+./builder server:test
 
-# Python tests only
-pnpm run test:python
+# Python tests only (nodes, AI, clients)
+./builder nodes:test
+./builder ai:test
+./builder client-python:test
 
 # TypeScript tests only
-pnpm run test:typescript
+./builder client-typescript:test
 ```
 
 ### Writing Tests
@@ -163,4 +197,3 @@ If you have questions, feel free to:
 - Review closed issues for similar questions
 
 Thank you for contributing to RocketRide Engine!
-

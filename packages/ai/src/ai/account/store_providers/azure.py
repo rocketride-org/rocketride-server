@@ -340,7 +340,13 @@ class AzureBlobStore(IStore):
 
     def _get_blob_name(self, path: str) -> str:
         """Convert relative path to blob name."""
+        import posixpath
+
         path = path.replace('\\', '/')
         if self._prefix:
-            return f'{self._prefix}/{path}'
-        return path
+            full_name = posixpath.normpath(f'{self._prefix}/{path}')
+            # Ensure the resolved name stays within the prefix
+            if not full_name.startswith(self._prefix + '/') and full_name != self._prefix:
+                raise StorageError(f'Path traversal detected: {path}')
+            return full_name
+        return posixpath.normpath(path)

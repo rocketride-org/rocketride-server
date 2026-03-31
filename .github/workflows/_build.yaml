@@ -20,6 +20,11 @@ on:
         required: false
         type: boolean
         default: false
+      nodownload:
+        description: Skip downloading pre-built artifacts
+        required: false
+        type: boolean
+        default: false
       package:
         description: Run the package step and upload artifacts
         required: false
@@ -109,7 +114,7 @@ jobs:
           queries: security-and-quality
 
       - name: Build
-        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version=${{ inputs.full_version }} --hash=${{ inputs.build_hash }} --stamp=${{ inputs.build_stamp }}
+        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version=${{ inputs.full_version }} --hash=${{ inputs.build_hash }} --stamp=${{ inputs.build_stamp }} ${{ inputs.nodownload && '--nodownload' || '' }}
 
       - name: Test
         if: inputs.codeql == false

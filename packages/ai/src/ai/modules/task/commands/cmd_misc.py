@@ -144,7 +144,7 @@ class MiscCommands(DAPConn):
                   component, and execution chain
 
         Usage Example:
-        { "command": "rrext_validate", "arguments": { "pipeline": { ... }, "source": "chat_1" } }
+        { "command": "rrext_validate", "arguments": { "pipeline": { "components": [], ... }, "source": "chat_1" } }
         """
         try:
             args = request.get('arguments', {})
@@ -165,8 +165,10 @@ class MiscCommands(DAPConn):
             if source:
                 inner['source'] = source
 
-            data = validatePipeline({'pipeline': inner})
+            # Validate it
+            data = validatePipeline(inner)
 
+            # Return the results
             return self.build_response(request, body=data)
 
         except Exception as e:

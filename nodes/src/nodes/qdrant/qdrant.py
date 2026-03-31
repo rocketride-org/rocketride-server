@@ -109,9 +109,9 @@ class Store(DocumentStoreBase):
             raise Exception('The metric you provided in the config.json does not match required qdrant configurations')
 
         if '://' in self.host:
-            url = f"{self.host}:{self.port}"
+            url = f'{self.host}:{self.port}'
         else:
-            url = f"http://{self.host}:{self.port}"
+            url = f'http://{self.host}:{self.port}'
         self.client = QdrantClient(url=url, api_key=self.apikey, prefer_grpc=False, timeout=60)
         return
 
@@ -538,7 +538,7 @@ class Store(DocumentStoreBase):
         filter_objectId = Filter(must=[FieldCondition(key='meta.objectId', match=models.MatchAny(any=objectIds))])
 
         # Set all the objects with the given objectId to true
-        self.client.set_payload(collection_name=self.collection, payload={'isDeleted': True}, points=filter_objectId)
+        self.client.set_payload(collection_name=self.collection, payload={'meta': {'isDeleted': True}}, points=filter_objectId)
         return
 
     def markActive(self, objectIds: List[str]) -> None:
@@ -556,7 +556,7 @@ class Store(DocumentStoreBase):
         filter_objectId = Filter(must=[FieldCondition(key='meta.objectId', match=models.MatchAny(any=objectIds))])
 
         # Set all the objects with the given objectId to false
-        self.client.set_payload(collection_name=self.collection, payload={'isDeleted': False}, points=filter_objectId)
+        self.client.set_payload(collection_name=self.collection, payload={'meta': {'isDeleted': False}}, points=filter_objectId)
         return
 
     def render(self, objectId: str, callback: Callable[[str], None]) -> None:

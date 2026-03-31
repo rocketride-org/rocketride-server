@@ -327,6 +327,8 @@ class Store(DocumentStoreBase):
 
     def remove(self, objectIds: List[str]) -> None:
         """Remove documents by object IDs."""
+        if not objectIds:
+            return
         if not self.doesCollectionExist():
             return
 
@@ -334,6 +336,8 @@ class Store(DocumentStoreBase):
 
     def markDeleted(self, objectIds: List[str]) -> None:
         """Mark documents as deleted."""
+        if not objectIds:
+            return
         if not self.doesCollectionExist():
             return
 
@@ -341,6 +345,8 @@ class Store(DocumentStoreBase):
 
     def markActive(self, objectIds: List[str]) -> None:
         """Mark documents as active (not deleted)."""
+        if not objectIds:
+            return
         if not self.doesCollectionExist():
             return
 
@@ -414,6 +420,9 @@ class Store(DocumentStoreBase):
 
         if docFilter.objectIds is not None:
             filter_conditions['meta.objectId'] = {'$in': docFilter.objectIds}
+
+        if docFilter.isDeleted is None or not docFilter.isDeleted:
+            filter_conditions['meta.isDeleted'] = False
 
         if docFilter.chunkIds is not None:
             filter_conditions['meta.chunkId'] = {'$in': docFilter.chunkIds}

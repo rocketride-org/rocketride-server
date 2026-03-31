@@ -13,17 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"embedding"
-	],
+	"classType": ["embedding"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"gpu"
-	],
+	"capabilities": ["gpu"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -51,14 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A processing component that generates vector embeddings from image content ",
-		"using advanced computer vision models. It transforms visual features into ",
-		"numerical representations that capture the semantic and structural characteristics ",
-		"of the image. These embeddings enable similarity search, clustering, and ",
-		"integration into multimodal workflows. Ideal for use cases involving image retrieval, ",
-		"classification, or content understanding."
-	],
+	"description": ["A processing component that generates vector embeddings from image content ", "using advanced computer vision models. It transforms visual features into ", "numerical representations that capture the semantic and structural characteristics ", "of the image. These embeddings enable similarity search, clustering, and ", "integration into multimodal workflows. Ideal for use cases involving image retrieval, ", "classification, or content understanding."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -75,12 +64,8 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"documents": [
-			"documents"
-		],
-		"image": [
-			"documents"
-		]
+		"documents": ["documents"],
+		"image": ["documents"]
 	},
 	"input": [
 		{
@@ -149,24 +134,18 @@
 		"embedding.custom": {
 			"object": "custom",
 			"title": "",
-			"properties": [
-				"embedding.model"
-			]
+			"properties": ["embedding.model"]
 		},
 		"embedding.profile": {
 			"title": "Model",
 			"description": "Embedding model",
 			"type": "string",
 			"default": "openai-patch16",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": [
-						"embedding.custom"
-					]
+					"properties": ["embedding.custom"]
 				}
 			]
 		}
@@ -180,9 +159,7 @@
 		{
 			"section": "Pipe",
 			"title": "Image",
-			"properties": [
-				"embedding.profile"
-			]
+			"properties": ["embedding.profile"]
 		}
 	],
 	//
@@ -201,7 +178,7 @@
 						"notEmpty": true,
 						"property": [
 							{
-								"path": "[0].documents[0].embedding",
+								"path": "[0].embedding",
 								"minLength": 384
 							}
 						]
@@ -214,30 +191,28 @@
 	//	Full test configuration - tests all embedding_image model profiles.
 	//	Run via: builder model_server:fulltest
 	//
-	"fulltest": {
-		"profiles": [
-			"openai-patch16",
-			"openai-patch32",
-			"google16x224"
-		],
-		"outputs": ["documents"],
-		"timeout": 120,
-		"cases": [
-			{
-				"name": "Embed single image",
-				"image": "images/ocr_test_text.png",
-				"expect": {
-					"documents": {
-						"notEmpty": true,
-						"property": [
-							{
-								"path": "[0].documents[0].embedding",
-								"minLength": 384
-							}
-						]
+	"fulltest": [
+		{
+			"profiles": ["openai-patch16", "openai-patch32", "google16x224"],
+			"outputs": ["documents"],
+			"timeout": 120,
+			"cases": [
+				{
+					"name": "Embed single image",
+					"image": "images/ocr_test_text.png",
+					"expect": {
+						"documents": {
+							"notEmpty": true,
+							"property": [
+								{
+									"path": "[0].embedding",
+									"minLength": 384
+								}
+							]
+						}
 					}
 				}
-			}
-		]
-	}
+			]
+		}
+	]
 }

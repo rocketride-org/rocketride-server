@@ -96,6 +96,14 @@ PipelineInputConnection = TypedDict(
     },
 )
 
+PipelineControlConnection = TypedDict(
+    'PipelineControlConnection',
+    {
+        'classType': str,  # REQUIRED - Class type of the invoke channel (e.g., 'llm', 'tool', 'memory')
+        'from': str,  # REQUIRED - Source component ID providing the invocation
+    },
+)
+
 
 class PipelineComponent(TypedDict, total=False):
     """
@@ -111,6 +119,7 @@ class PipelineComponent(TypedDict, total=False):
     description: str  # Component description for documentation
     ui: dict[str, Any]  # UI-specific configuration for visual editors
     input: list[PipelineInputConnection]  # Input connections from other components
+    control: list[PipelineControlConnection]  # Invoke (control-flow) connections from other components
 
 
 class PipelineConfig(TypedDict, total=False):
@@ -129,5 +138,3 @@ class PipelineConfig(TypedDict, total=False):
     source: Optional[str]  # ID of the component that serves as the pipeline entry point
     project_id: str  # Project identifier for organization and permissions
     viewport: dict[str, Any]  # UI viewport settings for visual editors
-
-

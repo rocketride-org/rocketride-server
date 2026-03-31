@@ -8,13 +8,8 @@
 	"path": "nodes.mcp_client",
 	"prefix": "mcp",
 	"icon": "mcp.svg",
-	"description": [
-		"Connects to an external MCP server and exposes its tools for agent tool-calling.",
-		"Transports: STDIO (local subprocess), Streamable HTTP (modern), and legacy HTTP+SSE."
-	],
-	"tile": [
-		"Transport: ${parameters.mcp_client.transport}"
-	],
+	"description": ["Connects to an external MCP server and exposes its tools for agent tool-calling.", "Transports: STDIO (local subprocess), Streamable HTTP (modern), and legacy HTTP+SSE."],
+	"tile": ["Transport: ${parameters.mcp_client.transport}"],
 	"lanes": {},
 	"preconfig": {
 		"default": "RocketRide",
@@ -23,7 +18,7 @@
 				"title": "RocketRide MCP server (stdio)",
 				"serverName": "RocketRide",
 				"transport": "stdio",
-				"commandLine": "python -m RocketRide_mcp"
+				"commandLine": "python -m rocketride_mcp"
 			},
 			"streamable_http": {
 				"title": "Generic MCP server (Streamable HTTP)",
@@ -51,29 +46,19 @@
 			"title": "Transport",
 			"description": "How to connect to the MCP server",
 			"default": "streamable-http",
-			"enum": [
-				"stdio",
-				"streamable-http",
-				"sse"
-			],
+			"enum": ["stdio", "streamable-http", "sse"],
 			"conditional": [
 				{
 					"value": "stdio",
-					"properties": [
-						"mcp_client.stdio"
-					]
+					"properties": ["mcp_client.stdio"]
 				},
 				{
 					"value": "streamable-http",
-					"properties": [
-						"mcp_client.http"
-					]
+					"properties": ["mcp_client.http"]
 				},
 				{
 					"value": "sse",
-					"properties": [
-						"mcp_client.sse"
-					]
+					"properties": ["mcp_client.sse"]
 				}
 			]
 		},
@@ -81,8 +66,8 @@
 		"mcp_client.commandLine": {
 			"type": "string",
 			"title": "Command line",
-			"description": "Command line to launch MCP server (stdio transport). Example: python -m RocketRide_mcp",
-			"default": "python -m RocketRide_mcp"
+			"description": "Command line to launch MCP server (stdio transport). Example: python -m rocketride_mcp",
+			"default": "python -m rocketride_mcp"
 		},
 		"mcp_client.endpoint": {
 			"type": "string",
@@ -117,39 +102,24 @@
 		"mcp_client.stdio": {
 			"object": "stdio",
 			"title": "STDIO (subprocess)",
-			"properties": [
-				"mcp_client.commandLine"
-			]
+			"properties": ["mcp_client.commandLine"]
 		},
 		"mcp_client.http": {
 			"object": "http",
 			"title": "HTTP (Streamable HTTP)",
-			"properties": [
-				"mcp_client.endpoint",
-				"mcp_client.headers",
-				"mcp_client.bearer"
-			]
+			"properties": ["mcp_client.endpoint", "mcp_client.headers", "mcp_client.bearer"]
 		},
 		"mcp_client.sse": {
 			"object": "sse",
 			"title": "Legacy HTTP+SSE",
-			"properties": [
-				"mcp_client.sse_endpoint",
-				"mcp_client.headers",
-				"mcp_client.bearer"
-			]
+			"properties": ["mcp_client.sse_endpoint", "mcp_client.headers", "mcp_client.bearer"]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "MCP Client",
-			"properties": [
-				"type",
-				"mcp_client.serverName",
-				"mcp_client.transport"
-			]
+			"properties": ["type", "mcp_client.serverName", "mcp_client.transport"]
 		}
 	]
 }
-

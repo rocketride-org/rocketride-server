@@ -1842,6 +1842,18 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 	});
 });
 
+describe('RocketRideClient URI normalization', () => {
+	it.each([
+		['wss://cloud.rocketride.ai', 'wss://cloud.rocketride.ai/task/service'],
+		['https://cloud.rocketride.ai', 'wss://cloud.rocketride.ai/task/service'],
+		['ws://localhost:5565', 'ws://localhost:5565/task/service'],
+		['http://localhost:5565', 'ws://localhost:5565/task/service'],
+	])('normalizes %s to %s', (inputUri, expectedUri) => {
+		const client = new RocketRideClient({ auth: 'test-key', uri: inputUri });
+		expect((client as any)._uri).toBe(expectedUri);
+	});
+});
+
 export async function isServerAvailable(): Promise<boolean> {
 	try {
 		const client = new RocketRideClient({

@@ -32,10 +32,42 @@ jobs:
   init:
     name: Initialize
     uses: ./.github/workflows/_init.yaml
+
+  # Skip build entirely for docs-only PRs (no code changed).
+  # For all code changes, builder handles engine download-vs-compile
+  # internally via hash comparison with nightly builds.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'packages/**'
+              - 'nodes/**'
+              - 'apps/**'
+              - 'scripts/**'
+              - 'builder'
+              - 'builder.cmd'
+              - '.github/workflows/**'
+
   build:
     name: Build
-    needs: init
-    if: github.event_name != 'schedule'
+    needs: [init, changes]
+    if: >-
+      always() &&
+      needs.init.result == 'success' &&
+      github.event_name != 'schedule' &&
+      (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     uses: ./.github/workflows/_build.yaml
     permissions:
       contents: read
@@ -95,6 +127,7 @@ jobs:
       full_version: ${{ needs.init.outputs.full_server_version }}
       build_hash: ${{ needs.init.outputs.build_hash }}
       build_stamp: ${{ needs.init.outputs.build_stamp }}
+      nodownload: true
     secrets: inherit
 
   # ---------------------------------------------------------------------------
@@ -139,3 +172,23 @@ jobs:
         with:
           sarif_file: 'trivy-${{ matrix.dockerfile }}.sarif'
           category: 'trivy-${{ matrix.dockerfile }}'
+
+  # ---------------------------------------------------------------------------
+  #  Gatekeeper — the ONLY job to mark as "Required" in branch protection.
+  #  Aggregates all CI results so skipped builds don't block PRs.
+  # ---------------------------------------------------------------------------
+  ci-ok:
+    name: CI OK
+    needs: [init, changes, build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify results
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "❌ One or more CI jobs failed or were cancelled."
+            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}"
+            exit 1
+          fi
+          echo "✅ All CI checks passed (or were correctly skipped)."
+          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}"

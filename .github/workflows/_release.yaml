@@ -127,7 +127,7 @@ jobs:
       - name: Publish rocketride to PyPI
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-python'
         run: |
-          pip install twine
+          pip install twine==6.1.0
           VERSION="${{ matrix.version }}"
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/rocketride/${VERSION}/json")
           if [ "$STATUS" = "200" ]; then
@@ -142,7 +142,7 @@ jobs:
       - name: Publish rocketride-mcp to PyPI
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-mcp'
         run: |
-          pip install twine
+          pip install twine==6.1.0
           VERSION="${{ matrix.version }}"
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/rocketride-mcp/${VERSION}/json")
           if [ "$STATUS" = "200" ]; then
@@ -164,7 +164,7 @@ jobs:
       - name: Publish to VS Code Marketplace
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'vscode'
         run: |
-          npm install -g @vscode/vsce
+          npm install -g @vscode/vsce@3.7.1
           VSIX=$(find release-assets -name '*.vsix' | head -n1)
           echo "Publishing ${VSIX}"
           OUTPUT=$(vsce publish --packagePath "${VSIX}" 2>&1) && exit 0
@@ -180,11 +180,11 @@ jobs:
       - name: Publish to Open VSX
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'vscode'
         run: |
-          npm install -g ovsx
+          npm install -g ovsx@0.10.9
           VSIX=$(find release-assets -name '*.vsix' | head -n1)
           echo "Publishing ${VSIX}"
           OUTPUT=$(ovsx publish "${VSIX}" -p "$OVSX_PAT" 2>&1) && exit 0
-          if echo "$OUTPUT" | grep -qi "already exists"; then
+          if echo "$OUTPUT" | grep -qiE "already exists|already published"; then
             echo "Version already exists on Open VSX — skipping"
           else
             echo "$OUTPUT"

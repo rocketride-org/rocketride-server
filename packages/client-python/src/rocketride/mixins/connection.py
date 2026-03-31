@@ -358,7 +358,7 @@ class ConnectionMixin(DAPClient):
         normalized = ConnectionMixin.normalize_uri(uri)
         parsed = urllib.parse.urlparse(normalized)
 
-        ws_scheme = 'wss' if parsed.scheme == 'https' else 'ws'
+        ws_scheme = 'wss' if parsed.scheme in ('https', 'wss') else 'ws'
         ws_uri = parsed._replace(scheme=ws_scheme)
         return f'{ws_uri.geturl()}/task/service'
 

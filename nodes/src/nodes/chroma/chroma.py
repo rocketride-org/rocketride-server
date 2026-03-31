@@ -144,22 +144,22 @@ class Store(DocumentStoreBase):
 
     def _convertFilter(self, docFilter: DocFilter) -> Dict[str, Any]:
         filters = []
-        if docFilter.nodeId:
+        if docFilter.nodeId is not None:
             filters.append({'nodeId': {'$eq': docFilter.nodeId}})
         if docFilter.isTable:
             filters.append({'isTable': {'$eq': docFilter.isTable}})
-        if docFilter.tableIds:
+        if docFilter.tableIds is not None:
             filters.append({'tableId': {'$in': docFilter.tableIds}})
-        if docFilter.parent:
+        if docFilter.parent is not None:
             filters.append({'parent': {'$eq': docFilter.parent}})
-        if docFilter.permissions:
+        if docFilter.permissions is not None:
             filters.append({'permissionId': {'$in': docFilter.permissions}})
-        if docFilter.objectIds:
+        if docFilter.objectIds is not None:
             filters.append({'objectId': {'$in': docFilter.objectIds}})
         if docFilter.isDeleted is not None:
             filters.append({'isDeleted': {'$eq': docFilter.isDeleted}})
-        if docFilter.chunkIds:
-            filters.append({'chunkId': {'$in': docFilter.objectIds}})
+        if docFilter.chunkIds is not None:
+            filters.append({'chunkId': {'$in': docFilter.chunkIds}})
         # If we are min chunk id, add a condition
         if docFilter.minChunkId is not None:
             filters.append({'chunkId': {'$gte': docFilter.minChunkId}})
@@ -367,10 +367,10 @@ class Store(DocumentStoreBase):
             nonlocal ids, embeddings, metadatas, documents
             if object_ids_to_delete:
                 if len(object_ids_to_delete) > 1:
-                    filter_condition = {'$or': [{'meta.objectId': object_id} for object_id in object_ids_to_delete]}
+                    filter_condition = {'$or': [{'objectId': object_id} for object_id in object_ids_to_delete]}
                     self.collectionObj.delete(where=filter_condition)
                 else:
-                    filter_condition = {'meta.objectId': list(object_ids_to_delete.keys())[0]}
+                    filter_condition = {'objectId': list(object_ids_to_delete.keys())[0]}
                     self.collectionObj.delete(where=filter_condition)
                 object_ids_to_delete.clear()
 

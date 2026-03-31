@@ -219,3 +219,6 @@ downloads/jre-17.zip
 downloads/jdk-17.tar.gz
 downloads/jre-17.tar.gz
 downloads/maven-3.9.6.tar.gz
+
+# One of the python modules keeps installing this
+include/python3.12/greenlet/greenlet.h

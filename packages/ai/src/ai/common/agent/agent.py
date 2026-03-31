@@ -69,6 +69,7 @@ class AgentBase(ABC):
 
         # And save any specific instructions
         self._instructions = config.get('instructions', [])
+        self._agent_description = config.get('agent_description', '') or ''
 
     # ---------------------------------------------------------------------
     # Pipeline-facing entrypoint

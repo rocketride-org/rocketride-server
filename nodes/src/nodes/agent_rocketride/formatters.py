@@ -25,12 +25,14 @@ from __future__ import annotations
 import csv as csv_mod
 import io
 import json
+from html import escape as html_escape
 from typing import Any, Callable, Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
 # Individual formatters
 # ---------------------------------------------------------------------------
+
 
 def _to_rows(data: Any) -> Optional[List[Dict[str, Any]]]:
     """Try to interpret *data* as a list of dicts (table rows).
@@ -117,13 +119,13 @@ def format_html_table(data: Any) -> Optional[str]:
     headers = list(rows[0].keys())
     parts: List[str] = ['<table>', '<thead><tr>']
     for h in headers:
-        parts.append(f'<th>{h}</th>')
+        parts.append(f'<th>{html_escape(str(h))}</th>')
     parts.append('</tr></thead>')
     parts.append('<tbody>')
     for row in rows:
         parts.append('<tr>')
         for h in headers:
-            parts.append(f'<td>{row.get(h, "")}</td>')
+            parts.append(f'<td>{html_escape(str(row.get(h, "")))}</td>')
         parts.append('</tr>')
     parts.append('</tbody></table>')
     return ''.join(parts)

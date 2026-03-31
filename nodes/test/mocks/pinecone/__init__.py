@@ -45,102 +45,94 @@ from dataclasses import dataclass
 # Index Specifications
 # =============================================================================
 
+
 @dataclass
 class ServerlessSpec:
     """Serverless index specification."""
-    cloud: str = "aws"
-    region: str = "us-east-1"
+
+    cloud: str = 'aws'
+    region: str = 'us-east-1'
 
 
 @dataclass
 class PodSpec:
     """Pod-based index specification."""
-    environment: str = "us-east1-gcp"
+
+    environment: str = 'us-east1-gcp'
     pods: int = 1
-    pod_type: str = "p1.x1"
+    pod_type: str = 'p1.x1'
 
 
 # =============================================================================
 # Mock Index
 # =============================================================================
 
+
 class MockIndex:
     """Mock Pinecone index."""
-    
+
     # Class-level storage: {index_name: {id: {values, metadata}}}
     _all_storage: Dict[str, Dict[str, Dict]] = {}
     _dimensions: Dict[str, int] = {}
-    
+
     def __init__(self, name: str):
+        """Initialize mock index for the given name."""
         self.name = name
         if name not in MockIndex._all_storage:
             MockIndex._all_storage[name] = {}
-    
+
     @property
     def _storage(self) -> Dict[str, Dict]:
         return MockIndex._all_storage.get(self.name, {})
-    
+
     def describe_index_stats(self) -> Dict[str, Any]:
         """Get index statistics."""
-        return {
-            "total_vector_count": len(self._storage),
-            "dimension": MockIndex._dimensions.get(self.name, 0)
-        }
-    
-    def query(
-        self,
-        vector: List[float],
-        top_k: int = 10,
-        filter: Optional[Dict] = None,
-        include_metadata: bool = True,
-        include_values: bool = False
-    ) -> Dict[str, Any]:
+        return {'total_vector_count': len(self._storage), 'dimension': MockIndex._dimensions.get(self.name, 0)}
+
+    def query(self, vector: List[float], top_k: int = 10, filter: Optional[Dict] = None, include_metadata: bool = True, include_values: bool = False) -> Dict[str, Any]:
         """Query the index for similar vectors."""
         matches = []
-        
+
         for id, data in self._storage.items():
-            metadata = data.get("metadata", {})
-            
+            metadata = data.get('metadata', {})
+
             # Apply filters
             if filter and not self._matches_filter(metadata, filter):
                 continue
-            
+
             # Calculate similarity score
-            stored_vector = data.get("values", [])
+            stored_vector = data.get('values', [])
             if stored_vector and vector:
                 score = self._cosine_similarity(vector, stored_vector)
             else:
                 score = 0.0
-            
-            match = {"id": id, "score": score}
+
+            match = {'id': id, 'score': score}
             if include_metadata:
-                match["metadata"] = self._serialize_metadata(metadata)
+                match['metadata'] = self._serialize_metadata(metadata)
             if include_values:
-                match["values"] = stored_vector
-            
+                match['values'] = stored_vector
+
             matches.append(match)
-        
+
         # Sort by score descending
-        matches.sort(key=lambda x: x["score"], reverse=True)
-        
-        return {"matches": matches[:top_k]}
-    
+        matches.sort(key=lambda x: x['score'], reverse=True)
+
+        return {'matches': matches[:top_k]}
+
     def upsert(self, vectors: List[Dict[str, Any]]):
         """Upsert vectors into the index."""
         for vec in vectors:
-            vec_id = vec["id"]
-            values = vec["values"]
-            metadata = vec.get("metadata", {})
-            
+            vec_id = vec['id']
+            values = vec['values']
+            metadata = vec.get('metadata', {})
+
             # Store dimension if not set
             if self.name not in MockIndex._dimensions and values:
                 MockIndex._dimensions[self.name] = len(values)
-            
-            self._storage[vec_id] = {
-                "values": values,
-                "metadata": metadata
-            }
-    
+
+            self._storage[vec_id] = {'values': values, 'metadata': metadata}
+
     def delete(self, ids: List[str] = None, filter: Dict = None):
         """Delete vectors from the index."""
         if ids:
@@ -150,74 +142,85 @@ class MockIndex:
         elif filter:
             to_delete = []
             for id, data in self._storage.items():
-                if self._matches_filter(data.get("metadata", {}), filter):
+                if self._matches_filter(data.get('metadata', {}), filter):
                     to_delete.append(id)
             for id in to_delete:
                 del self._storage[id]
-    
+
     def update(self, id: str, set_metadata: Dict = None):
         """Update vector metadata."""
         if id in self._storage and set_metadata:
-            self._storage[id]["metadata"].update(set_metadata)
-    
+            self._storage[id]['metadata'].update(set_metadata)
+
     def _matches_filter(self, metadata: Dict, filter: Dict) -> bool:
         """Check if metadata matches the filter."""
         if not filter:
             return True
-        
+
         # Handle $and
-        if "$and" in filter:
-            return all(self._matches_filter(metadata, f) for f in filter["$and"])
-        
+        if '$and' in filter:
+            return all(self._matches_filter(metadata, f) for f in filter['$and'])
+
         # Handle $or
-        if "$or" in filter:
-            return any(self._matches_filter(metadata, f) for f in filter["$or"])
-        
+        if '$or' in filter:
+            return any(self._matches_filter(metadata, f) for f in filter['$or'])
+
         # Handle individual field conditions
         for field, condition in filter.items():
-            if field.startswith("$"):
+            if field.startswith('$'):
                 continue
-            
+
             value = metadata.get(field)
-            
+
             if isinstance(condition, dict):
                 for op, expected in condition.items():
-                    if op == "$eq":
+                    if op == '$eq':
                         if value != expected:
                             return False
-                    elif op == "$in":
+                    elif op == '$ne':
+                        if value == expected:
+                            return False
+                    elif op == '$in':
                         if value not in expected:
                             return False
-                    elif op == "$gte":
+                    elif op == '$gt':
+                        if value is None or value <= expected:
+                            return False
+                    elif op == '$gte':
                         if value is None or value < expected:
                             return False
-                    elif op == "$lte":
+                    elif op == '$lt':
+                        if value is None or value >= expected:
+                            return False
+                    elif op == '$lte':
                         if value is None or value > expected:
                             return False
-                    elif op == "$contains":
+                    elif op == '$contains':
                         if expected not in str(value):
                             return False
+                    else:
+                        raise ValueError(f'Unsupported filter operator: {op}')
             else:
                 # Direct equality
                 if value != condition:
                     return False
-        
+
         return True
-    
+
     def _cosine_similarity(self, v1: List[float], v2: List[float]) -> float:
         """Calculate cosine similarity between two vectors."""
         if len(v1) != len(v2):
             return 0.0
-        
+
         dot_product = sum(a * b for a, b in zip(v1, v2))
         norm1 = sum(a * a for a in v1) ** 0.5
         norm2 = sum(b * b for b in v2) ** 0.5
-        
+
         if norm1 == 0 or norm2 == 0:
             return 0.0
-        
+
         return dot_product / (norm1 * norm2)
-    
+
     def _serialize_metadata(self, metadata: Dict) -> Dict:
         """Serialize metadata, handling special types and excluding None values."""
         result = {}
@@ -237,39 +240,31 @@ class MockIndex:
 # Mock Pinecone Client
 # =============================================================================
 
+
 class MockPinecone:
     """Mock Pinecone client."""
-    
+
     # Class-level set of index names
     _indexes: Dict[str, Dict] = {}
-    
+
     def __init__(self, api_key: str = None):
+        """Initialize mock Pinecone client."""
         self.api_key = api_key
-    
+
     def has_index(self, name: str) -> bool:
         """Check if an index exists."""
         return name in MockPinecone._indexes
-    
-    def create_index(
-        self,
-        name: str,
-        dimension: int,
-        metric: str = "cosine",
-        spec: Any = None
-    ):
+
+    def create_index(self, name: str, dimension: int, metric: str = 'cosine', spec: Any = None):
         """Create a new index."""
-        MockPinecone._indexes[name] = {
-            "dimension": dimension,
-            "metric": metric,
-            "spec": spec
-        }
+        MockPinecone._indexes[name] = {'dimension': dimension, 'metric': metric, 'spec': spec}
         MockIndex._dimensions[name] = dimension
         MockIndex._all_storage[name] = {}
-    
+
     def Index(self, name: str) -> MockIndex:
         """Get an index by name."""
         return MockIndex(name)
-    
+
     @classmethod
     def reset(cls):
         """Reset all mock state for testing."""
@@ -282,11 +277,12 @@ class MockPinecone:
 # GRPC submodule (pinecone.grpc.PineconeGRPC)
 # =============================================================================
 
+
 class grpc:
     """Mock grpc submodule."""
+
     PineconeGRPC = MockPinecone
 
 
 # Alias for direct import
 PineconeGRPC = MockPinecone
-

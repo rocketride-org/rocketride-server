@@ -348,7 +348,13 @@ class S3Store(IStore):
 
     def _get_key(self, path: str) -> str:
         """Convert relative path to S3 key."""
+        import posixpath
+
         path = path.replace('\\', '/')
         if self._prefix:
-            return f'{self._prefix}/{path}'
-        return path
+            full_key = posixpath.normpath(f'{self._prefix}/{path}')
+            # Ensure the resolved key stays within the prefix
+            if not full_key.startswith(self._prefix + '/') and full_key != self._prefix:
+                raise StorageError(f'Path traversal detected: {path}')
+            return full_key
+        return posixpath.normpath(path)

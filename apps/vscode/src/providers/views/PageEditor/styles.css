@@ -1,4 +1,4 @@
- * =============================================================================
+* =============================================================================
  * MIT License
  * Copyright (c) 2026 Aparavi Software AG
  *
@@ -48,8 +48,62 @@
 	display: flex;
 	justify-content: center;
 	align-items: center;
-	height: 100%;
+	min-height: 300px;
+	margin-top: 100px;
 	text-align: center;
+}
+
+/* ============================================================================ */
+/* INVALID FILE OVERLAY */
+/* ============================================================================ */
+
+.file-invalid-overlay {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	padding: 40px;
+	text-align: center;
+	color: var(--vscode-errorForeground);
+}
+
+.file-invalid-icon {
+	font-size: 48px;
+	margin-bottom: 16px;
+	opacity: 0.8;
+}
+
+.file-invalid-overlay h2 {
+	margin: 0 0 20px;
+	font-size: 18px;
+	font-weight: 600;
+	color: var(--vscode-errorForeground);
+}
+
+.file-invalid-errors {
+	list-style: none;
+	padding: 0;
+	margin: 0 0 20px;
+	text-align: left;
+	max-width: 500px;
+}
+
+.file-invalid-errors li {
+	padding: 6px 12px;
+	margin-bottom: 4px;
+	background: var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.1));
+	border-left: 3px solid var(--vscode-errorForeground);
+	border-radius: 2px;
+	font-family: var(--vscode-editor-font-family);
+	font-size: 13px;
+	color: var(--vscode-foreground);
+}
+
+.file-invalid-hint {
+	margin: 0;
+	font-size: 13px;
+	color: var(--vscode-descriptionForeground);
 }
 
 /* The Canvas component from rocketride-canvas handles its own internal styling */

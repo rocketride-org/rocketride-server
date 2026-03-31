@@ -2,7 +2,7 @@
 	"name": "rocketride",
 	"displayName": "RocketRide",
 	"description": "RocketRide extension for Visual Studio Code",
-	"version": "1.0.2",
+	"version": "1.0.6",
 	"publisher": "rocketride",
 	"repository": {
 		"type": "git",
@@ -127,6 +127,11 @@
 					"description": "Root OAuth2 URL for the refresh path (lambda) passed to the services OAuth2 endpoint. No UI to change it.",
 					"format": "uri"
 				},
+				"rocketride.integrations.autoAgentIntegration": {
+					"type": "boolean",
+					"default": true,
+					"description": "Automatically detect and install RocketRide documentation for coding agents (Copilot, Claude Code, Cursor, Windsurf) on startup"
+				},
 				"rocketride.integrations.copilot": {
 					"type": "boolean",
 					"default": false,
@@ -146,6 +151,16 @@
 					"type": "boolean",
 					"default": false,
 					"description": "Enable RocketRide integration with Windsurf"
+				},
+				"rocketride.integrations.claudeMd": {
+					"type": "boolean",
+					"default": false,
+					"description": "Install RocketRide instructions to CLAUDE.md at the repo root (generic agent support)"
+				},
+				"rocketride.integrations.agentsMd": {
+					"type": "boolean",
+					"default": false,
+					"description": "Install RocketRide instructions to AGENTS.md at the repo root (generic agent support)"
 				}
 			}
 		},
@@ -277,6 +292,16 @@
 			{
 				"command": "rocketride.page.welcome.open",
 				"title": "Welcome",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.agents.install",
+				"title": "Install Agent Documentation",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.agents.uninstall",
+				"title": "Remove Agent Documentation",
 				"category": "RocketRide"
 			}
 		],
