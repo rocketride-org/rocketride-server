@@ -151,12 +151,18 @@ class MonitorCommands(DAPConn):
                 subscriber_preference = self._monitors[pipe_key]
                 await _send_event(subscriber_preference)
 
-        # Project-scoped check
+        # Project-scoped check (exact source match)
         if project_key in self._monitors:
             subscriber_preference = self._monitors[project_key]
             await _send_event(subscriber_preference)
 
-        # Wildcard check
+        # Project-wildcard check (all sources within a project: p.{projectId}.*)
+        project_wildcard_key = f'p.{control.project_id}.*'
+        if project_wildcard_key != project_key and project_wildcard_key in self._monitors:
+            subscriber_preference = self._monitors[project_wildcard_key]
+            await _send_event(subscriber_preference)
+
+        # Global wildcard check (all tasks)
         if '*' in self._monitors:
             subscriber_preference = self._monitors['*']
             await _send_event(subscriber_preference)

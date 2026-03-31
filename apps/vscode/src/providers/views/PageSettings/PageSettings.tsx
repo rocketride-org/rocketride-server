@@ -31,7 +31,7 @@ import { IntegrationSettings } from './IntegrationSettings';
 import { MessageDisplay } from './MessageDisplay';
 
 // Import the styles
-import '../../styles/vscode.css'
+import '../../styles/vscode.css';
 import '../../styles/app.css';
 import './styles.css';
 
@@ -51,10 +51,13 @@ export interface SettingsData {
 	localDebugOutput: boolean;
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
 	envVars?: Record<string, string>;
+	autoAgentIntegration: boolean;
 	integrationCopilot: boolean;
 	integrationClaudeCode: boolean;
 	integrationCursor: boolean;
 	integrationWindsurf: boolean;
+	integrationClaudeMd: boolean;
+	integrationAgentsMd: boolean;
 }
 
 export interface EngineVersionItem {
@@ -67,51 +70,51 @@ export interface MessageData {
 	message: string;
 }
 
-export type PageSettingsIncomingMessage
-	= {
-		type: 'settingsLoaded';
-		settings: SettingsData;
-	}
+export type PageSettingsIncomingMessage =
 	| {
-		type: 'showMessage';
-		level: 'success' | 'error' | 'info' | 'warning';
-		message: string;
-		context?: 'development';
-	}
+			type: 'settingsLoaded';
+			settings: SettingsData;
+	  }
 	| {
-		type: 'engineVersionsLoaded';
-		versions: EngineVersionItem[];
-	};
+			type: 'showMessage';
+			level: 'success' | 'error' | 'info' | 'warning';
+			message: string;
+			context?: 'development';
+	  }
+	| {
+			type: 'engineVersionsLoaded';
+			versions: EngineVersionItem[];
+	  };
 
-export type PageSettingsOutgoingMessage
-	= {
-		type: 'ready';
-	}
+export type PageSettingsOutgoingMessage =
 	| {
-		type: 'saveSettings';
-		settings: SettingsData;
-	}
+			type: 'ready';
+	  }
 	| {
-		type: 'testConnection';
-		settings: SettingsData;
-	}
+			type: 'saveSettings';
+			settings: SettingsData;
+	  }
 	| {
-		type: 'clearCredentials';
-	}
+			type: 'testConnection';
+			settings: SettingsData;
+	  }
 	| {
-		type: 'fetchEngineVersions';
-	};
+			type: 'clearCredentials';
+	  }
+	| {
+			type: 'fetchEngineVersions';
+	  };
 
 // ============================================================================
 // MAIN SETTINGS VIEW COMPONENT
 // ============================================================================
 
 /**
- * PageSettings - Configuration dashboard for VS Code extension webview 
- * 
+ * PageSettings - Configuration dashboard for VS Code extension webview
+ *
  * Provides settings management interface with multiple configuration sections.
  * Communicates with VS Code extension via useMessaging for persistence and validation.
- * 
+ *
  * Features:
  * - Connection settings with cloud/local mode support
  * - Pipeline configuration with default paths
@@ -135,10 +138,13 @@ export const PageSettings: React.FC = () => {
 		localEngineArgs: '',
 		pipelineRestartBehavior: 'prompt',
 		envVars: {},
+		autoAgentIntegration: true,
 		integrationCopilot: false,
 		integrationClaudeCode: false,
 		integrationCursor: false,
-		integrationWindsurf: false
+		integrationWindsurf: false,
+		integrationClaudeMd: false,
+		integrationAgentsMd: false,
 	});
 	const [message, setMessage] = useState<MessageData | null>(null);
 	const [developmentTestMessage, setDevelopmentTestMessage] = useState<MessageData | null>(null);
@@ -149,39 +155,38 @@ export const PageSettings: React.FC = () => {
 	// WEBVIEW MESSAGING
 	// ========================================================================
 
-	const { sendMessage, isReady: _isReady } = useMessaging<
-		PageSettingsOutgoingMessage, PageSettingsIncomingMessage>({
-			onMessage: (message) => {
-				// Handle all incoming messages from your discriminated union
-				switch (message.type) {
-					case 'settingsLoaded':
-						setSettings(message.settings);
-						if (message.settings.connectionMode === 'local') {
-							setEngineVersionsLoading(true);
-							sendMessage({ type: 'fetchEngineVersions' });
-						}
-						break;
-
-					case 'engineVersionsLoaded':
-						setEngineVersions(message.versions);
-						setEngineVersionsLoading(false);
-						break;
-
-					case 'showMessage': {
-						const msg = { level: message.level, message: message.message };
-						const clearAfter = message.level === 'success' ? 5000 : undefined;
-						if (message.context === 'development') {
-							setDevelopmentTestMessage(msg);
-							if (clearAfter) setTimeout(() => setDevelopmentTestMessage(null), clearAfter);
-						} else {
-							setMessage(msg);
-							if (clearAfter) setTimeout(() => setMessage(null), clearAfter);
-						}
-						break;
+	const { sendMessage, isReady: _isReady } = useMessaging<PageSettingsOutgoingMessage, PageSettingsIncomingMessage>({
+		onMessage: (message) => {
+			// Handle all incoming messages from your discriminated union
+			switch (message.type) {
+				case 'settingsLoaded':
+					setSettings(message.settings);
+					if (message.settings.connectionMode === 'local') {
+						setEngineVersionsLoading(true);
+						sendMessage({ type: 'fetchEngineVersions' });
 					}
+					break;
+
+				case 'engineVersionsLoaded':
+					setEngineVersions(message.versions);
+					setEngineVersionsLoading(false);
+					break;
+
+				case 'showMessage': {
+					const msg = { level: message.level, message: message.message };
+					const clearAfter = message.level === 'success' ? 5000 : undefined;
+					if (message.context === 'development') {
+						setDevelopmentTestMessage(msg);
+						if (clearAfter) setTimeout(() => setDevelopmentTestMessage(null), clearAfter);
+					} else {
+						setMessage(msg);
+						if (clearAfter) setTimeout(() => setMessage(null), clearAfter);
+					}
+					break;
 				}
 			}
-		});
+		},
+	});
 
 	// ========================================================================
 	// EVENT HANDLERS
@@ -206,7 +211,7 @@ export const PageSettings: React.FC = () => {
 	 */
 	const handleClearCredentials = (): void => {
 		// Clear the API key from local state and send clear message
-		setSettings(prev => ({ ...prev, apiKey: '', hasApiKey: false }));
+		setSettings((prev) => ({ ...prev, apiKey: '', hasApiKey: false }));
 		sendMessage({ type: 'clearCredentials' });
 	};
 
@@ -214,7 +219,7 @@ export const PageSettings: React.FC = () => {
 	 * Update settings with partial changes
 	 */
 	const handleSettingsChange = (newSettings: Partial<SettingsData>): void => {
-		setSettings(prev => {
+		setSettings((prev) => {
 			// If switching to local mode, fetch engine versions
 			if (newSettings.connectionMode === 'local' && prev.connectionMode !== 'local') {
 				setEngineVersionsLoading(true);
@@ -228,12 +233,12 @@ export const PageSettings: React.FC = () => {
 	 * Add or update an environment variable (local state only, not saved until "Save All Settings")
 	 */
 	const handleEnvVarAdd = (key: string, value: string): void => {
-		setSettings(prev => ({
+		setSettings((prev) => ({
 			...prev,
 			envVars: {
 				...prev.envVars,
-				[key]: value
-			}
+				[key]: value,
+			},
 		}));
 	};
 
@@ -241,12 +246,12 @@ export const PageSettings: React.FC = () => {
 	 * Update an existing environment variable (local state only, not saved until "Save All Settings")
 	 */
 	const handleEnvVarUpdate = (key: string, value: string): void => {
-		setSettings(prev => ({
+		setSettings((prev) => ({
 			...prev,
 			envVars: {
 				...prev.envVars,
-				[key]: value
-			}
+				[key]: value,
+			},
 		}));
 	};
 
@@ -254,12 +259,12 @@ export const PageSettings: React.FC = () => {
 	 * Delete an environment variable (local state only, not saved until "Save All Settings")
 	 */
 	const handleEnvVarDelete = (key: string): void => {
-		setSettings(prev => {
+		setSettings((prev) => {
 			const newEnvVars = { ...prev.envVars };
 			delete newEnvVars[key];
 			return {
 				...prev,
-				envVars: newEnvVars
+				envVars: newEnvVars,
 			};
 		});
 	};
@@ -282,37 +287,15 @@ export const PageSettings: React.FC = () => {
 			<MessageDisplay message={message} />
 
 			<div className="settings-container">
-				<ConnectionSettings
-					settings={settings}
-					onSettingsChange={handleSettingsChange}
-					onClearCredentials={handleClearCredentials}
-					onTestDevelopmentConnection={handleTestDevelopmentConnection}
-					developmentTestMessage={developmentTestMessage}
-					engineVersions={engineVersions}
-					engineVersionsLoading={engineVersionsLoading}
-				/>
+				<ConnectionSettings settings={settings} onSettingsChange={handleSettingsChange} onClearCredentials={handleClearCredentials} onTestDevelopmentConnection={handleTestDevelopmentConnection} developmentTestMessage={developmentTestMessage} engineVersions={engineVersions} engineVersionsLoading={engineVersionsLoading} />
 
-				<PipelineSettings
-					settings={settings}
-					onSettingsChange={handleSettingsChange}
-				/>
+				<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} />
 
-				<EnvVariablesSettings
-					settings={settings}
-					onEnvVarAdd={handleEnvVarAdd}
-					onEnvVarUpdate={handleEnvVarUpdate}
-					onEnvVarDelete={handleEnvVarDelete}
-				/>
+				<EnvVariablesSettings settings={settings} onEnvVarAdd={handleEnvVarAdd} onEnvVarUpdate={handleEnvVarUpdate} onEnvVarDelete={handleEnvVarDelete} />
 
-				<DebuggingSettings
-					settings={settings}
-					onSettingsChange={handleSettingsChange}
-				/>
+				<DebuggingSettings settings={settings} onSettingsChange={handleSettingsChange} />
 
-				<IntegrationSettings
-					settings={settings}
-					onSettingsChange={handleSettingsChange}
-				/>
+				<IntegrationSettings settings={settings} onSettingsChange={handleSettingsChange} />
 			</div>
 		</div>
 	);

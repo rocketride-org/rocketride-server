@@ -39,6 +39,7 @@ from pgvector.psycopg2 import register_vector
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
+from .IGlobal import VALID_TABLE
 
 # Default PostgreSQL port
 DEFAULT_POSTGRES_PORT = 5432
@@ -49,6 +50,7 @@ MIN_SIMILARITY_SCORE = 0.20
 # SQL Queries
 SQL_QUERIES = {
     'check_collection_exists': "SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = %s)",
+    # fmt: off
     'create_collection': (
         'CREATE TABLE IF NOT EXISTS {collection} ('
         'id bigserial PRIMARY KEY, '
@@ -66,6 +68,7 @@ SQL_QUERIES = {
         'embedding vector({vector_size})'
         ');'
     ),
+    # fmt: on
     'count_documents': 'SELECT COUNT(*) FROM {collection}',
     'search_keyword': 'SELECT * FROM {collection} WHERE content LIKE %s {where_clause} LIMIT %s',
     'get_documents': 'SELECT * FROM {collection} {where_clause} LIMIT %s',
@@ -105,8 +108,10 @@ class Store(DocumentStoreBase):
         # Get our configuration
         config = Config.getNodeConfig(provider, connConfig)
 
-        # Save our parameters
-        self.collection = config.get('collection')
+        # Save our parameters — validate to prevent SQL injection via .format()
+        self.collection = ((config.get('table') or config.get('collection')) or '').strip()
+        if not self.collection or not VALID_TABLE.fullmatch(self.collection):
+            raise ValueError(f'Invalid collection name: {self.collection!r}. Must be a valid PostgreSQL identifier (letters, digits, underscores; max 63 chars).')
 
         # Remove leading and trailing spaces, leading http/https and :// and trailing slashes
         self.host = config.get('host').strip()

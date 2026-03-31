@@ -119,18 +119,6 @@ def _get_cache_dir() -> str:
     return os.path.join(_get_executable_dir(), 'cache')
 
 
-def _build_cmd(args: list[str]) -> str:
-    """Build a shell command string, quoting any argument that contains spaces."""
-
-    def _quote(arg: str) -> str:
-        if ' ' not in arg:
-            return arg
-        if os.name == 'nt':
-            return '"' + arg.replace('"', '\\"') + '"'
-        return "'" + arg.replace("'", "'\\''") + "'"
-
-    return ' '.join(_quote(a) for a in args)
-
 
 def _run(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
     """
@@ -441,23 +429,22 @@ def _compile_constraints(constraints_path: str):
     exe_dir = _get_executable_dir()
     monitorStatus('Compiling constraints...')
 
-    cmd = _build_cmd(
-        [
-            _uv_rel_path(),
-            'pip',
-            'compile',
-            './cache/combined.txt',
-            '--output-file',
-            './cache/constraints.txt',
-            '--python',
-            sys.executable,  # Explicitly specify Python version to avoid mismatch
-            '--index-strategy',
-            'unsafe-best-match',  # Check all indexes for best version
-            '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
-            '--emit-index-url',  # Preserve --extra-index-url etc. so install/dry-run can find packages (e.g. torch+cu128)
-        ]
-    )
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=False, stdin=subprocess.PIPE, encoding='utf-8', errors='replace', cwd=exe_dir)
+    args = [
+        _uv_rel_path(),
+        'pip',
+        'compile',
+        './cache/combined.txt',
+        '--output-file',
+        './cache/constraints.txt',
+        '--python',
+        sys.executable,  # Explicitly specify Python version to avoid mismatch
+        '--index-strategy',
+        'unsafe-best-match',  # Check all indexes for best version
+        '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
+        '--emit-index-url',  # Preserve --extra-index-url etc. so install/dry-run can find packages (e.g. torch+cu128)
+    ]
+    debug(f'Compile: {args}')
+    result = subprocess.run(args, capture_output=True, text=True, check=False, stdin=subprocess.PIPE, encoding='utf-8', errors='replace', cwd=exe_dir)
 
     if result.returncode != 0:
         error(f'Failed to compile constraints: {result.stderr}')
@@ -671,9 +658,8 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
     if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
         args.extend(['-c', './cache/constraints.txt'])
 
-    cmd = _build_cmd(args)
-    debug(f'Dry-run: {cmd}')
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=False, stdin=subprocess.PIPE, cwd=exe_dir)
+    debug(f'Dry-run: {args}')
+    result = subprocess.run(args, capture_output=True, text=True, check=False, stdin=subprocess.PIPE, cwd=exe_dir)
 
     # Check if dry-run failed (e.g., dependency resolution error)
     if result.returncode != 0:
@@ -751,10 +737,9 @@ def _install_requirements(requirements_path: str, constraints_path: str):
         uv_args.extend(['-c', './cache/constraints.txt'])
 
     # Run uv and stream output
-    cmd = _build_cmd(uv_args)
+    debug(f'Install: {uv_args}')
     proc = subprocess.Popen(
-        cmd,
-        shell=True,
+        uv_args,
         cwd=exe_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -885,8 +870,7 @@ def main():
                     uv_args.extend(['-c', './cache/constraints.txt'])
 
             # Run uv
-            cmd = _build_cmd(uv_args)
-            result = subprocess.run(cmd, shell=True, cwd=exe_dir)
+            result = subprocess.run(uv_args, cwd=exe_dir)
             sys.exit(result.returncode)
 
 

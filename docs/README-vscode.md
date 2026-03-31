@@ -1,6 +1,17 @@
-# RocketRide for Visual Studio Code
+<p align="center">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/images/banner-vscode.png" alt="RocketRide for VS Code" width="900">
+</p>
 
-Build, debug, and deploy AI pipelines - without leaving your IDE.
+<p align="center">
+  Build, debug, and deploy AI pipelines - without leaving your IDE.
+</p>
+
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride"><img src="https://img.shields.io/visual-studio-marketplace/v/RocketRide.rocketride?color=222223&label=marketplace" alt="VS Code Marketplace"></a>
+  <a href="https://github.com/rocketride-org/rocketride-server"><img src="https://img.shields.io/github/stars/rocketride-org/rocketride-server?style=flat&color=238636&label=GitHub&logo=github&logoColor=white" alt="GitHub"></a>
+  <a href="https://discord.gg/9hr3tdZmEG"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/license-MIT-41b6e6" alt="MIT License"></a>
+</p>
 
 ## Quick Start
 
@@ -42,35 +53,35 @@ Need inspiration? Check out our [example pipelines](https://docs.rocketride.org/
 
 ## Extension Settings
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `rocketride.connectionMode` | `string` | `"local"` | Connection mode: `"local"` (your machine), `"onprem"` (your own hosted server), or `"cloud"` (coming soon) |
-| `rocketride.hostUrl` | `string` | `"http://localhost:5565"` | Host URL for RocketRide service. Host and port will be parsed from this URL. |
-| `rocketride.defaultPipelinePath` | `string` | `"${workspaceFolder}/pipelines"` | Default directory path for creating new pipeline files |
-| `rocketride.local.engineVersion` | `string` | `"latest"` | Engine version to download. `"latest"` for newest stable, `"prerelease"` for newest prerelease, or a specific tag like `"server-v3.1.1"`. |
-| `rocketride.engineArgs` | `string[]` | `[]` | Additional arguments passed to the engine subprocess |
-| `rocketride.autoConnect` | `boolean` | `true` | Automatically connect to RocketRide server when extension activates |
-| `rocketride.pipelineRestartBehavior` | `string` | `"prompt"` | Behavior when a `.pipe` file changes while the pipeline is running: `"auto"`, `"manual"`, or `"prompt"` |
-| `rocketride.oauth2RootUrl` | `string` | `"https://oauth2.rocketride.ai"` | Root OAuth2 URL for the refresh path passed to the services OAuth2 endpoint |
-| `rocketride.integrations.copilot` | `boolean` | `false` | Enable RocketRide integration with GitHub Copilot |
-| `rocketride.integrations.claudeCode` | `boolean` | `false` | Enable RocketRide integration with Claude Code |
-| `rocketride.integrations.cursor` | `boolean` | `false` | Enable RocketRide integration with Cursor |
-| `rocketride.integrations.windsurf` | `boolean` | `false` | Enable RocketRide integration with Windsurf |
+| Setting                              | Type       | Default                          | Description                                                                                                                               |
+| ------------------------------------ | ---------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `rocketride.connectionMode`          | `string`   | `"local"`                        | Connection mode: `"local"` (your machine), `"onprem"` (your own hosted server), or `"cloud"` (coming soon)                                |
+| `rocketride.hostUrl`                 | `string`   | `"http://localhost:5565"`        | Host URL for RocketRide service. Host and port will be parsed from this URL.                                                              |
+| `rocketride.defaultPipelinePath`     | `string`   | `"${workspaceFolder}/pipelines"` | Default directory path for creating new pipeline files                                                                                    |
+| `rocketride.local.engineVersion`     | `string`   | `"latest"`                       | Engine version to download. `"latest"` for newest stable, `"prerelease"` for newest prerelease, or a specific tag like `"server-v3.1.1"`. |
+| `rocketride.engineArgs`              | `string[]` | `[]`                             | Additional arguments passed to the engine subprocess                                                                                      |
+| `rocketride.autoConnect`             | `boolean`  | `true`                           | Automatically connect to RocketRide server when extension activates                                                                       |
+| `rocketride.pipelineRestartBehavior` | `string`   | `"prompt"`                       | Behavior when a `.pipe` file changes while the pipeline is running: `"auto"`, `"manual"`, or `"prompt"`                                   |
+| `rocketride.oauth2RootUrl`           | `string`   | `"https://oauth2.rocketride.ai"` | Root OAuth2 URL for the refresh path passed to the services OAuth2 endpoint                                                               |
+| `rocketride.integrations.copilot`    | `boolean`  | `false`                          | Enable RocketRide integration with GitHub Copilot                                                                                         |
+| `rocketride.integrations.claudeCode` | `boolean`  | `false`                          | Enable RocketRide integration with Claude Code                                                                                            |
+| `rocketride.integrations.cursor`     | `boolean`  | `false`                          | Enable RocketRide integration with Cursor                                                                                                 |
+| `rocketride.integrations.windsurf`   | `boolean`  | `false`                          | Enable RocketRide integration with Windsurf                                                                                               |
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `RocketRide: Connect to Server` | Connect to the RocketRide engine |
-| `RocketRide: Disconnect from Server` | Disconnect from the engine |
-| `RocketRide: Reconnect to Server` | Reconnect to the engine |
-| `RocketRide: Open RocketRide Settings` | Open extension settings |
-| `RocketRide: Open Status Page` | View server and pipeline status |
-| `RocketRide Pipeline: Create New Pipeline` | Create a new `.pipe` file |
-| `RocketRide Pipeline: Run` | Run the selected pipeline |
-| `RocketRide Pipeline: Stop Pipeline` | Stop a running pipeline |
-| `RocketRide: Open as Text` | Open a `.pipe` file as raw JSON |
-| `RocketRide: Welcome` | Open the welcome page |
+| Command                                    | Description                      |
+| ------------------------------------------ | -------------------------------- |
+| `RocketRide: Connect to Server`            | Connect to the RocketRide engine |
+| `RocketRide: Disconnect from Server`       | Disconnect from the engine       |
+| `RocketRide: Reconnect to Server`          | Reconnect to the engine          |
+| `RocketRide: Open RocketRide Settings`     | Open extension settings          |
+| `RocketRide: Open Status Page`             | View server and pipeline status  |
+| `RocketRide Pipeline: Create New Pipeline` | Create a new `.pipe` file        |
+| `RocketRide Pipeline: Run`                 | Run the selected pipeline        |
+| `RocketRide Pipeline: Stop Pipeline`       | Stop a running pipeline          |
+| `RocketRide: Open as Text`                 | Open a `.pipe` file as raw JSON  |
+| `RocketRide: Welcome`                      | Open the welcome page            |
 
 ## Links
 

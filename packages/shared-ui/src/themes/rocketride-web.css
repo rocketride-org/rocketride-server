@@ -1,0 +1,304 @@
+/**
+ * RocketRide Design Tokens — Standalone Web Defaults
+ *
+ * Defines the --rr-* CSS custom properties used by all RocketRide
+ * webview components (flow canvas, status, token, etc.).
+ *
+ * This file provides the default values for a standard web application.
+ * When running inside VS Code, rocketride-vscode.css overrides these
+ * with VS Code theme variables so the UI matches the user's editor theme.
+ *
+ * Components should ONLY reference --rr-* variables for visual properties.
+ * Never use --vscode-* directly or hardcode color values in components.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * NAMING CONVENTION
+ *
+ *   --rr-<role>-<target>[-<variant>]
+ *
+ *   role     What the token controls:
+ *            bg, fg, text, color, border, shadow, accent, font, grey
+ *   target   The UI element or semantic concept:
+ *            paper, widget, input, list, button, titleBar, …
+ *   variant  Optional state or sub-property:
+ *            hover, active, focus, idle, light, sm, xs, h1–h5, …
+ *
+ * Examples:
+ *   --rr-bg-widget-hover     background → widget → hover state
+ *   --rr-border-input        border     → input field
+ *   --rr-font-size-h1        font size  → h1 heading
+ *   --rr-color-error-light   color      → error → light variant
+ * ──────────────────────────────────────────────────────────────────────
+ */
+
+:root {
+	/* ================================================================== */
+	/* Brand                                                               */
+	/* ================================================================== */
+
+	/** Primary brand colour — RocketRide orange. */
+	--rr-brand: #f7901f;
+
+	/* ================================================================== */
+	/* Palette mode                                                        */
+	/* ================================================================== */
+
+	/** "light" or "dark" — drives MUI palette.mode.
+	    In VS Code this is computed at runtime from --rr-bg-default. */
+	--rr-palette-mode: light;
+
+	/* ================================================================== */
+	/* Backgrounds                                                         */
+	/* ================================================================== */
+
+	/** Page / viewport fill. */
+	--rr-bg-default: #ffffff;
+
+	/** Primary opaque surface — canvas, node bodies, content areas. */
+	--rr-bg-paper: #f5f5f5;
+
+	/** Alternate surface for visually distinct sections (e.g. lanes). */
+	--rr-bg-surface-alt: #fafafa;
+
+	/* ================================================================== */
+	/* Title bar                                                           */
+	/* ================================================================== */
+
+	/** Node header foreground — active (hovered / selected). */
+	--rr-fg-titleBar-active: #1a1a1a;
+
+	/** Node header foreground — inactive (idle). */
+	--rr-fg-titleBar-inactive: #666666;
+
+	/** Node header background — active (hovered / selected). */
+	--rr-bg-titleBar-active: #e8e8e8;
+
+	/** Node header background — inactive (idle). */
+	--rr-bg-titleBar-inactive: #f0f0f0;
+
+	/* ================================================================== */
+	/* Widget (sidebar-style floating UI: toolbar, panels)                 */
+	/* ================================================================== */
+
+	/** Widget background — toolbars, side panels, floating UI. */
+	--rr-bg-widget: #f3f3f3;
+
+	/** Widget foreground text. */
+	--rr-fg-widget: #1a1a1a;
+
+	/** Widget section-header background. */
+	--rr-bg-widget-header: #e8e8e8;
+
+	/** Widget list-item hover background. */
+	--rr-bg-widget-hover: rgba(0, 0, 0, 0.04);
+
+	/** Widget drop-shadow — soft edge for panels and overlays. */
+	--rr-shadow-widget: rgba(0, 0, 0, 0.16);
+
+	/** Widget font family. */
+	--rr-font-family-widget: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+
+	/** Widget font size. */
+	--rr-font-size-widget: 13px;
+
+	/* ================================================================== */
+	/* Text                                                                */
+	/* ================================================================== */
+
+	/** Primary text — node titles, main labels. */
+	--rr-text-primary: #1a1a1a;
+
+	/** Secondary text — descriptions, hints. */
+	--rr-text-secondary: #666666;
+
+	/** Disabled / muted text — class-type labels, inactive items. */
+	--rr-text-disabled: #838383;
+
+	/** Link text — clickable documentation links. */
+	--rr-text-link: #1976d2;
+
+	/** Caption text — fine-print under form fields. */
+	--rr-text-caption: #7d7d7d;
+
+	/* ================================================================== */
+	/* Semantic colours                                                    */
+	/* ================================================================== */
+
+	/** Secondary accent — toolbar icons, secondary buttons. */
+	--rr-color-secondary: #666666;
+
+	/** Error — destructive actions, validation failures. */
+	--rr-color-error: #fa3c3c;
+
+	/** Error light variant — error icon idle state. */
+	--rr-color-error-light: #f44f55;
+
+	/** Warning — non-blocking alerts. */
+	--rr-color-warning: #e8b931;
+
+	/** Info — informational badges, links. */
+	--rr-color-info: #3182ce;
+
+	/** Success — completed tasks, positive feedback. */
+	--rr-color-success: #22e02c;
+
+	/* ================================================================== */
+	/* Borders                                                             */
+	/* ================================================================== */
+
+	/** Default border — node idle state, dividers, separators. */
+	--rr-border: #dcdcdc;
+
+	/** Border on hover state. */
+	--rr-border-hover: #aaaaaa;
+
+	/** Border on focus / selection state. */
+	--rr-border-focus: #0078d4;
+
+	/** Input field border. */
+	--rr-border-input: #a8a8a8;
+
+	/** MUI Paper border style. */
+	--rr-border-paper: 2px solid #eee;
+
+	/* ================================================================== */
+	/* Accent                                                              */
+	/* ================================================================== */
+
+	/** Primary accent — connected handles, active indicators. */
+	--rr-accent: #f7901f;
+
+	/** Faded accent — resize-handle borders, subtle highlights. */
+	--rr-accent-faded: rgba(247, 144, 31, 0.5);
+
+	/* ================================================================== */
+	/* Buttons                                                             */
+	/* ================================================================== */
+
+	/** Primary button background. */
+	--rr-bg-button: #f7901f;
+
+	/** Primary button foreground. */
+	--rr-fg-button: #ffffff;
+
+	/** Small button height (compact actions on nodes, toolbars). */
+	--rr-btn-sm-height: 16px;
+
+	/** Small button horizontal padding. */
+	--rr-btn-sm-padding: 0 6px;
+
+	/** Small button font size. */
+	--rr-btn-sm-font-size: 9px;
+
+	/** Small button border radius. */
+	--rr-btn-sm-radius: 3px;
+
+	/* ================================================================== */
+	/* Inputs                                                              */
+	/* ================================================================== */
+
+	/** Input field background. */
+	--rr-bg-input: #ffffff;
+
+	/* ================================================================== */
+	/* Lists                                                               */
+	/* ================================================================== */
+
+	/** List item hover background. */
+	--rr-bg-list-hover: rgba(0, 0, 0, 0.04);
+
+	/** List active-selection background. */
+	--rr-bg-list-active: #0e639c;
+
+	/** List active-selection foreground. */
+	--rr-fg-list-active: #ffffff;
+
+	/* ================================================================== */
+	/* Scrollbar                                                           */
+	/* ================================================================== */
+
+	/** Scrollbar thumb background. */
+	--rr-bg-scrollbar-thumb: rgba(121, 121, 121, 0.4);
+
+	/* ================================================================== */
+	/* Shadows                                                             */
+	/* ================================================================== */
+
+	/** Node idle state — thin ring that looks like a border. */
+	--rr-shadow-idle: 0 0 0 1px var(--rr-border);
+
+	/** Node hover state — slightly thicker ring. */
+	--rr-shadow-hover: 0 0 0 1.5px var(--rr-border-hover);
+
+	/** Node selected state — accent-coloured ring. */
+	--rr-shadow-selected: 0 0 0 1.5px var(--rr-border-focus);
+
+	/* ================================================================== */
+	/* Grey ramp                                                           */
+	/* ================================================================== */
+
+	/** Grey 200 — annotation backgrounds, subtle fills. */
+	--rr-grey-200: #d9d9d9;
+
+	/** Grey 400 — annotation borders, muted separators. */
+	--rr-grey-400: #a8a8a8;
+
+	/** Grey 500 — menu text, secondary icons. */
+	--rr-grey-500: #8e8e8e;
+
+	/* ================================================================== */
+	/* Icon filter                                                         */
+	/* ================================================================== */
+
+	/** CSS filter applied to raster / SVG icons to match light / dark mode. */
+	--rr-icon-filter: none;
+
+	/* ================================================================== */
+	/* Typography                                                          */
+	/* ================================================================== */
+
+	/** Base font family. */
+	--rr-font-family: Roboto, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+
+	/** Base font size — used for node labels and general canvas text. */
+	--rr-font-size: 0.75rem;
+
+	/** Small font size — lane labels, class-type badges. */
+	--rr-font-size-sm: 0.6rem;
+
+	/** Extra-small font size — invoke-tool labels, fine print. */
+	--rr-font-size-xs: 0.5rem;
+
+	/** Heading 1 font size. */
+	--rr-font-size-h1: 2rem;
+
+	/** Heading 2 font size. */
+	--rr-font-size-h2: 1.475rem;
+
+	/** Heading 3 font size. */
+	--rr-font-size-h3: 1.2rem;
+
+	/** Heading 4 font size. */
+	--rr-font-size-h4: 1.25rem;
+
+	/** Heading 5 font size. */
+	--rr-font-size-h5: 1.25rem;
+
+	/** Body text font size ("inherit" = use browser default). */
+	--rr-font-size-body: inherit;
+
+	/** Button label font size. */
+	--rr-font-size-button: 0.85rem;
+
+	/** Caption font size ("inherit" = use browser default). */
+	--rr-font-size-caption: inherit;
+
+	/** Subtitle font size. */
+	--rr-font-size-subtitle: 0.875rem;
+
+	/** Heading 5 font weight. */
+	--rr-font-weight-h5: 400;
+
+	/** Button label font weight. */
+	--rr-font-weight-button: 600;
+}

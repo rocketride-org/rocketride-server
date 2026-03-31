@@ -134,23 +134,28 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 		const commands = [
 			// Pipeline file operations
 			vscode.commands.registerCommand('rocketride.sidebar.files.openFile', async (item?: PipelineFileItem) => {
-				if (!item || !item.resourceUri) {
+				const resourceUri = this.resolveCommandResourceUri(item);
+				if (!resourceUri) {
 					vscode.window.showErrorMessage('No pipeline file selected');
 					return;
 				}
 
 				try {
 					// Open with a specific custom editor
-					await vscode.commands.executeCommand('vscode.openWith', item.resourceUri, 'rocketride.PageEditor');
+					await vscode.commands.executeCommand('vscode.openWith', resourceUri, 'rocketride.PageEditor');
 				} catch (error) {
 					vscode.window.showErrorMessage(`Failed to open status page: ${error}`);
 				}
 			}),
 
 			vscode.commands.registerCommand('rocketride.sidebar.files.openStatus', async (item?: PipelineFileItem) => {
-				const resourceUri = item?.resourceUri as vscode.Uri;
-				const componentId = item?.sourceComponent?.id as string;
-				const sourceComponent = item?.sourceComponent as ParsedSourceComponent;
+				const resourceUri = this.resolveCommandResourceUri(item);
+				if (!resourceUri) {
+					vscode.window.showErrorMessage('No pipeline file selected');
+					return;
+				}
+
+				const knownContext = this.resolveKnownPipelineCommandContext(item, resourceUri);
 				const unknownTask = item?.unknownTask as UnknownTask;
 
 				try {
@@ -164,18 +169,10 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 						source = unknownTask.sourceId;
 						displayName = unknownTask.displayName || source;
 					} else {
-						// Parse the pipeline file to get the project_id (for known tasks)
-						const parsedPipeline = this.getParsedPipeline(resourceUri);
-
-						if (parsedPipeline?.isValid && parsedPipeline.projectId) {
-							// Use project_id as the pipeline ID and componentId as the source
-							projectId = parsedPipeline.projectId;
-							source = componentId;
-
-							// Create a meaningful title: component name, provider title, or component id
-							const services = this.connectionManager.getCachedServices()?.services ?? {};
-							const providerDef = sourceComponent?.provider ? (services[sourceComponent.provider] as { title?: string } | undefined) : undefined;
-							displayName = sourceComponent?.name || providerDef?.title || componentId;
+						if (knownContext?.parsedPipeline?.isValid && knownContext.parsedPipeline.projectId && knownContext.componentId) {
+							projectId = knownContext.parsedPipeline.projectId;
+							source = knownContext.componentId;
+							displayName = knownContext.displayName;
 						} else {
 							vscode.window.showErrorMessage(`Invalid pipeline file or missing project_id: ${path.basename(resourceUri.fsPath)}`);
 							return;
@@ -206,14 +203,15 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			}),
 
 			vscode.commands.registerCommand('rocketride.sidebar.files.runPipeline', async (item?: PipelineFileItem) => {
-				if (!item || !item.resourceUri) {
+				const resourceUri = this.resolveCommandResourceUri(item);
+				if (!resourceUri) {
 					vscode.window.showErrorMessage('No pipeline selected');
 					return;
 				}
 
 				try {
 					// Read the pipeline file
-					const fileContent = await vscode.workspace.fs.readFile(item.resourceUri);
+					const fileContent = await vscode.workspace.fs.readFile(resourceUri);
 					const pipelineText = Buffer.from(fileContent).toString('utf8');
 					const pipelineJson = JSON.parse(pipelineText);
 
@@ -221,9 +219,9 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					const pipelineTransformed = ConfigManager.getInstance().substituteEnvVariables(pipelineJson);
 
 					// Get project and source identifiers
-					const parsedFile = item.parsedFile || this.getParsedPipeline(item.resourceUri);
-					const projectId = parsedFile?.projectId;
-					const sourceId = item.sourceComponent?.id || '';
+					const context = this.resolveKnownPipelineCommandContext(item, resourceUri);
+					const projectId = context?.parsedPipeline?.projectId;
+					const sourceId = context?.componentId ?? '';
 
 					// Use DAP command to execute pipeline without debugging
 					await this.connectionManager.request('execute', {
@@ -322,6 +320,59 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 		// Store disposables and add to context subscriptions
 		this.disposables.push(...commands);
 		commands.forEach((command) => this.context.subscriptions.push(command));
+	}
+
+	private resolveCommandResourceUri(item?: PipelineFileItem): vscode.Uri | undefined {
+		if (item?.resourceUri) {
+			return item.resourceUri;
+		}
+
+		const activeEditorUri = vscode.window.activeTextEditor?.document.uri;
+		if (activeEditorUri && this.isPipelineUri(activeEditorUri)) {
+			return activeEditorUri;
+		}
+
+		const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+		if (activeTab instanceof vscode.TabInputText || activeTab instanceof vscode.TabInputCustom) {
+			if (this.isPipelineUri(activeTab.uri)) {
+				return activeTab.uri;
+			}
+		}
+
+		return undefined;
+	}
+
+	private isPipelineUri(uri: vscode.Uri): boolean {
+		return uri.fsPath.endsWith('.pipe') || uri.fsPath.endsWith('.pipe.json');
+	}
+
+	private resolveKnownPipelineCommandContext(
+		item: PipelineFileItem | undefined,
+		resourceUri: vscode.Uri
+	):
+		| {
+				componentId?: string;
+				displayName: string;
+				parsedPipeline?: ParsedPipelineFile;
+				sourceComponent?: ParsedSourceComponent;
+		  }
+		| undefined {
+		const parsedPipeline = item?.parsedFile || this.getParsedPipeline(resourceUri);
+		if (!parsedPipeline?.isValid) {
+			return undefined;
+		}
+
+		const componentId = item?.sourceComponent?.id ?? parsedPipeline.pipeline?.source ?? parsedPipeline.sourceComponents?.[0]?.id;
+		const sourceComponent = componentId ? item?.sourceComponent || this.getSourceComponentById(resourceUri, componentId) : undefined;
+		const services = this.connectionManager.getCachedServices()?.services ?? {};
+		const providerDef = sourceComponent?.provider ? (services[sourceComponent.provider] as { title?: string } | undefined) : undefined;
+
+		return {
+			componentId,
+			displayName: sourceComponent?.name || providerDef?.title || componentId || path.basename(resourceUri.fsPath),
+			parsedPipeline,
+			sourceComponent,
+		};
 	}
 
 	/**
@@ -438,20 +489,50 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	/**
 	 * Handles file creation events
 	 */
+	/**
+	 * Handles newly created .pipe files.
+	 *
+	 * - Empty files are initialized with a valid pipeline template so the
+	 *   canvas editor can open them immediately.
+	 * - Non-empty files with valid pipeline JSON get a project_id assigned
+	 *   if missing or duplicated (e.g. copy-paste of another .pipe file).
+	 * - Invalid content (bad JSON, wrong structure) is left untouched —
+	 *   the sidebar will show "(Parse Error)" and the canvas will show
+	 *   an error overlay. We never overwrite the user's content.
+	 */
 	private async handleFileCreated(uri: vscode.Uri): Promise<void> {
 		try {
 			const raw = await vscode.workspace.fs.readFile(uri);
-			const parsed = JSON.parse(Buffer.from(raw).toString('utf8'));
-			if (parsed?.components) {
-				const existingIds = new Set([...this.parsedFiles.values()].map((f) => f.projectId).filter(Boolean));
-				const isDuplicate = parsed.project_id && existingIds.has(parsed.project_id);
-				if (!parsed.project_id || isDuplicate) {
-					parsed.project_id = crypto.randomUUID();
-					await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
+			const text = Buffer.from(raw).toString('utf8').trim();
+
+			if (!text) {
+				// Empty file — initialize with valid pipeline template
+				const parsed = { project_id: crypto.randomUUID(), components: [] };
+				await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
+			} else {
+				// Non-empty file — only touch it if the structure is already valid pipeline JSON
+				try {
+					const result = JSON.parse(text);
+					if (result && typeof result === 'object' && !Array.isArray(result)) {
+						const parsed = result as Record<string, unknown>;
+						if (Array.isArray(parsed.components)) {
+							// Collect all known project_ids from other open .pipe files
+							const existingIds = new Set([...this.parsedFiles.values()].map((f) => f.projectId).filter((id): id is string => typeof id === 'string' && id.trim() !== ''));
+							const projectId = typeof parsed.project_id === 'string' && parsed.project_id.trim() !== '' ? parsed.project_id : null;
+							const isDuplicate = projectId !== null && existingIds.has(projectId);
+							if (!projectId || isDuplicate) {
+								// Assign a fresh UUID so each pipeline file has a unique identity
+								parsed.project_id = crypto.randomUUID();
+								await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
+							}
+						}
+					}
+				} catch {
+					// Invalid JSON — leave as-is; sidebar will show Parse Error
 				}
 			}
 		} catch {
-			// If the file can't be read/parsed yet, just proceed with reload
+			// File can't be read yet (e.g. still being written) — proceed with reload
 		}
 		await this.loadPipelineFiles();
 	}
@@ -471,9 +552,59 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	}
 
 	/**
-	 * Handles file modification events
+	 * Handles file modification events.
+	 *
+	 * Same philosophy as handleFileCreated: empty files get a valid template,
+	 * valid pipelines get a project_id if missing/duplicated, and invalid
+	 * content is left alone for the error displays to handle.
+	 *
+	 * Supports the nested `{ pipeline: { ... } }` wrapper format that some
+	 * external tools produce, in addition to the flat format.
 	 */
 	private async handleFileChanged(uri: vscode.Uri): Promise<void> {
+		try {
+			const raw = await vscode.workspace.fs.readFile(uri);
+			const text = Buffer.from(raw).toString('utf8');
+			const trimmed = text.trim();
+
+			if (!trimmed) {
+				// Empty file — initialize with valid pipeline template
+				const parsed = { project_id: crypto.randomUUID(), components: [] };
+				await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
+			} else {
+				try {
+					const result = JSON.parse(text);
+					if (result && typeof result === 'object' && !Array.isArray(result)) {
+						const root = result as Record<string, unknown>;
+						// Support both flat `{ components, project_id }` and wrapped `{ pipeline: { components, project_id } }`
+						const target = root.pipeline && typeof root.pipeline === 'object' && !Array.isArray(root.pipeline) ? (root.pipeline as Record<string, unknown>) : root;
+						const hasComponents = Array.isArray(target.components);
+						if (hasComponents) {
+							// Collect project_ids from all OTHER files — exclude this file so it
+							// doesn't flag its own id as a duplicate on re-save
+							const existingIds = new Set(
+								[...this.parsedFiles.values()]
+									.filter((f) => f.filePath !== uri.fsPath)
+									.map((f) => f.projectId)
+									.filter((id): id is string => typeof id === 'string' && id.trim() !== '')
+							);
+							const projectId = typeof target.project_id === 'string' && target.project_id.trim() !== '' ? target.project_id : null;
+							const isDuplicate = projectId !== null && existingIds.has(projectId);
+							if (!projectId || isDuplicate) {
+								target.project_id = crypto.randomUUID();
+								await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(result, null, 2), 'utf8'));
+							}
+						}
+					}
+					// Invalid structure — leave as-is; sidebar will show Parse Error
+				} catch {
+					// Invalid JSON — leave as-is; sidebar will show Parse Error
+				}
+			}
+		} catch {
+			// File can't be read — skip
+		}
+
 		// Re-parse the changed file
 		const parsedFile = await PipelineFileParser.parseFile(uri.fsPath);
 		this.parsedFiles.set(uri.fsPath, parsedFile);
@@ -551,9 +682,9 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 
 				const message = runningComponents.length === 1 ? `Pipeline component "${componentNames}" in ${fileName} is running. Restart it?` : `${runningComponents.length} components (${componentNames}) in ${fileName} are running. Restart them?`;
 
-				const choice = await vscode.window.showInformationMessage(message, { modal: true }, 'Restart');
+				const choice = await vscode.window.showInformationMessage(message, { modal: true }, 'Yes', 'No');
 
-				if (choice === 'Restart') {
+				if (choice === 'Yes') {
 					for (const component of runningComponents) {
 						await this.restartPipe(parsedFile.projectId!, component.id, uri);
 					}

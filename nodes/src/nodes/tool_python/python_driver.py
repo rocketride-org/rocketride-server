@@ -43,11 +43,7 @@ INPUT_SCHEMA: Dict[str, Any] = {
     'properties': {
         'code': {
             'type': 'string',
-            'description': (
-                'Python source code to execute. Use print() to produce output. '
-                'Assign to a variable named "result" to return structured data. '
-                'Only whitelisted modules can be imported — check the tool description for the list.'
-            ),
+            'description': ('Python source code to execute. Use print() to produce output. Assign to a variable named "result" to return structured data. Only whitelisted modules can be imported — check the tool description for the list.'),
         },
     },
 }
@@ -79,12 +75,13 @@ OUTPUT_SCHEMA: Dict[str, Any] = {
 
 
 class PythonDriver(ToolsBase):
-
-    def __init__(self, *, server_name: str, allowed_modules: Set[str] | None = None):
+    def __init__(self, *, server_name: str, allowed_modules: Set[str] | None = None, timeout: int | None = None):
+        """Initialize the Python sandbox tool driver."""
         self._server_name = (server_name or '').strip() or 'python'
         self._tool_name = 'execute'
         self._namespaced = f'{self._server_name}.{self._tool_name}'
         self._allowed_modules = allowed_modules
+        self._timeout = timeout
 
     # ------------------------------------------------------------------
     # ToolsBase hooks
@@ -96,13 +93,7 @@ class PythonDriver(ToolsBase):
         return [
             {
                 'name': self._namespaced,
-                'description': (
-                    'Execute Python code in a sandboxed environment and return stdout/stderr. '
-                    'Use print() to produce visible output. '
-                    'Assign to a variable named "result" to return structured data (dict, list, etc.). '
-                    f'Timeout: {_TIMEOUT}s. '
-                    f'{imports_note}'
-                ),
+                'description': (f'Execute Python code in a sandboxed environment and return stdout/stderr. Use print() to produce visible output. Assign to a variable named "result" to return structured data (dict, list, etc.). Timeout: {self._timeout if self._timeout is not None else _TIMEOUT}s. {imports_note}'),
                 'inputSchema': INPUT_SCHEMA,
                 'outputSchema': OUTPUT_SCHEMA,
             }
@@ -125,4 +116,4 @@ class PythonDriver(ToolsBase):
 
         self._tool_validate(tool_name=tool_name, input_obj=input_obj)
 
-        return execute_sandboxed(input_obj['code'], allowed_modules=self._allowed_modules)
+        return execute_sandboxed(input_obj['code'], allowed_modules=self._allowed_modules, timeout=self._timeout)

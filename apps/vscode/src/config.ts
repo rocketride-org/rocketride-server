@@ -522,9 +522,6 @@ export class ConfigManager {
 					errors.push('Host URL must be a valid URL');
 				}
 			}
-			if (!config.apiKey) {
-				errors.push('API key is required when using on-prem mode');
-			}
 		} else {
 			// local — port is dynamically assigned, no validation needed
 		}

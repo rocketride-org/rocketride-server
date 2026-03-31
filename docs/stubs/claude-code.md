@@ -1,0 +1,34 @@
+---
+description: Use when working with RocketRide pipelines, SDK, components, or configuration
+globs: ['**/*.pipe', '**/pipeline*.json', '**/*rocketride*']
+---
+
+<!-- ROCKETRIDE:BEGIN -->
+
+# RocketRide — AI Pipeline Builder
+
+Use RocketRide when building AI pipelines, document processing, RAG systems, or data integration.
+
+## Documentation
+
+Full docs: `.rocketride/docs/`
+
+**Read the relevant doc(s) before generating any RocketRide code.**
+
+| File                              | Read when...                                                      |
+| --------------------------------- | ----------------------------------------------------------------- |
+| ROCKETRIDE_README.md              | Starting any RocketRide work — overview + mandatory setup steps   |
+| ROCKETRIDE_QUICKSTART.md          | Writing first pipeline — complete working examples (Python & TS)  |
+| ROCKETRIDE_PIPELINE_RULES.md      | Defining pipelines — structure, lane wiring, config rules         |
+| ROCKETRIDE_COMPONENT_REFERENCE.md | Choosing/configuring components — all providers and config fields |
+| ROCKETRIDE_COMMON_MISTAKES.md     | Before finalizing — known pitfalls to avoid                       |
+| ROCKETRIDE_python_API.md          | Python SDK — client methods, types, patterns                      |
+| ROCKETRIDE_typescript_API.md      | TypeScript SDK — client methods, types, patterns                  |
+
+## Before Writing ANY RocketRide Code
+
+1. Read `.rocketride/docs/ROCKETRIDE_README.md` for mandatory setup requirements
+2. Read the relevant API doc (Python or TypeScript) for your language
+3. Read `.rocketride/docs/ROCKETRIDE_PIPELINE_RULES.md` + `.rocketride/docs/ROCKETRIDE_COMPONENT_REFERENCE.md`
+4. Read `.rocketride/docs/ROCKETRIDE_COMMON_MISTAKES.md` before finalizing
+<!-- ROCKETRIDE:END -->

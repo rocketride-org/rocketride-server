@@ -88,7 +88,7 @@ class Embedding(EmbeddingBase):
 
         # Check it
         if self._embedding is None:
-            raise Exception(f'Could not instantiate embedding model ${self._model}')
+            raise Exception(f'Could not instantiate embedding model {self._model}')
 
         # Get the vector size and max tokens
         self._vectorSize = self._embedding.get_sentence_embedding_dimension()

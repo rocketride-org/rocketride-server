@@ -93,7 +93,7 @@ class IGlobal(IGlobalBase):
 
         # Check for success
         if response.status_code != 200:
-            raise Exception(f'Unable to destroy pipe on {self.urlControl}: {response.txt}')
+            raise Exception(f'Unable to destroy pipe on {self.urlControl}: {response.text}')
 
     def isLaneRemote(self, lane: str) -> bool:
         return lane in self.inputLanes

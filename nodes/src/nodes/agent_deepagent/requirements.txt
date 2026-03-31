@@ -1,0 +1,4 @@
+deepagents
+langchain
+langchain-core
+pydantic

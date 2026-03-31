@@ -35,29 +35,36 @@ const INTEGRATIONS: { key: BooleanKeys<SettingsData>; label: string; description
 	{
 		key: 'integrationCopilot',
 		label: 'GitHub Copilot',
-		description: 'Enable RocketRide integration with GitHub Copilot'
+		description: 'Enable RocketRide integration with GitHub Copilot',
 	},
 	{
 		key: 'integrationClaudeCode',
 		label: 'Claude Code',
-		description: 'Enable RocketRide integration with Claude Code'
+		description: 'Enable RocketRide integration with Claude Code',
 	},
 	{
 		key: 'integrationCursor',
 		label: 'Cursor',
-		description: 'Enable RocketRide integration with Cursor'
+		description: 'Enable RocketRide integration with Cursor',
 	},
 	{
 		key: 'integrationWindsurf',
 		label: 'Windsurf',
-		description: 'Enable RocketRide integration with Windsurf'
-	}
+		description: 'Enable RocketRide integration with Windsurf',
+	},
+	{
+		key: 'integrationClaudeMd',
+		label: 'Generic CLAUDE.md',
+		description: 'Install RocketRide instructions to CLAUDE.md at the repo root',
+	},
+	{
+		key: 'integrationAgentsMd',
+		label: 'Generic AGENTS.md',
+		description: 'Install RocketRide instructions to AGENTS.md at the repo root',
+	},
 ];
 
-export const IntegrationSettings: React.FC<IntegrationSettingsProps> = ({
-	settings,
-	onSettingsChange
-}) => {
+export const IntegrationSettings: React.FC<IntegrationSettingsProps> = ({ settings, onSettingsChange }) => {
 	return (
 		<div className="section">
 			<div className="section-title">Integrations</div>
@@ -66,18 +73,23 @@ export const IntegrationSettings: React.FC<IntegrationSettingsProps> = ({
 			<div className="form-grid">
 				<div className="form-group">
 					<div className="checkbox-group">
+						<label>
+							<input type="checkbox" checked={!!settings.autoAgentIntegration} onChange={(e) => onSettingsChange({ autoAgentIntegration: e.target.checked })} aria-describedby="autoAgentIntegration-help" />
+							<span>Automatic Agent Integration</span>
+						</label>
+						<div id="autoAgentIntegration-help" className="help-text">
+							Automatically detect and install RocketRide documentation for coding agents on startup
+						</div>
+
 						{INTEGRATIONS.map(({ key, label, description }) => (
 							<React.Fragment key={key}>
 								<label>
-									<input
-										type="checkbox"
-										checked={!!settings[key]}
-										onChange={(e) => onSettingsChange({ [key]: e.target.checked })}
-										aria-describedby={`${key}-help`}
-									/>
+									<input type="checkbox" checked={!!settings[key]} onChange={(e) => onSettingsChange({ [key]: e.target.checked })} aria-describedby={`${key}-help`} />
 									<span>{label}</span>
 								</label>
-								<div id={`${key}-help`} className="help-text">{description}</div>
+								<div id={`${key}-help`} className="help-text">
+									{description}
+								</div>
 							</React.Fragment>
 						))}
 					</div>

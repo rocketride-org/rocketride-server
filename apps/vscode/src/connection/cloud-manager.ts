@@ -30,20 +30,20 @@
 
 import { BaseManager, ManagerInfo } from './base-manager';
 import { ConfigManagerInfo } from '../config';
+import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
 
 export class CloudManager extends BaseManager {
-
 	/**
 	 * Validates that cloud/onprem credentials are configured.
 	 */
 	public async start(config: ConfigManagerInfo): Promise<void> {
 		this.emit('status', 'Validating credentials...');
 
-		if (!config.apiKey) {
-			throw new Error('API key is required for cloud/on-prem connections. Configure it in Settings.');
-		}
 		if (!config.hostUrl) {
 			throw new Error('Host URL is required for cloud/on-prem connections. Configure it in Settings.');
+		}
+		if (connectionModeRequiresApiKey(config.connectionMode) && !config.apiKey) {
+			throw new Error('API key is required for cloud connections. Configure it in Settings.');
 		}
 	}
 

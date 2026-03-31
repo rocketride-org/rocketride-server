@@ -50,11 +50,13 @@ class IGlobal(IGlobalBase):
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         server_name = str(cfg.get('serverName') or 'python').strip()
         allowed_modules = _parse_allowed_modules(cfg)
+        timeout = _parse_timeout(cfg)
 
         try:
             self.driver = PythonDriver(
                 server_name=server_name,
                 allowed_modules=allowed_modules,
+                timeout=timeout,
             )
         except Exception as e:
             warning(str(e))
@@ -62,6 +64,18 @@ class IGlobal(IGlobalBase):
 
     def endGlobal(self) -> None:
         self.driver = None
+
+
+def _parse_timeout(cfg: dict) -> int | None:
+    """Extract and validate the execution timeout from config. Returns None to use the sandbox default."""
+    raw = cfg.get('timeout')
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return max(1, min(value, 1200))
 
 
 def _parse_allowed_modules(cfg: dict) -> Set[str] | None:
@@ -76,6 +90,7 @@ def _parse_allowed_modules(cfg: dict) -> Set[str] | None:
 
     if not isinstance(raw, list):
         import json
+
         try:
             raw = json.loads(str(raw))
         except (json.JSONDecodeError, TypeError, ValueError):

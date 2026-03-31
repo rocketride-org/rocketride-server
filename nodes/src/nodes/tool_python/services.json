@@ -8,13 +8,8 @@
 	"path": "nodes.tool_python",
 	"prefix": "python",
 	"icon": "python.svg",
-	"description": [
-		"Executes Python code in a restricted in-process sandbox via exec().",
-		"Only whitelisted modules can be imported. Dangerous builtins are removed."
-	],
-	"tile": [
-		"Tool: python.execute"
-	],
+	"description": ["Executes Python code in a restricted in-process sandbox via exec().", "Only whitelisted modules can be imported. Dangerous builtins are removed."],
+	"tile": ["Tool: python.execute"],
 	"lanes": {},
 	"preconfig": {
 		"default": "default",
@@ -38,6 +33,15 @@
 			"title": "Module name",
 			"default": ""
 		},
+		"tool_python.timeout": {
+			"type": "integer",
+			"title": "Execution timeout (seconds)",
+			"description": "Maximum seconds a script may run before it is killed. Useful for long-running operations like network scans. Default is 20s, max is 1200s.",
+			"default": 20,
+			"minimum": 1,
+			"maximum": 1200,
+			"optional": true
+		},
 		"tool_python.allowedModules": {
 			"title": "Additional Allowed Modules",
 			"description": "Modules the agent is allowed to import, in addition to the built-in defaults (math, json, re, collections, datetime, etc.).",
@@ -45,9 +49,7 @@
 			"minItems": 0,
 			"items": {
 				"type": "object",
-				"properties": [
-					"tool_python.moduleName"
-				]
+				"properties": ["tool_python.moduleName"]
 			}
 		}
 	},
@@ -55,10 +57,7 @@
 		{
 			"section": "Pipe",
 			"title": "Python",
-			"properties": [
-				"type",
-				"tool_python.allowedModules"
-			]
+			"properties": ["type", "tool_python.timeout", "tool_python.allowedModules"]
 		}
 	]
 }
