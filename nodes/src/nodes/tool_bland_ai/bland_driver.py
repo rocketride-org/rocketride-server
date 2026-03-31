@@ -70,8 +70,9 @@ MAKE_CALL_SCHEMA: Dict[str, Any] = {
             'description': 'HTTPS URL to receive call results when the call ends',
         },
         'max_duration': {
-            'type': 'number',
-            'description': 'Max call length in minutes (default 5)',
+            'type': 'integer',
+            'minimum': 1,
+            'description': 'Max call length in minutes (positive integer, default 5)',
         },
     },
 }
@@ -194,6 +195,8 @@ class BlandDriver(ToolsBase):
 
             if 'max_duration' in input_obj:
                 raw_duration = input_obj.get('max_duration')
+                if isinstance(raw_duration, bool):
+                    raise ValueError('max_duration must be a positive integer')
                 try:
                     duration = int(raw_duration)
                 except (TypeError, ValueError):
@@ -215,25 +218,32 @@ class BlandDriver(ToolsBase):
         bare_name = tool_name.split('.', 1)[-1] if '.' in tool_name else tool_name
 
         if bare_name == 'make_call':
+            phone_number = str(input_obj.get('phone_number') or '').strip()
+            task = str(input_obj.get('task') or '').strip()
+            max_duration = self._max_duration
+            if 'max_duration' in input_obj:
+                max_duration = int(str(input_obj.get('max_duration')).strip())
             return bland_client.make_call(
                 self._api_key,
-                phone_number=input_obj['phone_number'],
-                task=input_obj['task'],
+                phone_number=phone_number,
+                task=task,
                 voice=input_obj.get('voice', self._default_voice),
                 first_sentence=input_obj.get('first_sentence', ''),
-                max_duration=input_obj.get('max_duration', self._max_duration),
+                max_duration=max_duration,
                 record=self._record,
                 language=self._language,
                 webhook=input_obj.get('webhook', ''),
             )
 
         if bare_name == 'get_call':
-            return bland_client.get_call(self._api_key, input_obj['call_id'])
+            call_id = str(input_obj.get('call_id') or '').strip()
+            return bland_client.get_call(self._api_key, call_id)
 
         if bare_name == 'analyze_call':
+            call_id = str(input_obj.get('call_id') or '').strip()
             return bland_client.analyze_call(
                 self._api_key,
-                input_obj['call_id'],
+                call_id,
                 goal=input_obj.get('goal', 'Analyze the phone call'),
                 questions=input_obj.get('questions'),
             )

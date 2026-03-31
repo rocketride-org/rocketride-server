@@ -64,7 +64,15 @@ class IGlobal(IGlobalBase):
 
         server_name = str(cfg.get('serverName') or 'bland').strip()
         default_voice = str(cfg.get('voice') or 'June').strip()
-        max_duration = int(cfg.get('maxDuration') or 5)
+        raw_max_duration = cfg.get('maxDuration', 5)
+        if isinstance(raw_max_duration, bool):
+            raise ValueError('maxDuration must be a positive integer')
+        try:
+            max_duration = int(raw_max_duration)
+        except (TypeError, ValueError):
+            raise ValueError('maxDuration must be a positive integer') from None
+        if max_duration <= 0:
+            raise ValueError('maxDuration must be a positive integer')
         record = _parse_bool(cfg.get('record', True))
         language = str(cfg.get('language') or 'en').strip()
 

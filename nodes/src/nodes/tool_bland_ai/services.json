@@ -57,10 +57,11 @@
 			]
 		},
 		"bland_ai.maxDuration": {
-			"type": "number",
+			"type": "integer",
 			"title": "Max Call Duration (minutes)",
-			"description": "Maximum call length in minutes",
-			"default": 5
+			"description": "Maximum call length in minutes (positive integer)",
+			"default": 5,
+			"minimum": 1
 		},
 		"bland_ai.record": {
 			"type": "boolean",
