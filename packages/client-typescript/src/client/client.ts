@@ -1387,6 +1387,7 @@ export class RocketRideClient extends DAPClient {
 		// Build event subscription request
 		const args: Record<string, unknown> = { types: eventTypes };
 		if (pipeId !== undefined) args.pipeId = pipeId;
+
 		const request = this.buildRequest('rrext_monitor', {
 			arguments: args,
 			token,
@@ -1406,33 +1407,7 @@ export class RocketRideClient extends DAPClient {
 	// PROJECT STORAGE MANAGEMENT
 	// ============================================================================
 
-	/**
-	 * Save or update a project pipeline.
-	 *
-	 * Stores a project pipeline configuration on the server. If the project
-	 * already exists, it will be updated. Use expectedVersion to ensure
-	 * you're updating the version you expect (prevents conflicts).
-	 *
-	 * @param options - Save project options
-	 * @param options.projectId - Unique identifier for the project
-	 * @param options.pipeline - Pipeline configuration object
-	 * @param options.expectedVersion - Expected current version for atomic updates (optional)
-	 * @returns Promise resolving to save result with success status, projectId, and new version
-	 * @throws Error if save fails due to version mismatch, storage error, or invalid input
-	 *
-	 * @example
-	 * ```typescript
-	 * // Save a new project
-	 * const result = await client.saveProject({
-	 *   projectId: 'proj-123',
-	 *   pipeline: {
-	 *     name: 'Data Processor',
-	 *     source: 'source_1',
-	 *     components: [...]
-	 *   }
-	 * });
-	 * ```
-	 */
+	/** Save or update a project pipeline configuration. */
 	async saveProject(options: { projectId: string; pipeline: Record<string, any> }): Promise<void> {
 		this.validateId(options.projectId, 'projectId');
 		if (!options.pipeline || typeof options.pipeline !== 'object') throw new Error('pipeline must be a non-empty object');
@@ -1532,27 +1507,32 @@ export class RocketRideClient extends DAPClient {
 		return filename;
 	}
 
-	async getLog(options: { projectId: string; source: string; startTime: number }): Promise<Record<string, any>> {
+	async getLog(options: { projectId: string; name: string }): Promise<Record<string, any>> {
 		this.validateId(options.projectId, 'projectId');
-		this.validateId(options.source, 'source');
-		if (options.startTime === undefined || options.startTime === null) throw new Error('startTime is required');
+		if (!options.name) throw new Error('name is required');
 
-		const filename = `${options.source}-${options.startTime}.log`;
-		return this.fsReadJson(`.logs/${options.projectId}/${filename}`);
+		return this.fsReadJson(`.logs/${options.projectId}/${options.name}`);
 	}
 
-	async listLogs(options: { projectId: string; source?: string }): Promise<string[]> {
+	async deleteLog(options: { projectId: string; name: string }): Promise<void> {
+		this.validateId(options.projectId, 'projectId');
+		if (!options.name) throw new Error('name is required');
+
+		await this.fsDelete(`.logs/${options.projectId}/${options.name}`);
+	}
+
+	async listLogs(options: { projectId: string; source?: string }): Promise<Array<{ name: string; modified?: number }>> {
 		this.validateId(options.projectId, 'projectId');
 		if (options.source) this.validateId(options.source, 'source');
 
 		const dir = await this.fsListDir(`.logs/${options.projectId}`);
-		let logs = dir.entries.filter((e) => e.type === 'file' && e.name.endsWith('.log')).map((e) => e.name);
+		let logs = dir.entries.filter((e) => e.type === 'file' && e.name.endsWith('.log')).map((e) => ({ name: e.name, modified: e.modified }));
 
 		if (options.source) {
-			logs = logs.filter((f) => f.startsWith(`${options.source}-`));
+			logs = logs.filter((l) => l.name.startsWith(`${options.source}-`));
 		}
 
-		logs.sort();
+		logs.sort((a, b) => (a.modified || 0) - (b.modified || 0));
 		return logs;
 	}
 
@@ -1778,6 +1758,22 @@ export class RocketRideClient extends DAPClient {
 			token,
 		});
 		return await this.request(message, timeout);
+	}
+
+	// ============================================================================
+	// DASHBOARD METHODS
+	// ============================================================================
+
+	/**
+	 * Retrieve a server dashboard snapshot.
+	 *
+	 * Returns the current state of all connections, tasks, and aggregate
+	 * metrics from the server. Requires 'task.monitor' permission.
+	 *
+	 * @returns DAPMessage with body containing overview, connections, and tasks
+	 */
+	async getDashboard(): Promise<DAPMessage> {
+		return this.dapRequest('rrext_dashboard', {});
 	}
 
 	// ============================================================================

@@ -29,6 +29,7 @@
  */
 
 export * from './client.js';
+export * from './dashboard.js';
 export * from './data.js';
 export * from './events.js';
 export * from './pipeline.js';
