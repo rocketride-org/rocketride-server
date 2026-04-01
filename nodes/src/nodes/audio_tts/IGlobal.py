@@ -12,10 +12,6 @@ from rocketlib import IGlobalBase, IJson, OPEN_MODE, getServiceDefinition
 from ai.common.config import Config
 from ai.common.models.base import get_model_server_address
 
-# Engine ``IJson`` / nested JSON normalization lives in ``connector_unwrap.py``. Set ``True`` to use it;
-# ``False`` = pass-through only if ``connConfig`` is already a ``dict`` (experiment — no unwrap).
-_USE_CONNECTOR_UNWRAP = True
-
 # ``services.json`` profile id → canonical ``engine`` (fallback if merged ``cfg`` lacks ``engine``).
 _PROFILE_TO_ENGINE: Dict[str, str] = {
     'piper': 'piper',
@@ -30,71 +26,46 @@ class IGlobal(IGlobalBase):
     _config: Dict[str, Any]
     _engine: Any
 
-    def _conn_config_delivered_dict(self) -> Dict[str, Any]:
-        """Plain dict for downstream merge. Controlled by :data:`_USE_CONNECTOR_UNWRAP`."""
-        cc = getattr(self.glb, 'connConfig', None)
-        if _USE_CONNECTOR_UNWRAP:
-            from .connector_unwrap import unwrap_connector_config_from_engine
+    def _api_key_from_raw_conn(self, raw: Any) -> str:
+        """Resolve ``api_key`` where RJSF stores it under a profile sibling (e.g. ``openai`` vs ``openai-tts``).
 
-            return unwrap_connector_config_from_engine(cc)
-        if isinstance(cc, dict):
-            return cc
-        return {}
+        Uses ``.get`` on any mapping-like object (including ``IJson``); do not require ``isinstance(..., dict)``
+        or the key is skipped.
+        """
 
-    def _conn_config_dict(self) -> Dict[str, Any]:
-        """Build the dict passed to ``Config.getNodeConfig`` (unwrap engine payload, hoist ``profile`` from ``parameters`` if needed)."""
-        d = self._conn_config_delivered_dict()
-        if not d:
-            return {}
-        return self._hoist_conn_profile(d)
-
-    def _hoist_conn_profile(self, conn: Dict[str, Any]) -> Dict[str, Any]:
-        """Hoist ``profile`` from ``parameters`` when the engine JSON omits top-level ``profile``."""
-        if not conn or conn.get('profile'):
-            return conn
-        params = conn.get('parameters')
-        if not isinstance(params, dict):
-            return conn
-        p = params.get('profile')
-        if not isinstance(p, str) or not p:
-            return conn
-        out = dict(conn)
-        out['profile'] = p
-        return out
-
-    def _api_key_from_raw_conn(self, raw: Dict[str, Any]) -> str:
-        """Resolve ``api_key`` where RJSF stores it under a profile sibling (e.g. ``openai`` vs profile ``openai-tts``)."""
-
-        def pick(d: Dict[str, Any]) -> str:
+        def pick(d: Any) -> str:
+            if d is None or not hasattr(d, 'get'):
+                return ''
             v = d.get('api_key')
             if v is not None and str(v).strip():
                 return str(v).strip()
             return ''
 
+        if raw is None or not hasattr(raw, 'get'):
+            return ''
         k = pick(raw)
         if k:
             return k
         params = raw.get('parameters')
-        if isinstance(params, dict):
-            k = pick(params)
-            if k:
-                return k
+        k = pick(params)
+        if k:
+            return k
         profile = raw.get('profile')
         if isinstance(profile, str) and profile:
-            bucket = raw.get(profile)
-            if isinstance(bucket, dict):
-                k = pick(bucket)
+            k = pick(raw.get(profile))
+            if k:
+                return k
+            if '-' in profile:
+                k = pick(raw.get(profile.split('-', 1)[0]))
                 if k:
                     return k
-            if '-' in profile:
-                nested = raw.get(profile.split('-', 1)[0])
-                if isinstance(nested, dict):
-                    k = pick(nested)
-                    if k:
-                        return k
+        for alt in ('openai-tts', 'openai', 'elevenlabs-default', 'elevenlabs'):
+            k = pick(raw.get(alt))
+            if k:
+                return k
         return ''
 
-    def _resolve_cloud_api_key(self, cfg: Dict[str, Any], raw: Dict[str, Any], engine: str) -> str:
+    def _resolve_cloud_api_key(self, cfg: Dict[str, Any], raw: Any, engine: str) -> str:
         """Form / merged config, then optional ``OPENAI_API_KEY`` / ``ELEVENLABS_API_KEY`` (runtime)."""
         k = (self._read_cfg(cfg, 'api_key', '') or '').strip() or self._api_key_from_raw_conn(raw)
         if k:
@@ -112,10 +83,9 @@ class IGlobal(IGlobalBase):
         params = config.get('parameters') if isinstance(config.get('parameters'), dict) else {}
         return params.get(key, default)
 
-    def _merge_cfg_locked_profile_engine(self, raw: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+    def _merge_cfg_locked_profile_engine(self, raw: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
         """After using OpenAI, stray ``engine`` (or other keys) in nested JSON can override the real profile. Force ``engine`` from ``services.json`` preconfig."""
-        raw = self._hoist_conn_profile(raw if isinstance(raw, dict) else {})
-        profile = raw.get('profile')
+        profile = raw.get('profile') if raw is not None and hasattr(raw, 'get') else None
         if (not isinstance(profile, str) or not profile.strip()) and isinstance(cfg, dict):
             p = cfg.get('profile')
             if isinstance(p, str) and p.strip():
@@ -141,20 +111,16 @@ class IGlobal(IGlobalBase):
         merged['engine'] = eng
         return merged
 
-    def _resolve_merged_config(self) -> tuple[Dict[str, Any], Dict[str, Any]]:
-        raw = self._conn_config_dict()
-        # Use stock ``Config.getNodeConfig`` (same as ``develop``); unwrap/hoist live on this node only.
+    def _resolve_merged_config(self) -> tuple[Any, Dict[str, Any]]:
+        raw = self.glb.connConfig
         cfg = Config.getNodeConfig(self.glb.logicalType, raw)
         if isinstance(cfg, IJson):
             cfg = IJson.toDict(cfg)
-        # ``getNodeConfig`` may set ``profile`` only on the merged dict; keep connector ``raw`` in sync
-        # so ``_merge_cfg_locked_profile_engine`` always sees the resolved profile.
-        if isinstance(cfg, dict):
-            p = cfg.get('profile')
-            if isinstance(p, str) and p.strip() and isinstance(raw, dict) and not (isinstance(raw.get('profile'), str) and str(raw.get('profile')).strip()):
-                raw = dict(raw)
-                raw['profile'] = p.strip()
         cfg = self._merge_cfg_locked_profile_engine(raw, cfg)
+        ak = self._api_key_from_raw_conn(raw)
+        if ak:
+            cfg = dict(cfg)
+            cfg['api_key'] = ak
         return raw, cfg
 
     @staticmethod
@@ -193,7 +159,7 @@ class IGlobal(IGlobalBase):
         return str(self._read_cfg(cfg, 'voice', '') or 'alloy').strip()
 
     def _build_tts_config_dict(self) -> Dict[str, Any]:
-        """Build TTS runtime options: normalize engine ``IJson`` → dict, ``getNodeConfig`` merge, then ``engine`` from merged cfg."""
+        """Build TTS runtime options: ``glb.connConfig`` + ``Config.getNodeConfig`` (same pattern as other filter nodes)."""
         raw, cfg = self._resolve_merged_config()
         if isinstance(cfg, IJson):
             cfg = IJson.toDict(cfg)
