@@ -90,6 +90,13 @@ from .events import (
     EVENT_TASK,
 )
 
+from .dashboard import (
+    DASHBOARD_OVERVIEW,
+    DASHBOARD_CONNECTION,
+    DASHBOARD_TASK,
+    DASHBOARD_RESPONSE,
+)
+
 from .data import (
     PIPELINE_RESULT,
     UPLOAD_RESULT,
@@ -121,6 +128,11 @@ __all__ = [
     'EVENT_TYPE',
     'EVENT_STATUS_UPDATE',
     'EVENT_TASK',
+    # Dashboard types
+    'DASHBOARD_OVERVIEW',
+    'DASHBOARD_CONNECTION',
+    'DASHBOARD_TASK',
+    'DASHBOARD_RESPONSE',
     # Data types
     'PIPELINE_RESULT',
     'UPLOAD_RESULT',

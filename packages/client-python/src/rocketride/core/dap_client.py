@@ -109,7 +109,7 @@ class DAPClient(DAPBase):
 
     def is_connected(self) -> bool:
         """
-        True when the transport is connected and authentication has succeeded.
+        Check whether the transport is connected and authenticated.
 
         The transport may be socket-connected before auth; we are not "connected"
         until both the socket is up and the DAP auth handshake has completed.
@@ -318,19 +318,27 @@ class DAPClient(DAPBase):
             elapsed_ms = (time.monotonic() - start) * 1000.0
             auth_timeout = max(timeout - elapsed_ms, 0)
 
-        # First DAP message must be auth
-        auth = self._transport.get_auth() or ''
-        request = {
-            'type': 'request',
-            'command': 'auth',
-            'seq': self._next_seq(),
-            'arguments': {'auth': auth},
-        }
-        response = await self.request(request, timeout=auth_timeout)
-        if not response.get('success', False):
-            message = response.get('message', 'Authentication failed')
-            await self._transport.disconnect(message, True)
-            raise AuthenticationException({'message': message})
+        # Send auth as first DAP message only if the transport provides credentials
+        # (e.g. WebSocket to a task server). Transports without get_auth (e.g. stdio
+        # to a subprocess) skip auth entirely — the subprocess doesn't speak DAP.
+        if hasattr(self._transport, 'get_auth'):
+            auth = self._transport.get_auth() or ''
+            auth_args = {'auth': auth}
+            if getattr(self, '_client_display_name', None):
+                auth_args['clientName'] = self._client_display_name
+            if getattr(self, '_client_display_version', None):
+                auth_args['clientVersion'] = self._client_display_version
+            request = {
+                'type': 'request',
+                'command': 'auth',
+                'seq': self._next_seq(),
+                'arguments': auth_args,
+            }
+            response = await self.request(request, timeout=auth_timeout)
+            if not response.get('success', False):
+                message = response.get('message', 'Authentication failed')
+                await self._transport.disconnect(message, True)
+                raise AuthenticationException({'message': message})
 
         # Only now are we connected (transport up + authenticated)
         self._authenticated = True
