@@ -11,6 +11,10 @@
 	--xy-node-border: none;
 	--xy-node-boxshadow-hover: var(--rr-shadow-hover);
 	--xy-node-boxshadow-selected: var(--rr-shadow-selected);
+
+	/* Edge stroke colour — visible on both light and dark backgrounds */
+	--xy-edge-stroke: var(--rr-text-disabled, #b1b1b7);
+	--xy-edge-stroke-selected: var(--rr-accent, #0078d4);
 }
 
 /* Suppress native focus ring — our box-shadow is the indicator */

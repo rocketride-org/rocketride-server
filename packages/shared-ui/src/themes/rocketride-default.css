@@ -62,6 +62,9 @@
 	/** Alternate surface for visually distinct sections (e.g. lanes). */
 	--rr-bg-surface-alt: #fafafa;
 
+	/** Generic surface — used for floating UI elements (e.g. edge delete button). */
+	--rr-bg-surface: #ffffff;
+
 	/* ================================================================== */
 	/* Title bar                                                           */
 	/* ================================================================== */
