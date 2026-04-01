@@ -81,7 +81,7 @@ Error IPythonInstanceBase::checkChanged(Entry &object) noexcept {
     const auto python = localfcn()->Error {
         // If we don't have a check changed
         if (!(m_pyMethods & PythonMethod::CheckChanged)) {
-            object.markChanged(Lvl::ServicePython,
+            object.markChanged(Lvl::DebugOut,
                                "No checkChanged, defaulting to changed");
             return {};
         }
