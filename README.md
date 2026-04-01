@@ -38,8 +38,6 @@
   <a href="https://www.producthunt.com/products/rocketride?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-rocketride" target="_blank" rel="noopener noreferrer"><img alt="RocketRide - Your IDE is the new AI command center. | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1112116&amp;theme=light&amp;t=1774995997490"></a>
 </p>
 
-</div>
-
 <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/screenshot-ide.png" alt="Build and run AI pipelines inside your IDE" width="100%">
 
 _Design, test, and ship complex AI workflows from a visual canvas, right where you write code._
@@ -47,6 +45,8 @@ _Design, test, and ship complex AI workflows from a visual canvas, right where y
 <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/screenshot-sdk.png" alt="Integrate real AI solutions using a simple SDK" width="100%">
 
 _Drop pipelines into any Python or TypeScript app with a few lines of code, no infrastructure glue required._
+
+</div>
 
 ## Features
 
