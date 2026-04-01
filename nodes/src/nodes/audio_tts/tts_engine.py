@@ -71,9 +71,11 @@ class TTSEngine:
         self._kokoro_remote_client = None
         self._openai_remote_client = None
         self._elevenlabs_remote_client = None
+        self._openai_remote_api_key = None
+        self._elevenlabs_remote_api_key = None
 
     def synthesize(self, text: str) -> Dict[str, Any]:
-        engine = str(self.config.get('engine', 'piper')).lower()
+        engine = str(self.config.get('engine', 'piper') or 'piper').lower().strip()
         if engine == 'piper':
             return self._piper(text)
         if engine == 'kokoro':
@@ -341,9 +343,28 @@ class TTSEngine:
 
         return {'path': out_path, 'mime_type': _mime_from_format(output_format)}
 
+    def _api_key_openai(self) -> str:
+        k = (self.config.get('api_key') or '').strip()
+        if k:
+            return k
+        return (os.environ.get('OPENAI_API_KEY') or '').strip()
+
+    def _api_key_elevenlabs(self) -> str:
+        k = (self.config.get('api_key') or '').strip()
+        if k:
+            return k
+        return (os.environ.get('ELEVENLABS_API_KEY') or '').strip()
+
     def _ensure_openai_remote_client(self) -> None:
+        api_key = self._api_key_openai()
         if self._openai_remote_client is not None:
-            return
+            if getattr(self, '_openai_remote_api_key', None) == api_key:
+                return
+            try:
+                self._openai_remote_client.disconnect()
+            except Exception:
+                pass
+            self._openai_remote_client = None
         from ai.common.models.base import ModelClient, get_model_server_address
 
         addr = get_model_server_address()
@@ -355,15 +376,23 @@ class TTSEngine:
             self.config.get('model', 'gpt-4o-mini-tts'),
             'openai_tts',
             {
-                'api_key': self.config.get('api_key'),
+                'api_key': api_key,
                 'voice': self.config.get('voice', 'alloy'),
             },
         )
         self._openai_remote_client = client
+        self._openai_remote_api_key = api_key
 
     def _ensure_elevenlabs_remote_client(self) -> None:
+        api_key = self._api_key_elevenlabs()
         if self._elevenlabs_remote_client is not None:
-            return
+            if getattr(self, '_elevenlabs_remote_api_key', None) == api_key:
+                return
+            try:
+                self._elevenlabs_remote_client.disconnect()
+            except Exception:
+                pass
+            self._elevenlabs_remote_client = None
         from ai.common.models.base import ModelClient, get_model_server_address
 
         addr = get_model_server_address()
@@ -375,11 +404,12 @@ class TTSEngine:
             self.config.get('model', 'eleven_multilingual_v2'),
             'elevenlabs_tts',
             {
-                'api_key': self.config.get('api_key'),
+                'api_key': api_key,
                 'voice': self.config.get('voice', ''),
             },
         )
         self._elevenlabs_remote_client = client
+        self._elevenlabs_remote_api_key = api_key
 
     def _elevenlabs(self, text: str) -> Dict[str, Any]:
         if self.config.get('elevenlabs_use_model_server'):
@@ -388,7 +418,13 @@ class TTSEngine:
             body = self._elevenlabs_remote_client.send_command(
                 'inference',
                 {
-                    'inputs': [{'text': text}],
+                    'inputs': [
+                        {
+                            'text': text,
+                            'voice': str(self.config.get('voice', '') or '').strip(),
+                            'model': str(self.config.get('model', 'eleven_multilingual_v2') or '').strip(),
+                        }
+                    ],
                     'output_fields': ['audio_base64', 'mime_type'],
                 },
             )
@@ -402,14 +438,14 @@ class TTSEngine:
                 f.write(raw)
             return {'path': out_path, 'mime_type': row.get('mime_type') or _mime_from_format(output_format)}
 
-        api_key = self.config.get('api_key', '')
+        api_key = self._api_key_elevenlabs()
         voice = self.config.get('voice', 'Rachel')
         model = self.config.get('model', 'eleven_multilingual_v2')
         output_format = str(self.config.get('output_format', 'mp3')).lower()
         out_path = self.config.get('output_path')
 
         if not api_key:
-            raise ValueError('ElevenLabs requires "api_key"')
+            raise ValueError('ElevenLabs requires "api_key" (node config or ELEVENLABS_API_KEY)')
 
         url = f'https://api.elevenlabs.io/v1/text-to-speech/{voice}'
         payload = {'text': text, 'model_id': model}
@@ -429,7 +465,14 @@ class TTSEngine:
             body = self._openai_remote_client.send_command(
                 'inference',
                 {
-                    'inputs': [{'text': text, 'output_format': output_format}],
+                    'inputs': [
+                        {
+                            'text': text,
+                            'output_format': output_format,
+                            'voice': str(self.config.get('voice', 'alloy') or 'alloy').strip(),
+                            'model': str(self.config.get('model', 'gpt-4o-mini-tts') or 'gpt-4o-mini-tts').strip(),
+                        }
+                    ],
                     'output_fields': ['audio_base64', 'mime_type'],
                 },
             )
@@ -444,17 +487,17 @@ class TTSEngine:
             mime = row.get('mime_type') or _mime_from_format(output_format)
             return {'path': out_path, 'mime_type': mime}
 
-        api_key = self.config.get('api_key', '')
+        api_key = self._api_key_openai()
         voice = self.config.get('voice', 'alloy')
         model = self.config.get('model', 'gpt-4o-mini-tts')
         output_format = str(self.config.get('output_format', 'mp3')).lower()
         out_path = self.config.get('output_path')
 
         if not api_key:
-            raise ValueError('OpenAI TTS requires "api_key"')
+            raise ValueError('OpenAI TTS requires "api_key" (node config or OPENAI_API_KEY)')
 
         url = 'https://api.openai.com/v1/audio/speech'
-        payload = {'model': model, 'voice': voice, 'input': text, 'format': output_format}
+        payload = {'model': model, 'voice': voice, 'input': text, 'response_format': output_format}
         headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
         response = requests.post(url, json=payload, headers=headers, timeout=120)
         response.raise_for_status()

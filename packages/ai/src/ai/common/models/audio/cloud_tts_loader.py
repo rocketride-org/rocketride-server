@@ -83,10 +83,12 @@ class OpenAITTSLoader(BaseLoader):
                     {
                         'text': str(item.get('text', '')),
                         'output_format': str(item.get('output_format', 'mp3')).lower(),
+                        'voice': str(item.get('voice', '') or '').strip(),
+                        'model': str(item.get('model', '') or '').strip(),
                     }
                 )
             else:
-                rows.append({'text': str(item), 'output_format': 'mp3'})
+                rows.append({'text': str(item), 'output_format': 'mp3', 'voice': '', 'model': ''})
         return {'rows': rows}
 
     @staticmethod
@@ -112,7 +114,16 @@ class OpenAITTSLoader(BaseLoader):
 
         def _one(row: Dict[str, str]) -> Tuple[bytes, str]:
             fmt = row.get('output_format', 'mp3')
-            payload = json.dumps({'model': model_id, 'voice': voice, 'input': row.get('text', ''), 'format': fmt}).encode('utf-8')
+            row_voice = (row.get('voice') or '').strip() or voice
+            row_model = (row.get('model') or '').strip() or model_id
+            payload = json.dumps(
+                {
+                    'model': row_model,
+                    'voice': row_voice,
+                    'input': row.get('text', ''),
+                    'response_format': fmt,
+                }
+            ).encode('utf-8')
             req = urllib.request.Request(
                 'https://api.openai.com/v1/audio/speech',
                 data=payload,
@@ -200,9 +211,15 @@ class ElevenLabsTTSLoader(BaseLoader):
         rows: List[Dict[str, str]] = []
         for item in inputs:
             if isinstance(item, dict):
-                rows.append({'text': str(item.get('text', ''))})
+                rows.append(
+                    {
+                        'text': str(item.get('text', '')),
+                        'voice': str(item.get('voice', '') or '').strip(),
+                        'model': str(item.get('model', '') or '').strip(),
+                    }
+                )
             else:
-                rows.append({'text': str(item)})
+                rows.append({'text': str(item), 'voice': '', 'model': ''})
         return {'rows': rows}
 
     @staticmethod
@@ -227,8 +244,10 @@ class ElevenLabsTTSLoader(BaseLoader):
         ctx = lock if lock is not None else threading.Lock()
 
         def _one(row: Dict[str, str]) -> bytes:
-            vid = quote(voice, safe='')
-            payload = json.dumps({'text': row.get('text', ''), 'model_id': model_id}).encode('utf-8')
+            row_voice = (row.get('voice') or '').strip() or voice
+            row_model = (row.get('model') or '').strip() or model_id
+            vid = quote(row_voice, safe='')
+            payload = json.dumps({'text': row.get('text', ''), 'model_id': row_model}).encode('utf-8')
             url = f'https://api.elevenlabs.io/v1/text-to-speech/{vid}'
             req = urllib.request.Request(
                 url,

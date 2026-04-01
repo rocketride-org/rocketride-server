@@ -18,7 +18,7 @@ def _infer_output_format(want_audio: bool, want_text: bool, engine: str) -> str:
     - Text-only: prefer MP3 for smaller base64 JSON.
     - ElevenLabs: our client always receives MPEG from the API, so keep MP3.
     """
-    eng = (engine or 'piper').lower()
+    eng = (engine or 'piper').lower().strip()
     if eng == 'elevenlabs':
         return 'mp3'
     if want_audio:
@@ -42,7 +42,13 @@ class IInstance(IInstanceBase):
                 warning('TTS: no downstream connection on audio or text lane; skipping synthesis')
                 return
 
-            out_fmt = _infer_output_format(want_audio, want_text, self.IGlobal._config.get('engine', ''))
+            # Refresh merged config for format/logging only — do **not** assign to ``IGlobal._config``
+            # here: ``synthesize`` must see the *previous* effective engine to dispose/recreate
+            # ``TTSEngine`` when switching (e.g. OpenAI → Kokoro). Pre-stomping _config made
+            # old_engine == new_engine and left the old engine instance/caches in place.
+            cfg_now = self.IGlobal._build_tts_config_dict()
+            eng = str(cfg_now.get('engine', '') or '').strip()
+            out_fmt = _infer_output_format(want_audio, want_text, eng)
             payload = self.IGlobal.synthesize(value, out_fmt)
             temp_path = payload.get('path')
 

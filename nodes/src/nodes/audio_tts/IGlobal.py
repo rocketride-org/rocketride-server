@@ -8,20 +8,165 @@ import tempfile
 import time
 from typing import Any, Dict
 
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase, IJson, OPEN_MODE, getServiceDefinition
 from ai.common.config import Config
 from ai.common.models.base import get_model_server_address
+
+# Engine ``IJson`` / nested JSON normalization lives in ``connector_unwrap.py``. Set ``True`` to use it;
+# ``False`` = pass-through only if ``connConfig`` is already a ``dict`` (experiment — no unwrap).
+_USE_CONNECTOR_UNWRAP = True
+
+# ``services.json`` profile id → canonical ``engine`` (fallback if merged ``cfg`` lacks ``engine``).
+_PROFILE_TO_ENGINE: Dict[str, str] = {
+    'piper': 'piper',
+    'kokoro-default': 'kokoro',
+    'bark-default': 'bark',
+    'openai-tts': 'openai',
+    'elevenlabs-default': 'elevenlabs',
+}
 
 
 class IGlobal(IGlobalBase):
     _config: Dict[str, Any]
     _engine: Any
 
+    def _conn_config_delivered_dict(self) -> Dict[str, Any]:
+        """Plain dict for downstream merge. Controlled by :data:`_USE_CONNECTOR_UNWRAP`."""
+        cc = getattr(self.glb, 'connConfig', None)
+        if _USE_CONNECTOR_UNWRAP:
+            from .connector_unwrap import unwrap_connector_config_from_engine
+
+            return unwrap_connector_config_from_engine(cc)
+        if isinstance(cc, dict):
+            return cc
+        return {}
+
+    def _conn_config_dict(self) -> Dict[str, Any]:
+        """Build the dict passed to ``Config.getNodeConfig`` (unwrap engine payload, hoist ``profile`` from ``parameters`` if needed)."""
+        d = self._conn_config_delivered_dict()
+        if not d:
+            return {}
+        return self._hoist_conn_profile(d)
+
+    def _hoist_conn_profile(self, conn: Dict[str, Any]) -> Dict[str, Any]:
+        """Hoist ``profile`` from ``parameters`` when the engine JSON omits top-level ``profile``."""
+        if not conn or conn.get('profile'):
+            return conn
+        params = conn.get('parameters')
+        if not isinstance(params, dict):
+            return conn
+        p = params.get('profile')
+        if not isinstance(p, str) or not p:
+            return conn
+        out = dict(conn)
+        out['profile'] = p
+        return out
+
+    def _api_key_from_raw_conn(self, raw: Dict[str, Any]) -> str:
+        """Resolve ``api_key`` where RJSF stores it under a profile sibling (e.g. ``openai`` vs profile ``openai-tts``)."""
+
+        def pick(d: Dict[str, Any]) -> str:
+            v = d.get('api_key')
+            if v is not None and str(v).strip():
+                return str(v).strip()
+            return ''
+
+        k = pick(raw)
+        if k:
+            return k
+        params = raw.get('parameters')
+        if isinstance(params, dict):
+            k = pick(params)
+            if k:
+                return k
+        profile = raw.get('profile')
+        if isinstance(profile, str) and profile:
+            bucket = raw.get(profile)
+            if isinstance(bucket, dict):
+                k = pick(bucket)
+                if k:
+                    return k
+            if '-' in profile:
+                nested = raw.get(profile.split('-', 1)[0])
+                if isinstance(nested, dict):
+                    k = pick(nested)
+                    if k:
+                        return k
+        return ''
+
+    def _resolve_cloud_api_key(self, cfg: Dict[str, Any], raw: Dict[str, Any], engine: str) -> str:
+        """Form / merged config, then optional ``OPENAI_API_KEY`` / ``ELEVENLABS_API_KEY`` (runtime)."""
+        k = (self._read_cfg(cfg, 'api_key', '') or '').strip() or self._api_key_from_raw_conn(raw)
+        if k:
+            return k
+        e = engine.lower()
+        if e == 'openai':
+            return os.environ.get('OPENAI_API_KEY', '').strip()
+        if e == 'elevenlabs':
+            return os.environ.get('ELEVENLABS_API_KEY', '').strip()
+        return ''
+
     def _read_cfg(self, config: Dict[str, Any], key: str, default: Any) -> Any:
         if key in config:
             return config.get(key, default)
         params = config.get('parameters') if isinstance(config.get('parameters'), dict) else {}
         return params.get(key, default)
+
+    def _merge_cfg_locked_profile_engine(self, raw: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+        """After using OpenAI, stray ``engine`` (or other keys) in nested JSON can override the real profile. Force ``engine`` from ``services.json`` preconfig."""
+        raw = self._hoist_conn_profile(raw if isinstance(raw, dict) else {})
+        profile = raw.get('profile')
+        if (not isinstance(profile, str) or not profile.strip()) and isinstance(cfg, dict):
+            p = cfg.get('profile')
+            if isinstance(p, str) and p.strip():
+                profile = p.strip()
+        if not isinstance(profile, str) or not profile:
+            return cfg
+        try:
+            sdef = getServiceDefinition(self.glb.logicalType)
+        except Exception:
+            return cfg
+        if not isinstance(sdef, dict):
+            return cfg
+        pre = sdef.get('preconfig') or {}
+        prof = (pre.get('profiles') or {}).get(profile)
+        if not isinstance(prof, dict):
+            return cfg
+        eng = prof.get('engine')
+        if not eng:
+            return cfg
+        if isinstance(cfg, IJson):
+            cfg = IJson.toDict(cfg)
+        merged = dict(cfg)
+        merged['engine'] = eng
+        return merged
+
+    def _resolve_merged_config(self) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        raw = self._conn_config_dict()
+        # Use stock ``Config.getNodeConfig`` (same as ``develop``); unwrap/hoist live on this node only.
+        cfg = Config.getNodeConfig(self.glb.logicalType, raw)
+        if isinstance(cfg, IJson):
+            cfg = IJson.toDict(cfg)
+        # ``getNodeConfig`` may set ``profile`` only on the merged dict; keep connector ``raw`` in sync
+        # so ``_merge_cfg_locked_profile_engine`` always sees the resolved profile.
+        if isinstance(cfg, dict):
+            p = cfg.get('profile')
+            if isinstance(p, str) and p.strip() and isinstance(raw, dict) and not (isinstance(raw.get('profile'), str) and str(raw.get('profile')).strip()):
+                raw = dict(raw)
+                raw['profile'] = p.strip()
+        cfg = self._merge_cfg_locked_profile_engine(raw, cfg)
+        return raw, cfg
+
+    @staticmethod
+    def _engine_from_merged_cfg(cfg: Dict[str, Any]) -> str:
+        """``engine`` from ``getNodeConfig`` merge; optional fallback from ``profile``."""
+        e = str(cfg.get('engine') or '').lower().strip()
+        if e:
+            return e
+        prof = cfg.get('profile')
+        if isinstance(prof, str) and prof.strip() in _PROFILE_TO_ENGINE:
+            return _PROFILE_TO_ENGINE[prof.strip()]
+        return 'piper'
 
     def _resolve_tts_model(self, cfg: Dict[str, Any], engine: str) -> str:
         """Map profile-specific keys (+ legacy ``model``) to the HF/API id TTSEngine expects."""
@@ -47,25 +192,16 @@ class IGlobal(IGlobalBase):
             return str(v or 'EXAVITQu4vr4xnSDxMaL').strip()
         return str(self._read_cfg(cfg, 'voice', '') or 'alloy').strip()
 
-    def beginGlobal(self):
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        from depends import depends  # type: ignore
-
-        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
-        depends(requirements)
-
-        from .tts_engine import TTSEngine
-
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        engine = str(self._read_cfg(cfg, 'engine', 'piper')).lower()
+    def _build_tts_config_dict(self) -> Dict[str, Any]:
+        """Build TTS runtime options: normalize engine ``IJson`` → dict, ``getNodeConfig`` merge, then ``engine`` from merged cfg."""
+        raw, cfg = self._resolve_merged_config()
+        if isinstance(cfg, IJson):
+            cfg = IJson.toDict(cfg)
+        engine = self._engine_from_merged_cfg(cfg)
 
         piper_voice = str(self._read_cfg(cfg, 'piper_voice', '') or '').strip()
+
         voice_model = ''
-        # Model placement: without a model-server address, the engine runs locally and each
-        # engine uses CPU/GPU on the engine host. With --modelserver (address set), Piper /
-        # Bark / Kokoro (and cloud loaders) use the model server where implemented.
         _ms = get_model_server_address() is not None
         piper_use_model_server = engine == 'piper' and _ms
         kokoro_use_model_server = engine == 'kokoro' and _ms
@@ -80,7 +216,7 @@ class IGlobal(IGlobalBase):
             else:
                 voice_model = ''
 
-        self._config = {
+        return {
             'engine': engine,
             'voice': self._resolve_tts_voice(cfg, engine),
             'voice_model': voice_model,
@@ -92,12 +228,23 @@ class IGlobal(IGlobalBase):
             'model': self._resolve_tts_model(cfg, engine),
             'kokoro_lang_code': str(self._read_cfg(cfg, 'kokoro_lang_code', 'a') or 'a').strip(),
             'kokoro_voice': str(self._read_cfg(cfg, 'kokoro_voice', 'af_heart') or 'af_heart').strip(),
-            'api_key': self._read_cfg(cfg, 'api_key', ''),
-            # Retained for model-server load options / identity; local Piper uses ``PiperVoice`` in-process.
+            'api_key': self._resolve_cloud_api_key(cfg, raw, engine),
             'piper_bin': 'piper',
-            # MP3: ``lameenc`` in-process first; ffmpeg (``imageio-ffmpeg`` / PATH) as fallback in tts_engine.
             'ffmpeg_bin': 'ffmpeg',
         }
+
+    def beginGlobal(self):
+        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
+            return
+
+        from depends import depends  # type: ignore
+
+        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
+        depends(requirements)
+
+        from .tts_engine import TTSEngine
+
+        self._config = self._build_tts_config_dict()
         self._engine = TTSEngine(self._config)
 
     def _cleanup_stale_outputs(self):
@@ -129,10 +276,14 @@ class IGlobal(IGlobalBase):
                 continue
 
     def validateConfig(self):
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        engine = str(self._read_cfg(cfg, 'engine', 'piper')).lower()
-        if engine in ('elevenlabs', 'openai') and not self._read_cfg(cfg, 'api_key', ''):
-            raise Exception(f'Engine "{engine}" requires api_key')
+        raw, cfg = self._resolve_merged_config()
+        if isinstance(cfg, IJson):
+            cfg = IJson.toDict(cfg)
+        engine = self._engine_from_merged_cfg(cfg)
+        api_key = self._resolve_cloud_api_key(cfg, raw, engine)
+        if engine in ('elevenlabs', 'openai') and not api_key:
+            env_hint = 'OPENAI_API_KEY' if engine == 'openai' else 'ELEVENLABS_API_KEY'
+            raise Exception(f'Engine "{engine}" requires api_key in node config or {env_hint} in the engine environment')
         if engine == 'piper':
             pv = str(self._read_cfg(cfg, 'piper_voice', '') or '').strip()
             if not pv:
@@ -142,7 +293,68 @@ class IGlobal(IGlobalBase):
             if not kv:
                 raise Exception('Kokoro: choose a voice from the list')
 
+    def _tts_identity_signature(self, cfg: Dict[str, Any]) -> tuple:
+        """Stable tuple for when ``TTSEngine`` must be recreated: engine switch **or** voice/model change (same engine)."""
+        if not cfg:
+            return ('',)
+        e = str(cfg.get('engine') or '').lower().strip()
+        if e == 'piper':
+            return (
+                'piper',
+                str(cfg.get('piper_voice', '') or '').strip(),
+                bool(cfg.get('piper_use_model_server')),
+            )
+        if e == 'kokoro':
+            return (
+                'kokoro',
+                str(cfg.get('kokoro_voice', '') or '').strip(),
+                str(cfg.get('kokoro_lang_code', '') or '').strip(),
+                bool(cfg.get('kokoro_use_model_server')),
+            )
+        if e in ('bark', 'bak'):
+            return (e, str(cfg.get('model', '') or '').strip())
+        if e == 'openai':
+            return (
+                'openai',
+                str(cfg.get('model', '') or '').strip(),
+                str(cfg.get('voice', '') or '').strip(),
+                bool(cfg.get('openai_use_model_server')),
+            )
+        if e == 'elevenlabs':
+            return (
+                'elevenlabs',
+                str(cfg.get('model', '') or '').strip(),
+                str(cfg.get('voice', '') or '').strip(),
+                bool(cfg.get('elevenlabs_use_model_server')),
+            )
+        return (e,)
+
     def synthesize(self, text: str, output_format: str) -> Dict[str, Any]:
+        # Re-read connector config each utterance: the same IGlobal can outlive a profile change
+        # (e.g. OpenAI → Kokoro) and would otherwise keep the old engine in ``self._config``.
+        new_cfg = self._build_tts_config_dict()
+
+        def _norm_eng(v: Any) -> str:
+            return str(v or '').lower().strip()
+
+        new_eng = _norm_eng(new_cfg.get('engine'))
+        prev_cfg = getattr(self, '_config', None) or {}
+        new_sig = self._tts_identity_signature(new_cfg)
+        prev_sig = self._tts_identity_signature(prev_cfg) if prev_cfg else None
+        inst = getattr(self, '_engine', None)
+        inst_eng = ''
+        if inst is not None and getattr(inst, 'config', None):
+            inst_eng = _norm_eng(inst.config.get('engine'))
+        # Recreate on engine/voice/model change, first run, or stray instance engine mismatch.
+        need_engine = inst is None or new_sig != prev_sig or (inst_eng and inst_eng != new_eng)
+        if need_engine:
+            if inst is not None:
+                self._engine.dispose()
+            from .tts_engine import TTSEngine
+
+            self._engine = TTSEngine(new_cfg)
+        self._config = new_cfg
+
         self._cleanup_stale_outputs()
         ext = output_format if output_format in ('wav', 'mp3') else 'wav'
         filename = f'tts_{int(time.time() * 1000)}.{ext}'
