@@ -1,7 +1,7 @@
 <div align="center">
 
 <a href="https://rocketride.org">
-  <img src="./images/banner-root.png" alt="RocketRide" width="100%">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/banner-root.png" alt="RocketRide" width="100%">
 </a>
 
 <p>
@@ -14,9 +14,9 @@
 </p>
 
 <p>
-  <img src="./images/icon-cpp.png" height="28" alt="C++" />&nbsp;&nbsp;
-  <img src="./images/icon-python.png" height="28" alt="Python" />&nbsp;&nbsp;
-  <img src="./images/icon-typescript.png" height="28" alt="TypeScript" />
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-cpp.png" height="28" alt="C++" />&nbsp;&nbsp;
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-python.png" height="28" alt="Python" />&nbsp;&nbsp;
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-typescript.png" height="28" alt="TypeScript" />
 </p>
 
 <p>
@@ -40,11 +40,11 @@
 
 </div>
 
-<img src="./images/screenshot-ide.png" alt="Build and run AI pipelines inside your IDE" width="100%">
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/screenshot-ide.png" alt="Build and run AI pipelines inside your IDE" width="100%">
 
 _Design, test, and ship complex AI workflows from a visual canvas, right where you write code._
 
-<img src="./images/screenshot-sdk.png" alt="Integrate real AI solutions using a simple SDK" width="100%">
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/screenshot-sdk.png" alt="Integrate real AI solutions using a simple SDK" width="100%">
 
 _Drop pipelines into any Python or TypeScript app with a few lines of code, no infrastructure glue required._
 
@@ -64,7 +64,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 1. Install the extension for your IDE. Search for RocketRide in the extension marketplace:
 
    <p align="center">
-     <img src="./images/install.png" alt="Install RocketRide extension">
+     <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/install.png" alt="Install RocketRide extension">
    </p>
 
    <sub>[Not seeing your IDE? Open an issue](https://github.com/rocketride-org/rocketride-server/issues/new) · [Download directly](https://open-vsx.org/extension/RocketRide/rocketride)</sub>
@@ -85,7 +85,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 3. Connect input lanes and output lanes by type to properly wire your pipeline. Some nodes like agents or LLMs can be invoked as tools for use by a parent node as shown below:
 
 <p align="center">
-  <img src="./images/first_pipe.gif" alt="Pipeline canvas example" width="100%">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/first_pipe.gif" alt="Pipeline canvas example" width="100%">
 </p>
 
 4. You can run a pipeline from the canvas by pressing the ▶️ button on the source node or from the `Connection Manager` directly.
@@ -108,7 +108,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 Selecting running pipelines allows for in-depth analytics. Trace call trees, token usage, memory consumption, and more to optimize your pipelines before scaling and deploying. Find the models, agents, and tools best fit for your task.
 
 <p align="center">
-  <img src="./images/tracing.gif" alt="Pipeline observability and tracing">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/tracing.gif" alt="Pipeline observability and tracing">
 </p>
 
 ## Contributors
