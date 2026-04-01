@@ -399,6 +399,20 @@ class TaskServer(DAPBase):
         if connection_id in self._connections:
             del self._connections[connection_id]
 
+        await self.broadcast_server_event(
+            EVENT_TYPE.DASHBOARD,
+            {
+                'event': 'apaevt_dashboard',
+                'body': {
+                    'action': 'connection_removed',
+                    'timestamp': time.time(),
+                    'connectionId': connection_id,
+                    'clientName': getattr(conn, '_client_info', {}).get('name'),
+                    'clientVersion': getattr(conn, '_client_info', {}).get('version'),
+                },
+            },
+        )
+
         # Process all tasks for disconnection cleanup
         for control in list(self._task_control.values()):
             try:
@@ -594,43 +608,19 @@ class TaskServer(DAPBase):
         if port in self._allocated_ports:
             self._allocated_ports.remove(port)
 
-    async def broadcast_event(
-        self,
-        type: EVENT_TYPE,
-        token: str,
-        event: Dict[str, Any],
-    ) -> None:
-        """
-        Broadcast task events to all interested monitoring connections.
+    async def broadcast_server_event(self, type: EVENT_TYPE, event: Dict[str, Any]) -> None:
+        """Broadcast a server-level event (not task-scoped) to all subscribed connections."""
+        for conn in list(self._connections.values()):
+            try:
+                await conn.send_server_event(type, event=event)
+            except Exception:
+                pass
 
-        This method implements the event distribution system that notifies
-        subscribed clients about task state changes, data updates, and other
-        significant events. It respects client subscription preferences and
-        handles broadcast failures gracefully.
-
-        Args:
-            listen_type (EVENT_TYPE): Category of event being broadcast
-                                    (PASSIVE, ACTIVE, DEBUG, etc.)
-            id (str): Short identifier for the specific task instance
-            token (str): Unique task identifier for event source
-            event (Dict[str, Any]): Event payload containing event details and data
-
-        Event Distribution Logic:
-        - Iterates through all active connections
-        - Each connection filters events based on subscription preferences
-        - Individual broadcast failures don't affect other recipients
-        - Events are only sent to connections with matching access rights
-
-        Error Handling:
-        - Individual monitor failures are logged but don't stop broadcasting
-        - Ensures robust event delivery even with problematic connections
-        - Maintains system stability despite client-side issues
-        """
-        # Broadcast to all active connections with error isolation
+    async def broadcast_task_event(self, type: EVENT_TYPE, token: str, event: Dict[str, Any]) -> None:
+        """Broadcast a task-scoped event to all subscribed connections."""
         for conn in self._connections.values():
             try:
-                # Delegate to connection's event filtering and forwarding logic
-                await conn.forward_event(type, token=token, event=event)
+                await conn.send_task_event(type, token=token, event=event)
 
             except PermissionError:
                 # This is a normal error - when the connection is typically
@@ -725,6 +715,24 @@ class TaskServer(DAPBase):
 
         # Ensure task is properly stopped and resources are cleaned up
         await control.task.stop_task()
+
+        # Remove monitor subscriptions that reference this task from all connections
+        project_key = f'p.{control.project_id}.{control.source}'
+        for conn in self._connections.values():
+            if hasattr(conn, '_monitors'):
+                # Remove exact source key and any pipe-scoped keys under it
+                keys_to_remove = [k for k in conn._monitors if k == project_key or k.startswith(f'{project_key}.')]
+                for key in keys_to_remove:
+                    conn._monitors.pop(key, None)
+
+        # Notify dashboard subscribers
+        await self.broadcast_server_event(
+            EVENT_TYPE.DASHBOARD,
+            {
+                'event': 'apaevt_dashboard',
+                'body': {'action': 'task_removed', 'timestamp': time.time(), 'taskId': control.id},
+            },
+        )
 
         # Log task removal for audit trail and debugging
         self.debug_message(f'Task status for "{control.id}" removed')

@@ -30,6 +30,7 @@ with different event subscription levels. It acts as an event distribution
 hub that respects access permissions and client preferences.
 """
 
+import time
 from typing import TYPE_CHECKING, Dict, Any, List
 from ai.common.dap import DAPConn, TransportBase
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
@@ -84,7 +85,15 @@ class MonitorCommands(DAPConn):
         # Format: "apikey:token" -> EVENT_TYPE mapping
         self._monitors: Dict[str, EVENT_TYPE] = {}
 
-    async def forward_event(
+    async def send_server_event(self, type: EVENT_TYPE, event: Dict[str, Any]) -> None:
+        """Send a server-level event if this connection is subscribed via the '*' wildcard."""
+        if '*' not in self._monitors:
+            return
+        if not (type & self._monitors['*']):
+            return
+        await self.send_event(event.get('event', 'unknown'), body=event.get('body'))
+
+    async def send_task_event(
         self,
         type: EVENT_TYPE,
         token: str,
@@ -346,6 +355,22 @@ class MonitorCommands(DAPConn):
                 # Unsubscribe: remove from monitor registry
                 self._monitors.pop(event_key, None)
                 self.debug_message(f'Removed monitoring for "{filter_name}"')
+
+                await self._server.broadcast_server_event(
+                    EVENT_TYPE.DASHBOARD,
+                    {
+                        'event': 'apaevt_dashboard',
+                        'body': {
+                            'action': 'monitor_changed',
+                            'timestamp': time.time(),
+                            'connectionId': self.get_connection_id(),
+                            'clientName': self._client_info.get('name'),
+                            'clientVersion': self._client_info.get('version'),
+                            'key': filter_name,
+                            'change': 'unsubscribed',
+                        },
+                    },
+                )
             else:
                 # Get the current type so we know what to update
                 prev = self._monitors.get(event_key, EVENT_TYPE.NONE)
@@ -353,6 +378,22 @@ class MonitorCommands(DAPConn):
                 # Subscribe or update: add/modify registry entry
                 self._monitors[event_key] = type
                 self.debug_message(f'Set "{filter_name}" monitoring to {type}')
+
+                await self._server.broadcast_server_event(
+                    EVENT_TYPE.DASHBOARD,
+                    {
+                        'event': 'apaevt_dashboard',
+                        'body': {
+                            'action': 'monitor_changed',
+                            'timestamp': time.time(),
+                            'connectionId': self.get_connection_id(),
+                            'clientName': self._client_info.get('name'),
+                            'clientVersion': self._client_info.get('version'),
+                            'key': filter_name,
+                            'change': 'subscribed',
+                        },
+                    },
+                )
 
                 # Send updates for what was missed (or empty state if task not running)
                 await self._send_updates(control, prev, type, project_id=project_id, source=source)

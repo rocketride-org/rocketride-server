@@ -54,9 +54,16 @@ Quick Start:
 For more information, see the documentation at https://docs.rocketride.ai
 """
 
-__version__ = '1.0.0'
+__version__ = ''
 __author__ = 'RocketRide, Inc.'
 __email__ = 'dev@rocketride.ai'
+
+try:
+    from importlib.metadata import version as _get_version
+
+    __version__ = _get_version('rocketride')
+except Exception:
+    pass
 
 # Import main classes for convenient access
 from .schema import (

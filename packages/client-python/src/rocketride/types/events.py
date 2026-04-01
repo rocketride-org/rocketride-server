@@ -58,7 +58,7 @@ Network Optimization:
 
 Usage:
     from rocketride.types import EVENT_TYPE, EVENT_STATUS_UPDATE, EVENT_TASK
-    
+
     # Subscribe to specific event types
     async def on_event(event):
         if event['event'] == 'apaevt_status_update':
@@ -67,20 +67,20 @@ Usage:
         elif event['event'] == 'apaevt_task':
             action = event['body']['action']
             print(f"Task {action}")
-    
+
     # Configure client with event subscription
     client = RocketRideClient(
         auth='your_api_key',
         onEvent=on_event
     )
-    
+
     # Subscribe to monitoring events
     subscription = EVENT_TYPE.SUMMARY | EVENT_TYPE.TASK
     await client.subscribe(subscription)
 """
 
 from enum import Flag
-from typing import Literal, TypedDict, List
+from typing import Literal, TypedDict, List, Union
 from .task import TASK_STATUS
 
 
@@ -169,9 +169,10 @@ class EVENT_TYPE(Flag):
     FLOW = 1 << 4  # Pipeline flow events - component execution tracking and data flow visualization
     TASK = 1 << 5  # Task lifecycle events - start, stop, state changes, and task management
     SSE = 1 << 6  # Real-time node-to-UI messages emitted via monitorSSE() during pipeline execution
+    DASHBOARD = 1 << 7  # Server-level events - connection added/removed, for admin dashboards
 
     # Convenience combination - ALL events except NONE for comprehensive monitoring
-    ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK | SSE
+    ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK | SSE | DASHBOARD
 
 
 class EVENT_STATUS_UPDATE(TypedDict, total=False):
@@ -208,101 +209,54 @@ class EVENT_STATUS_UPDATE(TypedDict, total=False):
     body: TASK_STATUS  # REQUIRED - Complete task status information with processing statistics and metrics
 
 
-class _EVENT_TASK_INFO(TypedDict):
-    """
-    Information about a currently running task.
+class TASK_RUNNING_ENTRY(TypedDict):
+    """Task info entry in the 'running' action payload."""
 
-    This structure provides essential task identification and context information
-    for task lifecycle management and client-side tracking. Used within the
-    EVENT_TASK 'running' action to list active tasks.
-    """
-
-    id: str  # Unique task identifier for tracking and management
-    projectId: str  # Project identifier for organization and permissions
-    source: str  # Source component that serves as pipeline entry point
+    id: str  # Unique task identifier
+    projectId: str  # Project identifier
+    source: str  # Source component entry point
 
 
-class _EVENT_TASK_BODY(TypedDict, total=False):
-    """
-    Body structure for apaevt_task events with discriminated union behavior.
+class TASK_EVENT_RUNNING(TypedDict):
+    """Snapshot of all active tasks, sent on initial subscription."""
 
-    This structure supports three distinct task lifecycle scenarios:
-    - 'running': Lists all currently running tasks for the client's API key
-    - 'begin': Notifies that a new task has started execution
-    - 'end': Notifies that a task has completed or terminated
+    action: Literal['running']
+    tasks: List[TASK_RUNNING_ENTRY]
 
-    Field Usage by Action:
-    - action='running': tasks field is required, projectId/source are not used
-    - action='begin'/'end': projectId/source are required, tasks is not used
 
-    Note: Python's TypedDict with total=False doesn't provide the same strict
-    discriminated union behavior as TypeScript, so field validation should be
-    handled in application logic.
-    """
+class TASK_EVENT_BEGIN(TypedDict):
+    """A task has started execution."""
 
-    action: Literal['running', 'begin', 'end']  # REQUIRED - Action identifier for task lifecycle events
+    action: Literal['begin']
+    name: str  # Display name of the task
+    projectId: str  # Project identifier
+    source: str  # Source component identifier
 
-    # For 'running' action - provides current task inventory
-    tasks: List[_EVENT_TASK_INFO]  # Array of currently running tasks belonging to client's API key
 
-    # For 'begin' and 'end' actions - task identification and context
-    projectId: str  # Project identifier for organization and permissions tracking
-    source: str  # Source component identifier that serves as pipeline entry point
+class TASK_EVENT_END(TypedDict):
+    """A task has completed or been terminated."""
+
+    action: Literal['end']
+    name: str  # Display name of the task
+    projectId: str  # Project identifier
+    source: str  # Source component identifier
+
+
+class TASK_EVENT_RESTART(TypedDict):
+    """A task has been restarted."""
+
+    action: Literal['restart']
+    name: str  # Display name of the task
+    projectId: str  # Project identifier
+    source: str  # Source component identifier
+
+
+TASK_EVENT = Union[TASK_EVENT_RUNNING, TASK_EVENT_BEGIN, TASK_EVENT_END, TASK_EVENT_RESTART]
 
 
 class EVENT_TASK(TypedDict, total=False):
-    """
-    DAP event for task lifecycle management with action-based event routing.
+    """Full DAP event for task lifecycle."""
 
-    This event handles three distinct task lifecycle scenarios, providing
-    comprehensive task management capabilities for client applications.
-    While Python doesn't support strict discriminated unions like TypeScript,
-    the action field determines which other fields are relevant.
-
-    Action Types and Usage:
-    - 'running': Sent when client first subscribes to EVENT_TYPE.TASK,
-                 provides snapshot of all active tasks for immediate state sync
-    - 'begin': Sent when a task starts execution, includes task identification
-    - 'end': Sent when a task completes or terminates, includes task identification
-
-    Event Flow:
-    1. Client subscribes to EVENT_TYPE.TASK
-    2. Server immediately sends 'running' action with current task list
-    3. As tasks start/stop, server sends 'begin'/'end' actions
-
-    Network Optimization:
-    - 'running' action sent only once per subscription to provide initial state
-    - 'begin'/'end' actions sent as lightweight notifications
-    - Only tasks belonging to client's API key are included
-
-    Field Validation:
-    Since Python's TypedDict doesn't enforce discriminated union behavior,
-    application code should validate field combinations based on action:
-    - action='running': expect 'tasks' field, ignore 'id'/'projectId'/'source'
-    - action='begin'/'end': expect 'id' and body 'projectId'/'source', ignore 'tasks'
-
-    Usage Example:
-    -------------
-    def handle_task_event(event: EVENT_TASK) -> None:
-        action = event["body"]["action"]
-
-        if action == "running":
-            # Handle current task list
-            tasks = event["body"].get("tasks", [])
-            print(f"Found {len(tasks)} running tasks")
-            for task in tasks:
-                print(f"Task {task['id']} in project {task['projectId']}")
-
-        elif action in ["begin", "end"]:
-            # Handle task lifecycle notification
-            task_id = event.get("id")
-            project_id = event["body"].get("projectId")
-            source = event["body"].get("source")
-            print(f"Task {task_id} has {action}")
-            print(f"Project: {project_id}, Source: {source}")
-    """
-
-    type: Literal['event']  # REQUIRED - DAP message type, always "event" for events
-    event: Literal['apaevt_task']  # REQUIRED - Event type identifier for task lifecycle events
-    body: _EVENT_TASK_BODY  # REQUIRED - Event body with action-specific data structure
-    id: str  # Task identifier for lifecycle tracking (required for 'begin'/'end' actions, unused for 'running')
+    type: Literal['event']
+    event: Literal['apaevt_task']
+    body: TASK_EVENT

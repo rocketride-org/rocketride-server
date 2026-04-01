@@ -61,7 +61,7 @@ export interface DashboardConnection {
 	clientInfo: Record<string, string>;
 	/** Active monitor subscriptions with their event flags. */
 	monitors: { key: string; flags: string[] }[];
-	/** Task IDs this connection is monitoring. */
+	/** Task display names this connection is monitoring. */
 	attachedTasks: string[];
 }
 
@@ -118,14 +118,91 @@ export interface DashboardResponse {
 	tasks: DashboardTask[];
 }
 
-/** Pushed event body from apaevt_dashboard server events. */
-export interface DashboardEvent {
-	/** Event action name. */
-	action: 'connection_added' | 'connection_removed' | 'task_started' | 'task_stopped' | 'task_removed';
+/** Base fields shared by all dashboard events. */
+interface DashboardEventBase {
 	/** Unix timestamp when the event occurred. */
 	timestamp: number;
-	/** Connection ID (for connection events). */
-	connectionId?: number;
-	/** Task ID (for task events). */
-	taskId?: string;
 }
+
+/** A new connection authenticated with the server. */
+interface DashboardConnectionAdded extends DashboardEventBase {
+	action: 'connection_added';
+	/** Unique monotonic connection identifier. */
+	connectionId: number;
+	/** Client display name from auth handshake. */
+	clientName?: string;
+	/** Client version from auth handshake. */
+	clientVersion?: string;
+	/** Account identifier. */
+	clientId?: string;
+}
+
+/** A connection was closed. */
+interface DashboardConnectionRemoved extends DashboardEventBase {
+	action: 'connection_removed';
+	/** Unique monotonic connection identifier. */
+	connectionId: number;
+	/** Client display name from auth handshake. */
+	clientName?: string;
+	/** Client version from auth handshake. */
+	clientVersion?: string;
+}
+
+/** A task was started or restarted. */
+interface DashboardTaskStarted extends DashboardEventBase {
+	action: 'task_started';
+	/** Task display identifier. */
+	taskId: string;
+}
+
+/** A task stopped (completed or errored). */
+interface DashboardTaskStopped extends DashboardEventBase {
+	action: 'task_stopped';
+	/** Task display identifier. */
+	taskId: string;
+}
+
+/** A completed task was cleaned up from the registry. */
+interface DashboardTaskRemoved extends DashboardEventBase {
+	action: 'task_removed';
+	/** Task display identifier. */
+	taskId: string;
+}
+
+/** A task exited with a non-zero exit code. */
+interface DashboardTaskError extends DashboardEventBase {
+	action: 'task_error';
+	/** Task display identifier. */
+	taskId: string;
+	/** Process exit code. */
+	exitCode: number;
+	/** Exit message from the engine. */
+	exitMessage?: string;
+}
+
+/** An authentication attempt failed. */
+interface DashboardAuthFailed extends DashboardEventBase {
+	action: 'auth_failed';
+	/** Unique monotonic connection identifier. */
+	connectionId: number;
+	/** Reason the auth was rejected. */
+	reason: string;
+}
+
+/** A monitor subscription changed on a connection. */
+interface DashboardMonitorChanged extends DashboardEventBase {
+	action: 'monitor_changed';
+	/** Unique monotonic connection identifier. */
+	connectionId: number;
+	/** Client display name from auth handshake. */
+	clientName?: string;
+	/** Client version from auth handshake. */
+	clientVersion?: string;
+	/** The monitor key that changed. */
+	key: string;
+	/** Whether the monitor was added or removed. */
+	change: 'subscribed' | 'unsubscribed';
+}
+
+/** Discriminated union of all dashboard activity events. */
+export type DashboardEvent = DashboardConnectionAdded | DashboardConnectionRemoved | DashboardTaskStarted | DashboardTaskStopped | DashboardTaskRemoved | DashboardTaskError | DashboardAuthFailed | DashboardMonitorChanged;

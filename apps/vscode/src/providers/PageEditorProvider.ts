@@ -259,20 +259,19 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 	 */
 	private async stopMonitoring(documentUri: string): Promise<void> {
 		const editorState = this.editorStates.get(documentUri);
-
-		// If we are not monitoring or missing projectId, nothing to stop
-		if (!editorState || !editorState.isMonitoring || !editorState.projectId) {
+		if (!editorState || !editorState.projectId) {
 			return;
 		}
 
-		// Unsubscribe via MonitorManager (reference-counted)
+		// Always unsubscribe from MonitorManager regardless of isMonitoring flag.
+		// A disconnect/reconnect cycle can desync isMonitoring from the actual
+		// MonitorManager refcount, so we must always clean up on dispose.
 		try {
 			await MonitorManager.getInstance().removeMonitor({ projectId: editorState.projectId, source: '*' }, ['summary']);
 		} catch (error) {
 			this.logger.error(`Stopping monitoring for project ${editorState.projectId}: ${error}`);
 		}
 
-		// Mark as not monitoring
 		editorState.isMonitoring = false;
 	}
 

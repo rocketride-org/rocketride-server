@@ -207,8 +207,10 @@ class RocketRideClient(
         client_id += 1
 
         # Client identification for auth handshake
-        self._client_display_name = kwargs.get('client_name', None)
-        self._client_display_version = kwargs.get('client_version', None)
+        from rocketride import __version__
+
+        self._client_display_name = kwargs.get('client_name', None) or 'Python SDK'
+        self._client_display_version = kwargs.get('client_version', None) or __version__
 
         # Initialize the underlying DAP client; transport is created in _internal_connect
         super().__init__(transport=None, module=kwargs.get('module', client_name), **kwargs)

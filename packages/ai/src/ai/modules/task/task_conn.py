@@ -39,6 +39,7 @@ of concerns through specialized command handler classes.
 
 import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
+from rocketride import EVENT_TYPE
 from ai.common.dap import DAPConn, TransportBase
 from .commands.cmd_task import TaskCommands
 from .commands.cmd_data import DataCommands
@@ -203,6 +204,18 @@ class TaskConn(
         credential = args.get('auth') or ''
         result = await self._server._server.authenticate_credential(credential)
         if isinstance(result, tuple):
+            await self._server.broadcast_server_event(
+                EVENT_TYPE.DASHBOARD,
+                {
+                    'event': 'apaevt_dashboard',
+                    'body': {
+                        'action': 'auth_failed',
+                        'timestamp': time.time(),
+                        'connectionId': self.get_connection_id(),
+                        'reason': result[1],
+                    },
+                },
+            )
             return self.build_error(request, result[1])
         self._account_info = result
         self._authenticated = True
@@ -212,6 +225,22 @@ class TaskConn(
             self._client_info['name'] = str(args['clientName'])
         if args.get('clientVersion'):
             self._client_info['version'] = str(args['clientVersion'])
+
+        # Notify dashboard subscribers that an authenticated connection has arrived
+        await self._server.broadcast_server_event(
+            EVENT_TYPE.DASHBOARD,
+            {
+                'event': 'apaevt_dashboard',
+                'body': {
+                    'action': 'connection_added',
+                    'timestamp': time.time(),
+                    'connectionId': self.get_connection_id(),
+                    'clientName': self._client_info.get('name'),
+                    'clientVersion': self._client_info.get('version'),
+                    'clientId': self._account_info.clientid if self._account_info else None,
+                },
+            },
+        )
 
         return self.build_response(request, body={})
 

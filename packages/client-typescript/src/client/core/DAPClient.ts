@@ -26,6 +26,7 @@ import { DAPBase } from './DAPBase.js';
 import { DAPMessage, RocketRideClientConfig } from '../types/index.js';
 import { TransportBase } from './TransportBase.js';
 import { AuthenticationException } from '../exceptions/index.js';
+import { SDK_VERSION } from '../constants.js';
 
 /**
  * DAP (Debug Adapter Protocol) client for communicating with RocketRide servers.
@@ -59,8 +60,8 @@ export class DAPClient extends DAPBase {
 	constructor(module: string, transport: TransportBase | undefined, config: RocketRideClientConfig = {}) {
 		super(module, transport, config);
 		this._requestTimeout = config.requestTimeout;
-		this._clientDisplayName = config.clientName;
-		this._clientDisplayVersion = config.clientVersion;
+		this._clientDisplayName = config.clientName || 'TypeScript SDK';
+		this._clientDisplayVersion = config.clientVersion || SDK_VERSION;
 	}
 
 	/**
