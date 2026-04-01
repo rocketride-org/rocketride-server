@@ -10,13 +10,13 @@
 </p>
 
 <p>
- RocketRide is an open-source data pipeline builder and runtime built for AI and ML workloads. With 50+ pipeline nodes spanning 13 LLM providers, 8 vector databases, OCR, NER, and more — pipelines are defined as portable JSON, built visually in VS Code, and executed by a multithreaded C++ runtime. From real-time data processing to multimodal AI search, RocketRide runs entirely on your own infrastructure.
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-cpp.png" alt="C++" />&nbsp;&nbsp;
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-python.png" alt="Python" />&nbsp;&nbsp;
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-typescript.png" alt="TypeScript" />
 </p>
 
 <p>
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-cpp.png" height="28" alt="C++" />&nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-python.png" height="28" alt="Python" />&nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-typescript.png" height="28" alt="TypeScript" />
+ RocketRide is an open-source data pipeline builder and runtime built for AI and ML workloads. With 50+ pipeline nodes spanning 13 LLM providers, 8 vector databases, OCR, NER, and more — pipelines are defined as portable JSON, built visually in VS Code, and executed by a multithreaded C++ runtime. From real-time data processing to multimodal AI search, RocketRide runs entirely on your own infrastructure.
 </p>
 
 <p>
