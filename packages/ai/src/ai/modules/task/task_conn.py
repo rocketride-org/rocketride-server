@@ -37,6 +37,7 @@ This design provides a single connection point while maintaining separation
 of concerns through specialized command handler classes.
 """
 
+import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from ai.common.dap import DAPConn, TransportBase
 from .commands.cmd_task import TaskCommands
@@ -164,10 +165,19 @@ class TaskConn(
         self._account_info: Optional[AccountInfo] = None
         self._authenticated = False
 
+        # Connection tracking for server dashboard
+        self._connected_at: float = time.time()
+        self._messages_in: int = 0
+        self._messages_out: int = 0
+        self._last_activity: float = time.time()
+        self._client_info: Dict[str, str] = {}
+
     async def on_receive(self, message: Dict[str, Any] = {}) -> None:
         """
         Intercept DAP dispatch: if not authenticated, only allow auth command; otherwise require auth first.
         """
+        self._messages_in += 1
+        self._last_activity = time.time()
         if message.get('type') == 'request' and message.get('command') == 'auth':
             await super().on_receive(message)
             if not self._authenticated:
@@ -191,6 +201,13 @@ class TaskConn(
             return self.build_error(request, result[1])
         self._account_info = result
         self._authenticated = True
+
+        # Capture optional client identification from auth arguments
+        if args.get('clientName'):
+            self._client_info['name'] = str(args['clientName'])
+        if args.get('clientVersion'):
+            self._client_info['version'] = str(args['clientVersion'])
+
         return self.build_response(request, body={})
 
     def has_permission(self, perm: Union[list[str], str]) -> bool:

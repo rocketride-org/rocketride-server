@@ -19,7 +19,8 @@ Architecture:
 - Provides read-only access to service metadata
 """
 
-from typing import TYPE_CHECKING, Dict, Any
+import time
+from typing import TYPE_CHECKING, Dict, Any, List
 from rocketlib import getServiceDefinitions, getServiceDefinition, validatePipeline
 from ai.common.dap import DAPConn, TransportBase
 
@@ -174,3 +175,138 @@ class MiscCommands(DAPConn):
         except Exception as e:
             self.debug_message(f'Pipeline validation failed: {str(e)}')
             raise
+
+    async def on_rrext_dashboard(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'rrext_dashboard' command to retrieve server dashboard data.
+
+        Returns a snapshot of the server's current state including overview
+        metrics, active connections, and task information for administrative
+        monitoring dashboards.
+
+        Args:
+            request (Dict[str, Any]): DAP request (no arguments required)
+
+        Returns:
+            Dict[str, Any]: DAP response containing:
+                - body.overview: Server-level aggregate metrics
+                - body.connections: List of active connection details
+                - body.tasks: List of task details with status and metrics
+        """
+        try:
+            server = self._server
+            current_time = time.time()
+
+            # Snapshot dicts to avoid RuntimeError if they change during iteration
+            task_controls = list(server._task_control.values())
+            conn_items = list(server._connections.items())
+
+            # Build connection-to-task mapping by scanning task controls
+            conn_tasks: Dict[int, List[str]] = {}
+            for control in task_controls:
+                if control.task is None:
+                    continue
+                for cid, conn in conn_items:
+                    project_key = f'p.{control.project_id}.{control.source}'
+                    if hasattr(conn, '_monitors') and (project_key in conn._monitors or '*' in conn._monitors):
+                        conn_tasks.setdefault(cid, []).append(control.id)
+
+            # Build connections list
+            connections = []
+            for conn_id, conn in conn_items:
+                conn_info: Dict[str, Any] = {
+                    'id': conn_id,
+                    'connectedAt': getattr(conn, '_connected_at', current_time),
+                    'lastActivity': getattr(conn, '_last_activity', current_time),
+                    'messagesIn': getattr(conn, '_messages_in', 0),
+                    'messagesOut': getattr(conn, '_messages_out', 0),
+                    'authenticated': getattr(conn, '_authenticated', False),
+                    'clientId': None,
+                    'apikey': '****',
+                    'clientInfo': getattr(conn, '_client_info', {}),
+                    'monitors': list(conn._monitors.keys()) if hasattr(conn, '_monitors') else [],
+                    'attachedTasks': conn_tasks.get(conn_id, []),
+                }
+                if hasattr(conn, '_account_info') and conn._account_info:
+                    conn_info['clientId'] = conn._account_info.clientid
+                    conn_info['apikey'] = self._mask_apikey(conn._account_info.apikey)
+                connections.append(conn_info)
+
+            # Build tasks list
+            tasks = []
+            for control in task_controls:
+                try:
+                    task_status = control.task.get_status()
+                    start = getattr(task_status, 'startTime', 0) or 0
+                    end = getattr(task_status, 'endTime', 0) or 0
+                    completed = getattr(task_status, 'completed', False)
+                    if completed and start > 0 and end > 0:
+                        elapsed = end - start
+                    elif start > 0:
+                        elapsed = current_time - start
+                    else:
+                        elapsed = 0
+
+                    # Convert Pydantic metrics model to plain dict for JSON serialization
+                    metrics_raw = getattr(task_status, 'metrics', None)
+                    metrics_dict = metrics_raw.model_dump() if hasattr(metrics_raw, 'model_dump') else metrics_raw
+
+                    tasks.append(
+                        {
+                            'id': control.id,
+                            'name': getattr(task_status, 'name', control.source),
+                            'projectId': control.project_id,
+                            'source': control.source,
+                            'provider': control.provider,
+                            'launchType': control.launch_type.value,
+                            'startTime': start,
+                            'elapsedTime': elapsed,
+                            'completed': completed,
+                            'status': getattr(task_status, 'status', None) if not completed else None,
+                            'exitCode': getattr(task_status, 'exitCode', None) if completed else None,
+                            'endTime': end if completed else None,
+                            'connections': control.task.get_connection_count(),
+                            'state': getattr(task_status, 'state', 0),
+                            'idleTime': getattr(control.task, '_idle_time', 0),
+                            'ttl': getattr(control.task, '_ttl', 0),
+                            'metrics': metrics_dict,
+                            'totalCount': getattr(task_status, 'totalCount', 0),
+                            'completedCount': getattr(task_status, 'completedCount', 0),
+                            'rateCount': getattr(task_status, 'rateCount', 0),
+                            'rateSize': getattr(task_status, 'rateSize', 0),
+                        }
+                    )
+                except Exception as e:
+                    self.debug_message(f'Error building task info for "{control.id}": {e}')
+                    continue
+
+            # Build overview — only count non-completed tasks as "active"
+            active_count = sum(1 for c in task_controls if not getattr(c.task.get_status(), 'completed', False))
+            start_time = getattr(server._server, '_startTime', None) or current_time
+            overview = {
+                'totalConnections': len(server._connections),
+                'activeTasks': active_count,
+                'peakTasks': server._tasks_peak,
+                'totalTasksLifetime': server._tasks_total,
+                'serverUptime': current_time - start_time,
+            }
+
+            return self.build_response(
+                request,
+                body={
+                    'overview': overview,
+                    'connections': connections,
+                    'tasks': tasks,
+                },
+            )
+
+        except Exception as e:
+            self.debug_message(f'Failed to retrieve dashboard data: {str(e)}')
+            raise
+
+    @staticmethod
+    def _mask_apikey(apikey: str) -> str:
+        """Mask an API key for display, showing only first 4 and last 4 characters."""
+        if not apikey or len(apikey) <= 8:
+            return '****'
+        return f'{apikey[:4]}****{apikey[-4:]}'
