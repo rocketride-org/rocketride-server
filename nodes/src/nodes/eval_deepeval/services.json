@@ -1,0 +1,127 @@
+{
+	"title": "DeepEval",
+	"protocol": "eval_deepeval://",
+	"classType": ["eval"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.eval_deepeval",
+	"prefix": "eval",
+	"description": ["General-purpose and safety evaluation metrics using the DeepEval framework. ", "Enable any combination of metrics — each enabled metric emits its own score on the answers lane. ", "Requires a connected LLM node (via the LLM control channel) for judge calls. ", "Wire: answers (LLM output), questions (original query), documents (retrieved context). ", "G-Eval allows defining any custom evaluation criteria in natural language."],
+	"icon": "eval.svg",
+	"invoke": {
+		"llm": {
+			"description": "LLM used as the DeepEval evaluator judge.",
+			"min": 0
+		}
+	},
+	"lanes": {
+		"questions": [],
+		"answers": ["answers"],
+		"documents": [],
+		"text": []
+	},
+	"input": [
+		{
+			"lane": "answers",
+			"description": "The generated answer to evaluate",
+			"output": [
+				{
+					"lane": "answers",
+					"description": "One score object per enabled metric: {score, passed, metric, threshold, reason}"
+				}
+			]
+		},
+		{
+			"lane": "questions",
+			"description": "Original user query",
+			"output": []
+		},
+		{
+			"lane": "documents",
+			"description": "Retrieved context chunks (required for faithfulness, hallucination)",
+			"output": []
+		},
+		{
+			"lane": "text",
+			"description": "Expected / ground-truth answer (optional)",
+			"output": []
+		}
+	],
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"threshold": 0.5,
+				"answer_relevancy": true,
+				"faithfulness": false,
+				"hallucination": false,
+				"g_eval": false,
+				"bias": false,
+				"toxicity": false,
+				"criteria": ""
+			}
+		}
+	},
+	"fields": {
+		"threshold": {
+			"type": "number",
+			"title": "Pass Threshold",
+			"description": "Minimum score to pass (0.0 – 1.0), applied to all enabled metrics.",
+			"minimum": 0,
+			"maximum": 1
+		},
+		"answer_relevancy": {
+			"type": "boolean",
+			"title": "Answer Relevancy",
+			"description": "Is the answer relevant to the input question?"
+		},
+		"faithfulness": {
+			"type": "boolean",
+			"title": "Faithfulness",
+			"description": "Are claims in the answer supported by the retrieved context? (Wire documents lane)"
+		},
+		"hallucination": {
+			"type": "boolean",
+			"title": "Hallucination",
+			"description": "Does the answer contain hallucinated facts not in the context? (Wire documents lane)"
+		},
+		"g_eval": {
+			"type": "boolean",
+			"title": "G-Eval (Custom Criteria)",
+			"description": "Score against your own natural-language criteria defined below."
+		},
+		"bias": {
+			"type": "boolean",
+			"title": "Bias",
+			"description": "Does the answer exhibit demographic, political, or other systematic bias?"
+		},
+		"toxicity": {
+			"type": "boolean",
+			"title": "Toxicity",
+			"description": "Does the answer contain toxic, harmful, or offensive content?"
+		},
+		"criteria": {
+			"type": "string",
+			"title": "G-Eval Criteria",
+			"description": "Custom evaluation criteria used when G-Eval is enabled (e.g. 'The response is concise and factually accurate.')"
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Threshold",
+			"properties": ["threshold"]
+		},
+		{
+			"section": "Pipe",
+			"title": "Metrics",
+			"properties": ["answer_relevancy", "faithfulness", "hallucination", "g_eval", "bias", "toxicity"]
+		},
+		{
+			"section": "Pipe",
+			"title": "G-Eval",
+			"properties": ["criteria"]
+		}
+	]
+}

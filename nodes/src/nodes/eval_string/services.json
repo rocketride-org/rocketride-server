@@ -1,0 +1,64 @@
+{
+	"title": "String Eval",
+	"protocol": "eval_string://",
+	"classType": ["eval"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.eval_string",
+	"prefix": "eval",
+	"description": ["Deterministic string-based evaluation metrics that score an answer against ", "an expected output. Supports exact match, substring contains, regex pattern, ", "BLEU, and ROUGE-L. No LLM calls required — zero latency quality gate. ", "Wire the answers lane to the LLM output and the text lane to a known expected answer."],
+	"icon": "eval.svg",
+	"lanes": {
+		"answers": ["answers"],
+		"text": []
+	},
+	"input": [
+		{
+			"lane": "answers",
+			"description": "The generated answer to evaluate",
+			"output": [
+				{
+					"lane": "answers",
+					"description": "Evaluation score: {score, passed, metric, threshold, reason}"
+				}
+			]
+		},
+		{
+			"lane": "text",
+			"description": "Expected / ground-truth answer (required for all string metrics)",
+			"output": []
+		}
+	],
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"metric": "exact_match",
+				"threshold": 0.7
+			}
+		}
+	},
+	"fields": {
+		"metric": {
+			"type": "string",
+			"title": "Metric",
+			"description": "String evaluation metric to use",
+			"enum": ["exact_match", "contains", "regex", "bleu", "rouge_l"]
+		},
+		"threshold": {
+			"type": "number",
+			"title": "Pass Threshold",
+			"description": "Minimum score to pass (0.0 – 1.0). exact_match and contains are binary (0 or 1).",
+			"minimum": 0,
+			"maximum": 1
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Eval Settings",
+			"properties": ["metric", "threshold"]
+		}
+	]
+}

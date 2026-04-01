@@ -1,0 +1,110 @@
+{
+	"title": "RAGAS Eval",
+	"protocol": "eval_ragas://",
+	"classType": ["eval"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.eval_ragas",
+	"prefix": "eval",
+	"description": ["RAG-specific evaluation metrics using the RAGAS framework. Enable any combination ", "of metrics — each enabled metric emits its own score on the answers lane. ", "Requires a connected LLM node (via the LLM control channel) for judge calls. ", "Wire: answers (LLM output), questions (original query), documents (retrieved context), ", "text (expected answer, optional — enables context_recall and factual_correctness)."],
+	"icon": "eval.svg",
+	"invoke": {
+		"llm": {
+			"description": "LLM used as the RAGAS evaluator judge.",
+			"min": 0
+		}
+	},
+	"lanes": {
+		"questions": [],
+		"answers": ["answers"],
+		"documents": [],
+		"text": []
+	},
+	"input": [
+		{
+			"lane": "answers",
+			"description": "The generated answer to evaluate",
+			"output": [
+				{
+					"lane": "answers",
+					"description": "One score object per enabled metric: {score, passed, metric, threshold, reason}"
+				}
+			]
+		},
+		{
+			"lane": "questions",
+			"description": "Original user query",
+			"output": []
+		},
+		{
+			"lane": "documents",
+			"description": "Retrieved context chunks (required for faithfulness, context_precision, context_recall)",
+			"output": []
+		},
+		{
+			"lane": "text",
+			"description": "Expected / ground-truth answer (required for context_recall, factual_correctness)",
+			"output": []
+		}
+	],
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"threshold": 0.7,
+				"faithfulness": true,
+				"answer_relevancy": false,
+				"context_precision": false,
+				"context_recall": false,
+				"factual_correctness": false
+			}
+		}
+	},
+	"fields": {
+		"threshold": {
+			"type": "number",
+			"title": "Pass Threshold",
+			"description": "Minimum score to pass (0.0 – 1.0), applied to all enabled metrics.",
+			"minimum": 0,
+			"maximum": 1
+		},
+		"faithfulness": {
+			"type": "boolean",
+			"title": "Faithfulness",
+			"description": "Are all claims in the answer grounded in the retrieved context? (LLM-only, no embeddings)"
+		},
+		"answer_relevancy": {
+			"type": "boolean",
+			"title": "Answer Relevancy",
+			"description": "Is the answer relevant to the original query? (Requires OPENAI_API_KEY env var for embeddings)"
+		},
+		"context_precision": {
+			"type": "boolean",
+			"title": "Context Precision",
+			"description": "Of the retrieved chunks, what fraction is actually relevant? (LLM-only)"
+		},
+		"context_recall": {
+			"type": "boolean",
+			"title": "Context Recall",
+			"description": "Does the context contain all information needed to answer? (Requires ground-truth — wire text lane)"
+		},
+		"factual_correctness": {
+			"type": "boolean",
+			"title": "Factual Correctness",
+			"description": "Does the answer match the ground-truth? (Requires ground-truth — wire text lane)"
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Threshold",
+			"properties": ["threshold"]
+		},
+		{
+			"section": "Pipe",
+			"title": "Metrics",
+			"properties": ["faithfulness", "answer_relevancy", "context_precision", "context_recall", "factual_correctness"]
+		}
+	]
+}
