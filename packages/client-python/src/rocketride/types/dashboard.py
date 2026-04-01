@@ -40,12 +40,10 @@ from typing import Any, Dict, List, TypedDict
 
 
 class DASHBOARD_OVERVIEW(TypedDict):
-    """Server-level aggregate metrics."""
+    """Server-level aggregate metrics (scoped to the caller's account)."""
 
-    totalConnections: int  # Number of currently active WebSocket connections
-    activeTasks: int  # Number of tasks currently in the registry
-    peakTasks: int  # Historical maximum concurrent task count
-    totalTasksLifetime: int  # Lifetime total of created tasks
+    totalConnections: int  # Number of currently active WebSocket connections for this account
+    activeTasks: int  # Number of tasks currently in the registry for this account
     serverUptime: float  # Seconds since server started
 
 

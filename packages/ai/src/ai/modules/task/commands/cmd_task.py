@@ -31,6 +31,7 @@ The actual task execution and management is delegated to the TaskServer.
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 from ai.account.store import StorageError
+from rocketride import TASK_STATE
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -247,13 +248,20 @@ class TaskCommands(DAPConn):
             Exception: If task does not exist
         """
         try:
-            # Get the argunents
+            # Verify permission
+            self.verify_permission('task.monitor')
+
+            # Get the arguments
             args = request.get('arguments', {})
             project_id = args.get('projectId', None)
             source = args.get('source', None)
 
             # Get the task control
             control = self._server.get_task_control_by_project(project_id, source)
+
+            # Verify the caller owns this task
+            if control.apikey != self._account_info.apikey:
+                raise PermissionError('Access denied: task belongs to a different account')
 
             # Return successful response with status data
             return self.build_response(
@@ -308,7 +316,7 @@ class TaskCommands(DAPConn):
                 name = pipeline_name or control.source
                 description = pipeline_desc or 'RocketRide DTC MCP Tool'
 
-                if status.state == 3:
+                if status.state == TASK_STATE.RUNNING.value:
                     tasks.append(
                         {
                             'name': name,

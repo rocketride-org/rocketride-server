@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Dict, Any, List
 from rocketride import EVENT_TYPE
 from rocketlib import getServiceDefinitions, getServiceDefinition, validatePipeline
 from ai.common.dap import DAPConn, TransportBase
+from ..pipeline import resolve_implied_source
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -155,12 +156,7 @@ class MiscCommands(DAPConn):
             # Resolve source: explicit arg > pipeline field > implied from components
             source = args.get('source', None) or pipeline.get('source', None)
             if not source:
-                for component in pipeline.get('components', []):
-                    config = component.get('config', {})
-                    if config.get('mode', '') == 'Source':
-                        if source is not None:
-                            raise ValueError('Pipeline has multiple source components, please specify one explicitly')
-                        source = component.get('id', None)
+                source = resolve_implied_source(pipeline)
 
             # Build the C++ payload with resolved source and default version
             inner = {**pipeline, 'version': pipeline.get('version', 1)}
@@ -195,12 +191,16 @@ class MiscCommands(DAPConn):
                 - body.tasks: List of task details with status and metrics
         """
         try:
+            # Require monitor permission
+            self.verify_permission('task.monitor')
+
             server = self._server
             current_time = time.time()
+            caller_apikey = self._account_info.apikey
 
-            # Snapshot dicts to avoid RuntimeError if they change during iteration
-            task_controls = list(server._task_control.values())
-            conn_items = list(server._connections.items())
+            # Snapshot and filter to caller's own data
+            task_controls = [c for c in server._task_control.values() if c.apikey == caller_apikey]
+            conn_items = [(cid, conn) for cid, conn in server._connections.items() if hasattr(conn, '_account_info') and conn._account_info and conn._account_info.apikey == caller_apikey]
 
             # Build connection-to-task mapping by scanning task controls
             conn_tasks: Dict[int, List[str]] = {}
@@ -296,14 +296,12 @@ class MiscCommands(DAPConn):
                     self.debug_message(f'Error building task info for "{control.id}": {e}')
                     continue
 
-            # Build overview — only count non-completed tasks as "active"
+            # Build overview — scoped to caller's tasks and connections
             active_count = sum(1 for c in task_controls if not getattr(c.task.get_status(), 'completed', False))
             start_time = getattr(server._server, '_startTime', None) or current_time
             overview = {
-                'totalConnections': len(server._connections),
+                'totalConnections': len(conn_items),
                 'activeTasks': active_count,
-                'peakTasks': server._tasks_peak,
-                'totalTasksLifetime': server._tasks_total,
                 'serverUptime': current_time - start_time,
             }
 
