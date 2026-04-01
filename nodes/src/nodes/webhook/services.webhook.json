@@ -54,9 +54,6 @@
 	//
 	"icon": "webhook.svg",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
@@ -86,7 +83,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//

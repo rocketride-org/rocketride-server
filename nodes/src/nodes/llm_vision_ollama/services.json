@@ -54,9 +54,6 @@
 	//
 	"icon": "ollama.svg",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of

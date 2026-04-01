@@ -28,7 +28,7 @@
 	"register": "filter",
 	//
 	// Optional:
-	//     The node is the actual pyhsical node to instantiate - if
+	//     The node is the actual physical node to instantiate - if
 	//     not specified, the protocol will be used
 	//
 	"node": "python",
@@ -47,15 +47,12 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A vector database component for MongoDB Atlas, enabling efficient storage and ", "retrieval of vector embeddings using MongoDB's native vector search capabilities. ", "It supports similarity search, filtering, and management of vector data with ", "high performance and advanced matching capabilities using Atlas Vector Search.", "</br></br>To access local services from AI Cloud, follow these steps: <a href=\"https://bit.ly/4maRLPL\" target=\"_blank\">Setting Up Ngrok to Local Services from RocketRide Data Toolchain for AI Cloud</a></br>", "</br></br><a href=\"https://www.mongodb.com/products/platform/atlas-vector-search\" target=\"_blank\">MongoDB Atlas Vector Search</a>"],
+	"description": ["A vector database component for MongoDB Atlas, enabling efficient storage and ", "retrieval of vector embeddings using MongoDB's native vector search capabilities. ", "It supports similarity search, filtering, and management of vector data with ", "high performance and advanced matching capabilities using Atlas Vector Search.", "</br></br><a href=\"https://www.mongodb.com/products/platform/atlas-vector-search\" target=\"_blank\">MongoDB Atlas Vector Search</a>"],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "mongodb.svg",
-	//
-	// Optional:
-	//	  Documentation link for this driver
 	//
 	//
 	//  Optional:
@@ -115,7 +112,7 @@
 	},
 	//
 	// Optional:
-	//     Local fields defintions - these define fields only for the
+	//     Local fields definitions - these define fields only for the
 	//     current service. You may specify them here, or directly
 	//     in the shape
 	//

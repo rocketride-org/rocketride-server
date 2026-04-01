@@ -36,9 +36,6 @@
 	//
 	"icon": "hash.svg",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -66,7 +63,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//

@@ -22,7 +22,7 @@
 	"capabilities": ["network", "noremote", "nosaas"],
 	//
 	// Optional:
-	//     The node is the actual pyhsical node to instantiate - if
+	//     The node is the actual physical node to instantiate - if
 	//     not specified, the protocol will be used
 	//
 	"node": "python",
@@ -48,9 +48,6 @@
 	//
 	"icon": "text-output.svg",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -61,7 +58,7 @@
 	},
 	//
 	// Optional:
-	//     Local fields defintions - these define fields only for the
+	//     Local fields definitions - these define fields only for the
 	//     current service. You may specify them here, or directly
 	//     in the shape
 	//

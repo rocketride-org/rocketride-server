@@ -28,7 +28,7 @@
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -61,9 +61,6 @@
 	//              profile (model name)
 	//
 	"icon": "deepseek.svg",
-	//
-	// Optional:
-	//	  Documentation link for this driver
 	//
 	//
 	//  Optional:
@@ -158,7 +155,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//

@@ -1,5 +1,5 @@
 //
-// Common field defintions - these will be merged into the service defintion
+// Common field definitions - these will be merged into the service definition
 // as required by the service
 //
 {
@@ -45,7 +45,7 @@
 			"default": true
 		},
 		//
-		// These are the defintions for the estimation subsection
+		// These are the definitions for the estimation subsection
 		//
 		"estimation.accessCost": {
 			"title": "Access cost",

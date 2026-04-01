@@ -28,7 +28,7 @@
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -48,9 +48,6 @@
 	//		Description to of this driver
 	//
 	"description": ["This component combines document parsing, text preprocessing, and embedding generation in a single node.", "It provides an end-to-end solution for converting raw documents into vector representations", "suitable for semantic search and analysis."],
-	//
-	// Optional:
-	//	  Documentation link for this driver
 	//
 	//
 	//	Optional:
@@ -104,7 +101,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//

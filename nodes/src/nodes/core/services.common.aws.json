@@ -1,6 +1,6 @@
 //
-// Common field defintions for accessing AWS - these will be merged into the
-// service defintion as required by the service
+// Common field definitions for accessing AWS - these will be merged into the
+// service definition as required by the service
 //
 {
 	"fields": {

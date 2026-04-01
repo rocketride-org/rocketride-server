@@ -28,7 +28,7 @@
 	"register": "filter",
 	//
 	// Optional:
-	//     The node is the actual pyhsical node to instantiate - if
+	//     The node is the actual physical node to instantiate - if
 	//     not specified, the protocol will be used
 	//
 	"node": "python",
@@ -47,15 +47,12 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A component that integrates with Anthropic’s Claude models for natural ", "language understanding and generation. It enables tasks such as ", "summarization, question answering, content generation, and conversational ", "AI. Configurable with model selection and prompt settings, the component ", "provides access to Claude’s advanced language capabilities with a strong focus ", "on safety, alignment, and reliability. Ideal for enterprise-grade workflows requiring ", "and vector-based machine learning workflows."],
+	"description": ["A vector database component for Milvus, enabling efficient storage, indexing, ", "and retrieval of vector embeddings. It supports high-performance similarity search, ", "flexible indexing strategies (IVF, HNSW), scalable deployment, and management ", "of vector data for machine learning and AI retrieval workflows."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "milvus.svg",
-	//
-	// Optional:
-	//	  Documentation link for this driver
 	//
 	//
 	//  Optional:
@@ -184,7 +181,7 @@
 	},
 	//
 	// Optional:
-	//     Local fields defintions - these define fields only for the
+	//     Local fields definitions - these define fields only for the
 	//     current service. You may specify them here, or directly
 	//     in the shape
 	//
