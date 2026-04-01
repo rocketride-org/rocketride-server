@@ -785,6 +785,7 @@ class Task(DAPBase):
                     'apaevt_task',
                     body={
                         'action': 'end',
+                        'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
                     },
@@ -794,6 +795,22 @@ class Task(DAPBase):
                     EVENT_TYPE.TASK,
                     task_message,
                 )
+
+                # Notify dashboard of task errors (non-zero exit)
+                if self._status.exitCode and self._status.exitCode != 0:
+                    await self._server.broadcast_server_event(
+                        EVENT_TYPE.DASHBOARD,
+                        {
+                            'event': 'apaevt_dashboard',
+                            'body': {
+                                'action': 'task_error',
+                                'timestamp': time.time(),
+                                'taskId': self.id,
+                                'exitCode': self._status.exitCode,
+                                'exitMessage': self._status.exitMessage or None,
+                            },
+                        },
+                    )
 
         self.debug_message('Resource cleanup completed successfully')
 
@@ -886,7 +903,7 @@ class Task(DAPBase):
 
         else:
             # Route through server broadcast system
-            await self._server.broadcast_event(
+            await self._server.broadcast_task_event(
                 type=type,
                 token=self.token,
                 event=message,
@@ -1570,6 +1587,7 @@ class Task(DAPBase):
                     'apaevt_task',
                     body={
                         'action': 'begin',
+                        'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
                     },
@@ -1585,6 +1603,7 @@ class Task(DAPBase):
                     'apaevt_task',
                     body={
                         'action': 'restart',
+                        'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
                     },

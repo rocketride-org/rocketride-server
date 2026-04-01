@@ -16,7 +16,7 @@
  */
 
 import React, { useState } from 'react';
-import type { DashboardResponse, DashboardEvent } from './types';
+import type { DashboardResponse, ActivityEvent } from './types';
 import { OverviewTab, ConnectionsTab, TasksTab, ActivityTab } from './components';
 
 // Theme CSS — web defaults first, then VS Code overrides on top
@@ -32,7 +32,7 @@ export interface IServerMonitorProps {
 	/** Full dashboard snapshot from rrext_dashboard response, or null if not yet loaded. */
 	data: DashboardResponse | null;
 	/** Activity events pushed from the server (newest first). */
-	events: DashboardEvent[];
+	events: ActivityEvent[];
 	/** Whether the client is connected to the server. */
 	isConnected: boolean;
 	/** Callback to request a manual data refresh from the host. */
@@ -48,7 +48,7 @@ type TabId = 'overview' | 'connections' | 'tasks' | 'activity';
 interface TabDef {
 	id: TabId;
 	label: string;
-	badge?: (data: DashboardResponse | null, events: DashboardEvent[]) => string | undefined;
+	badge?: (data: DashboardResponse | null, events: ActivityEvent[]) => string | undefined;
 }
 
 const TABS: TabDef[] = [

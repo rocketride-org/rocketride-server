@@ -203,7 +203,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ data }) => {
 							{completedTasks.slice(0, 5).map((task) => (
 								<tr key={task.id}>
 									<td>
-										<div className="sm-task-name">{task.id}</div>
+										<div className="sm-task-name">{task.name || task.id}</div>
 										<div className="sm-task-secondary">
 											{task.provider} &middot; {task.projectId?.slice(0, 8)}
 										</div>

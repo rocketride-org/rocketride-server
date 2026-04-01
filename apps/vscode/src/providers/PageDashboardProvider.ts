@@ -17,7 +17,7 @@ import { ConnectionManager } from '../connection/connection';
 import { MonitorManager } from '../connection/monitor-manager';
 import { ConnectionStatus, ConnectionState, GenericEvent } from '../shared/types';
 import type { PageDashboardIncomingMessage } from '../shared/types/pageDashboard';
-import type { DashboardResponse } from 'rocketride';
+import type { DashboardResponse, DashboardEvent } from 'rocketride';
 
 const POLL_INTERVAL_MS = 5_000;
 
@@ -126,7 +126,7 @@ export class PageDashboardProvider {
 	private async subscribeDashboardEvents(): Promise<void> {
 		try {
 			// Subscribe via MonitorManager (reference-counted, safe for shared connection)
-			await MonitorManager.getInstance().addMonitor({ token: '*' }, ['task', 'summary']);
+			await MonitorManager.getInstance().addMonitor({ token: '*' }, ['task', 'summary', 'dashboard']);
 		} catch (error) {
 			this.logger.error(`[PageDashboardProvider] Failed to subscribe dashboard events: ${error}`);
 		}
@@ -134,7 +134,7 @@ export class PageDashboardProvider {
 
 	private async unsubscribeDashboardEvents(): Promise<void> {
 		try {
-			await MonitorManager.getInstance().removeMonitor({ token: '*' }, ['task', 'summary']);
+			await MonitorManager.getInstance().removeMonitor({ token: '*' }, ['task', 'summary', 'dashboard']);
 		} catch (_error) {
 			// Best-effort; connection may already be gone
 		}
@@ -196,10 +196,19 @@ export class PageDashboardProvider {
 	private handleEvent(event: GenericEvent): void {
 		if (!this.panel) return;
 
-		// React to task lifecycle events — refresh dashboard data immediately
 		if (event.event === 'apaevt_task') {
-			this.fetchAndPost().catch((error) => {
-				this.logger.error(`[PageDashboardProvider] Refresh after task event error: ${error}`);
+			this.fetchAndPost().catch((err) => {
+				this.logger.error(`[PageDashboardProvider] Refresh error: ${err}`);
+			});
+			this.panel.webview.postMessage({ type: 'taskEvent', body: event.body as Record<string, unknown> }).then(undefined, (err: unknown) => {
+				this.logger.error(`[PageDashboardProvider] Failed to post task event: ${err}`);
+			});
+		} else if (event.event === 'apaevt_dashboard') {
+			this.fetchAndPost().catch((err) => {
+				this.logger.error(`[PageDashboardProvider] Refresh error: ${err}`);
+			});
+			this.panel.webview.postMessage({ type: 'dashboardEvent', body: event.body as DashboardEvent }).then(undefined, (err: unknown) => {
+				this.logger.error(`[PageDashboardProvider] Failed to post dashboard event: ${err}`);
 			});
 		}
 	}

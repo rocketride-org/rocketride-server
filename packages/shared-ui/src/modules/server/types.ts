@@ -10,4 +10,9 @@
  * module-specific UI types.
  */
 
-export type { DashboardOverview, DashboardConnection, DashboardTask, DashboardResponse, DashboardEvent } from 'rocketride';
+import type { DashboardEvent as _DashboardEvent, TaskEvent as _TaskEvent } from 'rocketride';
+
+export type { DashboardOverview, DashboardConnection, DashboardTask, DashboardResponse, DashboardEvent, TaskEvent } from 'rocketride';
+
+/** Wrapper for activity events from either channel. */
+export type ActivityEvent = { source: 'task'; body: _TaskEvent } | { source: 'dashboard'; body: _DashboardEvent };
