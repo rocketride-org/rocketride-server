@@ -42,6 +42,7 @@ import { getLogger } from '../shared/util/output';
 import { PipelineFileParser, ParsedPipelineFile, ParsedSourceComponent, ServiceClassInfo } from '../shared/util/pipelineParser';
 import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
+import { MonitorManager } from '../connection/monitor-manager';
 import { GenericEvent, GenericResponse } from '../shared/types';
 
 /** Parsed location from structured error format (ErrorType*`message`*filepath:linenumber) */
@@ -224,11 +225,13 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					const sourceId = context?.componentId ?? '';
 
 					// Use DAP command to execute pipeline without debugging
+					const pipeName = resourceUri ? path.basename(resourceUri.fsPath, '.pipe') : undefined;
 					await this.connectionManager.request('execute', {
 						projectId: projectId,
 						source: sourceId,
 						pipeline: pipelineTransformed,
 						args: ConfigManager.getInstance().getEffectiveEngineArgs(),
+						...(pipeName ? { name: pipeName } : {}),
 					});
 				} catch (error) {
 					vscode.window.showErrorMessage(`Failed to run pipeline: ${error}`);
@@ -384,9 +387,17 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			this.handleEvent(e);
 		});
 
+		// Subscribe to task lifecycle and output events (once — MonitorManager
+		// handles reconnection replay, so no need to re-add on each connect)
+		MonitorManager.getInstance()
+			.addMonitor({ token: '*' }, ['task', 'output'])
+			.catch((err) => {
+				this.logger.error(`Failed to subscribe to task events: ${err}`);
+			});
+
 		// Listen for connected events
 		const connectedEventListener = this.connectionManager.addListener('connected', (_e) => {
-			// Global task/output monitors are now registered in ConnectionManager.onConnectionEstablished
+			// Subscriptions are restored by MonitorManager.resubscribeAll() in connection.ts
 		});
 
 		// Listen for disconnected events
