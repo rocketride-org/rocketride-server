@@ -269,11 +269,9 @@ export const PageConnection: React.FC = () => {
 							Connect
 						</button>
 					)}
-					{isConnected && (
-						<button className="btn btn-secondary" onClick={() => sendMessage({ type: 'openDashboard' })} title="Open server monitoring dashboard">
-							Monitor
-						</button>
-					)}
+					<button className="btn btn-secondary" onClick={() => sendMessage({ type: 'openDashboard' })} title="Open server monitoring dashboard" disabled={!isConnected}>
+						Monitor
+					</button>
 					<button className="btn btn-secondary" onClick={handleOpenSettings}>
 						Settings
 					</button>

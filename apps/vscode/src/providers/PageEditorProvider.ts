@@ -37,6 +37,7 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { TaskStatus, GenericEvent, GenericResponse, ConnectionState } from '../shared/types';
 import { ConnectionManager } from '../connection/connection';
 import { MonitorManager } from '../connection/monitor-manager';
@@ -619,10 +620,46 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 			});
 			return;
 		}
+
+		// Enrich components with default names from the service catalog
+		const enriched = this.enrichComponentNames(text);
+
 		webview.postMessage({
 			type: 'update',
-			content: text,
+			content: enriched,
 		});
+	}
+
+	/**
+	 * Ensures every component in the pipeline has a config.name by defaulting
+	 * from the service catalog title. Returns the JSON string unchanged if
+	 * no services are cached or no components need enrichment.
+	 */
+	private enrichComponentNames(text: string): string {
+		const cached = this.connectionManager.getCachedServices();
+		const services = cached?.services;
+		if (!services || Object.keys(services).length === 0) {
+			return text;
+		}
+
+		const pipeline = JSON.parse(text);
+		const components = pipeline.components as Array<{ provider: string; name?: string }> | undefined;
+		if (!components) {
+			return text;
+		}
+
+		let changed = false;
+		for (const component of components) {
+			if (!component.name) {
+				const service = services[component.provider] as { title?: string } | undefined;
+				if (service?.title) {
+					component.name = service.title;
+					changed = true;
+				}
+			}
+		}
+
+		return changed ? JSON.stringify(pipeline, null, 2) : text;
 	}
 
 	/**

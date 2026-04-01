@@ -361,13 +361,10 @@ class Task(DAPBase):
             source_component['config'] = {}
         config = source_component['config']
 
-        # Priority: explicit name from execute args > config.name > source component ID
-        if self._task_name:
-            self._status.name = self._task_name
-        elif 'name' in config:
-            self._status.name = config['name']
-        else:
-            self._status.name = self.source
+        # Build status name: {task_name | task_id}.{component_name | source_id}
+        task_label = self._task_name or self.id
+        component_label = source_component.get('name') or config.get('name') or self.source
+        self._status.name = f'{task_label}.{component_label}'
 
         if 'mode' not in config:
             config['mode'] = 'Source'
