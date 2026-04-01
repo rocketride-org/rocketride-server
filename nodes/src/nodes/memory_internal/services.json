@@ -8,12 +8,7 @@
 	"path": "nodes.memory_internal",
 	"prefix": "memory",
 	"icon": "memory.svg",
-	"description": [
-		"Run-scoped keyed memory store exposed as agent tools.",
-		"Provides put, get, peek, list, and clear operations so agents can",
-		"persist intermediate results across planning waves without bloating",
-		"the LLM context window."
-	],
+	"description": ["Run-scoped keyed memory store exposed as agent tools.", "Provides put, get, peek, list, and clear operations so agents can", "persist intermediate results across planning waves without bloating", "the LLM context window."],
 	"lanes": {},
 	"preconfig": {
 		"default": "default",

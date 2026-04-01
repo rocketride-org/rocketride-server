@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"source"
-	],
+	"classType": ["source"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"noinclude"
-	],
+	"capabilities": ["noinclude"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "endpoint",
 	//
 	// Optional:
-	//		The node is the actual physical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,15 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A source component that listens for incoming HTTP requests and accepts ",
-		"uploaded documents or data from external systems or processes. It enables ",
-		"seamless integration for document ingestion, allowing external systems to ",
-		"trigger the component and send files for further processing. Configurable ",
-		"with endpoint and authentication settings, it ensures secure and reliable ",
-		"document transfer for pipeline processing. Ideal for receiving documents, ",
-		"images, or other files from external platforms via HTTP-based communication."
-	],
+	"description": ["A source component that listens for incoming HTTP requests and accepts ", "uploaded documents or data from external systems or processes. It enables ", "seamless integration for document ingestion, allowing external systems to ", "trigger the component and send files for further processing. Configurable ", "with endpoint and authentication settings, it ensures secure and reliable ", "document transfer for pipeline processing. Ideal for receiving documents, ", "images, or other files from external platforms via HTTP-based communication."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -69,7 +57,6 @@
 	// Optional:
 	//	  Documentation link for this driver
 	//
-	"documentation": "https://bit.ly/3XaDTK4",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
@@ -81,13 +68,7 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"_source": [
-			"tags",
-			"text",
-			"audio",
-			"video",
-			"image"
-		]
+		"_source": ["tags", "text", "audio", "video", "image"]
 	},
 	//
 	//	Optional:
@@ -124,12 +105,7 @@
 		{
 			"section": "Pipe",
 			"title": "Web Hook",
-			"properties": [
-				"hideForm",
-				"type",
-				"source.mode",
-				"parameters"
-			]
+			"properties": ["hideForm", "type", "source.mode", "parameters"]
 		}
 	]
 }

@@ -14,9 +14,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"data"
-	],
+	"classType": ["data"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -25,13 +23,13 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -50,29 +48,19 @@
 	// Optional:
 	//	Description to of this driver
 	//
-	"description": [
-		"A parsing component that uses Reducto to extract text and structured data ",
-		"from various document formats including PDFs, images, and other document types. ",
-		"It provides high-quality text extraction with support for tables, layout preservation, ",
-		"and multiple output formats."
-	],
+	"description": ["A parsing component that uses Reducto to extract text and structured data ", "from various document formats including PDFs, images, and other document types. ", "It provides high-quality text extraction with support for tables, layout preservation, ", "and multiple output formats."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "reducto.svg",
 
-
-	"documentation": "https://bit.ly/47vaPBW",
 	//
 	// Required:
 	//		Defines the input and output data types for the node
 	//
 	"lanes": {
-		"tags": [
-			"text",
-			"table"
-		]
+		"tags": ["text", "table"]
 	},
 	"input": [
 		{
@@ -97,9 +85,7 @@
 		{
 			"section": "Pipe",
 			"title": "Reducto",
-			"properties": [
-				"reducto.default"
-			]
+			"properties": ["reducto.default"]
 		}
 	],
 
@@ -123,32 +109,17 @@
 			"description": "Toggle to use the advanced parse mode, and have access to the full set of options from the Reducto API.",
 			"default": false,
 			"enum": [
-				[
-					false,
-					"Simple"
-				],
-				[
-					true,
-					"Advanced"
-				]
+				[false, "Simple"],
+				[true, "Advanced"]
 			],
 			"conditional": [
 				{
 					"value": false,
-					"properties": [
-						"reducto.Contains_Handwritten_Text",
-						"reducto.Contains_Non_English_Text",
-						"reducto.Summarize_Text"
-					]
+					"properties": ["reducto.Contains_Handwritten_Text", "reducto.Contains_Non_English_Text", "reducto.Summarize_Text"]
 				},
 				{
 					"value": true,
-					"properties": [
-						"reducto.advanced_documentation",
-						"reducto.options",
-						"reducto.advanced_options",
-						"reducto.experimental_options"
-					]
+					"properties": ["reducto.advanced_documentation", "reducto.options", "reducto.advanced_options", "reducto.experimental_options"]
 				}
 			]
 		},
@@ -158,14 +129,8 @@
 			"description": "Enables Agentic OCR mode for better handwriting recognition and small text/table cell corrections.",
 			"default": false,
 			"enum": [
-				[
-					true,
-					"Yes"
-				],
-				[
-					false,
-					"No"
-				]
+				[true, "Yes"],
+				[false, "No"]
 			]
 		},
 		"reducto.Contains_Non_English_Text": {
@@ -174,14 +139,8 @@
 			"description": "Enables Multilingual OCR system which can parse non-Germanic languages and unicode symbols.",
 			"default": false,
 			"enum": [
-				[
-					true,
-					"Yes"
-				],
-				[
-					false,
-					"No"
-				]
+				[true, "Yes"],
+				[false, "No"]
 			]
 		},
 		"reducto.Summarize_Text": {
@@ -190,14 +149,8 @@
 			"description": "Generate AI summaries for figures, diagrams, and images using vision-language models.",
 			"default": false,
 			"enum": [
-				[
-					true,
-					"Yes"
-				],
-				[
-					false,
-					"No"
-				]
+				[true, "Yes"],
+				[false, "No"]
 			]
 		},
 		"reducto.advanced_documentation": {
@@ -226,10 +179,7 @@
 		},
 		"reducto.default": {
 			"object": "default",
-			"properties": [
-				"reducto.api_key",
-				"reducto.parse_mode"
-			]
+			"properties": ["reducto.api_key", "reducto.parse_mode"]
 		}
 	},
 	//
@@ -244,9 +194,5 @@
 			}
 		}
 	},
-	"required": [
-		"reducto.api_key",
-		"reducto.parse_mode"
-	]
+	"required": ["reducto.api_key", "reducto.parse_mode"]
 }
-

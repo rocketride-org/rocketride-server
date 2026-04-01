@@ -13,19 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"target"
-	],
+	"classType": ["target"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"nosaas",
-		"filesystem",
-		"security"
-	],
+	"capabilities": ["nosaas", "filesystem", "security"],
 	"register": "endpoint",
 	//
 	// Optional:
@@ -51,13 +45,7 @@
 	//		accross service configurations
 	//
 	//
-	"description": [
-		"A target component that writes data to the file system. It supports ",
-		"outputting structured or unstructured content to files in a variety ",
-		"of formats such as JSON, CSV, or plain text. Configurable with output ",
-		"paths and naming conventions, the component enables flexible persistence ",
-		"of processed data to networked storage."
-	],
+	"description": ["A target component that writes data to the file system. It supports ", "outputting structured or unstructured content to files in a variety ", "of formats such as JSON, CSV, or plain text. Configurable with output ", "paths and naming conventions, the component enables flexible persistence ", "of processed data to networked storage."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -77,7 +65,7 @@
 			"output": []
 		}
 	],
-	
+
 	//
 	//	Optional:
 	//		Profile section are configuration optoins used by the driver
@@ -107,10 +95,7 @@
 		},
 		"local_text_output.target.parameters": {
 			"object": "parameters",
-			"properties": [
-				"storePath",
-				"local_text_output.exclude"
-			]
+			"properties": ["storePath", "local_text_output.exclude"]
 		}
 	},
 	//
@@ -122,9 +107,7 @@
 		{
 			"section": "Pipe",
 			"title": "Destination path",
-			"properties": [
-				"local_text_output.target.parameters"
-			]
+			"properties": ["local_text_output.target.parameters"]
 		}
 	],
 	"test": {

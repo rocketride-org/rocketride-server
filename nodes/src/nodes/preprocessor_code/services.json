@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"preprocessor"
-	],
+	"classType": ["preprocessor"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -24,13 +22,13 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -49,14 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A specialized component designed to parse and tokenize source code. It extracts ",
-		"structural elements such as functions, classes, and comments, enabling deeper semantic ",
-		"analysis. This component prepares source files for tasks like classification, embedding, ",
-		"or search by breaking them into meaningful syntactic units. Supporting multiple programming ",
-		"languages, it enables intelligent workflows involving code understanding, summarization, ",
-		"and reasoning."
-	],
+	"description": ["A specialized component designed to parse and tokenize source code. It extracts ", "structural elements such as functions, classes, and comments, enabling deeper semantic ", "analysis. This component prepares source files for tasks like classification, embedding, ", "or search by breaking them into meaningful syntactic units. Supporting multiple programming ", "languages, it enables intelligent workflows involving code understanding, summarization, ", "and reasoning."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -66,7 +57,6 @@
 	// Optional:
 	//	  Documentation link for this driver
 	//
-	"documentation": "https://bit.ly/4hDuofV",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
@@ -78,9 +68,7 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"text": [
-			"documents"
-		]
+		"text": ["documents"]
 	},
 	"input": [
 		{
@@ -165,10 +153,7 @@
 		},
 		"code.splitter.auto": {
 			"object": "auto",
-			"properties": [
-				"code.splitter.auto.language",
-				"code.splitter.strlen"
-			]
+			"properties": ["code.splitter.auto.language", "code.splitter.strlen"]
 		},
 		"code.splitter.c.language": {
 			"type": "string",
@@ -177,10 +162,7 @@
 		},
 		"code.splitter.c": {
 			"object": "c",
-			"properties": [
-				"code.splitter.c.language",
-				"code.splitter.strlen"
-			]
+			"properties": ["code.splitter.c.language", "code.splitter.strlen"]
 		},
 		"code.splitter.cpp.language": {
 			"type": "string",
@@ -189,10 +171,7 @@
 		},
 		"code.splitter.cpp": {
 			"object": "cpp",
-			"properties": [
-				"code.splitter.cpp.language",
-				"code.splitter.strlen"
-			]
+			"properties": ["code.splitter.cpp.language", "code.splitter.strlen"]
 		},
 		"code.splitter.python.language": {
 			"type": "string",
@@ -201,10 +180,7 @@
 		},
 		"code.splitter.python": {
 			"object": "python",
-			"properties": [
-				"code.splitter.python.language",
-				"code.splitter.strlen"
-			]
+			"properties": ["code.splitter.python.language", "code.splitter.strlen"]
 		},
 		"code.splitter.javascript.language": {
 			"type": "string",
@@ -213,10 +189,7 @@
 		},
 		"code.splitter.javascript": {
 			"object": "javascript",
-			"properties": [
-				"code.splitter.javascript.language",
-				"code.splitter.strlen"
-			]
+			"properties": ["code.splitter.javascript.language", "code.splitter.strlen"]
 		},
 		"code.splitter.typescript.language": {
 			"type": "string",
@@ -225,67 +198,39 @@
 		},
 		"code.splitter.typescript": {
 			"object": "typescript",
-			"properties": [
-				"code.splitter.typescript.language",
-				"code.splitter.strlen"
-			]
+			"properties": ["code.splitter.typescript.language", "code.splitter.strlen"]
 		},
 		"code.splitter.profile": {
 			"type": "string",
 			"title": "Code splitter profile",
 			"default": "auto",
 			"enum": [
-				[
-					"auto",
-					"Auto detect - autodetect language based on filename extension"
-				],
-				[
-					"c",
-					"C/C++ source"
-				],
-				[
-					"python",
-					"Python source"
-				],
-				[
-					"javascript",
-					"Javascript source`"
-				],
-				[
-					"typescript",
-					"Typescript source"
-				]
+				["auto", "Auto detect - autodetect language based on filename extension"],
+				["c", "C/C++ source"],
+				["python", "Python source"],
+				["javascript", "Javascript source`"],
+				["typescript", "Typescript source"]
 			],
 			"conditional": [
 				{
 					"value": "auto",
-					"properties": [
-						"code.splitter.auto"
-					]
+					"properties": ["code.splitter.auto"]
 				},
 				{
 					"value": "c",
-					"properties": [
-						"code.splitter.c"
-					]
+					"properties": ["code.splitter.c"]
 				},
 				{
 					"value": "python",
-					"properties": [
-						"code.splitter.python"
-					]
+					"properties": ["code.splitter.python"]
 				},
 				{
 					"value": "javascript",
-					"properties": [
-						"code.splitter.javascript"
-					]
+					"properties": ["code.splitter.javascript"]
 				},
 				{
 					"value": "typescript",
-					"properties": [
-						"code.splitter.typescript"
-					]
+					"properties": ["code.splitter.typescript"]
 				}
 			]
 		}
@@ -299,9 +244,7 @@
 		{
 			"section": "Pipe",
 			"title": "Code",
-			"properties": [
-				"code.splitter.profile"
-			]
+			"properties": ["code.splitter.profile"]
 		}
 	]
 }

@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"image"
-	],
+	"classType": ["image"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -24,13 +22,13 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -49,11 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that processes an image, cleans it up for OCR tasks by converting to",
-		"gray scale, removing noise, deskewing, and enhancing contrast. If you have 'noisy'",
-		"images of lesser quality, this can significantly improve the OCR accuracy."
-	],
+	"description": ["A component that processes an image, cleans it up for OCR tasks by converting to", "gray scale, removing noise, deskewing, and enhancing contrast. If you have 'noisy'", "images of lesser quality, this can significantly improve the OCR accuracy."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -63,16 +57,13 @@
 	// Optional:
 	//	  Documentation link for this driver
 	//
-	"documentation": "https://bit.ly/47k78An",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"image": [
-			"image"
-		]
+		"image": ["image"]
 	},
 	//
 	//	Optional:
@@ -85,8 +76,7 @@
 		"default": "default",
 		// Defines profiles used with the "profile": key
 		"profiles": {
-			"default": {
-			}
+			"default": {}
 		}
 	},
 	//
@@ -95,8 +85,7 @@
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
-	"fields": {
-	},
+	"fields": {},
 	//
 	// Required:
 	//		Defines the fields (shape) of the service. Either source or target
@@ -106,8 +95,7 @@
 		{
 			"section": "Pipe",
 			"title": "Image Cleanup",
-			"properties": [
-			]
+			"properties": []
 		}
 	],
 	"test": {

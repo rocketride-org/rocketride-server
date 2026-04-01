@@ -30,7 +30,7 @@
 			"type": "object"
 		},
 		"source.mode": {
-			"hidden":true,
+			"hidden": true,
 			"type": "string",
 			"default": "Source"
 		},
@@ -40,7 +40,7 @@
 			"default": "Target"
 		},
 		"hideForm": {
-			"hidden":true,
+			"hidden": true,
 			"type": "boolean",
 			"default": true
 		},
@@ -82,12 +82,7 @@
 		"estimation": {
 			"section": "estimation",
 			"title": "Cost estimations",
-			"properties": [
-				"estimation.accessDelay",
-				"estimation.accessRate",
-				"estimation.storeCost",
-				"estimation.accessCost"
-			]
+			"properties": ["estimation.accessDelay", "estimation.accessRate", "estimation.storeCost", "estimation.accessCost"]
 		},
 		//
 		// Include - subform to add/remove paths/enable*
@@ -125,15 +120,11 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": [
-						"include.index",
-						"include.vectorize"
-					]
+					"properties": ["include.index", "include.vectorize"]
 				},
 				{
 					"value": false,
-					"properties": [
-					]
+					"properties": []
 				}
 			]
 		},
@@ -148,15 +139,11 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": [
-						"include.classify",
-						"include.ocr"
-					]
+					"properties": ["include.classify", "include.ocr"]
 				},
 				{
 					"value": false,
-					"properties": [
-					]
+					"properties": []
 				}
 			]
 		},
@@ -180,15 +167,11 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": [
-						"include.classify",
-						"include.ocr"
-					]
+					"properties": ["include.classify", "include.ocr"]
 				},
 				{
 					"value": false,
-					"properties": [
-					]
+					"properties": []
 				}
 			]
 		},
@@ -198,11 +181,7 @@
 			"minItems": 1,
 			"items": {
 				"type": "object",
-				"properties": [
-					"include.path",
-					"include.permissions",
-					"include.signing"
-				]
+				"properties": ["include.path", "include.permissions", "include.signing"]
 			}
 		},
 		//
@@ -218,7 +197,7 @@
 			"optional": true,
 			"items": {
 				"type": "object",
-				"properties": [ "exclude.path" ]
+				"properties": ["exclude.path"]
 			}
 		},
 		//
@@ -254,9 +233,7 @@
 			"minItems": 1,
 			"items": {
 				"type": "object",
-				"properties": [
-					"DTC.include.path"
-				]
+				"properties": ["DTC.include.path"]
 			}
 		},
 		//
@@ -272,7 +249,7 @@
 			"optional": true,
 			"items": {
 				"type": "object",
-				"properties": [ "DTC.exclude.path" ]
+				"properties": ["DTC.exclude.path"]
 			}
 		},
 		//
@@ -308,9 +285,7 @@
 			"minItems": 1,
 			"items": {
 				"type": "object",
-				"properties": [
-					"Pipe.include.path"
-				]
+				"properties": ["Pipe.include.path"]
 			}
 		},
 		//
@@ -326,7 +301,7 @@
 			"optional": true,
 			"items": {
 				"type": "object",
-				"properties": [ "Pipe.exclude.path" ]
+				"properties": ["Pipe.exclude.path"]
 			}
 		}
 	}

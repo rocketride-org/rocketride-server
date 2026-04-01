@@ -13,19 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"database",
-		"tool"
-	],
+	"classType": ["database", "tool"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"noremote",
-		"invoke"
-	],
+	"capabilities": ["noremote", "invoke"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -53,12 +47,7 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": [
-		"A processing component that connects to a Neo4J graph database. ",
-		"Accepts natural-language questions, translates them to Cypher queries ",
-		"via an LLM, and returns results to the pipeline. Designed for knowledge graph retrieval, ",
-		"entity linking, and graph-based RAG workflows."
-	],
+	"description": ["A processing component that connects to a Neo4J graph database. ", "Accepts natural-language questions, translates them to Cypher queries ", "via an LLM, and returns results to the pipeline. Designed for knowledge graph retrieval, ", "entity linking, and graph-based RAG workflows."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -82,11 +71,7 @@
 	//
 	"lanes": {
 		// "answers": [],
-		"questions": [
-			"table",
-			"text",
-			"answers"
-		]
+		"questions": ["table", "text", "answers"]
 	},
 	"input": [
 		// {
@@ -142,28 +127,17 @@
 			"title": "Authentication",
 			"default": "userpass",
 			"enum": [
-				[
-					"userpass",
-					"Username & Password"
-				],
-				[
-					"token",
-					"Bearer Token"
-				]
+				["userpass", "Username & Password"],
+				["token", "Bearer Token"]
 			],
 			"conditional": [
 				{
 					"value": "userpass",
-					"properties": [
-						"neo4jdb.user",
-						"neo4jdb.password"
-					]
+					"properties": ["neo4jdb.user", "neo4jdb.password"]
 				},
 				{
 					"value": "token",
-					"properties": [
-						"neo4jdb.token"
-					]
+					"properties": ["neo4jdb.token"]
 				}
 			]
 		},
@@ -235,18 +209,11 @@
 			"hidden": true,
 			"type": "string",
 			"default": "default",
-			"enum": [
-				[
-					"default",
-					"Default"
-				]
-			],
+			"enum": [["default", "Default"]],
 			"conditional": [
 				{
 					"value": "default",
-					"properties": [
-						"neo4jdb.default"
-					]
+					"properties": ["neo4jdb.default"]
 				}
 			]
 		}
@@ -260,9 +227,7 @@
 		{
 			"section": "Pipe",
 			"title": "Neo4J",
-			"properties": [
-				"neo4jdb.profile"
-			]
+			"properties": ["neo4jdb.profile"]
 		}
 	]
 }

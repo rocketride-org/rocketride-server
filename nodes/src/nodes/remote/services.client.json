@@ -13,17 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"infrastructure"
-	],
+	"classType": ["infrastructure"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"nosaas"
-	],
+	"capabilities": ["nosaas"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -51,13 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A transport component that forwards data to a remote machine or ",
-		"processing node. It enables distributed pipeline architectures by ",
-		"offloading computation or specialized tasks to external systems. Configurable ",
-		"with network endpoints, authentication, and serialization settings, ",
-		"it supports scalable and modular deployment across environments."
-	],
+	"description": ["A transport component that forwards data to a remote machine or ", "processing node. It enables distributed pipeline architectures by ", "offloading computation or specialized tasks to external systems. Configurable ", "with network endpoints, authentication, and serialization settings, ", "it supports scalable and modular deployment across environments."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -67,7 +57,6 @@
 	// Optional:
 	//	  Documentation link for this driver
 	//
-	"documentation": "https://bit.ly/4l0udeR",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -112,9 +101,7 @@
 		{
 			"section": "Pipe",
 			"title": "Remote",
-			"properties": [
-				"remote"
-			]
+			"properties": ["remote"]
 		}
 	]
 }

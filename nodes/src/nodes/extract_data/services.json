@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"text"
-	],
+	"classType": ["text"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -24,13 +22,13 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -49,15 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that processes unstructured or semi-structured text and extracts ",
-		"structured data in a tabular format. It identifies key fields, values, and ",
-		"patterns within the input content using configurable extraction rules or machine ",
-		"learning models. The resulting output is organized into rows and columns, making ",
-		"it suitable for further analysis, storage, or integration into downstream systems. This ",
-		"component is ideal for transforming documents, reports, or freeform text into usable ",
-		"data structures, enabling automation and insight generation across various domains."
-	],
+	"description": ["A component that processes unstructured or semi-structured text and extracts ", "structured data in a tabular format. It identifies key fields, values, and ", "patterns within the input content using configurable extraction rules or machine ", "learning models. The resulting output is organized into rows and columns, making ", "it suitable for further analysis, storage, or integration into downstream systems. This ", "component is ideal for transforming documents, reports, or freeform text into usable ", "data structures, enabling automation and insight generation across various domains."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -67,7 +57,6 @@
 	// Optional:
 	//	  Documentation link for this driver
 	//
-	"documentation": "https://bit.ly/4qBFA0L",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -80,14 +69,8 @@
 		}
 	},
 	"lanes": {
-		"table": [
-			"answers",
-			"documents"
-		],
-		"text": [
-			"answers",
-			"documents"
-		]
+		"table": ["answers", "documents"],
+		"text": ["answers", "documents"]
 	},
 	"input": [
 		{
@@ -130,8 +113,7 @@
 		"default": "default",
 		// Defines profiles used with the "profile": key
 		"profiles": {
-			"default": {
-			}
+			"default": {}
 		}
 	},
 	//
@@ -154,74 +136,23 @@
 			"title": "Type",
 			"default": "text",
 			"enum": [
-				[
-					"text",
-					"Text"
-				],
-				[
-					"decimal",
-					"Number"
-				],
-				[
-					"int",
-					"Integer"
-				],
-				[
-					"date",
-					"Date"
-				],
-				[
-					"time",
-					"Time"
-				],
-				[
-					"datetime",
-					"DateTime"
-				],
-				[
-					"timestamp",
-					"Timestamp"
-				],
-				[
-					"binary",
-					"Binary"
-				],
-				[
-					"json",
-					"JSON"
-				],
-				[
-					"html",
-					"HTML"
-				],
-				[
-					"url",
-					"URL"
-				],
-				[
-					"email",
-					"Email"
-				],
-				[
-					"phone",
-					"Phone"
-				],
-				[
-					"ipv4",
-					"IPv4"
-				],
-				[
-					"ipv6",
-					"IPv6"
-				],
-				[
-					"uuid",
-					"UUID"
-				],
-				[
-					"guid",
-					"GUID"
-				]
+				["text", "Text"],
+				["decimal", "Number"],
+				["int", "Integer"],
+				["date", "Date"],
+				["time", "Time"],
+				["datetime", "DateTime"],
+				["timestamp", "Timestamp"],
+				["binary", "Binary"],
+				["json", "JSON"],
+				["html", "HTML"],
+				["url", "URL"],
+				["email", "Email"],
+				["phone", "Phone"],
+				["ipv4", "IPv4"],
+				["ipv6", "IPv6"],
+				["uuid", "UUID"],
+				["guid", "GUID"]
 			]
 		},
 		"extract.defval": {
@@ -236,35 +167,22 @@
 			"maxItems": 32,
 			"items": {
 				"type": "object",
-				"properties": [
-					"extract.column",
-					"extract.type",
-					"extract.defval"
-				]
+				"properties": ["extract.column", "extract.type", "extract.defval"]
 			}
 		},
 		"extract.default": {
 			"object": "default",
-			"properties": [
-				"extract.fields"
-			]
+			"properties": ["extract.fields"]
 		},
 		"extract.profile": {
 			"hidden": true,
 			"type": "string",
 			"default": "default",
-			"enum": [
-				[
-					"default",
-					"Default"
-				]
-			],
+			"enum": [["default", "Default"]],
 			"conditional": [
 				{
 					"value": "default",
-					"properties": [
-						"extract.default"
-					]
+					"properties": ["extract.default"]
 				}
 			]
 		}
@@ -278,9 +196,7 @@
 		{
 			"section": "Pipe",
 			"title": "Data Extract",
-			"properties": [
-				"extract.profile"
-			]
+			"properties": ["extract.profile"]
 		}
 	]
 }

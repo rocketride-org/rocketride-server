@@ -19,12 +19,10 @@
 	//     Capabilities are flags that change the behavior of the underlying
 	//     engine
 	//
-	"capabilities": [
-		"internal"
-	],
+	"capabilities": ["internal"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",

@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"preprocessor"
-	],
+	"classType": ["preprocessor"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -24,13 +22,13 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -49,11 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A processing component that analyzes document content to extract concise ",
-		"summaries, key points, and named entities and to divide a document for ",
-		"storage into a vector database."
-	],
+	"description": ["A processing component that analyzes document content to extract concise ", "summaries, key points, and named entities and to divide a document for ", "storage into a vector database."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -63,14 +57,12 @@
 	// Optional:
 	//	  Documentation link for this driver
 	//
-	"documentation": "https://bit.ly/4oODcCd",
 	//
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": [
-	],
+	"tile": [],
 	//
 	// Optional:
 	//		Defines the invoke connections that may/must be connected
@@ -88,12 +80,8 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"table": [
-			"documents"
-		],
-		"text": [
-			"documents"
-		]
+		"table": ["documents"],
+		"text": ["documents"]
 	},
 	//
 	//	Optional:
@@ -126,26 +114,17 @@
 		},
 		"preprocessor_llm.default": {
 			"object": "default",
-			"properties": [
-				"preprocessor_llm.numberOfTokens"
-			]
+			"properties": ["preprocessor_llm.numberOfTokens"]
 		},
 		"preprocessor_llm.profile": {
 			"hidden": true,
 			"type": "string",
 			"default": "default",
-			"enum": [
-				[
-					"default",
-					"Default"
-				]
-			],
+			"enum": [["default", "Default"]],
 			"conditional": [
 				{
 					"value": "default",
-					"properties": [
-						"preprocessor_llm.default"
-					]
+					"properties": ["preprocessor_llm.default"]
 				}
 			]
 		}
@@ -159,9 +138,7 @@
 		{
 			"section": "Pipe",
 			"title": "LLM",
-			"properties": [
-				"preprocessor_llm.profile"
-			]
+			"properties": ["preprocessor_llm.profile"]
 		}
 	]
 }

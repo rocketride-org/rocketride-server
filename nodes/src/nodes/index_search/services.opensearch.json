@@ -1,9 +1,7 @@
 {
 	"title": "OpenSearch",
 	"protocol": "opensearch://",
-	"classType": [
-		"store"
-	],
+	"classType": ["store"],
 	"capabilities": [],
 	"register": "filter",
 	"node": "python",
@@ -19,23 +17,13 @@
 		}
 	},
 	"prefix": "OpenSearch Index",
-	"description": [
-		"An OpenSearch node that supports classic BM25 search and vector search ",
-		"for ingestion and retrieval workflows. Works with self-managed OpenSearch."
-	],
+	"description": ["An OpenSearch node that supports classic BM25 search and vector search ", "for ingestion and retrieval workflows. Works with self-managed OpenSearch."],
 	"icon": "opensearch.svg",
-	"documentation": "https://opensearch.org/docs/latest/",
-	"tile": [
-		"Host: ${parameters.opensearch.host}"
-	],
+	"tile": ["Host: ${parameters.opensearch.host}"],
 	"lanes": {
 		"text": [],
 		"documents": [],
-		"questions": [
-			"text",
-			"answers",
-			"documents"
-		]
+		"questions": ["text", "answers", "documents"]
 	},
 	"test": {
 		"profiles": ["local"],
@@ -80,8 +68,8 @@
 						"notEmpty": true,
 						"contains": "Paris",
 						"property": [
-							{"path": "[0].score", "greaterThan": 0.5},
-							{"path": "[0].metadata.objectId", "equals": "test-doc-1"}
+							{ "path": "[0].score", "greaterThan": 0.5 },
+							{ "path": "[0].metadata.objectId", "equals": "test-doc-1" }
 						]
 					}
 				}
@@ -91,16 +79,12 @@
 	"input": [
 		{
 			"lane": "text",
-			"description": [
-				"Store text into the OpenSearch index. "
-			],
+			"description": ["Store text into the OpenSearch index. "],
 			"output": []
 		},
 		{
 			"lane": "documents",
-			"description": [
-				"Ingest documents (embeddings) into the OpenSearch vector store."
-			],
+			"description": ["Ingest documents (embeddings) into the OpenSearch vector store."],
 			"output": []
 		},
 		{
@@ -109,24 +93,17 @@
 			"output": [
 				{
 					"lane": "text",
-					"description": [
-						"Produces text that is most similar to the given question."
-					],
+					"description": ["Produces text that is most similar to the given question."],
 					"output": []
 				},
 				{
 					"lane": "answers",
-					"description": [
-						"Produces an answer with the documents that are most similar ",
-						"to the given question."
-					],
+					"description": ["Produces an answer with the documents that are most similar ", "to the given question."],
 					"output": []
 				},
 				{
 					"lane": "documents",
-					"description": [
-						"Produces documents that contain the given question, the document id, and the retrieved text, when using index mode."
-					],
+					"description": ["Produces documents that contain the given question, the document id, and the retrieved text, when using index mode."],
 					"output": []
 				}
 			]
@@ -147,10 +124,7 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": [
-						"opensearch.auth.username",
-						"opensearch.auth.password"
-					]
+					"properties": ["opensearch.auth.username", "opensearch.auth.password"]
 				}
 			]
 		},
@@ -181,18 +155,11 @@
 			"conditional": [
 				{
 					"value": false,
-					"properties": [
-						"opensearch.index_label",
-						"opensearch.search"
-					]
+					"properties": ["opensearch.index_label", "opensearch.search"]
 				},
 				{
 					"value": true,
-					"properties": [
-						"opensearch.vstore_label",
-						"opensearch.dim",
-						"opensearch.score"
-					]
+					"properties": ["opensearch.vstore_label", "opensearch.dim", "opensearch.score"]
 				}
 			]
 		},
@@ -204,34 +171,20 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": [
-						"opensearch.matchOperator",
-						"opensearch.search.highlight"
-					]
+					"properties": ["opensearch.matchOperator", "opensearch.search.highlight"]
 				}
 			]
 		},
 		"opensearch.matchOperator": {
 			"type": "string",
 			"title": "Match Operator",
-			"description": [
-				"Controls how multiple query terms are matched: ",
-				"'or' (default) matches documents containing ANY of the query terms, ",
-				"'and' matches documents containing ALL of the query terms, ",
-				"'exact' requires the exact phrase to appear in order (phrase matching)."
-			],
+			"description": ["Controls how multiple query terms are matched: ", "'or' (default) matches documents containing ANY of the query terms, ", "'and' matches documents containing ALL of the query terms, ", "'exact' requires the exact phrase to appear in order (phrase matching)."],
 			"default": "or",
-			"enum": [
-				"and",
-				"or",
-				"exact"
-			],
+			"enum": ["and", "or", "exact"],
 			"conditional": [
 				{
 					"value": "exact",
-					"properties": [
-						"opensearch.search.exact.slop"
-					]
+					"properties": ["opensearch.search.exact.slop"]
 				}
 			]
 		},
@@ -249,9 +202,7 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": [
-						"opensearch.search.highlight.fragment_size"
-					]
+					"properties": ["opensearch.search.highlight.fragment_size"]
 				}
 			]
 		},
@@ -303,18 +254,8 @@
 		{
 			"section": "Pipe",
 			"title": "OpenSearch Index/Vector",
-			"properties": [
-				"opensearch.host",
-				"opensearch.collection",
-				"opensearch.auth.enabled",
-				"opensearch.mode"
-			]
+			"properties": ["opensearch.host", "opensearch.collection", "opensearch.auth.enabled", "opensearch.mode"]
 		}
 	],
-	"required": [
-		"opensearch.host",
-		"opensearch.collection",
-		"opensearch.mode"
-	]
+	"required": ["opensearch.host", "opensearch.collection", "opensearch.mode"]
 }
-

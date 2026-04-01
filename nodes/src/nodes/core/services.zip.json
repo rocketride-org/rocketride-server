@@ -13,27 +13,19 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"target"
-	],
+	"classType": ["target"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"internal"
-	],
+	"capabilities": ["internal"],
 	//
 	// Optional:
 	//		Supported actions - if not specified, no actions are supported
 	//		engine
 	//
-	"actions": [
-		"export",
-		"delete",
-		"download"
-	],
+	"actions": ["export", "delete", "download"],
 	//
 	// Required:
 	//		The prefix map when added/removed when convertting URLs <=> paths
@@ -48,10 +40,7 @@
 	"fields": {
 		"zip.target.parameters": {
 			"object": "parameters",
-			"properties": [
-				"storePath",
-				"url"
-			]
+			"properties": ["storePath", "url"]
 		}
 	},
 	//
@@ -63,10 +52,7 @@
 		{
 			"section": "Target",
 			"title": "Zip Stream",
-			"properties": [
-				"type",
-				"zip.target.parameters"
-			]
+			"properties": ["type", "zip.target.parameters"]
 		}
 	]
 }

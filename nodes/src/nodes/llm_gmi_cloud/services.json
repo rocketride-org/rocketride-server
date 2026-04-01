@@ -13,17 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"llm"
-	],
+	"classType": ["llm"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"invoke"
-	],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -51,14 +47,7 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": [
-		"A component that connects to GMI Cloud's large language models for advanced ",
-		"natural language processing. GMI Cloud hosts 100+ OpenAI-compatible models ",
-		"including Llama 4, Qwen3, DeepSeek, GPT, Claude, and Gemini on owned H100/H200 ",
-		"GPU infrastructure. It enables capabilities like text generation, summarization, ",
-		"reasoning, and code understanding across a wide range of open-weight and ",
-		"proprietary models through a unified OpenAI-compatible API."
-	],
+	"description": ["A component that connects to GMI Cloud's large language models for advanced ", "natural language processing. GMI Cloud hosts 100+ OpenAI-compatible models ", "including Llama 4, Qwen3, DeepSeek, GPT, Claude, and Gemini on owned H100/H200 ", "GPU infrastructure. It enables capabilities like text generation, summarization, ", "reasoning, and code understanding across a wide range of open-weight and ", "proprietary models through a unified OpenAI-compatible API."],
 	//
 	// Optional:
 	//		The icon is the icon to display in the UI for this node
@@ -68,25 +57,20 @@
 	// Optional:
 	//		Documentation link for this driver
 	//
-	"documentation": "https://docs.gmicloud.ai/inference-engine/api-reference",
 	//
 	// Optional:
 	//		Rendering hints to the UI which indicate which fields of
 	//		the configuration should be used to display information
 	//		on the tile box
 	//
-	"tile": [
-		"Model: ${parameters.llm_gmi_cloud.profile}"
-	],
+	"tile": ["Model: ${parameters.llm_gmi_cloud.profile}"],
 	//
 	// Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"questions": [
-			"answers"
-		]
+		"questions": ["answers"]
 	},
 	"input": [
 		{
@@ -289,275 +273,178 @@
 		},
 		"gmi_cloud.custom": {
 			"object": "custom",
-			"properties": [
-				"gmi_cloud.serverbase",
-				"model",
-				"modelTotalTokens",
-				"llm.cloud.apikey"
-			]
+			"properties": ["gmi_cloud.serverbase", "model", "modelTotalTokens", "llm.cloud.apikey"]
 		},
 		"gmi_cloud.llama-4-scout": {
 			"object": "llama-4-scout",
-			"properties": [
-				"gmi_cloud.serverbase",
-				"llm.cloud.apikey"
-			]
+			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
 		},
 		"gmi_cloud.llama-4-maverick": {
 			"object": "llama-4-maverick",
-			"properties": [
-				"gmi_cloud.serverbase",
-				"llm.cloud.apikey"
-			]
+			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
 		},
 		"gmi_cloud.qwen3-235b": {
 			"object": "qwen3-235b",
-			"properties": [
-				"gmi_cloud.serverbase",
-				"llm.cloud.apikey"
-			]
+			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
 		},
 		"gmi_cloud.qwen3-32b": {
 			"object": "qwen3-32b",
-			"properties": [
-				"gmi_cloud.serverbase",
-				"llm.cloud.apikey"
-			]
+			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
 		},
 		"gmi_cloud.qwen3-30b": {
 			"object": "qwen3-30b",
-			"properties": [
-				"gmi_cloud.serverbase",
-				"llm.cloud.apikey"
-			]
+			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
 		},
 		"gmi_cloud.qwen3-coder-480b": {
 			"object": "qwen3-coder-480b",
-			"properties": [
-				"gmi_cloud.serverbase",
-				"llm.cloud.apikey"
-			]
+			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
 		},
 		"gmi_cloud.deepseek-v3-2": {
 			"object": "deepseek-v3-2",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"gmi_cloud.deepseek-v3": {
 			"object": "deepseek-v3",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"gmi_cloud.deepseek-r1": {
 			"object": "deepseek-r1",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"gmi_cloud.deepseek-r1-distill-32b": {
 			"object": "deepseek-r1-distill-32b",
-			"properties": [
-				"gmi_cloud.serverbase",
-				"llm.cloud.apikey"
-			]
+			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
 		},
 		"gmi_cloud.deepseek-r1-distill-1-5b": {
 			"object": "deepseek-r1-distill-1-5b",
-			"properties": [
-				"gmi_cloud.serverbase",
-				"llm.cloud.apikey"
-			]
+			"properties": ["gmi_cloud.serverbase", "llm.cloud.apikey"]
 		},
 		"gmi_cloud.deepseek-prover-v2": {
 			"object": "deepseek-prover-v2",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"gmi_cloud.gpt-5-2": {
 			"object": "gpt-5-2",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"gmi_cloud.gpt-5-1": {
 			"object": "gpt-5-1",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"gmi_cloud.gpt-5": {
 			"object": "gpt-5",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"gmi_cloud.gpt-4o": {
 			"object": "gpt-4o",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"gmi_cloud.claude-opus-4-5": {
 			"object": "claude-opus-4-5",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"gmi_cloud.claude-sonnet-4-5": {
 			"object": "claude-sonnet-4-5",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"gmi_cloud.gemini-3-pro": {
 			"object": "gemini-3-pro",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"gmi_cloud.gemini-3-flash": {
 			"object": "gemini-3-flash",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"gmi_cloud.profile": {
 			"title": "Model",
 			"description": "GMI Cloud LLM model",
 			"type": "string",
 			"default": "deepseek-v3",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": [
-						"gmi_cloud.custom"
-					]
+					"properties": ["gmi_cloud.custom"]
 				},
 				{
 					"value": "llama-4-scout",
-					"properties": [
-						"gmi_cloud.llama-4-scout"
-					]
+					"properties": ["gmi_cloud.llama-4-scout"]
 				},
 				{
 					"value": "llama-4-maverick",
-					"properties": [
-						"gmi_cloud.llama-4-maverick"
-					]
+					"properties": ["gmi_cloud.llama-4-maverick"]
 				},
 				{
 					"value": "qwen3-235b",
-					"properties": [
-						"gmi_cloud.qwen3-235b"
-					]
+					"properties": ["gmi_cloud.qwen3-235b"]
 				},
 				{
 					"value": "qwen3-32b",
-					"properties": [
-						"gmi_cloud.qwen3-32b"
-					]
+					"properties": ["gmi_cloud.qwen3-32b"]
 				},
 				{
 					"value": "qwen3-30b",
-					"properties": [
-						"gmi_cloud.qwen3-30b"
-					]
+					"properties": ["gmi_cloud.qwen3-30b"]
 				},
 				{
 					"value": "qwen3-coder-480b",
-					"properties": [
-						"gmi_cloud.qwen3-coder-480b"
-					]
+					"properties": ["gmi_cloud.qwen3-coder-480b"]
 				},
 				{
 					"value": "deepseek-v3-2",
-					"properties": [
-						"gmi_cloud.deepseek-v3-2"
-					]
+					"properties": ["gmi_cloud.deepseek-v3-2"]
 				},
 				{
 					"value": "deepseek-v3",
-					"properties": [
-						"gmi_cloud.deepseek-v3"
-					]
+					"properties": ["gmi_cloud.deepseek-v3"]
 				},
 				{
 					"value": "deepseek-r1",
-					"properties": [
-						"gmi_cloud.deepseek-r1"
-					]
+					"properties": ["gmi_cloud.deepseek-r1"]
 				},
 				{
 					"value": "deepseek-r1-distill-32b",
-					"properties": [
-						"gmi_cloud.deepseek-r1-distill-32b"
-					]
+					"properties": ["gmi_cloud.deepseek-r1-distill-32b"]
 				},
 				{
 					"value": "deepseek-r1-distill-1-5b",
-					"properties": [
-						"gmi_cloud.deepseek-r1-distill-1-5b"
-					]
+					"properties": ["gmi_cloud.deepseek-r1-distill-1-5b"]
 				},
 				{
 					"value": "deepseek-prover-v2",
-					"properties": [
-						"gmi_cloud.deepseek-prover-v2"
-					]
+					"properties": ["gmi_cloud.deepseek-prover-v2"]
 				},
 				{
 					"value": "gpt-5-2",
-					"properties": [
-						"gmi_cloud.gpt-5-2"
-					]
+					"properties": ["gmi_cloud.gpt-5-2"]
 				},
 				{
 					"value": "gpt-5-1",
-					"properties": [
-						"gmi_cloud.gpt-5-1"
-					]
+					"properties": ["gmi_cloud.gpt-5-1"]
 				},
 				{
 					"value": "gpt-5",
-					"properties": [
-						"gmi_cloud.gpt-5"
-					]
+					"properties": ["gmi_cloud.gpt-5"]
 				},
 				{
 					"value": "gpt-4o",
-					"properties": [
-						"gmi_cloud.gpt-4o"
-					]
+					"properties": ["gmi_cloud.gpt-4o"]
 				},
 				{
 					"value": "claude-opus-4-5",
-					"properties": [
-						"gmi_cloud.claude-opus-4-5"
-					]
+					"properties": ["gmi_cloud.claude-opus-4-5"]
 				},
 				{
 					"value": "claude-sonnet-4-5",
-					"properties": [
-						"gmi_cloud.claude-sonnet-4-5"
-					]
+					"properties": ["gmi_cloud.claude-sonnet-4-5"]
 				},
 				{
 					"value": "gemini-3-pro",
-					"properties": [
-						"gmi_cloud.gemini-3-pro"
-					]
+					"properties": ["gmi_cloud.gemini-3-pro"]
 				},
 				{
 					"value": "gemini-3-flash",
-					"properties": [
-						"gmi_cloud.gemini-3-flash"
-					]
+					"properties": ["gmi_cloud.gemini-3-flash"]
 				}
 			]
 		}
@@ -571,9 +458,7 @@
 		{
 			"section": "Pipe",
 			"title": "GMI Cloud",
-			"properties": [
-				"gmi_cloud.profile"
-			]
+			"properties": ["gmi_cloud.profile"]
 		}
 	],
 	"test": {

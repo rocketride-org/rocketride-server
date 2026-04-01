@@ -13,17 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"llm"
-	],
+	"classType": ["llm"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"invoke"
-	],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -47,23 +43,16 @@
 	//		The prefix map when added/removed when convertting URLs <=> paths
 	//
 	"prefix": "llm",
-    //
-    // Optional:
-    //	    Plans required to use this driver
-    //
-    "plans": ["enterprise"],
+	//
+	// Optional:
+	//	    Plans required to use this driver
+	//
+	"plans": ["enterprise"],
 	//
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that integrates with Googles models for natural ",
-		"language understanding and generation. It enables tasks such as ",
-		"summarization, question answering, content generation, and conversational ",
-		"AI. Configurable with model selection and prompt settings, the component ",
-		"provides access to Vertex extensive suite of models with advanced language ",
-		"capabilities."
-	],
+	"description": ["A component that integrates with Googles models for natural ", "language understanding and generation. It enables tasks such as ", "summarization, question answering, content generation, and conversational ", "AI. Configurable with model selection and prompt settings, the component ", "provides access to Vertex extensive suite of models with advanced language ", "capabilities."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -73,24 +62,19 @@
 	// Optional:
 	//	  Documentation link for this driver
 	//
-	"documentation": "https://bit.ly/4kTTxD4",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": [
-		"Model: ${parameters.llm_vertex.profile}"
-	],
+	"tile": ["Model: ${parameters.llm_vertex.profile}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"questions": [
-			"answers"
-		]
+		"questions": ["answers"]
 	},
 	"input": [
 		{
@@ -278,331 +262,207 @@
 		},
 		"vertex.custom": {
 			"object": "custom",
-			"properties": [
-				"model",
-				"modelTotalTokens",
-				"llm.cloud.project",
-				"llm.cloud.location"
-			],
+			"properties": ["model", "modelTotalTokens", "llm.cloud.project", "llm.cloud.location"],
 			"description": "For custom/non-Gemini models, enter fully-qualified ID from the list of supported models in VertexAI (e.g., meta/llama-3.1-8b-instruct-maas, claude-3-5-sonnet@20240620)."
 		},
 		"vertex.gemini-3-pro": {
 			"object": "gemini-3-pro",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.gemini-2_5-pro": {
 			"object": "gemini-2_5-pro",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.gemini-2_5-flash": {
 			"object": "gemini-2_5-flash",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.gemini-2_5-flash-lite": {
 			"object": "gemini-2_5-flash-lite",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.gemini-2_0-flash": {
 			"object": "gemini-2_0-flash",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.gemini-2_0-flash-lite": {
 			"object": "gemini-2_0-flash-lite",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.claude-opus-4-5": {
 			"object": "claude-opus-4-5",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.claude-sonnet-4-5": {
 			"object": "claude-sonnet-4-5",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.claude-haiku-4-5": {
 			"object": "claude-haiku-4-5",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.claude-3-5-haiku": {
 			"object": "claude-3-5-haiku",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.gemma-3-1b": {
 			"object": "gemma-3-1b",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.gemma-3-4b": {
 			"object": "gemma-3-4b",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.gemma-3-12b": {
 			"object": "gemma-3-12b",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.gemma-3-27b": {
 			"object": "gemma-3-27b",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.llama-4-maverick": {
 			"object": "llama-4-maverick",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.llama-4-scout": {
 			"object": "llama-4-scout",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.llama3-3": {
 			"object": "llama3-3",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.llama-3-2-90b": {
 			"object": "llama-3-2-90b",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.llama-3-1-405b": {
 			"object": "llama-3-1-405b",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.llama-3-1-70b": {
 			"object": "llama-3-1-70b",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.llama-3-1-8b": {
 			"object": "llama-3-1-8b",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.deepseek-r1": {
 			"object": "deepseek-r1",
-			"properties": [
-				"llm.cloud.project",
-				"llm.cloud.location"
-			]
+			"properties": ["llm.cloud.project", "llm.cloud.location"]
 		},
 		"vertex.profile": {
 			"title": "Model",
 			"description": "LLM model",
 			"type": "string",
 			"default": "gemini-2_5-flash",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": [
-						"vertex.custom"
-					]
+					"properties": ["vertex.custom"]
 				},
 				{
 					"value": "gemini-3-pro",
-					"properties": [
-						"vertex.gemini-3-pro"
-					]
+					"properties": ["vertex.gemini-3-pro"]
 				},
 				{
 					"value": "gemini-2_5-pro",
-					"properties": [
-						"vertex.gemini-2_5-pro"
-					]
+					"properties": ["vertex.gemini-2_5-pro"]
 				},
 				{
 					"value": "gemini-2_5-flash",
-					"properties": [
-						"vertex.gemini-2_5-flash"
-					]
+					"properties": ["vertex.gemini-2_5-flash"]
 				},
 				{
 					"value": "gemini-2_5-flash-lite",
-					"properties": [
-						"vertex.gemini-2_5-flash-lite"
-					]
+					"properties": ["vertex.gemini-2_5-flash-lite"]
 				},
 				{
 					"value": "gemini-2_0-flash",
-					"properties": [
-						"vertex.gemini-2_0-flash"
-					]
+					"properties": ["vertex.gemini-2_0-flash"]
 				},
 				{
 					"value": "gemini-2_0-flash-lite",
-					"properties": [
-						"vertex.gemini-2_0-flash-lite"
-					]
+					"properties": ["vertex.gemini-2_0-flash-lite"]
 				},
 				{
 					"value": "claude-opus-4-5",
-					"properties": [
-						"vertex.claude-opus-4-5"
-					]
+					"properties": ["vertex.claude-opus-4-5"]
 				},
 				{
 					"value": "claude-sonnet-4-5",
-					"properties": [
-						"vertex.claude-sonnet-4-5"
-					]
+					"properties": ["vertex.claude-sonnet-4-5"]
 				},
 				{
 					"value": "claude-haiku-4-5",
-					"properties": [
-						"vertex.claude-haiku-4-5"
-					]
+					"properties": ["vertex.claude-haiku-4-5"]
 				},
 				{
 					"value": "claude-3-5-haiku",
-					"properties": [
-						"vertex.claude-3-5-haiku"
-					]
+					"properties": ["vertex.claude-3-5-haiku"]
 				},
 				{
 					"value": "gemma-3-1b",
-					"properties": [
-						"vertex.gemma-3-1b"
-					]
+					"properties": ["vertex.gemma-3-1b"]
 				},
 				{
 					"value": "gemma-3-4b",
-					"properties": [
-						"vertex.gemma-3-4b"
-					]
+					"properties": ["vertex.gemma-3-4b"]
 				},
 				{
 					"value": "gemma-3-12b",
-					"properties": [
-						"vertex.gemma-3-12b"
-					]
+					"properties": ["vertex.gemma-3-12b"]
 				},
 				{
 					"value": "gemma-3-27b",
-					"properties": [
-						"vertex.gemma-3-27b"
-					]
+					"properties": ["vertex.gemma-3-27b"]
 				},
 				{
 					"value": "llama-4-maverick",
-					"properties": [
-						"vertex.llama-4-maverick"
-					]
+					"properties": ["vertex.llama-4-maverick"]
 				},
 				{
 					"value": "llama-4-scout",
-					"properties": [
-						"vertex.llama-4-scout"
-					]
+					"properties": ["vertex.llama-4-scout"]
 				},
 				{
 					"value": "llama3-3",
-					"properties": [
-						"vertex.llama3-3"
-					]
+					"properties": ["vertex.llama3-3"]
 				},
 				{
 					"value": "llama-3-2-90b",
-					"properties": [
-						"vertex.llama-3-2-90b"
-					]
+					"properties": ["vertex.llama-3-2-90b"]
 				},
 				{
 					"value": "llama-3-1-405b",
-					"properties": [
-						"vertex.llama-3-1-405b"
-					]
+					"properties": ["vertex.llama-3-1-405b"]
 				},
 				{
 					"value": "llama-3-1-70b",
-					"properties": [
-						"vertex.llama-3-1-70b"
-					]
+					"properties": ["vertex.llama-3-1-70b"]
 				},
 				{
 					"value": "llama-3-1-8b",
-					"properties": [
-						"vertex.llama-3-1-8b"
-					]
+					"properties": ["vertex.llama-3-1-8b"]
 				},
 				{
 					"value": "deepseek-r1",
-					"properties": [
-						"vertex.deepseek-r1"
-					]
+					"properties": ["vertex.deepseek-r1"]
 				}
 			]
 		},
-        "authType": {
+		"authType": {
 			"type": "string",
 			"title": "Authentication Type",
 			"default": "service",
 			"hidden": true
-        },
+		},
 		"Pipe.vertex.source.parameters": {
 			"object": "parameters",
-			"properties": [
-				"authType",
-				"google.customerId",
-                "google.adminEmail",
-                "google.serviceKey"
-			]
+			"properties": ["authType", "google.customerId", "google.adminEmail", "google.serviceKey"]
 		}
 	},
 	//
@@ -614,10 +474,7 @@
 		{
 			"section": "Pipe",
 			"title": "VertexAI",
-			"properties": [
-				"Pipe.vertex.source.parameters",
-				"vertex.profile"
-			]
+			"properties": ["Pipe.vertex.source.parameters", "vertex.profile"]
 		}
 	]
 }

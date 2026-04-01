@@ -13,28 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"database",
-		"tool"
-	],
+	"classType": ["database", "tool"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-      "noremote",
-      "invoke"
-	],
+	"capabilities": ["noremote", "invoke"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -53,13 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A processing component that takes structured table data and inserts it ",
-		"into a MySQL database. Designed for straightforward data ingestion, it ",
-		"supports field mapping and basic configuration of connection credentials ",
-		"and target tables. Ideal for storing processed results or structured outputs, ",
-		"this component ensures reliable insertion of records into relational storage."
-	],
+	"description": ["A processing component that takes structured table data and inserts it ", "into a MySQL database. Designed for straightforward data ingestion, it ", "supports field mapping and basic configuration of connection credentials ", "and target tables. Ideal for storing processed results or structured outputs, ", "this component ensures reliable insertion of records into relational storage."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -69,7 +57,6 @@
 	// Optional:
 	//	  Documentation link for this driver
 	//
-	"documentation": "https://bit.ly/4oODEAp",
 	//
 	// Optional:
 	//		Defines the invoke connections that may/must be connected
@@ -88,11 +75,7 @@
 	//
 	"lanes": {
 		"answers": [],
-		"questions": [
-			"table",
-			"text",
-			"answers"
-		]
+		"questions": ["table", "text", "answers"]
 	},
 	"input": [
 		{
@@ -103,13 +86,13 @@
 			"lane": "questions",
 			"output": [
 				{
-					"lane":"table"
+					"lane": "table"
 				},
 				{
-					"lane":"text"
+					"lane": "text"
 				},
 				{
-					"lane":"answers"
+					"lane": "answers"
 				}
 			]
 		}
@@ -191,32 +174,17 @@
 		},
 		"mysql.default": {
 			"object": "default",
-			"properties": [
-				"mysql.db_description",
-				"mysql.host",
-				"mysql.user",
-				"mysql.password",
-				"mysql.database",
-				"mysql.table",
-				"mysql.max_attempts"
-			]
+			"properties": ["mysql.db_description", "mysql.host", "mysql.user", "mysql.password", "mysql.database", "mysql.table", "mysql.max_attempts"]
 		},
 		"mysql.profile": {
 			"hidden": true,
 			"type": "string",
 			"default": "default",
-			"enum": [
-				[
-					"default",
-					"Default"
-				]
-			],
+			"enum": [["default", "Default"]],
 			"conditional": [
 				{
 					"value": "default",
-					"properties": [
-						"mysql.default"
-					]
+					"properties": ["mysql.default"]
 				}
 			]
 		}
@@ -230,9 +198,7 @@
 		{
 			"section": "Pipe",
 			"title": "MySQL",
-			"properties": [
-				"mysql.profile"
-			]
+			"properties": ["mysql.profile"]
 		}
 	]
 }

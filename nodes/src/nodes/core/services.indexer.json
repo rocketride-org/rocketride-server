@@ -20,9 +20,7 @@
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"internal"
-	],
+	"capabilities": ["internal"],
 	//
 	// Required:
 	//		The prefix map when added/removed when convertting URLs <=> paths

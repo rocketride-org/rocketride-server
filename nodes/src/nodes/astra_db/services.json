@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"store"
-	],
+	"classType": ["store"],
 	//
 	// Required:
 	//     Capabilities are flags that change the behavior of the underlying
@@ -24,7 +22,7 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
@@ -49,11 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A vector database component for Astra DB, enabling efficient storage and ", 
-		"retrieval of vector embeddings. It supports similarity search, filtering, ",
-		"and management of vector data with high performance and advanced matching capabilities."
-	],
+	"description": ["A vector database component for Astra DB, enabling efficient storage and ", "retrieval of vector embeddings. It supports similarity search, filtering, ", "and management of vector data with high performance and advanced matching capabilities."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -63,15 +57,11 @@
 	// Optional:
 	//	  Documentation link for this driver
 	//
-	"documentation": " ",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": [
-		"Mode : ${parameters.astra_db.profile}",
-		"Collection: ${parameters.astra_db.${profile}.collection}"
-	],
+	"tile": ["Mode : ${parameters.astra_db.profile}", "Collection: ${parameters.astra_db.${profile}.collection}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -84,10 +74,7 @@
 	"input": [
 		{
 			"lane": "documents",
-			"description": [
-				"Stores the documents into the vector database. The documents must be ",
-				"run through an embedding model prior to this step to compute the vectors."
-			],
+			"description": ["Stores the documents into the vector database. The documents must be ", "run through an embedding model prior to this step to compute the vectors."],
 			"output": []
 		},
 		{
@@ -96,26 +83,17 @@
 			"output": [
 				{
 					"lane": "documents",
-					"description": [
-						"Produces documents that are most similar to the given question."
-					],
+					"description": ["Produces documents that are most similar to the given question."],
 					"output": []
 				},
 				{
 					"lane": "answers",
-					"description": [
-						"Produces an answer with the documents that are most similar ",
-						"to the given question."
-					],
+					"description": ["Produces an answer with the documents that are most similar ", "to the given question."],
 					"output": []
 				},
 				{
 					"lane": "questions",
-					"description": [
-						"Updates the question with documents most similar to the ",
-						"question and sets up a filter so piping this to another store ",
-						"driver will limit its answers to the given subset of documents."
-					],
+					"description": ["Updates the question with documents most similar to the ", "question and sets up a filter so piping this to another store ", "driver will limit its answers to the given subset of documents."],
 					"output": []
 				}
 			]
@@ -172,8 +150,8 @@
 						"notEmpty": true,
 						"contains": "Paris",
 						"property": [
-							{"path": "[0].score", "greaterThan": 0.5},
-							{"path": "[0].metadata.objectId", "equals": "test-doc-1"}
+							{ "path": "[0].score", "greaterThan": 0.5 },
+							{ "path": "[0].metadata.objectId", "equals": "test-doc-1" }
 						]
 					}
 				}
@@ -197,8 +175,8 @@
 				"mode": "cloud",
 				"title": "Astra DB cloud server",
 				"api_endpoint": "",
-                "application_token": "",
-                "collection": "ROCKETRIDE"
+				"application_token": "",
+				"collection": "ROCKETRIDE"
 			}
 		}
 	},
@@ -226,17 +204,11 @@
 		},
 		"astra_db.target.autopipe": {
 			"object": "parameters",
-			"properties": [
-				"remote",
-				"astra_db.provider",
-				"all.embedding"
-			]
+			"properties": ["remote", "astra_db.provider", "all.embedding"]
 		},
 		"astra_db.target.parameters": {
 			"object": "parameters",
-			"properties": [
-				"astra_db.target.autopipe"
-			]
+			"properties": ["astra_db.target.autopipe"]
 		}
 	},
 	//
@@ -248,21 +220,12 @@
 		{
 			"section": "Pipe",
 			"title": "Astra DB Vector Store",
-			"properties": [
-				"astra_db.api_endpoint",
-				"astra_db.application_token",
-				"vector.score",
-				"vector.collection"
-			]
+			"properties": ["astra_db.api_endpoint", "astra_db.application_token", "vector.score", "vector.collection"]
 		},
 		{
 			"section": "Transform",
 			"title": "Astra DB",
-			"properties": [
-				"type",
-				"astra_db.target.parameters",
-				"target.mode"
-			]
+			"properties": ["type", "astra_db.target.parameters", "target.mode"]
 		}
 	]
 }

@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"source"
-	],
+	"classType": ["source"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"noinclude"
-	],
+	"capabilities": ["noinclude"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "endpoint",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,14 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A user interface component that provides a web-based chat experience. It ",
-		"creates its own HTTP endpoint, configured by host and port, to serve a simple ",
-		"chat UI. Users can interact with the interface to submit questions, which ",
-		"are routed through the attached pipeline for processing. Designed for easy ",
-		"integration, it enables the addition of conversational capabilities to any ",
-		"pipeline workflow."
-	],
+	"description": ["A user interface component that provides a web-based chat experience. It ", "creates its own HTTP endpoint, configured by host and port, to serve a simple ", "chat UI. Users can interact with the interface to submit questions, which ", "are routed through the attached pipeline for processing. Designed for easy ", "integration, it enables the addition of conversational capabilities to any ", "pipeline workflow."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -68,7 +57,6 @@
 	// Optional:
 	//	  Documentation link for this driver
 	//
-	"documentation": "https://bit.ly/47jkHzT",
 	//
 	// Optional:
 	//	 The tile is the displayable name of this node
@@ -80,9 +68,7 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"_source": [
-			"questions"
-		]
+		"_source": ["questions"]
 	},
 	"input": [
 		{
@@ -130,12 +116,7 @@
 		{
 			"section": "Pipe",
 			"title": "Chat",
-			"properties": [
-				"hideForm",
-				"type",
-				"source.mode",
-				"Pipe.source.parameters"
-			]
+			"properties": ["hideForm", "type", "source.mode", "Pipe.source.parameters"]
 		}
 	]
 }

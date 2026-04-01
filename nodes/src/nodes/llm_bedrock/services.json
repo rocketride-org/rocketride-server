@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"llm"
-	],
+	"classType": ["llm"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"invoke"
-	],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual pyhsical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,14 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that connects to Amazon Bedrock, providing access to a range ",
-		"of foundation models from leading AI providers through a unified AWS interface. ",
-		"It supports text generation, summarization, classification, and other natural language ",
-		"processing tasks. With flexible model selection and secure, serverless deployment, the ",
-		"component integrates seamlessly into AWS-powered pipelines, offering scalable, ",
-		"enterprise-ready AI capabilities without managing infrastructure."
-	],
+	"description": ["A component that connects to Amazon Bedrock, providing access to a range ", "of foundation models from leading AI providers through a unified AWS interface. ", "It supports text generation, summarization, classification, and other natural language ", "processing tasks. With flexible model selection and secure, serverless deployment, the ", "component integrates seamlessly into AWS-powered pipelines, offering scalable, ", "enterprise-ready AI capabilities without managing infrastructure."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -68,7 +57,6 @@
 	// Optional:
 	//	  Documentation link for this driver
 	//
-	"documentation": "https://bit.ly/4oGG8Rc",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
@@ -77,18 +65,14 @@
 	//          Bedrock LLM           (from service.tile)
 	//              profile (model name)
 	//
-	"tile": [
-		"Model: ${parameters.llm_bedrock.profile}"
-	],
+	"tile": ["Model: ${parameters.llm_bedrock.profile}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"questions": [
-			"answers"
-		]
+		"questions": ["answers"]
 	},
 	"input": [
 		{
@@ -308,322 +292,186 @@
 		},
 		"bedrock.custom": {
 			"object": "custom",
-			"properties": [
-				"model",
-				"modelTotalTokens",
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["model", "modelTotalTokens", "aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.ai21_jamba-1_5-large": {
 			"object": "ai21_jamba-1_5-large",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.ai21_jamba-1_5-mini": {
 			"object": "ai21_jamba-1_5-mini",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.amazon_titan-text-express": {
 			"object": "amazon_titan-text-express",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.amazon_nova-2-lite": {
 			"object": "amazon_nova-2-lite",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.anthropic_claude-3_7-sonnet": {
 			"object": "anthropic_claude-3_7-sonnet",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.anthropic_claude-sonnet-4-5": {
 			"object": "anthropic_claude-sonnet-4-5",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.anthropic_claude-3_5-haiku": {
 			"object": "anthropic_claude-3_5-haiku",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.anthropic_claude-haiku-4-5": {
 			"object": "anthropic_claude-haiku-4-5",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.anthropic_claude-opus-4": {
 			"object": "anthropic_claude-opus-4",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.anthropic_claude-opus-4-5": {
 			"object": "anthropic_claude-opus-4-5",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.cohere_command-r-plus": {
 			"object": "cohere_command-r-plus",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.cohere_command-r": {
 			"object": "cohere_command-r",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.meta_llama3_1-8b": {
 			"object": "meta_llama3_1-8b",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.meta_llama3_1-70b": {
 			"object": "meta_llama3_1-70b",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.meta_llama3_3-70b": {
 			"object": "meta_llama3_3-70b",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.meta_llama3_2-1b": {
 			"object": "meta_llama3_2-1b",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.meta_llama3_2-3b": {
 			"object": "meta_llama3_2-3b",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.meta_llama3_2-11b": {
 			"object": "meta_llama3_2-11b",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.meta_llama3_2-90b": {
 			"object": "meta_llama3_2-90b",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.meta_llama4-scout-17b": {
 			"object": "meta_llama4-scout-17b",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.meta_llama4-maverick-17b": {
 			"object": "meta_llama4-maverick-17b",
-			"properties": [
-				"aws.accessKey",
-				"aws.secretKey",
-				"aws.region"
-			]
+			"properties": ["aws.accessKey", "aws.secretKey", "aws.region"]
 		},
 		"bedrock.profile": {
 			"title": "Model",
 			"description": "LLM model",
 			"type": "string",
 			"default": "meta_llama3_3-70b",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": [
-						"bedrock.custom"
-					]
+					"properties": ["bedrock.custom"]
 				},
 				{
 					"value": "ai21_jamba-1_5-large",
-					"properties": [
-						"bedrock.ai21_jamba-1_5-large"
-					]
+					"properties": ["bedrock.ai21_jamba-1_5-large"]
 				},
 				{
 					"value": "ai21_jamba-1_5-mini",
-					"properties": [
-						"bedrock.ai21_jamba-1_5-mini"
-					]
+					"properties": ["bedrock.ai21_jamba-1_5-mini"]
 				},
 				{
 					"value": "amazon_titan-text-express",
-					"properties": [
-						"bedrock.amazon_titan-text-express"
-					]
+					"properties": ["bedrock.amazon_titan-text-express"]
 				},
 				{
 					"value": "amazon_nova-2-lite",
-					"properties": [
-						"bedrock.amazon_nova-2-lite"
-					]
+					"properties": ["bedrock.amazon_nova-2-lite"]
 				},
 				{
 					"value": "anthropic_claude-3_7-sonnet",
-					"properties": [
-						"bedrock.anthropic_claude-3_7-sonnet"
-					]
+					"properties": ["bedrock.anthropic_claude-3_7-sonnet"]
 				},
 				{
 					"value": "anthropic_claude-sonnet-4-5",
-					"properties": [
-						"bedrock.anthropic_claude-sonnet-4-5"
-					]
+					"properties": ["bedrock.anthropic_claude-sonnet-4-5"]
 				},
 				{
 					"value": "anthropic_claude-3_5-haiku",
-					"properties": [
-						"bedrock.anthropic_claude-3_5-haiku"
-					]
+					"properties": ["bedrock.anthropic_claude-3_5-haiku"]
 				},
 				{
 					"value": "anthropic_claude-haiku-4-5",
-					"properties": [
-						"bedrock.anthropic_claude-haiku-4-5"
-					]
+					"properties": ["bedrock.anthropic_claude-haiku-4-5"]
 				},
 				{
 					"value": "anthropic_claude-opus-4",
-					"properties": [
-						"bedrock.anthropic_claude-opus-4"
-					]
+					"properties": ["bedrock.anthropic_claude-opus-4"]
 				},
 				{
 					"value": "anthropic_claude-opus-4-5",
-					"properties": [
-						"bedrock.anthropic_claude-opus-4-5"
-					]
+					"properties": ["bedrock.anthropic_claude-opus-4-5"]
 				},
 				{
 					"value": "cohere_command-r-plus",
-					"properties": [
-						"bedrock.cohere_command-r-plus"
-					]
+					"properties": ["bedrock.cohere_command-r-plus"]
 				},
 				{
 					"value": "cohere_command-r",
-					"properties": [
-						"bedrock.cohere_command-r"
-					]
+					"properties": ["bedrock.cohere_command-r"]
 				},
 				{
 					"value": "meta_llama3_1-8b",
-					"properties": [
-						"bedrock.meta_llama3_1-8b"
-					]
+					"properties": ["bedrock.meta_llama3_1-8b"]
 				},
 				{
 					"value": "meta_llama3_1-70b",
-					"properties": [
-						"bedrock.meta_llama3_1-70b"
-					]
+					"properties": ["bedrock.meta_llama3_1-70b"]
 				},
 				{
 					"value": "meta_llama3_3-70b",
-					"properties": [
-						"bedrock.meta_llama3_3-70b"
-					]
+					"properties": ["bedrock.meta_llama3_3-70b"]
 				},
 				{
 					"value": "meta_llama3_2-1b",
-					"properties": [
-						"bedrock.meta_llama3_2-1b"
-					]
+					"properties": ["bedrock.meta_llama3_2-1b"]
 				},
 				{
 					"value": "meta_llama3_2-3b",
-					"properties": [
-						"bedrock.meta_llama3_2-3b"
-					]
+					"properties": ["bedrock.meta_llama3_2-3b"]
 				},
 				{
 					"value": "meta_llama3_2-11b",
-					"properties": [
-						"bedrock.meta_llama3_2-11b"
-					]
+					"properties": ["bedrock.meta_llama3_2-11b"]
 				},
 				{
 					"value": "meta_llama3_2-90b",
-					"properties": [
-						"bedrock.meta_llama3_2-90b"
-					]
+					"properties": ["bedrock.meta_llama3_2-90b"]
 				},
 				{
 					"value": "meta_llama4-scout-17b",
-					"properties": [
-						"bedrock.meta_llama4-scout-17b"
-					]
+					"properties": ["bedrock.meta_llama4-scout-17b"]
 				},
 				{
 					"value": "meta_llama4-maverick-17b",
-					"properties": [
-						"bedrock.meta_llama4-maverick-17b"
-					]
+					"properties": ["bedrock.meta_llama4-maverick-17b"]
 				}
 			]
 		}
@@ -637,9 +485,7 @@
 		{
 			"section": "Pipe",
 			"title": "Amazon Bedrock",
-			"properties": [
-				"bedrock.profile"
-			]
+			"properties": ["bedrock.profile"]
 		}
 	],
 	"test": {
