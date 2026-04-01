@@ -33,7 +33,6 @@ import asyncio
 import sys
 import json
 import tempfile
-import aiofiles
 import time
 import socket
 import hashlib
@@ -300,9 +299,17 @@ class Task(DAPBase):
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
 
+    # Only environment variables with this prefix are permitted to resolve in pipelines.
+    # All other env vars are blocked to prevent exfiltration of secrets via ${VAR} expansion.
+    ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
+
     def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
         """
         Replace ${KEY} placeholders in a pipeline dictionary with environment variable values.
+
+        Only environment variables whose names start with ALLOWED_ENV_PREFIX
+        are resolved. All other references are replaced with a redacted
+        placeholder to prevent secret exfiltration.
 
         Args:
             pipeline: Dictionary containing the pipeline configuration
@@ -313,10 +320,16 @@ class Task(DAPBase):
         # Convert dict to JSON string
         pipeline_str = json.dumps(pipeline)
 
-        # Replace ${VAR_NAME} with environment variable value
+        # Replace ${VAR_NAME} with environment variable value (if allowed)
         def replacer(match):
             env_var = match.group(1)
-            return os.environ.get(env_var, match.group(0))  # Keep original if not found
+            if env_var.startswith(self.ALLOWED_ENV_PREFIX):
+                # Check JSON injection vulnerability in env var resolution.
+                value = os.environ.get(env_var, match.group(0))
+                if value == match.group(0):
+                    return value  # placeholder not found
+                return json.dumps(value)[1:-1]  # escape but strip outer quotes
+            return '<REDACTED>'
 
         resolved_str = re.sub(r'\$\{([^}]+)\}', replacer, pipeline_str)
 
