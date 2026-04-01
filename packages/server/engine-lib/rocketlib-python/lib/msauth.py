@@ -51,7 +51,7 @@ def getClientToken(tenant, region, clientId, clientSecret, scopes):
             client_id=clientId,
             authority='https://login.microsoftonline.com/' + tenant,
             client_credential=clientSecret,
-            azure_region=region,
+            azure_region=region or None,
         )
 
         # Save it
@@ -84,7 +84,7 @@ def getPasswordToken(tenant, region, clientId, username, password, scopes):
     if data['app'] is None:
         # Get a new app
         app = msal.ConfidentialClientApplication(
-            client_id=clientId, authority='https://login.microsoftonline.com/' + tenant, azure_region=region
+            client_id=clientId, authority='https://login.microsoftonline.com/' + tenant, azure_region=region or None
         )
 
         # Save it
