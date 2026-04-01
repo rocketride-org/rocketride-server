@@ -21,6 +21,7 @@ Architecture:
 
 import time
 from typing import TYPE_CHECKING, Dict, Any, List
+from rocketride import EVENT_TYPE
 from rocketlib import getServiceDefinitions, getServiceDefinition, validatePipeline
 from ai.common.dap import DAPConn, TransportBase
 
@@ -206,10 +207,25 @@ class MiscCommands(DAPConn):
             for control in task_controls:
                 if control.task is None:
                     continue
+                task_name = getattr(control.task.get_status(), 'name', None) or control.source
                 for cid, conn in conn_items:
                     project_key = f'p.{control.project_id}.{control.source}'
                     if hasattr(conn, '_monitors') and (project_key in conn._monitors or '*' in conn._monitors):
-                        conn_tasks.setdefault(cid, []).append(control.id)
+                        conn_tasks.setdefault(cid, []).append(task_name)
+
+            # Build project ID → friendly name map from task controls
+            # so monitor keys like p.{uuid}.{source} can be displayed readably
+            project_names: Dict[str, str] = {}
+            source_names: Dict[str, str] = {}
+            for control in task_controls:
+                if control.task is None:
+                    continue
+                status = control.task.get_status()
+                task_name = getattr(status, 'name', None) or control.source
+                # Use the task_name prefix (before the dot) as project label
+                name_parts = task_name.split('.', 1)
+                project_names.setdefault(control.project_id, name_parts[0])
+                source_names.setdefault(f'{control.project_id}.{control.source}', name_parts[-1] if len(name_parts) > 1 else control.source)
 
             # Build connections list
             connections = []
@@ -224,7 +240,7 @@ class MiscCommands(DAPConn):
                     'clientId': None,
                     'apikey': '****',
                     'clientInfo': getattr(conn, '_client_info', {}),
-                    'monitors': list(conn._monitors.keys()) if hasattr(conn, '_monitors') else [],
+                    'monitors': self._build_monitors_list(conn._monitors, project_names, source_names) if hasattr(conn, '_monitors') else [],
                     'attachedTasks': conn_tasks.get(conn_id, []),
                 }
                 if hasattr(conn, '_account_info') and conn._account_info:
@@ -310,3 +326,46 @@ class MiscCommands(DAPConn):
         if not apikey or len(apikey) <= 8:
             return '****'
         return f'{apikey[:4]}****{apikey[-4:]}'
+
+    @staticmethod
+    def _build_monitors_list(
+        monitors: Dict[str, 'EVENT_TYPE'],
+        project_names: Dict[str, str],
+        source_names: Dict[str, str],
+    ) -> List[Dict[str, Any]]:
+        """Convert the _monitors dict into a list of {key, flags} objects for the dashboard."""
+        result = []
+        for key, flags in monitors.items():
+            flag_names = [f.name.lower() for f in EVENT_TYPE if f.value and f in flags]
+            label = MiscCommands._resolve_monitor_label(key, project_names, source_names)
+            result.append({'key': label, 'flags': flag_names})
+        return result
+
+    @staticmethod
+    def _resolve_monitor_label(
+        key: str,
+        project_names: Dict[str, str],
+        source_names: Dict[str, str],
+    ) -> str:
+        """Resolve a raw monitor key into a human-friendly label."""
+        if key == '*':
+            return 'All tasks'
+
+        if not key.startswith('p.'):
+            return key
+
+        # Strip the 'p.' prefix and split: projectId, source, [pipeId]
+        parts = key[2:].split('.', 2)
+        project_id = parts[0]
+        project_label = project_names.get(project_id, project_id[:8])
+
+        if len(parts) == 1 or (len(parts) == 2 and parts[1] == '*'):
+            return f'{project_label}.*'
+
+        source = parts[1]
+        source_label = source_names.get(f'{project_id}.{source}', source)
+
+        if len(parts) == 3:
+            return f'{project_label}.{source_label}.pipe{parts[2]}'
+
+        return f'{project_label}.{source_label}'

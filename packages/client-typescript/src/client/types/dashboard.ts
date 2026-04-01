@@ -63,8 +63,8 @@ export interface DashboardConnection {
 	apikey: string;
 	/** Client name/version from auth handshake. */
 	clientInfo: Record<string, string>;
-	/** Active monitor subscription keys. */
-	monitors: string[];
+	/** Active monitor subscriptions with their event flags. */
+	monitors: { key: string; flags: string[] }[];
 	/** Task IDs this connection is monitoring. */
 	attachedTasks: string[];
 }

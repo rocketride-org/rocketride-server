@@ -97,14 +97,19 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({ connections }) =
 
 					<div className="sm-detail-section">
 						<div className="sm-detail-label">Monitors ({selected.monitors.length})</div>
-						<div className="sm-tag-list">
-							{selected.monitors.map((m) => (
-								<span key={m} className="sm-tag">
-									{m}
+						{selected.monitors.length === 0 && <span className="sm-text-muted">none</span>}
+						{selected.monitors.map((m) => (
+							<div key={m.key} className="sm-monitor-row">
+								<span className="sm-mono sm-monitor-key">{m.key}</span>
+								<span className="sm-monitor-flags">
+									{m.flags.map((f) => (
+										<span key={f} className="sm-flag-tag">
+											{f}
+										</span>
+									))}
 								</span>
-							))}
-							{selected.monitors.length === 0 && <span className="sm-text-muted">none</span>}
-						</div>
+							</div>
+						))}
 					</div>
 
 					<div className="sm-detail-section">
