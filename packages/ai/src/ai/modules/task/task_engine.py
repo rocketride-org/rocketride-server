@@ -33,7 +33,6 @@ import asyncio
 import sys
 import json
 import tempfile
-import aiofiles
 import time
 import socket
 import hashlib
@@ -325,7 +324,11 @@ class Task(DAPBase):
         def replacer(match):
             env_var = match.group(1)
             if env_var.startswith(self.ALLOWED_ENV_PREFIX):
-                return os.environ.get(env_var, match.group(0))  # Keep original if not found
+                # Check JSON injection vulnerability in env var resolution.
+                value = os.environ.get(env_var, match.group(0))
+                if value == match.group(0):
+                    return value  # placeholder not found
+                return json.dumps(value)[1:-1]  # escape but strip outer quotes
             return '<REDACTED>'
 
         resolved_str = re.sub(r'\$\{([^}]+)\}', replacer, pipeline_str)
