@@ -298,6 +298,10 @@ class MonitorCommands(DAPConn):
             # Resolve the token to a project key
             control = self._server.get_task_control(token)
 
+            # Verify the caller owns this task
+            if control.apikey != self._account_info.apikey:
+                raise PermissionError('Access denied: task belongs to a different account')
+
             # Use the project key so subscribe/unsubscribe by token or project_id/source use the same key
             event_key = f'p.{control.project_id}.{control.source}'
             event_id = control.id
@@ -313,9 +317,16 @@ class MonitorCommands(DAPConn):
                 # Get the task
                 control = self._server.get_task_control_by_project(project_id, source)
 
+                # Verify the caller owns this task
+                if control.apikey != self._account_info.apikey:
+                    raise PermissionError('Access denied: task belongs to a different account')
+
                 # The task is running, we can fill it in
                 event_id = control.id
                 filter_name = control.id
+
+            except PermissionError:
+                raise
 
             except Exception:
                 event_id = None

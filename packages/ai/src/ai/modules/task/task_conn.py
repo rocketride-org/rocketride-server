@@ -243,7 +243,7 @@ class TaskConn(
         # Nope, denied
         return False
 
-    def verify_permission(self, perm: str) -> bool:
+    def verify_permission(self, perm: str) -> None:
         """
         Check if the account has the specified permission.
 
@@ -290,14 +290,20 @@ class TaskConn(
         """
         if not self._account_info:
             raise PermissionError('Not authenticated')
-        # If we authenticated with a public key, we need to use that
+        # If we authenticated with a public key, we are locked to that task
         if self._account_info.auth.startswith('pk_'):
-            # Look it up
             control = self._server.get_task_control_by_public_key(self._account_info.auth)
             return control.token
 
-        # First, extract any specified token
+        # If we authenticated with a task token, we are locked to that task
+        if self._account_info.auth.startswith('tk_'):
+            return self._account_info.auth
+
+        # Extract token from top-level (injected by debug commands) or arguments
         token = request.get('token', None)
+        if token is None:
+            args = request.get('arguments') or {}
+            token = args.get('token', None)
 
         # Now, we are good... but we need to verify permissions
         if permissions:
@@ -329,8 +335,16 @@ class TaskConn(
         # Get the token
         token = self.get_task_token(request, permissions)
 
-        # Get the task
-        return self._server.get_task(token)
+        # Get the task control and verify ownership for API key auth
+        control = self._server.get_task_control(token)
+
+        # For API key auth, verify the task belongs to this account.
+        # pk_ and tk_ auth are already scoped to their task by get_task_token.
+        if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
+            if control.apikey != self._account_info.apikey:
+                raise PermissionError('Access denied: task belongs to a different account')
+
+        return control.task
 
     def get_connection_id(self) -> int:
         """

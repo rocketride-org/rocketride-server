@@ -29,16 +29,12 @@
  * server-level dashboard push events (apaevt_dashboard).
  */
 
-/** Server-level aggregate metrics. */
+/** Server-level aggregate metrics (scoped to the caller's account). */
 export interface DashboardOverview {
-	/** Number of currently active WebSocket connections. */
+	/** Number of currently active WebSocket connections for this account. */
 	totalConnections: number;
-	/** Number of tasks currently in the registry. */
+	/** Number of tasks currently in the registry for this account. */
 	activeTasks: number;
-	/** Historical maximum concurrent task count. */
-	peakTasks: number;
-	/** Lifetime total of created tasks. */
-	totalTasksLifetime: number;
 	/** Seconds since server started. */
 	serverUptime: number;
 }

@@ -232,26 +232,24 @@ class DebugCommands(DAPConn):
             Exception: If task attachment or session establishment fails
         """
         try:
-            # Make sure the task eists first
-            args = request.get('arguments', {})
-            token = args.get('token', '')
-
-            # Verify we have debug permissions
-            self.verify_permission('task.debug')
-
             # Each debug session must have it's own unique connection
             if self._debug_token:
                 raise RuntimeError('Debugger already active on this session')
 
+            # Validate ownership and permissions via get_task
+            task = self.get_task(request, 'task.debug')
+            token = self.get_task_token(request)
+
             # If debugging is available, attach to it
-            if not self._server.is_debug_available(token=token):
+            if not task.is_debug_available():
                 raise Exception('Debugging is not available')
 
             # Establish connection to the existing task
             pipeline = await self._server.attach_task(token, self)
 
-            # Save the token
+            # Save the token and resolve the task id for events
             self._debug_token = token
+            self._debug_id = self._server.get_task_control(token).id
 
             # Confirm successful attachment with pipeline details
             await self.send_response(request, body={'pipeline': pipeline})
@@ -286,8 +284,9 @@ class DebugCommands(DAPConn):
             # the debug token if it was not specified
             request.setdefault('token', self._debug_token)
 
-            # Get the token
-            token = self.get_task_token(request, 'task.control')
+            # Validate ownership and permissions via get_task
+            self.get_task(request, 'task.control')
+            token = self.get_task_token(request)
 
             # Log the termination request
             self.debug_message('Terminating task and cleaning up resources')
@@ -338,8 +337,11 @@ class DebugCommands(DAPConn):
             # the debug token if it was not specified
             request.setdefault('token', self._debug_token)
 
-            # Get the task to validate it
+            # Validate ownership and permissions via get_task
             self.get_task(request, 'task.debug')
+
+            # Detach from the task (clears debugger on the task side)
+            await self._server.detach_task(request, self)
 
             # Clear the debug id and token
             self._debug_id = None

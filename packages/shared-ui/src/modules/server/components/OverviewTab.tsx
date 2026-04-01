@@ -55,8 +55,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ data }) => {
 			{/* Primary stats */}
 			<div className="sm-stats-row">
 				<StatCard label="Active Connections" value={overview.totalConnections} colorClass="sm-color-success" accentClass="sm-accent-green" subtitle={`${connections.length} active`} />
-				<StatCard label="Active Tasks" value={overview.activeTasks} colorClass="sm-color-accent" accentClass="sm-accent-blue" subtitle={`peak: ${overview.peakTasks}`} />
-				<StatCard label="Total Tasks" value={formatNumber(overview.totalTasksLifetime)} colorClass="sm-color-orange" accentClass="sm-accent-orange" subtitle="lifetime" />
+				<StatCard label="Active Tasks" value={overview.activeTasks} colorClass="sm-color-accent" accentClass="sm-accent-blue" />
 				<StatCard label="Uptime" value={formatUptime(overview.serverUptime)} colorClass="sm-color-info" accentClass="sm-accent-cyan" />
 			</div>
 

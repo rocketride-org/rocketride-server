@@ -534,7 +534,7 @@ class Task(DAPBase):
                         raise RuntimeError(f'Subprocess exited with code {self._engine_process.returncode}')
                     transport = TransportWebSocket(uri)
                     name = f'DATA-{self.id}'
-                    client = DAPClient(module=name, transport=transport)
+                    client = Task.TaskData(parent_task=self, module=name, transport=transport)
                     await client.connect()
                     return client
 
@@ -563,6 +563,9 @@ class Task(DAPBase):
         Manages subprocess termination, resource cleanup, connection management,
         and final status updates.
         """
+        # Block new operations (e.g. data requests) during teardown
+        self._is_terminating = True
+
         # Update status to stopping
         self._status.status = 'Stopping'
         self._status.state = TASK_STATE.STOPPING.value
@@ -1300,7 +1303,7 @@ class Task(DAPBase):
         self._status.rateSize = 0
         self._status.rateCount = 0
         self._status.serviceUp = False
-        self._status.exitCode = 0
+        self._status.exitCode = None
         self._status.exitMessage = ''
         self._status.endTime = 0.0
         self._status.pipeflow = TASK_STATUS_FLOW()
@@ -1613,18 +1616,19 @@ class Task(DAPBase):
                 # Get subprocess reference
                 engine = self._engine_process
 
-                # Mark as user-requested stop
+                # Mark as user-requested stop and block new operations
                 self._stop_requested = True
+                self._is_terminating = True
 
                 # Handle subprocess termination
-                if engine.returncode is None:
+                if engine is not None and engine.returncode is None:
                     self.debug_message('Initiating subprocess termination')
 
                     # Graceful shutdown with timeout
                     try:
                         # Phase 1: Graceful termination
                         self.debug_message('Sending termination signal to subprocess')
-                        self._engine_process.terminate()
+                        engine.terminate()
 
                         try:
                             await asyncio.wait_for(engine.wait(), timeout=CONST_CANCEL_WAIT_TIMEOUT_SECONDS)
