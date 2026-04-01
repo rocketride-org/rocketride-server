@@ -241,6 +241,7 @@ class Task(DAPBase):
         # Execution configuration
         self._threads = launch_args.get('threads', CONST_DEFAULT_MAX_THREADS)
         self._pipelineTraceLevel = launch_args.get('pipelineTraceLevel', None)
+        self._task_name: Optional[str] = launch_args.get('name', None)
         self._engine_process: Optional[asyncio.subprocess.Process] = None
 
         # Status tracking
@@ -363,10 +364,13 @@ class Task(DAPBase):
             source_component['config'] = {}
         config = source_component['config']
 
-        if 'name' not in config:
-            self._status.name = self.source
-        else:
+        # Priority: explicit name from execute args > config.name > source component ID
+        if self._task_name:
+            self._status.name = self._task_name
+        elif 'name' in config:
             self._status.name = config['name']
+        else:
+            self._status.name = self.source
 
         if 'mode' not in config:
             config['mode'] = 'Source'
