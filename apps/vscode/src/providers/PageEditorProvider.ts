@@ -39,6 +39,7 @@
 import * as vscode from 'vscode';
 import { TaskStatus, GenericEvent, GenericResponse, ConnectionState } from '../shared/types';
 import { ConnectionManager } from '../connection/connection';
+import { MonitorManager } from '../connection/monitor-manager';
 import { ConfigManager } from '../config';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
@@ -238,12 +239,8 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 		}
 
 		try {
-			// Send DAP command to start monitoring all components (*) for this project
-			await this.connectionManager.request('rrext_monitor', {
-				projectId: editorState.projectId,
-				source: '*', // Monitor ALL components in this project
-				types: ['summary'],
-			});
+			// Subscribe via MonitorManager (reference-counted, safe for shared connection)
+			await MonitorManager.getInstance().addMonitor({ projectId: editorState.projectId, source: '*' }, ['summary']);
 
 			// Mark as monitoring
 			editorState.isMonitoring = true;
@@ -267,17 +264,11 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 			return;
 		}
 
-		// If we are connected, send stop monitoring command
-		if (this.connectionManager.isConnected()) {
-			try {
-				// Send DAP command to stop monitoring (no types parameter)
-				await this.connectionManager.request('rrext_monitor', {
-					projectId: editorState.projectId,
-					source: '*',
-				});
-			} catch (error) {
-				this.logger.error(`Stopping monitoring for project ${editorState.projectId}: ${error}`);
-			}
+		// Unsubscribe via MonitorManager (reference-counted)
+		try {
+			await MonitorManager.getInstance().removeMonitor({ projectId: editorState.projectId, source: '*' }, ['summary']);
+		} catch (error) {
+			this.logger.error(`Stopping monitoring for project ${editorState.projectId}: ${error}`);
 		}
 
 		// Mark as not monitoring
@@ -496,7 +487,8 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 						try {
 							await this.saveDocument(document, data.content);
 							const parsed = JSON.parse(document.getText());
-							await this.runPipeline({ pipeline: { ...parsed, source: data.source } });
+							const pipeName = path.basename(document.uri.fsPath, '.pipe');
+							await this.runPipeline({ pipeline: { ...parsed, source: data.source } }, pipeName);
 						} catch (error: unknown) {
 							const message = error instanceof Error ? error.message : String(error);
 							vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
@@ -695,7 +687,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 	/**
 	 * Runs a pipeline by sending execute command to the backend
 	 */
-	private async runPipeline(document: { pipeline: Record<string, unknown> }): Promise<void> {
+	private async runPipeline(document: { pipeline: Record<string, unknown> }, name?: string): Promise<void> {
 		try {
 			const project = document.pipeline;
 
@@ -713,6 +705,7 @@ export class PageEditorProvider implements vscode.CustomTextEditorProvider {
 				pipeline: projectTransformed,
 				pipelineTraceLevel: 'full',
 				args: ConfigManager.getInstance().getEffectiveEngineArgs(),
+				...(name ? { name } : {}),
 			});
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : String(error);

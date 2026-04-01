@@ -23,7 +23,7 @@
 
 /**
  * Connection Webview Provider for Connection Management
- * 
+ *
  * Provides a rich webview interface for connection management with:
  * - Real-time connection status updates
  * - Visual connection state indicators
@@ -52,16 +52,12 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 	/**
 	 * Resolves the webview view
 	 */
-	public resolveWebviewView(
-		webviewView: vscode.WebviewView,
-		_context: vscode.WebviewViewResolveContext,
-		_token: vscode.CancellationToken,
-	) {
+	public resolveWebviewView(webviewView: vscode.WebviewView, _context: vscode.WebviewViewResolveContext, _token: vscode.CancellationToken) {
 		this._view = webviewView;
 
 		webviewView.webview.options = {
 			enableScripts: true,
-			localResourceRoots: [this.extensionUri]
+			localResourceRoots: [this.extensionUri],
 		};
 
 		webviewView.webview.html = this.getHtmlForWebview(webviewView.webview);
@@ -86,22 +82,25 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 						await this.connectionManager.reconnect();
 						break;
 
-				case 'openSettings':
-					vscode.commands.executeCommand('rocketride.page.settings.open');
-					break;
+					case 'openSettings':
+						vscode.commands.executeCommand('rocketride.page.settings.open');
+						break;
 
-			case 'openDocs':
-				vscode.env.openExternal(vscode.Uri.parse('https://docs.rocketride.org'));
-				break;
+					case 'openDocs':
+						vscode.env.openExternal(vscode.Uri.parse('https://docs.rocketride.org'));
+						break;
 
-			case 'openDeploy':
-				vscode.commands.executeCommand('rocketride.page.deploy.open');
-				break;
+					case 'openDeploy':
+						vscode.commands.executeCommand('rocketride.page.deploy.open');
+						break;
 
-		}
-		} catch (error) {
-			console.error('[PageConnectionProvider] Message handling error:', error);
-		}
+					case 'openDashboard':
+						vscode.commands.executeCommand('rocketride.page.dashboard.open');
+						break;
+				}
+			} catch (error) {
+				console.error('[PageConnectionProvider] Message handling error:', error);
+			}
 		});
 
 		this.disposables.push(messageDisposable);
@@ -125,18 +124,13 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 		});
 
 		// Listen for config changes
-		const configChangeListener = vscode.workspace.onDidChangeConfiguration(e => {
+		const configChangeListener = vscode.workspace.onDidChangeConfiguration((e) => {
 			if (e.affectsConfiguration('rocketride')) {
 				this.sendConnectionUpdate();
 			}
 		});
 
-		this.disposables.push(
-			connectionStateListener,
-			connectedListener,
-			errorListener,
-			configChangeListener
-		);
+		this.disposables.push(connectionStateListener, connectedListener, errorListener, configChangeListener);
 	}
 
 	/**
@@ -160,11 +154,11 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 					config: {
 						hostUrl: RocketRideClient.normalizeUri(config.hostUrl),
 						connectionMode: config.connectionMode,
-						autoConnect: config.autoConnect
+						autoConnect: config.autoConnect,
 					},
 					hasApiKey,
-					engineInfo
-				}
+					engineInfo,
+				},
 			});
 		} catch (error) {
 			console.error('[PageConnectionProvider] Failed to send connection update:', error);
@@ -182,21 +176,14 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 			let htmlContent = require('fs').readFileSync(htmlPath.fsPath, 'utf8');
 
 			// Replace template placeholders
-			htmlContent = htmlContent
-				.replace(/\{\{nonce\}\}/g, nonce)
-				.replace(/\{\{cspSource\}\}/g, webview.cspSource);
+			htmlContent = htmlContent.replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, webview.cspSource);
 
 			// Convert resource URLs to webview URIs
-			return htmlContent.replace(
-				/(?:src|href)="(\/static\/[^"]+)"/g,
-				(match: string, relativePath: string): string => {
-					const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
-					const resourceUri = webview.asWebviewUri(
-						vscode.Uri.joinPath(this.extensionUri, 'webview', cleanPath)
-					);
-					return match.replace(relativePath, resourceUri.toString());
-				}
-			);
+			return htmlContent.replace(/(?:src|href)="(\/static\/[^"]+)"/g, (match: string, relativePath: string): string => {
+				const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+				const resourceUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'webview', cleanPath));
+				return match.replace(relativePath, resourceUri.toString());
+			});
 		} catch (error) {
 			console.error('Error loading connection HTML:', error);
 			return this.getErrorHtml(error, htmlPath.fsPath);
@@ -248,7 +235,7 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 	 * Cleans up event listeners and resources
 	 */
 	public dispose(): void {
-		this.disposables.forEach(disposable => disposable.dispose());
+		this.disposables.forEach((disposable) => disposable.dispose());
 		this.disposables = [];
 	}
 }
