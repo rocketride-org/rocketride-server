@@ -48,8 +48,6 @@ class TTSEngine:
         self.config = config
         self._piper_remote_client: Optional[Any] = None
         self._kokoro_remote_client: Optional[Any] = None
-        self._openai_remote_client: Optional[Any] = None
-        self._elevenlabs_remote_client: Optional[Any] = None
         self._hf_pipeline: Optional[Any] = None
         self._hf_pipeline_key: Optional[tuple] = None
         self._piper_voice: Optional[Any] = None
@@ -77,12 +75,7 @@ class TTSEngine:
         self._piper_voice_onnx = None
         self._kokoro_pipeline = None
         self._kokoro_cache_lang = None
-        for client in (
-            self._piper_remote_client,
-            self._kokoro_remote_client,
-            self._openai_remote_client,
-            self._elevenlabs_remote_client,
-        ):
+        for client in (self._piper_remote_client, self._kokoro_remote_client):
             if client is not None:
                 try:
                     client.disconnect()
@@ -90,10 +83,6 @@ class TTSEngine:
                     pass
         self._piper_remote_client = None
         self._kokoro_remote_client = None
-        self._openai_remote_client = None
-        self._elevenlabs_remote_client = None
-        self._openai_remote_api_key = None
-        self._elevenlabs_remote_api_key = None
 
     def synthesize(self, text: str) -> Dict[str, Any]:
         """Dispatch synthesis to the configured TTS engine and return a path/mime_type dict."""
@@ -390,92 +379,8 @@ class TTSEngine:
             return k
         return (os.environ.get('ELEVENLABS_API_KEY') or '').strip()
 
-    def _ensure_openai_remote_client(self) -> None:
-        """Connect to the OpenAI TTS model server, reconnecting if the API key changed."""
-        api_key = self._api_key_openai()
-        if self._openai_remote_client is not None:
-            if getattr(self, '_openai_remote_api_key', None) == api_key:
-                return
-            try:
-                self._openai_remote_client.disconnect()
-            except Exception:
-                pass
-            self._openai_remote_client = None
-        from ai.common.models.base import ModelClient, get_model_server_address
-
-        addr = get_model_server_address()
-        if not addr:
-            raise RuntimeError('OpenAI TTS model server mode requires --modelserver')
-        host, port = addr
-        client = ModelClient(port, host)
-        client.load_model(
-            self.config.get('model', 'gpt-4o-mini-tts'),
-            'openai_tts',
-            {
-                'api_key': api_key,
-                'voice': self.config.get('voice', 'alloy'),
-            },
-        )
-        self._openai_remote_client = client
-        self._openai_remote_api_key = api_key
-
-    def _ensure_elevenlabs_remote_client(self) -> None:
-        """Connect to the ElevenLabs TTS model server, reconnecting if the API key changed."""
-        api_key = self._api_key_elevenlabs()
-        if self._elevenlabs_remote_client is not None:
-            if getattr(self, '_elevenlabs_remote_api_key', None) == api_key:
-                return
-            try:
-                self._elevenlabs_remote_client.disconnect()
-            except Exception:
-                pass
-            self._elevenlabs_remote_client = None
-        from ai.common.models.base import ModelClient, get_model_server_address
-
-        addr = get_model_server_address()
-        if not addr:
-            raise RuntimeError('ElevenLabs TTS model server mode requires --modelserver')
-        host, port = addr
-        client = ModelClient(port, host)
-        client.load_model(
-            self.config.get('model', 'eleven_multilingual_v2'),
-            'elevenlabs_tts',
-            {
-                'api_key': api_key,
-                'voice': self.config.get('voice', ''),
-            },
-        )
-        self._elevenlabs_remote_client = client
-        self._elevenlabs_remote_api_key = api_key
-
     def _elevenlabs(self, text: str) -> Dict[str, Any]:
-        """Synthesize speech via the ElevenLabs API or model server and save the result."""
-        if self.config.get('elevenlabs_use_model_server'):
-            self._ensure_elevenlabs_remote_client()
-            output_format = str(self.config.get('output_format', 'mp3')).lower()
-            body = self._elevenlabs_remote_client.send_command(
-                'inference',
-                {
-                    'inputs': [
-                        {
-                            'text': text,
-                            'voice': str(self.config.get('voice', '') or '').strip(),
-                            'model': str(self.config.get('model', 'eleven_multilingual_v2') or '').strip(),
-                        }
-                    ],
-                    'output_fields': ['audio_base64', 'mime_type'],
-                },
-            )
-            rows = body.get('result') or []
-            if not rows:
-                raise ValueError('ElevenLabs TTS model server returned no result')
-            row = rows[0]
-            raw = base64.b64decode(row['audio_base64'])
-            out_path = self.config.get('output_path')
-            with open(out_path, 'wb') as f:
-                f.write(raw)
-            return {'path': out_path, 'mime_type': row.get('mime_type') or _mime_from_format(output_format)}
-
+        """Synthesize speech via the ElevenLabs API and save the result."""
         api_key = self._api_key_elevenlabs()
         voice = self.config.get('voice', 'Rachel')
         model = self.config.get('model', 'eleven_multilingual_v2')
@@ -497,35 +402,7 @@ class TTSEngine:
         return {'path': out_path, 'mime_type': _mime_from_format(output_format)}
 
     def _openai(self, text: str) -> Dict[str, Any]:
-        """Synthesize speech via the OpenAI TTS API or model server and save the result."""
-        if self.config.get('openai_use_model_server'):
-            self._ensure_openai_remote_client()
-            output_format = str(self.config.get('output_format', 'mp3')).lower()
-            body = self._openai_remote_client.send_command(
-                'inference',
-                {
-                    'inputs': [
-                        {
-                            'text': text,
-                            'output_format': output_format,
-                            'voice': str(self.config.get('voice', 'alloy') or 'alloy').strip(),
-                            'model': str(self.config.get('model', 'gpt-4o-mini-tts') or 'gpt-4o-mini-tts').strip(),
-                        }
-                    ],
-                    'output_fields': ['audio_base64', 'mime_type'],
-                },
-            )
-            rows = body.get('result') or []
-            if not rows:
-                raise ValueError('OpenAI TTS model server returned no result')
-            row = rows[0]
-            raw = base64.b64decode(row['audio_base64'])
-            out_path = self.config.get('output_path')
-            with open(out_path, 'wb') as f:
-                f.write(raw)
-            mime = row.get('mime_type') or _mime_from_format(output_format)
-            return {'path': out_path, 'mime_type': mime}
-
+        """Synthesize speech via the OpenAI TTS API and save the result."""
         api_key = self._api_key_openai()
         voice = self.config.get('voice', 'alloy')
         model = self.config.get('model', 'gpt-4o-mini-tts')

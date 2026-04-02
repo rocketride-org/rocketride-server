@@ -111,8 +111,6 @@ class IGlobal(IGlobalBase):
         _ms = get_model_server_address() is not None
         piper_use_model_server = engine == 'piper' and _ms
         kokoro_use_model_server = engine == 'kokoro' and _ms
-        openai_use_model_server = engine == 'openai' and _ms
-        elevenlabs_use_model_server = engine == 'elevenlabs' and _ms
 
         if engine == 'piper' and piper_voice:
             if not piper_use_model_server:
@@ -129,8 +127,6 @@ class IGlobal(IGlobalBase):
             'piper_voice': piper_voice,
             'piper_use_model_server': piper_use_model_server,
             'kokoro_use_model_server': kokoro_use_model_server,
-            'openai_use_model_server': openai_use_model_server,
-            'elevenlabs_use_model_server': elevenlabs_use_model_server,
             'model': self._resolve_tts_model(cfg, engine),
             'kokoro_voice': str(self._read_cfg(cfg, 'kokoro_voice', 'af_heart') or 'af_heart').strip(),
             'kokoro_lang_code': (str(self._read_cfg(cfg, 'kokoro_voice', 'af_heart') or 'af_heart').strip() or 'a')[0],
@@ -227,14 +223,12 @@ class IGlobal(IGlobalBase):
                 'openai',
                 str(cfg.get('model', '') or '').strip(),
                 str(cfg.get('voice', '') or '').strip(),
-                bool(cfg.get('openai_use_model_server')),
             )
         if e == 'elevenlabs':
             return (
                 'elevenlabs',
                 str(cfg.get('model', '') or '').strip(),
                 str(cfg.get('voice', '') or '').strip(),
-                bool(cfg.get('elevenlabs_use_model_server')),
             )
         return (e,)
 
