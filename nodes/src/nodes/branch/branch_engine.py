@@ -154,10 +154,14 @@ class BranchEngine:
 
         try:
             # Timeout protects against catastrophic backtracking (ReDoS) from
-            # user-supplied patterns. Python 3.11+ supports the timeout kwarg.
+            # user-supplied patterns. Python 3.11-3.13 supports the timeout
+            # kwarg on re.search; it was removed in 3.14.
             import sys
-            kwargs = {'timeout': 2.0} if sys.version_info >= (3, 11) else {}
-            match = re.search(pattern, text, **kwargs)
+
+            if (3, 11) <= sys.version_info < (3, 14):
+                match = re.search(pattern, text, timeout=2.0)
+            else:
+                match = re.search(pattern, text)
             matched = match is not None
             details = f'pattern={pattern}, match={match.group() if match else None}'
         except re.error as exc:

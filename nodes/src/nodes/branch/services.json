@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"branch"
-	],
+	"classType": ["branch"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -49,14 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A conditional routing component that evaluates data against configurable ",
-		"rules and sends it to different output lanes based on the results. ",
-		"Supports keyword matching, regex patterns, text length checks, numeric ",
-		"score thresholds, metadata field comparison, and basic sentiment ",
-		"classification. Rules are evaluated in order and the first match wins. ",
-		"If no rule matches, data is routed to the configured default lane."
-	],
+	"description": ["A conditional routing component that evaluates data against configurable ", "rules and sends it to different output lanes based on the results. ", "Supports keyword matching, regex patterns, text length checks, numeric ", "score thresholds, metadata field comparison, and basic sentiment ", "classification. Rules are evaluated in order and the first match wins. ", "If no rule matches, data is routed to the configured default lane."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -137,12 +128,11 @@
 			"sentiment": {
 				"title": "Sentiment Filter",
 				"type": "sentiment",
-				"expected_sentiment": "positive",
+				"expected": "positive",
 				"default_lane": "questions"
 			},
 			"custom": {
 				"title": "Custom Rules",
-				"type": "custom",
 				"default_lane": "questions"
 			}
 		}
@@ -156,12 +146,12 @@
 		"cases": [
 			{
 				"questions": {
-					"questions": [{"text": "Tell me about artificial intelligence and machine learning"}]
+					"questions": [{ "text": "Tell me about artificial intelligence and machine learning" }]
 				},
 				"config": {
 					"rules": [
 						{
-							"condition": {"type": "contains", "keywords": "artificial,intelligence", "mode": "any"},
+							"condition": { "type": "contains", "keywords": "artificial,intelligence", "mode": "any" },
 							"lane": "questions"
 						}
 					],
@@ -175,12 +165,12 @@
 			},
 			{
 				"questions": {
-					"questions": [{"text": "Hello world"}]
+					"questions": [{ "text": "Hello world" }]
 				},
 				"config": {
 					"rules": [
 						{
-							"condition": {"type": "contains", "keywords": "python,java", "mode": "any"},
+							"condition": { "type": "contains", "keywords": "python,java", "mode": "any" },
 							"lane": "answers"
 						}
 					],
@@ -201,7 +191,7 @@
 	//		in the shape
 	//
 	"fields": {
-		"condition_type": {
+		"type": {
 			"type": "string",
 			"title": "Condition Type",
 			"description": "Type of condition to evaluate",
@@ -256,14 +246,14 @@
 				["<", "Less than"]
 			]
 		},
-		"field_name": {
+		"field": {
 			"type": "string",
 			"title": "Field Name",
 			"description": "Metadata field name to check",
 			"minLength": 0,
 			"maxLength": 128
 		},
-		"field_value": {
+		"value": {
 			"type": "string",
 			"title": "Field Value",
 			"description": "Expected value for metadata field comparison",
@@ -297,7 +287,7 @@
 		},
 		"branch.custom": {
 			"object": "custom",
-			"properties": ["condition_type", "keywords", "pattern", "threshold", "operator", "field_name", "field_value", "default_lane"]
+			"properties": ["type", "keywords", "pattern", "threshold", "operator", "field", "value", "default_lane"]
 		},
 		"branch.profile": {
 			"title": "Profile",
@@ -338,9 +328,7 @@
 		{
 			"section": "Pipe",
 			"title": "Conditional Branch",
-			"properties": [
-				"branch.profile"
-			]
+			"properties": ["branch.profile"]
 		}
 	]
 }

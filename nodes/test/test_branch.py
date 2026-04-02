@@ -44,15 +44,20 @@ from unittest.mock import MagicMock, Mock
 import pytest
 
 # ---------------------------------------------------------------------------
-# Path setup
+# Path setup and mock engine runtime modules via session-scoped fixture
 # ---------------------------------------------------------------------------
 NODES_SRC = Path(__file__).parent.parent / 'src' / 'nodes'
-if str(NODES_SRC) not in sys.path:
-    sys.path.insert(0, str(NODES_SRC))
 
-# ---------------------------------------------------------------------------
-# Mock engine runtime modules before any node import
-# ---------------------------------------------------------------------------
+_MOCK_MODULE_NAMES = [
+    'rocketlib',
+    'rocketlib.types',
+    'ai',
+    'ai.common',
+    'ai.common.schema',
+    'ai.common.config',
+    'depends',
+    'engLib',
+]
 
 
 class _MockIGlobalBase:
@@ -157,7 +162,21 @@ class _MockAnswer:
 
 
 def _install_mocks():
-    """Install mock modules for rocketlib, ai.common.schema, etc."""
+    """Install mock modules for rocketlib, ai.common.schema, etc.
+
+    Returns a teardown callable that restores the original sys.path and
+    sys.modules state so other test modules are not affected.
+    """
+    # Snapshot original state before any modifications
+    original_path = sys.path[:]
+    original_modules = {name: sys.modules.get(name) for name in _MOCK_MODULE_NAMES}
+    path_entry = str(NODES_SRC)
+
+    # Add nodes source to path
+    if path_entry not in sys.path:
+        sys.path.insert(0, path_entry)
+
+    # Build mocks
     mock_rocketlib = types.ModuleType('rocketlib')
     mock_rocketlib.IGlobalBase = _MockIGlobalBase
     mock_rocketlib.IInstanceBase = _MockIInstanceBase
@@ -190,8 +209,27 @@ def _install_mocks():
     sys.modules['depends'] = MagicMock()
     sys.modules['engLib'] = MagicMock()
 
+    def _teardown():
+        sys.path[:] = original_path
+        for name, orig in original_modules.items():
+            if orig is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = orig
 
-_install_mocks()
+    return _teardown
+
+
+# Install mocks at import time (required before branch module can be imported)
+_teardown_mocks = _install_mocks()
+
+
+@pytest.fixture(autouse=True, scope='session')
+def _cleanup_engine_mocks():
+    """Session fixture that restores sys.path/sys.modules after all tests complete."""
+    yield
+    _teardown_mocks()
+
 
 # NOW we can safely import the branch node
 from branch.branch_engine import BranchEngine  # noqa: E402
@@ -441,6 +479,11 @@ class TestSentimentCondition:
     def test_mixed_but_negative_dominant(self):
         # More negative words than positive
         result = BranchEngine.sentiment('Terrible awful horrible product, but one nice feature')
+        assert result['details'] == 'negative'
+
+    def test_repeated_words_counted_individually(self):
+        # "bad bad bad good" has 3 negative words vs 1 positive -- should be negative, not neutral
+        result = BranchEngine.sentiment('bad bad bad good')
         assert result['details'] == 'negative'
 
 
@@ -822,13 +865,13 @@ class TestServicesJson:
 
     def test_has_fields(self, services):
         fields = services['fields']
-        assert 'condition_type' in fields
+        assert 'type' in fields
         assert 'keywords' in fields
-        assert 'regex_pattern' in fields
+        assert 'pattern' in fields
         assert 'threshold' in fields
         assert 'operator' in fields
-        assert 'field_name' in fields
-        assert 'field_value' in fields
+        assert 'field' in fields
+        assert 'value' in fields
         assert 'default_lane' in fields
 
     def test_has_shape(self, services):
