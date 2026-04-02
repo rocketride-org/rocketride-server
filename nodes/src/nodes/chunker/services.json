@@ -20,7 +20,7 @@
 			"output": [
 				{
 					"lane": "documents",
-					"description": ["Produces one document per chunk, with chunk_index, parent_id, ", "and total_chunks metadata for downstream reassembly."],
+					"description": ["Produces one document per chunk, with chunkId and parentId ", "metadata for downstream reassembly."],
 					"output": []
 				}
 			]

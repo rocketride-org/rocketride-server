@@ -28,14 +28,16 @@ import os
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 from ai.common.config import Config
 
-from .chunker_strategies import ChunkingStrategy, RecursiveCharacterChunker, SentenceChunker, TokenChunker
+from .hybrid_search import HybridSearchEngine
 
 
 class IGlobal(IGlobalBase):
-    strategy: ChunkingStrategy | None = None
+    engine: HybridSearchEngine | None = None
+    top_k: int = 10
+    rrf_k: int = 60
 
     def validateConfig(self):
-        """Validate that tiktoken dependency is available (only needed for token strategy)."""
+        """Validate that the rank_bm25 dependency is available."""
         try:
             from depends import depends
 
@@ -48,37 +50,23 @@ class IGlobal(IGlobalBase):
         # Are we in config mode or some other mode?
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             # We are going to get a call to configureService but
-            # we don't actually need to load the strategy for that
+            # we don't actually need to load the engine for that
             pass
         else:
             # Get this node's config
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-            # Read strategy parameters from config
-            strategy_name = config.get('strategy', 'recursive')
-            chunk_size = int(config.get('chunk_size', 1000))
-            chunk_overlap = int(config.get('chunk_overlap', 200))
-            encoding_name = config.get('encoding_name', 'cl100k_base')
+            # Read parameters from config
+            alpha = float(config.get('alpha', 0.5))
+            self.top_k = int(config.get('top_k', 10))
+            self.rrf_k = int(config.get('rrf_k', 60))
 
-            # Build the appropriate strategy
-            if strategy_name == 'token':
-                self.strategy = TokenChunker(
-                    chunk_size=chunk_size,
-                    chunk_overlap=chunk_overlap,
-                    encoding_name=encoding_name,
-                )
-            elif strategy_name == 'sentence':
-                self.strategy = SentenceChunker(
-                    chunk_size=chunk_size,
-                    chunk_overlap=chunk_overlap,
-                )
-            else:
-                # Default to recursive character chunker
-                self.strategy = RecursiveCharacterChunker(
-                    chunk_size=chunk_size,
-                    chunk_overlap=chunk_overlap,
-                )
+            # Validate alpha range
+            alpha = max(0.0, min(1.0, alpha))
+
+            # Create the hybrid search engine
+            self.engine = HybridSearchEngine(alpha=alpha)
 
     def endGlobal(self):
-        # Release the strategy
-        self.strategy = None
+        # Release the engine
+        self.engine = None

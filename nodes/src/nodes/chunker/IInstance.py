@@ -81,12 +81,9 @@ class IInstance(IInstanceBase):
                 chunk_doc.metadata = copy.copy(document.metadata) if document.metadata else DocMetadata()
                 chunk_doc.page_content = chunk_data['text']
 
-                # Update metadata
-                if chunk_doc.metadata is not None:
-                    chunk_doc.metadata.chunkId = self.chunkId
-                    chunk_doc.metadata.parentId = parent_id
-                else:
-                    chunk_doc.metadata = DocMetadata(objectId=parent_id, chunkId=self.chunkId, parentId=parent_id)
+                # Update metadata (always non-None after the copy/create above)
+                chunk_doc.metadata.chunkId = self.chunkId
+                chunk_doc.metadata.parentId = parent_id
 
                 self.chunkId += 1
                 output_docs.append(chunk_doc)
