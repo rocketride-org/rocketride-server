@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import mcp.types as types
+from mcp.types import ListResourcesRequest, ReadResourceRequest, ListPromptsRequest, GetPromptRequest
 
 from rocketride_mcp import resources as resources_mod
 from rocketride_mcp import prompts as prompts_mod
@@ -354,13 +355,9 @@ async def test_server_registers_list_resources_handler(env_rocketride: None) -> 
 
     assert server_instance is not None, 'Server was not instantiated'
     assert mock_stdio.called, 'stdio_server was never called — handler registration failed'
-    # Verify the list_resources handler was registered by calling it
-    resources = await server_mod.list_resources(mock_client)
-    assert len(resources) == 3
-    uris = [str(r.uri) for r in resources]
-    assert 'rocketride://pipelines' in uris
-    assert 'rocketride://status' in uris
-    assert 'rocketride://nodes' in uris
+    # Verify handlers were registered on the actual Server instance
+    assert ListResourcesRequest in server_instance.request_handlers, 'list_resources handler not registered on server'
+    assert ReadResourceRequest in server_instance.request_handlers, 'read_resource handler not registered on server'
 
 
 async def test_server_registers_list_prompts_handler(env_rocketride: None) -> None:
@@ -390,17 +387,10 @@ async def test_server_registers_list_prompts_handler(env_rocketride: None) -> No
                         raise
 
     assert server_instance is not None, 'Server was not instantiated'
-    # Verify prompts are accessible after registration
-    prompts = server_mod.list_prompts()
-    assert len(prompts) == 3
-    names = [p.name for p in prompts]
-    assert 'analyze-document' in names
-    assert 'chat-with-data' in names
-    assert 'evaluate-pipeline' in names
-
-    # Same reasoning: reaching stdio_server means all handler registrations
-    # (including list_prompts, get_prompt) completed without error.
     assert mock_stdio.called, 'stdio_server was never called — handler registration failed'
+    # Verify handlers were registered on the actual Server instance
+    assert ListPromptsRequest in server_instance.request_handlers, 'list_prompts handler not registered on server'
+    assert GetPromptRequest in server_instance.request_handlers, 'get_prompt handler not registered on server'
 
 
 # =============================================================================
