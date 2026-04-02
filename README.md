@@ -10,13 +10,13 @@
 </p>
 
 <p>
- RocketRide is an open-source data pipeline builder and runtime built for AI and ML workloads. With 50+ pipeline nodes spanning 13 LLM providers, 8 vector databases, OCR, NER, and more — pipelines are defined as portable JSON, built visually in VS Code, and executed by a multithreaded C++ runtime. From real-time data processing to multimodal AI search, RocketRide runs entirely on your own infrastructure.
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-cpp.png" alt="C++" />&nbsp;&nbsp;
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-python.png" alt="Python" />&nbsp;&nbsp;
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-typescript.png" alt="TypeScript" />
 </p>
 
 <p>
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-cpp.png" height="28" alt="C++" />&nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-python.png" height="28" alt="Python" />&nbsp;&nbsp;
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-typescript.png" height="28" alt="TypeScript" />
+ RocketRide is an open-source data pipeline builder and runtime built for AI and ML workloads. With 50+ pipeline nodes spanning 13 LLM providers, 8 vector databases, OCR, NER, and more — pipelines are defined as portable JSON, built visually in VS Code, and executed by a multithreaded C++ runtime. From real-time data processing to multimodal AI search, RocketRide runs entirely on your own infrastructure.
 </p>
 
 <p>
@@ -29,16 +29,10 @@
 
 <p>
   <a href="https://github.com/rocketride-org/rocketride-server/actions/workflows/ci.yml"><img src="https://github.com/rocketride-org/rocketride-server/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/rocketride-org/rocketride-server/releases/tag/server-v3.1.0"><img src="https://img.shields.io/badge/engine-v3.1.0-5f2167?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTEgMTkxIj48cGF0aCBkPSJNMTU5LjUgMTYxLjRMMTUzLjcgMTY3LjJDMTUxLjkgMTY5IDE0OC45IDE2OSAxNDcgMTY3LjJMMTI2LjYgMTQ2LjhDMTE1LjYgMTM1LjggMTE1LjYgMTE4IDEyNi42IDEwN0MxMzguMSA5NS41IDEzOC4xIDc2LjkgMTI2LjYgNjUuNEwxMjUuMSA2My45QzExMy42IDUyLjQgOTUgNTIuNCA4My41IDYzLjlDNzIuNSA3NC45IDU0LjYgNzQuOSA0My42IDYzLjlMMjMuMiA0My41QzIxLjQgNDEuNyAyMS40IDM4LjcgMjMuMiAzNi44TDI5IDMxQzM3IDIzIDQ5LjEgMjAuNSA1OS42IDI0LjlMODcuNSAzNi4zQzk3LjMgNDAuMSAxMDguNCAzOCAxMTYuMyAzMS4xTDEzNyAxMC40QzEzOC42IDguOSAxNDAuNCA3LjQgMTQyLjUgNi4yQzE0Ni4yIDQuMSAxNTAuMyAzIDE1NC41IDIuNkwxODUuNCAwQzE4OC4zLS4zIDE5MC44IDIuMiAxOTAuNSA1LjFMMTg3LjggMzYuNEMxODcuMyA0Mi44IDE4NC41IDQ4LjggMTgwLjEgNTMuNUwxNjAuNSA3My4xQzE1Mi41IDgxLjIgMTUwLjEgOTMuMyAxNTQuNSAxMDMuOEwxNTUuNSAxMDYuMkwxNjEuMiAxMjBMMTY1LjYgMTMwLjlDMTY5LjkgMTQxLjQgMTY3LjUgMTUzLjUgMTU5LjUgMTYxLjVaIiBmaWxsPSJ3aGl0ZSIvPjxwYXRoIGQ9Ik0uOCAxOTAuM0MtLjIgMTg5LjMtLjMgMTg3LjYuNiAxODYuNEwyMS4xIDE2MkMzMS4xIDE1MCAzNy45IDEzNy43IDQxLjMgMTI1LjNDNDMuNiAxMTYuNiA0NC42IDEwOC41IDQ0LjEgMTAxLjJDNDQuMSAxMDAuMyA0NC40IDk5LjQgNDUuMSA5OC44QzQ1LjggOTguMiA0Ni44IDk3LjkgNDcuNyA5OC4xQzY1IDEwMS42IDgzLjUgOTguMyA5OC41IDg4LjlDOTkuNiA4OC4yIDEwMS4xIDg4LjQgMTAyIDg5LjNDMTAyLjkgOTAuMiAxMDMuMSA5MS43IDEwMi40IDkyLjhDOTMgMTA3LjggODkuNyAxMjYuMyA5My4yIDE0My41QzkzLjQgMTQ0LjMgOTMuMiAxNDUuMiA5Mi42IDE0NS45QzkyIDE0Ni42IDkxIDE0Ny4yIDkwLjEgMTQ3LjFDODIuOCAxNDYuNiA3NC42IDE0Ny41IDY2IDE0OS45QzUzLjYgMTUzLjIgNDEuMiAxNjAgMjkuMyAxNzAuMUw0LjkgMTkwLjZDMy44IDE5MS41IDIuMSAxOTEuNSAxIDE5MC40SC44WiIgZmlsbD0iI0Y5MzgyMiIvPjwvc3ZnPgo=" alt="Engine v3.1.0"></a>
+  <a href="https://github.com/rocketride-org/rocketride-server/releases/tag/server-v3.1.0"><img src="https://img.shields.io/badge/Runtime-v3.1.0-5f2167?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTEgMTkxIj48cGF0aCBkPSJNMTU5LjUgMTYxLjRMMTUzLjcgMTY3LjJDMTUxLjkgMTY5IDE0OC45IDE2OSAxNDcgMTY3LjJMMTI2LjYgMTQ2LjhDMTE1LjYgMTM1LjggMTE1LjYgMTE4IDEyNi42IDEwN0MxMzguMSA5NS41IDEzOC4xIDc2LjkgMTI2LjYgNjUuNEwxMjUuMSA2My45QzExMy42IDUyLjQgOTUgNTIuNCA4My41IDYzLjlDNzIuNSA3NC45IDU0LjYgNzQuOSA0My42IDYzLjlMMjMuMiA0My41QzIxLjQgNDEuNyAyMS40IDM4LjcgMjMuMiAzNi44TDI5IDMxQzM3IDIzIDQ5LjEgMjAuNSA1OS42IDI0LjlMODcuNSAzNi4zQzk3LjMgNDAuMSAxMDguNCAzOCAxMTYuMyAzMS4xTDEzNyAxMC40QzEzOC42IDguOSAxNDAuNCA3LjQgMTQyLjUgNi4yQzE0Ni4yIDQuMSAxNTAuMyAzIDE1NC41IDIuNkwxODUuNCAwQzE4OC4zLS4zIDE5MC44IDIuMiAxOTAuNSA1LjFMMTg3LjggMzYuNEMxODcuMyA0Mi44IDE4NC41IDQ4LjggMTgwLjEgNTMuNUwxNjAuNSA3My4xQzE1Mi41IDgxLjIgMTUwLjEgOTMuMyAxNTQuNSAxMDMuOEwxNTUuNSAxMDYuMkwxNjEuMiAxMjBMMTY1LjYgMTMwLjlDMTY5LjkgMTQxLjQgMTY3LjUgMTUzLjUgMTU5LjUgMTYxLjVaIiBmaWxsPSJ3aGl0ZSIvPjxwYXRoIGQ9Ik0uOCAxOTAuM0MtLjIgMTg5LjMtLjMgMTg3LjYuNiAxODYuNEwyMS4xIDE2MkMzMS4xIDE1MCAzNy45IDEzNy43IDQxLjMgMTI1LjNDNDMuNiAxMTYuNiA0NC42IDEwOC41IDQ0LjEgMTAxLjJDNDQuMSAxMDAuMyA0NC40IDk5LjQgNDUuMSA5OC44QzQ1LjggOTguMiA0Ni44IDk3LjkgNDcuNyA5OC4xQzY1IDEwMS42IDgzLjUgOTguMyA5OC41IDg4LjlDOTkuNiA4OC4yIDEwMS4xIDg4LjQgMTAyIDg5LjNDMTAyLjkgOTAuMiAxMDMuMSA5MS43IDEwMi40IDkyLjhDOTMgMTA3LjggODkuNyAxMjYuMyA5My4yIDE0My41QzkzLjQgMTQ0LjMgOTMuMiAxNDUuMiA5Mi42IDE0NS45QzkyIDE0Ni42IDkxIDE0Ny4yIDkwLjEgMTQ3LjFDODIuOCAxNDYuNiA3NC42IDE0Ny41IDY2IDE0OS45QzUzLjYgMTUzLjIgNDEuMiAxNjAgMjkuMyAxNzAuMUw0LjkgMTkwLjZDMy44IDE5MS41IDIuMSAxOTEuNSAxIDE5MC40SC44WiIgZmlsbD0iI0Y5MzgyMiIvPjwvc3ZnPgo=" alt="Engine v3.1.0"></a>
   <a href="https://discord.gg/9hr3tdZmEG"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/license-MIT-41b6e6" alt="MIT License"></a>
+  <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/License-MIT-41b6e6" alt="MIT License"></a>
 </p>
-
-<p>
-  <a href="https://www.producthunt.com/products/rocketride?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-rocketride" target="_blank" rel="noopener noreferrer"><img alt="RocketRide - Your IDE is the new AI command center. | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1112116&amp;theme=light&amp;t=1774995997490"></a>
-</p>
-
-</div>
 
 <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/screenshot-ide.png" alt="Build and run AI pipelines inside your IDE" width="100%">
 
@@ -48,16 +42,20 @@ _Design, test, and ship complex AI workflows from a visual canvas, right where y
 
 _Drop pipelines into any Python or TypeScript app with a few lines of code, no infrastructure glue required._
 
+</div>
+
 ## Features
 
-- **VS Code Extension** — Build, visualize, and monitor pipelines directly in your editor. The visual pipeline builder lets you drag, connect, and configure nodes without writing boilerplate. Real-time observability tracks token usage, LLM calls, latency, and execution — all without leaving VS Code. Pipelines are defined as portable JSON, meaning they're version-controllable, shareable, and runnable anywhere.
-- **High-performance C++ runtime** — RocketRide's runtime is built in C++ with native multithreading, purpose-built for the throughput demands of AI and data workloads. No bottlenecks, no compromises for production scale.
-- **50+ pipeline nodes** — A comprehensive library of pre-built nodes covering 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, chunking strategies, embedding models, and more. All nodes are Python-extensible, so you can build and publish your own.
-- **Multi-agent workflows** — Orchestrate and scale complex agent pipelines with built-in support for CrewAI and LangChain. Chain agents, share memory across pipeline runs, and manage multi-step reasoning workflows at scale. Switch between agentic frameworks with a few clicks for your task.
-- **Coding agent ready** — Install the VS Code extension and RocketRide automatically detects and configures your coding agent — Claude, Cursor, and more. Your agent can build, modify, and deploy pipelines through natural language.
-- **TypeScript, Python & MCP SDKs** — Integrate pipelines into native applications, expose them as callable tools for AI assistants, or build programmatic pipeline workflows into your existing codebase.
-- **Zero dependency headaches** — RocketRide manages Python environments, C++ toolchains, Java/Tika, and all node dependencies automatically. Clone, build, run — no manual setup, no version conflicts, no glue scripts.
-- **One-click deploy** — Run on Docker, on-prem, or RocketRide Cloud (coming soon). RocketRide's architecture is designed for production from day one — not retrofitted from a demo.
+| Feature                           | Description                                                                                                                                                                                                                          |
+| :-------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Visual Pipeline Builder**       | Drag, connect, and configure nodes in VS Code — no boilerplate. Real-time observability tracks token usage, LLM calls, latency, and execution. Pipelines are portable JSON — version-controllable, shareable, and runnable anywhere. |
+| **High-Performance C++ Runtime**  | Native multithreading purpose-built for the throughput demands of AI and data workloads. No bottlenecks, no compromises for production scale.                                                                                        |
+| **50+ Pipeline Nodes**            | 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, chunking strategies, embedding models, and more. All nodes are Python-extensible — build and publish your own.                                                    |
+| **Multi-Agent Workflows**         | Built-in CrewAI and LangChain support. Chain agents, share memory across pipeline runs, and manage multi-step reasoning at scale.                                                                                                    |
+| **Coding Agent Ready**            | RocketRide auto-detects your coding agent — Claude, Cursor, and more. Build, modify, and deploy pipelines through natural language.                                                                                                  |
+| **TypeScript, Python & MCP SDKs** | Integrate pipelines into native apps, expose them as callable tools for AI assistants, or build programmatic workflows into your existing codebase.                                                                                  |
+| **Zero Dependency Headaches**     | Python environments, C++ toolchains, Java/Tika, and all node dependencies managed automatically. Clone, build, run — no manual setup.                                                                                                |
+| **One-Click Deploy**              | Run on Docker, on-prem, or RocketRide Cloud (coming soon). Production-ready architecture from day one — not retrofitted from a demo.                                                                                                 |
 
 ## Quick Start
 
@@ -88,7 +86,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
   <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/first_pipe.gif" alt="Pipeline canvas example" width="100%">
 </p>
 
-4. You can run a pipeline from the canvas by pressing the ▶️ button on the source node or from the `Connection Manager` directly.
+4. You can run a pipeline from the canvas by pressing the ▶ button on the source node or from the `Connection Manager` directly.
 
 5. Deploy your pipelines on your own infrastructure.
 
@@ -121,4 +119,4 @@ RocketRide is built by a growing community of contributors. Whether you've fixed
 
 ---
 
-<p align="center">Made with 🤍 in SF & EU</p>
+<p align="center">Made with ♥ in SF &amp; EU</p>
