@@ -167,16 +167,13 @@ def _install_mocks():
     Returns a teardown callable that restores the original sys.path and
     sys.modules state so other test modules are not affected.
     """
-    # Snapshot original state before any modifications
     original_path = sys.path[:]
     original_modules = {name: sys.modules.get(name) for name in _MOCK_MODULE_NAMES}
     path_entry = str(NODES_SRC)
 
-    # Add nodes source to path
     if path_entry not in sys.path:
         sys.path.insert(0, path_entry)
 
-    # Build mocks
     mock_rocketlib = types.ModuleType('rocketlib')
     mock_rocketlib.IGlobalBase = _MockIGlobalBase
     mock_rocketlib.IInstanceBase = _MockIInstanceBase
@@ -220,18 +217,18 @@ def _install_mocks():
     return _teardown
 
 
-# Install mocks at import time (required before branch module can be imported)
+# Install mocks at import time so the branch module can be imported.
+# The session fixture below ensures teardown restores original state.
 _teardown_mocks = _install_mocks()
 
 
 @pytest.fixture(autouse=True, scope='session')
-def _cleanup_engine_mocks():
+def _engine_mocks():
     """Session fixture that restores sys.path/sys.modules after all tests complete."""
     yield
     _teardown_mocks()
 
 
-# NOW we can safely import the branch node
 from branch.branch_engine import BranchEngine  # noqa: E402
 
 
@@ -287,6 +284,16 @@ class TestContainsCondition:
 
     def test_whitespace_in_keywords(self):
         result = BranchEngine.contains('hello world', ' hello , world ', 'all')
+        assert result['matched'] is True
+
+    def test_invalid_mode_raises_value_error(self):
+        with pytest.raises(ValueError, match='unsupported contains mode'):
+            BranchEngine.contains('hello', 'hello', 'invalid')
+
+    def test_mode_case_insensitive(self):
+        result = BranchEngine.contains('hello world', 'hello', 'ANY')
+        assert result['matched'] is True
+        result = BranchEngine.contains('hello world', 'hello,world', 'ALL')
         assert result['matched'] is True
 
 
@@ -746,8 +753,8 @@ class TestIInstanceRouting:
         inst.instance.writeQuestions.assert_called_once()
         inst.instance.writeAnswers.assert_not_called()
 
-    def test_deep_copy_prevents_mutation(self):
-        """Verify that the routed question is a deep copy, not the original."""
+    def test_original_object_passed_directly(self):
+        """Verify that the original question is passed directly (no deepcopy) since first-match-wins means only one downstream consumer."""
         inst = self._make_instance(
             rules=[{'condition': {'type': 'always_true'}, 'lane': 'questions'}],
         )
@@ -755,12 +762,26 @@ class TestIInstanceRouting:
         question.addQuestion('Original question')
         inst.writeQuestions(question)
 
-        # Get the argument passed to writeQuestions
         routed = inst.instance.writeQuestions.call_args[0][0]
+        assert routed is question
 
-        # Mutate the original and ensure the routed copy is unaffected
-        question.questions.append({'text': 'mutated'})
-        assert len(routed.questions) == 1  # deep copy should be unaffected
+    def test_none_engine_raises_runtime_error(self):
+        """Verify that a RuntimeError is raised when the engine is None."""
+        from branch.IInstance import IInstance
+
+        inst = IInstance()
+        inst.IGlobal = MagicMock()
+        inst.IGlobal.engine = None
+        inst.instance = MagicMock()
+
+        question = _MockQuestion()
+        question.addQuestion('test')
+        with pytest.raises(RuntimeError, match='BranchEngine is not initialised'):
+            inst.writeQuestions(question)
+
+        answer = _MockAnswer(text='test')
+        with pytest.raises(RuntimeError, match='BranchEngine is not initialised'):
+            inst.writeAnswers(answer)
 
 
 # =============================================================================
@@ -857,7 +878,10 @@ class TestServicesJson:
         assert 'regex' in profiles
         assert 'score' in profiles
         assert 'sentiment' in profiles
-        assert 'custom' in profiles
+
+    def test_no_custom_profile(self, services):
+        profiles = services['preconfig']['profiles']
+        assert 'custom' not in profiles
 
     def test_has_test_cases(self, services):
         assert 'test' in services

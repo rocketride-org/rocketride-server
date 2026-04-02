@@ -114,6 +114,11 @@ class BranchEngine:
         Returns:
             Evaluation result dict with matched/condition/details keys.
         """
+        _VALID_MODES = ('any', 'all')
+        mode = mode.lower().strip() if isinstance(mode, str) else mode
+        if mode not in _VALID_MODES:
+            raise ValueError(f'unsupported contains mode: {mode!r} (expected one of {_VALID_MODES})')
+
         if not text or not keywords:
             return {'matched': False, 'condition': 'contains', 'details': 'empty text or keywords'}
 
@@ -153,23 +158,12 @@ class BranchEngine:
             return {'matched': False, 'condition': 'regex', 'details': 'empty text or pattern'}
 
         try:
-            # Timeout protects against catastrophic backtracking (ReDoS) from
-            # user-supplied patterns. Python 3.11-3.13 supports the timeout
-            # kwarg on re.search; it was removed in 3.14.
-            import sys
-
-            if (3, 11) <= sys.version_info < (3, 14):
-                match = re.search(pattern, text, timeout=2.0)
-            else:
-                match = re.search(pattern, text)
+            match = re.search(pattern, text)
             matched = match is not None
             details = f'pattern={pattern}, match={match.group() if match else None}'
         except re.error as exc:
             matched = False
             details = f'invalid regex: {exc}'
-        except TimeoutError:
-            matched = False
-            details = f'regex timed out (pattern too complex): {pattern[:50]}'
 
         return {'matched': matched, 'condition': 'regex', 'details': details}
 

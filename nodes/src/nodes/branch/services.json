@@ -78,7 +78,7 @@
 				},
 				{
 					"lane": "answers",
-					"description": "Questions routed to the answers output lane"
+					"description": "Questions converted to Answer (text only -- history/documents/context are not carried over)"
 				}
 			]
 		},
@@ -88,7 +88,7 @@
 			"output": [
 				{
 					"lane": "questions",
-					"description": "Answers routed to the questions output lane"
+					"description": "Answers converted to Question (text only -- enrichment from addContext/addHistory is not carried over)"
 				},
 				{
 					"lane": "answers",
@@ -129,10 +129,6 @@
 				"title": "Sentiment Filter",
 				"type": "sentiment",
 				"expected": "positive",
-				"default_lane": "questions"
-			},
-			"custom": {
-				"title": "Custom Rules",
 				"default_lane": "questions"
 			}
 		}
@@ -285,10 +281,6 @@
 			"object": "sentiment",
 			"properties": ["default_lane"]
 		},
-		"branch.custom": {
-			"object": "custom",
-			"properties": ["type", "keywords", "pattern", "threshold", "operator", "field", "value", "default_lane"]
-		},
 		"branch.profile": {
 			"title": "Profile",
 			"description": "Branch routing profile",
@@ -311,10 +303,6 @@
 				{
 					"value": "sentiment",
 					"properties": ["branch.sentiment"]
-				},
-				{
-					"value": "custom",
-					"properties": ["branch.custom"]
 				}
 			]
 		}

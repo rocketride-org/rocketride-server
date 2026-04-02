@@ -21,8 +21,6 @@
 # SOFTWARE.
 # =============================================================================
 
-import copy
-
 from rocketlib import IInstanceBase
 from ai.common.schema import Question, Answer
 from .IGlobal import IGlobal
@@ -40,8 +38,17 @@ class IInstance(IInstanceBase):
         }
 
     def _route_question(self, question: Question) -> None:
-        """Evaluate branch conditions against a question and route to the matched output lane."""
+        """Evaluate branch conditions against a question and route to the matched output lane.
+
+        When routed to the answers lane the question is converted to an Answer.
+        Note: the converted Answer carries only the prompt text -- enrichment
+        fields such as history, documents, and context from the original
+        Question are not copied.  This is intentional: downstream answer
+        consumers do not expect Question-specific fields.
+        """
         engine = self.IGlobal.engine
+        if engine is None:
+            raise RuntimeError('BranchEngine is not initialised (IGlobal.beginGlobal may have failed)')
 
         # Extract text from the question for condition evaluation
         text = question.getPrompt() if hasattr(question, 'getPrompt') else str(question)
@@ -50,21 +57,28 @@ class IInstance(IInstanceBase):
         data = self._build_data(text, metadata)
         lane = engine.route(data)
 
-        # Deep copy to prevent mutation across branches
-        routed = copy.deepcopy(question)
-
         if lane == 'answers':
-            # Convert question to an answer and route to the answers lane
+            # Convert question to an answer and route to the answers lane.
             answer = Answer()
             answer.setText(text)
             self.instance.writeAnswers(answer)
         else:
-            # Default: route to the questions lane
-            self.instance.writeQuestions(routed)
+            # Route to the questions lane (first-match-wins means only one
+            # downstream consumer, so no deep copy is needed).
+            self.instance.writeQuestions(question)
 
     def _route_answer(self, answer: Answer) -> None:
-        """Evaluate branch conditions against an answer and route to the matched output lane."""
+        """Evaluate branch conditions against an answer and route to the matched output lane.
+
+        When routed to the questions lane the answer is converted to a Question.
+        Note: the converted Question carries only the answer text -- enrichment
+        added via addContext(), addHistory(), etc. on the original Answer is not
+        copied.  This is intentional: downstream question consumers do not
+        expect Answer-specific fields.
+        """
         engine = self.IGlobal.engine
+        if engine is None:
+            raise RuntimeError('BranchEngine is not initialised (IGlobal.beginGlobal may have failed)')
 
         # Extract text from the answer for condition evaluation
         text = answer.getText() if hasattr(answer, 'getText') else str(answer)
@@ -73,17 +87,15 @@ class IInstance(IInstanceBase):
         data = self._build_data(text, metadata)
         lane = engine.route(data)
 
-        # Deep copy to prevent mutation across branches
-        routed = copy.deepcopy(answer)
-
         if lane == 'questions':
-            # Convert answer to a question and route to the questions lane
+            # Convert answer to a question and route to the questions lane.
             question = Question()
             question.addQuestion(text)
             self.instance.writeQuestions(question)
         else:
-            # Default: route to the answers lane
-            self.instance.writeAnswers(routed)
+            # Route to the answers lane (first-match-wins means only one
+            # downstream consumer, so no deep copy is needed).
+            self.instance.writeAnswers(answer)
 
     def writeQuestions(self, question: Question) -> None:
         """Evaluate branch conditions against question text/metadata and route to matched output lane."""
