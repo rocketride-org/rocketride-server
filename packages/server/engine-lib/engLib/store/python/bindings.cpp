@@ -1299,6 +1299,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND_PROP_READONLY_STATIC(REMOTING,
                                      url::UrlConfig::PROTOCOL_CAPS::REMOTING)
         .PYBIND_PROP_READONLY_STATIC(GPU, url::UrlConfig::PROTOCOL_CAPS::GPU)
+        .PYBIND_PROP_READONLY_STATIC(EXPERIMENTAL, url::UrlConfig::PROTOCOL_CAPS::EXPERIMENTAL)
 
         .PYBIND_FUNCTION_STATIC(
             getProtocolCaps, [](const std::string &protocol) -> uint32_t {
