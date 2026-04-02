@@ -252,9 +252,9 @@ class StreamingHandler:
 
             # Mistral
             if p == 'mistral':
-                choices = getattr(chunk, 'data', {})
-                if hasattr(choices, 'choices') and choices.choices:
-                    delta = getattr(choices.choices[0], 'delta', None)
+                data = getattr(chunk, 'data', {})
+                if hasattr(data, 'choices') and data.choices:
+                    delta = getattr(data.choices[0], 'delta', None)
                     if delta:
                         return getattr(delta, 'content', '') or ''
                 # Fallback: newer Mistral SDK shapes
@@ -309,7 +309,7 @@ class StreamingHandler:
         except Exception:
             # SSE delivery is best-effort; never let it break the
             # chat response path.
-            pass
+            logger.debug('SSE send failed for event=%s', event_type, exc_info=True)
 
     # ------------------------------------------------------------------
     # Internal helpers

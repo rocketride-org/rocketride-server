@@ -384,7 +384,7 @@ class TestStreamResponse:
         assert types.count('token') == 3
 
     def test_empty_chunks_produce_empty_answer(self):
-        inst, mock_sse = _make_instance()
+        inst, _mock_sse = _make_instance()
         h = StreamingHandler(inst, provider='openai')
         question = _make_question('test')
 
@@ -576,6 +576,11 @@ def _fake_schema_module():
     Returns a module-like namespace with an ``Answer`` class that
     mirrors the real Answer's ``setAnswer`` / ``getText`` / ``isJson``
     interface without needing Pydantic or the client SDK.
+
+    Note: FakeAnswer intentionally implements only the subset of the
+    real ``Answer`` API exercised by ``StreamingHandler``.  If the real
+    Answer gains new methods that ``StreamingHandler`` starts calling,
+    the relevant tests will fail and FakeAnswer should be updated.
     """
 
     class FakeAnswer:
