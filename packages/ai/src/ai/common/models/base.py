@@ -57,6 +57,7 @@ class BaseLoader:
         the actual ML libraries.
         """
         if cls._REQUIREMENTS_FILE and not cls._dependencies_loaded:
+            import ai.common.torch  # noqa: F401 — side-effect: installs and initialises torch
             from depends import depends
 
             depends(cls._REQUIREMENTS_FILE)
