@@ -8,7 +8,7 @@ import tempfile
 import time
 from typing import Any, Dict
 
-from rocketlib import IGlobalBase, IJson, OPEN_MODE
+from rocketlib import IGlobalBase, OPEN_MODE
 from ai.common.models.base import get_model_server_address
 from .config_resolver import resolve_cloud_api_key, resolve_merged_config
 
@@ -78,8 +78,6 @@ class IGlobal(IGlobalBase):
     def _build_tts_config_dict(self) -> Dict[str, Any]:
         """Build TTS runtime options: ``glb.connConfig`` + ``Config.getNodeConfig`` (same pattern as other filter nodes)."""
         raw, cfg = self._resolve_merged_config()
-        if isinstance(cfg, IJson):
-            cfg = IJson.toDict(cfg)
         engine = self._engine_from_merged_cfg(cfg)
 
         piper_voice = str(self._read_cfg(cfg, 'piper_voice', '') or '').strip()
@@ -160,8 +158,6 @@ class IGlobal(IGlobalBase):
 
     def validateConfig(self):
         raw, cfg = self._resolve_merged_config()
-        if isinstance(cfg, IJson):
-            cfg = IJson.toDict(cfg)
         engine = self._engine_from_merged_cfg(cfg)
         api_key = self._resolve_cloud_api_key(cfg, raw, engine)
         if engine in ('elevenlabs', 'openai') and not api_key:
