@@ -113,7 +113,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         question = question.strip()
         raw_limit = args.get('limit')
-        limit = max(1, min(int(raw_limit), 25000)) if raw_limit is not None else 250
+        try:
+            limit = max(1, min(int(raw_limit), 25000)) if raw_limit is not None else 250
+        except (TypeError, ValueError):
+            limit = 250
 
         sql_result = self.get_sql({'question': question, 'limit': limit})
         if not sql_result.get('valid'):

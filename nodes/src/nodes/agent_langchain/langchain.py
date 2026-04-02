@@ -186,7 +186,7 @@ class LangChainDriver(AgentBase):
             if not isinstance(name, str) or not name.strip():
                 continue
             desc = td.get('description') if isinstance(td.get('description'), str) else f'Invoke host tool: {name}'
-            input_schema = td.get('input_schema')
+            input_schema = td.get('inputSchema')
             if isinstance(input_schema, dict):
                 try:
                     schema_text = json.dumps(input_schema, ensure_ascii=False)

@@ -182,7 +182,7 @@ def _normalize_shortcuts(args):
     """Expand convenience shortcuts (body_json, bearer_token, basic_auth) into canonical form."""
     body_json = args.pop('body_json', None)
     if body_json is not None and not args.get('body'):
-        content_str = json.dumps(body_json) if isinstance(body_json, (dict, list)) else str(body_json)
+        content_str = json.dumps(body_json) if isinstance(body_json, (dict, list)) else body_json if isinstance(body_json, str) else json.dumps(body_json)
         args['body'] = {'type': 'raw', 'raw': {'content': content_str, 'content_type': 'application/json'}}
 
     bearer_token = args.pop('bearer_token', None)

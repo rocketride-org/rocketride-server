@@ -30,7 +30,6 @@ for IInstance tool methods.
 
 from __future__ import annotations
 
-from typing import Optional, Set
 
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE
@@ -39,8 +38,8 @@ from rocketlib import IGlobalBase, OPEN_MODE
 class IGlobal(IGlobalBase):
     """Global state for tool_python."""
 
-    allowed_modules: Optional[Set[str]] = None
-    timeout: Optional[int] = None
+    allowed_modules: set[str] | None = None
+    timeout: int | None = None
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -67,7 +66,7 @@ def _parse_timeout(cfg: dict) -> int | None:
     return max(1, min(value, 1200))
 
 
-def _parse_allowed_modules(cfg: dict) -> Set[str] | None:
+def _parse_allowed_modules(cfg: dict) -> set[str] | None:
     """Extract allowed module names from the array config field.
 
     Returns ``None`` if the field is absent (use sandbox defaults),
@@ -85,7 +84,7 @@ def _parse_allowed_modules(cfg: dict) -> Set[str] | None:
         except (json.JSONDecodeError, TypeError, ValueError):
             return set()
 
-    modules: Set[str] = set()
+    modules: set[str] = set()
     for row in raw:
         if not hasattr(row, 'get'):
             continue

@@ -31,8 +31,6 @@ for IInstance tool methods.
 from __future__ import annotations
 
 import re
-from typing import List, Set
-
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
@@ -50,8 +48,8 @@ _METHOD_FLAGS = {
 class IGlobal(IGlobalBase):
     """Global state for http_request."""
 
-    enabled_methods: Set[str] = set()
-    url_patterns: List[re.Pattern] = []
+    enabled_methods: set[str] | None = None
+    url_patterns: list[re.Pattern] | None = None
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -61,9 +59,9 @@ class IGlobal(IGlobalBase):
         self.enabled_methods, self.url_patterns = self._build_guardrails(cfg)
 
     @staticmethod
-    def _build_guardrails(cfg: dict) -> tuple[Set[str], List[re.Pattern]]:
+    def _build_guardrails(cfg: dict) -> tuple[set[str], list[re.Pattern]]:
         """Read allowed-methods checkboxes and URL whitelist from the config."""
-        enabled: Set[str] = set()
+        enabled: set[str] = set()
         for method, flag in _METHOD_FLAGS.items():
             if cfg.get(flag, method in ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')):
                 enabled.add(method)
@@ -76,7 +74,7 @@ class IGlobal(IGlobalBase):
                 raw_whitelist = json.loads(str(raw_whitelist))
             except (json.JSONDecodeError, TypeError, ValueError):
                 raw_whitelist = []
-        patterns: List[re.Pattern] = []
+        patterns: list[re.Pattern] = []
         for row in raw_whitelist:
             if not hasattr(row, 'get'):
                 continue

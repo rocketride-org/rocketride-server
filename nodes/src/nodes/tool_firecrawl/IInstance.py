@@ -78,7 +78,8 @@ class IInstance(IInstanceBase):
         if metadata is not None and not isinstance(metadata, dict):
             try:
                 metadata = metadata.model_dump(exclude_none=True) if hasattr(metadata, 'model_dump') else {}
-            except Exception:
+            except Exception as e:
+                warning(f'firecrawl: failed to dump metadata: {e}')
                 metadata = {}
 
         return {'success': True, 'content': content, 'metadata': metadata or {}}
@@ -137,7 +138,8 @@ def _normalize_tool_input(input_obj):
             parsed = json.loads(input_obj)
             if isinstance(parsed, dict):
                 input_obj = parsed
-        except Exception:
+        except (json.JSONDecodeError, TypeError) as e:
+            warning(f'firecrawl: failed to parse input as JSON: {e}')
             pass
     if not isinstance(input_obj, dict):
         warning(f'firecrawl: unexpected input type {type(input_obj).__name__}: {input_obj!r}')

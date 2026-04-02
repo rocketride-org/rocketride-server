@@ -25,7 +25,7 @@ class IInstance(IInstanceBase):
     """Pipeline instance for the memory_internal tool node."""
 
     IGlobal: IGlobal
-    _store: MemoryStore = None
+    _store: MemoryStore | None = None
 
     def beginInstance(self) -> None:
         self._store = MemoryStore()
@@ -49,7 +49,7 @@ class IInstance(IInstanceBase):
     def put(self, args):
         """Store a value under a key."""
         if not isinstance(args, dict):
-            args = {}
+            raise ValueError('args must be a dict')
         return self._store.put(args.get('key', ''), args.get('value'))
 
     @tool_function(
@@ -73,7 +73,7 @@ class IInstance(IInstanceBase):
     def get(self, args):
         """Retrieve a value by key."""
         if not isinstance(args, dict):
-            args = {}
+            raise ValueError('args must be a dict')
         return self._store.get(args.get('key', ''))
 
     @tool_function(
@@ -111,5 +111,5 @@ class IInstance(IInstanceBase):
     def clear(self, args):
         """Clear one or all keys."""
         if not isinstance(args, dict):
-            args = {}
+            raise ValueError('args must be a dict')
         return self._store.clear(args.get('key'))

@@ -148,7 +148,7 @@ class CrewDriver(AgentBase):
                 continue
             if not desc:
                 desc = f'Invoke host tool: {name}'
-            input_schema = (td.get('input_schema') or td.get('inputSchema')) if isinstance(td, dict) else None
+            input_schema = td.get('inputSchema') if isinstance(td, dict) else None
             if isinstance(input_schema, dict):
                 try:
                     schema_text = json.dumps(input_schema, ensure_ascii=False)

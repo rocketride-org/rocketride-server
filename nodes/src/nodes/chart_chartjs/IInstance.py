@@ -138,7 +138,7 @@ class IInstance(IInstanceBase):
             'Generate a Chart.js v4 configuration for the provided data' + (f' as a {chart_type} chart' if chart_type else '') + '.',
         )
         q.addQuestion(
-            'Generate the Chart.js configuration JSON for the data above.' if not description else description,
+            description or 'Generate the Chart.js configuration JSON for the data above.',
         )
 
         # Call the pipeline LLM directly
