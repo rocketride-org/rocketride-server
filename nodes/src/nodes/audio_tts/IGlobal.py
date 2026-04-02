@@ -253,8 +253,8 @@ class IGlobal(IGlobalBase):
 
         self._cleanup_stale_outputs()
         ext = output_format if output_format in ('wav', 'mp3') else 'wav'
-        filename = f'tts_{int(time.time() * 1000)}.{ext}'
-        out_path = os.path.join(tempfile.gettempdir(), filename)
+        fd, out_path = tempfile.mkstemp(prefix='tts_', suffix=f'.{ext}')
+        os.close(fd)
 
         runtime_cfg = dict(self._config)
         runtime_cfg['output_path'] = out_path
