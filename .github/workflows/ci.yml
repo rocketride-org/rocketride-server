@@ -79,6 +79,28 @@ jobs:
     secrets: inherit
 
   # ---------------------------------------------------------------------------
+  #  Build passthrough — when build is skipped (docs-only PRs), report success
+  #  under the same check names so branch protection required checks pass.
+  # ---------------------------------------------------------------------------
+  build-skip:
+    name: Build / ${{ matrix.label }}
+    needs: [init, changes]
+    if: >-
+      always() &&
+      needs.init.result == 'success' &&
+      github.event_name == 'pull_request' &&
+      needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - label: Ubuntu 22.04
+          - label: Windows Server 2022
+          - label: macOS (ARM64)
+    steps:
+      - run: echo "Build skipped — no code changes detected"
+
+  # ---------------------------------------------------------------------------
   #  CodeQL — scheduled + push only (not on PRs to avoid blocking releases)
   # ---------------------------------------------------------------------------
   codeql:
