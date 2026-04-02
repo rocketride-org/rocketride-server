@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2026 Aparavi Software AG
+# Copyright (c) 2026 RocketRide
 # =============================================================================
 
 # Helpers that keep audio_tts-specific config rules out of IGlobal.

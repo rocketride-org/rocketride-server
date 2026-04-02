@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2026 Aparavi Software AG
+# Copyright (c) 2026 RocketRide
 # =============================================================================
 
 """Hugging Face Hub helpers for Piper ONNX voices (rhasspy/piper-voices)."""

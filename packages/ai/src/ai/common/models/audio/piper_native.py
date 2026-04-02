@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2026 Aparavi Software AG
+# Copyright (c) 2026 RocketRide
 # =============================================================================
 
 """In-process Piper synthesis via ``piper.PiperVoice`` (no subprocess)."""
