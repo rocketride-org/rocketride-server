@@ -276,7 +276,15 @@ class IGlobal(IGlobalBase):
         runtime_cfg['output_format'] = ext
         self._engine.config = runtime_cfg
 
-        result = self._engine.synthesize(text)
+        try:
+            result = self._engine.synthesize(text)
+        except Exception:
+            try:
+                os.remove(out_path)
+            except OSError:
+                pass
+            raise
+
         path = result['path']
 
         return {'path': path, 'mime_type': result.get('mime_type', 'audio/wav')}
