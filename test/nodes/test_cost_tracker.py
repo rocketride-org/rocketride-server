@@ -453,7 +453,7 @@ class TestIInstanceLifecycle:
 
     def test_deep_copy_prevents_mutation(self):
         """Deep copying the answer prevents upstream mutation."""
-        tracker, answer = self._build_instance()
+        _tracker, answer = self._build_instance()
 
         original_metadata = dict(answer.metadata)
         answer_copy = copy.deepcopy(answer)

@@ -104,7 +104,7 @@ class IInstance(IInstanceBase):
                 # Prevent the answer from propagating downstream
                 self.preventDefault()
                 return
-            debug(f'Cost Tracker: WARNING -- budget exceeded (${budget_status["used"]:.6f} spent)')
+            debug(f'Cost Tracker: WARNING -- budget exceeded (${budget_status["used"]:.6f} spent, limit ${budget_status["limit"]:.6f})')
 
         # Forward the (annotated) answer downstream
         self.instance.writeAnswers(answer)

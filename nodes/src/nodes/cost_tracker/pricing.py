@@ -28,12 +28,12 @@ March 2026.  Custom pricing can be supplied at runtime to override these
 defaults.
 """
 
-from typing import Dict, Optional
+from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Default pricing table (USD per 1 M tokens)
 # ---------------------------------------------------------------------------
-PRICING: Dict[str, Dict[str, float]] = {
+PRICING: dict[str, dict[str, float]] = {
     'gpt-5': {'input': 2.00, 'output': 8.00},
     'gpt-5.1': {'input': 2.00, 'output': 8.00},
     'gpt-5.2': {'input': 2.00, 'output': 8.00},
@@ -55,7 +55,7 @@ PRICING: Dict[str, Dict[str, float]] = {
 }
 
 
-def find_model_pricing(model_name: str, custom_pricing: Optional[Dict[str, Dict[str, float]]] = None) -> Optional[Dict[str, float]]:
+def find_model_pricing(model_name: str, custom_pricing: Optional[dict[str, dict[str, float]]] = None) -> Optional[dict[str, float]]:
     """Return the pricing entry for *model_name* using fuzzy matching.
 
     Resolution order:
@@ -71,7 +71,7 @@ def find_model_pricing(model_name: str, custom_pricing: Optional[Dict[str, Dict[
     normalized = model_name.strip().lower()
 
     # Build merged lookup: custom overrides default (normalize keys to lowercase)
-    merged: Dict[str, Dict[str, float]] = dict(PRICING)
+    merged: dict[str, dict[str, float]] = dict(PRICING)
     if custom_pricing:
         merged.update({k.strip().lower(): v for k, v in custom_pricing.items()})
 
@@ -98,7 +98,7 @@ def find_model_pricing(model_name: str, custom_pricing: Optional[Dict[str, Dict[
     return None
 
 
-def get_price(model: str, input_tokens: int, output_tokens: int, custom_pricing: Optional[Dict[str, Dict[str, float]]] = None) -> float:
+def get_price(model: str, input_tokens: int, output_tokens: int, custom_pricing: Optional[dict[str, dict[str, float]]] = None) -> float:
     """Calculate the cost in USD for a single LLM request.
 
     Args:

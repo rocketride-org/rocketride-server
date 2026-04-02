@@ -25,7 +25,7 @@
 
 import json
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from .pricing import get_price
 
@@ -38,7 +38,7 @@ class CostTracker:
     pipeline threads concurrently.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """Initialise the tracker from a node configuration dict."""
         self._lock = threading.Lock()
 
@@ -52,7 +52,7 @@ class CostTracker:
 
         # Custom pricing override (JSON string or dict)
         custom_pricing_raw = config.get('custom_pricing_json')
-        self._custom_pricing: Optional[Dict[str, Dict[str, float]]] = None
+        self._custom_pricing: Optional[dict[str, dict[str, float]]] = None
         if custom_pricing_raw:
             if isinstance(custom_pricing_raw, str):
                 self._custom_pricing = json.loads(custom_pricing_raw)
@@ -61,14 +61,14 @@ class CostTracker:
 
         # Accumulation state
         self._total_cost: float = 0.0
-        self._entries: List[Dict[str, Any]] = []
-        self._per_model: Dict[str, Dict[str, Any]] = {}
+        self._entries: list[dict[str, Any]] = []
+        self._per_model: dict[str, dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
     # Cost calculation
     # ------------------------------------------------------------------
 
-    def calculate_cost(self, model: str, input_tokens: int, output_tokens: int) -> Dict[str, Any]:
+    def calculate_cost(self, model: str, input_tokens: int, output_tokens: int) -> dict[str, Any]:
         """Calculate cost for a single request without tracking it.
 
         Returns:
@@ -87,7 +87,7 @@ class CostTracker:
     # Tracking
     # ------------------------------------------------------------------
 
-    def track(self, cost_entry: Dict[str, Any]) -> None:
+    def track(self, cost_entry: dict[str, Any]) -> None:
         """Record a cost entry and accumulate totals.
 
         ``cost_entry`` should be a dict as returned by
@@ -122,7 +122,7 @@ class CostTracker:
         with self._lock:
             return self._total_cost
 
-    def check_budget(self, budget_limit: Optional[float] = None) -> Dict[str, Any]:
+    def check_budget(self, budget_limit: Optional[float] = None) -> dict[str, Any]:
         """Check spending against a budget limit.
 
         Args:
@@ -160,7 +160,7 @@ class CostTracker:
             'alert_threshold_reached': percent_used >= self._alert_threshold_pct,
         }
 
-    def get_summary(self) -> Dict[str, Any]:
+    def get_summary(self) -> dict[str, Any]:
         """Return a per-model cost breakdown plus the overall total."""
         with self._lock:
             return {
