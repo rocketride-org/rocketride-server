@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2026 Aparavi Software AG
+# Copyright (c) 2026 RocketRide
 # =============================================================================
 
 """Piper voice presets — shared Hub cache (see ``ai.common.models.audio.piper_hub``)."""
