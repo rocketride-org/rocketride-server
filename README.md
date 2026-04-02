@@ -10,18 +10,9 @@
 </p>
 
 <p>
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/cplusplus/white" />
-  <img src="https://cdn.simpleicons.org/cplusplus/black" width="28" height="28" alt="C++" />
-</picture>&nbsp;&nbsp;
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/python/white" />
-  <img src="https://cdn.simpleicons.org/python/black" width="28" height="28" alt="Python" />
-</picture>&nbsp;&nbsp;
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/typescript/white" />
-  <img src="https://cdn.simpleicons.org/typescript/black" width="28" height="28" alt="TypeScript" />
-</picture>
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-cpp.png" alt="C++" />&nbsp;&nbsp;
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-python.png" alt="Python" />&nbsp;&nbsp;
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-typescript.png" alt="TypeScript" />
 </p>
 
 <p>
