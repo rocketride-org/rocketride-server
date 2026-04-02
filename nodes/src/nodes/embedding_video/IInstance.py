@@ -21,13 +21,9 @@
 # SOFTWARE.
 # =============================================================================
 
-import base64
-import logging
-from rocketlib import IInstanceBase, AVI_ACTION
+from rocketlib import IInstanceBase, AVI_ACTION, debug, warning
 from ai.common.schema import Doc, DocMetadata
 from .IGlobal import IGlobal
-
-logger = logging.getLogger(__name__)
 
 # Supported video MIME types and their corresponding file extensions.
 SUPPORTED_VIDEO_TYPES = {
@@ -61,6 +57,7 @@ class IInstance(IInstanceBase):
         super().__init__(*args, **kwargs)
         self._frame_chunk_id = 0
         self._video_data = None
+        self._mime_type = None
 
     def writeVideo(self, action: int, mimeType: str, buffer: bytes):
         """
@@ -83,7 +80,7 @@ class IInstance(IInstanceBase):
                 max_size = self.IGlobal.max_video_size_bytes
                 if len(self._video_data) + len(buffer) > max_size:
                     max_mb = max_size / (1024 * 1024)
-                    logger.error('Video exceeds maximum allowed size of %.0f MB, rejecting', max_mb)
+                    warning(f'Video exceeds maximum allowed size of {max_mb:.0f} MB, rejecting')
                     self._video_data = None
                     return
                 self._video_data += buffer
@@ -104,10 +101,10 @@ class IInstance(IInstanceBase):
         Args:
             video_bytes (bytes): The complete video file content.
         """
-        import cv2
+        from ai.common.opencv import cv2
+        from ai.common.image import ImageProcessor
         import tempfile
         import os
-        from PIL import Image as PILImage
 
         # Write video bytes to a temporary file for OpenCV to read.
         # OpenCV's VideoCapture requires a file path or device index.
@@ -120,7 +117,7 @@ class IInstance(IInstanceBase):
             cap = cv2.VideoCapture(tmp_path)
             try:
                 if not cap.isOpened():
-                    logger.error('Failed to open video file for frame extraction')
+                    warning('Failed to open video file for frame extraction')
                     return
 
                 fps = cap.get(cv2.CAP_PROP_FPS)
@@ -148,6 +145,7 @@ class IInstance(IInstanceBase):
 
                 frames_extracted = 0
                 frame_interval_frames = max(1, int(interval * fps))
+                documents = []
 
                 current_frame_pos = int(start_time * fps) if start_time > 0 else 0
 
@@ -170,19 +168,17 @@ class IInstance(IInstanceBase):
                     # Calculate the timestamp for this frame.
                     time_stamp = current_frame_pos / fps
 
-                    # Convert BGR (OpenCV default) to RGB for the embedding model.
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-                    # Convert numpy array to PIL Image for the embedding model.
-                    pil_image = PILImage.fromarray(frame_rgb)
+                    # Convert BGR frame to PNG bytes, then load as PIL Image via ImageProcessor.
+                    _, png_buffer = cv2.imencode('.png', frame)
+                    frame_bytes = png_buffer.tobytes()
+                    pil_image = ImageProcessor.load_image_from_bytes(frame_bytes)
 
                     # Generate the embedding with device lock for thread safety.
                     with self.IGlobal.device_lock:
                         embedding = self.IGlobal.embedding.create_image_embedding(pil_image)
 
-                    # Encode the frame as base64 PNG for document storage.
-                    _, png_buffer = cv2.imencode('.png', frame)
-                    frame_base64 = base64.b64encode(png_buffer.tobytes()).decode('utf-8')
+                    # Encode the frame as base64 for document storage.
+                    frame_base64 = ImageProcessor.get_base64(pil_image)
 
                     # Create metadata with frame number and timestamp.
                     metadata = DocMetadata(
@@ -200,8 +196,7 @@ class IInstance(IInstanceBase):
                     doc.embedding = embedding if isinstance(embedding, list) else embedding.tolist()
                     doc.embedding_model = self.IGlobal.embedding.model_name
 
-                    # Pass the document to the next pipeline stage.
-                    self.instance.writeDocuments([doc])
+                    documents.append(doc)
 
                     self._frame_chunk_id += 1
                     frames_extracted += 1
@@ -209,11 +204,11 @@ class IInstance(IInstanceBase):
                     # Advance to the next frame position.
                     current_frame_pos += frame_interval_frames
 
-                logger.info(
-                    'Video embedding complete: extracted %d frames, interval=%.1fs',
-                    frames_extracted,
-                    interval,
-                )
+                # Emit all frame documents in a single call.
+                if documents:
+                    self.instance.writeDocuments(documents)
+
+                debug(f'Video embedding complete: extracted {frames_extracted} frames, interval={interval:.1f}s')
             finally:
                 cap.release()
 

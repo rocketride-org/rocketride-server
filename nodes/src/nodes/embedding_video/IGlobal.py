@@ -23,7 +23,7 @@
 
 import os
 import threading
-from rocketlib import IGlobalBase
+from rocketlib import IGlobalBase, OPEN_MODE
 from ai.common.config import Config
 
 
@@ -46,9 +46,12 @@ class IGlobal(IGlobalBase):
         - Loading frame extraction configuration (interval, max frames, etc.).
         - Creating a thread lock for device access during video processing.
         """
+        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
+            return
+
         from depends import depends
 
-        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
         depends(requirements)
 
         # Import torch to ensure the PyTorch framework is loaded.
