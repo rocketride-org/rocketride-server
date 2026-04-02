@@ -343,7 +343,10 @@ class StoreMixin(DAPClient):
                     if config.get('mode') == 'Source':
                         sources.append({'id': component.get('id'), 'provider': component.get('provider'), 'name': config.get('name', component.get('id'))})
                 items.append({id_key: item_id, 'name': pipeline.get('name', 'Untitled'), 'description': pipeline.get('description', ''), 'sources': sources, 'totalComponents': len(pipeline.get('components', []))})
-            except Exception:
+            except Exception as e:
+                import logging
+
+                logging.getLogger(__name__).debug('Failed to read %s/%s: %s', directory, entry['name'], e)
                 continue
 
         return {list_key: items, 'count': len(items)}

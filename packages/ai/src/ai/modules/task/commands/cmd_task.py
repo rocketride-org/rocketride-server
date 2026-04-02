@@ -401,7 +401,7 @@ class TaskCommands(DAPConn):
             length = 4_194_304
         length = min(length, 4_194_304)
 
-        data = await fs.read_chunk(handle, offset, length)
+        data = await fs.read_chunk(handle, offset, length, connection_id=self._connection_id)
         response = self.build_response(request, body={'size': len(data)})
         response['arguments'] = {'data': data}
         return response
@@ -413,7 +413,7 @@ class TaskCommands(DAPConn):
         data = args.get('data', b'')
         if isinstance(data, str):
             data = data.encode('utf-8')
-        written = await fs.write_chunk(handle, data)
+        written = await fs.write_chunk(handle, data, connection_id=self._connection_id)
         return self.build_response(request, body={'bytesWritten': written})
 
     async def _store_fs_close(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -423,9 +423,9 @@ class TaskCommands(DAPConn):
         mode = args.get('mode', 'r')
 
         if mode == 'w':
-            await fs.close_write(handle)
+            await fs.close_write(handle, connection_id=self._connection_id)
         else:
-            await fs.close_read(handle)
+            await fs.close_read(handle, connection_id=self._connection_id)
         return self.build_response(request)
 
     async def _store_fs_delete(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:

@@ -348,10 +348,6 @@ class FilesystemStore(IStore):
         except Exception as e:
             raise StorageError(f'Failed to close file {filename}: {e}') from e
 
-    async def abort_write(self, filename: str, context) -> None:
-        """Close the file, committing whatever has been written."""
-        await self.close_write(filename, context)
-
     async def open_read(self, filename: str) -> dict:
         """Open a file for reading. Returns context with aiofiles handle and file size."""
         try:

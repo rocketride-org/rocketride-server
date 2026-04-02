@@ -389,10 +389,6 @@ class S3Store(IStore):
                     pass
             raise StorageError(f'Failed to finalize upload for {filename}: {e}') from e
 
-    async def abort_write(self, filename: str, context) -> None:
-        """Close the upload, committing whatever has been written."""
-        await self.close_write(filename, context)
-
     async def open_read(self, filename: str) -> dict:
         """Get file size via head_object for ranged reads."""
         try:

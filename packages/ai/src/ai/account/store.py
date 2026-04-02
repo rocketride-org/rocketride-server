@@ -271,10 +271,6 @@ class IStore(ABC):
         """Finalize and commit the write session."""
         await self.write_bytes(filename, bytes(context['buffer']))
 
-    async def abort_write(self, filename: str, context: Any) -> None:
-        """Close a write session, committing whatever data has been written."""
-        await self.close_write(filename, context)
-
     async def open_read(self, filename: str) -> dict:
         """
         Begin a read session for the given file.

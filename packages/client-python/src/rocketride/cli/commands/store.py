@@ -81,6 +81,11 @@ class StoreCommand(BaseCommand):
 
         entries = result.get('entries', [])
         if not entries:
+            stat = await client.fs_stat(path) if path else {'exists': True, 'type': 'dir'}
+            if stat.get('exists') and stat.get('type') == 'dir':
+                print(f'    {0:>8,} File(s)  {0:>14,} bytes')
+                print(f'    {0:>8,} Dir(s)')
+                return 0
             print('File Not Found')
             return 0
 

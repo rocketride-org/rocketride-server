@@ -1463,7 +1463,8 @@ export class RocketRideClient extends DAPClient {
 				const pipeline = await this.fsReadJson(`.projects/${entry.name}`);
 				const sources = (pipeline.components || []).filter((c: any) => c.config?.mode === 'Source').map((c: any) => ({ id: c.id, provider: c.provider, name: c.config?.name || c.id }));
 				projects.push({ id, name: pipeline.name || 'Untitled', sources, totalComponents: (pipeline.components || []).length });
-			} catch {
+			} catch (err) {
+				console.debug(`[RocketRideClient] Failed to read .projects/${entry.name}:`, err);
 				continue;
 			}
 		}
@@ -1505,7 +1506,8 @@ export class RocketRideClient extends DAPClient {
 				const pipeline = await this.fsReadJson(`.templates/${entry.name}`);
 				const sources = (pipeline.components || []).filter((c: any) => c.config?.mode === 'Source').map((c: any) => ({ id: c.id, provider: c.provider, name: c.config?.name || c.id }));
 				templates.push({ id, name: pipeline.name || 'Untitled', sources, totalComponents: (pipeline.components || []).length });
-			} catch {
+			} catch (err) {
+				console.debug(`[RocketRideClient] Failed to read .templates/${entry.name}:`, err);
 				continue;
 			}
 		}

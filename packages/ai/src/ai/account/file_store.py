@@ -125,25 +125,26 @@ class FileStore:
         self._handles[handle.handle_id] = handle
         return handle.handle_id
 
-    async def write_chunk(self, handle_id: str, data: bytes) -> int:
+    async def write_chunk(self, handle_id: str, data: bytes, connection_id: int = 0) -> int:
         """
         Write data to an open write handle.
 
         Args:
             handle_id: Handle returned by open_write.
             data: Bytes to append.
+            connection_id: Caller's connection ID for ownership check.
 
         Returns:
             Number of bytes written.
         """
-        handle = self._get_handle(handle_id, FileHandleMode.WRITE)
+        handle = self._get_handle(handle_id, FileHandleMode.WRITE, connection_id)
         written = await self._store.write_chunk(handle.path, handle.context, data)
         handle.bytes_written += written
         return written
 
-    async def close_write(self, handle_id: str) -> None:
+    async def close_write(self, handle_id: str, connection_id: int = 0) -> None:
         """Close a write handle, committing the data."""
-        handle = self._get_handle(handle_id, FileHandleMode.WRITE)
+        handle = self._get_handle(handle_id, FileHandleMode.WRITE, connection_id)
         try:
             await self._store.close_write(handle.path, handle.context)
         finally:
@@ -175,7 +176,7 @@ class FileStore:
         self._handles[handle.handle_id] = handle
         return {'handle': handle.handle_id, 'size': result['size']}
 
-    async def read_chunk(self, handle_id: str, offset: int, length: int = MAX_CHUNK_SIZE) -> bytes:
+    async def read_chunk(self, handle_id: str, offset: int, length: int = MAX_CHUNK_SIZE, connection_id: int = 0) -> bytes:
         """
         Read data from an open read handle.
 
@@ -192,12 +193,12 @@ class FileStore:
         if length <= 0:
             raise StorageError(f'Read length must be positive, got {length}')
         length = min(length, MAX_CHUNK_SIZE)
-        handle = self._get_handle(handle_id, FileHandleMode.READ)
+        handle = self._get_handle(handle_id, FileHandleMode.READ, connection_id)
         return await self._store.read_chunk(handle.path, handle.context, offset, length)
 
-    async def close_read(self, handle_id: str) -> None:
+    async def close_read(self, handle_id: str, connection_id: int = 0) -> None:
         """Close a read handle."""
-        handle = self._get_handle(handle_id, FileHandleMode.READ)
+        handle = self._get_handle(handle_id, FileHandleMode.READ, connection_id)
         try:
             await self._store.close_read(handle.path, handle.context)
         finally:
@@ -382,8 +383,8 @@ class FileStore:
     # Private Methods
     # =========================================================================
 
-    def _get_handle(self, handle_id: str, expected_mode: FileHandleMode) -> FileHandle:
-        """Look up a handle and validate its state."""
+    def _get_handle(self, handle_id: str, expected_mode: FileHandleMode, connection_id: int = 0) -> FileHandle:
+        """Look up a handle and validate its state and ownership."""
         handle = self._handles.get(handle_id)
         if handle is None:
             raise StorageError(f'Invalid handle: {handle_id}')
@@ -391,6 +392,8 @@ class FileStore:
             raise StorageError(f'Handle already closed: {handle_id}')
         if handle.mode != expected_mode:
             raise StorageError(f'Wrong handle mode: expected {expected_mode.value}, got {handle.mode.value}')
+        if connection_id and handle.connection_id and handle.connection_id != connection_id:
+            raise StorageError('Handle belongs to another connection')
         return handle
 
     def _release_handle(self, handle: FileHandle) -> None:

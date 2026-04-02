@@ -978,7 +978,13 @@ export class RocketRideCLI {
 					const result = await client.fsListDir(path || '');
 					const entries = result.entries || [];
 					if (entries.length === 0) {
-						console.log('File Not Found');
+						const stat = path ? await client.fsStat(path) : { exists: true, type: 'dir' as const };
+						if (stat.exists && stat.type === 'dir') {
+							console.log(`    ${(0).toLocaleString().padStart(8)} File(s)  ${(0).toLocaleString().padStart(14)} bytes`);
+							console.log(`    ${(0).toLocaleString().padStart(8)} Dir(s)`);
+						} else {
+							console.log('File Not Found');
+						}
 					} else {
 						let totalSize = 0;
 						let fileCount = 0;
