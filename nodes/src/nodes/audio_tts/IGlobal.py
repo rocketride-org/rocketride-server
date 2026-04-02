@@ -107,8 +107,8 @@ class IGlobal(IGlobalBase):
             'openai_use_model_server': openai_use_model_server,
             'elevenlabs_use_model_server': elevenlabs_use_model_server,
             'model': self._resolve_tts_model(cfg, engine),
-            'kokoro_lang_code': str(self._read_cfg(cfg, 'kokoro_lang_code', 'a') or 'a').strip(),
             'kokoro_voice': str(self._read_cfg(cfg, 'kokoro_voice', 'af_heart') or 'af_heart').strip(),
+            'kokoro_lang_code': (str(self._read_cfg(cfg, 'kokoro_voice', 'af_heart') or 'af_heart').strip() or 'a')[0],
             'api_key': self._resolve_cloud_api_key(cfg, raw, engine),
             'piper_bin': 'piper',
             'ffmpeg_bin': 'ffmpeg',
@@ -187,7 +187,6 @@ class IGlobal(IGlobalBase):
             return (
                 'kokoro',
                 str(cfg.get('kokoro_voice', '') or '').strip(),
-                str(cfg.get('kokoro_lang_code', '') or '').strip(),
                 bool(cfg.get('kokoro_use_model_server')),
             )
         if e in ('bark', 'bak'):

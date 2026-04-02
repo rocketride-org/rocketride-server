@@ -35,7 +35,6 @@
 			},
 			"kokoro": {
 				"engine": "kokoro",
-				"kokoro_lang_code": "a",
 				"kokoro_voice": "af_heart"
 			},
 			"bark": {
@@ -57,27 +56,10 @@
 		}
 	},
 	"fields": {
-		"audio_tts.kokoro_lang_code": {
-			"type": "string",
-			"title": "Language",
-			"description": "Must match the Kokoro voice family (see hexgrad/Kokoro-82M VOICES.md).",
-			"default": "a",
-			"enum": [
-				["a", "American English"],
-				["b", "British English"],
-				["e", "Spanish"],
-				["f", "French"],
-				["h", "Hindi"],
-				["i", "Italian"],
-				["j", "Japanese (may need misaki[ja])"],
-				["p", "Brazilian Portuguese"],
-				["z", "Mandarin Chinese (may need misaki[zh])"]
-			]
-		},
 		"audio_tts.kokoro_voice": {
 			"type": "string",
 			"title": "Voice",
-			"description": "Kokoro voice id; pair with Language (e.g. af_* / am_* with American English).",
+			"description": "Kokoro voice. The language is derived automatically from the voice prefix (af_/am_ → American, bf_/bm_ → British, ef_/em_ → Spanish, etc.).",
 			"default": "af_heart",
 			"enum": [
 				["af_heart", "American — af_heart"],
@@ -239,7 +221,7 @@
 		},
 		"audio_tts.form.kokoro": {
 			"object": "kokoro",
-			"properties": ["audio_tts.kokoro_lang_code", "audio_tts.kokoro_voice"]
+			"properties": ["audio_tts.kokoro_voice"]
 		},
 		"audio_tts.form.bark": {
 			"object": "bark",
