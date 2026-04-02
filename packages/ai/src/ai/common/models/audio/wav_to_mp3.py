@@ -1,6 +1,6 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2026 RocketRide
+# Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
 """WAV → MP3 without a separate ``ffmpeg`` install (``lameenc`` in-process)."""
