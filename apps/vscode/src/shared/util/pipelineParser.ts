@@ -71,34 +71,49 @@ export interface ParsedPipelineFile {
 	errors: string[];
 }
 
-export class PipelineFileParser {
+/**
+ * Lightweight service definition used only for source-component detection.
+ * Mirrors the `classType` array from the full service catalog without
+ * pulling in UI-specific types.
+ */
+export interface ServiceClassInfo {
+	classType?: string[];
+}
 
+export class PipelineFileParser {
 	/**
 	 * Parse a pipeline file from file system
+	 *
+	 * @param filePath  Absolute path to the .pipe / .pipe.json file
+	 * @param services  Optional service catalog for classType-based source detection
 	 */
-	static async parseFile(filePath: string): Promise<ParsedPipelineFile> {
+	static async parseFile(filePath: string, services?: Record<string, ServiceClassInfo>): Promise<ParsedPipelineFile> {
 		try {
 			const content = await fs.promises.readFile(filePath, 'utf8');
-			return this.parseContent(content, filePath);
+			return this.parseContent(content, filePath, services);
 		} catch (error) {
 			return {
 				filePath,
 				isValid: false,
 				sourceComponents: [],
-				errors: [`Failed to read file: ${error instanceof Error ? error.message : 'Unknown error'}`]
+				errors: [`Failed to read file: ${error instanceof Error ? error.message : 'Unknown error'}`],
 			};
 		}
 	}
 
 	/**
 	 * Parse pipeline content from string
+	 *
+	 * @param content   Raw JSON text of the pipeline file
+	 * @param filePath  File path (used for diagnostics / map key)
+	 * @param services  Optional service catalog for classType-based source detection
 	 */
-	static parseContent(content: string, filePath: string): ParsedPipelineFile {
+	static parseContent(content: string, filePath: string, services?: Record<string, ServiceClassInfo>): ParsedPipelineFile {
 		const result: ParsedPipelineFile = {
 			filePath,
 			isValid: false,
 			sourceComponents: [],
-			errors: []
+			errors: [],
 		};
 
 		try {
@@ -117,11 +132,10 @@ export class PipelineFileParser {
 			if (result.isValid) {
 				result.pipeline = pipelineData;
 
-				// Extract source components
-				const sourceComponents = this.getSourceComponents(pipelineData);
-				result.sourceComponents = sourceComponents.map(component => this.parseSourceComponent(component));
+				// Extract source components using both config.mode and service classType
+				const sourceComponents = this.getSourceComponents(pipelineData, services);
+				result.sourceComponents = sourceComponents.map((component) => this.parseSourceComponent(component));
 			}
-
 		} catch (jsonError) {
 			result.errors.push(`Invalid JSON: ${jsonError instanceof Error ? jsonError.message : 'Unknown JSON error'}`);
 		}
@@ -143,7 +157,7 @@ export class PipelineFileParser {
 			name: component.name,
 			description: component.description,
 			warnings,
-			icon: 'default' // Default icon, you'll replace this with SVG logic
+			icon: 'default', // Default icon, you'll replace this with SVG logic
 		};
 	}
 
@@ -177,9 +191,7 @@ export class PipelineFileParser {
 			});
 
 			// Check for duplicate component IDs
-			const componentIds = record.components
-				.map((c: unknown) => (c as Record<string, unknown>).id)
-				.filter(Boolean);
+			const componentIds = record.components.map((c: unknown) => (c as Record<string, unknown>).id).filter(Boolean);
 			const duplicates = componentIds.filter((id: unknown, index: number) => componentIds.indexOf(id) !== index);
 			if (duplicates.length > 0) {
 				errors.push(`Duplicate component IDs found: ${(duplicates as string[]).join(', ')}`);
@@ -188,26 +200,44 @@ export class PipelineFileParser {
 
 		return {
 			isValid: errors.length === 0,
-			errors
+			errors,
 		};
 	}
 
 	/**
-	 * Get source components (components with mode: "Source")
+	 * Get source components.
+	 *
+	 * A component is considered a source when:
+	 *   1. Its config explicitly contains `mode: "Source"` (set by the engine
+	 *      during execution or in manually authored pipeline files), OR
+	 *   2. Its provider's service definition has `classType` containing
+	 *      `"source"` (the runtime catalog provided by the engine).
+	 *
+	 * The second check is essential because the canvas editor does not write
+	 * `config.mode` — only the engine adds it at execution time, so freshly
+	 * saved .pipe files from the canvas lack the flag.
 	 */
-	private static getSourceComponents(pipeline: Pipeline): PipelineComponent[] {
-		return pipeline.components.filter(c =>
-			c.config &&
-			typeof c.config === 'object' &&
-			'mode' in c.config &&
-			c.config.mode === 'Source'
-		);
+	private static getSourceComponents(pipeline: Pipeline, services?: Record<string, ServiceClassInfo>): PipelineComponent[] {
+		return pipeline.components.filter((c) => {
+			// Check 1: explicit config.mode === 'Source'
+			if (c.config && typeof c.config === 'object' && 'mode' in c.config && c.config.mode === 'Source') {
+				return true;
+			}
+			// Check 2: service catalog classType includes 'source'
+			if (services && c.provider) {
+				const svc = services[c.provider] as ServiceClassInfo | undefined;
+				if (svc?.classType?.includes('source')) {
+					return true;
+				}
+			}
+			return false;
+		});
 	}
 
 	/**
 	 * Find component by ID
 	 */
 	static findComponent(pipeline: Pipeline, componentId: string): PipelineComponent | undefined {
-		return pipeline.components.find(c => c.id === componentId);
+		return pipeline.components.find((c) => c.id === componentId);
 	}
 }

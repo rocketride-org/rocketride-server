@@ -395,7 +395,17 @@ export class RocketRideClient extends DAPClient {
 		try {
 			const url = new URL(normalized);
 
-			if (!url.port && !url.hostname.includes('rocketride.ai')) {
+			// The URL API silently strips ports that are default-for-scheme
+			// (e.g. :443 on https, :80 on http), so url.port alone cannot
+			// distinguish "no port given" from "scheme-default port given".
+			// Check the raw input for an explicit `:digits` after the scheme.
+			const withoutScheme = normalized.replace(/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//, '');
+			const authority = withoutScheme.split(/[/?#]/, 1)[0] ?? '';
+			const hasExplicitPort = authority.startsWith('[')
+				? /\]:\d+$/.test(authority) // IPv6 literal with explicit port
+				: /:\d+$/.test(authority);  // hostname/IPv4 with explicit port
+
+			if (!url.port && !hasExplicitPort && !url.hostname.includes('rocketride.ai')) {
 				url.port = CONST_DEFAULT_WEB_PORT;
 			}
 
