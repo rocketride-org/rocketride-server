@@ -1,27 +1,16 @@
 {
 	"title": "Model Router",
 	"protocol": "router_llm://",
-	"classType": [
-		"router"
-	],
+	"classType": ["router"],
 	"capabilities": [],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.router_llm",
 	"prefix": "router_llm",
-	"description": [
-		"An intelligent LLM model router that selects the optimal provider and model ",
-		"based on configurable routing strategies. Supports complexity-based routing ",
-		"(simple queries to cheap models, complex to powerful ones), cost-aware routing ",
-		"(switches to cheaper models when budget threshold is hit), latency-optimized ",
-		"routing, ordered fallback chains, and random A/B traffic splitting for model ",
-		"comparison experiments."
-	],
+	"description": ["An intelligent LLM model router that selects the optimal provider and model ", "based on configurable routing strategies. Supports complexity-based routing ", "(simple queries to cheap models, complex to powerful ones), cost-aware routing ", "(switches to cheaper models when budget threshold is hit), latency-optimized ", "routing, ordered fallback chains, and deterministic A/B traffic splitting for model ", "comparison experiments."],
 	"icon": "util-infrastructure.svg",
 	"lanes": {
-		"questions": [
-			"questions"
-		]
+		"questions": ["questions"]
 	},
 	"input": [
 		{
@@ -137,24 +126,14 @@
 			"description": "Routing profile",
 			"type": "string",
 			"default": "complexity",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			]
+			"enum": ["*>preconfig.profiles.*.title"]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "Model Router",
-			"properties": [
-				"router.profile",
-				"router.strategy",
-				"router.primary_model",
-				"router.fallback_models",
-				"router.budget_limit",
-				"router.ab_split_percent",
-				"router.complexity_threshold"
-			]
+			"properties": ["router.profile", "router.strategy", "router.primary_model", "router.fallback_models", "router.budget_limit", "router.ab_split_percent", "router.complexity_threshold"]
 		}
 	]
 }

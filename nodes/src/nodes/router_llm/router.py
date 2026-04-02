@@ -137,8 +137,16 @@ class ModelRouter:
             self.fallback_models = []
 
         self.budget_limit: float = float(config.get('budget_limit', 0.0))
+        if self.budget_limit < 0:
+            raise ValueError(f'budget_limit must be >= 0, got {self.budget_limit}')
+
         self.ab_split_percent: int = int(config.get('ab_split_percent', 50))
+        if not (0 <= self.ab_split_percent <= 100):
+            raise ValueError(f'ab_split_percent must be between 0 and 100, got {self.ab_split_percent}')
+
         self.complexity_threshold: int = int(config.get('complexity_threshold', 50))
+        if self.complexity_threshold < 1:
+            raise ValueError(f'complexity_threshold must be >= 1, got {self.complexity_threshold}')
 
         # Runtime state — guarded by _lock for thread safety across pipeline threads
         self._lock = threading.Lock()
@@ -202,24 +210,33 @@ class ModelRouter:
         with self._lock:
             self._request_count += 1
 
+        primary_info = _get_model_info(self.primary_model)
+
         if score >= self.complexity_threshold:
             # Complex query -> tier 1 (powerful)
-            info = _get_model_info(self.primary_model) if _get_model_info(self.primary_model)['tier'] == 1 else _get_model_info('claude-opus')
+            info = primary_info if primary_info['tier'] == 1 else _get_model_info('claude-opus')
             info['reason'] = f'complexity score {score} >= threshold {self.complexity_threshold}, routed to powerful model'
         elif score >= self.complexity_threshold // 2:
             # Medium complexity -> tier 2 (balanced)
-            info = _get_model_info(self.primary_model) if _get_model_info(self.primary_model)['tier'] == 2 else _get_model_info('claude-sonnet')
+            info = primary_info if primary_info['tier'] == 2 else _get_model_info('claude-sonnet')
             info['reason'] = f'complexity score {score}, routed to balanced model'
         else:
             # Simple query -> tier 3 (fast/cheap)
-            info = _get_model_info('claude-haiku')
+            info = primary_info if primary_info['tier'] == 3 else _get_model_info('claude-haiku')
             info['reason'] = f'complexity score {score} < {self.complexity_threshold // 2}, routed to fast model'
 
         info['complexity_score'] = score
         return info
 
     def _route_cost_aware(self, text: str) -> Dict[str, Any]:
-        """Route based on cumulative cost against budget."""
+        """Route based on cumulative cost against budget.
+
+        Note: This strategy requires downstream nodes to call
+        ``router.record_cost(amount)`` after each LLM invocation so that
+        cumulative spend is tracked.  Without that integration the budget
+        will never be consumed and the router will always use the primary
+        model.
+        """
         with self._lock:
             self._request_count += 1
             current_cost = self._cumulative_cost
@@ -280,6 +297,11 @@ class ModelRouter:
         with self._lock:
             self._request_count += 1
 
+        # Determine group-B model, ensuring it differs from primary
+        fallback = self.fallback_models[0] if self.fallback_models else self.primary_model
+        if fallback == self.primary_model and len(self.fallback_models) > 1:
+            fallback = self.fallback_models[1]
+
         # Deterministic bucket via hash
         digest = hashlib.sha256(text.encode('utf-8')).hexdigest()
         bucket = int(digest[:8], 16) % 100  # 0-99
@@ -289,10 +311,13 @@ class ModelRouter:
             info['reason'] = f'A/B test bucket {bucket} < {self.ab_split_percent}%, assigned to group A (primary)'
             info['ab_group'] = 'A'
         else:
-            fallback = self.fallback_models[0] if self.fallback_models else self.primary_model
             info = _get_model_info(fallback)
             info['reason'] = f'A/B test bucket {bucket} >= {self.ab_split_percent}%, assigned to group B (fallback)'
             info['ab_group'] = 'B'
+
+        # Warn if A/B test is effectively a no-op (both groups use same model)
+        if fallback == self.primary_model:
+            info['ab_warning'] = 'group A and group B use the same model; configure a distinct fallback_models entry for meaningful A/B testing'
 
         info['ab_bucket'] = bucket
         return info

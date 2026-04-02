@@ -203,7 +203,7 @@ class TestModelTiers:
         assert len(MODEL_TIERS) == 9
 
     def test_each_entry_has_required_keys(self):
-        for name, entry in MODEL_TIERS.items():
+        for entry in MODEL_TIERS.values():
             assert 'provider' in entry
             assert 'model' in entry
             assert 'tier' in entry
@@ -397,6 +397,103 @@ class TestABTestRouting:
         result = router.select_model('Hello')
         assert 'ab_bucket' in result
         assert 0 <= result['ab_bucket'] <= 99
+
+
+# ===========================================================================
+# Test: Initialization Validation
+# ===========================================================================
+
+
+class TestInitValidation:
+    """Tests for range validation on router configuration."""
+
+    def test_negative_budget_limit_rejected(self):
+        with pytest.raises(ValueError, match='budget_limit must be >= 0'):
+            ModelRouter({'strategy': 'complexity', 'budget_limit': -1.0})
+
+    def test_zero_budget_limit_accepted(self):
+        router = ModelRouter({'strategy': 'complexity', 'budget_limit': 0})
+        assert router.budget_limit == 0.0
+
+    def test_ab_split_below_zero_rejected(self):
+        with pytest.raises(ValueError, match='ab_split_percent must be between 0 and 100'):
+            ModelRouter({'strategy': 'ab_test', 'ab_split_percent': -1})
+
+    def test_ab_split_above_100_rejected(self):
+        with pytest.raises(ValueError, match='ab_split_percent must be between 0 and 100'):
+            ModelRouter({'strategy': 'ab_test', 'ab_split_percent': 101})
+
+    def test_ab_split_boundary_values_accepted(self):
+        r0 = ModelRouter({'strategy': 'ab_test', 'ab_split_percent': 0})
+        assert r0.ab_split_percent == 0
+        r100 = ModelRouter({'strategy': 'ab_test', 'ab_split_percent': 100})
+        assert r100.ab_split_percent == 100
+
+    def test_complexity_threshold_zero_rejected(self):
+        with pytest.raises(ValueError, match='complexity_threshold must be >= 1'):
+            ModelRouter({'strategy': 'complexity', 'complexity_threshold': 0})
+
+    def test_complexity_threshold_negative_rejected(self):
+        with pytest.raises(ValueError, match='complexity_threshold must be >= 1'):
+            ModelRouter({'strategy': 'complexity', 'complexity_threshold': -5})
+
+    def test_complexity_threshold_one_accepted(self):
+        router = ModelRouter({'strategy': 'complexity', 'complexity_threshold': 1})
+        assert router.complexity_threshold == 1
+
+
+# ===========================================================================
+# Test: Complexity Routing Honors Tier-3 Primary Model
+# ===========================================================================
+
+
+class TestComplexityRoutingTier3Primary:
+    """Verify that simple queries use the configured primary_model when it is tier 3."""
+
+    def test_tier3_primary_used_for_simple_queries(self):
+        router = ModelRouter({'strategy': 'complexity', 'primary_model': 'gpt-5-nano', 'complexity_threshold': 50})
+        result = router.select_model('Hi')
+        assert result['model'] == 'gpt-5-nano'
+        assert result['tier'] == 3
+
+    def test_tier3_primary_not_used_for_complex_queries(self):
+        router = ModelRouter({'strategy': 'complexity', 'primary_model': 'gpt-5-nano', 'complexity_threshold': 50})
+        complex_q = 'Please explain and analyze the comprehensive implications of this nuanced trade-off in detail?'
+        result = router.select_model(complex_q)
+        # Tier-3 primary should not be used for complex queries; should fall back to tier-1
+        assert result['tier'] == 1
+
+
+# ===========================================================================
+# Test: A/B Test Warning for Same Model
+# ===========================================================================
+
+
+class TestABTestWarning:
+    """Verify that A/B test warns when both groups use the same model."""
+
+    def test_warning_when_no_fallback(self):
+        router = ModelRouter({'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': '', 'ab_split_percent': 50})
+        result = router.select_model('Hello')
+        assert 'ab_warning' in result
+
+    def test_warning_when_fallback_matches_primary(self):
+        router = ModelRouter({'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': 'claude-sonnet', 'ab_split_percent': 50})
+        result = router.select_model('Hello')
+        assert 'ab_warning' in result
+
+    def test_no_warning_when_fallback_differs(self):
+        router = ModelRouter({'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': 'gpt-5-mini', 'ab_split_percent': 50})
+        result = router.select_model('Hello')
+        assert 'ab_warning' not in result
+
+    def test_distinct_second_fallback_used_when_first_matches_primary(self):
+        router = ModelRouter({'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': 'claude-sonnet,gpt-5-mini', 'ab_split_percent': 0})
+        result = router.select_model('Hello')
+        # Should pick gpt-5-mini since claude-sonnet matches primary
+        assert result['model'] == 'gpt-5-mini'
+        assert result['ab_group'] == 'B'
+        assert 'ab_warning' not in result
 
 
 # ===========================================================================
