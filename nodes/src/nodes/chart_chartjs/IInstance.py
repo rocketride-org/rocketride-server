@@ -24,55 +24,134 @@
 """
 Chart (Chart.js) tool node instance.
 
-Binds the pipeline LLM to the ``ChartjsDriver`` and delegates tool
-invocation.
+Exposes a ``generate_chart`` tool that uses the pipeline LLM to produce
+valid Chart.js v4 configuration JSON from raw data.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import json
 
-from rocketlib import IInstanceBase
-from rocketlib.types import IInvokeLLM
+from rocketlib import IInstanceBase, tool_function, IInvokeLLM
+from ai.common.schema import Question
 
 from .IGlobal import IGlobal
-
-
-def _make_llm_invoker(instance: Any) -> Any:
-    """Create an LLM-invoking callable bound to the pipeline instance.
-
-    Returns a callable that accepts a ``Question`` and returns the LLM
-    response text.
-    """
-    llm_nodes = instance.getControllerNodeIds('llm')
-    if not llm_nodes:
-        return None
-    llm_node_id = llm_nodes[0]
-
-    def invoke_llm(question: Any) -> str:
-        result = instance.invoke('llm', IInvokeLLM(op='ask', question=question), nodeId=llm_node_id)
-        if hasattr(result, 'getText') and callable(result.getText):
-            return (result.getText() or '').strip()
-        return str(result).strip()
-
-    return invoke_llm
 
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
-    def invoke(self, param: Any) -> Any:  # noqa: ANN401
-        driver = getattr(self.IGlobal, 'driver', None)
-        if driver is None:
-            raise RuntimeError('chart_chartjs: driver not initialized')
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['data'],
+            'properties': {
+                'data': {
+                    'oneOf': [{'type': 'array'}, {'type': 'object'}],
+                    'description': 'The raw data to chart. Can be an array of objects, key-value pairs, or any structured data.',
+                },
+                'chart_type': {
+                    'type': 'string',
+                    'enum': ['bar', 'line', 'pie', 'doughnut', 'radar', 'polarArea', 'scatter', 'bubble'],
+                    'description': 'Optional hint for chart type. If omitted, the best type is chosen automatically.',
+                },
+                'title': {
+                    'type': 'string',
+                    'description': 'Optional chart title.',
+                },
+                'description': {
+                    'type': 'string',
+                    'description': 'Natural language description of what chart to create.',
+                },
+            },
+        },
+        output_schema={
+            'type': 'string',
+            'description': 'A ready-to-render ```chartjs fenced block. Use this string verbatim in the answer — do not add extra fences around it.',
+        },
+        description=(
+            'Generate a Chart.js chart configuration from data. '
+            'Required: "data" (the raw data to chart). '
+            'Optional: "chart_type" (bar, line, pie, doughnut, radar, polarArea, scatter, bubble), '
+            '"title" (chart title), "description" (natural language description of desired chart). '
+            'Returns a ready-to-render string. Place it verbatim in the answer — do NOT wrap it in additional fences.'
+        ),
+    )
+    def generate_chart(self, args):
+        """
+        Generate a Chart.js v4 chart configuration from data via the pipeline LLM.
+        """
+        if not isinstance(args, dict):
+            raise ValueError('Tool input must be a JSON object')
 
-        # Bind the LLM invoker before each invocation
-        if driver._llm_invoke is None:
-            llm_invoker = _make_llm_invoker(self.instance)
-            if llm_invoker is None:
-                raise RuntimeError(
-                    'Chart generator requires an LLM node connected to the pipeline.'
-                )
-            driver.set_llm_invoker(llm_invoker)
+        data = args.get('data')
+        if data is None:
+            raise ValueError('"data" is required')
+        if isinstance(data, (list, dict)) and len(data) == 0:
+            raise ValueError('"data" must not be empty')
 
-        return driver.handle_invoke(param)
+        valid_types = ['bar', 'line', 'pie', 'doughnut', 'radar', 'polarArea', 'scatter', 'bubble']
+        chart_type = args.get('chart_type')
+        if chart_type and chart_type not in valid_types:
+            raise ValueError(f'"chart_type" must be one of {valid_types}; got {chart_type!r}')
+
+        # Truncate large datasets to keep the LLM prompt manageable
+        if isinstance(data, list) and len(data) > 200:
+            data = data[:200]
+
+        data_str = json.dumps(data, indent=2, default=str) if not isinstance(data, str) else data
+        title = args.get('title')
+        description = args.get('description')
+
+        # Build the LLM question
+        q = Question(role='You are a Chart.js v4 configuration generator.')
+
+        q.addInstruction(
+            'Output format',
+            'Produce ONLY a valid Chart.js v4 JSON configuration object. No markdown fences, no explanation — just the raw JSON object.',
+        )
+        q.addInstruction(
+            'Required fields',
+            'The JSON must include "type", "data" (with "labels" and "datasets"), and "options". Set responsive to true and maintainAspectRatio to true in options.',
+        )
+        q.addInstruction(
+            'Styling',
+            'Use readable colors with good contrast. Include a legend if there are multiple datasets.',
+        )
+        q.addInstruction(
+            'No callbacks',
+            'Do NOT include any JavaScript function callbacks (e.g. tooltip.callbacks.label, '
+            'legend.labels.generateLabels). The output must be pure static JSON — no functions, '
+            'no code strings. If you need to show data values in labels or legends, embed them '
+            'directly in the label strings (e.g. "Telegraph Voyage — $215.75").',
+        )
+
+        q.addContext(f'Data:\n{data_str}')
+        if chart_type:
+            q.addContext(f'Chart type: {chart_type}')
+        if title:
+            q.addContext(f'Title: {title}')
+        if description:
+            q.addContext(f'Description: {description}')
+
+        q.addGoal(
+            'Generate a Chart.js v4 configuration for the provided data' + (f' as a {chart_type} chart' if chart_type else '') + '.',
+        )
+        q.addQuestion(
+            'Generate the Chart.js configuration JSON for the data above.' if not description else description,
+        )
+
+        # Call the pipeline LLM directly
+        llm_nodes = self.instance.getControllerNodeIds('llm')
+        if not llm_nodes:
+            raise RuntimeError('Chart generator requires an LLM node connected to the pipeline.')
+
+        result = self.instance.invoke('llm', IInvokeLLM(op='ask', question=q), nodeId=llm_nodes[0])
+
+        if hasattr(result, 'getText') and callable(result.getText):
+            response_text = (result.getText() or '').strip()
+        else:
+            response_text = str(result).strip()
+
+        # Wrap in a ```chartjs fence so the UI renders this as a chart.
+        return f'```chartjs\n{response_text}\n```'

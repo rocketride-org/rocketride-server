@@ -24,10 +24,8 @@
 """
 HTTP Request tool node - global (shared) state.
 
-Reads the node configuration and creates an ``HttpDriver`` that exposes a
-single ``http_request`` tool for agent invocation.  The config panel only
-provides security guardrails (allowed methods + URL whitelist); the agent
-is responsible for supplying the full request details.
+Reads config and stores security guardrails (allowed methods + URL whitelist)
+for IInstance tool methods.
 """
 
 from __future__ import annotations
@@ -37,8 +35,6 @@ from typing import List, Set
 
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
-
-from .http_driver import HttpDriver
 
 _METHOD_FLAGS = {
     'GET': 'allowGET',
@@ -54,27 +50,15 @@ _METHOD_FLAGS = {
 class IGlobal(IGlobalBase):
     """Global state for http_request."""
 
-    driver: HttpDriver | None = None
+    enabled_methods: Set[str] = set()
+    url_patterns: List[re.Pattern] = []
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        server_name = str((cfg.get('serverName') or 'http')).strip()
-
-        enabled_methods, url_patterns = self._build_guardrails(cfg)
-
-        try:
-            self.driver = HttpDriver(
-                server_name=server_name,
-                enabled_methods=enabled_methods,
-                url_patterns=url_patterns,
-            )
-        except Exception as e:
-            warning(str(e))
-            raise
+        self.enabled_methods, self.url_patterns = self._build_guardrails(cfg)
 
     @staticmethod
     def _build_guardrails(cfg: dict) -> tuple[Set[str], List[re.Pattern]]:
@@ -87,6 +71,7 @@ class IGlobal(IGlobalBase):
         raw_whitelist = cfg.get('urlWhitelist') or []
         if not isinstance(raw_whitelist, list):
             import json
+
             try:
                 raw_whitelist = json.loads(str(raw_whitelist))
             except (json.JSONDecodeError, TypeError, ValueError):
@@ -118,4 +103,5 @@ class IGlobal(IGlobalBase):
             warning(str(e))
 
     def endGlobal(self) -> None:
-        self.driver = None
+        self.enabled_methods = set()
+        self.url_patterns = []

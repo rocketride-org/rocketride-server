@@ -34,7 +34,7 @@ from rocketlib import debug
 
 from ai.common.agent import AgentBase
 from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
-from ai.common.tools import ToolsBase
+from rocketlib import ToolDescriptor
 
 
 class CrewDriver(AgentBase):
@@ -78,7 +78,7 @@ class CrewDriver(AgentBase):
         self,
         *,
         host: AgentHost,
-        tool_descriptors: List[ToolsBase.ToolDescriptor],
+        tool_descriptors: List[ToolDescriptor],
         invoke_tool: Callable[..., Any],
         log_tool_call: Callable[..., None],
         ctx: Dict[str, Any],
@@ -198,12 +198,7 @@ class CrewDriver(AgentBase):
         agent_obj = Agent(
             role='Assistant',
             goal='Solve the user request using available tools when helpful.',
-            backstory=(
-                'You are an agent node in a tool-invocation hierarchy. '
-                'You may call tools wired to you via the host tools interface. '
-                'When a tool is needed, call it; otherwise respond directly. '
-                'Follow any additional instructions exactly.'
-            ),
+            backstory=('You are an agent node in a tool-invocation hierarchy. You may call tools wired to you via the host tools interface. When a tool is needed, call it; otherwise respond directly. Follow any additional instructions exactly.'),
             tools=tools_for_agent,
             llm=llm,
             verbose=False,

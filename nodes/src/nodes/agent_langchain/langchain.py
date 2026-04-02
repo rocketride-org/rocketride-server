@@ -30,7 +30,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ai.common.agent import AgentBase
 from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
-from ai.common.tools import ToolsBase
+from rocketlib import ToolDescriptor
 
 
 class LangChainDriver(AgentBase):
@@ -67,7 +67,7 @@ class LangChainDriver(AgentBase):
             def _identifying_params(self) -> Dict[str, Any]:
                 return {'framework': 'rocketride', 'adapter': 'tool_calling_json'}
 
-            def bind_tools(self, tools: Any, **kwargs: Any) -> "RocketRideToolCallingChatModel":
+            def bind_tools(self, tools: Any, **kwargs: Any) -> 'RocketRideToolCallingChatModel':
                 try:
                     self._bound_tools = _normalize_bound_tools(tools)
                 except Exception:
@@ -96,7 +96,7 @@ class LangChainDriver(AgentBase):
         self,
         *,
         host: AgentHost,
-        tool_descriptors: List[ToolsBase.ToolDescriptor],
+        tool_descriptors: List[ToolDescriptor],
         invoke_tool: Callable[..., Any],
         log_tool_call: Callable[..., None],
         ctx: Dict[str, Any],
@@ -448,4 +448,3 @@ def _safe_str(v: Any) -> str:
         return '' if v is None else str(v)
     except Exception:
         return ''
-

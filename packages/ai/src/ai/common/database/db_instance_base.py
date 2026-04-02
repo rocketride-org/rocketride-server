@@ -41,13 +41,12 @@ from typing import Any, Dict, List
 
 import json
 
-from rocketlib import IInstanceBase, debug, error, warning
+from rocketlib import IInstanceBase, debug, error, warning, tool_function
 from sqlalchemy import MetaData, Table as SQLTable, insert, text
 from sqlalchemy.exc import NoSuchTableError, SQLAlchemyError
 
 from ai.common.schema import Answer, Question, QuestionType
 from ai.common.table import Table
-from ai.common.tools import ToolsBase
 from rocketlib.types import IInvokeLLM
 
 from .db_global_base import DatabaseGlobalBase
@@ -55,40 +54,195 @@ from .sql_safety import is_sql_safe
 
 
 class DatabaseInstanceBase(IInstanceBase, ABC):
-    """Abstract base for the IInstance layer of any relational database node."""
+    """Abstract base for the IInstance layer of any relational database node.
 
-    # Type annotation for the global connection state; derived classes narrow
-    # this to their concrete IGlobal subclass for IDE and type-checker support.
+    Derived classes must implement ``_db_display_name()`` to provide the
+    human-readable database name used in tool descriptions (e.g. 'MySQL').
+    """
+
     IGlobal: DatabaseGlobalBase
 
-    _driver: ToolsBase = None
-
     # ------------------------------------------------------------------
-    # Abstract interface — derived classes MUST implement this method
+    # Abstract interface
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def _create_driver(self) -> ToolsBase:
-        """Instantiate and return the tool-provider driver for this database.
-
-        Example (MySQL):
-            return MySQLDriver(server_name='mysql', instance=self)
-        """
+    def _db_display_name(self) -> str:
+        """Return the human-readable database name (e.g. 'MySQL', 'PostgreSQL')."""
 
     # ------------------------------------------------------------------
-    # Lifecycle — fully generic, uses _create_driver from the subclass
+    # Tool methods — dispatched by IInstanceBase.invoke() via @tool_function
     # ------------------------------------------------------------------
 
-    def beginInstance(self) -> None:
-        self._driver = self._create_driver()
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['question'],
+            'properties': {
+                'question': {'type': 'string', 'description': 'Natural-language description of the data you want to retrieve'},
+                'limit': {'type': 'integer', 'description': 'Maximum number of rows to return (default 250, max 25000). Increase when you need the full result set.'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'rows': {'type': 'array', 'description': 'Result rows returned by the query.', 'items': {'type': 'object'}},
+                'sql': {'type': 'string', 'description': 'The generated SQL SELECT statement that was executed.'},
+                'row_limit': {'type': 'integer', 'description': 'The row cap applied to this query.'},
+                'valid': {'type': 'boolean', 'description': 'Whether a valid SQL query was generated.'},
+                'error': {'type': 'string', 'description': 'Error message if query generation or execution failed.'},
+                'answer': {'type': 'string', 'description': 'LLM text response when the question is not a database query.'},
+            },
+        },
+        description=lambda self: (
+            f'Accepts a natural-language description of the data you want, converts it to a safe '
+            f'SQL SELECT statement, executes it against the {self._db_display_name()} database, and returns the result rows. '
+            f'No schema lookup or SQL knowledge required -- just describe what you need. '
+            f'Describe the end result you want, not intermediate steps -- this tool can handle '
+            f'aggregations, tokenization, joins, and complex transformations in a single request. '
+            f'Results may be large -- consider using peek or store.'
+        ),
+    )
+    def get_data(self, args):
+        """Translate natural language to SQL and execute."""
+        if not isinstance(args, dict):
+            raise ValueError('Tool input must be a JSON object')
+        question = args.get('question')
+        if not question or not isinstance(question, str) or not question.strip():
+            raise ValueError('"question" is required and must be a non-empty string')
 
-    def endInstance(self) -> None:
-        pass
+        question = question.strip()
+        raw_limit = args.get('limit')
+        limit = max(1, min(int(raw_limit), 25000)) if raw_limit is not None else 250
 
-    def invoke(self, param: Any) -> Any:
-        if self._driver is None:
-            raise RuntimeError('Database driver not initialized')
-        return self._driver.handle_invoke(param)
+        sql_result = self.get_sql({'question': question, 'limit': limit})
+        if not sql_result.get('valid'):
+            return sql_result
+
+        sql_query = sql_result['sql']
+        result = self._executeSQLQuery(sql_query)
+        if result is None:
+            return {'error': 'Query execution failed', 'sql': sql_query, 'rows': []}
+
+        rows = [self._sanitize_row(row) for row in result]
+        return {'rows': rows, 'sql': sql_query, 'row_limit': limit}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'table': {'type': 'string', 'description': 'Optional table name to get schema for. If omitted, returns schema for all tables.'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'database': {'type': 'string'},
+                'tables': {'type': 'object', 'description': 'Map of table name to table definition.'},
+                'error': {'type': 'string'},
+            },
+        },
+        description=lambda self: (
+            f'Returns the {self._db_display_name()} database schema including all tables, columns, types, primary keys, '
+            f'and foreign key relationships. Pass a table name to get the schema for a single table, '
+            f'or omit it to get the full database schema. '
+            f'Do NOT call this preemptively -- only use when get_data fails or returns unexpected results.'
+        ),
+    )
+    def get_schema(self, args):
+        """Return the reflected database schema."""
+        if args is not None and not isinstance(args, dict):
+            raise ValueError('Tool input must be a JSON object or empty')
+        if not args:
+            args = {}
+
+        table_filter = args.get('table')
+
+        def _format_table(table_info):
+            result = {'columns': [{'column': name, 'type': col_type} for name, col_type in table_info['columns']]}
+            if table_info.get('primary_key'):
+                result['primary_key'] = table_info['primary_key']
+            if table_info.get('foreign_keys'):
+                result['foreign_keys'] = table_info['foreign_keys']
+            return result
+
+        if table_filter:
+            table_info = self.IGlobal.db_schema.get(table_filter)
+            if table_info is None:
+                return {'error': f'Table "{table_filter}" not found', 'database': self.IGlobal.database}
+            return {'database': self.IGlobal.database, 'tables': {table_filter: _format_table(table_info)}}
+
+        return {
+            'database': self.IGlobal.database,
+            'tables': {name: _format_table(info) for name, info in self.IGlobal.db_schema.items()},
+        }
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['question'],
+            'properties': {
+                'question': {'type': 'string', 'description': 'Natural-language question to convert into a SQL query'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'sql': {'type': 'string'},
+                'valid': {'type': 'boolean'},
+                'error': {'type': 'string'},
+                'answer': {'type': 'string'},
+            },
+        },
+        description=lambda self: f'Accepts a natural-language description and returns the equivalent {self._db_display_name()} SQL SELECT statement without executing it. Only use when the user explicitly asks to see the SQL -- for actual data retrieval, use get_data instead.',
+    )
+    def get_sql(self, args):
+        """Translate natural language to SQL without executing."""
+        if not isinstance(args, dict):
+            raise ValueError('Tool input must be a JSON object')
+        question = args.get('question')
+        if not question or not isinstance(question, str) or not question.strip():
+            raise ValueError('"question" is required and must be a non-empty string')
+
+        question = question.strip()
+        limit = args.get('limit', 250)
+        result = self._buildSQLQuery(question, limit=limit)
+
+        is_valid = result.get('isValid', '').lower() == 'true'
+        sql_query = result.get('query', '')
+
+        if is_valid and sql_query and is_sql_safe(sql_query):
+            return {'sql': sql_query, 'valid': True}
+        elif is_valid and sql_query:
+            return {'error': 'Generated query contains unsafe SQL', 'sql': sql_query, 'valid': False}
+        else:
+            return {'answer': sql_query, 'valid': False}
+
+    # ------------------------------------------------------------------
+    # Sanitization helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _sanitize_value(val):
+        """Convert a single database value to a JSON-serializable type."""
+        if val is None or isinstance(val, (str, int, float, bool)):
+            return val
+        if hasattr(val, '__float__'):
+            return float(val)
+        if hasattr(val, 'isoformat'):
+            return val.isoformat()
+        if isinstance(val, bytes):
+            return val.decode('utf-8', errors='replace')
+        return str(val)
+
+    @classmethod
+    def _sanitize_row(cls, row):
+        """Ensure every value in a result row is JSON-serializable."""
+        if isinstance(row, dict):
+            return {k: cls._sanitize_value(v) for k, v in row.items()}
+        if isinstance(row, (list, tuple)):
+            return [cls._sanitize_value(v) for v in row]
+        return cls._sanitize_value(row)
 
     # ------------------------------------------------------------------
     # SQL query helpers
@@ -125,9 +279,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
             # EXPLAIN rejected the query — log and feed the error back so the
             # LLM can produce a corrected statement on the next attempt.
-            warning(
-                f'SQL validation attempt {attempt + 1}/{self.IGlobal.max_validation_attempts} failed: {explain_error}'
-            )
+            warning(f'SQL validation attempt {attempt + 1}/{self.IGlobal.max_validation_attempts} failed: {explain_error}')
             previous_sql = sql_query
             last_error = explain_error
 
@@ -144,8 +296,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         Returns the parsed JSON dict from the LLM with keys ``isValid`` and
         ``query``.
         """
+
         def describe_schema(schema: dict) -> str:
             """Format the db_schema dict into a concise text block for the LLM."""
+
             def simplify_type(sql_type: str) -> str:
                 # Strip COLLATE clauses (e.g. VARCHAR(255) COLLATE utf8mb4_general_ci)
                 # so the LLM sees clean type names.
@@ -198,9 +352,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         )
         question.addInstruction(
             'Ambiguity',
-            'If the user\'s question is ambiguous, make reasonable assumptions and attempt to craft a query. '
-            'If you infer that the user\'s question or command is entirely unrelated to querying the database, '
-            'attempt to answer the question in a manner similar to the provided by the example.',
+            "If the user's question is ambiguous, make reasonable assumptions and attempt to craft a query. If you infer that the user's question or command is entirely unrelated to querying the database, attempt to answer the question in a manner similar to the provided by the example.",
         )
 
         # Concrete SQL example so the LLM understands the expected output shape.
@@ -208,14 +360,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             'Tell me the salaries of department managers',
             {
                 'isValid': 'true',
-                'query': (
-                    'SELECT dm.emp_no, e.first_name, e.last_name, s.salary\n'
-                    'FROM dept_manager dm\n'
-                    'JOIN employees e ON dm.emp_no = e.emp_no\n'
-                    'JOIN salaries s ON dm.emp_no = s.emp_no\n'
-                    'WHERE CURRENT_DATE BETWEEN s.from_date AND s.to_date\n'
-                    'LIMIT 250'
-                ),
+                'query': ('SELECT dm.emp_no, e.first_name, e.last_name, s.salary\nFROM dept_manager dm\nJOIN employees e ON dm.emp_no = e.emp_no\nJOIN salaries s ON dm.emp_no = s.emp_no\nWHERE CURRENT_DATE BETWEEN s.from_date AND s.to_date\nLIMIT 250'),
             },
         )
         # Off-topic example so the LLM knows how to handle non-DB questions.
@@ -227,11 +372,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         # On a retry, provide the rejected SQL and the EXPLAIN error so the
         # LLM knows exactly what was wrong and can produce a corrected query.
         if previous_sql and error:
-            question.addContext(
-                f'Your previous attempt produced the following SQL:\n\n{previous_sql}\n\n'
-                f'The database rejected it with this error:\n\n{error}\n\n'
-                f'Please fix the query and try again.'
-            )
+            question.addContext(f'Your previous attempt produced the following SQL:\n\n{previous_sql}\n\nThe database rejected it with this error:\n\n{error}\n\nPlease fix the query and try again.')
 
         result = self.instance.invoke('llm', IInvokeLLM(op='ask', question=question))
 
@@ -370,10 +511,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         if not self.IGlobal._tableExists(self.IGlobal.table):
             debug(f'Table "{self.IGlobal.table}" does not exist. Creating it from data structure...')
             if not self.IGlobal._createTableFromData(self.IGlobal.table, items):
-                error(
-                    f'Failed to create table "{self.IGlobal.table}". '
-                    f'Please create it manually before running the pipeline.'
-                )
+                error(f'Failed to create table "{self.IGlobal.table}". Please create it manually before running the pipeline.')
                 raise RuntimeError(f'Table "{self.IGlobal.table}" does not exist and could not be created automatically.')
             debug(f'Successfully created table "{self.IGlobal.table}" from data structure.')
 
@@ -396,10 +534,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         try:
             table = SQLTable(self.IGlobal.table, metadata, autoload_with=engine)
         except NoSuchTableError:
-            error(
-                f'Table "{self.IGlobal.table}" does not exist in database '
-                f'"{self.IGlobal.database}". Please create it manually before running the pipeline.'
-            )
+            error(f'Table "{self.IGlobal.table}" does not exist in database "{self.IGlobal.database}". Please create it manually before running the pipeline.')
             raise
 
         def prepare_value(value: Any) -> Any:

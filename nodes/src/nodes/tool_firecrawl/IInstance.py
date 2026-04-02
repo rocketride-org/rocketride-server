@@ -26,23 +26,125 @@
 """
 Firecrawl tool node instance.
 
-Delegates tool invoke operations to the FirecrawlDriver.
+Exposes ``scrape_url`` and ``map_url`` tools for web scraping via Firecrawl.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import json
 
-from rocketlib import IInstanceBase
+from rocketlib import IInstanceBase, tool_function, warning
 
+from .utils import firecrawl_wrapper
 from .IGlobal import IGlobal
 
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
-    def invoke(self, param: Any) -> Any:  # noqa: ANN401
-        driver = getattr(self.IGlobal, 'driver', None)
-        if driver is None:
-            raise RuntimeError('tool_firecrawl: driver not initialized')
-        return driver.handle_invoke(param)
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['url'],
+            'properties': {
+                'url': {'type': 'string', 'description': 'The URL of the web page to scrape.'},
+                'formats': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Output formats (default: ["markdown"]).', 'default': ['markdown']},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'content': {'type': 'string'},
+                'metadata': {'type': 'object'},
+            },
+        },
+        description='Scrape a single web page and return its content.',
+    )
+    def scrape_url(self, args):
+        """Scrape a single web page."""
+        args = _normalize_tool_input(args)
+        url = args.get('url')
+        if not url:
+            raise ValueError('scrape_url requires a `url` parameter')
+
+        result = firecrawl_wrapper(lambda: self.IGlobal.app.scrape(url))
+
+        content = getattr(result, 'markdown', None) or getattr(result, 'html', None) or ''
+        if not isinstance(content, str):
+            content = json.dumps(content)
+
+        metadata = getattr(result, 'metadata', None)
+        if metadata is not None and not isinstance(metadata, dict):
+            try:
+                metadata = metadata.model_dump(exclude_none=True) if hasattr(metadata, 'model_dump') else {}
+            except Exception:
+                metadata = {}
+
+        return {'success': True, 'content': content, 'metadata': metadata or {}}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['url'],
+            'properties': {
+                'url': {'type': 'string', 'description': 'The root URL of the website to map.'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'links': {'type': 'array', 'items': {'type': 'string'}},
+            },
+        },
+        description="Map a website's structure and return all discovered URLs.",
+    )
+    def map_url(self, args):
+        """Map a website's URL structure."""
+        args = _normalize_tool_input(args)
+        url = args.get('url')
+        if not url:
+            raise ValueError('map_url requires a `url` parameter')
+
+        result = firecrawl_wrapper(lambda: self.IGlobal.app.map(url))
+
+        links = []
+        if hasattr(result, 'links') and result.links:
+            for link in result.links:
+                if hasattr(link, 'url'):
+                    links.append(link.url)
+                elif isinstance(link, str):
+                    links.append(link)
+
+        return {'success': True, 'links': links}
+
+
+def _normalize_tool_input(input_obj):
+    """Normalize tool input into a plain dict.
+
+    Handles: None, dict, Pydantic model, JSON string, and nested
+    ``input`` wrappers that some framework paths produce.
+    """
+    if input_obj is None:
+        return {}
+    if hasattr(input_obj, 'model_dump') and callable(getattr(input_obj, 'model_dump')):
+        input_obj = input_obj.model_dump()
+    elif hasattr(input_obj, 'dict') and callable(getattr(input_obj, 'dict')):
+        input_obj = input_obj.dict()
+    if isinstance(input_obj, str):
+        try:
+            parsed = json.loads(input_obj)
+            if isinstance(parsed, dict):
+                input_obj = parsed
+        except Exception:
+            pass
+    if not isinstance(input_obj, dict):
+        warning(f'firecrawl: unexpected input type {type(input_obj).__name__}: {input_obj!r}')
+        return {}
+    if 'input' in input_obj and isinstance(input_obj['input'], dict):
+        inner = input_obj['input']
+        extras = {k: v for k, v in input_obj.items() if k != 'input'}
+        input_obj = {**inner, **extras}
+    input_obj.pop('security_context', None)
+    return input_obj
