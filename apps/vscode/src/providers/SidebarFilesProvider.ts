@@ -225,7 +225,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					const sourceId = context?.componentId ?? '';
 
 					// Use DAP command to execute pipeline without debugging
-					const pipeName = resourceUri ? path.basename(resourceUri.fsPath, '.pipe') : undefined;
+					const pipeName = resourceUri ? path.basename(resourceUri.fsPath).replace(/\.pipe(?:\.json)?$/, '') : undefined;
 					await this.connectionManager.request('execute', {
 						projectId: projectId,
 						source: sourceId,

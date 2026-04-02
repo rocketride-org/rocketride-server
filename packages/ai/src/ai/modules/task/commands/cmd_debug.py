@@ -337,15 +337,12 @@ class DebugCommands(DAPConn):
             # the debug token if it was not specified
             request.setdefault('token', self._debug_token)
 
-            # Validate ownership and permissions via get_task
-            self.get_task(request, 'task.debug')
-
-            # Detach from the task (clears debugger on the task side)
-            await self._server.detach_task(request, self)
-
-            # Clear the debug id and token
-            self._debug_id = None
-            self._debug_token = None
+            # Best-effort detach — task may already be terminated
+            try:
+                self.get_task(request, 'task.debug')
+                await self._server.detach_task(request, self)
+            except Exception as e:
+                self.debug_message(f'Best-effort detach (task may be terminated): {e}')
 
             # Log the disconnection request
             self.debug_message('Disconnecting from task')
@@ -358,6 +355,10 @@ class DebugCommands(DAPConn):
             # Log disconnection failure with task context
             self.debug_message(f'Failed to disconnect from task: {str(e)}')
             raise
+        finally:
+            # Always clear debug state regardless of success/failure
+            self._debug_id = None
+            self._debug_token = None
 
     async def on_pause(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """

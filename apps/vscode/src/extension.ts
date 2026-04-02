@@ -374,6 +374,16 @@ export async function deactivate(): Promise<void> {
 		}
 	}
 
+	if (_pageDashboard) {
+		try {
+			_pageDashboard.dispose();
+		} catch (error: unknown) {
+			if (!(error instanceof Error) || error.name !== 'Canceled') {
+				console.error('[ROCKETRIDE] Error disposing dashboard page:', error);
+			}
+		}
+	}
+
 	if (pageDeploy) {
 		try {
 			pageDeploy.dispose();

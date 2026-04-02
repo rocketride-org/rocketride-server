@@ -162,7 +162,7 @@ globals()['isLevelEnabled'] = engLib.isLevelEnabled
 
 def debug(*args) -> None:
     """
-    Messages shown if the --trace=ServicePython is specified.
+    Output debug messages. Shown when the appropriate trace level is enabled.
     """
     ...
 

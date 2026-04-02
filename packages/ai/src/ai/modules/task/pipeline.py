@@ -14,11 +14,13 @@ def resolve_implied_source(pipeline: Dict[str, Any]) -> Optional[str]:
     Raises:
         ValueError: If multiple source components are found.
     """
-    source = None
+    seen_source = False
+    source_id = None
     for component in pipeline.get('components', []):
         config = component.get('config', {})
         if config.get('mode', '') == 'Source':
-            if source is not None:
+            if seen_source:
                 raise ValueError('Pipeline has multiple source components, please specify one explicitly')
-            source = component.get('id', None)
-    return source
+            seen_source = True
+            source_id = component.get('id', None)
+    return source_id

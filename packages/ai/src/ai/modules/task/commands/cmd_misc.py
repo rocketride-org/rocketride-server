@@ -350,7 +350,7 @@ class MiscCommands(DAPConn):
             return 'All tasks'
 
         if not key.startswith('p.'):
-            return key
+            return 'Task monitor'
 
         # Strip the 'p.' prefix and split: projectId, source, [pipeId]
         parts = key[2:].split('.', 2)

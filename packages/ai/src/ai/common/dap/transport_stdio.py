@@ -551,6 +551,9 @@ class TransportStdio(TransportBase):
         - '>SSE*json' - Real-time node-to-UI message (pipe_id + message + optional data)
         - '>EXIT*exit_code_hex*exit_message' - Process exit
         """
+        if message is None:
+            return
+
         # Parse object status messages: '>OBJ*size_hex*object_name'
         if message.startswith('>OBJ*'):
             try:

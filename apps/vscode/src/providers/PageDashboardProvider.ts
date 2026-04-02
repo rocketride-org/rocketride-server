@@ -12,6 +12,8 @@
  */
 
 import * as vscode from 'vscode';
+import * as crypto from 'crypto';
+import { readFileSync } from 'fs';
 import { getLogger } from '../shared/util/output';
 import { ConnectionManager } from '../connection/connection';
 import { MonitorManager } from '../connection/monitor-manager';
@@ -222,7 +224,7 @@ export class PageDashboardProvider {
 		const htmlPath = vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'page-dashboard.html');
 
 		try {
-			let htmlContent = require('fs').readFileSync(htmlPath.fsPath, 'utf8');
+			let htmlContent = readFileSync(htmlPath.fsPath, 'utf8');
 
 			htmlContent = htmlContent.replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, webview.cspSource);
 
@@ -243,12 +245,7 @@ export class PageDashboardProvider {
 	}
 
 	private generateNonce(): string {
-		let text = '';
-		const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-		for (let i = 0; i < 32; i++) {
-			text += possible.charAt(Math.floor(Math.random() * possible.length));
-		}
-		return text;
+		return crypto.randomBytes(32).toString('base64url');
 	}
 
 	// =========================================================================

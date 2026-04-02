@@ -83,7 +83,7 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({ connections }) =
 						</div>
 						<div className="sm-detail-row">
 							<span className="sm-text-secondary">API Key</span>
-							<span className="sm-mono">{selected.apikey}</span>
+							<span className="sm-mono">{selected.apikey ? `${selected.apikey.slice(0, 4)}${'•'.repeat(8)}${selected.apikey.slice(-4)}` : '—'}</span>
 						</div>
 						{selected.clientInfo.name && (
 							<div className="sm-detail-row">

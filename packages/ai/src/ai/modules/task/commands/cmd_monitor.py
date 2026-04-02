@@ -85,11 +85,11 @@ class MonitorCommands(DAPConn):
         # Format: "apikey:token" -> EVENT_TYPE mapping
         self._monitors: Dict[str, EVENT_TYPE] = {}
 
-    async def send_server_event(self, type: EVENT_TYPE, event: Dict[str, Any]) -> None:
+    async def send_server_event(self, event_type: EVENT_TYPE, event: Dict[str, Any]) -> None:
         """Send a server-level event if this connection is subscribed via the '*' wildcard."""
         if '*' not in self._monitors:
             return
-        if not (type & self._monitors['*']):
+        if not (event_type & self._monitors['*']):
             return
         await self.send_event(event.get('event', 'unknown'), body=event.get('body'))
 
@@ -461,14 +461,17 @@ class MonitorCommands(DAPConn):
         # Determine the desired event subscription level
         types = args.get('types', None)
 
-        # Handle both integer bitmask and string array formats
-        if types and isinstance(types, list):
-            # Client sent array of strings - convert to bitmask
+        # Handle string array, integer bitmask, and legacy listenType formats
+        if isinstance(types, list):
             bitmask_value = strings_to_bitmask(types)
-
+        elif isinstance(types, int):
+            bitmask_value = types
+        elif isinstance(types, str) and types.isdigit():
+            bitmask_value = int(types)
         else:
-            # Fallback to no events
-            bitmask_value = 0
+            # Fallback to legacy listenType or no events
+            listen_type = args.get('listenType', 0)
+            bitmask_value = int(listen_type) if isinstance(listen_type, (int, float)) else 0
 
         # Create EVENT_TYPE enum from the bitmask
         event_type = EVENT_TYPE(bitmask_value)

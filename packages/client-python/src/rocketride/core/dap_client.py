@@ -334,7 +334,11 @@ class DAPClient(DAPBase):
                 'seq': self._next_seq(),
                 'arguments': auth_args,
             }
-            response = await self.request(request, timeout=auth_timeout)
+            try:
+                response = await self.request(request, timeout=auth_timeout)
+            except Exception:
+                await self._transport.disconnect('Auth request failed', True)
+                raise
             if not response.get('success', False):
                 message = response.get('message', 'Authentication failed')
                 await self._transport.disconnect(message, True)
