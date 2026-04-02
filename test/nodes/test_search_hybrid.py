@@ -648,8 +648,8 @@ class TestIInstanceIntegration:
         saved, names, schema_mod, SubQuestion, IInstance = self._load_iinstance()
         try:
             docs = [
-                schema_mod.Doc(page_content='Machine learning is a subset of AI.', score=0.9, metadata={'hybrid_score': 0.85}),
-                schema_mod.Doc(page_content='Deep learning uses neural networks.', score=0.7, metadata={'hybrid_score': 0.72}),
+                schema_mod.Doc(page_content='Machine learning is a subset of AI.', score=0.9, metadata=None),
+                schema_mod.Doc(page_content='Deep learning uses neural networks.', score=0.7, metadata=None),
             ]
             question = schema_mod.Question(
                 questions=[SubQuestion('machine learning')],
@@ -671,6 +671,8 @@ class TestIInstanceIntegration:
             assert 'results' in answer_text
             assert '[Document 1]' in answer_text
             assert '(score:' in answer_text
+            # Score should be a real number (from RRF), not 'N/A'
+            assert 'N/A' not in answer_text
         finally:
             self._restore_modules(saved, names)
 

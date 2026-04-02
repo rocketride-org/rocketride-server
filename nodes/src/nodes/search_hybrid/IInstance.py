@@ -113,7 +113,7 @@ class IInstance(IInstanceBase):
         if reranked_docs and self.instance.hasListener('answers'):
             context_parts = []
             for i, doc in enumerate(reranked_docs):
-                score = doc.metadata.get('hybrid_score', 'N/A') if doc.metadata else 'N/A'
+                score = doc.score if doc.score is not None else 'N/A'
                 snippet = (doc.page_content or '')[:500]
                 context_parts.append(f'[Document {i + 1}] (score: {score})\n{snippet}')
             answer_text = f'Hybrid search returned {len(reranked_docs)} results:\n\n' + '\n\n'.join(context_parts)
