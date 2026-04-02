@@ -149,7 +149,7 @@ class IGlobal(IGlobalBase):
 
     def endGlobal(self):
         """Clean up the global instance when the node shuts down."""
-        self.chat = None
+        self._chat = None
 
     def _format_error(self, status_or_code, etype, emsg, fallback: str) -> str:
         parts: list[str] = []

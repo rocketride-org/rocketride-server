@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `gemini-2_0-flash-lite` → use `gemini-2.5-flash-lite`
   - Standardized profile key naming: `gemini-2.5-*` (dot notation) for consistency
 
+### Added
+
+- **Config**: `Config.getNodeConfig()` now emits warnings when deprecated profiles are used, with migration guidance from the profile's `migration` field
+
 ## [1.0.3] - 2026-03-01
 
 ### Added

@@ -21,32 +21,19 @@
 # SOFTWARE.
 # =============================================================================
 
-import os
-from rocketlib import IGlobalBase
-from ai.common.config import Config
-from ai.common.chat import ChatBase
+from .IGlobal import IGlobal
+from .IInstance import IInstance
 
 
-class IGlobal(IGlobalBase):
-    chat: ChatBase | None = None
+def getChat():
+    """Get the Chat class from the module."""
+    from .gmi_cloud import Chat
 
-    def beginGlobal(self):
-        from depends import depends  # type: ignore
+    return Chat
 
-        # Load the requirements
-        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-        depends(requirements)
 
-        from .ibm_watson import Chat
-
-        # Get our bag
-        bag = self.IEndpoint.endpoint.bag
-
-        # Get this nodes config
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        # Get a chat to interface
-        self._chat = Chat(self.glb.logicalType, config, bag)
-
-    def endGlobal(self):
-        self._chat = None
+__all__ = [
+    'IGlobal',
+    'IInstance',
+    'getChat',
+]

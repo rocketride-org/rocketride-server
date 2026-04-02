@@ -208,7 +208,7 @@ class IGlobal(IGlobalBase):
 
         Called when the filter is being destroyed or reset.
         """
-        self.chat = None
+        self._chat = None
 
     def _format_error(self, status, etype, emsg, fallback: str) -> str:
         """

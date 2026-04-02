@@ -29,6 +29,8 @@
  * including DAP messages, callbacks, configuration options, and transport interfaces.
  */
 
+import { ConnectionException } from '../exceptions/index.js';
+
 /**
  * Stack trace information for errors.
  */
@@ -134,7 +136,7 @@ export type DisconnectCallback = (reason?: string, hasError?: boolean) => Promis
  * Callback when a connection attempt fails (e.g. auth or pipeline not ready).
  * Used in persist mode to inform the UI while the client keeps retrying.
  */
-export type ConnectErrorCallback = (message: string) => Promise<void>;
+export type ConnectErrorCallback = (error: ConnectionException) => void | Promise<void>;
 
 /**
  * Configuration options for creating an RocketRideClient instance.
@@ -185,5 +187,3 @@ export interface RocketRideClientConfig {
 	/** Client module name for debugging and identification */
 	module?: string;
 }
-
-
