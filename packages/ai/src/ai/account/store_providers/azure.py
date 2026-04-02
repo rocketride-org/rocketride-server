@@ -334,8 +334,9 @@ class AzureBlobStore(IStore):
 
             while len(context['buffer']) >= self._AZURE_BLOCK_SIZE:
                 chunk = bytes(context['buffer'][: self._AZURE_BLOCK_SIZE])
-                del context['buffer'][: self._AZURE_BLOCK_SIZE]
                 self._stage_block(context, chunk)
+                # Only discard from buffer after successful staging
+                del context['buffer'][: self._AZURE_BLOCK_SIZE]
 
             return written
         except Exception as e:
@@ -350,7 +351,6 @@ class AzureBlobStore(IStore):
                 blob=context['blob_name'],
             )
             remaining = bytes(context['buffer'])
-            context['buffer'].clear()
 
             if not context['block_ids']:
                 # Small file — no blocks were staged, simple upload
@@ -361,6 +361,9 @@ class AzureBlobStore(IStore):
                     self._stage_block(context, remaining)
 
                 blob_client.commit_block_list(context['block_ids'])
+
+            # Only clear buffer after successful commit
+            context['buffer'].clear()
 
         except Exception as e:
             raise StorageError(f'Failed to finalize upload for {filename}: {e}') from e
@@ -405,6 +408,25 @@ class AzureBlobStore(IStore):
     async def close_read(self, filename: str, context) -> None:
         """No-op — Azure reads are stateless."""
         pass
+
+    async def get_file_info(self, filename: str) -> dict:
+        """Get file size and modification time via get_blob_properties."""
+        try:
+            client = self._get_client()
+            blob_name = self._get_blob_name(filename)
+            blob_client = client.get_blob_client(
+                container=self._container,
+                blob=blob_name,
+            )
+            properties = blob_client.get_blob_properties()
+            return {
+                'size': properties.size,
+                'modified': properties.last_modified.timestamp(),
+            }
+        except Exception as e:
+            if 'BlobNotFound' in str(e) or 'ResourceNotFound' in str(e):
+                raise StorageError(f'File not found: {filename}')
+            raise StorageError(f'Failed to get file info for {filename}: {e}') from e
 
     def _stage_block(self, context: dict, data: bytes) -> None:
         """Stage a single block and record its ID."""

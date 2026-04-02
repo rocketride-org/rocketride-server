@@ -5,7 +5,7 @@ Tests cover:
 - Generic file operations (read, write, delete, list_dir, mkdir, stat)
 - Path validation and traversal prevention
 - Directory listing with file/dir type detection
-- Domain convenience methods (projects, templates, logs)
+- Handle-based I/O (open/close/read/write handles)
 - User isolation between different client_ids
 """
 
@@ -74,6 +74,16 @@ class TestFileStoreInit:
         fs = FileStore(istore, 'user-123')
         assert fs._client_id == 'user-123'
 
+    def test_rejects_client_id_with_slash(self, istore):
+        """client_id with path separators is rejected."""
+        with pytest.raises(ValueError, match='path separators'):
+            FileStore(istore, 'user/evil')
+
+    def test_rejects_client_id_dotdot(self, istore):
+        """client_id of '..' is rejected."""
+        with pytest.raises(ValueError, match=r'\.\.'):
+            FileStore(istore, '..')
+
 
 # ============================================================================
 # Store.get_file_store Factory
@@ -134,6 +144,21 @@ class TestPathValidation:
     def test_normal_path(self):
         """Normal paths pass through unchanged."""
         assert FileStore._validate_path('data/input.csv') == 'data/input.csv'
+
+    def test_rejects_glob_chars(self):
+        """Paths with glob/wildcard characters are rejected."""
+        with pytest.raises(ValueError, match='invalid characters'):
+            FileStore._validate_path('data/file*.txt')
+
+    def test_rejects_question_mark(self):
+        """Paths with ? are rejected."""
+        with pytest.raises(ValueError, match='invalid characters'):
+            FileStore._validate_path('data/file?.txt')
+
+    def test_rejects_angle_brackets(self):
+        """Paths with < or > are rejected."""
+        with pytest.raises(ValueError, match='invalid characters'):
+            FileStore._validate_path('data/<bad>.txt')
 
 
 # ============================================================================
@@ -213,13 +238,13 @@ class TestListDir:
         assert all(e['type'] == 'file' for e in result['entries'])
 
     @pytest.mark.asyncio
-    async def test_list_files_have_modified(self, fs):
-        """list_dir returns modified timestamps for file entries."""
+    async def test_list_files_have_size_and_modified(self, fs):
+        """list_dir returns size and modified timestamps for file entries."""
         await fs.write('timestamped.txt', b'data')
 
         result = await fs.list_dir('')
         file_entry = next(e for e in result['entries'] if e['name'] == 'timestamped.txt')
-        assert 'modified' in file_entry
+        assert file_entry['size'] == 4
         assert isinstance(file_entry['modified'], float)
 
     @pytest.mark.asyncio
@@ -233,12 +258,13 @@ class TestListDir:
         assert entries == {'file.txt': 'file', 'subdir': 'dir'}
 
     @pytest.mark.asyncio
-    async def test_list_dirs_no_modified(self, fs):
-        """list_dir does not include modified for directory entries."""
+    async def test_list_dirs_no_size_or_modified(self, fs):
+        """list_dir does not include size or modified for directory entries."""
         await fs.write('subdir/nested.txt', b'a')
 
         result = await fs.list_dir('')
         dir_entry = next(e for e in result['entries'] if e['type'] == 'dir')
+        assert 'size' not in dir_entry
         assert 'modified' not in dir_entry
 
     @pytest.mark.asyncio
@@ -294,13 +320,13 @@ class TestStat:
 
     @pytest.mark.asyncio
     async def test_stat_file(self, fs):
-        """Stat returns file metadata with modified timestamp."""
+        """Stat returns file metadata with size and modified timestamp."""
         await fs.write('hello.txt', b'world')
         result = await fs.stat('hello.txt')
 
         assert result['exists'] is True
         assert result['type'] == 'file'
-        assert 'modified' in result
+        assert result['size'] == 5
         assert isinstance(result['modified'], float)
 
     @pytest.mark.asyncio
@@ -376,22 +402,22 @@ class TestHandleIO:
 
     @pytest.mark.asyncio
     async def test_read_chunks(self, fs):
-        """Read a file in chunks via handle."""
+        """Read a file in chunks via handle with explicit offsets."""
         await fs.write('big.bin', b'A' * 100)
 
         info = await fs.open_read('big.bin', connection_id=1)
         assert info['size'] == 100
 
-        chunk = await fs.read_chunk(info['handle'], length=40)
+        chunk = await fs.read_chunk(info['handle'], offset=0, length=40)
         assert len(chunk) == 40
 
-        chunk2 = await fs.read_chunk(info['handle'], length=40)
+        chunk2 = await fs.read_chunk(info['handle'], offset=40, length=40)
         assert len(chunk2) == 40
 
-        chunk3 = await fs.read_chunk(info['handle'], length=40)
+        chunk3 = await fs.read_chunk(info['handle'], offset=80, length=40)
         assert len(chunk3) == 20  # Only 20 bytes left
 
-        chunk4 = await fs.read_chunk(info['handle'])
+        chunk4 = await fs.read_chunk(info['handle'], offset=100)
         assert chunk4 == b''  # EOF
 
         await fs.close_read(info['handle'])
@@ -433,7 +459,7 @@ class TestHandleIO:
             await fs.write_chunk('nonexistent-handle', b'data')
 
         with pytest.raises(StorageError, match='Invalid handle'):
-            await fs.read_chunk('nonexistent-handle')
+            await fs.read_chunk('nonexistent-handle', offset=0)
 
     @pytest.mark.asyncio
     async def test_wrong_mode(self, fs):

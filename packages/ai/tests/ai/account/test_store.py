@@ -977,7 +977,7 @@ class TestStoreIntegration:
         # Read back via handles
         info = await fs.open_read('chunked.bin', connection_id=1)
         assert info['size'] == 23  # len('chunk-1-chunk-2-chunk-3')
-        data = await fs.read_chunk(info['handle'])
+        data = await fs.read_chunk(info['handle'], offset=0)
         await fs.close_read(info['handle'])
 
         assert data == b'chunk-1-chunk-2-chunk-3'
@@ -999,6 +999,10 @@ class TestStoreIntegration:
         # Data should be committed and readable
         data = await fs.read('disconnect.bin')
         assert data == b'partial-data'
+
+        # Write lock should be released — a new write must succeed
+        handle_id2 = await fs.open_write('disconnect.bin', connection_id=43)
+        await fs.close_write(handle_id2)
 
     @pytest.mark.asyncio
     async def test_write_lock_prevents_double_open(self, temp_dir):

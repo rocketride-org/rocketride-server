@@ -251,11 +251,17 @@ class FilesystemStore(IStore):
 
     async def get_modified_time(self, filename: str) -> float:
         """Get the last modified time of a file as an epoch timestamp."""
+        info = await self.get_file_info(filename)
+        return info['modified']
+
+    async def get_file_info(self, filename: str) -> dict:
+        """Get file size and modification time in a single stat call."""
         try:
             full_path = self._get_full_path(filename)
             if not full_path.exists():
                 raise StorageError(f'File not found: {filename}')
-            return full_path.stat().st_mtime
+            st = full_path.stat()
+            return {'size': st.st_size, 'modified': st.st_mtime}
         except StorageError:
             raise
         except Exception as e:

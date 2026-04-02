@@ -316,23 +316,20 @@ class S3Store(IStore):
     _S3_MIN_PART_SIZE = 5 * 1024 * 1024
 
     async def open_write(self, filename: str) -> dict:
-        """Begin a multipart upload session."""
+        """Prepare a write session. Multipart upload is deferred until needed."""
         try:
-            client = self._get_client()
             key = self._get_key(filename)
-            response = client.create_multipart_upload(Bucket=self._bucket, Key=key)
-            upload_id = response['UploadId']
             return {
                 'context': {
                     'key': key,
-                    'upload_id': upload_id,
+                    'upload_id': None,
                     'parts': [],
                     'part_number': 1,
                     'buffer': bytearray(),
                 },
             }
         except Exception as e:
-            raise StorageError(f'Failed to start multipart upload for {filename}: {e}') from e
+            raise StorageError(f'Failed to prepare upload for {filename}: {e}') from e
 
     async def write_chunk(self, filename: str, context, data: bytes) -> int:
         """Buffer data and flush as S3 parts when buffer reaches 5 MB."""
@@ -342,9 +339,15 @@ class S3Store(IStore):
 
             # Flush parts while buffer is large enough
             while len(context['buffer']) >= self._S3_MIN_PART_SIZE:
+                # Lazily create multipart upload on first flush
+                if context['upload_id'] is None:
+                    client = self._get_client()
+                    response = client.create_multipart_upload(Bucket=self._bucket, Key=context['key'])
+                    context['upload_id'] = response['UploadId']
+
                 chunk = bytes(context['buffer'][: self._S3_MIN_PART_SIZE])
-                del context['buffer'][: self._S3_MIN_PART_SIZE]
                 self._upload_part(context, chunk)
+                del context['buffer'][: self._S3_MIN_PART_SIZE]
 
             return written
         except Exception as e:
@@ -357,13 +360,8 @@ class S3Store(IStore):
             remaining = bytes(context['buffer'])
             context['buffer'].clear()
 
-            if not context['parts']:
-                # Total data < 5 MB: skip multipart, use simple put_object
-                client.abort_multipart_upload(
-                    Bucket=self._bucket,
-                    Key=context['key'],
-                    UploadId=context['upload_id'],
-                )
+            if context['upload_id'] is None:
+                # No multipart was started — simple put_object
                 client.put_object(
                     Bucket=self._bucket,
                     Key=context['key'],
@@ -381,15 +379,16 @@ class S3Store(IStore):
                     MultipartUpload={'Parts': context['parts']},
                 )
         except Exception as e:
-            # Best-effort abort on failure
-            try:
-                self._get_client().abort_multipart_upload(
-                    Bucket=self._bucket,
-                    Key=context['key'],
-                    UploadId=context['upload_id'],
-                )
-            except Exception:
-                pass
+            # Best-effort abort on failure (only if multipart was started)
+            if context.get('upload_id'):
+                try:
+                    self._get_client().abort_multipart_upload(
+                        Bucket=self._bucket,
+                        Key=context['key'],
+                        UploadId=context['upload_id'],
+                    )
+                except Exception:
+                    pass
             raise StorageError(f'Failed to finalize upload for {filename}: {e}') from e
 
     async def abort_write(self, filename: str, context) -> None:
@@ -430,6 +429,21 @@ class S3Store(IStore):
     async def close_read(self, filename: str, context) -> None:
         """No-op — S3 reads are stateless."""
         pass
+
+    async def get_file_info(self, filename: str) -> dict:
+        """Get file size and modification time via head_object."""
+        try:
+            client = self._get_client()
+            key = self._get_key(filename)
+            response = client.head_object(Bucket=self._bucket, Key=key)
+            return {
+                'size': response['ContentLength'],
+                'modified': response['LastModified'].timestamp(),
+            }
+        except Exception as e:
+            if self._is_no_such_key_error(e):
+                raise StorageError(f'File not found: {filename}')
+            raise StorageError(f'Failed to get file info for {filename}: {e}') from e
 
     def _upload_part(self, context: dict, data: bytes) -> None:
         """Upload a single part and record its ETag."""

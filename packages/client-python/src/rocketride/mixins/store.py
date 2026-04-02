@@ -43,6 +43,8 @@ class StoreMixin(DAPClient):
     wrappers that call the convenience methods with well-known paths.
     """
 
+    _INVALID_PATH_CHARS = frozenset('*?<>|"\x00')
+
     def __init__(self, **kwargs):
         """Initialize storage capabilities."""
         super().__init__(**kwargs)
@@ -51,38 +53,37 @@ class StoreMixin(DAPClient):
     # Handle-Based I/O
     # =========================================================================
 
-    async def fs_open(self, path: str, mode: str = 'r', offset: int = 0) -> Dict[str, Any]:
+    async def fs_open(self, path: str, mode: str = 'r') -> Dict[str, Any]:
         """
         Open a file handle for reading or writing.
 
         Args:
             path: Relative path within the account store.
             mode: 'r' for read, 'w' for write.
-            offset: Initial byte offset (read mode only).
 
         Returns:
             Dict with 'handle' (str). Read mode also includes 'size' (int).
         """
+        self._validate_store_path(path)
         args: Dict[str, Any] = {'subcommand': 'fs_open', 'path': path, 'mode': mode}
-        if mode == 'r' and offset > 0:
-            args['offset'] = offset
         request = self.build_request(command='rrext_store', arguments=args)
         response = await self.request(request)
         self._check_response(response)
         return response.get('body', {})
 
-    async def fs_read(self, handle: str, length: int = 4_194_304) -> bytes:
+    async def fs_read(self, handle: str, offset: int = 0, length: int = 4_194_304) -> bytes:
         """
         Read data from an open read handle.
 
         Args:
             handle: Handle ID returned by fs_open.
+            offset: Byte offset to read from.
             length: Max bytes to read (default 4 MB).
 
         Returns:
             Bytes read. Empty bytes indicates EOF.
         """
-        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_read', 'handle': handle, 'length': length})
+        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_read', 'handle': handle, 'offset': offset, 'length': length})
         response = await self.request(request)
         self._check_response(response)
         return response.get('arguments', {}).get('data', b'')
@@ -126,6 +127,7 @@ class StoreMixin(DAPClient):
         Args:
             path: Relative path within the account store.
         """
+        self._validate_store_path(path)
         request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_delete', 'path': path})
         response = await self.request(request)
         self._check_response(response)
@@ -138,9 +140,11 @@ class StoreMixin(DAPClient):
             path: Relative directory path (default: account root).
 
         Returns:
-            Dict with keys: entries (list of {name, type, modified?}), count.
-            File entries include a modified epoch timestamp.
+            Dict with keys: entries (list of {name, type, size?, modified?}), count.
+            File entries include size (bytes) and modified (epoch timestamp).
         """
+        if path:
+            self._validate_store_path(path)
         request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_list_dir', 'path': path})
         response = await self.request(request)
         self._check_response(response)
@@ -153,6 +157,7 @@ class StoreMixin(DAPClient):
         Args:
             path: Relative directory path.
         """
+        self._validate_store_path(path)
         request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_mkdir', 'path': path})
         response = await self.request(request)
         self._check_response(response)
@@ -165,8 +170,10 @@ class StoreMixin(DAPClient):
             path: Relative path within the account store.
 
         Returns:
-            Dict with keys: exists, type (file|dir), modified (epoch timestamp, files only).
+            Dict with keys: exists, type (file|dir), size (bytes, files only),
+            modified (epoch timestamp, files only).
         """
+        self._validate_store_path(path)
         request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_stat', 'path': path})
         response = await self.request(request)
         self._check_response(response)
@@ -182,11 +189,13 @@ class StoreMixin(DAPClient):
         handle = info['handle']
         try:
             chunks = []
+            offset = 0
             while True:
-                chunk = await self.fs_read(handle)
+                chunk = await self.fs_read(handle, offset)
                 if not chunk:
                     break
                 chunks.append(chunk)
+                offset += len(chunk)
             return b''.join(chunks).decode(encoding)
         finally:
             await self.fs_close(handle, 'r')
@@ -220,8 +229,7 @@ class StoreMixin(DAPClient):
 
     async def save_project(self, project_id: str, pipeline: Dict[str, Any]) -> None:
         """Save a project pipeline to .projects/<project_id>.json."""
-        if not project_id:
-            raise ValueError('project_id is required')
+        self._validate_id(project_id, 'project_id')
         if not pipeline or not isinstance(pipeline, dict):
             raise ValueError('pipeline must be a non-empty dictionary')
 
@@ -229,15 +237,13 @@ class StoreMixin(DAPClient):
 
     async def get_project(self, project_id: str) -> Dict[str, Any]:
         """Get a project by ID from .projects/<project_id>.json."""
-        if not project_id:
-            raise ValueError('project_id is required')
+        self._validate_id(project_id, 'project_id')
 
         return await self.fs_read_json(f'.projects/{project_id}.json')
 
     async def delete_project(self, project_id: str) -> None:
         """Delete a project by ID."""
-        if not project_id:
-            raise ValueError('project_id is required')
+        self._validate_id(project_id, 'project_id')
 
         await self.fs_delete(f'.projects/{project_id}.json')
 
@@ -251,8 +257,7 @@ class StoreMixin(DAPClient):
 
     async def save_template(self, template_id: str, pipeline: Dict[str, Any]) -> None:
         """Save a template pipeline to .templates/<template_id>.json."""
-        if not template_id:
-            raise ValueError('template_id is required')
+        self._validate_id(template_id, 'template_id')
         if not pipeline or not isinstance(pipeline, dict):
             raise ValueError('pipeline must be a non-empty dictionary')
 
@@ -260,15 +265,13 @@ class StoreMixin(DAPClient):
 
     async def get_template(self, template_id: str) -> Dict[str, Any]:
         """Get a template by ID from .templates/<template_id>.json."""
-        if not template_id:
-            raise ValueError('template_id is required')
+        self._validate_id(template_id, 'template_id')
 
         return await self.fs_read_json(f'.templates/{template_id}.json')
 
     async def delete_template(self, template_id: str) -> None:
         """Delete a template by ID."""
-        if not template_id:
-            raise ValueError('template_id is required')
+        self._validate_id(template_id, 'template_id')
 
         await self.fs_delete(f'.templates/{template_id}.json')
 
@@ -282,10 +285,8 @@ class StoreMixin(DAPClient):
 
     async def save_log(self, project_id: str, source: str, contents: Dict[str, Any]) -> str:
         """Save a log file to .logs/<project_id>/<source>-<start_time>.log. Returns filename."""
-        if not project_id:
-            raise ValueError('project_id is required')
-        if not source:
-            raise ValueError('source is required')
+        self._validate_id(project_id, 'project_id')
+        self._validate_id(source, 'source')
         if not contents or not isinstance(contents, dict):
             raise ValueError('contents must be a non-empty dictionary')
 
@@ -299,10 +300,8 @@ class StoreMixin(DAPClient):
 
     async def get_log(self, project_id: str, source: str, start_time: float) -> Dict[str, Any]:
         """Get a log file by source name and start time."""
-        if not project_id:
-            raise ValueError('project_id is required')
-        if not source:
-            raise ValueError('source is required')
+        self._validate_id(project_id, 'project_id')
+        self._validate_id(source, 'source')
         if start_time is None:
             raise ValueError('start_time is required')
 
@@ -311,8 +310,9 @@ class StoreMixin(DAPClient):
 
     async def list_logs(self, project_id: str, source: Optional[str] = None) -> Dict[str, Any]:
         """List log files for a project."""
-        if not project_id:
-            raise ValueError('project_id is required')
+        self._validate_id(project_id, 'project_id')
+        if source:
+            self._validate_id(source, 'source')
 
         dir_result = await self.fs_list_dir(f'.logs/{project_id}')
         logs = [e['name'] for e in dir_result.get('entries', []) if e['type'] == 'file' and e['name'].endswith('.log')]
@@ -347,6 +347,25 @@ class StoreMixin(DAPClient):
                 continue
 
         return {list_key: items, 'count': len(items)}
+
+    @staticmethod
+    def _validate_store_path(path: str) -> None:
+        """Validate a store path before sending to the server."""
+        for segment in path.replace('\\', '/').split('/'):
+            if segment == '..':
+                raise ValueError(f'Path traversal not allowed: {path}')
+            if segment and any(c in StoreMixin._INVALID_PATH_CHARS or ord(c) < 0x20 for c in segment):
+                raise ValueError(f'Path contains invalid characters: {path}')
+
+    @staticmethod
+    def _validate_id(value: str, name: str) -> None:
+        """Validate that a domain identifier is a safe single path segment."""
+        if not value:
+            raise ValueError(f'{name} is required')
+        if '/' in value or '\\' in value:
+            raise ValueError(f'{name} must not contain path separators')
+        if any(c in StoreMixin._INVALID_PATH_CHARS or ord(c) < 0x20 for c in value):
+            raise ValueError(f'{name} contains invalid characters: {value}')
 
     def _check_response(self, response: Dict[str, Any]) -> None:
         """Raise RuntimeError if the response indicates failure."""

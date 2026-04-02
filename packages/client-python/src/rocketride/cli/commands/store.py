@@ -74,17 +74,37 @@ class StoreCommand(BaseCommand):
 
     async def _cmd_dir(self, client: 'RocketRideClient') -> int:
         """List directory contents."""
+        from datetime import datetime, timezone
+
         path = getattr(self.args, 'path', '') or ''
         result = await client.fs_list_dir(path)
 
         entries = result.get('entries', [])
         if not entries:
-            print('(empty directory)')
+            print('File Not Found')
             return 0
+
+        total_size = 0
+        file_count = 0
+        dir_count = 0
         for entry in entries:
-            type_indicator = 'DIR ' if entry['type'] == 'dir' else 'FILE'
-            print(f'  {type_indicator}  {entry["name"]}')
-        print(f'\n  {result["count"]} item(s)')
+            modified = entry.get('modified')
+            if modified:
+                dt = datetime.fromtimestamp(modified, tz=timezone.utc)
+                date_str = dt.strftime('%m/%d/%Y  %I:%M %p')
+            else:
+                date_str = '                   '
+            if entry['type'] == 'dir':
+                print(f'{date_str}    <DIR>          {entry["name"]}')
+                dir_count += 1
+            else:
+                size = entry.get('size', 0)
+                total_size += size
+                print(f'{date_str}    {size:>14,} {entry["name"]}')
+                file_count += 1
+
+        print(f'    {file_count:>8,} File(s)  {total_size:>14,} bytes')
+        print(f'    {dir_count:>8,} Dir(s)')
 
         return 0
 
@@ -102,9 +122,22 @@ class StoreCommand(BaseCommand):
         content = getattr(self.args, 'content', None)
 
         if file_path:
-            with open(file_path, 'rb') as f:
-                data = f.read()
-            await client.fs_write(path, data)
+            info = await client.fs_open(path, 'w')
+            handle = info['handle']
+            try:
+                with open(file_path, 'rb') as f:
+                    while True:
+                        chunk = f.read(65536)
+                        if not chunk:
+                            break
+                        await client.fs_write(handle, chunk)
+                await client.fs_close(handle, 'w')
+            except Exception:
+                try:
+                    await client.fs_close(handle, 'w')
+                except Exception:
+                    pass
+                raise
         elif content is not None:
             await client.fs_write_string(path, content)
         else:
@@ -134,12 +167,15 @@ class StoreCommand(BaseCommand):
             print(f'{path}: not found')
         else:
             entry_type = result.get('type', 'unknown')
+            details = []
+            size = result.get('size')
+            if size is not None:
+                details.append(f'size: {size:,}')
             modified = result.get('modified')
             if modified:
                 from datetime import datetime, timezone
 
-                ts = datetime.fromtimestamp(modified, tz=timezone.utc).isoformat()
-                print(f'{path}: {entry_type} (modified: {ts})')
-            else:
-                print(f'{path}: {entry_type}')
+                details.append(f'modified: {datetime.fromtimestamp(modified, tz=timezone.utc).isoformat()}')
+            suffix = f' ({", ".join(details)})' if details else ''
+            print(f'{path}: {entry_type}{suffix}')
         return 0

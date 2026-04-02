@@ -2248,8 +2248,8 @@ def test_get_websocket_uri_normalization(input_uri: str, expected_uri: str) -> N
 class TestFileStoreOperations:
     """Test handle-based file store operations against a live server."""
 
-    def _unique_path(self, prefix: str = 'test') -> str:
-        return f'.test-store/{prefix}-{"".join(random.choices(string.ascii_lowercase, k=8))}'
+    def _unique_path(self, name: str = 'test') -> str:
+        return f'.test-store/py-{name}-{"".join(random.choices(string.ascii_lowercase, k=8))}'
 
     @pytest.mark.asyncio
     async def test_handle_write_and_read(self):
@@ -2266,7 +2266,7 @@ class TestFileStoreOperations:
 
             info = await client.fs_open(path, 'r')
             assert info['size'] == 11
-            data = await client.fs_read(info['handle'])
+            data = await client.fs_read(info['handle'], offset=0)
             assert data == b'hello world'
             await client.fs_close(info['handle'], 'r')
 
@@ -2311,11 +2311,13 @@ class TestFileStoreOperations:
 
             info = await client.fs_open(path, 'r')
             chunks = []
+            offset = 0
             while True:
-                chunk = await client.fs_read(info['handle'], length=300)
+                chunk = await client.fs_read(info['handle'], offset=offset, length=300)
                 if not chunk:
                     break
                 chunks.append(chunk)
+                offset += len(chunk)
             await client.fs_close(info['handle'], 'r')
 
             assert b''.join(chunks) == data

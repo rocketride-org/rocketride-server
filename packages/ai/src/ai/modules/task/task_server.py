@@ -423,8 +423,9 @@ class TaskServer(DAPBase):
         # Close any open file store handles for this connection
         if hasattr(conn, '_account_info') and conn._account_info:
             try:
-                fs = self.store.get_file_store(conn._account_info.clientid)
-                await fs.close_all_handles(connection_id)
+                client_id = conn._account_info.clientid
+                if client_id in self.store._file_stores:
+                    await self.store._file_stores[client_id].close_all_handles(connection_id)
             except Exception as e:
                 self.debug_message(f'Error closing file handles for connection {connection_id}: {e}')
 

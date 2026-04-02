@@ -1434,20 +1434,20 @@ export class RocketRideClient extends DAPClient {
 	 * ```
 	 */
 	async saveProject(options: { projectId: string; pipeline: Record<string, any> }): Promise<void> {
-		if (!options.projectId) throw new Error('projectId is required');
+		this.validateId(options.projectId, 'projectId');
 		if (!options.pipeline || typeof options.pipeline !== 'object') throw new Error('pipeline must be a non-empty object');
 
 		await this.fsWriteJson(`.projects/${options.projectId}.json`, options.pipeline);
 	}
 
 	async getProject(options: { projectId: string }): Promise<Record<string, any>> {
-		if (!options.projectId) throw new Error('projectId is required');
+		this.validateId(options.projectId, 'projectId');
 
 		return this.fsReadJson(`.projects/${options.projectId}.json`);
 	}
 
 	async deleteProject(options: { projectId: string }): Promise<void> {
-		if (!options.projectId) throw new Error('projectId is required');
+		this.validateId(options.projectId, 'projectId');
 
 		await this.fsDelete(`.projects/${options.projectId}.json`);
 	}
@@ -1476,20 +1476,20 @@ export class RocketRideClient extends DAPClient {
 	// ============================================================================
 
 	async saveTemplate(options: { templateId: string; pipeline: Record<string, any> }): Promise<void> {
-		if (!options.templateId) throw new Error('templateId is required');
+		this.validateId(options.templateId, 'templateId');
 		if (!options.pipeline || typeof options.pipeline !== 'object') throw new Error('pipeline must be a non-empty object');
 
 		await this.fsWriteJson(`.templates/${options.templateId}.json`, options.pipeline);
 	}
 
 	async getTemplate(options: { templateId: string }): Promise<Record<string, any>> {
-		if (!options.templateId) throw new Error('templateId is required');
+		this.validateId(options.templateId, 'templateId');
 
 		return this.fsReadJson(`.templates/${options.templateId}.json`);
 	}
 
 	async deleteTemplate(options: { templateId: string }): Promise<void> {
-		if (!options.templateId) throw new Error('templateId is required');
+		this.validateId(options.templateId, 'templateId');
 
 		await this.fsDelete(`.templates/${options.templateId}.json`);
 	}
@@ -1518,8 +1518,8 @@ export class RocketRideClient extends DAPClient {
 	// ============================================================================
 
 	async saveLog(options: { projectId: string; source: string; contents: Record<string, any> }): Promise<string> {
-		if (!options.projectId) throw new Error('projectId is required');
-		if (!options.source) throw new Error('source is required');
+		this.validateId(options.projectId, 'projectId');
+		this.validateId(options.source, 'source');
 		if (!options.contents || typeof options.contents !== 'object') throw new Error('contents must be a non-empty object');
 
 		const startTime = options.contents?.body?.startTime;
@@ -1531,8 +1531,8 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	async getLog(options: { projectId: string; source: string; startTime: number }): Promise<Record<string, any>> {
-		if (!options.projectId) throw new Error('projectId is required');
-		if (!options.source) throw new Error('source is required');
+		this.validateId(options.projectId, 'projectId');
+		this.validateId(options.source, 'source');
 		if (options.startTime === undefined || options.startTime === null) throw new Error('startTime is required');
 
 		const filename = `${options.source}-${options.startTime}.log`;
@@ -1540,7 +1540,8 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	async listLogs(options: { projectId: string; source?: string }): Promise<string[]> {
-		if (!options.projectId) throw new Error('projectId is required');
+		this.validateId(options.projectId, 'projectId');
+		if (options.source) this.validateId(options.source, 'source');
 
 		const dir = await this.fsListDir(`.logs/${options.projectId}`);
 		let logs = dir.entries.filter((e) => e.type === 'file' && e.name.endsWith('.log')).map((e) => e.name);
@@ -1565,11 +1566,9 @@ export class RocketRideClient extends DAPClient {
 	 * @param offset - Initial byte offset (read mode only)
 	 * @returns Object with 'handle' (string). Read mode also includes 'size' (number).
 	 */
-	async fsOpen(path: string, mode: 'r' | 'w' = 'r', offset?: number): Promise<{ handle: string; size?: number }> {
+	async fsOpen(path: string, mode: 'r' | 'w' = 'r'): Promise<{ handle: string; size?: number }> {
+		this.validateStorePath(path);
 		const args: Record<string, unknown> = { subcommand: 'fs_open', path, mode };
-		if (mode === 'r' && offset !== undefined && offset > 0) {
-			args.offset = offset;
-		}
 		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
 		if (this.didFail(response)) throw new Error(response.message || 'Failed to open file');
@@ -1580,11 +1579,12 @@ export class RocketRideClient extends DAPClient {
 	 * Read data from an open read handle.
 	 *
 	 * @param handle - Handle ID returned by fsOpen
+	 * @param offset - Byte offset to read from
 	 * @param length - Max bytes to read (default 4 MB). Empty Uint8Array indicates EOF.
 	 * @returns The bytes read
 	 */
-	async fsRead(handle: string, length: number = 4_194_304): Promise<Uint8Array> {
-		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_read', handle, length } });
+	async fsRead(handle: string, offset: number = 0, length: number = 4_194_304): Promise<Uint8Array> {
+		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_read', handle, offset, length } });
 		const response = await this.request(request);
 		if (this.didFail(response)) throw new Error(response.message || 'Failed to read from handle');
 		return ((response.arguments as any)?.data as Uint8Array) || new Uint8Array(0);
@@ -1623,6 +1623,7 @@ export class RocketRideClient extends DAPClient {
 	 * @throws Error if file does not exist or delete fails
 	 */
 	async fsDelete(path: string): Promise<void> {
+		this.validateStorePath(path);
 		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_delete', path } });
 		const response = await this.request(request);
 		if (this.didFail(response)) throw new Error(response.message || 'Failed to delete file');
@@ -1634,7 +1635,8 @@ export class RocketRideClient extends DAPClient {
 	 * @param path - Relative directory path (default: account root)
 	 * @returns Directory entries with name and type (file or dir)
 	 */
-	async fsListDir(path: string = ''): Promise<{ entries: Array<{ name: string; type: 'file' | 'dir'; modified?: number }>; count: number }> {
+	async fsListDir(path: string = ''): Promise<{ entries: Array<{ name: string; type: 'file' | 'dir'; size?: number; modified?: number }>; count: number }> {
+		if (path) this.validateStorePath(path);
 		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_list_dir', path } });
 		const response = await this.request(request);
 		if (this.didFail(response)) throw new Error(response.message || 'Failed to list directory');
@@ -1647,6 +1649,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param path - Relative directory path
 	 */
 	async fsMkdir(path: string): Promise<void> {
+		this.validateStorePath(path);
 		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_mkdir', path } });
 		const response = await this.request(request);
 		if (this.didFail(response)) throw new Error(response.message || 'Failed to create directory');
@@ -1656,9 +1659,10 @@ export class RocketRideClient extends DAPClient {
 	 * Get file or directory metadata.
 	 *
 	 * @param path - Relative path within the account store
-	 * @returns Metadata including existence, type, and modified epoch timestamp (for files)
+	 * @returns Metadata including existence, type, size (bytes), and modified epoch timestamp (for files)
 	 */
-	async fsStat(path: string): Promise<{ exists: boolean; type?: 'file' | 'dir'; modified?: number }> {
+	async fsStat(path: string): Promise<{ exists: boolean; type?: 'file' | 'dir'; size?: number; modified?: number }> {
+		this.validateStorePath(path);
 		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_stat', path } });
 		const response = await this.request(request);
 		if (this.didFail(response)) throw new Error(response.message || 'Failed to stat path');
@@ -1674,16 +1678,18 @@ export class RocketRideClient extends DAPClient {
 		const { handle } = await this.fsOpen(path, 'r');
 		try {
 			const chunks: Uint8Array[] = [];
+			let offset = 0;
 			while (true) {
-				const chunk = await this.fsRead(handle);
+				const chunk = await this.fsRead(handle, offset);
 				if (chunk.length === 0) break;
 				chunks.push(chunk);
-			}
-			const total = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
-			let offset = 0;
-			for (const chunk of chunks) {
-				total.set(chunk, offset);
 				offset += chunk.length;
+			}
+			const total = new Uint8Array(offset);
+			let pos = 0;
+			for (const chunk of chunks) {
+				total.set(chunk, pos);
+				pos += chunk.length;
 			}
 			return new TextDecoder().decode(total);
 		} finally {
@@ -1716,6 +1722,35 @@ export class RocketRideClient extends DAPClient {
 	/** Write an object as JSON. */
 	async fsWriteJson(path: string, obj: any): Promise<void> {
 		await this.fsWriteString(path, JSON.stringify(obj, null, 2));
+	}
+
+	// ============================================================================
+	// PATH AND ID VALIDATION
+	// ============================================================================
+
+	private static readonly INVALID_PATH_CHARS = new Set(['*', '?', '<', '>', '|', '"', '\x00']);
+
+	private validateStorePath(path: string): void {
+		for (const segment of path.replace(/\\/g, '/').split('/')) {
+			if (segment === '..') throw new Error(`Path traversal not allowed: ${path}`);
+			if (segment) {
+				for (const ch of segment) {
+					if (RocketRideClient.INVALID_PATH_CHARS.has(ch) || ch.charCodeAt(0) < 0x20) {
+						throw new Error(`Path contains invalid characters: ${path}`);
+					}
+				}
+			}
+		}
+	}
+
+	private validateId(value: string, name: string): void {
+		if (!value) throw new Error(`${name} is required`);
+		if (value.includes('/') || value.includes('\\')) throw new Error(`${name} must not contain path separators`);
+		for (const ch of value) {
+			if (RocketRideClient.INVALID_PATH_CHARS.has(ch) || ch.charCodeAt(0) < 0x20) {
+				throw new Error(`${name} contains invalid characters: ${value}`);
+			}
+		}
 	}
 
 	// ============================================================================

@@ -558,7 +558,7 @@ class RocketRideCLI:
         elif self.args.command == 'store':
             # Store command requires store_subcommand
             if not hasattr(self.args, 'store_subcommand') or not self.args.store_subcommand:
-                print('Error: Store subcommand is required (save_project, get_project, delete_project, get_all_projects, save_template, get_template, delete_template, get_all_templates, save_log, get_log, list_logs)')
+                print('Error: Store subcommand is required (dir, type, write, rm, mkdir, stat)')
                 return 1
 
         elif self.args.command == 'upload' and not self.args.pipeline_path and not self.args.token:

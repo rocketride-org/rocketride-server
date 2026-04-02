@@ -1925,10 +1925,8 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 	// ============================================================================
 
 	describe('File Store Operations', () => {
-		const storePrefix = `.test-store/ts-${Date.now()}`;
-
 		function uniquePath(name: string): string {
-			return `${storePrefix}/${name}-${Math.random().toString(36).slice(2, 10)}`;
+			return `.test-store/ts-${name}-${Math.random().toString(36).slice(2, 10)}`;
 		}
 
 		beforeEach(async () => {
@@ -1947,7 +1945,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 
 				const rInfo = await client.fsOpen(path, 'r');
 				expect(rInfo.size).toBe(11);
-				const data = await client.fsRead(rInfo.handle);
+				const data = await client.fsRead(rInfo.handle, 0);
 				expect(new TextDecoder().decode(data)).toBe('hello world');
 				await client.fsClose(rInfo.handle, 'r');
 
@@ -1987,10 +1985,12 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 
 				const rInfo = await client.fsOpen(path, 'r');
 				const chunks: Uint8Array[] = [];
+				let offset = 0;
 				while (true) {
-					const chunk = await client.fsRead(rInfo.handle, 300);
+					const chunk = await client.fsRead(rInfo.handle, offset, 300);
 					if (chunk.length === 0) break;
 					chunks.push(chunk);
+					offset += chunk.length;
 				}
 				await client.fsClose(rInfo.handle, 'r');
 

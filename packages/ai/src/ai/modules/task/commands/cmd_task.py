@@ -384,16 +384,24 @@ class TaskCommands(DAPConn):
             handle_id = await fs.open_write(path, self._connection_id)
             return self.build_response(request, body={'handle': handle_id})
         else:
-            offset = args.get('offset', 0)
-            result = await fs.open_read(path, self._connection_id, offset=offset)
+            result = await fs.open_read(path, self._connection_id)
             return self.build_response(request, body=result)
 
     async def _store_fs_read(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Read data from an open read handle."""
         fs = self._get_file_store()
         handle = args.get('handle')
+        offset = args.get('offset', 0)
         length = args.get('length', 4_194_304)
-        data = await fs.read_chunk(handle, length)
+
+        # Clamp client-supplied values
+        if not isinstance(offset, int) or offset < 0:
+            offset = 0
+        if not isinstance(length, int) or length <= 0:
+            length = 4_194_304
+        length = min(length, 4_194_304)
+
+        data = await fs.read_chunk(handle, offset, length)
         response = self.build_response(request, body={'size': len(data)})
         response['arguments'] = {'data': data}
         return response

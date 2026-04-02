@@ -169,8 +169,7 @@ class IStore(ABC):
         """
         Get the last modified time of a file as an epoch timestamp.
 
-        Default implementation reads the file to confirm existence, then
-        returns current time. Backends should override with native metadata.
+        Default implementation delegates to get_file_info.
 
         Args:
             filename: Relative path to file
@@ -181,11 +180,30 @@ class IStore(ABC):
         Raises:
             StorageError: If file doesn't exist
         """
+        info = await self.get_file_info(filename)
+        return info['modified']
+
+    async def get_file_info(self, filename: str) -> dict:
+        """
+        Get file metadata: size and modification time.
+
+        Default implementation reads the file to confirm existence and
+        returns approximate values. Backends should override with native
+        metadata (stat, head_object, get_blob_properties).
+
+        Args:
+            filename: Relative path to file
+
+        Returns:
+            dict with 'size' (int, bytes) and 'modified' (float, epoch timestamp)
+
+        Raises:
+            StorageError: If file doesn't exist
+        """
         import time
 
-        # Default: confirm file exists, return current time
-        await self.read_file(filename)
-        return time.time()
+        data = await self.read_bytes(filename)
+        return {'size': len(data), 'modified': time.time()}
 
     async def write_bytes(self, filename: str, data: bytes) -> None:
         """
@@ -494,7 +512,7 @@ class Store:
             storage_path = home / '.rocketlib' / 'store'
         except Exception:
             # Fallback to temp directory if home cannot be determined
-            storage_path = Path(tempfile.gettempdir()) / '.rocketlib' / 'dtc'
+            storage_path = Path(tempfile.gettempdir()) / '.rocketlib' / 'store'
 
         return f'filesystem://{storage_path.as_posix()}'
 

@@ -33,6 +33,12 @@ from .store import IStore, StorageError
 # Sentinel file used to represent empty directories on object stores
 DIR_MARKER = '.dirmarker'
 
+# Maximum bytes a single read_chunk call may return
+MAX_CHUNK_SIZE = 4_194_304  # 4 MB
+
+# Characters forbidden inside any single path segment
+_INVALID_SEGMENT_CHARS = frozenset('*?<>|"\x00')
+
 
 class FileHandleMode(Enum):
     """Mode for an open file handle."""
@@ -50,7 +56,6 @@ class FileHandle:
     mode: FileHandleMode = FileHandleMode.READ
     connection_id: int = 0
     context: Any = None
-    offset: int = 0
     bytes_written: int = 0
     closed: bool = False
 
@@ -72,6 +77,10 @@ class FileStore:
         """Initialize FileStore scoped to a specific account."""
         if not client_id:
             raise ValueError('client_id is required')
+        if '/' in client_id or '\\' in client_id:
+            raise ValueError('client_id must not contain path separators')
+        if client_id in ('.', '..'):
+            raise ValueError('client_id must not be "." or ".."')
         self._store = store
         self._client_id = client_id
         self._handles: dict[str, FileHandle] = {}
@@ -99,7 +108,14 @@ class FileStore:
         if full_path in self._write_locks:
             raise StorageError(f'File already open for writing: {path}')
 
-        result = await self._store.open_write(full_path)
+        # Acquire lock before awaiting to prevent races at suspension points
+        self._write_locks.add(full_path)
+        try:
+            result = await self._store.open_write(full_path)
+        except Exception:
+            self._write_locks.discard(full_path)
+            raise
+
         handle = FileHandle(
             path=full_path,
             mode=FileHandleMode.WRITE,
@@ -107,7 +123,6 @@ class FileStore:
             context=result['context'],
         )
         self._handles[handle.handle_id] = handle
-        self._write_locks.add(full_path)
         return handle.handle_id
 
     async def write_chunk(self, handle_id: str, data: bytes) -> int:
@@ -138,14 +153,13 @@ class FileStore:
     # Handle-Based Read Operations
     # =========================================================================
 
-    async def open_read(self, path: str, connection_id: int, offset: int = 0) -> dict:
+    async def open_read(self, path: str, connection_id: int) -> dict:
         """
         Open a file for reading.
 
         Args:
             path: Relative path within the account store.
             connection_id: ID of the owning connection (for cleanup on disconnect).
-            offset: Initial byte offset.
 
         Returns:
             Dict with 'handle' (str) and 'size' (int).
@@ -157,26 +171,29 @@ class FileStore:
             mode=FileHandleMode.READ,
             connection_id=connection_id,
             context=result['context'],
-            offset=offset,
         )
         self._handles[handle.handle_id] = handle
         return {'handle': handle.handle_id, 'size': result['size']}
 
-    async def read_chunk(self, handle_id: str, length: int = 4_194_304) -> bytes:
+    async def read_chunk(self, handle_id: str, offset: int, length: int = MAX_CHUNK_SIZE) -> bytes:
         """
         Read data from an open read handle.
 
         Args:
             handle_id: Handle returned by open_read.
-            length: Max bytes to read (default 4 MB).
+            offset: Byte offset to read from.
+            length: Max bytes to read (default 4 MB, capped at MAX_CHUNK_SIZE).
 
         Returns:
             Bytes read. Empty bytes indicates EOF.
         """
+        if offset < 0:
+            raise StorageError(f'Offset must be non-negative, got {offset}')
+        if length <= 0:
+            raise StorageError(f'Read length must be positive, got {length}')
+        length = min(length, MAX_CHUNK_SIZE)
         handle = self._get_handle(handle_id, FileHandleMode.READ)
-        data = await self._store.read_chunk(handle.path, handle.context, handle.offset, length)
-        handle.offset += len(data)
-        return data
+        return await self._store.read_chunk(handle.path, handle.context, offset, length)
 
     async def close_read(self, handle_id: str) -> None:
         """Close a read handle."""
@@ -222,11 +239,13 @@ class FileStore:
         info = await self.open_read(path, connection_id)
         try:
             chunks = []
+            offset = 0
             while True:
-                chunk = await self.read_chunk(info['handle'])
+                chunk = await self.read_chunk(info['handle'], offset)
                 if not chunk:
                     break
                 chunks.append(chunk)
+                offset += len(chunk)
             return b''.join(chunks)
         finally:
             await self.close_read(info['handle'])
@@ -259,9 +278,11 @@ class FileStore:
             path: Relative path within the account store.
 
         Raises:
-            StorageError: If file does not exist or delete fails.
+            StorageError: If file does not exist, delete fails, or file is open for writing.
         """
         full_path = self._full_path(path)
+        if full_path in self._write_locks:
+            raise StorageError(f'Cannot delete file while it is open for writing: {path}')
         await self._store.delete_file(full_path)
 
     async def list_dir(self, path: str = '') -> dict:
@@ -272,8 +293,8 @@ class FileStore:
             path: Relative directory path (default: account root).
 
         Returns:
-            Dict with keys: entries (list of {name, type, modified?}), count.
-            File entries include a modified epoch timestamp.
+            Dict with keys: entries (list of {name, type, size?, modified?}), count.
+            File entries include size (bytes) and modified (epoch timestamp).
         """
         prefix = self._full_path(path)
         if not prefix.endswith('/'):
@@ -302,11 +323,13 @@ class FileStore:
 
         entries = []
         for name in sorted(entries_map):
-            info = entries_map[name]
-            entry: dict = {'name': name, 'type': info['type']}
-            if info['type'] == 'file':
+            meta = entries_map[name]
+            entry: dict = {'name': name, 'type': meta['type']}
+            if meta['type'] == 'file':
                 try:
-                    entry['modified'] = await self._store.get_modified_time(info['full_path'])
+                    file_info = await self._store.get_file_info(meta['full_path'])
+                    entry['size'] = file_info['size']
+                    entry['modified'] = file_info['modified']
                 except StorageError:
                     pass
             entries.append(entry)
@@ -334,7 +357,8 @@ class FileStore:
             path: Relative path within the account store.
 
         Returns:
-            Dict with keys: exists, type (file|dir), modified (epoch timestamp, files only).
+            Dict with keys: exists, type (file|dir), size (bytes, files only),
+            modified (epoch timestamp, files only).
         """
         full_path = self._full_path(path)
 
@@ -347,8 +371,8 @@ class FileStore:
 
         # Try as file
         try:
-            modified = await self._store.get_modified_time(full_path)
-            return {'exists': True, 'type': 'file', 'modified': modified}
+            file_info = await self._store.get_file_info(full_path)
+            return {'exists': True, 'type': 'file', 'size': file_info['size'], 'modified': file_info['modified']}
         except StorageError:
             pass
 
@@ -403,6 +427,10 @@ class FileStore:
         if '..' in parts:
             raise ValueError(f'Path traversal not allowed: {path}')
 
+        for part in parts:
+            if part and any(c in _INVALID_SEGMENT_CHARS or ord(c) < 0x20 for c in part):
+                raise ValueError(f'Path contains invalid characters: {path}')
+
         normalized = str(PurePosixPath(path)) if path else ''
         if normalized == '.':
             normalized = ''
@@ -421,5 +449,6 @@ __all__ = [
     'FileStore',
     'FileHandle',
     'FileHandleMode',
+    'MAX_CHUNK_SIZE',
     'DIR_MARKER',
 ]
