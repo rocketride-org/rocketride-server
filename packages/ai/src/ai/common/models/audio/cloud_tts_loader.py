@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import base64
 import json
-import threading
 import urllib.error
 import urllib.request
 from urllib.parse import quote
@@ -65,7 +64,6 @@ class OpenAITTSLoader(BaseLoader):
             'api_key': api_key,
             'voice': voice,
             'model': model_name,
-            '_lock': threading.Lock(),
         }
         metadata = {
             'loader': 'openai_tts',
@@ -111,13 +109,9 @@ class OpenAITTSLoader(BaseLoader):
         api_key = bundle.get('api_key')
         voice = bundle.get('voice', 'alloy')
         model_id = bundle.get('model', 'gpt-4o-mini-tts')
-        lock = bundle.get('_lock')
 
         items: List[Dict[str, str]] = []
-        ctx = lock if lock is not None else threading.Lock()
-
-        def _one(row: Dict[str, str]) -> Tuple[bytes, str]:
-            """Send a single TTS request to the OpenAI API and return raw audio bytes with MIME type."""
+        for row in rows:
             fmt = row.get('output_format', 'mp3')
             row_voice = (row.get('voice') or '').strip() or voice
             row_model = (row.get('model') or '').strip() or model_id
@@ -140,21 +134,16 @@ class OpenAITTSLoader(BaseLoader):
             )
             try:
                 with urllib.request.urlopen(req, timeout=120) as resp:
-                    body = resp.read()
+                    raw = resp.read()
             except urllib.error.HTTPError as e:
                 detail = e.read().decode('utf-8', errors='replace')
                 raise RuntimeError(f'OpenAI TTS HTTP {e.code}: {detail}') from e
-            return body, _mime_for_openai_format(fmt)
-
-        with ctx:
-            for row in rows:
-                raw, mime = _one(row)
-                items.append(
-                    {
-                        'audio_base64': base64.b64encode(raw).decode('ascii'),
-                        'mime_type': mime,
-                    }
-                )
+            items.append(
+                {
+                    'audio_base64': base64.b64encode(raw).decode('ascii'),
+                    'mime_type': _mime_for_openai_format(fmt),
+                }
+            )
         return {'items': items}
 
     @staticmethod
@@ -202,7 +191,6 @@ class ElevenLabsTTSLoader(BaseLoader):
             'api_key': api_key,
             'voice': voice,
             'model': model_name,
-            '_lock': threading.Lock(),
         }
         metadata = {
             'loader': 'elevenlabs_tts',
@@ -247,13 +235,9 @@ class ElevenLabsTTSLoader(BaseLoader):
         api_key = bundle.get('api_key')
         voice = bundle.get('voice')
         model_id = bundle.get('model', 'eleven_multilingual_v2')
-        lock = bundle.get('_lock')
 
         items: List[Dict[str, str]] = []
-        ctx = lock if lock is not None else threading.Lock()
-
-        def _one(row: Dict[str, str]) -> bytes:
-            """Send a single TTS request to the ElevenLabs API and return raw audio bytes."""
+        for row in rows:
             row_voice = (row.get('voice') or '').strip() or voice
             row_model = (row.get('model') or '').strip() or model_id
             vid = quote(row_voice, safe='')
@@ -271,20 +255,16 @@ class ElevenLabsTTSLoader(BaseLoader):
             )
             try:
                 with urllib.request.urlopen(req, timeout=120) as resp:
-                    return resp.read()
+                    raw = resp.read()
             except urllib.error.HTTPError as e:
                 detail = e.read().decode('utf-8', errors='replace')
                 raise RuntimeError(f'ElevenLabs TTS HTTP {e.code}: {detail}') from e
-
-        with ctx:
-            for row in rows:
-                raw = _one(row)
-                items.append(
-                    {
-                        'audio_base64': base64.b64encode(raw).decode('ascii'),
-                        'mime_type': 'audio/mpeg',
-                    }
-                )
+            items.append(
+                {
+                    'audio_base64': base64.b64encode(raw).decode('ascii'),
+                    'mime_type': 'audio/mpeg',
+                }
+            )
         return {'items': items}
 
     @staticmethod
