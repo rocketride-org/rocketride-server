@@ -1747,6 +1747,8 @@ Error IServices::init() noexcept {
                 else if (cap == "noremote")
                     def.capabilities &=
                         ~url::UrlConfig::PROTOCOL_CAPS::REMOTING;
+                else if (cap == "experimental")
+                    def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::EXPERIMENTAL;
                 else
                     return APERR(Ec::InvalidParam, "Invalid cap setting", cap,
                                  "in", definitionPath);
