@@ -337,10 +337,26 @@ class TestRedisBackendMocked:
         pipe_mock = MagicMock()
         backend._client.pipeline.return_value = pipe_mock
         backend._client.hget.return_value = 'None'
+        # pttl returns -1 when the key has no TTL, or -2 when key doesn't exist
+        backend._client.pttl.return_value = -1
 
         result = backend.put('sess', 'mykey', {'data': 42})
         assert result['ok'] is True
         pipe_mock.execute.assert_called()
+
+    def test_put_redis_aligns_ttl_with_session(self):
+        """When session has a TTL, new keys should inherit remaining TTL from metadata key."""
+        backend = self._make_backend()
+        backend._client.sismember.return_value = True
+        pipe_mock = MagicMock()
+        backend._client.pipeline.return_value = pipe_mock
+        # Simulate 5000ms remaining on the metadata key
+        backend._client.pttl.return_value = 5000
+
+        result = backend.put('sess', 'mykey', {'data': 42})
+        assert result['ok'] is True
+        # Should call pexpire on the data key, keys key, and history key
+        assert backend._client.pexpire.call_count == 3
 
     def test_get_redis_found(self):
         backend = self._make_backend()
@@ -378,6 +394,24 @@ class TestRedisBackendMocked:
         result = backend.delete_session('sess')
         assert result['ok'] is True
         pipe_mock.execute.assert_called()
+
+    def test_close_redis_calls_client_close(self):
+        backend = self._make_backend()
+        backend.close()
+        backend._client.close.assert_called_once()
+
+    def test_replace_history_redis(self):
+        backend = self._make_backend()
+        pipe_mock = MagicMock()
+        backend._client.pipeline.return_value = pipe_mock
+        # No TTL on the session
+        backend._client.pttl.return_value = -1
+
+        entries = [{'op': 'summary', 'timestamp': 0}, {'op': 'put', 'key': 'k1', 'timestamp': 1}]
+        backend.replace_history('sess', entries)
+        pipe_mock.delete.assert_called_once()
+        pipe_mock.rpush.assert_called_once()
+        pipe_mock.execute.assert_called_once()
 
 
 # =============================================================================
@@ -458,6 +492,16 @@ class TestAutoSummarization:
 
 class TestHistoryRetrieval:
     """Tests for get_history with limits."""
+
+    def test_replace_history(self, backend: InMemoryBackend):
+        backend.create_session('s1')
+        backend.put('s1', 'k1', 'v1')
+        backend.put('s1', 'k2', 'v2')
+        # Replace with a single summary entry
+        backend.replace_history('s1', [{'op': 'summary', 'timestamp': 0}])
+        history = backend.get_history('s1', limit=0)
+        assert len(history['entries']) == 1
+        assert history['entries'][0]['op'] == 'summary'
 
     def test_history_records_puts(self, backend: InMemoryBackend):
         backend.create_session('s1')
@@ -697,6 +741,13 @@ class TestPersistentMemoryStoreFacade:
         history = store.get_history('s1')
         assert history['ok'] is True
         assert len(history['entries']) >= 1
+
+    def test_close_inmemory_is_noop(self, store: PersistentMemoryStore):
+        """InMemoryBackend.close() should be a safe no-op."""
+        store.backend.close()
+        # Store should still function after close (no-op for in-memory)
+        store.create_session('after-close')
+        assert store.resume_session('after-close')['ok'] is True
 
 
 # =============================================================================

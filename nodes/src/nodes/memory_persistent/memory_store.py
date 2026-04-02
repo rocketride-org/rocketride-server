@@ -85,6 +85,13 @@ class MemoryBackend(ABC):
     def get_history(self, session_id: str, limit: int = 50) -> Dict[str, Any]:
         """Return the most recent history entries for a session."""
 
+    @abstractmethod
+    def replace_history(self, session_id: str, entries: List[Dict[str, Any]]) -> None:
+        """Replace all history entries for a session with the given list."""
+
+    def close(self) -> None:
+        """Release any resources held by the backend. No-op by default."""
+
 
 # ---------------------------------------------------------------------------
 # InMemory backend (for testing)
@@ -227,6 +234,11 @@ class InMemoryBackend(MemoryBackend):
             # Return most recent entries (tail)
             entries = history[-limit:] if limit > 0 else history
             return {'ok': True, 'session_id': session_id, 'entries': copy.deepcopy(entries)}
+
+    def replace_history(self, session_id: str, entries: List[Dict[str, Any]]) -> None:
+        with self._lock:
+            if session_id in self._history:
+                self._history[session_id] = list(entries)
 
 
 # ---------------------------------------------------------------------------
@@ -386,10 +398,13 @@ class RedisBackend(MemoryBackend):
                 ),
             )
             pipe.execute()
-            # Re-apply TTL if session has one
-            ttl = self._get_ttl_seconds(session_id)
-            if ttl:
-                self._client.expire(self._data_key(session_id, key), ttl)
+            # Align new key's expiry with the session metadata key's
+            # remaining TTL so it doesn't outlive the session.
+            remaining_ms = self._client.pttl(self._meta_key(session_id))
+            if remaining_ms and remaining_ms > 0:
+                self._client.pexpire(self._data_key(session_id, key), remaining_ms)
+                self._client.pexpire(self._keys_key(session_id), remaining_ms)
+                self._client.pexpire(self._history_key(session_id), remaining_ms)
             return {'ok': True, 'session_id': session_id, 'key': key}
 
     def get(self, session_id: str, key: str) -> Dict[str, Any]:
@@ -465,6 +480,26 @@ class RedisBackend(MemoryBackend):
             raw_entries = self._client.lrange(self._history_key(session_id), -limit, -1) if limit > 0 else self._client.lrange(self._history_key(session_id), 0, -1)
             entries = [json.loads(e) for e in raw_entries]
             return {'ok': True, 'session_id': session_id, 'entries': entries}
+
+    def replace_history(self, session_id: str, entries: List[Dict[str, Any]]) -> None:
+        with self._lock:
+            history_key = self._history_key(session_id)
+            pipe = self._client.pipeline()
+            pipe.delete(history_key)
+            if entries:
+                pipe.rpush(history_key, *[json.dumps(e) for e in entries])
+            pipe.execute()
+            # Preserve TTL alignment with session metadata
+            remaining_ms = self._client.pttl(self._meta_key(session_id))
+            if remaining_ms and remaining_ms > 0:
+                self._client.pexpire(history_key, remaining_ms)
+
+    def close(self) -> None:
+        """Close the Redis connection explicitly."""
+        try:
+            self._client.close()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -595,18 +630,7 @@ class PersistentMemoryStore:
             'timestamp': time.time(),
         }
 
-        # Replace history: summary + recent entries
-        if isinstance(self._backend, InMemoryBackend):
-            with self._backend._lock:
-                self._backend._history[session_id] = [summary_entry] + recent_entries
-        elif isinstance(self._backend, RedisBackend):
-            history_key = self._backend._history_key(session_id)
-            with self._backend._lock:
-                pipe = self._backend._client.pipeline()
-                pipe.delete(history_key)
-                pipe.rpush(history_key, json.dumps(summary_entry))
-                for entry in recent_entries:
-                    pipe.rpush(history_key, json.dumps(entry))
-                pipe.execute()
+        # Replace history via backend's public API: summary + recent entries
+        self._backend.replace_history(session_id, [summary_entry, *recent_entries])
 
         return True
