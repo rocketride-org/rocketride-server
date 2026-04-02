@@ -37,7 +37,6 @@ class IGlobal(IGlobalBase):
     goal: str = ''
     backstory: str = ''
     expected_output: str = ''
-    max_iter: int = 0
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -53,11 +52,9 @@ class IGlobal(IGlobalBase):
         self.process = Process.sequential
 
         conn_config = IJson.toDict(self.glb.connConfig) if self.glb.connConfig else {}
-        conn_config = conn_config if isinstance(conn_config, dict) else {}
 
         self.goal = str(conn_config.get('goal') or '').strip()
         self.backstory = str(conn_config.get('backstory') or '').strip()
-        self.max_iter = int(conn_config.get('max_iter') or 0)
 
         if self.glb.logicalType == 'agent_crewai_orchestrator':
             from .crewai import OrchestratorDriver
@@ -68,8 +65,7 @@ class IGlobal(IGlobalBase):
             self.expected_output = str(conn_config.get('expected_output') or '').strip()
             from .crewai import CrewDriver
             self.agent = CrewDriver(self, process=self.process, role=self.role, task_description=self.task_description,
-                                    goal=self.goal, backstory=self.backstory, expected_output=self.expected_output,
-                                    max_iter=self.max_iter)
+                                    goal=self.goal, backstory=self.backstory, expected_output=self.expected_output)
 
     def endGlobal(self) -> None:
         self.agent = None
@@ -79,4 +75,3 @@ class IGlobal(IGlobalBase):
         self.goal = ''
         self.backstory = ''
         self.expected_output = ''
-        self.max_iter = 0

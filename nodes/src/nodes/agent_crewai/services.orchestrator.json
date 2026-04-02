@@ -41,9 +41,9 @@
 		"profiles": {
 			"default": {
 				"instructions": [],
+				"expert_mode": false,
 				"goal": "",
-				"backstory": "",
-				"max_iter": 0
+				"backstory": ""
 			}
 		}
 	},
@@ -57,42 +57,44 @@
 				"format": "textarea"
 			}
 		},
+		"expert_mode": {
+			"type": "boolean",
+			"title": "Expert Mode",
+			"description": "Expose CrewAI manager Agent configuration directly.",
+			"default": false,
+			"enum": [
+				[false, "Off"],
+				[true, "On"]
+			],
+			"conditional": [
+				{
+					"value": true,
+					"properties": ["goal", "backstory"]
+				}
+			]
+		},
 		"goal": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Manager Goal",
-			"description": "What the orchestrator manager agent is trying to achieve. Leave blank to use the default."
+			"description": "What the orchestrator manager is trying to achieve. Maps to CrewAI Agent(goal=...)."
 		},
 		"backstory": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Manager Backstory",
-			"description": "Background context for the orchestrator's persona. Leave blank to use the default."
+			"description": "Background context for the orchestrator's persona. Maps to CrewAI Agent(backstory=...)."
 		},
-		"max_iter": {
-			"type": "number",
-			"title": "Manager Max Iterations",
-			"description": "Maximum iterations for the orchestrator manager agent. 0 defaults to number of sub-agents + 2."
-		},
-		"agent_crewai_orchestrator.default": { "object": "default", "properties": ["instructions", "goal", "backstory", "max_iter"] },
-		"agent_crewai_orchestrator.profile": {
-			"title": "Profile",
-			"type": "string",
-			"default": "default",
-			"enum": [["default", "Default"]],
-			"conditional": [{ "value": "default", "properties": ["agent_crewai_orchestrator.default"] }]
+		"agent_crewai_orchestrator.default": {
+			"object": "default",
+			"properties": ["instructions", "expert_mode"]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "CrewAI Orchestrator",
-			"properties": ["instructions"]
-		},
-		{
-			"section": "Advanced",
-			"title": "Expert manager settings",
-			"properties": ["goal", "backstory", "max_iter"]
+			"properties": ["agent_crewai_orchestrator.default"]
 		}
 	]
 }

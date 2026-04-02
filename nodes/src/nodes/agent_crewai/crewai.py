@@ -51,14 +51,15 @@ def _safe_str(v: Any) -> str:
         return ''
 
 
-_DEFAULT_GOAL = (
-    'Complete the assigned task using the minimum tool calls needed. '
-    'Once you have sufficient information to answer, stop immediately and return your Final Answer.'
-)
+def _escape_braces(text: str) -> str:
+    """Escape curly braces so CrewAI doesn't treat them as template variables."""
+    return text.replace('{', '{{').replace('}', '}}')
+
+
+_DEFAULT_GOAL = 'Complete the assigned task to the best of your ability.'
 _DEFAULT_BACKSTORY = (
-    'You are a specialized agent in a multi-agent pipeline. '
-    'Use tools when necessary. As soon as you have enough information to answer, stop and provide your Final Answer. '
-    'Do not make additional tool calls beyond what is needed.'
+    'You are a specialized agent in a multi-agent pipeline with access to tools. '
+    'Use your tools and reasoning to complete tasks effectively.'
 )
 _DEFAULT_EXPECTED_OUTPUT = 'A clear, direct answer to the assigned task.'
 
@@ -75,7 +76,11 @@ class CrewAgentBase(AgentBase):
         call_llm_text: Callable[..., str],
         ctx: Dict[str, Any],
     ) -> Any:
+        """Wrap the host LLM channel as a CrewAI-compatible BaseLLM instance.
 
+        The returned HostInvokeLLM delegates all calls back through
+        ``call_llm_text``, which routes to the engine's llm invoke channel.
+        """
         from crewai import BaseLLM
 
         class HostInvokeLLM(BaseLLM):
@@ -103,7 +108,12 @@ class CrewAgentBase(AgentBase):
         invoke_tool: Callable[..., Any],
         ctx: Dict[str, Any],
     ) -> List[Any]:
+        """Convert host tool descriptors into CrewAI BaseTool instances.
 
+        Each tool's JSON Schema is embedded in the description so CrewAI can
+        pass structured arguments. A dynamic Pydantic args_schema is built per
+        tool to preserve real parameter names through CrewAI's argument filter.
+        """
         from crewai.tools import BaseTool
         from pydantic import BaseModel, ConfigDict, Field, create_model
 
@@ -185,7 +195,12 @@ class CrewDriver(CrewAgentBase):
     FRAMEWORK = 'crewai'
 
     def __init__(self, iGlobal: Any, *, process: Any = None, role: str = 'Assistant', task_description: str = '',
-                 goal: str = '', backstory: str = '', expected_output: str = '', max_iter: int = 0):
+                 goal: str = '', backstory: str = '', expected_output: str = ''):
+        """Initialise the driver with per-node config loaded from connConfig.
+
+        All string fields default to empty; empty values fall back to the
+        module-level ``_DEFAULT_*`` constants at run time.
+        """
         super().__init__(iGlobal)
         self._process = process
         self._role = role
@@ -193,7 +208,6 @@ class CrewDriver(CrewAgentBase):
         self._goal = goal
         self._backstory = backstory
         self._expected_output = expected_output
-        self._max_iter = max_iter
 
     def describe(self, pSelf: Any) -> Any:
         """Return a DescribeResponse for crewai.describe fan-out.
@@ -220,6 +234,13 @@ class CrewDriver(CrewAgentBase):
         host: AgentHost,
         ctx: Dict[str, Any],
     ) -> AgentRunResult:
+        """Execute a single-agent CrewAI Crew and return the result text.
+
+        Builds a one-agent, one-task Crew using the host's LLM and tool
+        channels. If ``task_description`` is blank the incoming prompt is used
+        as the task. All config fields fall back to ``_DEFAULT_*`` constants
+        when empty.
+        """
         run_id = ctx.get('run_id', '')
         debug('agent_crewai driver _run start run_id={}'.format(run_id))
 
@@ -246,7 +267,7 @@ class CrewDriver(CrewAgentBase):
             ctx=ctx,
         )
 
-        agent_kwargs: Dict[str, Any] = dict(
+        agent_obj = Agent(
             role=self._role,
             goal=self._goal or _DEFAULT_GOAL,
             backstory=self._backstory or _DEFAULT_BACKSTORY,
@@ -254,15 +275,12 @@ class CrewDriver(CrewAgentBase):
             llm=llm,
             verbose=False,
         )
-        if self._max_iter > 0:
-            agent_kwargs['max_iter'] = self._max_iter
-        agent_obj = Agent(**agent_kwargs)
 
         from ai.common.agent._internal.utils import extract_prompt
         prompt = extract_prompt(agent_input.question) if hasattr(agent_input, 'question') else ''
         task_text = self._task_description or prompt or ''
 
-        desc = task_text.replace('{', '{{').replace('}', '}}')
+        desc = _escape_braces(task_text)
 
         task_obj = Task(
             description=desc or 'Complete the user request.',
@@ -329,15 +347,7 @@ class CrewDriver(CrewAgentBase):
 
             result = crew.kickoff()
 
-        final_text = ''
-        if hasattr(result, 'raw'):
-            try:
-                final_text = _safe_str(getattr(result, 'raw'))
-            except Exception:
-                final_text = ''
-        if not final_text:
-            final_text = _safe_str(result)
-
+        final_text = _safe_str(getattr(result, 'raw', None)) or _safe_str(result)
         return final_text, result
 
 
@@ -346,9 +356,7 @@ class CrewDriver(CrewAgentBase):
 _MGR_ROLE = 'Orchestrator'
 _MGR_GOAL = (
     'Coordinate the team to complete the user request. '
-    'Delegate to each available agent exactly once.'
-    'Accept their first response without asking for revisions or improvements. '
-    'When all agents have responded, synthesize and return the final answer.'
+    'Delegate to the appropriate agents and synthesize their outputs into a final answer.'
 )
 _MGR_BACKSTORY = (
     'You are a senior orchestrator managing a team of specialized agents. '
@@ -369,6 +377,12 @@ class OrchestratorDriver(CrewAgentBase):
     FRAMEWORK = 'crewai_orchestrator'
 
     def __init__(self, iGlobal: Any):
+        """Initialise the orchestrator driver.
+
+        Stores a reference to iGlobal for accessing expert config fields at
+        run time, and initialises the pSelf stash used to capture the engine
+        context across the run_agent → _run call boundary.
+        """
         super().__init__(iGlobal)
         self._iGlobal = iGlobal
         # Stash for pSelf — needed in _run() to call pSelf.instance.invoke('crewai', ...).
@@ -390,6 +404,15 @@ class OrchestratorDriver(CrewAgentBase):
         host: AgentHost,
         ctx: Dict[str, Any],
     ) -> AgentRunResult:
+        """Fan out crewai.describe to all connected sub-agents and run a hierarchical Crew.
+
+        Steps:
+          1. Collect descriptors from each sub-agent node via per-node crewai.describe invoke.
+          2. Build a CrewAI Agent + Task per descriptor, routing LLM/tool calls back through
+             each sub-agent's own engine channels.
+          3. Build the manager agent using this node's LLM channel and expert config.
+          4. Kick off a hierarchical Crew and return the synthesised result.
+        """
         from crewai import Agent, Crew, Process, Task
         from rocketlib.types import IInvokeCrew
         from ai.common.agent._internal.host import AgentHostServices
@@ -479,7 +502,7 @@ class OrchestratorDriver(CrewAgentBase):
                 tools=sub_tools,
                 llm=sub_llm,
                 verbose=False,
-                max_iter=3,
+                max_iter=5,
                 allow_delegation=False,
             )
 
@@ -505,21 +528,20 @@ class OrchestratorDriver(CrewAgentBase):
         ig = self._iGlobal
         base_backstory = ig.backstory or _MGR_BACKSTORY
         if prompt:
-            escaped_prompt = prompt.replace('{', '{{').replace('}', '}}')
+            escaped_prompt = _escape_braces(prompt)
             manager_backstory = f'{base_backstory}\n\nBackground context — user request: {escaped_prompt}'
         else:
             manager_backstory = base_backstory
 
-        mgr_kwargs: Dict[str, Any] = dict(
+        manager_agent = Agent(
             role=_MGR_ROLE,
             goal=ig.goal or _MGR_GOAL,
             backstory=manager_backstory,
             llm=manager_llm,
             verbose=False,
             allow_delegation=True,
-            max_iter=ig.max_iter if ig.max_iter > 0 else len(descriptors) + 2,
+            max_iter=5,
         )
-        manager_agent = Agent(**mgr_kwargs)
 
         # 5. Assemble and kick off the hierarchical Crew.
         crew = Crew(
