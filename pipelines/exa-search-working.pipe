@@ -1,0 +1,120 @@
+{
+  "viewport": {
+    "x": 89.25,
+    "y": 66.4375,
+    "zoom": 0.8333333333333334
+  },
+  "name": "",
+  "description": "",
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "name": "Exa search chat",
+      "description": "Accepts user chat input",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      },
+      "ui": {
+        "position": {
+          "x": 100,
+          "y": 0
+        },
+        "measured": {
+          "width": 176,
+          "height": 61
+        },
+        "data": {
+          "provider": "chat",
+          "class": [
+            "source"
+          ],
+          "type": "default",
+          "content": ""
+        },
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "search_exa_1",
+      "provider": "search_exa",
+      "name": "Exa search",
+      "config": {
+        "apikey": "${ROCKETRIDE_APIKEY_EXA}",
+        "profile": "default",
+        "default": {
+          "highlightChars": 600,
+          "includeHighlights": true,
+          "numResults": 5,
+          "type": "auto"
+        },
+        "parameters": {
+          "google": {}
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 320,
+          "y": 40
+        },
+        "measured": {
+          "width": 176,
+          "height": 96
+        },
+        "data": {
+          "provider": "search_exa",
+          "class": [
+            "search"
+          ],
+          "type": "default",
+          "content": ""
+        },
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ]
+    },
+    {
+      "id": "response_1",
+      "provider": "response",
+      "name": "Response",
+      "config": {
+        "lanes": []
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 40
+        },
+        "measured": {
+          "width": 176,
+          "height": 31
+        },
+        "data": {
+          "provider": "response",
+          "class": [
+            "target"
+          ],
+          "type": "default",
+          "content": ""
+        },
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "search_exa_1"
+        }
+      ]
+    }
+  ],
+  "source": "chat_1",
+  "project_id": "d7a9cb04-469b-47a3-82cd-0e3fd5e9e983"
+}
