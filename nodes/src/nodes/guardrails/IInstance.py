@@ -144,15 +144,9 @@ class IInstance(IInstanceBase):
             documents: List of Doc objects from the pipeline.
         """
         for doc in documents:
-            body = None
-            if hasattr(doc, 'page_content'):
-                body = doc.page_content
-            elif isinstance(doc, dict) and 'page_content' in doc:
-                body = doc['page_content']
-            elif isinstance(doc, str):
-                body = doc
-            if body:
-                self.source_documents.append(str(body))
+            content = doc.page_content if hasattr(doc, 'page_content') else (doc.get('page_content') if isinstance(doc, dict) else doc)
+            if content and str(content).strip():
+                self.source_documents.append(str(content))
 
         # Forward documents downstream
         self.instance.writeDocuments(documents)
