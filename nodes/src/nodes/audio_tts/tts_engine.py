@@ -407,6 +407,10 @@ class TTSEngine:
         except ImportError as e:
             raise RuntimeError('Kokoro requires ``kokoro`` (and usually ``soundfile``). Install ``nodes/audio_tts/requirements.txt`` via depends(). For some languages you may need extra misaki extras (see Kokoro docs).') from e
 
+        from ai.common.models.audio.spacy_en_model import ensure_spacy_en_model
+
+        ensure_spacy_en_model()
+
         lang = str(self.config.get('kokoro_lang_code', 'a') or 'a').strip()
 
         if self._kokoro_pipeline is None or self._kokoro_cache_lang != lang:

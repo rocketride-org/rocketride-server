@@ -8,9 +8,9 @@ transformers
 # Kokoro-82M: official inference package (not transformers AutoModel)
 kokoro>=0.9.4
 soundfile>=0.12.0
-# Misaki English G2P uses spaCy; if en_core_web_sm is missing, misaki calls spacy.cli.download(),
-# which uses wasabi and can sys.exit(1) — shows up as "Exception: 1" at wasabi/printer.py in embedded runs.
-https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+# en_core_web_sm is installed dynamically in tts_engine._kokoro() via
+# ai.common.models.audio.spacy_en_model.ensure_spacy_en_model() so the version
+# matches the installed spaCy
 # WAV→MP3 without ffmpeg subprocess when possible (Piper + HF paths); fallback: imageio-ffmpeg → bundled ffmpeg
 lameenc>=1.6.0
 imageio-ffmpeg>=0.4.0

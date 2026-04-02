@@ -31,6 +31,20 @@ class KokoroLoader(BaseLoader):
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_kokoro.txt')
     _DEFAULTS: dict = {'lang_code': 'a', 'repo_id': 'hexgrad/Kokoro-82M'}
 
+    @classmethod
+    def _ensure_dependencies(cls) -> None:
+        """Install kokoro/soundfile via requirements file, then ensure en_core_web_sm is present.
+
+        Extends ``BaseLoader._ensure_dependencies`` to install the spaCy English
+        model after the base requirements are satisfied.  The model version is
+        derived at runtime from the installed spaCy version so no URL is
+        hardcoded in the requirements file.
+        """
+        super()._ensure_dependencies()
+        from .spacy_en_model import ensure_spacy_en_model
+
+        ensure_spacy_en_model()
+
     @staticmethod
     def _estimate_memory_gb() -> float:
         """Return a conservative GPU memory estimate (GB) for Kokoro-82M plus activations."""
