@@ -151,10 +151,10 @@ def resolve_cloud_api_key(cfg: Dict[str, Any], raw: Any, engine: str, read_cfg: 
 def _merge_cfg_locked_profile_engine(logical_type: str, raw: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Override ``cfg['engine']`` with the engine locked in the selected profile's preconfig.
 
-    Reads the active profile name from ``raw`` or ``cfg``, then looks up
-    ``preconfig.profiles[profile].engine`` via ``getServiceDefinition``.
-    When found, returns a copy of ``cfg`` with ``engine`` replaced so that
-    the profile's declared engine cannot be overridden by user-supplied config.
+    Reads the active profile name from ``raw`` or ``cfg``.  When neither
+    supplies one, falls back to ``preconfig.default`` — the same resolution
+    that ``Config.getNodeConfig()`` uses for the no-profile path — so the
+    engine lock applies even when a profile key is omitted from the payload.
 
     Args:
         logical_type: The node's logical type string used to call
@@ -171,14 +171,24 @@ def _merge_cfg_locked_profile_engine(logical_type: str, raw: Any, cfg: Dict[str,
         p = cfg.get('profile')
         if isinstance(p, str) and p.strip():
             profile = p.strip()
-    if not isinstance(profile, str) or not profile:
-        return cfg
+
     try:
         sdef = getServiceDefinition(logical_type)
     except Exception:
         return cfg
     if not isinstance(sdef, dict):
         return cfg
+
+    # When no profile is present in raw or cfg, fall back to preconfig.default —
+    # the same resolution that Config.getNodeConfig() uses for the no-profile
+    # path, so the engine lock applies even when profile is omitted.
+    if not isinstance(profile, str) or not profile.strip():
+        pre = sdef.get('preconfig') or {}
+        profile = str(pre.get('default') or '').strip()
+
+    if not profile:
+        return cfg
+
     pre = sdef.get('preconfig') or {}
     prof = (pre.get('profiles') or {}).get(profile)
     if not isinstance(prof, dict):
