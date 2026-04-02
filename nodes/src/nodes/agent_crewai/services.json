@@ -36,7 +36,11 @@
 				"agent_description": "",
 				"instructions": [],
 				"role": "Assistant",
-				"task_description": ""
+				"task_description": "",
+				"goal": "",
+				"backstory": "",
+				"expected_output": "",
+				"max_iter": 0
 			}
 		}
 	},
@@ -71,8 +75,32 @@
 			"title": "Task",
 			"description": "What this agent should do when used in a CrewAI Orchestrator pipeline. If blank, the incoming question is used."
 		},
+		"goal": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Goal",
+			"description": "What this agent is trying to achieve. Leave blank to use the default."
+		},
+		"backstory": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Backstory",
+			"description": "Background context for this agent's persona. Leave blank to use the default."
+		},
+		"expected_output": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Expected Output",
+			"description": "Description of the expected output format. Leave blank to use the default."
+		},
+		"max_iter": {
+			"type": "number",
+			"title": "Max Iterations",
+			"description": "Maximum agent iterations before forced stop. 0 uses the framework default (25)."
+		},
 		"agent_crewai.default": { "object": "default", "properties": ["agent_description", "instructions"] },
 		"agent_crewai.subagent": { "object": "default", "properties": ["role", "task_description"] },
+		"agent_crewai.expert": { "object": "default", "properties": ["goal", "backstory", "expected_output", "max_iter"] },
 		"agent_crewai.profile": {
 			"title": "Profile",
 			"type": "string",
@@ -91,6 +119,11 @@
 			"section": "Sub-Agent Settings",
 			"title": "Settings when used in a CrewAI Orchestrator pipeline",
 			"properties": ["agent_crewai.subagent"]
+		},
+		{
+			"section": "Advanced",
+			"title": "Expert CrewAI settings",
+			"properties": ["agent_crewai.expert"]
 		}
 	]
 }

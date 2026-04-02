@@ -184,11 +184,16 @@ class CrewDriver(CrewAgentBase):
 
     FRAMEWORK = 'crewai'
 
-    def __init__(self, iGlobal: Any, *, process: Any = None, role: str = 'Assistant', task_description: str = ''):
+    def __init__(self, iGlobal: Any, *, process: Any = None, role: str = 'Assistant', task_description: str = '',
+                 goal: str = '', backstory: str = '', expected_output: str = '', max_iter: int = 0):
         super().__init__(iGlobal)
         self._process = process
         self._role = role
         self._task_description = task_description
+        self._goal = goal
+        self._backstory = backstory
+        self._expected_output = expected_output
+        self._max_iter = max_iter
 
     def describe(self, pSelf: Any) -> Any:
         """Return a DescribeResponse for crewai.describe fan-out.
@@ -241,14 +246,17 @@ class CrewDriver(CrewAgentBase):
             ctx=ctx,
         )
 
-        agent_obj = Agent(
+        agent_kwargs: Dict[str, Any] = dict(
             role=self._role,
-            goal=_DEFAULT_GOAL,
-            backstory=_DEFAULT_BACKSTORY,
+            goal=self._goal or _DEFAULT_GOAL,
+            backstory=self._backstory or _DEFAULT_BACKSTORY,
             tools=tools_for_agent,
             llm=llm,
             verbose=False,
         )
+        if self._max_iter > 0:
+            agent_kwargs['max_iter'] = self._max_iter
+        agent_obj = Agent(**agent_kwargs)
 
         from ai.common.agent._internal.utils import extract_prompt
         prompt = extract_prompt(agent_input.question) if hasattr(agent_input, 'question') else ''
@@ -258,7 +266,7 @@ class CrewDriver(CrewAgentBase):
 
         task_obj = Task(
             description=desc or 'Complete the user request.',
-            expected_output=_DEFAULT_EXPECTED_OUTPUT,
+            expected_output=self._expected_output or _DEFAULT_EXPECTED_OUTPUT,
             agent=agent_obj,
             markdown=False,
         )
@@ -362,6 +370,7 @@ class OrchestratorDriver(CrewAgentBase):
 
     def __init__(self, iGlobal: Any):
         super().__init__(iGlobal)
+        self._iGlobal = iGlobal
         # Stash for pSelf — needed in _run() to call pSelf.instance.invoke('crewai', ...).
         # Not thread-safe; safe because pipeline runs are sequential per node instance.
         self._current_pSelf: Any = None
@@ -493,20 +502,24 @@ class OrchestratorDriver(CrewAgentBase):
         # 4. Build manager agent. The user's prompt goes into backstory (background context)
         #    rather than the goal so it doesn't drive active reasoning on every LLM call.
         #    The goal stays generic: delegate once, return the result.
-        manager_backstory = _MGR_BACKSTORY
+        ig = self._iGlobal
+        base_backstory = ig.backstory or _MGR_BACKSTORY
         if prompt:
             escaped_prompt = prompt.replace('{', '{{').replace('}', '}}')
-            manager_backstory = f'{_MGR_BACKSTORY}\n\nBackground context — user request: {escaped_prompt}'
+            manager_backstory = f'{base_backstory}\n\nBackground context — user request: {escaped_prompt}'
+        else:
+            manager_backstory = base_backstory
 
-        manager_agent = Agent(
+        mgr_kwargs: Dict[str, Any] = dict(
             role=_MGR_ROLE,
-            goal=_MGR_GOAL,
+            goal=ig.goal or _MGR_GOAL,
             backstory=manager_backstory,
             llm=manager_llm,
             verbose=False,
             allow_delegation=True,
-            max_iter=len(descriptors) + 2,
+            max_iter=ig.max_iter if ig.max_iter > 0 else len(descriptors) + 2,
         )
+        manager_agent = Agent(**mgr_kwargs)
 
         # 5. Assemble and kick off the hierarchical Crew.
         crew = Crew(

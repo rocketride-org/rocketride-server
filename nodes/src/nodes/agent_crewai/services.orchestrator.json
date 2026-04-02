@@ -40,7 +40,10 @@
 		"default": "default",
 		"profiles": {
 			"default": {
-				"instructions": []
+				"instructions": [],
+				"goal": "",
+				"backstory": "",
+				"max_iter": 0
 			}
 		}
 	},
@@ -54,7 +57,24 @@
 				"format": "textarea"
 			}
 		},
-		"agent_crewai_orchestrator.default": { "object": "default", "properties": ["instructions"] },
+		"goal": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Manager Goal",
+			"description": "What the orchestrator manager agent is trying to achieve. Leave blank to use the default."
+		},
+		"backstory": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Manager Backstory",
+			"description": "Background context for the orchestrator's persona. Leave blank to use the default."
+		},
+		"max_iter": {
+			"type": "number",
+			"title": "Manager Max Iterations",
+			"description": "Maximum iterations for the orchestrator manager agent. 0 defaults to number of sub-agents + 2."
+		},
+		"agent_crewai_orchestrator.default": { "object": "default", "properties": ["instructions", "goal", "backstory", "max_iter"] },
 		"agent_crewai_orchestrator.profile": {
 			"title": "Profile",
 			"type": "string",
@@ -68,6 +88,11 @@
 			"section": "Pipe",
 			"title": "CrewAI Orchestrator",
 			"properties": ["instructions"]
+		},
+		{
+			"section": "Advanced",
+			"title": "Expert manager settings",
+			"properties": ["goal", "backstory", "max_iter"]
 		}
 	]
 }

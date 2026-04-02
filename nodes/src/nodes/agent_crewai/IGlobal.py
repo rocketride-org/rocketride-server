@@ -34,6 +34,10 @@ class IGlobal(IGlobalBase):
     agent: Any = None
     role: str = 'Assistant'
     task_description: str = ''
+    goal: str = ''
+    backstory: str = ''
+    expected_output: str = ''
+    max_iter: int = 0
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -51,17 +55,28 @@ class IGlobal(IGlobalBase):
         conn_config = IJson.toDict(self.glb.connConfig) if self.glb.connConfig else {}
         conn_config = conn_config if isinstance(conn_config, dict) else {}
 
+        self.goal = str(conn_config.get('goal') or '').strip()
+        self.backstory = str(conn_config.get('backstory') or '').strip()
+        self.max_iter = int(conn_config.get('max_iter') or 0)
+
         if self.glb.logicalType == 'agent_crewai_orchestrator':
             from .crewai import OrchestratorDriver
             self.agent = OrchestratorDriver(self)
         else:
             self.role = str(conn_config.get('role') or 'Assistant').strip() or 'Assistant'
             self.task_description = str(conn_config.get('task_description') or '').strip()
+            self.expected_output = str(conn_config.get('expected_output') or '').strip()
             from .crewai import CrewDriver
-            self.agent = CrewDriver(self, process=self.process, role=self.role, task_description=self.task_description)
+            self.agent = CrewDriver(self, process=self.process, role=self.role, task_description=self.task_description,
+                                    goal=self.goal, backstory=self.backstory, expected_output=self.expected_output,
+                                    max_iter=self.max_iter)
 
     def endGlobal(self) -> None:
         self.agent = None
         self.process = None
         self.role = 'Assistant'
         self.task_description = ''
+        self.goal = ''
+        self.backstory = ''
+        self.expected_output = ''
+        self.max_iter = 0
