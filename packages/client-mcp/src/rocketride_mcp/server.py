@@ -105,6 +105,7 @@ async def run_server() -> None:
 
     @server.list_tools()  # type: ignore[untyped-decorator,no-untyped-call]
     async def list_tools() -> list[types.Tool]:
+        """Return MCP tool descriptors for all running RocketRide pipelines."""
         entries = await _dynamic_tools()
         tools: list[types.Tool] = []
         for entry in entries:
@@ -119,6 +120,7 @@ async def run_server() -> None:
 
     @server.call_tool()  # type: ignore[untyped-decorator]
     async def call_tool(name: str, arguments: dict[str, Any] | None) -> list[types.TextContent]:
+        """Execute a pipeline tool by name with the given arguments."""
         resp = await _handle_call(name, arguments or {})
         if resp.get('isError'):
             raise RuntimeError(resp['content'][0]['text'])
@@ -128,20 +130,24 @@ async def run_server() -> None:
 
     @server.list_resources()  # type: ignore[untyped-decorator,no-untyped-call]
     async def handle_list_resources() -> list[types.Resource]:
+        """Return the catalogue of available RocketRide MCP resources."""
         return await list_resources(_client)
 
     @server.read_resource()  # type: ignore[untyped-decorator]
     async def handle_read_resource(uri: Any) -> str:
+        """Fetch the JSON payload for the requested resource URI."""
         return await read_resource(_client, str(uri))
 
     # --- Prompts -------------------------------------------------------------
 
     @server.list_prompts()  # type: ignore[untyped-decorator,no-untyped-call]
     async def handle_list_prompts() -> list[types.Prompt]:
+        """Return all available MCP prompt templates."""
         return list_prompts()
 
     @server.get_prompt()  # type: ignore[untyped-decorator]
     async def handle_get_prompt(name: str, arguments: dict[str, str] | None) -> types.GetPromptResult:
+        """Render a prompt template with the supplied arguments."""
         return get_prompt(name, arguments)
 
     try:

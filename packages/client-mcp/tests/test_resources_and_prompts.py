@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -333,20 +334,33 @@ async def test_server_registers_list_resources_handler(env_rocketride: None) -> 
     mock_client.connect = AsyncMock()
     mock_client.disconnect = AsyncMock()
 
-    with patch('rocketride_mcp.server.RocketRideClient', return_value=mock_client):
-        with patch('rocketride_mcp.server.mcp.server.stdio.stdio_server') as mock_stdio:
-            # Make the context manager raise to short-circuit after registration
-            mock_stdio.side_effect = RuntimeError('stop')
-            try:
-                await server_mod.run_server()
-            except RuntimeError as e:
-                if 'stop' not in str(e):
-                    raise
+    server_instance = None
+    original_server_cls = server_mod.Server
 
-    # Reaching the stdio_server call means all handler registrations
-    # (list_tools, call_tool, list_resources, read_resource) completed
-    # without error.  If any decorator failed, we'd never reach this point.
+    def capture_server(*args: Any, **kwargs: Any) -> Any:
+        nonlocal server_instance
+        server_instance = original_server_cls(*args, **kwargs)
+        return server_instance
+
+    with patch('rocketride_mcp.server.RocketRideClient', return_value=mock_client):
+        with patch('rocketride_mcp.server.Server', side_effect=capture_server):
+            with patch('rocketride_mcp.server.mcp.server.stdio.stdio_server') as mock_stdio:
+                mock_stdio.side_effect = RuntimeError('stop')
+                try:
+                    await server_mod.run_server()
+                except RuntimeError as e:
+                    if 'stop' not in str(e):
+                        raise
+
+    assert server_instance is not None, 'Server was not instantiated'
     assert mock_stdio.called, 'stdio_server was never called — handler registration failed'
+    # Verify the list_resources handler was registered by calling it
+    resources = await server_mod.list_resources(mock_client)
+    assert len(resources) == 3
+    uris = [str(r.uri) for r in resources]
+    assert 'rocketride://pipelines' in uris
+    assert 'rocketride://status' in uris
+    assert 'rocketride://nodes' in uris
 
 
 async def test_server_registers_list_prompts_handler(env_rocketride: None) -> None:
@@ -357,14 +371,32 @@ async def test_server_registers_list_prompts_handler(env_rocketride: None) -> No
     mock_client.connect = AsyncMock()
     mock_client.disconnect = AsyncMock()
 
+    server_instance = None
+    original_server_cls = server_mod.Server
+
+    def capture_server(*args: Any, **kwargs: Any) -> Any:
+        nonlocal server_instance
+        server_instance = original_server_cls(*args, **kwargs)
+        return server_instance
+
     with patch('rocketride_mcp.server.RocketRideClient', return_value=mock_client):
-        with patch('rocketride_mcp.server.mcp.server.stdio.stdio_server') as mock_stdio:
-            mock_stdio.side_effect = RuntimeError('stop')
-            try:
-                await server_mod.run_server()
-            except RuntimeError as e:
-                if 'stop' not in str(e):
-                    raise
+        with patch('rocketride_mcp.server.Server', side_effect=capture_server):
+            with patch('rocketride_mcp.server.mcp.server.stdio.stdio_server') as mock_stdio:
+                mock_stdio.side_effect = RuntimeError('stop')
+                try:
+                    await server_mod.run_server()
+                except RuntimeError as e:
+                    if 'stop' not in str(e):
+                        raise
+
+    assert server_instance is not None, 'Server was not instantiated'
+    # Verify prompts are accessible after registration
+    prompts = server_mod.list_prompts()
+    assert len(prompts) == 3
+    names = [p.name for p in prompts]
+    assert 'analyze-document' in names
+    assert 'chat-with-data' in names
+    assert 'evaluate-pipeline' in names
 
     # Same reasoning: reaching stdio_server means all handler registrations
     # (including list_prompts, get_prompt) completed without error.
