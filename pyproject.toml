@@ -46,7 +46,8 @@ fixable = ["D", "Q"]
 # Rules to ignore
 # D100 Ignore no public module docstring
 # D101 Ignore no public class docstring
-# D102 Ignore no public function docstring
+# D102 Ignore no public method docstring
+# D103 Ignore no public function docstring
 # D104 Ignore no public package docstring
 # D200 Ignore single line docstring
 # D205 1 blank line required between summary line and description
@@ -55,7 +56,7 @@ fixable = ["D", "Q"]
 # E203 Ignore whitespace before ':' - ruff puts it there and then produces an error on it
 # E402 Ignore missing module level docstring - we need depends first
 # E501 Line too long
-ignore = ["D100", "D101", "D102", "D104", "D200", "D205", "D301", "D400", "E203", "E402", "E501"]
+ignore = ["D100", "D101", "D102", "D103", "D104", "D200", "D205", "D301", "D400", "E203", "E402", "E501"]
 
 [tool.ruff.lint.flake8-quotes]
 # Enforce single quotes for inline strings

@@ -343,9 +343,10 @@ async def test_server_registers_list_resources_handler(env_rocketride: None) -> 
                 if 'stop' not in str(e):
                     raise
 
-    # The handler for list resources should have been registered.
-    # The mcp library registers handlers internally on the Server object,
-    # so we verify the run_server function completed registration without error.
+    # Reaching the stdio_server call means all handler registrations
+    # (list_tools, call_tool, list_resources, read_resource) completed
+    # without error.  If any decorator failed, we'd never reach this point.
+    assert mock_stdio.called, 'stdio_server was never called — handler registration failed'
 
 
 async def test_server_registers_list_prompts_handler(env_rocketride: None) -> None:
@@ -364,6 +365,10 @@ async def test_server_registers_list_prompts_handler(env_rocketride: None) -> No
             except RuntimeError as e:
                 if 'stop' not in str(e):
                     raise
+
+    # Same reasoning: reaching stdio_server means all handler registrations
+    # (including list_prompts, get_prompt) completed without error.
+    assert mock_stdio.called, 'stdio_server was never called — handler registration failed'
 
 
 # =============================================================================
