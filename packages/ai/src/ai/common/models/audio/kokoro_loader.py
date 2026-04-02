@@ -33,6 +33,7 @@ class KokoroLoader(BaseLoader):
 
     @staticmethod
     def _estimate_memory_gb() -> float:
+        """Return a conservative GPU memory estimate (GB) for Kokoro-82M plus activations."""
         # Kokoro-82M + activations; keep conservative for placement
         return 0.55
 
@@ -114,6 +115,7 @@ class KokoroLoader(BaseLoader):
 
     @staticmethod
     def preprocess(model: Any, inputs: List[Any], metadata: Optional[Dict] = None) -> Dict[str, Any]:
+        """Normalize raw inputs into a list of dicts with text, voice, and speed fields."""
         items: List[Dict[str, Any]] = []
         for item in inputs:
             if isinstance(item, dict):
@@ -135,6 +137,7 @@ class KokoroLoader(BaseLoader):
         metadata: Optional[Dict] = None,
         stream: Optional[Any] = None,
     ) -> Any:
+        """Run Kokoro TTS synthesis for each item and return base64-encoded WAV audio."""
         if hasattr(model, 'model_obj'):
             bundle = model.model_obj
         else:
@@ -204,6 +207,7 @@ class KokoroLoader(BaseLoader):
         output_fields: List[str],
         **kwargs,
     ) -> List[Dict[str, Any]]:
+        """Filter each inference item to only the requested output_fields."""
         items = raw_output.get('items') if isinstance(raw_output, dict) else None
         if not items:
             return [{} for _ in range(batch_size or 1)]

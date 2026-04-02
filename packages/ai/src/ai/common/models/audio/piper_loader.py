@@ -78,6 +78,7 @@ class PiperLoader(BaseLoader):
 
     @staticmethod
     def preprocess(model: Any, inputs: List[Any], metadata: Optional[Dict] = None) -> Dict[str, Any]:
+        """Extract plain text strings from raw inputs for synthesis."""
         texts: List[str] = []
         for item in inputs:
             if isinstance(item, str):
@@ -95,6 +96,7 @@ class PiperLoader(BaseLoader):
         metadata: Optional[Dict] = None,
         stream: Optional[Any] = None,
     ) -> Any:
+        """Synthesize WAV audio for each text using PiperVoice and return base64-encoded results."""
         if hasattr(model, 'model_obj'):
             bundle = model.model_obj
         else:
@@ -109,6 +111,7 @@ class PiperLoader(BaseLoader):
         items: List[Dict[str, str]] = []
 
         def _synth_one(voice: Any, text: str) -> bytes:
+            """Synthesize a single text utterance to a temporary WAV file and return its bytes."""
             fd, wav_path = tempfile.mkstemp(suffix='.wav')
             os.close(fd)
             try:
@@ -146,6 +149,7 @@ class PiperLoader(BaseLoader):
         output_fields: List[str],
         **kwargs,
     ) -> List[Dict[str, Any]]:
+        """Filter each inference item to only the requested output_fields."""
         items = raw_output.get('items') if isinstance(raw_output, dict) else None
         if not items:
             return [{} for _ in range(batch_size or 1)]

@@ -28,6 +28,7 @@ from ..base import BaseLoader
 
 
 def _mime_for_openai_format(fmt: str) -> str:
+    """Return the MIME type string for the given OpenAI audio format name."""
     f = (fmt or 'mp3').lower()
     return {
         'mp3': 'audio/mpeg',
@@ -56,6 +57,7 @@ class OpenAITTSLoader(BaseLoader):
         voice: str = 'alloy',
         **kwargs,
     ) -> Tuple[Any, Dict[str, Any], int]:
+        """Build the OpenAI TTS credential bundle; no weights are downloaded."""
         if not api_key:
             raise ValueError('OpenAITTSLoader requires api_key')
 
@@ -76,6 +78,7 @@ class OpenAITTSLoader(BaseLoader):
 
     @staticmethod
     def preprocess(model: Any, inputs: List[Any], metadata: Optional[Dict] = None) -> Dict[str, Any]:
+        """Normalize raw inputs into a list of row dicts with text, format, voice, and model fields."""
         rows: List[Dict[str, str]] = []
         for item in inputs:
             if isinstance(item, dict):
@@ -98,6 +101,7 @@ class OpenAITTSLoader(BaseLoader):
         metadata: Optional[Dict] = None,
         stream: Optional[Any] = None,
     ) -> Any:
+        """Call the OpenAI speech endpoint for each row and return base64-encoded audio items."""
         if hasattr(model, 'model_obj'):
             bundle = model.model_obj
         else:
@@ -113,6 +117,7 @@ class OpenAITTSLoader(BaseLoader):
         ctx = lock if lock is not None else threading.Lock()
 
         def _one(row: Dict[str, str]) -> Tuple[bytes, str]:
+            """Send a single TTS request to the OpenAI API and return raw audio bytes with MIME type."""
             fmt = row.get('output_format', 'mp3')
             row_voice = (row.get('voice') or '').strip() or voice
             row_model = (row.get('model') or '').strip() or model_id
@@ -160,6 +165,7 @@ class OpenAITTSLoader(BaseLoader):
         output_fields: List[str],
         **kwargs,
     ) -> List[Dict[str, Any]]:
+        """Filter each inference item to only the requested output_fields."""
         items = raw_output.get('items') if isinstance(raw_output, dict) else None
         if not items:
             return [{} for _ in range(batch_size or 1)]
@@ -186,6 +192,7 @@ class ElevenLabsTTSLoader(BaseLoader):
         voice: str = '',
         **kwargs,
     ) -> Tuple[Any, Dict[str, Any], int]:
+        """Build the ElevenLabs TTS credential bundle; no weights are downloaded."""
         if not api_key:
             raise ValueError('ElevenLabsTTSLoader requires api_key')
         if not voice:
@@ -208,6 +215,7 @@ class ElevenLabsTTSLoader(BaseLoader):
 
     @staticmethod
     def preprocess(model: Any, inputs: List[Any], metadata: Optional[Dict] = None) -> Dict[str, Any]:
+        """Normalize raw inputs into a list of row dicts with text, voice, and model fields."""
         rows: List[Dict[str, str]] = []
         for item in inputs:
             if isinstance(item, dict):
@@ -229,6 +237,7 @@ class ElevenLabsTTSLoader(BaseLoader):
         metadata: Optional[Dict] = None,
         stream: Optional[Any] = None,
     ) -> Any:
+        """Call the ElevenLabs TTS endpoint for each row and return base64-encoded audio items."""
         if hasattr(model, 'model_obj'):
             bundle = model.model_obj
         else:
@@ -244,6 +253,7 @@ class ElevenLabsTTSLoader(BaseLoader):
         ctx = lock if lock is not None else threading.Lock()
 
         def _one(row: Dict[str, str]) -> bytes:
+            """Send a single TTS request to the ElevenLabs API and return raw audio bytes."""
             row_voice = (row.get('voice') or '').strip() or voice
             row_model = (row.get('model') or '').strip() or model_id
             vid = quote(row_voice, safe='')
@@ -285,6 +295,7 @@ class ElevenLabsTTSLoader(BaseLoader):
         output_fields: List[str],
         **kwargs,
     ) -> List[Dict[str, Any]]:
+        """Filter each inference item to only the requested output_fields."""
         items = raw_output.get('items') if isinstance(raw_output, dict) else None
         if not items:
             return [{} for _ in range(batch_size or 1)]

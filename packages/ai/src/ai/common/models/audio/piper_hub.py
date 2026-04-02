@@ -14,6 +14,7 @@ PIPER_VOICES_REPO_ID = 'rhasspy/piper-voices'
 
 
 def _hf_hub_download(filename: str) -> str:
+    """Download a single file from the piper-voices HF repo and return its local cache path."""
     try:
         from huggingface_hub import hf_hub_download
     except ImportError as e:
