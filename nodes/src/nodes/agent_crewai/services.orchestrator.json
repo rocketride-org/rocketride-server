@@ -7,11 +7,7 @@
 	"node": "python",
 	"path": "nodes.agent_crewai",
 	"prefix": "agent",
-	"description": [
-		"Multi-agent orchestrator using CrewAI hierarchical process.",
-		"Fans out to connected CrewAI sub-agent nodes, assembles a Crew, and synthesizes their outputs.",
-		"Can be invoked as a tool (`<nodeId>.run_agent`) for nested orchestration."
-	],
+	"description": ["Multi-agent orchestrator using CrewAI hierarchical process.", "Fans out to connected CrewAI sub-agent nodes, assembles a Crew, and synthesizes their outputs.", "Can be invoked as a tool (`<nodeId>.run_agent`) for nested orchestration."],
 	"icon": "crewai.svg",
 	"invoke": {
 		"llm": {
@@ -41,7 +37,7 @@
 		"profiles": {
 			"default": {
 				"instructions": [],
-				"expert_mode": false,
+				"advanced_mode": false,
 				"goal": "",
 				"backstory": ""
 			}
@@ -57,9 +53,9 @@
 				"format": "textarea"
 			}
 		},
-		"expert_mode": {
+		"advanced_mode": {
 			"type": "boolean",
-			"title": "Expert Mode",
+			"title": "Advanced Mode",
 			"description": "Expose CrewAI manager Agent configuration directly.",
 			"default": false,
 			"enum": [
@@ -87,7 +83,7 @@
 		},
 		"agent_crewai_orchestrator.default": {
 			"object": "default",
-			"properties": ["instructions", "expert_mode"]
+			"properties": ["instructions", "advanced_mode"]
 		}
 	},
 	"shape": [

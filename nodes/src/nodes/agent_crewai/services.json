@@ -35,7 +35,7 @@
 			"default": {
 				"agent_description": "",
 				"instructions": [],
-				"expert_mode": false,
+				"advanced_mode": false,
 				"role": "Assistant",
 				"task_description": "",
 				"goal": "",
@@ -64,9 +64,9 @@
 				"format": "textarea"
 			}
 		},
-		"expert_mode": {
+		"advanced_mode": {
 			"type": "boolean",
-			"title": "Expert Mode",
+			"title": "Advanced Mode",
 			"description": "Expose CrewAI Agent and Task configuration directly.",
 			"default": false,
 			"enum": [
@@ -76,12 +76,7 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": [
-						"agent_crewai.agent_config_header",
-						"role", "goal", "backstory",
-						"agent_crewai.task_config_header",
-						"task_description", "expected_output"
-					]
+					"properties": ["agent_crewai.agent_config_header", "role", "goal", "backstory", "agent_crewai.task_config_header", "task_description", "expected_output"]
 				}
 			]
 		},
@@ -126,7 +121,7 @@
 		},
 		"agent_crewai.default": {
 			"object": "default",
-			"properties": ["agent_description", "instructions", "expert_mode"]
+			"properties": ["agent_description", "instructions", "advanced_mode"]
 		}
 	},
 	"shape": [
