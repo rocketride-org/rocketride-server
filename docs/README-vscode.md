@@ -13,10 +13,6 @@
   <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/license-MIT-41b6e6" alt="MIT License"></a>
 </p>
 
-<p align="center">
-  <a href="https://www.producthunt.com/products/rocketride" target="_blank" rel="noopener noreferrer"><img alt="RocketRide on Product Hunt" width="250" height="54" src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/producthunt-badge.png"></a>
-</p>
-
 ## Quick Start
 
 1. Install the **RocketRide** extension from the VS Code Marketplace
