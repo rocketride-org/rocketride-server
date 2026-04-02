@@ -10,9 +10,18 @@
 </p>
 
 <p>
-<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-cpp.png" alt="C++" />&nbsp;&nbsp;
-<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-python.png" alt="Python" />&nbsp;&nbsp;
-<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/icon-typescript.png" alt="TypeScript" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/cplusplus/white" />
+  <img src="https://cdn.simpleicons.org/cplusplus/black" width="28" height="28" alt="C++" />
+</picture>&nbsp;&nbsp;
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/python/white" />
+  <img src="https://cdn.simpleicons.org/python/black" width="28" height="28" alt="Python" />
+</picture>&nbsp;&nbsp;
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://cdn.simpleicons.org/typescript/white" />
+  <img src="https://cdn.simpleicons.org/typescript/black" width="28" height="28" alt="TypeScript" />
+</picture>
 </p>
 
 <p>
@@ -86,7 +95,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
   <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/first_pipe.gif" alt="Pipeline canvas example" width="100%">
 </p>
 
-4. You can run a pipeline from the canvas by pressing the ▶️ button on the source node or from the `Connection Manager` directly.
+4. You can run a pipeline from the canvas by pressing the ▶ button on the source node or from the `Connection Manager` directly.
 
 5. Deploy your pipelines on your own infrastructure.
 
@@ -119,4 +128,4 @@ RocketRide is built by a growing community of contributors. Whether you've fixed
 
 ---
 
-<p align="center">Made with 🤍 in SF & EU</p>
+<p align="center">Made with ♥ in SF &amp; EU</p>
