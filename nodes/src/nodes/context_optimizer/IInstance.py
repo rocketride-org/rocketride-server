@@ -23,7 +23,7 @@
 
 import copy
 
-from rocketlib import IInstanceBase, Entry, debug
+from rocketlib import IInstanceBase, Entry, debug, warning
 from .IGlobal import IGlobal
 from ai.common.schema import Question
 
@@ -48,6 +48,7 @@ class IInstance(IInstanceBase):
         optimizer = self.IGlobal.optimizer
         if optimizer is None:
             # No optimizer available (e.g. config mode) -- pass through
+            warning('context_optimizer: optimizer not initialized, passing question through unchanged')
             self.instance.writeQuestions(question)
             return
 

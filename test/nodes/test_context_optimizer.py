@@ -59,6 +59,7 @@ def _install_stubs() -> None:
     rocketlib.Entry = _Entry
     rocketlib.OPEN_MODE = _OPEN_MODE
     rocketlib.debug = lambda *a, **k: None
+    rocketlib.warning = lambda *a, **k: None
     sys.modules['rocketlib'] = rocketlib
 
     # ai.common.config
@@ -790,3 +791,145 @@ class TestIInstanceLifecycle:
         mock_opt.optimize.assert_called_once()
         call_kwargs = mock_opt.optimize.call_args
         assert 'question' in call_kwargs.kwargs or len(call_kwargs.args) > 0
+
+
+# ===========================================================================
+# Input validation tests (issues #4 and #5)
+# ===========================================================================
+
+
+class TestInputValidation:
+    """Tests for non-numeric input handling and budget percentage validation."""
+
+    def test_non_numeric_max_context_tokens(self):
+        """Non-numeric max_context_tokens should default to 0 without crashing."""
+        config = {'model_name': 'gpt-5', 'max_context_tokens': 'not_a_number'}
+        opt = ContextOptimizer(config)
+        assert opt.max_context_tokens == 0
+
+    def test_non_numeric_budget_pct(self):
+        """Non-numeric budget percentage should default to 0."""
+        config = {'model_name': 'gpt-5', 'system_prompt_budget_pct': 'bad'}
+        opt = ContextOptimizer(config)
+        assert opt.system_prompt_budget_pct == 0.0
+
+    def test_negative_budget_pct_clamped(self):
+        """Negative percentages should be clamped to 0."""
+        config = {'model_name': 'gpt-5', 'query_budget_pct': -10}
+        opt = ContextOptimizer(config)
+        assert opt.query_budget_pct == 0.0
+
+    def test_over_100_budget_pct_clamped(self):
+        """Percentages over 100 should be clamped to 100."""
+        config = {'model_name': 'gpt-5', 'document_budget_pct': 150}
+        opt = ContextOptimizer(config)
+        assert opt.document_budget_pct == 100.0
+
+    def test_negative_max_context_tokens_clamped(self):
+        """Negative max_context_tokens should be clamped to 0."""
+        config = {'model_name': 'gpt-5', 'max_context_tokens': -500}
+        opt = ContextOptimizer(config)
+        assert opt.max_context_tokens == 0
+
+    def test_valid_values_pass_through(self):
+        """Valid numeric values should be accepted as-is."""
+        config = {
+            'model_name': 'gpt-5',
+            'max_context_tokens': 1000,
+            'system_prompt_budget_pct': 10,
+            'query_budget_pct': 15,
+            'document_budget_pct': 50,
+            'history_budget_pct': 25,
+        }
+        opt = ContextOptimizer(config)
+        assert opt.max_context_tokens == 1000
+        assert opt.system_prompt_budget_pct == 10.0
+        assert opt.query_budget_pct == 15.0
+        assert opt.document_budget_pct == 50.0
+        assert opt.history_budget_pct == 25.0
+
+
+# ===========================================================================
+# Two-pass optimization tests (issue #6)
+# ===========================================================================
+
+
+class TestTwoPassOptimization:
+    """Tests for the two-pass budget redistribution approach."""
+
+    def test_pass1_no_truncation_when_fits(self, optimizer):
+        """When all content fits within the total limit, nothing should be truncated."""
+        result = optimizer.optimize(
+            question='Short question',
+            system_prompt='Be helpful.',
+            documents=[{'content': 'A small document.'}],
+            history=[{'role': 'user', 'content': 'Hi'}],
+        )
+        assert result['metadata']['tokens_saved'] == 0
+        assert result['metadata']['components_truncated'] == []
+        assert result['question'] == 'Short question'
+        assert result['system_prompt'] == 'Be helpful.'
+
+    def test_pass2_truncates_when_over_budget(self, small_optimizer):
+        """When content exceeds the limit, per-component budgets should apply."""
+        long_text = 'This is a sentence. ' * 100
+        result = small_optimizer.optimize(
+            question=long_text,
+            system_prompt=long_text,
+            documents=[{'content': long_text}],
+            history=[{'role': 'user', 'content': long_text}],
+        )
+        assert result['metadata']['tokens_saved'] > 0
+        assert len(result['metadata']['components_truncated']) > 0
+
+    def test_documents_preserved_when_under_budget(self, optimizer):
+        """Pass 1 should return all documents unchanged when total fits."""
+        docs = [
+            {'content': 'Doc 1'},
+            {'content': 'Doc 2'},
+            {'content': 'Doc 3'},
+        ]
+        result = optimizer.optimize(question='Test', documents=docs)
+        assert len(result['documents']) == 3
+
+
+# ===========================================================================
+# Score-preserving document ranking tests (issue #7)
+# ===========================================================================
+
+
+class TestScorePreservingRanking:
+    """Tests for preserving vector DB ordering in document ranking."""
+
+    def test_documents_with_scores_preserve_order(self, optimizer):
+        """Documents with score fields should keep their original order."""
+        docs = [
+            {'content': 'Most relevant from vector DB', 'score': 0.95},
+            {'content': 'Second most relevant', 'score': 0.85},
+            {'content': 'Third most relevant Python programming', 'score': 0.70},
+        ]
+        result = optimizer.rank_documents(docs, 'Python programming', 10000)
+        assert len(result) == 3
+        # Original order should be preserved (score-descending from vector DB)
+        assert result[0]['content'] == 'Most relevant from vector DB'
+        assert result[1]['content'] == 'Second most relevant'
+        assert result[2]['content'] == 'Third most relevant Python programming'
+
+    def test_documents_without_scores_use_keyword_overlap(self, optimizer):
+        """Documents without scores should fall back to keyword overlap ranking."""
+        docs = [
+            {'content': 'The weather is sunny today.'},
+            {'content': 'Python programming language is great.'},
+        ]
+        result = optimizer.rank_documents(docs, 'Python programming', 10000)
+        assert 'Python' in result[0]['content']
+
+    def test_mixed_score_and_no_score_preserves_order(self, optimizer):
+        """If any doc has a score, original order is preserved for all."""
+        docs = [
+            {'content': 'First doc', 'score': 0.9},
+            {'content': 'Second doc with Python programming'},  # no score
+            {'content': 'Third doc', 'score': 0.7},
+        ]
+        result = optimizer.rank_documents(docs, 'Python programming', 10000)
+        assert result[0]['content'] == 'First doc'

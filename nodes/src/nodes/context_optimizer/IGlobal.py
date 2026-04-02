@@ -40,7 +40,7 @@ class IGlobal(IGlobalBase):
             from depends import depends  # type: ignore
 
             # Load the requirements (tiktoken)
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+            requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
             depends(requirements)
 
             # Get the configuration

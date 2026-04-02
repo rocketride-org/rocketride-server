@@ -28,10 +28,11 @@ components (system prompt, query, documents, history), and truncating or
 summarizing content to fit within model limits.
 """
 
+import logging
 import re
 from typing import Any, Dict, List, Optional
 
-import tiktoken
+logger = logging.getLogger(__name__)
 
 
 class ContextOptimizer:
@@ -81,11 +82,24 @@ class ContextOptimizer:
                 - history_budget_pct: float - percentage for history (default 25)
         """
         self.model_name: str = config.get('model_name', 'gpt-5')
-        self.max_context_tokens: int = int(config.get('max_context_tokens', 0))
-        self.system_prompt_budget_pct: float = float(config.get('system_prompt_budget_pct', 10))
-        self.query_budget_pct: float = float(config.get('query_budget_pct', 15))
-        self.document_budget_pct: float = float(config.get('document_budget_pct', 50))
-        self.history_budget_pct: float = float(config.get('history_budget_pct', 25))
+
+        # Validate max_context_tokens (issue #4: non-numeric values)
+        try:
+            self.max_context_tokens: int = max(0, int(config.get('max_context_tokens', 0)))
+        except (ValueError, TypeError):
+            logger.warning('context_optimizer: max_context_tokens is not a valid integer, defaulting to 0')
+            self.max_context_tokens = 0
+
+        # Validate budget percentages (issue #4: non-numeric values, issue #5: negative values)
+        self.system_prompt_budget_pct: float = self._parse_pct(config.get('system_prompt_budget_pct', 10), 'system_prompt_budget_pct')
+        self.query_budget_pct: float = self._parse_pct(config.get('query_budget_pct', 15), 'query_budget_pct')
+        self.document_budget_pct: float = self._parse_pct(config.get('document_budget_pct', 50), 'document_budget_pct')
+        self.history_budget_pct: float = self._parse_pct(config.get('history_budget_pct', 25), 'history_budget_pct')
+
+        # Warn if budget percentages sum to less than 90 (issue #5)
+        pct_sum = self.system_prompt_budget_pct + self.query_budget_pct + self.document_budget_pct + self.history_budget_pct
+        if pct_sum < 90:
+            logger.warning('context_optimizer: budget percentages sum to %.1f%% (< 90%%), context window may be underutilized', pct_sum)
 
         # Resolve the effective token limit
         if self.max_context_tokens > 0:
@@ -93,15 +107,37 @@ class ContextOptimizer:
         else:
             self._total_limit = self.MODEL_LIMITS.get(self.model_name, 128000)
 
-        # Cache the tiktoken encoding
-        self._encoding: Optional[tiktoken.Encoding] = None
+        # Cache the tiktoken encoding (lazily imported)
+        self._encoding = None
+
+    @staticmethod
+    def _parse_pct(value: Any, name: str) -> float:
+        """Parse a percentage value, clamping to [0, 100] with warnings."""
+        try:
+            pct = float(value)
+        except (ValueError, TypeError):
+            logger.warning('context_optimizer: %s is not a valid number, defaulting to 0', name)
+            return 0.0
+        if pct < 0:
+            logger.warning('context_optimizer: %s is negative (%.1f), clamping to 0', name, pct)
+            return 0.0
+        if pct > 100:
+            logger.warning('context_optimizer: %s exceeds 100 (%.1f), clamping to 100', name, pct)
+            return 100.0
+        return pct
 
     # ------------------------------------------------------------------
     # Token counting
     # ------------------------------------------------------------------
 
-    def _get_encoding(self, encoding_name: str = 'cl100k_base') -> tiktoken.Encoding:
-        """Return a cached tiktoken encoding instance."""
+    def _get_encoding(self, encoding_name: str = 'cl100k_base'):
+        """Return a cached tiktoken encoding instance.
+
+        tiktoken is imported lazily so that module-level import does not fail
+        before ``depends()`` has installed the package at runtime.
+        """
+        import tiktoken
+
         if self._encoding is None or self._encoding.name != encoding_name:
             self._encoding = tiktoken.get_encoding(encoding_name)
         return self._encoding
@@ -305,27 +341,36 @@ class ContextOptimizer:
     # ------------------------------------------------------------------
 
     def rank_documents(self, documents: List[Dict[str, Any]], query: str, max_tokens: int, encoding: str = 'cl100k_base') -> List[Dict[str, Any]]:
-        """Rank documents by relevance to *query* and select those fitting in *max_tokens*.
+        """Select documents that fit within *max_tokens*, preserving original order.
 
-        Relevance is scored by counting overlapping keywords between the query
-        and each document's content. Documents are then selected greedily in
-        descending relevance order until the budget is exhausted.
+        Documents arriving from a vector DB are already ranked by embedding
+        similarity.  This method preserves that ordering and uses greedy
+        budget selection.  When documents carry a ``score`` field it is used
+        as the primary sort key; keyword overlap with *query* is used only as
+        a secondary tiebreaker for documents that lack a score.
 
         Args:
             documents: List of dicts with at least a ``content`` key.
+                       An optional ``score`` key (float) from the vector DB
+                       is respected for ranking.
             query: The user's query text.
             max_tokens: Maximum total tokens for returned documents.
             encoding: tiktoken encoding name.
 
         Returns:
-            Subset of documents that fit within the token budget, ordered by
-            relevance (highest first).
+            Subset of documents that fit within the token budget, preserving
+            the original (or score-based) ordering.
         """
         if not documents or max_tokens <= 0:
             return []
 
-        if not query:
-            # No query to rank against -- take documents in order
+        # Check whether any document carries a vector-DB score
+        has_scores = any(doc.get('score') is not None for doc in documents)
+
+        if not query or has_scores:
+            # Either no query to rank against, or documents already carry
+            # embedding similarity scores -- preserve original order (which
+            # is score-descending from the vector DB) and greedily select.
             selected: List[Dict[str, Any]] = []
             used = 0
             for doc in documents:
@@ -334,28 +379,28 @@ class ContextOptimizer:
                 if used + cost <= max_tokens:
                     selected.append(doc)
                     used += cost
-                else:
-                    break
             return selected
 
-        # Compute keyword overlap scores
+        # No scores available -- use keyword overlap as a lightweight
+        # relevance signal, but only as a tiebreaker on the original index
+        # to avoid completely discarding the upstream ordering.
         query_words = set(re.findall(r'\w+', query.lower()))
 
         scored: List[tuple] = []
-        for doc in documents:
+        for idx, doc in enumerate(documents):
             content = doc.get('content', doc.get('page_content', ''))
             content_str = str(content)
             doc_words = set(re.findall(r'\w+', content_str.lower()))
             overlap = len(query_words & doc_words)
             tokens = self.count_tokens(content_str, encoding)
-            scored.append((overlap, tokens, doc))
+            # Primary: overlap descending, secondary: original index ascending
+            scored.append((overlap, idx, tokens, doc))
 
-        # Sort by overlap descending, then by token cost ascending (prefer smaller docs on tie)
         scored.sort(key=lambda x: (-x[0], x[1]))
 
         selected = []
         used = 0
-        for _overlap, tokens, doc in scored:
+        for _overlap, _idx, tokens, doc in scored:
             if used + tokens <= max_tokens:
                 selected.append(doc)
                 used += tokens
@@ -376,10 +421,15 @@ class ContextOptimizer:
     ) -> Dict[str, Any]:
         """Run the full context optimization pipeline.
 
-        1. Determine the total token limit for the model.
-        2. Allocate budget across components.
-        3. Truncate / rank / summarize each component to fit its budget.
-        4. Return the optimized context and metadata.
+        Uses a two-pass approach so that truncation is the exception, not the
+        default:
+
+        **Pass 1** -- check whether all components fit within the total token
+        limit without per-component caps.  If they do, return everything
+        unchanged (no wasted context window).
+
+        **Pass 2** -- when the total exceeds the limit, allocate percentage-
+        based budgets and truncate/rank/summarize each component to fit.
 
         Args:
             question: The user's query text.
@@ -413,10 +463,31 @@ class ContextOptimizer:
         original_history = sum(self.count_tokens(m.get('content', '')) + self.count_tokens(m.get('role', '')) + 4 for m in history)
         original_total = original_system + original_question + original_docs + original_history
 
-        # Allocate budget
+        # ------------------------------------------------------------------
+        # Pass 1: everything fits -- no truncation needed
+        # ------------------------------------------------------------------
+        if original_total <= total_limit:
+            budget = self.allocate_budget(total_limit)
+            return {
+                'system_prompt': system_prompt,
+                'question': question,
+                'documents': documents,
+                'history': history,
+                'metadata': {
+                    'tokens_used': original_total,
+                    'tokens_saved': 0,
+                    'components_truncated': [],
+                    'model': effective_model,
+                    'total_limit': total_limit,
+                    'budget': budget,
+                },
+            }
+
+        # ------------------------------------------------------------------
+        # Pass 2: total exceeds limit -- apply per-component budgets
+        # ------------------------------------------------------------------
         budget = self.allocate_budget(total_limit)
 
-        # Optimize each component
         components_truncated: List[str] = []
 
         opt_system = self.truncate_to_budget(system_prompt, budget['system_prompt'])
