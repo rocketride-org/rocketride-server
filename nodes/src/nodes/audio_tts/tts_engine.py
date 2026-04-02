@@ -1,6 +1,24 @@
 # =============================================================================
 # MIT License
 # Copyright (c) 2026 RocketRide
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 # =============================================================================
 
 import base64
@@ -119,17 +137,20 @@ class TTSEngine:
         if output_format == 'mp3':
             fd, wav_path = tempfile.mkstemp(suffix='.wav')
             os.close(fd)
-        with wave.open(wav_path, 'wb') as wavf:
-            wavf.setnchannels(1)
-            wavf.setsampwidth(2)
-            wavf.setframerate(int(sampling_rate))
-            wavf.writeframes((audio_arr * 32767).astype(np.int16).tobytes())
-        if output_format == 'mp3':
-            self._transcode_wav_to_mp3(wav_path, out_path)
-            try:
-                os.remove(wav_path)
-            except OSError:
-                pass
+        try:
+            with wave.open(wav_path, 'wb') as wavf:
+                wavf.setnchannels(1)
+                wavf.setsampwidth(2)
+                wavf.setframerate(int(sampling_rate))
+                wavf.writeframes((audio_arr * 32767).astype(np.int16).tobytes())
+            if output_format == 'mp3':
+                self._transcode_wav_to_mp3(wav_path, out_path)
+        finally:
+            if output_format == 'mp3' and wav_path != out_path:
+                try:
+                    os.remove(wav_path)
+                except OSError:
+                    pass
 
     def _transformers_tts(self, text: str, model_default: str) -> Dict[str, Any]:
         from ai.common.models.transformers import pipeline as rr_pipeline
@@ -328,18 +349,19 @@ class TTSEngine:
         if output_format == 'mp3':
             fd, wav_path = tempfile.mkstemp(suffix='.wav')
             os.close(fd)
-
-        if self._piper_voice_onnx != model:
-            self._piper_voice = load_piper_voice(model)
-            self._piper_voice_onnx = model
-        write_piper_wav(self._piper_voice, text, wav_path)
-
-        if output_format == 'mp3':
-            self._transcode_wav_to_mp3(wav_path, out_path)
-            try:
-                os.remove(wav_path)
-            except OSError:
-                pass
+        try:
+            if self._piper_voice_onnx != model:
+                self._piper_voice = load_piper_voice(model)
+                self._piper_voice_onnx = model
+            write_piper_wav(self._piper_voice, text, wav_path)
+            if output_format == 'mp3':
+                self._transcode_wav_to_mp3(wav_path, out_path)
+        finally:
+            if output_format == 'mp3' and wav_path != out_path:
+                try:
+                    os.remove(wav_path)
+                except OSError:
+                    pass
 
         return {'path': out_path, 'mime_type': _mime_from_format(output_format)}
 
