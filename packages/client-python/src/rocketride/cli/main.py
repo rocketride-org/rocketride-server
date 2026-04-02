@@ -463,213 +463,48 @@ class RocketRideCLI:
             help='Output results in JSON format',
         )
 
-        # Store command - manages project storage
-        # Create a parent parser with common args that will be inherited by subcommands
+        # Store command - file store and domain storage operations
         store_common_parser = argparse.ArgumentParser(add_help=False)
         add_common_args(store_common_parser)
 
-        store_parser = subparsers.add_parser('rrext_store', help='Manage project storage', parents=[store_common_parser])
+        store_parser = subparsers.add_parser('store', help='File store operations', parents=[store_common_parser])
 
-        # Create subparser for store subcommands
         store_subparsers = store_parser.add_subparsers(
             dest='store_subcommand',
-            help='Storage operations',
-            metavar='STORE_COMMAND',
-        )
-
-        # save_project subcommand (inherits common args from parent)
-        save_project_parser = store_subparsers.add_parser(
-            'save_project',
-            help='Save a project to storage',
-            parents=[store_common_parser],
-        )
-        save_project_parser.add_argument(
-            '--project-id',
-            required=True,
-            help='Project ID',
-        )
-        save_project_parser.add_argument(
-            '--expected-version',
-            help='Expected version for atomic update (optional)',
-        )
-        save_project_group = save_project_parser.add_mutually_exclusive_group(required=True)
-        save_project_group.add_argument(
-            '--project-file',
-            help='Path to pipeline JSON file',
-        )
-        save_project_group.add_argument(
-            '--project-json',
-            help='Pipeline JSON as string',
-        )
-
-        # get_project subcommand (inherits common args from parent)
-        get_project_parser = store_subparsers.add_parser(
-            'get_project',
-            help='Get a project from storage',
-            parents=[store_common_parser],
-        )
-        get_project_parser.add_argument(
-            '--project-id',
-            required=True,
-            help='Project ID to retrieve',
-        )
-
-        # delete_project subcommand (inherits common args from parent)
-        delete_project_parser = store_subparsers.add_parser(
-            'delete_project',
-            help='Delete a project from storage',
-            parents=[store_common_parser],
-        )
-        delete_project_parser.add_argument(
-            '--project-id',
-            required=True,
-            help='Project ID to delete',
-        )
-        delete_project_parser.add_argument(
-            '--expected-version',
-            help='Expected version for atomic delete (required)',
-        )
-
-        # get_all_projects subcommand (inherits common args from parent)
-        store_subparsers.add_parser(
-            'get_all_projects',
-            help='List all projects for authenticated user',
-            parents=[store_common_parser],
+            help='Store commands',
+            metavar='COMMAND',
         )
 
         # =====================================================================
-        # Template subcommands (system-wide templates accessible to all users)
+        # File system commands
         # =====================================================================
 
-        # save_template subcommand (inherits common args from parent)
-        save_template_parser = store_subparsers.add_parser(
-            'save_template',
-            help='Save a template to storage (system-wide)',
-            parents=[store_common_parser],
-        )
-        save_template_parser.add_argument(
-            '--template-id',
-            required=True,
-            help='Template ID',
-        )
-        save_template_parser.add_argument(
-            '--expected-version',
-            help='Expected version for atomic update (optional)',
-        )
-        save_template_group = save_template_parser.add_mutually_exclusive_group(required=True)
-        save_template_group.add_argument(
-            '--template-file',
-            help='Path to pipeline JSON file',
-        )
-        save_template_group.add_argument(
-            '--template-json',
-            help='Pipeline JSON as string',
-        )
+        # dir - list directory
+        dir_parser = store_subparsers.add_parser('dir', help='List directory contents', parents=[store_common_parser])
+        dir_parser.add_argument('path', nargs='?', default='', help='Directory path (default: root)')
 
-        # get_template subcommand (inherits common args from parent)
-        get_template_parser = store_subparsers.add_parser(
-            'get_template',
-            help='Get a template from storage',
-            parents=[store_common_parser],
-        )
-        get_template_parser.add_argument(
-            '--template-id',
-            required=True,
-            help='Template ID to retrieve',
-        )
+        # type - display file contents
+        type_parser = store_subparsers.add_parser('type', help='Display file contents', parents=[store_common_parser])
+        type_parser.add_argument('path', help='File path')
 
-        # delete_template subcommand (inherits common args from parent)
-        delete_template_parser = store_subparsers.add_parser(
-            'delete_template',
-            help='Delete a template from storage',
-            parents=[store_common_parser],
-        )
-        delete_template_parser.add_argument(
-            '--template-id',
-            required=True,
-            help='Template ID to delete',
-        )
-        delete_template_parser.add_argument(
-            '--expected-version',
-            help='Expected version for atomic delete (optional)',
-        )
+        # write - write file
+        write_parser = store_subparsers.add_parser('write', help='Write a file', parents=[store_common_parser])
+        write_parser.add_argument('path', help='File path')
+        write_group = write_parser.add_mutually_exclusive_group(required=True)
+        write_group.add_argument('--file', help='Local file to upload')
+        write_group.add_argument('--content', help='Inline text content')
 
-        # get_all_templates subcommand (inherits common args from parent)
-        store_subparsers.add_parser(
-            'get_all_templates',
-            help='List all templates (system-wide)',
-            parents=[store_common_parser],
-        )
+        # rm - delete file
+        rm_parser = store_subparsers.add_parser('rm', help='Delete a file', parents=[store_common_parser])
+        rm_parser.add_argument('path', help='File path')
 
-        # =====================================================================
-        # Log subcommands (per-project log files for historical tracking)
-        # =====================================================================
+        # mkdir - create directory
+        mkdir_parser = store_subparsers.add_parser('mkdir', help='Create a directory', parents=[store_common_parser])
+        mkdir_parser.add_argument('path', help='Directory path')
 
-        # save_log subcommand (inherits common args from parent)
-        save_log_parser = store_subparsers.add_parser(
-            'save_log',
-            help='Save a log file for a source run',
-            parents=[store_common_parser],
-        )
-        save_log_parser.add_argument(
-            '--project-id',
-            required=True,
-            help='Project ID',
-        )
-        save_log_parser.add_argument(
-            '--source',
-            required=True,
-            help='Source name',
-        )
-        save_log_parser.add_argument(
-            '--contents-json',
-            required=True,
-            help='Log contents JSON as string (must contain body.startTime)',
-        )
-
-        # get_log subcommand (inherits common args from parent)
-        get_log_parser = store_subparsers.add_parser(
-            'get_log',
-            help='Get a log file by source and start time',
-            parents=[store_common_parser],
-        )
-        get_log_parser.add_argument(
-            '--project-id',
-            required=True,
-            help='Project ID',
-        )
-        get_log_parser.add_argument(
-            '--source',
-            required=True,
-            help='Source name',
-        )
-        get_log_parser.add_argument(
-            '--start-time',
-            required=True,
-            type=float,
-            help='Start time of the run (float)',
-        )
-
-        # list_logs subcommand (inherits common args from parent)
-        list_logs_parser = store_subparsers.add_parser(
-            'list_logs',
-            help='List log files for a project',
-            parents=[store_common_parser],
-        )
-        list_logs_parser.add_argument(
-            '--project-id',
-            required=True,
-            help='Project ID',
-        )
-        list_logs_parser.add_argument(
-            '--source',
-            help='Optional source name to filter logs',
-        )
-        list_logs_parser.add_argument(
-            '--page',
-            type=int,
-            help='Page number (0-indexed, page size is 100)',
-        )
+        # stat - file/directory metadata
+        stat_parser = store_subparsers.add_parser('stat', help='Get file/directory metadata', parents=[store_common_parser])
+        stat_parser.add_argument('path', help='File or directory path')
 
         return parser
 
@@ -720,7 +555,7 @@ class RocketRideCLI:
             # List command doesn't require token (lists all user's tasks)
             pass
 
-        elif self.args.command == 'rrext_store':
+        elif self.args.command == 'store':
             # Store command requires store_subcommand
             if not hasattr(self.args, 'store_subcommand') or not self.args.store_subcommand:
                 print('Error: Store subcommand is required (save_project, get_project, delete_project, get_all_projects, save_template, get_template, delete_template, get_all_templates, save_log, get_log, list_logs)')
@@ -768,7 +603,7 @@ class RocketRideCLI:
                 'stop': StopCommand,
                 'events': EventsCommand,
                 'list': ListCommand,
-                'rrext_store': StoreCommand,
+                'store': StoreCommand,
             }
 
             if self.args.command in command_map:

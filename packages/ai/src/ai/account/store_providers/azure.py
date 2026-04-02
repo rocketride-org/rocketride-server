@@ -308,6 +308,119 @@ class AzureBlobStore(IStore):
             raise StorageError(f'Failed to list files with prefix {prefix} from Azure: {e}') from e
 
     # =========================================================================
+    # Handle-Based I/O
+    # =========================================================================
+
+    # Azure recommended block size (4 MB)
+    _AZURE_BLOCK_SIZE = 4 * 1024 * 1024
+
+    async def open_write(self, filename: str) -> dict:
+        """Prepare a staged block upload session."""
+        blob_name = self._get_blob_name(filename)
+        return {
+            'context': {
+                'blob_name': blob_name,
+                'block_ids': [],
+                'block_counter': 0,
+                'buffer': bytearray(),
+            },
+        }
+
+    async def write_chunk(self, filename: str, context, data: bytes) -> int:
+        """Buffer data and stage blocks when buffer reaches 4 MB."""
+        try:
+            context['buffer'].extend(data)
+            written = len(data)
+
+            while len(context['buffer']) >= self._AZURE_BLOCK_SIZE:
+                chunk = bytes(context['buffer'][: self._AZURE_BLOCK_SIZE])
+                del context['buffer'][: self._AZURE_BLOCK_SIZE]
+                self._stage_block(context, chunk)
+
+            return written
+        except Exception as e:
+            raise StorageError(f'Failed to write chunk to {filename}: {e}') from e
+
+    async def close_write(self, filename: str, context) -> None:
+        """Commit staged blocks or do a simple upload for small files."""
+        try:
+            client = self._get_client()
+            blob_client = client.get_blob_client(
+                container=self._container,
+                blob=context['blob_name'],
+            )
+            remaining = bytes(context['buffer'])
+            context['buffer'].clear()
+
+            if not context['block_ids']:
+                # Small file — no blocks were staged, simple upload
+                blob_client.upload_blob(remaining, overwrite=True)
+            else:
+                # Flush remaining buffer as the final block
+                if remaining:
+                    self._stage_block(context, remaining)
+
+                blob_client.commit_block_list(context['block_ids'])
+
+        except Exception as e:
+            raise StorageError(f'Failed to finalize upload for {filename}: {e}') from e
+
+    async def abort_write(self, filename: str, context) -> None:
+        """Close the upload, committing whatever has been written."""
+        await self.close_write(filename, context)
+
+    async def open_read(self, filename: str) -> dict:
+        """Get blob properties for ranged reads."""
+        try:
+            client = self._get_client()
+            blob_name = self._get_blob_name(filename)
+            blob_client = client.get_blob_client(
+                container=self._container,
+                blob=blob_name,
+            )
+            properties = blob_client.get_blob_properties()
+            size = properties.size
+            return {'context': {'blob_name': blob_name}, 'size': size}
+        except Exception as e:
+            if 'BlobNotFound' in str(e) or 'ResourceNotFound' in str(e):
+                raise StorageError(f'File not found: {filename}')
+            raise StorageError(f'Failed to open {filename} for reading: {e}') from e
+
+    async def read_chunk(self, filename: str, context, offset: int, length: int = 4_194_304) -> bytes:
+        """Read a range of bytes from Azure Blob."""
+        try:
+            client = self._get_client()
+            blob_client = client.get_blob_client(
+                container=self._container,
+                blob=context['blob_name'],
+            )
+            download_stream = blob_client.download_blob(offset=offset, length=length)
+            return download_stream.readall()
+        except Exception as e:
+            error_str = str(e)
+            if 'InvalidRange' in error_str or '416' in error_str:
+                return b''
+            raise StorageError(f'Failed to read chunk from {filename}: {e}') from e
+
+    async def close_read(self, filename: str, context) -> None:
+        """No-op — Azure reads are stateless."""
+        pass
+
+    def _stage_block(self, context: dict, data: bytes) -> None:
+        """Stage a single block and record its ID."""
+        import base64
+
+        client = self._get_client()
+        blob_client = client.get_blob_client(
+            container=self._container,
+            blob=context['blob_name'],
+        )
+        block_id = base64.b64encode(f'block-{context["block_counter"]:06d}'.encode()).decode()
+        blob_client.stage_block(block_id=block_id, data=data)
+        context['block_ids'].append(block_id)
+        context['block_counter'] += 1
+
+    # =========================================================================
     # Private Methods
     # =========================================================================
 

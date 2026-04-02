@@ -2240,6 +2240,152 @@ def test_get_websocket_uri_normalization(input_uri: str, expected_uri: str) -> N
     assert ConnectionMixin._get_websocket_uri(input_uri) == expected_uri
 
 
+# ============================================================================
+# File Store Operations
+# ============================================================================
+
+
+class TestFileStoreOperations:
+    """Test handle-based file store operations against a live server."""
+
+    def _unique_path(self, prefix: str = 'test') -> str:
+        return f'.test-store/{prefix}-{"".join(random.choices(string.ascii_lowercase, k=8))}'
+
+    @pytest.mark.asyncio
+    async def test_handle_write_and_read(self):
+        """Write via handle, read back via handle."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('hw')
+
+            info = await client.fs_open(path, 'w')
+            written = await client.fs_write(info['handle'], b'hello world')
+            assert written == 11
+            await client.fs_close(info['handle'], 'w')
+
+            info = await client.fs_open(path, 'r')
+            assert info['size'] == 11
+            data = await client.fs_read(info['handle'])
+            assert data == b'hello world'
+            await client.fs_close(info['handle'], 'r')
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_multiple_write_chunks(self):
+        """Write multiple chunks then read back."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('chunks')
+
+            info = await client.fs_open(path, 'w')
+            for i in range(5):
+                await client.fs_write(info['handle'], f'chunk-{i}-'.encode())
+            await client.fs_close(info['handle'], 'w')
+
+            content = await client.fs_read_string(path)
+            assert content == 'chunk-0-chunk-1-chunk-2-chunk-3-chunk-4-'
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_read_in_chunks(self):
+        """Read a file in multiple chunks via handle."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('rc')
+            data = b'X' * 1000
+
+            info = await client.fs_open(path, 'w')
+            await client.fs_write(info['handle'], data)
+            await client.fs_close(info['handle'], 'w')
+
+            info = await client.fs_open(path, 'r')
+            chunks = []
+            while True:
+                chunk = await client.fs_read(info['handle'], length=300)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            await client.fs_close(info['handle'], 'r')
+
+            assert b''.join(chunks) == data
+            assert len(chunks) == 4  # 300 + 300 + 300 + 100
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_convenience_string_roundtrip(self):
+        """fs_write_string / fs_read_string round-trip."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('str')
+
+            await client.fs_write_string(path, 'Hello \u2603 \U0001f680')
+            result = await client.fs_read_string(path)
+            assert result == 'Hello \u2603 \U0001f680'
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_convenience_json_roundtrip(self):
+        """fs_write_json / fs_read_json round-trip."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('json')
+            obj = {'name': 'Test', 'values': [1, 2, 3], 'nested': {'ok': True}}
+
+            await client.fs_write_json(path, obj)
+            result = await client.fs_read_json(path)
+            assert result == obj
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_stat_and_delete(self):
+        """Write a file, stat it, delete it, stat again."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('stat')
+
+            info = await client.fs_open(path, 'w')
+            await client.fs_write(info['handle'], b'data')
+            await client.fs_close(info['handle'], 'w')
+
+            result = await client.fs_stat(path)
+            assert result['exists'] is True
+            assert result['type'] == 'file'
+
+            await client.fs_delete(path)
+
+            result = await client.fs_stat(path)
+            assert result['exists'] is False
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+
 # Pytest configuration
 pytest_plugins = ['pytest_asyncio']
 

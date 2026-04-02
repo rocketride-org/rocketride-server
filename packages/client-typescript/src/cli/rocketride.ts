@@ -982,6 +982,123 @@ export class RocketRideCLI {
 
 		addCommonOptions(stopCmd);
 
+		// Store command with file system subcommands
+		const storeCmd = program
+			.command('store')
+			.description('File store operations');
+
+		// store dir
+		const storeDirCmd = storeCmd
+			.command('dir [path]')
+			.description('List directory contents')
+			.action(async (path, options) => {
+				this.args = { command: 'store', subcommand: 'dir', path: path || '', ...options };
+				this.uri = options.uri;
+				try {
+					const client = await this.createAndConnectClient();
+					const result = await client.fsListDir(path || '');
+					const entries = result.entries || [];
+					if (entries.length === 0) { console.log('(empty directory)'); }
+					else {
+						for (const e of entries) { console.log(`  ${e.type === 'dir' ? 'DIR ' : 'FILE'}  ${e.name}`); }
+						console.log(`\n  ${result.count} item(s)`);
+					}
+					process.exit(0);
+				} finally { this.cancel(); await this.cleanupClient(); }
+			});
+		addCommonOptions(storeDirCmd);
+
+		// store type
+		const storeTypeCmd = storeCmd
+			.command('type <path>')
+			.description('Display file contents')
+			.action(async (path, options) => {
+				this.args = { command: 'store', subcommand: 'type', path, ...options };
+				this.uri = options.uri;
+				try {
+					const client = await this.createAndConnectClient();
+					const text = await client.fsReadString(path);
+					process.stdout.write(text);
+					process.exit(0);
+				} finally { this.cancel(); await this.cleanupClient(); }
+			});
+		addCommonOptions(storeTypeCmd);
+
+		// store write
+		const storeWriteCmd = storeCmd
+			.command('write <path>')
+			.description('Write a file')
+			.option('--file <localFile>', 'Local file to upload')
+			.option('--content <text>', 'Inline text content')
+			.action(async (path, options) => {
+				this.args = { command: 'store', subcommand: 'write', path, ...options };
+				this.uri = options.uri;
+				try {
+					const client = await this.createAndConnectClient();
+					if (options.file) {
+						const fs = await import('fs');
+						const data = fs.readFileSync(options.file);
+						await client.fsWrite(path, data);
+					} else if (options.content !== undefined) {
+						await client.fsWriteString(path, options.content);
+					} else {
+						console.error('Error: Either --file or --content is required'); process.exit(1);
+					}
+					console.log(`Written: ${path}`);
+					process.exit(0);
+				} finally { this.cancel(); await this.cleanupClient(); }
+			});
+		addCommonOptions(storeWriteCmd);
+
+		// store rm
+		const storeRmCmd = storeCmd
+			.command('rm <path>')
+			.description('Delete a file')
+			.action(async (path, options) => {
+				this.args = { command: 'store', subcommand: 'rm', path, ...options };
+				this.uri = options.uri;
+				try {
+					const client = await this.createAndConnectClient();
+					await client.fsDelete(path);
+					console.log(`Deleted: ${path}`);
+					process.exit(0);
+				} finally { this.cancel(); await this.cleanupClient(); }
+			});
+		addCommonOptions(storeRmCmd);
+
+		// store mkdir
+		const storeMkdirCmd = storeCmd
+			.command('mkdir <path>')
+			.description('Create a directory')
+			.action(async (path, options) => {
+				this.args = { command: 'store', subcommand: 'mkdir', path, ...options };
+				this.uri = options.uri;
+				try {
+					const client = await this.createAndConnectClient();
+					await client.fsMkdir(path);
+					console.log(`Created: ${path}/`);
+					process.exit(0);
+				} finally { this.cancel(); await this.cleanupClient(); }
+			});
+		addCommonOptions(storeMkdirCmd);
+
+		// store stat
+		const storeStatCmd = storeCmd
+			.command('stat <path>')
+			.description('Get file/directory metadata')
+			.action(async (path, options) => {
+				this.args = { command: 'store', subcommand: 'stat', path, ...options };
+				this.uri = options.uri;
+				try {
+					const client = await this.createAndConnectClient();
+					const result = await client.fsStat(path);
+					if (!result.exists) { console.log(`${path}: not found`); }
+					else { console.log(`${path}: ${result.type}${result.modified ? ` (modified: ${new Date(result.modified * 1000).toISOString()})` : ''}`); }
+					process.exit(0);
+				} finally { this.cancel(); await this.cleanupClient(); }
+			});
+		addCommonOptions(storeStatCmd);
+
 		return program;
 	}
 

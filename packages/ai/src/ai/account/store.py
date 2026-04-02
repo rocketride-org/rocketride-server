@@ -11,15 +11,16 @@ Defaults to filesystem://~/.rocketlib/dtc if not set (user home directory).
 Falls back to temp directory if home directory cannot be determined.
 """
 
+import io
 import os
 import re
-import json
 import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-from .account import AccountInfo
+if TYPE_CHECKING:
+    from .file_store import FileStore
 
 
 # Retry configuration for cloud storage operations
@@ -164,6 +165,132 @@ class IStore(ABC):
         """
         pass
 
+    async def get_modified_time(self, filename: str) -> float:
+        """
+        Get the last modified time of a file as an epoch timestamp.
+
+        Default implementation reads the file to confirm existence, then
+        returns current time. Backends should override with native metadata.
+
+        Args:
+            filename: Relative path to file
+
+        Returns:
+            float: Last modified time as Unix epoch timestamp
+
+        Raises:
+            StorageError: If file doesn't exist
+        """
+        import time
+
+        # Default: confirm file exists, return current time
+        await self.read_file(filename)
+        return time.time()
+
+    async def write_bytes(self, filename: str, data: bytes) -> None:
+        """
+        Write binary data to file.
+
+        Default implementation encodes to string via latin-1.
+        Backends should override for proper binary I/O.
+
+        Args:
+            filename: Relative path to file
+            data: Binary data to write
+
+        Raises:
+            StorageError: If write operation fails
+        """
+        await self.write_file(filename, data.decode('latin-1'))
+
+    async def read_bytes(self, filename: str) -> bytes:
+        """
+        Read binary data from file.
+
+        Default implementation decodes from string via latin-1.
+        Backends should override for proper binary I/O.
+
+        Args:
+            filename: Relative path to file
+
+        Returns:
+            File contents as bytes
+
+        Raises:
+            StorageError: If file doesn't exist or read fails
+        """
+        content = await self.read_file(filename)
+        return content.encode('latin-1')
+
+    # =========================================================================
+    # Handle-Based I/O — open / read / write / close
+    # =========================================================================
+    #
+    # Default implementations buffer everything in memory and delegate to
+    # read_bytes/write_bytes on close.  Backends should override with native
+    # streaming (S3 multipart, Azure staged blocks, filesystem fd).
+
+    async def open_write(self, filename: str) -> dict:
+        """
+        Begin a write session for the given file.
+
+        Returns:
+            dict with backend-specific context. Must include key 'context'.
+        """
+        return {'context': {'buffer': bytearray(), 'filename': filename}}
+
+    async def write_chunk(self, filename: str, context: Any, data: bytes) -> int:
+        """
+        Append a chunk of data to an open write session.
+
+        Returns:
+            Number of bytes written.
+        """
+        context['buffer'].extend(data)
+        return len(data)
+
+    async def close_write(self, filename: str, context: Any) -> None:
+        """Finalize and commit the write session."""
+        await self.write_bytes(filename, bytes(context['buffer']))
+
+    async def abort_write(self, filename: str, context: Any) -> None:
+        """Close a write session, committing whatever data has been written."""
+        await self.close_write(filename, context)
+
+    async def open_read(self, filename: str) -> dict:
+        """
+        Begin a read session for the given file.
+
+        Returns:
+            dict with 'context' (opaque) and 'size' (total bytes).
+        """
+        data = await self.read_bytes(filename)
+        buf = io.BytesIO(data)
+        return {'context': {'buf': buf}, 'size': len(data)}
+
+    async def read_chunk(self, filename: str, context: Any, offset: int, length: int = 4_194_304) -> bytes:
+        """
+        Read a chunk of data from an open read session.
+
+        Args:
+            filename: The file being read.
+            context: Opaque context from open_read.
+            offset: Byte offset to read from.
+            length: Number of bytes to read (default 4 MB).
+
+        Returns:
+            The requested bytes. Empty bytes indicates EOF.
+        """
+        buf: io.BytesIO = context['buf']
+        buf.seek(offset)
+        return buf.read(length)
+
+    async def close_read(self, filename: str, context: Any) -> None:
+        """Close a read session and release resources."""
+        buf = context.get('buf')
+        if buf:
+            buf.close()
+
     @abstractmethod
     async def list_files(self, prefix: str = '') -> list:  # noqa: D102
         """
@@ -257,6 +384,7 @@ class Store:
             store: Backend storage implementation (FilesystemStore, S3Store, AzureBlobStore)
         """
         self._store = store
+        self._file_stores: dict = {}
 
     # =========================================================================
     # Public Static Methods
@@ -325,422 +453,24 @@ class Store:
         # Wrap backend in Store instance
         return Store(backend)
 
-    # =========================================================================
-    # Public Methods - Proxy (Direct pass-through to IStore)
-    # =========================================================================
-
-    async def read_file(self, path: str) -> str:
+    def get_file_store(self, client_id: str) -> 'FileStore':
         """
-        Read file contents from storage.
+        Get a FileStore instance scoped to a specific account.
+
+        FileStore instances are cached per client_id to avoid repeated
+        instantiation for the same account.
 
         Args:
-            path: Relative path to file within storage root
+            client_id: Account identifier for path scoping.
 
         Returns:
-            str: File contents as string
-
-        Raises:
-            StorageError: If file doesn't exist or read fails
+            FileStore instance scoped to the given account.
         """
-        return await self._store.read_file(path)
-
-    async def write_file(self, path: str, content: str) -> None:
-        """
-        Write file to storage (non-atomic, overwrites existing).
-
-        For atomic writes with version checking, use write_file_atomic() instead.
-
-        Args:
-            path: Relative path to file within storage root
-            content: File contents to write
-
-        Raises:
-            StorageError: If write fails
-        """
-        return await self._store.write_file(path, content)
-
-    async def read_file_with_metadata(self, path: str):
-        """
-        Read file contents along with version metadata.
-
-        Returns version information (hash/ETag) for use in atomic operations.
-
-        Args:
-            path: Relative path to file within storage root
-
-        Returns:
-            tuple: (content: str, version: str) where version is hash or ETag
-
-        Raises:
-            StorageError: If file doesn't exist or read fails
-        """
-        return await self._store.read_file_with_metadata(path)
-
-    async def write_file_atomic(self, path: str, content: str, expected_version: Optional[str] = None) -> str:
-        """
-        Write file atomically with optimistic locking.
-
-        For updates/deletes of existing files, expected_version MUST be provided.
-        For new file creation, expected_version should be None.
-
-        Implementation varies by backend:
-        - Filesystem: Uses OS-level file locking (fcntl/msvcrt)
-        - S3: Uses conditional PutObject with IfMatch ETag
-        - Azure: Uses conditional upload_blob with match_condition
-
-        Args:
-            path: Relative path to file within storage root
-            content: File contents to write
-            expected_version: Expected current version (hash/ETag) for conflict detection
-
-        Returns:
-            str: New version identifier (hash/ETag) after write
-
-        Raises:
-            StorageError: If write fails or version mismatch (conflict)
-        """
-        return await self._store.write_file_atomic(path, content, expected_version)
-
-    async def delete_file(self, path: str, expected_version: Optional[str] = None) -> None:
-        """
-        Delete file atomically with optimistic locking.
-
-        For deleting existing files, expected_version MUST be provided to prevent
-        accidental deletion if file was modified by another process.
-
-        Args:
-            path: Relative path to file within storage root
-            expected_version: Expected current version (hash/ETag) for conflict detection
-
-        Raises:
-            StorageError: If file doesn't exist, delete fails, or version mismatch
-        """
-        return await self._store.delete_file(path, expected_version)
-
-    async def list_files(self, prefix: str = '') -> list:
-        """
-        List all files under a given path prefix.
-
-        Args:
-            prefix: Path prefix to filter files (e.g., 'user-123/.projects/')
-                   Empty string lists all files
-
-        Returns:
-            list[str]: List of relative file paths matching the prefix
-        """
-        return await self._store.list_files(prefix)
-
-    # =========================================================================
-    # Public Methods - Project Operations (User-Scoped)
-    # =========================================================================
-
-    async def save_project(self, account_info, project_id: str, pipeline: dict, expected_version: Optional[str] = None) -> dict:
-        """
-        Save a project for a user.
-
-        Args:
-            account_info: AccountInfo object containing clientid
-            project_id: Project ID (used for filename)
-            pipeline: Pipeline configuration dictionary
-            expected_version: Expected current version for atomic update (optional)
-
-        Returns:
-            dict: Result with success status, project_id, and new version
-
-        Raises:
-            ValueError: If parameters are invalid
-            StorageError: If storage operation fails or version mismatch
-        """
-        if not isinstance(account_info, AccountInfo):
-            raise ValueError('account_info must be an AccountInfo instance')
-        if not project_id:
-            raise ValueError('project_id is required')
-        if not pipeline:
-            raise ValueError('pipeline is required')
-
-        file_path = Store._construct_store_path(account_info.clientid, project_id)
-        return await self._save_item(file_path, project_id, 'project_id', pipeline, expected_version)
-
-    async def get_project(self, account_info, project_id: str) -> dict:
-        """
-        Get a project by ID.
-
-        Args:
-            account_info: AccountInfo object containing clientid
-            project_id: Project ID to retrieve
-
-        Returns:
-            dict: Result with success status, project data, and version
-
-        Raises:
-            StorageError: If project not found or read fails
-        """
-        if not isinstance(account_info, AccountInfo):
-            raise ValueError('account_info must be an AccountInfo instance')
-
-        file_path = Store._construct_store_path(account_info.clientid, project_id)
-        return await self._get_item(file_path)
-
-    async def delete_project(self, account_info, project_id: str, expected_version: Optional[str] = None) -> dict:
-        """
-        Delete a project by ID.
-
-        Args:
-            account_info: AccountInfo object containing clientid
-            project_id: Project ID to delete
-            expected_version: Expected current version for atomic delete (optional)
-
-        Returns:
-            dict: Result with success status
-
-        Raises:
-            StorageError: If project not found, delete fails, or version mismatch
-        """
-        if not isinstance(account_info, AccountInfo):
-            raise ValueError('account_info must be an AccountInfo instance')
-
-        file_path = Store._construct_store_path(account_info.clientid, project_id)
-        return await self._delete_item(file_path, project_id, 'project_id', expected_version)
-
-    async def get_all_projects(self, account_info) -> dict:
-        """
-        Get all projects for a user.
-
-        Args:
-            account_info: AccountInfo object containing clientid
-
-        Returns:
-            dict: Result with success status, projects array, and count
-        """
-        if not isinstance(account_info, AccountInfo):
-            raise ValueError('account_info must be an AccountInfo instance')
-
-        prefix = Store._construct_store_path(account_info.clientid)
-        return await self._get_all_items(prefix, 'id', 'projects')
-
-    # =========================================================================
-    # Public Methods - Template Operations (System-Wide)
-    # =========================================================================
-
-    async def save_template(self, template_id: str, pipeline: dict, expected_version: Optional[str] = None) -> dict:
-        """
-        Save a template (system-wide, accessible to all users).
-
-        Args:
-            template_id: Template ID (used for filename)
-            pipeline: Pipeline configuration dictionary
-            expected_version: Expected current version for atomic update (optional)
-
-        Returns:
-            dict: Result with success status, template_id, and new version
-
-        Raises:
-            ValueError: If parameters are invalid
-            StorageError: If storage operation fails or version mismatch
-        """
-        if not template_id:
-            raise ValueError('template_id is required')
-        if not pipeline:
-            raise ValueError('pipeline is required')
-
-        file_path = Store._construct_template_path(template_id)
-        return await self._save_item(file_path, template_id, 'template_id', pipeline, expected_version)
-
-    async def get_template(self, template_id: str) -> dict:
-        """
-        Get a template by ID.
-
-        Args:
-            template_id: Template ID to retrieve
-
-        Returns:
-            dict: Result with success status, template data, and version
-
-        Raises:
-            StorageError: If template not found or read fails
-        """
-        if not template_id:
-            raise ValueError('template_id is required')
-
-        file_path = Store._construct_template_path(template_id)
-        return await self._get_item(file_path)
-
-    async def delete_template(self, template_id: str, expected_version: Optional[str] = None) -> dict:
-        """
-        Delete a template by ID.
-
-        Args:
-            template_id: Template ID to delete
-            expected_version: Expected current version for atomic delete (optional)
-
-        Returns:
-            dict: Result with success status
-
-        Raises:
-            StorageError: If template not found, delete fails, or version mismatch
-        """
-        if not template_id:
-            raise ValueError('template_id is required')
-
-        file_path = Store._construct_template_path(template_id)
-        return await self._delete_item(file_path, template_id, 'template_id', expected_version)
-
-    async def get_all_templates(self) -> dict:
-        """
-        Get all templates (system-wide).
-
-        Returns:
-            dict: Result with success status, templates array, and count
-        """
-        prefix = Store._construct_template_path()
-        return await self._get_all_items(prefix, 'id', 'templates')
-
-    # =========================================================================
-    # Public Methods - Log Operations (User-Scoped, Per-Project)
-    # =========================================================================
-
-    async def save_log(self, account_info, project_id: str, source: str, contents: dict) -> dict:
-        """
-        Save a log file for a source run.
-
-        Creates or overwrites a log file in the users/<client-id>/.logs/<project_id>/ directory.
-        The filename is constructed as <source>-<start_time>.log where start_time
-        is extracted from contents['body']['startTime'].
-
-        Args:
-            account_info: AccountInfo object containing clientid
-            project_id: Project ID
-            source: Name of the source
-            contents: Log contents dictionary containing body.startTime
-
-        Returns:
-            dict: Result with success status and filename
-
-        Raises:
-            ValueError: If parameters are invalid
-            StorageError: If storage operation fails
-        """
-        if not isinstance(account_info, AccountInfo):
-            raise ValueError('account_info must be an AccountInfo instance')
-        if not project_id:
-            raise ValueError('project_id is required')
-        if not source:
-            raise ValueError('source is required')
-        if not contents:
-            raise ValueError('contents is required')
-
-        # Extract start_time from contents
-        start_time = contents.get('body', {}).get('startTime')
-        if start_time is None:
-            raise ValueError('contents must contain body.startTime')
-
-        # Construct filename: source-<start_time>.log
-        filename = f'{source}-{start_time}.log'
-        file_path = Store._construct_log_path(account_info.clientid, project_id, filename)
-
-        # Serialize contents to JSON
-        contents_json = json.dumps(contents, indent=2)
-
-        # Save file (overwrite if exists)
-        await self._store.write_file(file_path, contents_json)
-
-        return {'success': True, 'filename': filename}
-
-    async def get_log(self, account_info, project_id: str, source: str, start_time: float) -> dict:
-        """
-        Get a log file by source name and start time.
-
-        Args:
-            account_info: AccountInfo object containing clientid
-            project_id: Project ID
-            source: Name of the source
-            start_time: Start time of the run
-
-        Returns:
-            dict: Result with success status and log contents
-
-        Raises:
-            ValueError: If parameters are invalid
-            StorageError: If log not found or read fails
-        """
-        if not isinstance(account_info, AccountInfo):
-            raise ValueError('account_info must be an AccountInfo instance')
-        if not project_id:
-            raise ValueError('project_id is required')
-        if not source:
-            raise ValueError('source is required')
-        if start_time is None:
-            raise ValueError('start_time is required')
-
-        # Construct filename: source-<start_time>.log
-        filename = f'{source}-{start_time}.log'
-        file_path = Store._construct_log_path(account_info.clientid, project_id, filename)
-
-        # Read log file
-        contents_json = await self._store.read_file(file_path)
-        contents = json.loads(contents_json)
-
-        return {'success': True, 'contents': contents}
-
-    async def list_logs(self, account_info, project_id: str, source: Optional[str] = None, page: Optional[int] = None) -> dict:
-        """
-        List log files for a project.
-
-        Args:
-            account_info: AccountInfo object containing clientid
-            project_id: Project ID
-            source: Optional source name to filter logs (filters files starting with '<source>-')
-            page: Page number (0-indexed). If negative or None, defaults to 0.
-                  Page size is LOG_PAGE_SIZE (100).
-
-        Returns:
-            dict: Result with success status, logs array, count, total_count, page, and total_pages
-        """
-        if not isinstance(account_info, AccountInfo):
-            raise ValueError('account_info must be an AccountInfo instance')
-        if not project_id:
-            raise ValueError('project_id is required')
-
-        # Normalize page number
-        if page is None or page < 0:
-            page = 0
-
-        # Get directory prefix
-        prefix = Store._construct_log_path(account_info.clientid, project_id)
-
-        # List all files in directory
-        file_paths = await self._store.list_files(prefix)
-
-        # Filter to only .log files
-        log_files = [f for f in file_paths if f.endswith('.log')]
-
-        # If source provided, filter files starting with source-
-        if source:
-            log_files = [f for f in log_files if Path(f).name.startswith(f'{source}-')]
-
-        # Sort files
-        log_files.sort()
-
-        # Calculate pagination
-        total_count = len(log_files)
-        total_pages = (total_count + LOG_PAGE_SIZE - 1) // LOG_PAGE_SIZE if total_count > 0 else 1
-        start_idx = page * LOG_PAGE_SIZE
-        end_idx = start_idx + LOG_PAGE_SIZE
-
-        # Get page of files
-        page_files = log_files[start_idx:end_idx]
-
-        # Extract just filenames from paths
-        logs = [Path(f).name for f in page_files]
-
-        return {
-            'success': True,
-            'logs': logs,
-            'count': len(logs),
-            'total_count': total_count,
-            'page': page,
-            'total_pages': total_pages,
-        }
+        if client_id not in self._file_stores:
+            from .file_store import FileStore
+
+            self._file_stores[client_id] = FileStore(self._store, client_id)
+        return self._file_stores[client_id]
 
     # =========================================================================
     # Private Static Methods
@@ -761,7 +491,7 @@ class Store:
         try:
             # Try to get user's home directory (works on Windows/Linux/Mac)
             home = Path.home()
-            storage_path = home / '.rocketlib' / 'dtc'
+            storage_path = home / '.rocketlib' / 'store'
         except Exception:
             # Fallback to temp directory if home cannot be determined
             storage_path = Path(tempfile.gettempdir()) / '.rocketlib' / 'dtc'
@@ -794,203 +524,6 @@ class Store:
                 url = f'{scheme}://{expanded_path}'
 
         return url
-
-    @staticmethod
-    def _construct_path(components: list, item_id: Optional[str] = None) -> str:
-        """
-        Construct storage path for items (projects or templates).
-
-        Args:
-            components: List of path components (e.g., ['users', client_id, '.projects'])
-            item_id: Item ID (optional)
-
-        Returns:
-            str: File path if item_id provided, directory path otherwise
-        """
-        # Use Path for cross-platform path construction, convert to POSIX-style string
-        # (forward slashes) for storage consistency across platforms
-        base_path = Path(*components)
-
-        if item_id:
-            file_path = base_path / f'{item_id}.json'
-            return file_path.as_posix()
-        else:
-            # Return directory path with trailing slash
-            return base_path.as_posix() + '/'
-
-    @staticmethod
-    def _construct_store_path(client_id: str, project_id: Optional[str] = None) -> str:
-        """
-        Construct storage path for projects.
-
-        Args:
-            client_id: Client/user ID
-            project_id: Project ID (optional)
-
-        Returns:
-            str: File path if project_id provided, directory path otherwise
-                - With project_id: "users/<client_id>/.projects/<project_id>.json"
-                - Without project_id: "users/<client_id>/.projects/"
-        """
-        return Store._construct_path(['users', client_id, '.projects'], project_id)
-
-    @staticmethod
-    def _construct_template_path(template_id: Optional[str] = None) -> str:
-        """
-        Construct storage path for templates.
-
-        Templates are stored in a system-wide location accessible to all users.
-
-        Args:
-            template_id: Template ID (optional)
-
-        Returns:
-            str: File path if template_id provided, directory path otherwise
-                - With template_id: "system/.templates/<template_id>.json"
-                - Without template_id: "system/.templates/"
-        """
-        return Store._construct_path(['system', '.templates'], template_id)
-
-    @staticmethod
-    def _construct_log_path(client_id: str, project_id: str, filename: Optional[str] = None) -> str:
-        """
-        Construct storage path for log files.
-
-        Args:
-            client_id: Client/user ID
-            project_id: Project ID
-            filename: Log filename (optional)
-
-        Returns:
-            str: File path if filename provided, directory path otherwise
-                - With filename: "users/<client_id>/.logs/<project_id>/<filename>"
-                - Without filename: "users/<client_id>/.logs/<project_id>/"
-        """
-        base_path = Path('users', client_id, '.logs', project_id)
-        if filename:
-            file_path = base_path / filename
-            return file_path.as_posix()
-        else:
-            return base_path.as_posix() + '/'
-
-    # =========================================================================
-    # Private Methods
-    # =========================================================================
-
-    async def _save_item(self, file_path: str, item_id: str, id_key: str, pipeline: dict, expected_version: Optional[str] = None) -> dict:
-        """
-        Save an item (project or template).
-
-        Args:
-            file_path: Storage path for the item
-            item_id: Item ID
-            id_key: Key name for ID in response (e.g., 'project_id' or 'template_id')
-            pipeline: Pipeline configuration dictionary
-            expected_version: Expected current version for atomic update (optional)
-
-        Returns:
-            dict: Result with success status, item ID, and new version
-        """
-        # Serialize pipeline to JSON
-        pipeline_json = json.dumps(pipeline, indent=2)
-
-        # Save atomically using the wrapped store
-        new_version = await self._store.write_file_atomic(file_path, pipeline_json, expected_version)
-
-        return {'success': True, id_key: item_id, 'version': new_version}
-
-    async def _get_item(self, file_path: str) -> dict:
-        """
-        Get an item (project or template) by path.
-
-        Args:
-            file_path: Storage path for the item
-
-        Returns:
-            dict: Result with success status, pipeline data, and version
-        """
-        # Read pipeline with version using the wrapped store
-        pipeline_json, version = await self._store.read_file_with_metadata(file_path)
-        pipeline = json.loads(pipeline_json)
-
-        return {'success': True, 'pipeline': pipeline, 'version': version}
-
-    async def _delete_item(self, file_path: str, item_id: str, id_key: str, expected_version: Optional[str] = None) -> dict:
-        """
-        Delete an item (project or template).
-
-        Args:
-            file_path: Storage path for the item
-            item_id: Item ID
-            id_key: Key name for ID in response (e.g., 'project_id' or 'template_id')
-            expected_version: Expected current version for atomic delete (optional)
-
-        Returns:
-            dict: Result with success status
-        """
-        # Delete atomically using the wrapped store
-        await self._store.delete_file(file_path, expected_version)
-
-        return {'success': True, id_key: item_id}
-
-    async def _get_all_items(self, prefix: str, id_key: str, list_key: str) -> dict:
-        """
-        Get all items (projects or templates) from a directory.
-
-        Args:
-            prefix: Directory prefix to list
-            id_key: Key name for ID in summaries (e.g., 'id')
-            list_key: Key name for the list in response (e.g., 'projects' or 'templates')
-
-        Returns:
-            dict: Result with success status, items array, and count
-        """
-        # List all files in directory using the wrapped store
-        file_paths = await self._store.list_files(prefix)
-
-        # Filter to only .json files
-        item_files = [f for f in file_paths if f.endswith('.json')]
-
-        # Read each item and extract summary
-        items = []
-        for file_path in item_files:
-            try:
-                # Extract item_id from filename
-                item_id = Path(file_path).stem  # Gets filename without extension
-
-                # Read pipeline data
-                pipeline_json = await self._store.read_file(file_path)
-                pipeline = json.loads(pipeline_json)
-
-                # Extract name (from pipeline.name or source component name)
-                pipeline_name = pipeline.get('name', 'Untitled')
-                pipeline_desc = pipeline.get('description', '')
-
-                # Extract sources (all components where config.mode == 'Source')
-                sources = []
-                pipeline_components = pipeline.get('components', [])
-                for component in pipeline_components:
-                    config = component.get('config', {})
-                    if config.get('mode') == 'Source':
-                        sources.append({
-                            'id': component.get('id'),
-                            'provider': component.get('provider'),
-                            'name': config.get('name', component.get('id'))
-                        })
-
-                summary = {
-                    id_key: item_id,
-                    'name': pipeline_name,
-                    'description': pipeline_desc,
-                    'sources': sources,
-                    'totalComponents': len(pipeline_components)
-                }
-                items.append(summary)
-            except Exception:
-                # Skip files that can't be read or parsed
-                continue
-
-        return {'success': True, list_key: items, 'count': len(items)}
 
 
 __all__ = [

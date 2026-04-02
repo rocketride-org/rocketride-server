@@ -194,6 +194,7 @@ class Task(DAPBase):
         launch_type: LAUNCH_TYPE = LAUNCH_TYPE.LAUNCH,
         provider: str = None,
         ttl: int = 900,
+        client_id: str = '',
         **kwargs,
     ) -> None:
         """
@@ -206,6 +207,7 @@ class Task(DAPBase):
             launch_args: Launch configuration parameters
             launch_type: Task creation mode (launch/attach)
             ttl: Time-to-live in seconds for idle tasks (default: 900 = 15 minutes; 0 = no timeout)
+            client_id: Account identifier for store access scoping
             **kwargs: Additional DAP configuration
         """
         # Store authentication
@@ -214,6 +216,7 @@ class Task(DAPBase):
         self.source = source
         self.token = token
         self.public_auth = public_auth
+        self.client_id = client_id
 
         # TTL management - count-up timer approach
         self._ttl = ttl  # Maximum idle time in seconds
@@ -1508,7 +1511,10 @@ class Task(DAPBase):
 
             await self._send_status_update()
 
-            # Launch subprocess - explicitly pass environment to inherit ROCKETRIDE_MOCK for testing
+            # Launch subprocess - pass environment with account context for store access
+            subprocess_env = os.environ.copy()
+            subprocess_env['ROCKETRIDE_CLIENT_ID'] = self.client_id
+
             self._engine_process = await asyncio.create_subprocess_exec(
                 exec_path,
                 *child_args,
@@ -1517,7 +1523,7 @@ class Task(DAPBase):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 limit=CONST_SUBPROCESS_BUFFER_LIMIT,
-                env=os.environ.copy(),
+                env=subprocess_env,
             )
 
             # Initialize stdio interface

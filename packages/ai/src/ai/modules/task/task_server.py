@@ -47,7 +47,7 @@ import time
 import asyncio
 import uuid
 from typing import List
-from fastapi import WebSocket, HTTPException
+from fastapi import WebSocket
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
 from ai.constants import CONST_CLEANUP_DELAY_TIME, CONST_CLEANUP_SLEEP_TIME, CONST_DEFAULT_TTL, CONST_TTL_CHECK
@@ -80,8 +80,9 @@ class TASK_CONTROL:
     # Short of the pipe -  used for display and events
     id: str = ''
 
-    # These are the mapped apikey and the token for the task
+    # These are the mapped apikey, client_id, and the token for the task
     apikey: str = ''
+    client_id: str = ''
     token: str = ''
 
     # Public token - used in as alt auth
@@ -418,6 +419,14 @@ class TaskServer(DAPBase):
             except Exception as e:
                 # Log cleanup errors but continue processing other tasks
                 self.debug_message(f'Error during disconnection cleanup for task "{control.id}": {e}')
+
+        # Close any open file store handles for this connection
+        if hasattr(conn, '_account_info') and conn._account_info:
+            try:
+                fs = self.store.get_file_store(conn._account_info.clientid)
+                await fs.close_all_handles(connection_id)
+            except Exception as e:
+                self.debug_message(f'Error closing file handles for connection {connection_id}: {e}')
 
         # Log successful disconnection cleanup
         self.debug_message(f'Connection {connection_id} disconnected and cleaned up.')
@@ -804,6 +813,7 @@ class TaskServer(DAPBase):
         *,
         attach_debugger=False,
         wait_for_running=False,
+        client_id: str = '',
     ) -> str:
         """
         Create and start a new computational task with full lifecycle management.
@@ -880,6 +890,7 @@ class TaskServer(DAPBase):
 
         # Parse task configuration from request arguments
         control.apikey = apikey
+        control.client_id = client_id
         control.token = args.get('token', None)
         control.pipeline = args.get('pipeline', None)
         control.source = args.get('source', None)
@@ -1016,6 +1027,7 @@ class TaskServer(DAPBase):
                 launch_type=control.launch_type,
                 provider=control.provider,
                 ttl=ttl,
+                client_id=control.client_id,
             )
 
             # Register task in central registry

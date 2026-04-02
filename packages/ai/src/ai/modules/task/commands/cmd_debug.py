@@ -194,6 +194,7 @@ class DebugCommands(DAPConn):
                 request,
                 self,
                 attach_debugger=True,
+                client_id=self._account_info.clientid,
             )
 
             # Save the debug token and the event id

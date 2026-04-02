@@ -309,6 +309,147 @@ class S3Store(IStore):
             raise StorageError(f'Failed to list files with prefix {prefix} from S3: {e}') from e
 
     # =========================================================================
+    # Handle-Based I/O
+    # =========================================================================
+
+    # S3 minimum part size (5 MB) — all parts except the last must be >= this
+    _S3_MIN_PART_SIZE = 5 * 1024 * 1024
+
+    async def open_write(self, filename: str) -> dict:
+        """Begin a multipart upload session."""
+        try:
+            client = self._get_client()
+            key = self._get_key(filename)
+            response = client.create_multipart_upload(Bucket=self._bucket, Key=key)
+            upload_id = response['UploadId']
+            return {
+                'context': {
+                    'key': key,
+                    'upload_id': upload_id,
+                    'parts': [],
+                    'part_number': 1,
+                    'buffer': bytearray(),
+                },
+            }
+        except Exception as e:
+            raise StorageError(f'Failed to start multipart upload for {filename}: {e}') from e
+
+    async def write_chunk(self, filename: str, context, data: bytes) -> int:
+        """Buffer data and flush as S3 parts when buffer reaches 5 MB."""
+        try:
+            context['buffer'].extend(data)
+            written = len(data)
+
+            # Flush parts while buffer is large enough
+            while len(context['buffer']) >= self._S3_MIN_PART_SIZE:
+                chunk = bytes(context['buffer'][: self._S3_MIN_PART_SIZE])
+                del context['buffer'][: self._S3_MIN_PART_SIZE]
+                self._upload_part(context, chunk)
+
+            return written
+        except Exception as e:
+            raise StorageError(f'Failed to write chunk to {filename}: {e}') from e
+
+    async def close_write(self, filename: str, context) -> None:
+        """Finalize the upload — single put_object if small, complete multipart otherwise."""
+        try:
+            client = self._get_client()
+            remaining = bytes(context['buffer'])
+            context['buffer'].clear()
+
+            if not context['parts']:
+                # Total data < 5 MB: skip multipart, use simple put_object
+                client.abort_multipart_upload(
+                    Bucket=self._bucket,
+                    Key=context['key'],
+                    UploadId=context['upload_id'],
+                )
+                client.put_object(
+                    Bucket=self._bucket,
+                    Key=context['key'],
+                    Body=remaining,
+                )
+            else:
+                # Flush remaining buffer as the final part (can be < 5 MB)
+                if remaining:
+                    self._upload_part(context, remaining)
+
+                client.complete_multipart_upload(
+                    Bucket=self._bucket,
+                    Key=context['key'],
+                    UploadId=context['upload_id'],
+                    MultipartUpload={'Parts': context['parts']},
+                )
+        except Exception as e:
+            # Best-effort abort on failure
+            try:
+                self._get_client().abort_multipart_upload(
+                    Bucket=self._bucket,
+                    Key=context['key'],
+                    UploadId=context['upload_id'],
+                )
+            except Exception:
+                pass
+            raise StorageError(f'Failed to finalize upload for {filename}: {e}') from e
+
+    async def abort_write(self, filename: str, context) -> None:
+        """Close the upload, committing whatever has been written."""
+        await self.close_write(filename, context)
+
+    async def open_read(self, filename: str) -> dict:
+        """Get file size via head_object for ranged reads."""
+        try:
+            client = self._get_client()
+            key = self._get_key(filename)
+            response = client.head_object(Bucket=self._bucket, Key=key)
+            size = response['ContentLength']
+            return {'context': {'key': key}, 'size': size}
+        except Exception as e:
+            if self._is_no_such_key_error(e):
+                raise StorageError(f'File not found: {filename}')
+            raise StorageError(f'Failed to open {filename} for reading: {e}') from e
+
+    async def read_chunk(self, filename: str, context, offset: int, length: int = 4_194_304) -> bytes:
+        """Read a range of bytes from S3."""
+        try:
+            client = self._get_client()
+            end = offset + length - 1
+            response = client.get_object(
+                Bucket=self._bucket,
+                Key=context['key'],
+                Range=f'bytes={offset}-{end}',
+            )
+            return response['Body'].read()
+        except Exception as e:
+            # Empty response at EOF
+            error_str = str(e)
+            if 'InvalidRange' in error_str or '416' in error_str:
+                return b''
+            raise StorageError(f'Failed to read chunk from {filename}: {e}') from e
+
+    async def close_read(self, filename: str, context) -> None:
+        """No-op — S3 reads are stateless."""
+        pass
+
+    def _upload_part(self, context: dict, data: bytes) -> None:
+        """Upload a single part and record its ETag."""
+        client = self._get_client()
+        response = client.upload_part(
+            Bucket=self._bucket,
+            Key=context['key'],
+            UploadId=context['upload_id'],
+            PartNumber=context['part_number'],
+            Body=data,
+        )
+        context['parts'].append(
+            {
+                'PartNumber': context['part_number'],
+                'ETag': response['ETag'],
+            }
+        )
+        context['part_number'] += 1
+
+    # =========================================================================
     # Private Static Methods
     # =========================================================================
 
