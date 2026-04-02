@@ -25,13 +25,14 @@
 # ApprovalNotifier -- sends notifications when an approval is requested.
 #
 # Supports three channels: 'webhook', 'log', and 'none'.
-# The webhook channel prepares a JSON payload and logs it; it does NOT
-# actually perform the HTTP POST in production pipeline context to avoid
-# side-effects in the hot path.  Tests can verify the payload structure.
+# The webhook channel prepares a JSON payload and POSTs it to the configured
+# URL.  The HTTP call is fire-and-forget with a short timeout so it does not
+# block the pipeline hot path.  Delivery failures are logged but never raise.
 # ------------------------------------------------------------------------------
 
 import json
 import logging
+import urllib.request
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
@@ -82,18 +83,19 @@ class ApprovalNotifier:
         return None
 
     def notify_webhook(self, url: Optional[str], approval_request: Dict[str, Any]) -> Dict[str, Any]:
-        """Prepare a webhook POST payload and log it.
+        """Prepare a webhook POST payload and send it.
 
-        The actual HTTP call is intentionally skipped in pipeline context
-        to avoid blocking I/O.  The structured payload is returned so
-        callers (and tests) can inspect it.
+        The HTTP call uses a short timeout (10 s) so it does not block the
+        pipeline hot path.  Delivery failures are logged but never raised --
+        the structured payload is always returned so callers (and tests) can
+        inspect it regardless of network outcome.
 
         Args:
             url: The webhook endpoint URL.
             approval_request: The approval request dict.
 
         Returns:
-            The payload that *would* be POSTed.
+            The payload that was POSTed (or attempted).
         """
         self._validate_webhook_url(url)
 
@@ -109,8 +111,19 @@ class ApprovalNotifier:
             'webhook_url': url,
         }
 
-        logger.info('Approval webhook payload prepared for %s -> %s', payload['approval_id'], url)
-        logger.debug('Payload: %s', json.dumps(payload, default=str))
+        body = json.dumps(payload, default=str).encode('utf-8')
+        req = urllib.request.Request(
+            url,
+            data=body,
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                logger.info('Approval webhook delivered for %s -> %s (HTTP %s)', payload['approval_id'], url, resp.status)
+        except Exception:
+            logger.exception('Failed to deliver approval webhook for %s -> %s', payload['approval_id'], url)
 
         return payload
 

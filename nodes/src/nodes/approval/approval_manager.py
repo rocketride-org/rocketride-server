@@ -45,17 +45,20 @@ class ApprovalManager:
     All public methods are thread-safe.
     """
 
-    def __init__(self, timeout_seconds: int = 3600, timeout_action: str = 'approve') -> None:
+    def __init__(self, timeout_seconds: int = 3600, timeout_action: str = 'approve', require_comment: bool = False) -> None:
         """Initialise the approval manager.
 
         Args:
             timeout_seconds: Seconds before a pending request times out.
             timeout_action: Action on timeout -- 'approve' or 'reject'.
+            require_comment: When ``True``, approve/reject calls must supply
+                a non-empty *comment*/*reason*.
         """
         self._requests: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._timeout_seconds = timeout_seconds
         self._timeout_action = timeout_action  # 'approve' or 'reject'
+        self._require_comment = require_comment
         self._pending_count: int = 0
 
     # ------------------------------------------------------------------
@@ -136,6 +139,9 @@ class ApprovalManager:
             KeyError: If *approval_id* is not found.
             ValueError: If the request is not in 'pending' status.
         """
+        if self._require_comment and not comment:
+            raise ValueError('A comment is required when approving (require_comment is enabled)')
+
         with self._lock:
             request = self._get_request(approval_id)
             self._check_timeout(approval_id)
@@ -161,8 +167,12 @@ class ApprovalManager:
 
         Raises:
             KeyError: If *approval_id* is not found.
-            ValueError: If the request is not in 'pending' status.
+            ValueError: If the request is not in 'pending' status or a
+                reason is required but missing.
         """
+        if self._require_comment and not reason:
+            raise ValueError('A reason is required when rejecting (require_comment is enabled)')
+
         with self._lock:
             request = self._get_request(approval_id)
             self._check_timeout(approval_id)

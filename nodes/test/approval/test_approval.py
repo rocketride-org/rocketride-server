@@ -242,6 +242,49 @@ class TestApprovalManagerApproveReject:
         assert result['review_comment'] is None
 
 
+class TestApprovalManagerRequireComment:
+    """Test require_comment enforcement."""
+
+    def test_approve_without_comment_raises_when_required(self):
+        mgr = ApprovalManager(require_comment=True)
+        req = mgr.request_approval('item-1', 'c')
+        with pytest.raises(ValueError, match='comment is required'):
+            mgr.approve(req['approval_id'], 'alice')
+
+    def test_approve_with_empty_comment_raises_when_required(self):
+        mgr = ApprovalManager(require_comment=True)
+        req = mgr.request_approval('item-1', 'c')
+        with pytest.raises(ValueError, match='comment is required'):
+            mgr.approve(req['approval_id'], 'alice', comment='')
+
+    def test_approve_with_comment_succeeds_when_required(self):
+        mgr = ApprovalManager(require_comment=True)
+        req = mgr.request_approval('item-1', 'c')
+        result = mgr.approve(req['approval_id'], 'alice', comment='Looks good')
+        assert result['status'] == 'approved'
+        assert result['review_comment'] == 'Looks good'
+
+    def test_reject_without_reason_raises_when_required(self):
+        mgr = ApprovalManager(require_comment=True)
+        req = mgr.request_approval('item-1', 'c')
+        with pytest.raises(ValueError, match='reason is required'):
+            mgr.reject(req['approval_id'], 'bob')
+
+    def test_reject_with_reason_succeeds_when_required(self):
+        mgr = ApprovalManager(require_comment=True)
+        req = mgr.request_approval('item-1', 'c')
+        result = mgr.reject(req['approval_id'], 'bob', reason='Needs rework')
+        assert result['status'] == 'rejected'
+        assert result['review_comment'] == 'Needs rework'
+
+    def test_require_comment_false_allows_no_comment(self):
+        mgr = ApprovalManager(require_comment=False)
+        req = mgr.request_approval('item-1', 'c')
+        result = mgr.approve(req['approval_id'], 'alice')
+        assert result['status'] == 'approved'
+        assert result['review_comment'] is None
+
+
 class TestApprovalManagerTimeout:
     """Test timeout auto-approve and auto-reject."""
 
@@ -381,10 +424,38 @@ class TestApprovalNotifierWebhook:
             'timeout_seconds': 3600,
             'timeout_action': 'approve',
         }
-        payload = notifier.notify(req)
+        with patch('approval.notifier.urllib.request.urlopen'):
+            payload = notifier.notify(req)
         assert payload['event'] == 'approval_requested'
         assert payload['approval_id'] == 'abc-123'
         assert payload['webhook_url'] == 'https://hooks.example.com/approve'
+
+    def test_webhook_actually_sends_http_post(self):
+        notifier = ApprovalNotifier(notification_type='webhook', webhook_url='https://hooks.example.com/approve')
+        req = {
+            'approval_id': 'abc-123',
+            'item_id': 'item-1',
+            'content_preview': 'hello',
+            'metadata': {},
+            'status': 'pending',
+            'timeout_seconds': 3600,
+            'timeout_action': 'approve',
+        }
+        with patch('approval.notifier.urllib.request.urlopen') as mock_urlopen:
+            notifier.notify(req)
+            mock_urlopen.assert_called_once()
+            call_args = mock_urlopen.call_args
+            posted_request = call_args[0][0]
+            assert posted_request.method == 'POST'
+            assert posted_request.get_header('Content-type') == 'application/json'
+
+    def test_webhook_delivery_failure_does_not_raise(self):
+        notifier = ApprovalNotifier(notification_type='webhook', webhook_url='https://hooks.example.com/approve')
+        req = {'approval_id': 'abc-123', 'item_id': 'item-1', 'status': 'pending'}
+        with patch('approval.notifier.urllib.request.urlopen', side_effect=Exception('connection refused')):
+            # Should not raise -- delivery failures are logged only
+            payload = notifier.notify(req)
+        assert payload['approval_id'] == 'abc-123'
 
     def test_webhook_missing_url_raises(self):
         with pytest.raises(ValueError, match='webhook_url is required'):
@@ -529,7 +600,7 @@ class TestIInstanceAutoApprove:
     def test_auto_approve_text_answer(self):
         inst = _make_instance(auto_approve=True)
         answer = Answer()
-        answer._answer = 'plain text response'
+        answer.setAnswer('plain text response')
 
         inst.writeAnswers(answer)
 

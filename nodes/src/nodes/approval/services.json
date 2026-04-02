@@ -28,7 +28,7 @@
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -40,19 +40,14 @@
 	"path": "nodes.approval",
 	//
 	// Required:
-	//		The prefix map when added/removed when convertting URLs <=> paths
+	//		The prefix map when added/removed when converting URLs <=> paths
 	//
 	"prefix": "approval",
 	//
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A filter component that pauses pipeline execution to request human review ",
-		"and approval before forwarding data to downstream nodes. Supports configurable ",
-		"timeout with auto-approve or auto-reject, webhook and log notifications, ",
-		"and an auto-approve pass-through mode for testing or low-risk pipelines."
-	],
+	"description": ["A filter component that pauses pipeline execution to request human review ", "and approval before forwarding data to downstream nodes. Supports configurable ", "timeout with auto-approve or auto-reject, webhook and log notifications, ", "and an auto-approve pass-through mode for testing or low-risk pipelines."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -165,21 +160,11 @@
 		},
 		"approval.custom": {
 			"object": "custom",
-			"properties": [
-				"approval.timeout_seconds",
-				"approval.timeout_action",
-				"approval.notification_type",
-				"approval.webhook_url",
-				"approval.require_comment"
-			]
+			"properties": ["approval.timeout_seconds", "approval.timeout_action", "approval.notification_type", "approval.webhook_url", "approval.require_comment"]
 		},
 		"approval.manual": {
 			"object": "manual",
-			"properties": [
-				"approval.timeout_seconds",
-				"approval.timeout_action",
-				"approval.notification_type"
-			]
+			"properties": ["approval.timeout_seconds", "approval.timeout_action", "approval.notification_type"]
 		},
 		"approval.auto_approve": {
 			"object": "auto_approve",

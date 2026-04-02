@@ -45,17 +45,21 @@ class IGlobal(IGlobalBase):
 
         try:
             timeout_seconds = int(config.get('timeout_seconds', 3600))
+            if timeout_seconds < 0:
+                timeout_seconds = 3600
         except (TypeError, ValueError):
             timeout_seconds = 3600
         timeout_action = config.get('timeout_action', 'approve')
         notification_type = config.get('notification_type', 'log')
         webhook_url = config.get('webhook_url', None)
         self.auto_approve = bool(config.get('auto_approve', False))
+        require_comment = bool(config.get('require_comment', False))
 
         # Shared manager -- one per pipeline lifetime
         self.approval_manager = ApprovalManager(
             timeout_seconds=timeout_seconds,
             timeout_action=timeout_action,
+            require_comment=require_comment,
         )
 
         # Shared notifier
