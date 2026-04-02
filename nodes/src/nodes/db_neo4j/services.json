@@ -53,6 +53,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "neo4j.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
 	// Optional:
 	//		Defines the invoke connections that may/must be connected

@@ -58,6 +58,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "pinecone.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
 	//
 	//  Optional:

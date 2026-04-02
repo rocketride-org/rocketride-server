@@ -9,6 +9,7 @@
 	"prefix": "Elasticsearch Vector Store",
 	"description": ["A vector database component for Elasticsearch, enabling efficient storage and ", "retrieval of vector embeddings. It supports similarity search, filtering, ", "and management of vector data with high performance. Supports Elastic Cloud ", "Serverless, Elastic Cloud Hosted, and self-managed Elasticsearch deployments."],
 	"icon": "elasticsearch.svg",
+	"documentation": "https://docs.rocketride.org",
 	"tile": ["Host/Port: ${parameters.elasticsearch.${profile}.host}:${parameters.elasticsearch.${profile}.port}", "Index: ${parameters.elasticsearch.${profile}.index}"],
 	"lanes": {
 		"text": [],

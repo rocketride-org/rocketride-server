@@ -9,6 +9,7 @@
 	"prefix": "agent",
 	"description": ["Wave-planning agent built natively on the RocketRide architecture.", "Plans each step as a wave of parallel tool calls, uses keyed memory to stay token-efficient,", "and requests tool schemas on demand instead of loading them all upfront.", "Can be invoked as a tool (`<nodeId>.run_agent`) for hierarchical agent orchestration."],
 	"icon": "rocketride.svg",
+	"documentation": "https://docs.rocketride.org",
 	"invoke": {
 		"llm": {
 			"description": "LLM used by the agent for planning and synthesis",

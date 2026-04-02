@@ -54,6 +54,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "audio-transcribe.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
 	//
 	//	Optional:

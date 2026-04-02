@@ -47,6 +47,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "text-output.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
 	//
 	//	Optional:

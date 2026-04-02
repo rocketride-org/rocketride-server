@@ -19,6 +19,7 @@
 	"prefix": "OpenSearch Index",
 	"description": ["An OpenSearch node that supports classic BM25 search and vector search ", "for ingestion and retrieval workflows. Works with self-managed OpenSearch."],
 	"icon": "opensearch.svg",
+	"documentation": "https://docs.rocketride.org",
 	"tile": ["Host: ${parameters.opensearch.host}"],
 	"lanes": {
 		"text": [],

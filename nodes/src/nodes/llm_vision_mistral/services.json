@@ -9,6 +9,7 @@
 	"prefix": "image_vision_mistral",
 	"description": ["A component that connects to Mistral AI's vision-capable models for image analysis, ", "OCR, and visual understanding tasks. Supports all Mistral vision models including ", "Mistral Large 3, Medium 3.1, Small 3.2, and Ministral models. Features robust error ", "handling, automatic image processing, and flexible prompt configuration for various use cases."],
 	"icon": "mistral-vision.svg",
+	"documentation": "https://docs.rocketride.org",
 	"tile": ["Model: ${parameters.image_vision_mistral.profile}"],
 	"lanes": {
 		"image": ["text"],

@@ -61,6 +61,7 @@
 	//              profile (model name)
 	//
 	"icon": "deepseek.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
 	//
 	//  Optional:
