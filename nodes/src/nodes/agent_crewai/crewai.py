@@ -44,6 +44,7 @@ from rocketlib import ToolDescriptor
 
 # ── Shared utilities ──────────────────────────────────────────────────────────
 
+
 def _safe_str(v: Any) -> str:
     try:
         return '' if v is None else str(v)
@@ -57,14 +58,12 @@ def _escape_braces(text: str) -> str:
 
 
 _DEFAULT_GOAL = 'Complete the assigned task to the best of your ability.'
-_DEFAULT_BACKSTORY = (
-    'You are a specialized agent in a multi-agent pipeline with access to tools. '
-    'Use your tools and reasoning to complete tasks effectively.'
-)
+_DEFAULT_BACKSTORY = 'You are a specialized agent in a multi-agent pipeline with access to tools. Use your tools and reasoning to complete tasks effectively.'
 _DEFAULT_EXPECTED_OUTPUT = 'A clear, direct answer to the assigned task.'
 
 
 # ── CrewAgentBase ─────────────────────────────────────────────────────────────
+
 
 class CrewAgentBase(AgentBase):
     """Shared base for CrewDriver and OrchestratorDriver."""
@@ -189,13 +188,13 @@ class CrewAgentBase(AgentBase):
 
 # ── CrewDriver ────────────────────────────────────────────────────────────────
 
+
 class CrewDriver(CrewAgentBase):
     """Sub-agent mode / standalone single-agent Crew."""
 
     FRAMEWORK = 'crewai'
 
-    def __init__(self, iGlobal: Any, *, process: Any = None, role: str = 'Assistant', task_description: str = '',
-                 goal: str = '', backstory: str = '', expected_output: str = ''):
+    def __init__(self, iGlobal: Any, *, process: Any = None, role: str = 'Assistant', task_description: str = '', goal: str = '', backstory: str = '', expected_output: str = ''):
         """Initialise the driver with per-node config loaded from connConfig.
 
         All string fields default to empty; empty values fall back to the
@@ -276,9 +275,7 @@ class CrewDriver(CrewAgentBase):
             verbose=False,
         )
 
-        from ai.common.agent._internal.utils import extract_prompt
-        prompt = extract_prompt(agent_input.question) if hasattr(agent_input, 'question') else ''
-        task_text = self._task_description or prompt or ''
+        task_text = self._task_description or ''
 
         desc = _escape_braces(task_text)
 
@@ -354,14 +351,8 @@ class CrewDriver(CrewAgentBase):
 # ── OrchestratorDriver ────────────────────────────────────────────────────────
 
 _MGR_ROLE = 'Orchestrator'
-_MGR_GOAL = (
-    'Coordinate the team to complete the user request. '
-    'Delegate to the appropriate agents and synthesize their outputs into a final answer.'
-)
-_MGR_BACKSTORY = (
-    'You are a senior orchestrator managing a team of specialized agents. '
-    'Delegate tasks to the right agent and synthesize their outputs into a final answer.'
-)
+_MGR_GOAL = 'Coordinate the team to complete the user request. Delegate to the appropriate agents and synthesize their outputs into a final answer.'
+_MGR_BACKSTORY = 'You are a senior orchestrator managing a team of specialized agents. Delegate tasks to the right agent and synthesize their outputs into a final answer.'
 
 
 class OrchestratorDriver(CrewAgentBase):
