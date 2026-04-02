@@ -6,7 +6,7 @@ Text-to-speech node for RocketRide pipelines.
 
 - Input lane: `text`
 - Outputs depend on **what you connect** (not a separate “output mode” setting):
-  - **`audio` lane connected:** streams PCM chunks via `writeAudio` (BEGIN / WRITE / END) for downstream audio nodes.
+  - **`audio` lane connected:** sends container-format audio bytes (WAV or MP3) via `writeAudio` (BEGIN / WRITE / END) with the matching MIME type for downstream audio nodes.
   - **`text` lane connected:** emits one JSON string per utterance with `mime_type` and **`base64`** (no `path` — the file lived only briefly on the server host and is removed after handoff).
   - **Both connected:** same bytes are streamed on `audio` and embedded as `base64` on `text` (one read, then temp file deleted).
   - **Neither connected:** synthesis is skipped (warning logged).
