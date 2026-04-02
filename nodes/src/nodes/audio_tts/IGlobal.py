@@ -8,9 +8,9 @@ import tempfile
 import time
 from typing import Any, Dict
 
-from rocketlib import IGlobalBase, IJson, OPEN_MODE, getServiceDefinition
-from ai.common.config import Config
+from rocketlib import IGlobalBase, IJson, OPEN_MODE
 from ai.common.models.base import get_model_server_address
+from .config_resolver import resolve_cloud_api_key, resolve_merged_config
 
 # ``services.json`` profile id → canonical ``engine`` (fallback if merged ``cfg`` lacks ``engine``).
 _PROFILE_TO_ENGINE: Dict[str, str] = {
@@ -26,56 +26,9 @@ class IGlobal(IGlobalBase):
     _config: Dict[str, Any]
     _engine: Any
 
-    def _api_key_from_raw_conn(self, raw: Any) -> str:
-        """Resolve ``api_key`` where RJSF stores it under a profile sibling (e.g. ``openai`` vs ``openai-tts``).
-
-        Uses ``.get`` on any mapping-like object (including ``IJson``); do not require ``isinstance(..., dict)``
-        or the key is skipped.
-        """
-
-        def pick(d: Any) -> str:
-            if d is None or not hasattr(d, 'get'):
-                return ''
-            v = d.get('api_key')
-            if v is not None and str(v).strip():
-                return str(v).strip()
-            return ''
-
-        if raw is None or not hasattr(raw, 'get'):
-            return ''
-        k = pick(raw)
-        if k:
-            return k
-        params = raw.get('parameters')
-        k = pick(params)
-        if k:
-            return k
-        profile = raw.get('profile')
-        if isinstance(profile, str) and profile:
-            k = pick(raw.get(profile))
-            if k:
-                return k
-            if '-' in profile:
-                k = pick(raw.get(profile.split('-', 1)[0]))
-                if k:
-                    return k
-        for alt in ('openai-tts', 'openai', 'elevenlabs-default', 'elevenlabs'):
-            k = pick(raw.get(alt))
-            if k:
-                return k
-        return ''
-
     def _resolve_cloud_api_key(self, cfg: Dict[str, Any], raw: Any, engine: str) -> str:
         """Form / merged config, then optional ``OPENAI_API_KEY`` / ``ELEVENLABS_API_KEY`` (runtime)."""
-        k = (self._read_cfg(cfg, 'api_key', '') or '').strip() or self._api_key_from_raw_conn(raw)
-        if k:
-            return k
-        e = engine.lower()
-        if e == 'openai':
-            return os.environ.get('OPENAI_API_KEY', '').strip()
-        if e == 'elevenlabs':
-            return os.environ.get('ELEVENLABS_API_KEY', '').strip()
-        return ''
+        return resolve_cloud_api_key(cfg, raw, engine, self._read_cfg)
 
     def _read_cfg(self, config: Dict[str, Any], key: str, default: Any) -> Any:
         if key in config:
@@ -83,45 +36,9 @@ class IGlobal(IGlobalBase):
         params = config.get('parameters') if isinstance(config.get('parameters'), dict) else {}
         return params.get(key, default)
 
-    def _merge_cfg_locked_profile_engine(self, raw: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
-        """After using OpenAI, stray ``engine`` (or other keys) in nested JSON can override the real profile. Force ``engine`` from ``services.json`` preconfig."""
-        profile = raw.get('profile') if raw is not None and hasattr(raw, 'get') else None
-        if (not isinstance(profile, str) or not profile.strip()) and isinstance(cfg, dict):
-            p = cfg.get('profile')
-            if isinstance(p, str) and p.strip():
-                profile = p.strip()
-        if not isinstance(profile, str) or not profile:
-            return cfg
-        try:
-            sdef = getServiceDefinition(self.glb.logicalType)
-        except Exception:
-            return cfg
-        if not isinstance(sdef, dict):
-            return cfg
-        pre = sdef.get('preconfig') or {}
-        prof = (pre.get('profiles') or {}).get(profile)
-        if not isinstance(prof, dict):
-            return cfg
-        eng = prof.get('engine')
-        if not eng:
-            return cfg
-        if isinstance(cfg, IJson):
-            cfg = IJson.toDict(cfg)
-        merged = dict(cfg)
-        merged['engine'] = eng
-        return merged
-
     def _resolve_merged_config(self) -> tuple[Any, Dict[str, Any]]:
         raw = self.glb.connConfig
-        cfg = Config.getNodeConfig(self.glb.logicalType, raw)
-        if isinstance(cfg, IJson):
-            cfg = IJson.toDict(cfg)
-        cfg = self._merge_cfg_locked_profile_engine(raw, cfg)
-        ak = self._api_key_from_raw_conn(raw)
-        if ak:
-            cfg = dict(cfg)
-            cfg['api_key'] = ak
-        return raw, cfg
+        return resolve_merged_config(self.glb.logicalType, raw)
 
     @staticmethod
     def _engine_from_merged_cfg(cfg: Dict[str, Any]) -> str:
