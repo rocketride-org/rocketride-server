@@ -134,9 +134,12 @@ _mock_ai = MagicMock()
 _mock_ai.common = _mock_ai_common
 _mock_ai.common.schema = _mock_ai_schema
 
+_mock_ai_config = MagicMock()
+
 sys.modules.setdefault('rocketlib', _mock_rocketlib)
 sys.modules.setdefault('ai', _mock_ai)
 sys.modules.setdefault('ai.common', _mock_ai_common)
+sys.modules.setdefault('ai.common.config', _mock_ai_config)
 sys.modules.setdefault('ai.common.schema', _mock_ai_schema)
 
 # Now safe to import.
@@ -207,7 +210,7 @@ class TestAgentDefinitionParsing:
             AgentDefinition.from_dict({'name': 'bot', 'evil_key': 'payload'})
 
     def test_from_dict_rejects_non_dict(self):
-        with pytest.raises(ValueError, match='must be a dict'):
+        with pytest.raises(TypeError, match='must be a dict'):
             AgentDefinition.from_dict('not a dict')
 
     def test_empty_name_raises(self):
@@ -215,7 +218,7 @@ class TestAgentDefinitionParsing:
             AgentDefinition(name='')
 
     def test_name_must_be_string(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match='non-empty string'):
             AgentDefinition(name=123)
 
     def test_tools_must_be_list_of_strings(self):
@@ -723,9 +726,10 @@ class TestCommunicationProtocols:
         cfg = {'agents_json': agents, 'communication_protocol': 'blackboard'}
         orch = MultiAgentOrchestrator(cfg, _make_echo_llm())
         result = orch.run('test')
-        # Agent should have written its result to the blackboard.
+        # Agent should have written its result to the blackboard with step-indexed key.
         bb = result['blackboard']
-        assert 'a_result' in bb
+        # Single-agent passthrough uses task_id='single', so key is 'a_result_single'.
+        assert 'a_result_single' in bb
 
     def test_message_passing_send_and_receive(self):
         agents = json.dumps([{'name': 'sender'}, {'name': 'receiver'}])
@@ -758,31 +762,52 @@ class TestCommunicationProtocols:
 
 
 class TestIGlobalLifecycle:
-    def test_begin_global_loads_config(self):
+    def _make_iglobal(self, conn_config=None, open_mode='RUN'):
+        """Create an IGlobal with properly mocked IEndpoint and glb."""
         from multi_agent.IGlobal import IGlobal
 
         ig = IGlobal()
-        ig.glb = type('Glb', (), {'connConfig': {'agents_json': '[]', 'max_rounds': 5}})()
+
+        # Mock IEndpoint so the CONFIG mode check works.
+        mock_endpoint = MagicMock()
+        mock_endpoint.endpoint.openMode = open_mode
+        ig.IEndpoint = mock_endpoint
+
+        # Mock glb with optional connConfig and logicalType.
+        attrs = {'logicalType': 'multi_agent'}
+        if conn_config is not None:
+            attrs['connConfig'] = conn_config
+        ig.glb = type('Glb', (), attrs)()
+
+        # Make Config.getNodeConfig return the connConfig dict (mimics real behavior).
+        from ai.common.config import Config
+
+        Config.getNodeConfig = MagicMock(side_effect=lambda lt, cc: dict(cc))
+
+        return ig
+
+    def test_begin_global_loads_config(self):
+        ig = self._make_iglobal(conn_config={'agents_json': '[]', 'max_rounds': 5})
         ig.beginGlobal()
         assert ig.config is not None
         assert ig.config.get('max_rounds') == 5
 
     def test_end_global_clears_config(self):
-        from multi_agent.IGlobal import IGlobal
-
-        ig = IGlobal()
-        ig.glb = type('Glb', (), {'connConfig': {'agents_json': '[]'}})()
+        ig = self._make_iglobal(conn_config={'agents_json': '[]'})
         ig.beginGlobal()
         ig.endGlobal()
         assert ig.config is None
 
     def test_begin_global_missing_connconfig(self):
-        from multi_agent.IGlobal import IGlobal
-
-        ig = IGlobal()
-        ig.glb = type('Glb', (), {})()
+        ig = self._make_iglobal(conn_config=None)
         ig.beginGlobal()
         assert ig.config == {}
+
+    def test_begin_global_config_mode_skips(self):
+        """When openMode is CONFIG, beginGlobal should return early without loading config."""
+        ig = self._make_iglobal(conn_config={'agents_json': '[]'}, open_mode='CONFIG')
+        ig.beginGlobal()
+        assert ig.config is None
 
 
 # ===========================================================================
@@ -847,6 +872,134 @@ class TestDeadlockDetection:
         ]
         results = orch.execute(tasks)
         assert all(r.error == 'Dependency deadlock' for r in results)
+
+
+# ===========================================================================
+# CodeRabbit review fixes — regression tests
+# ===========================================================================
+
+
+class TestCodeRabbitFixes:
+    """Tests that verify the fixes from CodeRabbit review feedback."""
+
+    def _agents_json(self):
+        return json.dumps([{'name': 'a1', 'role': 'r1'}, {'name': 'a2', 'role': 'r2'}])
+
+    def test_parallel_empty_plan_returns_empty(self):
+        """Empty plan in parallel mode should return empty list, not crash."""
+        cfg = {'agents_json': self._agents_json(), 'execution_mode': 'parallel'}
+        orch = MultiAgentOrchestrator(cfg, _make_echo_llm())
+        results = orch.execute([])
+        assert results == []
+
+    def test_parallel_results_deterministic_order(self):
+        """Parallel results should be in plan order, not completion order."""
+        import time as time_mod
+
+        cfg = {'agents_json': self._agents_json(), 'execution_mode': 'parallel'}
+
+        def slow_llm(sys, usr):
+            # a2 finishes faster than a1 to test ordering.
+            if 'slow' in usr:
+                time_mod.sleep(0.05)
+            return f'result-for-{usr[:10]}'
+
+        orch = MultiAgentOrchestrator(cfg, slow_llm)
+        tasks = [
+            SubTask(id='t1', description='slow task', assigned_agent='a1'),
+            SubTask(id='t2', description='fast task', assigned_agent='a2'),
+        ]
+        results = orch.execute(tasks)
+        assert len(results) == 2
+        # Results must be in plan order (t1 first, t2 second).
+        assert results[0].task_id == 't1'
+        assert results[1].task_id == 't2'
+
+    def test_parallel_overflow_capped(self):
+        """Plans exceeding MAX_PARALLEL_TASKS are capped."""
+        cfg = {'agents_json': self._agents_json(), 'execution_mode': 'parallel'}
+        orch = MultiAgentOrchestrator(cfg, _make_echo_llm())
+        # Create more tasks than MAX_PARALLEL_TASKS.
+        tasks = [SubTask(id=f't{i}', description=f'task-{i}', assigned_agent='a1') for i in range(100)]
+        results = orch.execute(tasks)
+        assert len(results) <= orch.MAX_PARALLEL_TASKS
+
+    def test_fallback_plan_preserves_original_question(self):
+        """When JSON parsing fails, fallback tasks should contain the original question."""
+        agents = json.dumps([{'name': 'a'}])
+        llm = _make_plan_llm('not valid json at all')
+        orch = MultiAgentOrchestrator({'agents_json': agents}, llm)
+        plan = orch.plan('What is quantum computing?')
+        # The task description should contain the original question.
+        assert 'What is quantum computing?' in plan[0].description
+
+    def test_failed_prerequisite_blocks_dependents(self):
+        """If a prerequisite task fails, dependent tasks should be skipped."""
+
+        def failing_llm(sys, usr):
+            if 'fail' in usr:
+                raise RuntimeError('step failed')
+            return 'ok'
+
+        cfg = {'agents_json': self._agents_json(), 'execution_mode': 'supervisor'}
+        orch = MultiAgentOrchestrator(cfg, failing_llm)
+        tasks = [
+            SubTask(id='t1', description='fail this', assigned_agent='a1'),
+            SubTask(id='t2', description='depends on t1', assigned_agent='a2', depends_on=['t1']),
+        ]
+        results = orch.execute(tasks)
+        assert len(results) == 2
+        # t1 should have the original error.
+        t1_result = next(r for r in results if r.task_id == 't1')
+        assert t1_result.error is not None
+        assert 'step failed' in t1_result.error
+        # t2 should be skipped because t1 failed.
+        t2_result = next(r for r in results if r.task_id == 't2')
+        assert t2_result.error is not None
+        assert 'Skipped' in t2_result.error
+
+    def test_blackboard_step_indexed_keys(self):
+        """Same agent used in multiple tasks should not overwrite blackboard entries."""
+        agents = json.dumps([{'name': 'worker', 'role': 'worker'}])
+        cfg = {
+            'agents_json': agents,
+            'communication_protocol': 'blackboard',
+            'execution_mode': 'sequential',
+        }
+        call_count = {'n': 0}
+
+        def counting_llm(sys, usr):
+            call_count['n'] += 1
+            return f'result-{call_count["n"]}'
+
+        orch = MultiAgentOrchestrator(cfg, counting_llm)
+        tasks = [
+            SubTask(id='t1', description='first', assigned_agent='worker'),
+            SubTask(id='t2', description='second', assigned_agent='worker'),
+        ]
+        orch.execute(tasks)
+        bb = orch.blackboard.read_all()
+        # Both results should be present with step-indexed keys.
+        assert 'worker_result_t1' in bb
+        assert 'worker_result_t2' in bb
+        assert bb['worker_result_t1'] != bb['worker_result_t2']
+
+    def test_iinstance_none_config_raises(self):
+        """IInstance should raise RuntimeError when config is None."""
+        from multi_agent.IGlobal import IGlobal
+        from multi_agent.IInstance import IInstance
+
+        ig = IGlobal()
+        ig.config = None  # Simulate missing config.
+
+        inst = IInstance()
+        inst.IGlobal = ig
+        inst.instance = MagicMock()
+
+        q = _MockQuestion()
+        q.addQuestion('Hello')
+        with pytest.raises(RuntimeError, match='config is not loaded'):
+            inst.writeQuestions(q)
 
 
 # ===========================================================================

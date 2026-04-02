@@ -218,9 +218,9 @@ class MultiAgentOrchestrator:
         )
 
         raw = self._call_llm(system_prompt, question)
-        return self._parse_plan(raw)
+        return self._parse_plan(raw, original_question=question)
 
-    def _parse_plan(self, raw: str) -> List[SubTask]:
+    def _parse_plan(self, raw: str, original_question: str = '') -> List[SubTask]:
         """Parse the supervisor's JSON plan into SubTask objects.
 
         Gracefully handles markdown fences and malformed JSON by falling
@@ -237,10 +237,13 @@ class MultiAgentOrchestrator:
             items = json.loads(text)
         except json.JSONDecodeError:
             # Fallback: one task per agent, sequentially.
+            # Preserve the original question so agents receive the user's
+            # intent rather than the LLM's malformed planning output.
+            fallback_description = original_question if original_question else raw[:500]
             return [
                 SubTask(
                     id=f'task-{i}',
-                    description=f'Handle your part of: {raw[:500]}',
+                    description=f'Handle your part of: {fallback_description}',
                     assigned_agent=a.name,
                     depends_on=[f'task-{i - 1}'] if i > 0 else [],
                 )
@@ -328,48 +331,73 @@ class MultiAgentOrchestrator:
             round_count += 1
         return results
 
+    # Maximum number of concurrent tasks in parallel mode to prevent
+    # resource exhaustion from extremely large plans.
+    MAX_PARALLEL_TASKS = 50
+
     def _execute_parallel(self, plan: List[SubTask]) -> List[AgentResult]:
-        results: List[AgentResult] = []
-        tasks_to_run = plan[: self._max_rounds]  # enforce max_rounds
+        if not plan:
+            return []
+
+        # Cap at both max_rounds and MAX_PARALLEL_TASKS to prevent overflow.
+        cap = min(self._max_rounds, self.MAX_PARALLEL_TASKS)
+        tasks_to_run = plan[:cap]
+
+        # Index results by task ID so we can return them in plan order.
+        results_by_id: Dict[str, AgentResult] = {}
 
         with ThreadPoolExecutor(max_workers=min(len(tasks_to_run), 8)) as pool:
             futures = {}
             for task in tasks_to_run:
                 agent = self._agents_by_name.get(task.assigned_agent)
                 if agent is None:
-                    results.append(
-                        AgentResult(
-                            agent_name=task.assigned_agent,
-                            task_id=task.id,
-                            error=f'Unknown agent: {task.assigned_agent}',
-                        )
+                    results_by_id[task.id] = AgentResult(
+                        agent_name=task.assigned_agent,
+                        task_id=task.id,
+                        error=f'Unknown agent: {task.assigned_agent}',
                     )
                     continue
                 future = pool.submit(self._execute_agent, agent, task.description, task.id)
                 futures[future] = task
 
             for future in as_completed(futures):
+                task = futures[future]
                 try:
-                    results.append(future.result())
+                    results_by_id[task.id] = future.result()
                 except Exception as exc:
-                    task = futures[future]
-                    results.append(
-                        AgentResult(
-                            agent_name=task.assigned_agent,
-                            task_id=task.id,
-                            error=str(exc),
-                        )
+                    results_by_id[task.id] = AgentResult(
+                        agent_name=task.assigned_agent,
+                        task_id=task.id,
+                        error=str(exc),
                     )
 
-        return results
+        # Return results in original plan order for determinism.
+        return [results_by_id[t.id] for t in tasks_to_run if t.id in results_by_id]
 
     def _execute_supervisor(self, plan: List[SubTask]) -> List[AgentResult]:
         """Dependency-aware execution: run ready tasks in parallel waves."""
         completed: Dict[str, AgentResult] = {}
+        failed_ids: set = set()  # Track failed task IDs so dependents are skipped.
         remaining = list(plan)
         round_count = 0
 
         while remaining and round_count < self._max_rounds:
+            # Skip tasks that depend on a failed prerequisite.
+            newly_skipped = []
+            for t in remaining:
+                if any(d in failed_ids for d in t.depends_on):
+                    failed_deps = [d for d in t.depends_on if d in failed_ids]
+                    completed[t.id] = AgentResult(
+                        agent_name=t.assigned_agent,
+                        task_id=t.id,
+                        error=f'Skipped: prerequisite(s) {failed_deps} failed',
+                    )
+                    failed_ids.add(t.id)
+                    newly_skipped.append(t.id)
+            if newly_skipped:
+                remaining = [t for t in remaining if t.id not in completed]
+                continue  # Re-evaluate remaining after skipping.
+
             # Find tasks whose dependencies are all satisfied.
             ready = [t for t in remaining if all(d in completed for d in t.depends_on)]
             if not ready:
@@ -394,6 +422,7 @@ class MultiAgentOrchestrator:
                             task_id=task.id,
                             error=f'Unknown agent: {task.assigned_agent}',
                         )
+                        failed_ids.add(task.id)
                         continue
                     future = pool.submit(self._execute_agent, agent, task.description, task.id)
                     futures[future] = task
@@ -408,6 +437,8 @@ class MultiAgentOrchestrator:
                             task_id=task.id,
                             error=str(exc),
                         )
+                    if result.error:
+                        failed_ids.add(task.id)
                     completed[task.id] = result
 
             remaining = [t for t in remaining if t.id not in completed]
@@ -464,8 +495,11 @@ class MultiAgentOrchestrator:
             output = self._call_llm(system_prompt, user_prompt)
 
             # Post-execution: write result to blackboard if using blackboard protocol.
+            # Use step-indexed key to avoid overwrites when the same agent
+            # handles multiple tasks (e.g. 'researcher_result_t1').
             if self._protocol == 'blackboard':
-                self._blackboard.write(agent.name, f'{agent.name}_result', output)
+                bb_key = f'{agent.name}_result_{task_id}'
+                self._blackboard.write(agent.name, bb_key, output)
 
             duration = time.time() - start
             return AgentResult(

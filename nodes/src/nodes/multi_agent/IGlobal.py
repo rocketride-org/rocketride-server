@@ -39,7 +39,11 @@ class IGlobal(IGlobalBase):
         """
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
-        self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        conn_config = getattr(self.glb, 'connConfig', None)
+        if conn_config is None:
+            self.config = {}
+            return
+        self.config = Config.getNodeConfig(self.glb.logicalType, conn_config)
 
     def endGlobal(self) -> None:
         """Release configuration when the pipe closes."""

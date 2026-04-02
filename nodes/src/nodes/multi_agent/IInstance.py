@@ -47,12 +47,19 @@ class IInstance(IInstanceBase):
             6. Write the answer with per-agent attribution metadata.
             7. Deep-copy the answer to prevent downstream mutation.
         """
-        config = self.IGlobal.config or {}
+        config = self.IGlobal.config
+        if config is None:
+            raise RuntimeError('Multi-agent orchestrator config is not loaded; IGlobal.beginGlobal() may not have run')
 
         # Extract the user's question text.
         question_text = ''
         if hasattr(question, 'questions') and question.questions:
-            question_text = ' '.join(q.text if hasattr(q, 'text') else str(q) for q in question.questions)
+            parts = []
+            for q in question.questions:
+                if q is None:
+                    continue
+                parts.append(q.text if hasattr(q, 'text') else str(q))
+            question_text = ' '.join(parts)
         if not question_text and hasattr(question, 'getPrompt'):
             question_text = question.getPrompt()
         if not question_text:
