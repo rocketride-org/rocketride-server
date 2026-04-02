@@ -1,14 +1,63 @@
 {
+	//
+	// Required:
+	//		The displayable name of this node
+	//
 	"title": "Text To Speech",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
 	"protocol": "audio_tts://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
 	"classType": ["audio"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
 	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
 	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
 	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most nodes
+	//
 	"path": "nodes.audio_tts",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
 	"prefix": "audio_tts",
-	"description": ["Converts incoming text into speech audio using local or cloud TTS engines.", "Output is driven by wiring: audio lane streams PCM chunks; text lane emits JSON with mime type and base64 (no server file path — suitable when the engine runs remotely).", "Encoding (WAV vs MP3) is chosen automatically from connected output lanes (not a form field).", "Routing: without a model server, the engine runs locally and chooses CPU/GPU on the engine host; each profile downloads its weights/voices there. With --modelserver, Bark uses HF transformers on the server; Kokoro uses the kokoro loader; Piper uses the Piper loader; OpenAI/ElevenLabs may be proxied.", "Every profile uses curated dropdowns — see ``requirements.txt`` + ``depends()`` on load: ``piper-tts``, ``transformers``, ``kokoro``, ``lameenc``, ``imageio-ffmpeg``, ``requests``, etc."],
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["Converts incoming text into speech audio using local or cloud TTS engines.", "Output is driven by wiring: audio lane streams PCM chunks; text lane emits JSON with mime type and base64 (no server file path — suitable when the engine runs remotely).", "Encoding (WAV vs MP3) is chosen automatically from connected output lanes (not a form field).", "Routing: without a model server, the engine runs locally and chooses CPU/GPU on the engine host; each profile downloads its weights/voices there. With --modelserver, Bark uses HF transformers on the server; Kokoro uses the kokoro loader; Piper uses the Piper loader; OpenAI/ElevenLabs call their APIs directly from the engine host.", "Every profile uses curated dropdowns — see requirements.txt + depends() on load: piper-tts, transformers, kokoro, lameenc, imageio-ffmpeg, requests, etc."],
+	//
+	// Optional:
+	//	  The icon to display in the UI for this node
+	//
 	"icon": "audio-player.svg",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
 	"lanes": {
 		"text": ["audio", "text"]
 	},
@@ -26,8 +75,16 @@
 			]
 		}
 	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
 	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
 		"default": "piper",
+		// Defines profiles used with the "profile": key
 		"profiles": {
 			"piper": {
 				"engine": "piper",
@@ -55,7 +112,14 @@
 			}
 		}
 	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
 	"fields": {
+		// ── Kokoro ────────────────────────────────────────────────────────────
 		"audio_tts.kokoro_voice": {
 			"type": "string",
 			"title": "Voice",
@@ -118,6 +182,7 @@
 				["pm_santa", "Portuguese — pm_santa"]
 			]
 		},
+		// ── Bark ──────────────────────────────────────────────────────────────
 		"audio_tts.bark_model": {
 			"type": "string",
 			"title": "Model",
@@ -129,6 +194,7 @@
 				["suno/bark", "Bark (full)"]
 			]
 		},
+		// ── OpenAI ────────────────────────────────────────────────────────────
 		"audio_tts.openai_model": {
 			"type": "string",
 			"title": "Model",
@@ -162,6 +228,7 @@
 				["cedar", "Cedar"]
 			]
 		},
+		// ── ElevenLabs ────────────────────────────────────────────────────────
 		"audio_tts.elevenlabs_model": {
 			"type": "string",
 			"title": "Model",
@@ -192,6 +259,7 @@
 				["yoZ06aMxZJJ28mfd3POQ", "Sam"]
 			]
 		},
+		// ── Shared ────────────────────────────────────────────────────────────
 		"audio_tts.api_key": {
 			"type": "string",
 			"title": "API key",
@@ -200,6 +268,7 @@
 				"ui:widget": "ApiKeyWidget"
 			}
 		},
+		// ── Piper ─────────────────────────────────────────────────────────────
 		"audio_tts.piper_voice": {
 			"type": "string",
 			"title": "Voice model",
@@ -215,6 +284,7 @@
 				["pt_BR-faber-medium", "Portuguese (Brazil) — Faber, medium"]
 			]
 		},
+		// ── Form objects (one per profile) ────────────────────────────────────
 		"audio_tts.form.piper": {
 			"object": "piper",
 			"properties": ["audio_tts.piper_voice"]
@@ -235,6 +305,7 @@
 			"object": "elevenlabs",
 			"properties": ["audio_tts.elevenlabs_model", "audio_tts.elevenlabs_voice", "audio_tts.api_key"]
 		},
+		// ── Profile selector (drives conditional form rendering) ───────────────
 		"audio_tts.profile": {
 			"title": "TTS profile",
 			"type": "string",
@@ -270,6 +341,11 @@
 			]
 		}
 	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
 	"shape": [
 		{
 			"section": "Pipe",
@@ -277,6 +353,10 @@
 			"properties": ["audio_tts.profile"]
 		}
 	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing
+	//
 	"test": {
 		"requires": ["ROCKETRIDE_TTS_TEST_ENABLED"],
 		"profiles": ["kokoro", "bark"],
