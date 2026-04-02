@@ -71,6 +71,10 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+# Default per-test timeout (seconds). Prevents individual tests from hanging
+# indefinitely when the server is unresponsive or a connection leaks.
+# Override per-test with @pytest.mark.timeout(seconds).
+timeout = 120
 addopts = [
     "-v",
     "--tb=short",
@@ -80,3 +84,4 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
 ]
+asyncio_mode = "auto"
