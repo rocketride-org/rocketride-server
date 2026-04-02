@@ -48,6 +48,7 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     def writeText(self, text: str):
+        """Synthesize the incoming text and emit the audio on the audio and/or text lanes."""
         value = (text or '').strip()
         if not value:
             return

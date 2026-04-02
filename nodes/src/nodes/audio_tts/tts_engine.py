@@ -36,6 +36,7 @@ from ai.common.models.audio.wav_to_mp3 import try_wav_to_mp3_lameenc
 
 
 def _mime_from_format(output_format: str) -> str:
+    """Return the MIME type string corresponding to the given output format."""
     if output_format == 'mp3':
         return 'audio/mpeg'
     return 'audio/wav'
@@ -57,6 +58,7 @@ class TTSEngine:
         self._kokoro_cache_lang: Optional[str] = None
 
     def _dispose_hf_pipeline(self) -> None:
+        """Disconnect and release the cached HuggingFace pipeline client, if any."""
         pipe = self._hf_pipeline
         if pipe is not None:
             client = getattr(pipe, '_client', None)
@@ -69,6 +71,7 @@ class TTSEngine:
             self._hf_pipeline_key = None
 
     def dispose(self) -> None:
+        """Release all cached models, pipelines, and remote clients held by this engine."""
         self._dispose_hf_pipeline()
         self._piper_voice = None
         self._piper_voice_onnx = None
@@ -93,6 +96,7 @@ class TTSEngine:
         self._elevenlabs_remote_api_key = None
 
     def synthesize(self, text: str) -> Dict[str, Any]:
+        """Dispatch synthesis to the configured TTS engine and return a path/mime_type dict."""
         engine = str(self.config.get('engine', 'piper') or 'piper').lower().strip()
         if engine == 'piper':
             return self._piper(text)
@@ -107,6 +111,7 @@ class TTSEngine:
         raise ValueError(f'Unsupported TTS engine: {engine}')
 
     def _ffmpeg_executable(self) -> str:
+        """Return the ffmpeg binary path, preferring imageio-ffmpeg when available."""
         fb = str(self.config.get('ffmpeg_bin', '') or 'ffmpeg')
         if fb != 'ffmpeg':
             return fb
@@ -118,6 +123,7 @@ class TTSEngine:
             return 'ffmpeg'
 
     def _transcode_wav_to_mp3(self, wav_path: str, mp3_path: str):
+        """Convert a WAV file to MP3 using lameenc or ffmpeg as fallback."""
         if try_wav_to_mp3_lameenc(wav_path, mp3_path):
             return
         ffmpeg_bin = self._ffmpeg_executable()
@@ -153,6 +159,7 @@ class TTSEngine:
                     pass
 
     def _transformers_tts(self, text: str, model_default: str) -> Dict[str, Any]:
+        """Run TTS inference via a HuggingFace transformers pipeline and save the output."""
         from ai.common.models.transformers import pipeline as rr_pipeline
 
         model = self.config.get('model') or model_default
@@ -193,6 +200,7 @@ class TTSEngine:
         return {'path': out_path, 'mime_type': _mime_from_format(output_format)}
 
     def _ensure_kokoro_remote_client(self) -> None:
+        """Connect to the Kokoro model server, loading the model if not already done."""
         if self._kokoro_remote_client is not None:
             return
         from ai.common.models.base import ModelClient, get_model_server_address
@@ -280,9 +288,11 @@ class TTSEngine:
         return {'path': out_path, 'mime_type': _mime_from_format(output_format)}
 
     def _bark(self, text: str) -> Dict[str, Any]:
+        """Synthesize speech with the Bark model via the transformers pipeline."""
         return self._transformers_tts(text, model_default='suno/bark-small')
 
     def _ensure_piper_remote_client(self) -> None:
+        """Connect to the Piper model server and load the configured voice preset."""
         if self._piper_remote_client is not None:
             return
         from ai.common.models.base import ModelClient, get_model_server_address
@@ -305,6 +315,7 @@ class TTSEngine:
         self._piper_remote_client = client
 
     def _piper(self, text: str) -> Dict[str, Any]:
+        """Synthesize speech with Piper, using model server or local ONNX voice."""
         if self.config.get('piper_use_model_server'):
             self._ensure_piper_remote_client()
             body = self._piper_remote_client.send_command(
@@ -366,18 +377,21 @@ class TTSEngine:
         return {'path': out_path, 'mime_type': _mime_from_format(output_format)}
 
     def _api_key_openai(self) -> str:
+        """Return the OpenAI API key from config or the OPENAI_API_KEY environment variable."""
         k = (self.config.get('api_key') or '').strip()
         if k:
             return k
         return (os.environ.get('OPENAI_API_KEY') or '').strip()
 
     def _api_key_elevenlabs(self) -> str:
+        """Return the ElevenLabs API key from config or the ELEVENLABS_API_KEY environment variable."""
         k = (self.config.get('api_key') or '').strip()
         if k:
             return k
         return (os.environ.get('ELEVENLABS_API_KEY') or '').strip()
 
     def _ensure_openai_remote_client(self) -> None:
+        """Connect to the OpenAI TTS model server, reconnecting if the API key changed."""
         api_key = self._api_key_openai()
         if self._openai_remote_client is not None:
             if getattr(self, '_openai_remote_api_key', None) == api_key:
@@ -406,6 +420,7 @@ class TTSEngine:
         self._openai_remote_api_key = api_key
 
     def _ensure_elevenlabs_remote_client(self) -> None:
+        """Connect to the ElevenLabs TTS model server, reconnecting if the API key changed."""
         api_key = self._api_key_elevenlabs()
         if self._elevenlabs_remote_client is not None:
             if getattr(self, '_elevenlabs_remote_api_key', None) == api_key:
@@ -434,6 +449,7 @@ class TTSEngine:
         self._elevenlabs_remote_api_key = api_key
 
     def _elevenlabs(self, text: str) -> Dict[str, Any]:
+        """Synthesize speech via the ElevenLabs API or model server and save the result."""
         if self.config.get('elevenlabs_use_model_server'):
             self._ensure_elevenlabs_remote_client()
             output_format = str(self.config.get('output_format', 'mp3')).lower()
@@ -481,6 +497,7 @@ class TTSEngine:
         return {'path': out_path, 'mime_type': _mime_from_format(output_format)}
 
     def _openai(self, text: str) -> Dict[str, Any]:
+        """Synthesize speech via the OpenAI TTS API or model server and save the result."""
         if self.config.get('openai_use_model_server'):
             self._ensure_openai_remote_client()
             output_format = str(self.config.get('output_format', 'mp3')).lower()

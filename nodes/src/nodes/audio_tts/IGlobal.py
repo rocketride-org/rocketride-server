@@ -49,12 +49,14 @@ class IGlobal(IGlobalBase):
         return resolve_cloud_api_key(cfg, raw, engine, self._read_cfg)
 
     def _read_cfg(self, config: Dict[str, Any], key: str, default: Any) -> Any:
+        """Read a key from a config dict or its nested ``parameters`` sub-dict, with a default."""
         if key in config:
             return config.get(key, default)
         params = config.get('parameters') if isinstance(config.get('parameters'), dict) else {}
         return params.get(key, default)
 
     def _resolve_merged_config(self) -> tuple[Any, Dict[str, Any]]:
+        """Delegate to ``resolve_merged_config`` using the current connector config and logical type."""
         raw = self.glb.connConfig
         return resolve_merged_config(self.glb.logicalType, raw)
 
@@ -84,6 +86,7 @@ class IGlobal(IGlobalBase):
         return str(self._read_cfg(cfg, 'model', '') or '').strip()
 
     def _resolve_tts_voice(self, cfg: Dict[str, Any], engine: str) -> str:
+        """Resolve the voice identifier for the given engine from merged config keys."""
         e = engine.lower()
         if e == 'openai':
             v = self._read_cfg(cfg, 'openai_voice', '') or self._read_cfg(cfg, 'voice', '')
@@ -133,6 +136,7 @@ class IGlobal(IGlobalBase):
         }
 
     def beginGlobal(self):
+        """Install dependencies and create the TTSEngine instance when the pipeline starts."""
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
@@ -147,6 +151,7 @@ class IGlobal(IGlobalBase):
         self._engine = TTSEngine(self._config)
 
     def _cleanup_stale_outputs(self):
+        """Remove old TTS temp files from the system temp dir to prevent unbounded growth."""
         # Keep current output behavior but prevent unbounded temp directory growth.
         if not self._read_cfg(self._config, 'cleanup_temp_outputs', True):
             return
@@ -175,6 +180,7 @@ class IGlobal(IGlobalBase):
                 continue
 
     def validateConfig(self):
+        """Validate the node configuration, raising an exception on missing required values."""
         raw, cfg = self._resolve_merged_config()
         engine = self._engine_from_merged_cfg(cfg)
         api_key = self._resolve_cloud_api_key(cfg, raw, engine)
@@ -226,11 +232,13 @@ class IGlobal(IGlobalBase):
         return (e,)
 
     def synthesize(self, text: str, output_format: str) -> Dict[str, Any]:
+        """Synthesize text to audio, recreating the TTSEngine if the engine/voice config changed."""
         # Re-read connector config each utterance: the same IGlobal can outlive a profile change
         # (e.g. OpenAI → Kokoro) and would otherwise keep the old engine in ``self._config``.
         new_cfg = self._build_tts_config_dict()
 
         def _norm_eng(v: Any) -> str:
+            """Normalize an engine name to a lowercase stripped string."""
             return str(v or '').lower().strip()
 
         new_eng = _norm_eng(new_cfg.get('engine'))
@@ -267,6 +275,7 @@ class IGlobal(IGlobalBase):
         return {'path': path, 'mime_type': result.get('mime_type', 'audio/wav')}
 
     def endGlobal(self):
+        """Dispose the TTSEngine and free all resources when the pipeline shuts down."""
         eng = getattr(self, '_engine', None)
         if eng is not None:
             eng.dispose()
