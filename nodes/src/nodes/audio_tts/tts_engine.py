@@ -23,7 +23,6 @@
 
 import base64
 import os
-import subprocess
 import tempfile
 import wave
 from typing import Any, Dict, Optional
@@ -32,7 +31,7 @@ import numpy as np
 import requests
 
 from ai.common.models.audio.piper_native import load_piper_voice, write_piper_wav
-from ai.common.models.audio.wav_to_mp3 import try_wav_to_mp3_lameenc
+from ai.common.models.audio.wav_to_mp3 import wav_to_mp3_lameenc
 
 
 def _mime_from_format(output_format: str) -> str:
@@ -163,54 +162,6 @@ class TTSEngine:
             return self._openai(text)
         raise ValueError(f'Unsupported TTS engine: {engine}')
 
-    def _ffmpeg_executable(self) -> str:
-        """Return the ffmpeg binary path, preferring imageio-ffmpeg when available.
-
-        Checks ``config['ffmpeg_bin']`` first; if it equals the default
-        ``'ffmpeg'``, tries to resolve the bundled binary via
-        ``imageio_ffmpeg.get_ffmpeg_exe()``.  Falls back to the plain
-        ``'ffmpeg'`` name (must be on ``PATH``) if the package is absent.
-
-        Returns:
-            Absolute path to the ffmpeg executable, or ``'ffmpeg'`` as a
-            fallback relying on ``PATH`` resolution.
-        """
-        fb = str(self.config.get('ffmpeg_bin', '') or 'ffmpeg')
-        if fb != 'ffmpeg':
-            return fb
-        try:
-            import imageio_ffmpeg
-
-            return imageio_ffmpeg.get_ffmpeg_exe()
-        except Exception:
-            return 'ffmpeg'
-
-    def _transcode_wav_to_mp3(self, wav_path: str, mp3_path: str):
-        """Convert a WAV file to MP3 using lameenc or ffmpeg as fallback.
-
-        Tries ``try_wav_to_mp3_lameenc`` first (in-process, no subprocess).
-        Falls back to ffmpeg via ``_ffmpeg_executable()`` when lameenc is
-        unavailable or fails.
-
-        Args:
-            wav_path: Absolute path to the source WAV file.
-            mp3_path: Absolute path where the output MP3 should be written.
-
-        Raises:
-            RuntimeError: If ffmpeg is not found and lameenc is also
-                unavailable, with a message describing how to install either.
-            subprocess.CalledProcessError: If ffmpeg exits with a non-zero
-                status code.
-        """
-        if try_wav_to_mp3_lameenc(wav_path, mp3_path):
-            return
-        ffmpeg_bin = self._ffmpeg_executable()
-        cmd = [ffmpeg_bin, '-y', '-i', wav_path, '-vn', '-acodec', 'libmp3lame', mp3_path]
-        try:
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except FileNotFoundError as e:
-            raise RuntimeError(f'MP3 output needs ``lameenc`` (see node ``requirements.txt``) or ffmpeg ({ffmpeg_bin!r}). Install ``lameenc`` via depends(), or ffmpeg (e.g. brew install ffmpeg), or rely on ``imageio-ffmpeg`` when packaged with the engine.') from e
-
     def _save_mono_float_audio(self, audio_arr: np.ndarray, sampling_rate: int, out_path: str, output_format: str) -> None:
         """Write mono float32 [-1,1] samples to WAV or MP3 (via temp WAV + transcoding).
 
@@ -248,7 +199,7 @@ class TTSEngine:
                 wavf.setframerate(int(sampling_rate))
                 wavf.writeframes((audio_arr * 32767).astype(np.int16).tobytes())
             if output_format == 'mp3':
-                self._transcode_wav_to_mp3(wav_path, out_path)
+                wav_to_mp3_lameenc(wav_path, out_path)
         finally:
             if output_format == 'mp3' and wav_path != out_path:
                 try:
@@ -556,7 +507,7 @@ class TTSEngine:
                 self._piper_voice_onnx = model
             write_piper_wav(self._piper_voice, text, wav_path)
             if output_format == 'mp3':
-                self._transcode_wav_to_mp3(wav_path, out_path)
+                wav_to_mp3_lameenc(wav_path, out_path)
         finally:
             if output_format == 'mp3' and wav_path != out_path:
                 try:
