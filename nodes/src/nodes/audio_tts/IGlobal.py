@@ -40,9 +40,13 @@ _PROFILE_TO_ENGINE: Dict[str, str] = {
 }
 
 
+_CLEANUP_INTERVAL_SEC = 300  # run stale-file cleanup at most once every 5 minutes
+
+
 class IGlobal(IGlobalBase):
     _config: Dict[str, Any]
     _engine: Any
+    _last_cleanup_ts: float = 0.0
 
     def _resolve_cloud_api_key(self, cfg: Dict[str, Any], raw: Any, engine: str) -> str:
         """Form / merged config, then optional ``OPENAI_API_KEY`` / ``ELEVENLABS_API_KEY`` (runtime)."""
@@ -152,7 +156,10 @@ class IGlobal(IGlobalBase):
 
     def _cleanup_stale_outputs(self):
         """Remove old TTS temp files from the system temp dir to prevent unbounded growth."""
-        # Keep current output behavior but prevent unbounded temp directory growth.
+        now = time.time()
+        if now - self._last_cleanup_ts < _CLEANUP_INTERVAL_SEC:
+            return
+        self._last_cleanup_ts = now
         if not self._read_cfg(self._config, 'cleanup_temp_outputs', True):
             return
 
