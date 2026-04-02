@@ -35,7 +35,24 @@ from ai.common.config import Config
 
 
 def _pick_api_key(raw: Any) -> str:
-    """Read api_key from raw connector shapes used by audio_tts profiles."""
+    """Read api_key from raw connector shapes used by audio_tts profiles.
+
+    Searches for a non-empty ``api_key`` value in several locations within
+    the ``IJson``-like connector config object, in priority order:
+
+    1. Top-level ``raw.api_key``
+    2. ``raw.parameters.api_key``
+    3. ``raw[profile].api_key`` (current profile sub-dict)
+    4. ``raw[profile_prefix].api_key`` (prefix before first ``-``)
+    5. ``raw['openai'].api_key`` and ``raw['elevenlabs'].api_key``
+
+    Args:
+        raw: Raw connector config object (``IJson``-like, supports ``.get``).
+            May be ``None``; in that case an empty string is returned.
+
+    Returns:
+        First non-empty API key found, or ``''`` if none is present.
+    """
 
     def pick(d: Any) -> str:
         """Extract a non-empty ``api_key`` string from a mapping-like object, or return empty string."""
@@ -71,7 +88,19 @@ def _pick_api_key(raw: Any) -> str:
 
 
 def _as_dict(obj: Any) -> Dict[str, Any]:
-    """Best-effort conversion for mapping-like objects (dict or IJson-like with ``items``)."""
+    """Best-effort conversion for mapping-like objects to a plain ``dict``.
+
+    Handles three cases: already a ``dict`` (returned as-is), ``None``
+    (returns ``{}``), and ``IJson``-like objects that expose an ``items()``
+    method (converted via ``dict(obj.items())``).
+
+    Args:
+        obj: Object to convert.  May be a ``dict``, an ``IJson`` C++ wrapper,
+            or ``None``.
+
+    Returns:
+        Plain Python ``dict``.  Returns ``{}`` on conversion failure.
+    """
     if isinstance(obj, dict):
         return obj
     if obj is None:
@@ -86,7 +115,24 @@ def _as_dict(obj: Any) -> Dict[str, Any]:
 
 
 def resolve_cloud_api_key(cfg: Dict[str, Any], raw: Any, engine: str, read_cfg: Callable[[Dict[str, Any], str, Any], Any]) -> str:
-    """Resolve cloud ``api_key`` from merged cfg/raw connector, then env fallback by engine."""
+    """Resolve the cloud API key from merged config, raw connector, or environment variable.
+
+    Resolution order:
+    1. ``cfg['api_key']`` via ``read_cfg`` (covers ``parameters`` sub-dict).
+    2. ``_pick_api_key(raw)`` (searches profile sub-dicts in the connector).
+    3. ``OPENAI_API_KEY`` env var (OpenAI only).
+    4. ``ELEVENLABS_API_KEY`` env var (ElevenLabs only).
+
+    Args:
+        cfg: Merged node config dict (output of ``Config.getNodeConfig``).
+        raw: Raw connector config object (``IJson``-like).
+        engine: Canonical engine name (e.g. ``'openai'``, ``'elevenlabs'``).
+        read_cfg: Callable with signature ``(config, key, default) -> value``
+            used to read keys from ``cfg`` and its ``parameters`` sub-dict.
+
+    Returns:
+        API key string, or ``''`` if not found anywhere.
+    """
     k = (read_cfg(cfg, 'api_key', '') or '').strip() or _pick_api_key(raw)
     if k:
         return k
@@ -103,7 +149,23 @@ def resolve_cloud_api_key(cfg: Dict[str, Any], raw: Any, engine: str, read_cfg: 
 
 
 def _merge_cfg_locked_profile_engine(logical_type: str, raw: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensure cfg.engine matches the selected profile's preconfig engine."""
+    """Override ``cfg['engine']`` with the engine locked in the selected profile's preconfig.
+
+    Reads the active profile name from ``raw`` or ``cfg``, then looks up
+    ``preconfig.profiles[profile].engine`` via ``getServiceDefinition``.
+    When found, returns a copy of ``cfg`` with ``engine`` replaced so that
+    the profile's declared engine cannot be overridden by user-supplied config.
+
+    Args:
+        logical_type: The node's logical type string used to call
+            ``getServiceDefinition`` (e.g. ``'audio_tts'``).
+        raw: Raw connector config object (``IJson``-like).
+        cfg: Merged node config dict from ``Config.getNodeConfig``.
+
+    Returns:
+        ``cfg`` unchanged if no profile/engine lock applies, otherwise a new
+        dict copy with ``engine`` set to the profile's locked value.
+    """
     profile = raw.get('profile') if raw is not None and hasattr(raw, 'get') else None
     if (not isinstance(profile, str) or not profile.strip()) and hasattr(cfg, 'get'):
         p = cfg.get('profile')
@@ -130,7 +192,26 @@ def _merge_cfg_locked_profile_engine(logical_type: str, raw: Any, cfg: Dict[str,
 
 
 def resolve_merged_config(logical_type: str, raw: Any) -> tuple[Any, Dict[str, Any]]:
-    """Return ``(raw, cfg)`` after base merge + audio_tts-specific normalization."""
+    """Return ``(raw, cfg)`` after base merge and audio_tts-specific normalisation.
+
+    Applies three steps on top of ``Config.getNodeConfig``:
+
+    1. Profile-engine lock via ``_merge_cfg_locked_profile_engine`` so the
+       profile's declared engine cannot be overridden.
+    2. Conversion to a plain ``dict`` via ``_as_dict``.
+    3. API key promotion: if ``_pick_api_key(raw)`` finds a key, it is
+       written into ``cfg['api_key']`` so downstream resolvers find it at the
+       top level.
+
+    Args:
+        logical_type: The node's logical type string (e.g. ``'audio_tts'``).
+        raw: Raw connector config object (``IJson``-like) from
+            ``glb.connConfig``.
+
+    Returns:
+        Tuple of ``(raw, cfg)`` where ``raw`` is the original connector object
+        and ``cfg`` is the normalised plain-dict config.
+    """
     cfg = Config.getNodeConfig(logical_type, raw)
     cfg = _merge_cfg_locked_profile_engine(logical_type, raw, cfg)
     cfg = _as_dict(cfg)

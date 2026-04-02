@@ -36,7 +36,14 @@ from ai.common.models.audio.wav_to_mp3 import try_wav_to_mp3_lameenc
 
 
 def _mime_from_format(output_format: str) -> str:
-    """Return the MIME type string corresponding to the given output format."""
+    """Return the MIME type string corresponding to the given output format.
+
+    Args:
+        output_format: ``'mp3'`` or ``'wav'``.
+
+    Returns:
+        ``'audio/mpeg'`` for MP3, ``'audio/wav'`` for everything else.
+    """
     if output_format == 'mp3':
         return 'audio/mpeg'
     return 'audio/wav'
@@ -44,7 +51,35 @@ def _mime_from_format(output_format: str) -> str:
 
 class TTSEngine:
     def __init__(self, config: Dict[str, Any]):
-        """Initialize TTS engine wrapper with normalized node configuration."""
+        """Initialize TTS engine wrapper with normalized node configuration.
+
+        Args:
+            config: Merged runtime config dict produced by
+                ``IGlobal._build_tts_config_dict()``.  Expected keys include
+                ``engine``, ``voice``, ``voice_model``, ``piper_voice``,
+                ``kokoro_voice``, ``kokoro_lang_code``, ``model``,
+                ``api_key``, ``output_path``, ``output_format``,
+                ``piper_bin``, and ``ffmpeg_bin``.
+
+        Attributes:
+            config: Mutable config dict; ``IGlobal.synthesize`` injects
+                ``output_path`` / ``output_format`` before each call.
+            _piper_remote_client: Cached DAP ``ModelClient`` for Piper model
+                server mode; ``None`` when not connected.
+            _kokoro_remote_client: Cached DAP ``ModelClient`` for Kokoro model
+                server mode; ``None`` when not connected.
+            _hf_pipeline: Cached HuggingFace pipeline for Bark (and any future
+                ``_transformers_tts`` engine); ``None`` until first use.
+            _hf_pipeline_key: ``(model, task)`` tuple that identifies the
+                currently loaded pipeline; used to detect model changes.
+            _piper_voice: In-process ``PiperVoice`` instance; reused across
+                utterances when the ONNX path does not change.
+            _piper_voice_onnx: ONNX path of the loaded ``_piper_voice``; used
+                to detect voice changes without reloading.
+            _kokoro_pipeline: ``KPipeline`` instance for local Kokoro inference;
+                recreated when ``kokoro_lang_code`` changes.
+            _kokoro_cache_lang: Language code of the loaded ``_kokoro_pipeline``.
+        """
         self.config = config
         self._piper_remote_client: Optional[Any] = None
         self._kokoro_remote_client: Optional[Any] = None
@@ -56,7 +91,13 @@ class TTSEngine:
         self._kokoro_cache_lang: Optional[str] = None
 
     def _dispose_hf_pipeline(self) -> None:
-        """Disconnect and release the cached HuggingFace pipeline client, if any."""
+        """Disconnect and release the cached HuggingFace pipeline client, if any.
+
+        Calls ``_client.disconnect()`` on the pipeline's underlying DAP client
+        when running in model-server mode, then clears ``_hf_pipeline`` and
+        ``_hf_pipeline_key``.  Errors during disconnect are silently ignored so
+        that cleanup always completes.
+        """
         pipe = self._hf_pipeline
         if pipe is not None:
             client = getattr(pipe, '_client', None)
@@ -69,7 +110,13 @@ class TTSEngine:
             self._hf_pipeline_key = None
 
     def dispose(self) -> None:
-        """Release all cached models, pipelines, and remote clients held by this engine."""
+        """Release all cached models, pipelines, and remote clients held by this engine.
+
+        Clears in-process Piper voice, Kokoro pipeline, and HuggingFace pipeline,
+        then disconnects Piper and Kokoro remote ``ModelClient`` instances.
+        Should be called before discarding a ``TTSEngine`` instance to avoid
+        leaking WebSocket connections to the model server.
+        """
         self._dispose_hf_pipeline()
         self._piper_voice = None
         self._piper_voice_onnx = None
@@ -85,7 +132,24 @@ class TTSEngine:
         self._kokoro_remote_client = None
 
     def synthesize(self, text: str) -> Dict[str, Any]:
-        """Dispatch synthesis to the configured TTS engine and return a path/mime_type dict."""
+        """Dispatch synthesis to the configured TTS engine and return a path/mime_type dict.
+
+        Reads ``self.config['engine']`` to select the backend.  The caller
+        (``IGlobal.synthesize``) must have injected ``output_path`` and
+        ``output_format`` into ``self.config`` before calling this method.
+
+        Args:
+            text: Plain-text utterance to synthesize.
+
+        Returns:
+            Dict with keys:
+                - ``path`` (str): Absolute path to the generated audio file.
+                - ``mime_type`` (str): MIME type matching the output format
+                  (e.g. ``'audio/wav'`` or ``'audio/mpeg'``).
+
+        Raises:
+            ValueError: If ``engine`` is not one of the supported backends.
+        """
         engine = str(self.config.get('engine', 'piper') or 'piper').lower().strip()
         if engine == 'piper':
             return self._piper(text)
@@ -100,7 +164,17 @@ class TTSEngine:
         raise ValueError(f'Unsupported TTS engine: {engine}')
 
     def _ffmpeg_executable(self) -> str:
-        """Return the ffmpeg binary path, preferring imageio-ffmpeg when available."""
+        """Return the ffmpeg binary path, preferring imageio-ffmpeg when available.
+
+        Checks ``config['ffmpeg_bin']`` first; if it equals the default
+        ``'ffmpeg'``, tries to resolve the bundled binary via
+        ``imageio_ffmpeg.get_ffmpeg_exe()``.  Falls back to the plain
+        ``'ffmpeg'`` name (must be on ``PATH``) if the package is absent.
+
+        Returns:
+            Absolute path to the ffmpeg executable, or ``'ffmpeg'`` as a
+            fallback relying on ``PATH`` resolution.
+        """
         fb = str(self.config.get('ffmpeg_bin', '') or 'ffmpeg')
         if fb != 'ffmpeg':
             return fb
@@ -112,7 +186,22 @@ class TTSEngine:
             return 'ffmpeg'
 
     def _transcode_wav_to_mp3(self, wav_path: str, mp3_path: str):
-        """Convert a WAV file to MP3 using lameenc or ffmpeg as fallback."""
+        """Convert a WAV file to MP3 using lameenc or ffmpeg as fallback.
+
+        Tries ``try_wav_to_mp3_lameenc`` first (in-process, no subprocess).
+        Falls back to ffmpeg via ``_ffmpeg_executable()`` when lameenc is
+        unavailable or fails.
+
+        Args:
+            wav_path: Absolute path to the source WAV file.
+            mp3_path: Absolute path where the output MP3 should be written.
+
+        Raises:
+            RuntimeError: If ffmpeg is not found and lameenc is also
+                unavailable, with a message describing how to install either.
+            subprocess.CalledProcessError: If ffmpeg exits with a non-zero
+                status code.
+        """
         if try_wav_to_mp3_lameenc(wav_path, mp3_path):
             return
         ffmpeg_bin = self._ffmpeg_executable()
@@ -123,7 +212,27 @@ class TTSEngine:
             raise RuntimeError(f'MP3 output needs ``lameenc`` (see node ``requirements.txt``) or ffmpeg ({ffmpeg_bin!r}). Install ``lameenc`` via depends(), or ffmpeg (e.g. brew install ffmpeg), or rely on ``imageio-ffmpeg`` when packaged with the engine.') from e
 
     def _save_mono_float_audio(self, audio_arr: np.ndarray, sampling_rate: int, out_path: str, output_format: str) -> None:
-        """Write mono float32 [-1,1] samples to WAV or MP3 (via temp WAV + transcoding)."""
+        """Write mono float32 [-1,1] samples to WAV or MP3 (via temp WAV + transcoding).
+
+        For WAV output the samples are written directly to ``out_path``.
+        For MP3 output an intermediate WAV is created in the system temp
+        directory, transcoded via ``_transcode_wav_to_mp3``, then deleted
+        in a ``finally`` block regardless of success or failure.
+
+        Args:
+            audio_arr: 1-D (or squeezable to 1-D) float32 array of audio
+                samples in the range ``[-1.0, 1.0]``.  Values are clipped
+                before writing.
+            sampling_rate: Sample rate in Hz (e.g. ``22050`` for Piper,
+                ``24000`` for Kokoro).
+            out_path: Absolute path where the final audio file is written.
+                Must already exist as an empty file (created by
+                ``tempfile.mkstemp``).
+            output_format: ``'wav'`` or ``'mp3'``.
+
+        Raises:
+            ValueError: If ``audio_arr`` is empty after conversion.
+        """
         output_format = output_format.lower()
         audio_arr = np.clip(np.asarray(audio_arr, dtype=np.float32), -1.0, 1.0)
         if audio_arr.size == 0:
@@ -148,7 +257,26 @@ class TTSEngine:
                     pass
 
     def _transformers_tts(self, text: str, model_default: str) -> Dict[str, Any]:
-        """Run TTS inference via a HuggingFace transformers pipeline and save the output."""
+        """Run TTS inference via a HuggingFace transformers pipeline and save the output.
+
+        Reuses a cached pipeline when the model and task are unchanged.
+        With ``--modelserver`` the pipeline is remote; without it, inference
+        runs in-process using the local GPU/CPU.
+
+        Args:
+            text: Plain-text utterance to synthesize.
+            model_default: HuggingFace model id to use when
+                ``config['model']`` is empty (e.g. ``'suno/bark-small'``).
+
+        Returns:
+            Dict with keys:
+                - ``path`` (str): Path to the written audio file.
+                - ``mime_type`` (str): MIME type of the output.
+
+        Raises:
+            ValueError: If the pipeline returns an unexpected result type or
+                empty audio samples.
+        """
         from ai.common.models.transformers import pipeline as rr_pipeline
 
         model = self.config.get('model') or model_default
@@ -189,7 +317,15 @@ class TTSEngine:
         return {'path': out_path, 'mime_type': _mime_from_format(output_format)}
 
     def _ensure_kokoro_remote_client(self) -> None:
-        """Connect to the Kokoro model server, loading the model if not already done."""
+        """Connect to the Kokoro model server, loading the model if not already done.
+
+        Reads ``config['kokoro_lang_code']`` to pass the language to the
+        loader.  The resulting ``ModelClient`` is stored in
+        ``_kokoro_remote_client`` and reused for subsequent utterances.
+
+        Raises:
+            RuntimeError: If ``--modelserver`` is not set in ``sys.argv``.
+        """
         if self._kokoro_remote_client is not None:
             return
         from ai.common.models.base import ModelClient, get_model_server_address
@@ -211,7 +347,25 @@ class TTSEngine:
         self._kokoro_remote_client = client
 
     def _kokoro(self, text: str) -> Dict[str, Any]:
-        """Kokoro-82M via the ``kokoro`` PyPI package (not HuggingFace ``transformers`` AutoModel)."""
+        """Synthesize speech with Kokoro-82M and save the result.
+
+        Uses the ``kokoro`` PyPI package (``KPipeline``) for local inference,
+        or the Kokoro model-server loader when ``config['kokoro_use_model_server']``
+        is set.  The ``KPipeline`` is cached per ``kokoro_lang_code`` and
+        recreated only when the language changes.
+
+        Args:
+            text: Plain-text utterance to synthesize.
+
+        Returns:
+            Dict with keys:
+                - ``path`` (str): Path to the written audio file.
+                - ``mime_type`` (str): MIME type of the output.
+
+        Raises:
+            RuntimeError: If the ``kokoro`` package is not installed (local mode).
+            ValueError: If the pipeline or model server returns no audio samples.
+        """
         voice = str(self.config.get('kokoro_voice', 'af_heart') or 'af_heart').strip()
         out_path = self.config.get('output_path')
         output_format = str(self.config.get('output_format', 'wav')).lower()
@@ -277,11 +431,33 @@ class TTSEngine:
         return {'path': out_path, 'mime_type': _mime_from_format(output_format)}
 
     def _bark(self, text: str) -> Dict[str, Any]:
-        """Synthesize speech with the Bark model via the transformers pipeline."""
+        """Synthesize speech with the Bark model via the transformers pipeline.
+
+        Delegates to ``_transformers_tts`` with ``suno/bark-small`` as the
+        default model.  The active model can be overridden via
+        ``config['model']``.
+
+        Args:
+            text: Plain-text utterance to synthesize.
+
+        Returns:
+            Dict with keys:
+                - ``path`` (str): Path to the written audio file.
+                - ``mime_type`` (str): MIME type of the output.
+        """
         return self._transformers_tts(text, model_default='suno/bark-small')
 
     def _ensure_piper_remote_client(self) -> None:
-        """Connect to the Piper model server and load the configured voice preset."""
+        """Connect to the Piper model server and load the configured voice preset.
+
+        Reads ``config['piper_voice']`` and ``config['piper_bin']`` to build
+        the loader options.  The resulting ``ModelClient`` is stored in
+        ``_piper_remote_client`` and reused for subsequent utterances.
+
+        Raises:
+            RuntimeError: If ``--modelserver`` is not set in ``sys.argv``, or
+                if ``config['piper_voice']`` is empty.
+        """
         if self._piper_remote_client is not None:
             return
         from ai.common.models.base import ModelClient, get_model_server_address
@@ -304,7 +480,28 @@ class TTSEngine:
         self._piper_remote_client = client
 
     def _piper(self, text: str) -> Dict[str, Any]:
-        """Synthesize speech with Piper, using model server or local ONNX voice."""
+        """Synthesize speech with Piper, using model server or local ONNX voice.
+
+        In model-server mode (``config['piper_use_model_server']``), sends an
+        inference command via DAP and decodes the returned base64 WAV.
+        In local mode, loads the ONNX voice file (cached in ``_piper_voice``)
+        and writes the WAV in-process via ``write_piper_wav``.
+
+        An intermediate WAV is created and cleaned up in a ``finally`` block
+        when the requested output format is MP3.
+
+        Args:
+            text: Plain-text utterance to synthesize.
+
+        Returns:
+            Dict with keys:
+                - ``path`` (str): Path to the written audio file.
+                - ``mime_type`` (str): MIME type of the output.
+
+        Raises:
+            ValueError: If ``config['voice_model']`` is empty in local mode
+                (no ONNX path cached for the selected preset).
+        """
         if self.config.get('piper_use_model_server'):
             self._ensure_piper_remote_client()
             body = self._piper_remote_client.send_command(
@@ -366,21 +563,47 @@ class TTSEngine:
         return {'path': out_path, 'mime_type': _mime_from_format(output_format)}
 
     def _api_key_openai(self) -> str:
-        """Return the OpenAI API key from config or the OPENAI_API_KEY environment variable."""
+        """Return the OpenAI API key from config or the OPENAI_API_KEY environment variable.
+
+        Returns:
+            API key string, or an empty string if not configured.
+        """
         k = (self.config.get('api_key') or '').strip()
         if k:
             return k
         return (os.environ.get('OPENAI_API_KEY') or '').strip()
 
     def _api_key_elevenlabs(self) -> str:
-        """Return the ElevenLabs API key from config or the ELEVENLABS_API_KEY environment variable."""
+        """Return the ElevenLabs API key from config or the ELEVENLABS_API_KEY environment variable.
+
+        Returns:
+            API key string, or an empty string if not configured.
+        """
         k = (self.config.get('api_key') or '').strip()
         if k:
             return k
         return (os.environ.get('ELEVENLABS_API_KEY') or '').strip()
 
     def _elevenlabs(self, text: str) -> Dict[str, Any]:
-        """Synthesize speech via the ElevenLabs API and save the result."""
+        """Synthesize speech via the ElevenLabs API and save the result.
+
+        Posts to ``https://api.elevenlabs.io/v1/text-to-speech/{voice_id}``
+        and writes the response body (MPEG audio) directly to ``output_path``.
+        The API always returns MP3; ``output_format`` is noted for the MIME
+        type but no transcoding is performed.
+
+        Args:
+            text: Plain-text utterance to synthesize.
+
+        Returns:
+            Dict with keys:
+                - ``path`` (str): Path to the written audio file.
+                - ``mime_type`` (str): ``'audio/mpeg'``.
+
+        Raises:
+            ValueError: If no API key is available in config or environment.
+            requests.HTTPError: If the ElevenLabs API returns a non-2xx status.
+        """
         api_key = self._api_key_elevenlabs()
         voice = self.config.get('voice', 'Rachel')
         model = self.config.get('model', 'eleven_multilingual_v2')
@@ -402,7 +625,24 @@ class TTSEngine:
         return {'path': out_path, 'mime_type': _mime_from_format(output_format)}
 
     def _openai(self, text: str) -> Dict[str, Any]:
-        """Synthesize speech via the OpenAI TTS API and save the result."""
+        """Synthesize speech via the OpenAI TTS API and save the result.
+
+        Posts to ``https://api.openai.com/v1/audio/speech`` with the
+        configured model, voice, and output format, then writes the response
+        body to ``output_path``.
+
+        Args:
+            text: Plain-text utterance to synthesize.
+
+        Returns:
+            Dict with keys:
+                - ``path`` (str): Path to the written audio file.
+                - ``mime_type`` (str): MIME type matching ``output_format``.
+
+        Raises:
+            ValueError: If no API key is available in config or environment.
+            requests.HTTPError: If the OpenAI API returns a non-2xx status.
+        """
         api_key = self._api_key_openai()
         voice = self.config.get('voice', 'alloy')
         model = self.config.get('model', 'gpt-4o-mini-tts')

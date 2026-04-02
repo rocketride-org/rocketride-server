@@ -30,11 +30,24 @@ from .IGlobal import IGlobal
 
 
 def _infer_output_format(want_audio: bool, want_text: bool, engine: str) -> str:
-    """
-    File encoding is chosen from wiring, not from node settings.
-    - Audio lane: prefer WAV for broad player / pipeline compatibility (OpenAI can emit WAV).
-    - Text-only: prefer MP3 for smaller base64 JSON.
-    - ElevenLabs: our client always receives MPEG from the API, so keep MP3.
+    """Determine the audio encoding from connected output lanes and engine constraints.
+
+    Encoding is driven by wiring, not by a node settings field:
+
+    - **Audio lane connected:** WAV for broadest player/pipeline compatibility.
+      (OpenAI can produce WAV; ElevenLabs is the exception below.)
+    - **Text lane only:** MP3 for a smaller base64 payload.
+    - **ElevenLabs (any wiring):** always MP3 — the API only returns MPEG audio.
+
+    Args:
+        want_audio: ``True`` when the ``audio`` output lane has a downstream
+            connection.
+        want_text: ``True`` when the ``text`` output lane has a downstream
+            connection.
+        engine: Canonical engine name (e.g. ``'elevenlabs'``, ``'piper'``).
+
+    Returns:
+        ``'mp3'`` or ``'wav'``.
     """
     eng = (engine or 'piper').lower().strip()
     if eng == 'elevenlabs':
@@ -48,7 +61,24 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     def writeText(self, text: str):
-        """Synthesize the incoming text and emit the audio on the audio and/or text lanes."""
+        """Synthesize the incoming text and emit the audio on the audio and/or text lanes.
+
+        Determines which output lanes are wired, infers the audio format, calls
+        ``IGlobal.synthesize``, reads the temp file once, streams raw bytes on
+        the ``audio`` lane (``BEGIN`` / ``WRITE`` / ``END``), and/or emits a
+        JSON payload with ``mime_type`` and ``base64`` on the ``text`` lane.
+        The temp file is always deleted in the ``finally`` block.
+
+        Empty or whitespace-only input is silently skipped.  When neither lane
+        is connected a warning is logged and synthesis is skipped entirely.
+
+        Args:
+            text: Plain-text utterance received from the upstream node.
+
+        Raises:
+            Exception: Propagates any synthesis failure after logging a warning,
+                so the pipeline execution layer can handle it appropriately.
+        """
         value = (text or '').strip()
         if not value:
             return

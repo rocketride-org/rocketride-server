@@ -49,24 +49,70 @@ class IGlobal(IGlobalBase):
     _last_cleanup_ts: float = 0.0
 
     def _resolve_cloud_api_key(self, cfg: Dict[str, Any], raw: Any, engine: str) -> str:
-        """Form / merged config, then optional ``OPENAI_API_KEY`` / ``ELEVENLABS_API_KEY`` (runtime)."""
+        """Resolve the API key for cloud TTS engines from config or environment.
+
+        Delegates to ``resolve_cloud_api_key`` in ``config_resolver``, passing
+        ``_read_cfg`` as the config-reader callable.  Falls back to
+        ``OPENAI_API_KEY`` or ``ELEVENLABS_API_KEY`` environment variables when
+        the key is absent from the merged config.
+
+        Args:
+            cfg: Merged node config dict (output of ``Config.getNodeConfig``).
+            raw: Raw connector config object (``IJson``-like) from
+                ``glb.connConfig``.
+            engine: Canonical engine name (e.g. ``'openai'``, ``'elevenlabs'``).
+
+        Returns:
+            API key string, or empty string if not found.
+        """
         return resolve_cloud_api_key(cfg, raw, engine, self._read_cfg)
 
     def _read_cfg(self, config: Dict[str, Any], key: str, default: Any) -> Any:
-        """Read a key from a config dict or its nested ``parameters`` sub-dict, with a default."""
+        """Read a key from a config dict or its nested ``parameters`` sub-dict, with a default.
+
+        Checks the top-level dict first; if the key is absent, checks
+        ``config['parameters']`` (present when ``getNodeConfig`` wraps values
+        under a ``parameters`` sub-key).
+
+        Args:
+            config: Config dict to search.
+            key: Key to look up.
+            default: Value to return when the key is not found in either dict.
+
+        Returns:
+            The value associated with ``key``, or ``default``.
+        """
         if key in config:
             return config.get(key, default)
         params = config.get('parameters') if isinstance(config.get('parameters'), dict) else {}
         return params.get(key, default)
 
     def _resolve_merged_config(self) -> tuple[Any, Dict[str, Any]]:
-        """Delegate to ``resolve_merged_config`` using the current connector config and logical type."""
+        """Delegate to ``resolve_merged_config`` using the current connector config and logical type.
+
+        Returns:
+            Tuple of ``(raw, cfg)`` where ``raw`` is the ``IJson``-like
+            connector config object and ``cfg`` is the merged, normalised
+            config dict ready for ``_build_tts_config_dict``.
+        """
         raw = self.glb.connConfig
         return resolve_merged_config(self.glb.logicalType, raw)
 
     @staticmethod
     def _engine_from_merged_cfg(cfg: Dict[str, Any]) -> str:
-        """``engine`` from ``getNodeConfig`` merge; optional fallback from ``profile``."""
+        """Resolve the canonical engine name from a merged config dict.
+
+        Reads ``cfg['engine']`` first.  If absent or empty, falls back to
+        ``cfg['profile']`` looked up in ``_PROFILE_TO_ENGINE``.  Defaults to
+        ``'piper'`` when neither is present.
+
+        Args:
+            cfg: Merged node config dict.
+
+        Returns:
+            Lowercase engine name: ``'piper'``, ``'kokoro'``, ``'bark'``,
+            ``'openai'``, or ``'elevenlabs'``.
+        """
         e = str(cfg.get('engine') or '').lower().strip()
         if e:
             return e
@@ -76,7 +122,22 @@ class IGlobal(IGlobalBase):
         return 'piper'
 
     def _resolve_tts_model(self, cfg: Dict[str, Any], engine: str) -> str:
-        """Map profile-specific keys (+ legacy ``model``) to the HF/API id TTSEngine expects."""
+        """Map profile-specific config keys to the model id that TTSEngine expects.
+
+        Each engine has a preferred key (e.g. ``bark_model``, ``openai_model``)
+        with a legacy ``model`` fallback for configs created before the
+        per-engine keys were introduced.
+
+        Args:
+            cfg: Merged node config dict.
+            engine: Canonical engine name (e.g. ``'bark'``, ``'openai'``).
+
+        Returns:
+            HuggingFace model id or API model name string.  Falls back to a
+            sensible default when no value is configured:
+            ``'suno/bark-small'`` (Bark), ``'gpt-4o-mini-tts'`` (OpenAI),
+            ``'eleven_multilingual_v2'`` (ElevenLabs).
+        """
         e = engine.lower()
         if e in ('bark', 'bak'):
             v = self._read_cfg(cfg, 'bark_model', '') or self._read_cfg(cfg, 'model', '')
@@ -90,7 +151,20 @@ class IGlobal(IGlobalBase):
         return str(self._read_cfg(cfg, 'model', '') or '').strip()
 
     def _resolve_tts_voice(self, cfg: Dict[str, Any], engine: str) -> str:
-        """Resolve the voice identifier for the given engine from merged config keys."""
+        """Resolve the voice identifier for the given engine from merged config keys.
+
+        Each cloud engine has a preferred key (``openai_voice``,
+        ``elevenlabs_voice``) with a legacy ``voice`` fallback.  Local
+        engines read the generic ``voice`` key.
+
+        Args:
+            cfg: Merged node config dict.
+            engine: Canonical engine name.
+
+        Returns:
+            Voice identifier string.  Defaults: ``'alloy'`` (OpenAI and
+            generic), ``'EXAVITQu4vr4xnSDxMaL'`` (ElevenLabs "Bella").
+        """
         e = engine.lower()
         if e == 'openai':
             v = self._read_cfg(cfg, 'openai_voice', '') or self._read_cfg(cfg, 'voice', '')
@@ -101,7 +175,31 @@ class IGlobal(IGlobalBase):
         return str(self._read_cfg(cfg, 'voice', '') or 'alloy').strip()
 
     def _build_tts_config_dict(self) -> Dict[str, Any]:
-        """Build TTS runtime options: ``glb.connConfig`` + ``Config.getNodeConfig`` (same pattern as other filter nodes)."""
+        """Build the TTS runtime config dict from merged connector and node config.
+
+        Calls ``_resolve_merged_config`` on every invocation so that profile
+        switches (e.g. OpenAI → Kokoro) are always reflected without restarting
+        the pipeline.  Downloads and caches the Piper ONNX voice file when
+        running locally (non-model-server) and the engine is ``'piper'``.
+
+        Returns:
+            Dict consumed by ``TTSEngine.__init__`` and ``IGlobal.synthesize``.
+            Keys:
+
+            - ``engine`` (str): Active backend name.
+            - ``voice`` (str): Resolved voice identifier for the engine.
+            - ``voice_model`` (str): Local ONNX path for Piper; empty otherwise.
+            - ``piper_voice`` (str): Piper preset key (e.g. ``'en_US-lessac-medium'``).
+            - ``piper_use_model_server`` (bool): Route Piper through model server.
+            - ``kokoro_use_model_server`` (bool): Route Kokoro through model server.
+            - ``model`` (str): HuggingFace or API model id.
+            - ``kokoro_voice`` (str): Kokoro voice id (e.g. ``'af_heart'``).
+            - ``kokoro_lang_code`` (str): Single-char language code derived from
+              the Kokoro voice prefix (e.g. ``'a'`` for American English).
+            - ``api_key`` (str): Cloud API key; empty for local engines.
+            - ``piper_bin`` (str): Piper binary name (``'piper'``).
+            - ``ffmpeg_bin`` (str): ffmpeg binary name (``'ffmpeg'``).
+        """
         raw, cfg = self._resolve_merged_config()
         engine = self._engine_from_merged_cfg(cfg)
 
@@ -136,7 +234,14 @@ class IGlobal(IGlobalBase):
         }
 
     def beginGlobal(self):
-        """Install dependencies and create the TTSEngine instance when the pipeline starts."""
+        """Install pip dependencies and create the TTSEngine when the pipeline starts.
+
+        Skipped in ``CONFIG`` open mode (UI validation pass).  Calls
+        ``depends(requirements.txt)`` to install all declared packages, then
+        builds the initial config dict and constructs a ``TTSEngine`` instance
+        that is reused across utterances (and recreated on engine/voice change
+        inside ``synthesize``).
+        """
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
@@ -151,7 +256,17 @@ class IGlobal(IGlobalBase):
         self._engine = TTSEngine(self._config)
 
     def _cleanup_stale_outputs(self):
-        """Remove old TTS temp files from the system temp dir to prevent unbounded growth."""
+        """Remove old TTS temp files from the system temp dir to prevent unbounded growth.
+
+        Runs at most once every ``_CLEANUP_INTERVAL_SEC`` seconds (5 minutes).
+        Scans ``tempfile.gettempdir()`` for files whose names start with
+        ``tts_`` and end with ``.wav`` or ``.mp3`` and deletes those older
+        than ``temp_output_max_age_sec`` seconds (default 3600 = 1 hour).
+
+        Can be disabled by setting ``cleanup_temp_outputs`` to ``False`` in the
+        node config, or by setting ``temp_output_max_age_sec`` to ``0``.
+        Deletion errors are silently ignored (best-effort cleanup).
+        """
         now = time.time()
         if now - self._last_cleanup_ts < _CLEANUP_INTERVAL_SEC:
             return
@@ -183,7 +298,18 @@ class IGlobal(IGlobalBase):
                 continue
 
     def validateConfig(self):
-        """Validate the node configuration, raising an exception on missing required values."""
+        """Validate the node configuration, raising on missing required values.
+
+        Called by the engine during the ``CONFIG`` open-mode pass (before the
+        pipeline starts) so that misconfiguration surfaces as a clear error in
+        the UI rather than a cryptic runtime failure.
+
+        Raises:
+            Exception: If a cloud engine (``openai`` / ``elevenlabs``) has no
+                API key configured.
+            Exception: If ``engine='piper'`` but no ``piper_voice`` is set.
+            Exception: If ``engine='kokoro'`` but no ``kokoro_voice`` is set.
+        """
         raw, cfg = self._resolve_merged_config()
         engine = self._engine_from_merged_cfg(cfg)
         api_key = self._resolve_cloud_api_key(cfg, raw, engine)
@@ -200,7 +326,27 @@ class IGlobal(IGlobalBase):
                 raise Exception('Kokoro: choose a voice from the list')
 
     def _tts_identity_signature(self, cfg: Dict[str, Any]) -> tuple:
-        """Stable tuple for when ``TTSEngine`` must be recreated: engine switch **or** voice/model change (same engine)."""
+        """Return a stable tuple that identifies the current engine/voice/model combination.
+
+        Used by ``synthesize`` to detect when the ``TTSEngine`` must be
+        disposed and recreated (engine switch, voice change, model change, or
+        model-server flag change).
+
+        Args:
+            cfg: Config dict to build the signature from.  Typically the
+                output of ``_build_tts_config_dict``.
+
+        Returns:
+            A tuple whose first element is the engine name, followed by
+            engine-specific discriminators:
+
+            - Piper: ``('piper', piper_voice, piper_use_model_server)``
+            - Kokoro: ``('kokoro', kokoro_voice, kokoro_use_model_server)``
+            - Bark: ``(engine, model)``
+            - OpenAI: ``('openai', model, voice)``
+            - ElevenLabs: ``('elevenlabs', model, voice)``
+            - Empty/unknown: ``('',)``
+        """
         if not cfg:
             return ('',)
         e = str(cfg.get('engine') or '').lower().strip()
@@ -233,7 +379,33 @@ class IGlobal(IGlobalBase):
         return (e,)
 
     def synthesize(self, text: str, output_format: str) -> Dict[str, Any]:
-        """Synthesize text to audio, recreating the TTSEngine if the engine/voice config changed."""
+        """Synthesize text to audio, recreating the TTSEngine if the engine/voice config changed.
+
+        Re-reads the connector config on every call so that runtime profile
+        switches (e.g. OpenAI → Kokoro) take effect without restarting the
+        pipeline.  Compares identity signatures to decide whether to dispose
+        the old engine and construct a new one.
+
+        Reserves a unique temp file via ``tempfile.mkstemp`` before calling
+        ``TTSEngine.synthesize``, and deletes it if synthesis raises an
+        exception.
+
+        Args:
+            text: Plain-text utterance to synthesize.
+            output_format: Requested audio format — ``'wav'`` or ``'mp3'``.
+                Any other value is treated as ``'wav'``.
+
+        Returns:
+            Dict with keys:
+                - ``path`` (str): Absolute path to the generated audio file.
+                  The caller (``IInstance``) is responsible for reading and
+                  deleting this file.
+                - ``mime_type`` (str): MIME type of the audio file.
+
+        Raises:
+            Exception: Propagates any exception raised by ``TTSEngine.synthesize``,
+                after cleaning up the reserved output file.
+        """
         # Re-read connector config each utterance: the same IGlobal can outlive a profile change
         # (e.g. OpenAI → Kokoro) and would otherwise keep the old engine in ``self._config``.
         new_cfg = self._build_tts_config_dict()
@@ -284,7 +456,11 @@ class IGlobal(IGlobalBase):
         return {'path': path, 'mime_type': result.get('mime_type', 'audio/wav')}
 
     def endGlobal(self):
-        """Dispose the TTSEngine and free all resources when the pipeline shuts down."""
+        """Dispose the TTSEngine and free all resources when the pipeline shuts down.
+
+        Calls ``TTSEngine.dispose()`` to release cached models, ONNX runtimes,
+        and any open WebSocket connections to the model server.
+        """
         eng = getattr(self, '_engine', None)
         if eng is not None:
             eng.dispose()
