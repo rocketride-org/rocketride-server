@@ -15,10 +15,10 @@ from .config_resolver import resolve_cloud_api_key, resolve_merged_config
 # ``services.json`` profile id → canonical ``engine`` (fallback if merged ``cfg`` lacks ``engine``).
 _PROFILE_TO_ENGINE: Dict[str, str] = {
     'piper': 'piper',
-    'kokoro-default': 'kokoro',
-    'bark-default': 'bark',
-    'openai-tts': 'openai',
-    'elevenlabs-default': 'elevenlabs',
+    'kokoro': 'kokoro',
+    'bark': 'bark',
+    'openai': 'openai',
+    'elevenlabs': 'elevenlabs',
 }
 
 

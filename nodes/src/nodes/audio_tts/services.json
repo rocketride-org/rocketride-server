@@ -33,22 +33,22 @@
 				"engine": "piper",
 				"piper_voice": "en_US-lessac-medium"
 			},
-			"kokoro-default": {
+			"kokoro": {
 				"engine": "kokoro",
 				"kokoro_lang_code": "a",
 				"kokoro_voice": "af_heart"
 			},
-			"bark-default": {
+			"bark": {
 				"engine": "bark",
 				"bark_model": "suno/bark-small"
 			},
-			"openai-tts": {
+			"openai": {
 				"engine": "openai",
 				"openai_model": "gpt-4o-mini-tts",
 				"openai_voice": "alloy",
 				"api_key": ""
 			},
-			"elevenlabs-default": {
+			"elevenlabs": {
 				"engine": "elevenlabs",
 				"elevenlabs_model": "eleven_multilingual_v2",
 				"elevenlabs_voice": "EXAVITQu4vr4xnSDxMaL",
@@ -238,19 +238,19 @@
 			"properties": ["audio_tts.piper_voice"]
 		},
 		"audio_tts.form.kokoro": {
-			"object": "kokoro-default",
+			"object": "kokoro",
 			"properties": ["audio_tts.kokoro_lang_code", "audio_tts.kokoro_voice"]
 		},
 		"audio_tts.form.bark": {
-			"object": "bark-default",
+			"object": "bark",
 			"properties": ["audio_tts.bark_model"]
 		},
 		"audio_tts.form.openai": {
-			"object": "openai-tts",
+			"object": "openai",
 			"properties": ["audio_tts.openai_model", "audio_tts.openai_voice", "audio_tts.api_key"]
 		},
 		"audio_tts.form.elevenlabs": {
-			"object": "elevenlabs-default",
+			"object": "elevenlabs",
 			"properties": ["audio_tts.elevenlabs_model", "audio_tts.elevenlabs_voice", "audio_tts.api_key"]
 		},
 		"audio_tts.profile": {
@@ -259,10 +259,10 @@
 			"default": "piper",
 			"enum": [
 				["piper", "Piper"],
-				["kokoro-default", "Kokoro"],
-				["bark-default", "Bark"],
-				["openai-tts", "OpenAI TTS"],
-				["elevenlabs-default", "ElevenLabs"]
+				["kokoro", "Kokoro"],
+				["bark", "Bark"],
+				["openai", "OpenAI TTS"],
+				["elevenlabs", "ElevenLabs"]
 			],
 			"conditional": [
 				{
@@ -270,19 +270,19 @@
 					"properties": ["audio_tts.form.piper"]
 				},
 				{
-					"value": "kokoro-default",
+					"value": "kokoro",
 					"properties": ["audio_tts.form.kokoro"]
 				},
 				{
-					"value": "bark-default",
+					"value": "bark",
 					"properties": ["audio_tts.form.bark"]
 				},
 				{
-					"value": "openai-tts",
+					"value": "openai",
 					"properties": ["audio_tts.form.openai"]
 				},
 				{
-					"value": "elevenlabs-default",
+					"value": "elevenlabs",
 					"properties": ["audio_tts.form.elevenlabs"]
 				}
 			]
@@ -297,7 +297,7 @@
 	],
 	"test": {
 		"requires": ["ROCKETRIDE_TTS_TEST_ENABLED"],
-		"profiles": ["kokoro-default", "bark-default"],
+		"profiles": ["kokoro", "bark"],
 		"outputs": ["text"],
 		"cases": [
 			{

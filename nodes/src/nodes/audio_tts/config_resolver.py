@@ -44,7 +44,7 @@ def _pick_api_key(raw: Any) -> str:
             k = pick(raw.get(profile.split('-', 1)[0]))
             if k:
                 return k
-    for alt in ('openai-tts', 'openai', 'elevenlabs-default', 'elevenlabs'):
+    for alt in ('openai', 'elevenlabs'):
         k = pick(raw.get(alt))
         if k:
             return k
