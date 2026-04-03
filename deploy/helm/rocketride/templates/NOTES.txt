@@ -30,7 +30,11 @@ Access the engine via port-forward:
 {{- end }}
 
 Components deployed:
+{{- if .Values.engine.autoscaling.enabled }}
+  - Engine: autoscaling enabled (min {{ .Values.engine.autoscaling.minReplicas }}, max {{ .Values.engine.autoscaling.maxReplicas }})
+{{- else }}
   - Engine: {{ .Values.engine.replicaCount }} replica(s)
+{{- end }}
 {{- if .Values.postgres.enabled }}
   - PostgreSQL (pgvector): 1 replica (StatefulSet)
 {{- end }}
