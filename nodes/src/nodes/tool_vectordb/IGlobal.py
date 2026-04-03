@@ -68,10 +68,10 @@ class IGlobal(IGlobalBase):
             raise ValueError(f'tool_vectordb: unsupported backend {backend!r}. Supported: {", ".join(sorted(_BACKEND_MODULES))}')
 
         # Resolve the store from the backend vector DB node.
-        # The backend store is initialized via the same connConfig that
-        # carries the vector DB connection parameters.
+        # Prefer backend connection config from the bag (populated by an
+        # upstream vector DB node) over the tool node's own connConfig.
         bag = self.IEndpoint.endpoint.bag
-        conn_config = self.glb.connConfig
+        conn_config = bag.get(f'{backend}_connConfig') or bag.get('vectordb_connConfig') or self.glb.connConfig
         store = self._create_store(backend, conn_config, bag)
 
         try:
