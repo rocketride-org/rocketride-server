@@ -202,6 +202,12 @@ class MiscCommands(DAPConn):
             task_controls = [c for c in server._task_control.values() if c.apikey == caller_apikey]
             conn_items = [(cid, conn) for cid, conn in server._connections.items() if hasattr(conn, '_account_info') and conn._account_info and conn._account_info.apikey == caller_apikey]
 
+            # Task-scoped tokens (tk_) can only see their own task
+            caller_auth = self._account_info.auth if hasattr(self._account_info, 'auth') else ''
+            if caller_auth.startswith('tk_'):
+                task_controls = [c for c in task_controls if c.token == caller_auth]
+                conn_items = [(cid, conn) for cid, conn in conn_items if cid == self._connection_id]
+
             # Build connection-to-task mapping by scanning task controls
             conn_tasks: Dict[int, List[str]] = {}
             for control in task_controls:

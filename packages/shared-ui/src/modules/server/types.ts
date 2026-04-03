@@ -15,4 +15,4 @@ import type { DashboardEvent as _DashboardEvent, TaskEvent as _TaskEvent } from 
 export type { DashboardOverview, DashboardConnection, DashboardTask, DashboardResponse, DashboardEvent, TaskEvent } from 'rocketride';
 
 /** Wrapper for activity events from either channel. */
-export type ActivityEvent = { source: 'task'; body: _TaskEvent } | { source: 'dashboard'; body: _DashboardEvent };
+export type ActivityEvent = { source: 'task'; body: _TaskEvent; receivedAt: number } | { source: 'dashboard'; body: _DashboardEvent; receivedAt: number };

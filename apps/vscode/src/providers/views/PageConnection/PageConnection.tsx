@@ -39,6 +39,8 @@ interface ConnectionState {
 	progressMessage?: string;
 }
 
+const TRANSITIONAL_STATES: ReadonlySet<ConnectionState['state']> = new Set(['connecting', 'downloading-engine', 'starting-engine', 'stopping-engine']);
+
 interface Config {
 	hostUrl: string;
 	connectionMode: 'cloud' | 'onprem' | 'local';
@@ -78,7 +80,7 @@ export const PageConnection: React.FC = () => {
 
 	// Animate connecting dots
 	useEffect(() => {
-		const isConnecting = connectionData?.connectionState.state === 'connecting' || connectionData?.connectionState.state === 'downloading-engine' || connectionData?.connectionState.state === 'starting-engine' || connectionData?.connectionState.state === 'stopping-engine';
+		const isConnecting = connectionData?.connectionState.state && TRANSITIONAL_STATES.has(connectionData.connectionState.state);
 
 		if (isConnecting) {
 			const interval = setInterval(() => {
@@ -105,56 +107,26 @@ export const PageConnection: React.FC = () => {
 
 	const getStatusLabel = (): string => {
 		if (!connectionData) return 'Loading...';
-
-		switch (connectionData.connectionState.state) {
-			case 'connected':
-				return 'Connected';
-			case 'downloading-engine':
-			case 'starting-engine':
-			case 'connecting':
-			case 'stopping-engine':
-				return `Connecting${getAnimatedDots()}`;
-			case 'disconnected':
-			case 'engine-startup-failed':
-			default:
-				return 'Disconnected';
-		}
+		const { state } = connectionData.connectionState;
+		if (state === 'connected') return 'Connected';
+		if (TRANSITIONAL_STATES.has(state)) return `Connecting${getAnimatedDots()}`;
+		return 'Disconnected';
 	};
 
 	const getStatusClass = (): string => {
 		if (!connectionData) return 'status-loading';
-
-		switch (connectionData.connectionState.state) {
-			case 'connected':
-				return 'status-connected';
-			case 'downloading-engine':
-			case 'starting-engine':
-			case 'connecting':
-			case 'stopping-engine':
-				return 'status-connecting';
-			case 'disconnected':
-			case 'engine-startup-failed':
-			default:
-				return 'status-disconnected';
-		}
+		const { state } = connectionData.connectionState;
+		if (state === 'connected') return 'status-connected';
+		if (TRANSITIONAL_STATES.has(state)) return 'status-connecting';
+		return 'status-disconnected';
 	};
 
 	const getStatusIcon = (): string => {
 		if (!connectionData) return '○';
-
-		switch (connectionData.connectionState.state) {
-			case 'connected':
-				return '✓';
-			case 'downloading-engine':
-			case 'starting-engine':
-			case 'connecting':
-			case 'stopping-engine':
-				return '◷';
-			case 'disconnected':
-			case 'engine-startup-failed':
-			default:
-				return '○';
-		}
+		const { state } = connectionData.connectionState;
+		if (state === 'connected') return '✓';
+		if (TRANSITIONAL_STATES.has(state)) return '◷';
+		return '○';
 	};
 
 	const getStatusDetailLine = (): string => {

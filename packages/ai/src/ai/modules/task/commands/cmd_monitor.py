@@ -152,29 +152,33 @@ class MonitorCommands(DAPConn):
         # Build the base project-scoped key
         project_key = f'p.{control.project_id}.{control.source}'
 
+        # Gather all matching subscription keys and merge their preferences
+        # so each subscriber receives the event at most once.
+        merged_preference = EVENT_TYPE(0)
+
         # Pipe-scoped check (most specific) — SSE events embed pipe_id in body
         pipe_id = (event or {}).get('body', {}).get('pipe_id')
         if pipe_id is not None:
             pipe_key = f'{project_key}.{pipe_id}'
             if pipe_key in self._monitors:
-                subscriber_preference = self._monitors[pipe_key]
-                await _send_event(subscriber_preference)
+                merged_preference |= self._monitors[pipe_key]
 
         # Project-scoped check (exact source match)
         if project_key in self._monitors:
-            subscriber_preference = self._monitors[project_key]
-            await _send_event(subscriber_preference)
+            merged_preference |= self._monitors[project_key]
 
         # Project-wildcard check (all sources within a project: p.{projectId}.*)
         project_wildcard_key = f'p.{control.project_id}.*'
         if project_wildcard_key != project_key and project_wildcard_key in self._monitors:
-            subscriber_preference = self._monitors[project_wildcard_key]
-            await _send_event(subscriber_preference)
+            merged_preference |= self._monitors[project_wildcard_key]
 
         # Global wildcard check (all tasks)
         if '*' in self._monitors:
-            subscriber_preference = self._monitors['*']
-            await _send_event(subscriber_preference)
+            merged_preference |= self._monitors['*']
+
+        # Send once with the merged preference
+        if merged_preference:
+            await _send_event(merged_preference)
 
         return
 

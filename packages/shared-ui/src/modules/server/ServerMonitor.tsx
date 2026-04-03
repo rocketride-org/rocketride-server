@@ -101,11 +101,12 @@ const ServerMonitor: React.FC<IServerMonitorProps> = ({ data, events, isConnecte
 				)}
 			</div>
 
-			<div className="sm-tab-bar">
+			<div className="sm-tab-bar" role="tablist">
 				{TABS.map((tab) => {
 					const badge = tab.badge?.(data, events);
+					const isActive = activeTab === tab.id;
 					return (
-						<button key={tab.id} className={`sm-tab ${activeTab === tab.id ? 'sm-tab-active' : ''}`} onClick={() => setActiveTab(tab.id)}>
+						<button key={tab.id} role="tab" id={`tab-${tab.id}`} aria-selected={isActive} aria-controls={`tabpanel-${tab.id}`} tabIndex={isActive ? 0 : -1} className={`sm-tab ${isActive ? 'sm-tab-active' : ''}`} onClick={() => setActiveTab(tab.id)}>
 							{tab.label}
 							{badge && <span className="sm-tab-badge">{badge}</span>}
 						</button>
@@ -119,10 +120,12 @@ const ServerMonitor: React.FC<IServerMonitorProps> = ({ data, events, isConnecte
 				</div>
 			) : (
 				<>
-					{activeTab === 'overview' && <OverviewTab data={data} />}
-					{activeTab === 'connections' && <ConnectionsTab connections={data.connections} />}
-					{activeTab === 'tasks' && <TasksTab tasks={data.tasks} />}
-					{activeTab === 'activity' && <ActivityTab events={events} />}
+					<div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
+						{activeTab === 'overview' && <OverviewTab data={data} />}
+						{activeTab === 'connections' && <ConnectionsTab connections={data.connections} />}
+						{activeTab === 'tasks' && <TasksTab tasks={data.tasks} />}
+						{activeTab === 'activity' && <ActivityTab events={events} />}
+					</div>
 				</>
 			)}
 		</div>

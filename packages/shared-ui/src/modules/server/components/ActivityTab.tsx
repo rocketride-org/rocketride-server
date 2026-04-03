@@ -51,10 +51,10 @@ function getDashboardEventDisplay(body: DashboardEvent): { color: string; label:
 function getEventDisplay(event: ActivityEvent): { color: string; label: string; message: string; timestamp: number } {
 	if (event.source === 'task') {
 		const display = getTaskEventDisplay(event.body);
-		return { ...display, timestamp: Date.now() / 1000 };
+		return { ...display, timestamp: event.receivedAt };
 	}
 	const display = getDashboardEventDisplay(event.body);
-	return { ...display, timestamp: event.body.timestamp };
+	return { ...display, timestamp: event.receivedAt };
 }
 
 export const ActivityTab: React.FC<ActivityTabProps> = ({ events }) => (

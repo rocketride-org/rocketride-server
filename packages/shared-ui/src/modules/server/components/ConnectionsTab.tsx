@@ -36,7 +36,18 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({ connections }) =
 					</thead>
 					<tbody>
 						{connections.map((conn) => (
-							<tr key={conn.id} className={selectedId === conn.id ? 'sm-row-selected' : ''} onClick={() => setSelectedId(conn.id === selectedId ? null : conn.id)}>
+							<tr
+								key={conn.id}
+								className={selectedId === conn.id ? 'sm-row-selected' : ''}
+								onClick={() => setSelectedId(conn.id === selectedId ? null : conn.id)}
+								tabIndex={0}
+								onKeyDown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										setSelectedId(conn.id === selectedId ? null : conn.id);
+									}
+								}}
+							>
 								<td className="sm-mono">#{conn.id}</td>
 								<td>{conn.clientInfo?.name || conn.clientId || `Conn #${conn.id}`}</td>
 								<td className="sm-mono">{formatTime(conn.connectedAt)}</td>
@@ -70,9 +81,9 @@ export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({ connections }) =
 						<span>
 							#{selected.id} &mdash; {selected.clientInfo?.name || selected.clientId || `Conn #${selected.id}`}
 						</span>
-						<span className="sm-detail-close" onClick={() => setSelectedId(null)}>
+						<button className="sm-detail-close" aria-label="Close details" onClick={() => setSelectedId(null)}>
 							&times;
-						</span>
+						</button>
 					</div>
 
 					<div className="sm-detail-section">

@@ -11,13 +11,11 @@
  */
 
 import React, { useState, useCallback } from 'react';
-import ServerMonitor from 'shared/modules/server';
-import type { DashboardResponse, DashboardEvent, TaskEvent } from 'rocketride';
+import ServerMonitor, { type ActivityEvent } from 'shared/modules/server';
+import type { DashboardResponse } from 'rocketride';
 import { useMessaging } from '../../../shared/util/useMessaging';
 import '../../styles/vscode.css';
 import type { PageDashboardIncomingMessage } from '../../../shared/types/pageDashboard';
-
-type ActivityEvent = { source: 'task'; body: TaskEvent } | { source: 'dashboard'; body: DashboardEvent };
 type OutgoingMessage = { type: 'ready' } | { type: 'refresh' };
 
 const MAX_EVENTS = 100;
@@ -36,10 +34,10 @@ export const PageDashboard: React.FC = () => {
 				setIsConnected(message.state === 'connected');
 				break;
 			case 'taskEvent':
-				setEvents((prev) => [{ source: 'task' as const, body: message.body }, ...prev].slice(0, MAX_EVENTS));
+				setEvents((prev) => [{ source: 'task' as const, body: message.body, receivedAt: Date.now() / 1000 }, ...prev].slice(0, MAX_EVENTS));
 				break;
 			case 'dashboardEvent':
-				setEvents((prev) => [{ source: 'dashboard' as const, body: message.body }, ...prev].slice(0, MAX_EVENTS));
+				setEvents((prev) => [{ source: 'dashboard' as const, body: message.body, receivedAt: message.body.timestamp }, ...prev].slice(0, MAX_EVENTS));
 				break;
 		}
 	}, []);
