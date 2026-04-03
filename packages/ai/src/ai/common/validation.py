@@ -19,9 +19,9 @@ from rocketlib import debug
 # Matches C0/C1 control characters EXCEPT common whitespace (\t \n \r)
 _CONTROL_CHAR_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]')
 
-# Model names should be alphanumeric with hyphens, dots, slashes, colons, and underscores
-# e.g. "gpt-4", "claude-3-opus-20240229", "us.anthropic.claude-3", "meta-llama/Llama-3"
-_MODEL_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$')
+# Model names should be alphanumeric with hyphens, dots, slashes, colons, at-signs, and underscores
+# e.g. "gpt-4", "claude-3-opus-20240229", "us.anthropic.claude-3", "meta-llama/Llama-3", "org@model"
+_MODEL_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._:/@-]*$')
 
 # Absolute upper bound for output tokens across all known providers (as of 2026)
 MAX_OUTPUT_TOKENS = 1_000_000
@@ -89,25 +89,30 @@ def validate_prompt(prompt: str, max_tokens: int, token_counter) -> str:
     return prompt
 
 
-def validate_model_name(model: Optional[str]) -> str:
+def validate_model_name(model: Optional[str]) -> Optional[str]:
     """Validate that a model name is well-formed.
 
     Args:
-        model: The model identifier string.
+        model: The model identifier string, or None if not yet configured.
 
     Returns:
-        The validated model name (stripped of leading/trailing whitespace).
+        The validated model name (stripped of leading/trailing whitespace),
+        or None if model was None (not yet configured).
 
     Raises:
-        ValueError: If the model name is empty or contains invalid characters.
+        ValueError: If the model name is non-None but empty or contains
+            invalid characters.
     """
-    if not model or not model.strip():
-        raise ValueError('Model name is required but was empty or not provided.')
+    if model is None:
+        return None
+
+    if not model.strip():
+        raise ValueError('Model name was provided but is empty.')
 
     model = model.strip()
 
     if not _MODEL_NAME_RE.match(model):
-        raise ValueError(f'Invalid model name: {model!r}. Model names must start with an alphanumeric character and contain only letters, digits, hyphens, dots, underscores, colons, or slashes.')
+        raise ValueError(f'Invalid model name: {model!r}. Model names must start with an alphanumeric character and contain only letters, digits, hyphens, dots, underscores, colons, at-signs, or slashes.')
 
     return model
 

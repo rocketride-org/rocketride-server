@@ -40,7 +40,6 @@ from typing import Any, Dict
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from ai.common.validation import validate_prompt
 from langchain_openai import ChatOpenAI
 
 
@@ -186,11 +185,8 @@ class Chat(ChatBase):
 
         for attempt in range(max_retries + 1):  # +1 for initial attempt
             try:
-                # Validate + sanitize prompt (matches shared ChatBase behavior)
-                prompt = validate_prompt(question.getPrompt(), self.getTotalTokens(), self.getTokens)
-
                 # Ask the model
-                results = self._llm.invoke(prompt)
+                results = self._llm.invoke(question.getPrompt())
 
                 # Create and return the answer
                 answer = Answer(expectJson=question.expectJson)

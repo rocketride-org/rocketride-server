@@ -18,7 +18,7 @@ from rocketlib import debug
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.util import parseJson
-from ai.common.validation import sanitize_prompt, validate_model_name, validate_max_tokens, validate_prompt
+from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
 
 
 class ChatBase:
@@ -127,10 +127,6 @@ class ChatBase:
             Should raise appropriate exceptions for API failures, authentication
             errors, or other provider-specific issues
         """
-        # Sanitize control characters as a safety net for subclasses that
-        # override chat() and bypass chat_string() validation
-        prompt = sanitize_prompt(prompt)
-
         # Ask the LLM
         results = self._llm.invoke(prompt)
 
