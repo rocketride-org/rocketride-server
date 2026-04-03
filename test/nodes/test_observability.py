@@ -246,6 +246,14 @@ class TestMetricsEndpoint:
 class TestOpenTelemetryTracing:
     """Validate tracer initialisation and helper functions."""
 
+    @pytest.fixture(autouse=True)
+    def reset_tracing_state(self):
+        """Reset tracing module state before each test to ensure isolation."""
+        tracing._tracer_provider = None
+        yield
+        # Clean up after test
+        tracing.shutdown_tracing()
+
     def test_setup_tracing_none_exporter(self):
         """With OTEL_EXPORTER_TYPE=none, setup should succeed without network calls."""
         with patch.dict(os.environ, {'OTEL_EXPORTER_TYPE': 'none', 'OTEL_SERVICE_NAME': 'rocketride-test'}):
@@ -301,7 +309,30 @@ class TestOpenTelemetryTracing:
             with patch.dict(sys.modules, {'opentelemetry.exporter.otlp.proto.grpc.trace_exporter': mock_otlp_module}):
                 provider = tracing.setup_tracing()
                 assert provider is not None
+
+    def test_shutdown_tracing_is_lock_protected(self):
+        """shutdown_tracing() should acquire _setup_lock to prevent races with setup_tracing()."""
+        import threading
+
+        with patch.dict(os.environ, {'OTEL_EXPORTER_TYPE': 'none'}):
+            tracing.setup_tracing()
+
+        errors = []
+
+        def concurrent_shutdown():
+            try:
                 tracing.shutdown_tracing()
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=concurrent_shutdown) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f'Concurrent shutdown raised: {errors}'
+        assert tracing._tracer_provider is None
 
 
 # =========================================================================

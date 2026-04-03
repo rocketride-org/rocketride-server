@@ -337,11 +337,12 @@ class WebServer:
 
         This method is called when the FastAPI application shuts down.
         """
-        # Flush pending spans and shut down the tracer provider
-        shutdown_tracing()
-
         if self._user_shutdown is not None:
             await self._user_shutdown()
+
+        # Flush pending spans and shut down the tracer provider after user
+        # callbacks so that any spans emitted during shutdown are exported.
+        shutdown_tracing()
 
     async def _authenticate_credential_inner(self, authorization: str) -> Union[AccountInfo, Tuple[int, str]]:
         """

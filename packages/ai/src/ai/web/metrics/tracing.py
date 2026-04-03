@@ -124,8 +124,11 @@ def shutdown_tracing() -> None:
     """Flush pending spans and shut down the tracer provider.
 
     Safe to call even if ``setup_tracing`` was never invoked.
+    Thread-safe: uses the same lock as ``setup_tracing`` to prevent
+    races between concurrent setup and shutdown calls.
     """
     global _tracer_provider
-    if _tracer_provider is not None:
-        _tracer_provider.shutdown()
-        _tracer_provider = None
+    with _setup_lock:
+        if _tracer_provider is not None:
+            _tracer_provider.shutdown()
+            _tracer_provider = None
