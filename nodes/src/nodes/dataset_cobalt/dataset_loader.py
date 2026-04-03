@@ -27,6 +27,25 @@ from typing import Any, Dict, List
 from rocketlib import debug, warning
 
 
+def _validate_path(path: str) -> str:
+    """Validate and return the canonical path, raising ValueError if outside cwd.
+
+    Resolves symlinks via os.path.realpath() and verifies the result lives
+    under the current working directory. Also rejects raw '..' components
+    before normalisation (they would be resolved away by realpath).
+    """
+    if '..' in path.replace('\\', '/').split('/'):
+        raise ValueError(f'Path traversal detected in file path: {path}')
+
+    real_path = os.path.realpath(path)
+    real_cwd = os.path.realpath(os.getcwd())
+
+    if not real_path.startswith(real_cwd + os.sep) and real_path != real_cwd:
+        raise ValueError(f'Path {path} is outside the working directory')
+
+    return real_path
+
+
 class DatasetLoader:
     """Loads and transforms evaluation datasets using Cobalt AI's Dataset class.
 
@@ -77,26 +96,13 @@ class DatasetLoader:
             FileNotFoundError: If the file does not exist.
             ValueError: If the file extension is unsupported or path contains traversal.
         """
-        from cobalt import Dataset
-
-        # Validate path to prevent path traversal attacks.
-        # Check the raw path for '..' components before normalization,
-        # since normpath resolves them away.
-        if '..' in path.replace('\\', '/').split('/'):
-            raise ValueError(f'Path traversal detected in file path: {path}')
-
-        normalized = os.path.normpath(path)
-
-        # Reject absolute paths outside the working directory for security.
-        # Only paths under the current working directory (or relative paths
-        # that resolve into it) are permitted.
-        if os.path.isabs(normalized):
-            cwd = os.getcwd()
-            if not normalized.startswith(cwd):
-                raise ValueError(f'Absolute path not allowed outside working directory: {path}')
+        # Validate path: resolves symlinks and ensures it's under cwd.
+        normalized = _validate_path(path)
 
         if not os.path.isfile(normalized):
             raise FileNotFoundError(f'Dataset file not found: {normalized}')
+
+        from cobalt import Dataset
 
         ext = os.path.splitext(normalized)[1].lower()
         debug(f'Cobalt DatasetLoader: Loading file {normalized} with extension {ext}')
@@ -128,6 +134,16 @@ class DatasetLoader:
         Raises:
             ValueError: If items is empty or not a list.
         """
+        # Parse JSON string from textarea input (services.json sends a string
+        # when the field type is textarea).
+        if isinstance(items, str):
+            import json
+
+            try:
+                items = json.loads(items)
+            except json.JSONDecodeError as e:
+                raise ValueError(f'Failed to parse inline items as JSON: {e}') from e
+
         if not items or not isinstance(items, list):
             raise ValueError('Inline items must be a non-empty list of dicts')
 
@@ -246,15 +262,25 @@ class DatasetLoader:
         """
         questions = []
         for item in items:
-            text = item.get('input') or item.get('text') or item.get('question') or ''
+            # Use None-aware fallback so that explicit empty strings or
+            # falsy values (e.g. 0) from earlier fields are not skipped
+            # in favour of later fields.
+            text = next(
+                (v for v in (item.get('input'), item.get('text'), item.get('question')) if v is not None),
+                '',
+            )
+            expected = next(
+                (v for v in (item.get('expected'), item.get('output'), item.get('answer')) if v is not None),
+                '',
+            )
             metadata = {
-                'expected': item.get('expected') or item.get('output') or '',
+                'expected': expected,
                 'dataset_id': item.get('id') or '',
                 'cobalt_source': True,
             }
             # Preserve any extra fields from the original item as metadata
             for key, value in item.items():
-                if key not in ('input', 'text', 'question', 'expected', 'output', 'id'):
+                if key not in ('input', 'text', 'question', 'expected', 'output', 'answer', 'id'):
                     metadata[key] = value
 
             questions.append({'text': str(text), 'metadata': metadata})

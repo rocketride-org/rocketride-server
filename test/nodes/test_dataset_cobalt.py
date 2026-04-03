@@ -37,6 +37,21 @@ import pytest
 # Mock infrastructure: rocketlib, engLib, ai.common, cobalt, depends
 # ---------------------------------------------------------------------------
 
+# Names of every module we mock — used by the session fixture to restore
+# sys.modules after the entire test run.
+_MOCK_MODULE_NAMES = [
+    'engLib',
+    'rocketlib',
+    'depends',
+    'ai',
+    'ai.common',
+    'ai.common.config',
+    'ai.common.schema',
+    'rocketride',
+    'json5',
+    'cobalt',
+]
+
 
 def _install_mocks():
     """Install mock modules so the node code can be imported without the engine."""
@@ -115,6 +130,7 @@ def _install_mocks():
             self.examples = []
             self.documents = []
             self.goals = []
+            self.metadata = {}
 
         def addQuestion(self, text):
             self.questions.append(text)
@@ -142,8 +158,23 @@ def _install_mocks():
         sys.modules['json5'] = ModuleType('json5')
 
 
-# Install mocks before any node imports
+_original_modules = {name: sys.modules.get(name) for name in _MOCK_MODULE_NAMES}
+_original_path = sys.path[:]
+
+# Install mocks at module level so node imports below succeed.
 _install_mocks()
+
+
+@pytest.fixture(autouse=True, scope='session')
+def _restore_modules():
+    """Restore sys.modules after the entire test session completes."""
+    yield
+    sys.path[:] = _original_path
+    for name, orig in _original_modules.items():
+        if orig is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = orig
 
 
 # ---------------------------------------------------------------------------
@@ -233,18 +264,20 @@ def _make_loader(source_type='file', file_path='', sample_size=0, items=None, **
 class TestLoadFromJsonFile:
     """Test loading from JSON file (mocked)."""
 
+    @patch('os.path.realpath', side_effect=lambda p: p)
     @patch('os.getcwd', return_value='/data')
     @patch('os.path.isfile', return_value=True)
-    def test_load_json_returns_items(self, mock_isfile, mock_cwd):
+    def test_load_json_returns_items(self, mock_isfile, mock_cwd, mock_realpath):
         loader = _make_loader(file_path='/data/test.json')
         items = loader.load_from_file('/data/test.json')
         assert len(items) == 2
         assert items[0]['input'] == 'json-q1'
         assert items[1]['expected'] == 'json-a2'
 
+    @patch('os.path.realpath', side_effect=lambda p: p)
     @patch('os.getcwd', return_value='/data')
     @patch('os.path.isfile', return_value=True)
-    def test_load_json_via_load_method(self, mock_isfile, mock_cwd):
+    def test_load_json_via_load_method(self, mock_isfile, mock_cwd, mock_realpath):
         loader = _make_loader(source_type='file', file_path='/data/test.json')
         items = loader.load()
         assert len(items) == 2
@@ -253,9 +286,10 @@ class TestLoadFromJsonFile:
 class TestLoadFromCsvFile:
     """Test loading from CSV file (mocked)."""
 
+    @patch('os.path.realpath', side_effect=lambda p: p)
     @patch('os.getcwd', return_value='/data')
     @patch('os.path.isfile', return_value=True)
-    def test_load_csv_returns_items(self, mock_isfile, mock_cwd):
+    def test_load_csv_returns_items(self, mock_isfile, mock_cwd, mock_realpath):
         loader = _make_loader(file_path='/data/test.csv')
         items = loader.load_from_file('/data/test.csv')
         assert len(items) == 3
@@ -265,9 +299,10 @@ class TestLoadFromCsvFile:
 class TestLoadFromJsonlFile:
     """Test loading from JSONL file (mocked)."""
 
+    @patch('os.path.realpath', side_effect=lambda p: p)
     @patch('os.getcwd', return_value='/data')
     @patch('os.path.isfile', return_value=True)
-    def test_load_jsonl_returns_items(self, mock_isfile, mock_cwd):
+    def test_load_jsonl_returns_items(self, mock_isfile, mock_cwd, mock_realpath):
         loader = _make_loader(file_path='/data/test.jsonl')
         items = loader.load_from_file('/data/test.jsonl')
         assert len(items) == 2
@@ -427,30 +462,49 @@ class TestEmptyDatasetHandling:
         assert questions == []
 
 
-class TestMissingFileError:
-    """Test missing file error handling."""
+class TestPathValidation:
+    """Test path validation and security."""
 
     @patch('os.path.isfile', return_value=False)
-    def test_missing_file_raises(self, mock_isfile):
-        loader = _make_loader(file_path='/nonexistent/data.json')
+    @patch('os.path.realpath', side_effect=lambda p: p)
+    @patch('os.getcwd', return_value='/data')
+    def test_missing_file_raises(self, mock_cwd, mock_realpath, mock_isfile):
+        loader = _make_loader(file_path='/data/nonexistent.json')
         with pytest.raises(FileNotFoundError, match='not found'):
-            loader.load_from_file('/nonexistent/data.json')
+            loader.load_from_file('/data/nonexistent.json')
 
     def test_path_traversal_raises(self):
         loader = _make_loader(file_path='/data/../../../etc/passwd')
         with pytest.raises(ValueError, match='traversal'):
             loader.load_from_file('/data/../../../etc/passwd')
 
+    @patch('os.path.realpath', side_effect=lambda p: p)
     @patch('os.getcwd', return_value='/safe/workdir')
-    @patch('os.path.isfile', return_value=True)
-    def test_absolute_path_outside_workdir_raises(self, mock_isfile, mock_cwd):
+    def test_absolute_path_outside_workdir_raises(self, mock_cwd, mock_realpath):
         loader = _make_loader(file_path='/etc/secrets.json')
-        with pytest.raises(ValueError, match='Absolute path not allowed'):
+        with pytest.raises(ValueError, match='outside the working directory'):
             loader.load_from_file('/etc/secrets.json')
 
-    @patch('os.getcwd', return_value='/data')
+    @patch('os.path.realpath', side_effect=lambda p: '/safe/workdir_evil/test.json' if 'evil' in p else p)
+    @patch('os.getcwd', return_value='/safe/workdir')
+    def test_sibling_prefix_attack_raises(self, mock_cwd, mock_realpath):
+        """Sibling prefix like /safe/workdir_evil/ must not pass startswith check."""
+        loader = _make_loader(file_path='/safe/workdir_evil/test.json')
+        with pytest.raises(ValueError, match='outside the working directory'):
+            loader.load_from_file('/safe/workdir_evil/test.json')
+
+    @patch('os.path.realpath', side_effect=lambda p: '/tmp/evil/data.json' if 'symlink' in p else p)
+    @patch('os.getcwd', return_value='/safe/workdir')
+    def test_symlink_resolved_outside_workdir_raises(self, mock_cwd, mock_realpath):
+        """Symlink resolving outside cwd must be rejected."""
+        loader = _make_loader(file_path='/safe/workdir/symlink_data.json')
+        with pytest.raises(ValueError, match='outside the working directory'):
+            loader.load_from_file('/safe/workdir/symlink_data.json')
+
     @patch('os.path.isfile', return_value=True)
-    def test_unsupported_extension_raises(self, mock_isfile, mock_cwd):
+    @patch('os.path.realpath', side_effect=lambda p: p)
+    @patch('os.getcwd', return_value='/data')
+    def test_unsupported_extension_raises(self, mock_cwd, mock_realpath, mock_isfile):
         loader = _make_loader(file_path='/data/test.xml')
         with pytest.raises(ValueError, match='Unsupported'):
             loader.load_from_file('/data/test.xml')
@@ -550,9 +604,10 @@ class TestIGlobalLifecycle:
         g.glb.logicalType = 'dataset_cobalt'
         return g
 
+    @patch('os.path.realpath', side_effect=lambda p: p)
     @patch('os.getcwd', return_value='/data')
     @patch('os.path.isfile', return_value=True)
-    def test_begin_and_end_global(self, mock_isfile, mock_cwd):
+    def test_begin_and_end_global(self, mock_isfile, mock_cwd, mock_realpath):
         config = {'source_type': 'file', 'file_path': '/data/test.json', 'sample_size': 0}
         g = self._make_global(config)
 
@@ -576,9 +631,10 @@ class TestIGlobalLifecycle:
         assert len(g._questions) == 1
         assert g._questions[0]['text'] == 'inline-q1'
 
+    @patch('os.path.realpath', side_effect=lambda p: p)
     @patch('os.getcwd', return_value='/missing')
     @patch('os.path.isfile', return_value=False)
-    def test_begin_global_missing_file_graceful(self, mock_isfile, mock_cwd):
+    def test_begin_global_missing_file_graceful(self, mock_isfile, mock_cwd, mock_realpath):
         config = {'source_type': 'file', 'file_path': '/missing/data.json', 'sample_size': 0}
         g = self._make_global(config)
 
@@ -609,3 +665,109 @@ class TestIGlobalLifecycle:
 
         # Should not raise; just warns
         g.validateConfig()
+
+
+# ===========================================================================
+# Review-fix regression tests
+# ===========================================================================
+
+
+class TestNullFallbackChain:
+    """Fix 5: None-aware fallback for to_questions field resolution."""
+
+    def test_explicit_empty_string_not_skipped(self):
+        """An explicit empty string in 'input' should NOT fall through to 'text'."""
+        items = [{'input': '', 'text': 'should not use this'}]
+        loader = _make_loader()
+        questions = loader.to_questions(items)
+        assert questions[0]['text'] == ''
+
+    def test_none_input_falls_through_to_text(self):
+        items = [{'input': None, 'text': 'fallback text'}]
+        loader = _make_loader()
+        questions = loader.to_questions(items)
+        assert questions[0]['text'] == 'fallback text'
+
+    def test_answer_field_used_for_expected(self):
+        """The 'answer' field should be a valid fallback for expected output."""
+        items = [{'input': 'q', 'answer': 'the answer'}]
+        loader = _make_loader()
+        questions = loader.to_questions(items)
+        assert questions[0]['metadata']['expected'] == 'the answer'
+
+    def test_explicit_empty_expected_not_skipped(self):
+        items = [{'input': 'q', 'expected': '', 'output': 'should not use'}]
+        loader = _make_loader()
+        questions = loader.to_questions(items)
+        assert questions[0]['metadata']['expected'] == ''
+
+
+class TestInlineJsonStringParsing:
+    """Fix 6: Inline items can arrive as a JSON string from textarea input."""
+
+    def test_json_string_parsed_to_list(self):
+        json_str = '[{"input": "q1", "expected": "a1"}]'
+        loader = _make_loader(source_type='inline', items=[{'input': 'placeholder'}])
+        items = loader.load_from_items(json_str)
+        assert len(items) == 1
+
+    def test_invalid_json_string_raises(self):
+        loader = _make_loader(source_type='inline')
+        with pytest.raises(ValueError, match='Failed to parse'):
+            loader.load_from_items('{not valid json')
+
+    def test_json_string_non_array_raises(self):
+        loader = _make_loader(source_type='inline')
+        with pytest.raises(ValueError, match='non-empty list'):
+            loader.load_from_items('{"not": "an array"}')
+
+
+class TestGoldAnswerNotInContext:
+    """Fix 2: Expected output must NOT appear in prompt context (addContext)."""
+
+    def test_expected_output_in_metadata_not_context(self):
+        questions = [
+            {'text': 'q1', 'metadata': {'expected': 'secret_answer', 'dataset_id': '1', 'cobalt_source': True}},
+        ]
+        inst = IInstance()
+        inst.IGlobal = MagicMock()
+        inst.IGlobal._questions = questions
+        inst.instance = MagicMock()
+
+        emitted = []
+        inst.instance.writeQuestions.side_effect = lambda q: emitted.append(q)
+
+        template = sys.modules['ai.common.schema'].Question()
+        inst.writeQuestions(template)
+
+        assert len(emitted) == 1
+        # The context list must NOT contain the expected answer
+        assert 'secret_answer' not in emitted[0].context
+        # But metadata should have it
+        assert emitted[0].metadata.get('expected') == 'secret_answer'
+
+
+class TestValidatePathHelper:
+    """Fix 1 + 8: Shared _validate_path helper used by loader and IGlobal."""
+
+    def test_validate_path_rejects_sibling_prefix(self):
+        from nodes.dataset_cobalt.dataset_loader import _validate_path
+
+        with patch('os.path.realpath', side_effect=lambda p: p):
+            with patch('os.getcwd', return_value='/safe/workdir'):
+                with pytest.raises(ValueError, match='outside'):
+                    _validate_path('/safe/workdir_evil/test.json')
+
+    def test_validate_path_accepts_valid_child(self):
+        from nodes.dataset_cobalt.dataset_loader import _validate_path
+
+        with patch('os.path.realpath', side_effect=lambda p: p):
+            with patch('os.getcwd', return_value='/safe/workdir'):
+                result = _validate_path('/safe/workdir/data/test.json')
+                assert result == '/safe/workdir/data/test.json'
+
+    def test_validate_path_rejects_dotdot(self):
+        from nodes.dataset_cobalt.dataset_loader import _validate_path
+
+        with pytest.raises(ValueError, match='traversal'):
+            _validate_path('/data/../../../etc/passwd')

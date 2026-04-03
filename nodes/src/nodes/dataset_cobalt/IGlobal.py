@@ -62,11 +62,14 @@ class IGlobal(IGlobalBase):
                     warning('Cobalt Dataset Global: No file path provided for file source type.')
                     return
 
-                if '..' in file_path.replace('\\', '/').split('/'):
-                    warning(f'Cobalt Dataset Global: Path traversal detected in file path: {file_path}')
+                from .dataset_loader import _validate_path
+
+                try:
+                    normalized = _validate_path(file_path)
+                except ValueError as e:
+                    warning(f'Cobalt Dataset Global: {str(e)}')
                     return
 
-                normalized = os.path.normpath(file_path)
                 if not os.path.isfile(normalized):
                     warning(f'Cobalt Dataset Global: File not found: {normalized}')
                     return
