@@ -1,0 +1,46 @@
+name: Discord Discussion Notification
+
+on:
+  discussion:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_DISCUSSIONS_WEBHOOK_URL }}
+          DISCUSSION_TITLE: ${{ github.event.discussion.title }}
+          DISCUSSION_URL: ${{ github.event.discussion.html_url }}
+          DISCUSSION_BODY: ${{ github.event.discussion.body }}
+          DISCUSSION_AUTHOR: ${{ github.event.discussion.user.login }}
+          DISCUSSION_AVATAR: ${{ github.event.discussion.user.avatar_url }}
+          DISCUSSION_NUMBER: ${{ github.event.discussion.number }}
+          DISCUSSION_CATEGORY: ${{ github.event.discussion.category.name }}
+        run: |
+          # Truncate body and close unclosed code blocks
+          BODY="${DISCUSSION_BODY:0:1500}"
+          BACKTICK_COUNT=$(echo "$BODY" | grep -o '```' | wc -l)
+          if (( BACKTICK_COUNT % 2 != 0 )); then
+            BODY="${DISCUSSION_BODY:0:1500}..."$'\n```'
+          fi
+
+          PAYLOAD=$(jq -n \
+            --arg title "#$DISCUSSION_NUMBER $DISCUSSION_TITLE" \
+            --arg url "$DISCUSSION_URL" \
+            --arg desc "$BODY" \
+            --arg author "$DISCUSSION_AUTHOR" \
+            --arg avatar "$DISCUSSION_AVATAR" \
+            --arg category "$DISCUSSION_CATEGORY" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            '{embeds: [{title: $title, url: $url, description: $desc, color: 10181046,
+               author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
+               fields: [
+                 {name: "Category", value: $category, inline: true},
+                 {name: "Repo", value: $repo, inline: true}
+               ]}]}')
+          curl -sS -f -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
