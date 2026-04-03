@@ -86,7 +86,7 @@
 		{
 			"section": "Pipe",
 			"title": "Bland AI Voice Agent",
-			"properties": ["type", "bland_ai.apikey", "bland_ai.voice", "bland_ai.maxDuration", "bland_ai.record", "bland_ai.language"]
+			"properties": ["type", "bland_ai.apikey", "bland_ai.voice", "bland_ai.maxDuration", "bland_ai.language", "bland_ai.record"]
 		}
 	]
 }
