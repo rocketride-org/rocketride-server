@@ -58,6 +58,9 @@ def setup_tracing(app=None) -> TracerProvider:
 
     Thread-safe: concurrent callers will block until the first caller
     finishes initialisation, then return the already-configured provider.
+    Subsequent calls with an ``app`` argument will still instrument the
+    app even when the provider was already created (so callers that
+    first init without an app can later pass one).
 
     Args:
         app: A FastAPI application instance.  When provided the
@@ -70,34 +73,37 @@ def setup_tracing(app=None) -> TracerProvider:
     global _tracer_provider
 
     with _setup_lock:
-        if _tracer_provider is not None:
-            return _tracer_provider
+        if _tracer_provider is None:
+            service_name = os.environ.get('OTEL_SERVICE_NAME', 'rocketride')
+            exporter_type = os.environ.get('OTEL_EXPORTER_TYPE', 'none').lower()
 
-        service_name = os.environ.get('OTEL_SERVICE_NAME', 'rocketride')
-        exporter_type = os.environ.get('OTEL_EXPORTER_TYPE', 'none').lower()
+            resource = Resource.create({'service.name': service_name})
+            provider = TracerProvider(resource=resource)
 
-        resource = Resource.create({'service.name': service_name})
-        provider = TracerProvider(resource=resource)
+            # Attach an exporter based on configuration.
+            if exporter_type == 'otlp':
+                from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 
-        # Attach an exporter based on configuration.
-        if exporter_type == 'otlp':
-            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+                endpoint = os.environ.get('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://localhost:4317')
+                exporter = OTLPSpanExporter(endpoint=endpoint)
+                provider.add_span_processor(BatchSpanProcessor(exporter))
+            elif exporter_type == 'console':
+                provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+            # else: 'none' — no exporter, tracing is effectively a no-op.
 
-            endpoint = os.environ.get('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://localhost:4317')
-            exporter = OTLPSpanExporter(endpoint=endpoint)
-            provider.add_span_processor(BatchSpanProcessor(exporter))
-        elif exporter_type == 'console':
-            provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
-        # else: 'none' — no exporter, tracing is effectively a no-op.
+            trace.set_tracer_provider(provider)
+            _tracer_provider = provider
 
-        trace.set_tracer_provider(provider)
-        _tracer_provider = provider
+        provider = _tracer_provider
 
-    # Auto-instrument FastAPI if an app is provided.
+    # Auto-instrument FastAPI if an app is provided (idempotent: skip if
+    # the app was already instrumented to avoid double-wrapping).
     if app is not None:
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        if not getattr(app.state, '_otel_instrumented', False):
+            from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-        FastAPIInstrumentor.instrument_app(app)
+            FastAPIInstrumentor.instrument_app(app)
+            app.state._otel_instrumented = True
 
     return provider
 

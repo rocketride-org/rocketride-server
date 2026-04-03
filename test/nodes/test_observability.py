@@ -223,7 +223,7 @@ class TestMetricsEndpoint:
 
     def test_is_metrics_public_default(self):
         os.environ.pop('ROCKETRIDE_METRICS_PUBLIC', None)
-        assert metrics_endpoint.is_metrics_public() is True
+        assert metrics_endpoint.is_metrics_public() is False
 
     def test_is_metrics_public_false(self):
         with patch.dict(os.environ, {'ROCKETRIDE_METRICS_PUBLIC': 'false'}):
@@ -280,10 +280,12 @@ class TestOpenTelemetryTracing:
         """When passed a FastAPI app, auto-instrumentation should be applied."""
         with patch.dict(os.environ, {'OTEL_EXPORTER_TYPE': 'none'}):
             mock_app = MagicMock()
-            with patch.object(tracing, 'FastAPIInstrumentor', create=True) as mock_instrumentor_cls:
-                mock_instrumentor_cls.instrument_app = MagicMock()
+            mock_app.state = MagicMock()
+            mock_app.state._otel_instrumented = False
+            with patch('opentelemetry.instrumentation.fastapi.FastAPIInstrumentor.instrument_app') as mock_instrument_app:
                 provider = tracing.setup_tracing(app=mock_app)
                 assert provider is not None
+                mock_instrument_app.assert_called_once_with(mock_app)
                 tracing.shutdown_tracing()
 
     def test_setup_tracing_otlp_exporter(self):
@@ -318,11 +320,13 @@ class TestMetricsMiddleware:
         counter_before = REGISTRY.get_sample_value('rocketride_http_requests_total', {'method': 'GET', 'endpoint': '/test-mw', 'status_code': '200'}) or 0.0
         hist_count_before = REGISTRY.get_sample_value('rocketride_http_request_duration_seconds_count', {'method': 'GET', 'endpoint': '/test-mw'}) or 0.0
 
-        request = MagicMock(spec=['method', 'url', 'headers'])
+        request = MagicMock(spec=['method', 'url', 'headers', 'scope', 'app'])
         request.method = 'GET'
         request.url = MagicMock()
         request.url.path = '/test-mw'
         request.url.__str__ = lambda self: 'http://localhost:5565/test-mw'
+        request.scope = {'type': 'http'}
+        request.app = MagicMock(routes=[])
 
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -356,11 +360,13 @@ class TestMetricsMiddleware:
 
         counter_before = REGISTRY.get_sample_value('rocketride_http_requests_total', {'method': 'POST', 'endpoint': '/fail-mw', 'status_code': '500'}) or 0.0
 
-        request = MagicMock(spec=['method', 'url', 'headers'])
+        request = MagicMock(spec=['method', 'url', 'headers', 'scope', 'app'])
         request.method = 'POST'
         request.url = MagicMock()
         request.url.path = '/fail-mw'
         request.url.__str__ = lambda self: 'http://localhost:5565/fail-mw'
+        request.scope = {'type': 'http'}
+        request.app = MagicMock(routes=[])
 
         async def call_next(req):
             raise RuntimeError('boom')
@@ -387,11 +393,13 @@ class TestMetricsMiddleware:
 
         counter_before = REGISTRY.get_sample_value('rocketride_http_requests_total', {'method': 'GET', 'endpoint': '/not-found-mw', 'status_code': '404'}) or 0.0
 
-        request = MagicMock(spec=['method', 'url', 'headers'])
+        request = MagicMock(spec=['method', 'url', 'headers', 'scope', 'app'])
         request.method = 'GET'
         request.url = MagicMock()
         request.url.path = '/not-found-mw'
         request.url.__str__ = lambda self: 'http://localhost:5565/not-found-mw'
+        request.scope = {'type': 'http'}
+        request.app = MagicMock(routes=[])
 
         mock_response = MagicMock()
         mock_response.status_code = 404

@@ -19,7 +19,10 @@ from ai.web import exception, error, Result
 from ai.account import Account, AccountInfo, Reporter
 from ai.modules import ALL as ALLOWED_MODULES
 from .middleware import AuthMiddleware
+from .metrics.middleware import MetricsMiddleware
 from .endpoints import use, ping, version, shutdown, status
+from .endpoints.metrics_endpoint import metrics_endpoint, is_metrics_public
+from .metrics.tracing import setup_tracing, shutdown_tracing
 from .denied import (
     CONST_ACCESS_DENIED_HTML,
     CONST_ACCESS_DENIED_TEXT,
@@ -128,8 +131,9 @@ class WebServer:
         self._compiled_public_paths = None
         self._compiled_private_paths = None
 
-        # Add our metrics middleware to the app
+        # Add our auth and metrics middleware to the app
         self.app.add_middleware(AuthMiddleware)
+        self.app.add_middleware(MetricsMiddleware)
 
         # Declare the port
         self._port = None
@@ -179,6 +183,7 @@ class WebServer:
         # These are always there - no way to turn them off
         self.add_route('/status', status, ['GET'])
         self.add_route('/version', version, ['GET'], public=True)
+        self.add_route('/metrics', metrics_endpoint, ['GET'], public=is_metrics_public())
 
         # Configure the Uvicorn server immediately upon initialization
         self.server = self._configure_server()
@@ -319,6 +324,9 @@ class WebServer:
         # Save the event loop in case anyone needs it
         self.eventLoop = asyncio.get_running_loop()
 
+        # Initialise OpenTelemetry tracing and auto-instrument the app
+        setup_tracing(app=self.app)
+
         # If the user has a startup function
         if self._user_startup is not None:
             await self._user_startup()
@@ -329,6 +337,9 @@ class WebServer:
 
         This method is called when the FastAPI application shuts down.
         """
+        # Flush pending spans and shut down the tracer provider
+        shutdown_tracing()
+
         if self._user_shutdown is not None:
             await self._user_shutdown()
 
