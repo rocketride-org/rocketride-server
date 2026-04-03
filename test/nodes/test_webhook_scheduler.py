@@ -346,7 +346,7 @@ class TestScheduleCreateModel:
             )
 
     def test_empty_pipeline_id_rejected(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match='at least 1 character'):
             ScheduleCreate(
                 pipeline_id='',
                 cron_expression='0 * * * *',
@@ -354,7 +354,7 @@ class TestScheduleCreateModel:
             )
 
     def test_empty_name_rejected(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match='at least 1 character'):
             ScheduleCreate(
                 pipeline_id='my-pipeline',
                 cron_expression='0 * * * *',

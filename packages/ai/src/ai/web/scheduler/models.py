@@ -43,8 +43,10 @@ class ScheduleCreate(BaseModel):
 
         This is intentionally a lightweight structural check (field count only).
         Full semantic validation (e.g. range checks for each field) is deferred
-        to the scheduler backend (APScheduler / croniter) which raises on
-        invalid expressions at schedule-add time.
+        to PipelineScheduler._parse_cron which delegates to APScheduler's
+        CronTrigger — it will reject invalid values like ``99 99 99 99 99``
+        at schedule-add time. This two-layer approach keeps the Pydantic model
+        fast while still catching bad syntax before persistence.
         """
         parts = v.strip().split()
         if len(parts) != 5:
