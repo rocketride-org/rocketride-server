@@ -2,19 +2,19 @@
 
 /**
  * MIT License
- *
+ * 
  * Copyright (c) 2026 Aparavi Software AG
- *
+ * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- *
+ * 
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- *
+ * 
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -30,27 +30,27 @@
  * This module provides a comprehensive command-line interface for managing RocketRide pipelines,
  * uploading files, monitoring task status, and controlling pipeline execution using the
  * Debug Adapter Protocol (DAP).
- *
+ * 
  * Features:
  * - Start and manage RocketRide data processing pipelines
  * - Upload files with parallel processing and progress tracking
  * - Monitor real-time pipeline status and metrics
  * - Stop running pipelines gracefully
  * - Environment-based configuration via .env files
- *
+ * 
  * Configuration:
  * The client supports configuration via .env file with the following variables:
  * - ROCKETRIDE_APIKEY: Your RocketRide API key (required for authentication)
  * - ROCKETRIDE_URI: The RocketRide server URI (defaults to wss://cloud.rocketride.ai)
  * - ROCKETRIDE_PIPELINE: Path to your default pipeline configuration file
  * - ROCKETRIDE_TOKEN: Task token for existing pipelines
- *
+ * 
  * Commands:
  * - start: Start a new pipeline from configuration file
  * - upload: Upload files to a pipeline (with --pipeline or --token)
  * - status: Monitor real-time status of a running pipeline
  * - stop: Terminate a running pipeline gracefully
- *
+ * 
  * @example
  * ```bash
  * # Start a pipeline
@@ -119,7 +119,7 @@ class Box {
 
 	private boxTop(): string {
 		const titlePart = ` ${this.title} `;
-		const remainingWidth = this.width - 3 - titlePart.length;
+		const remainingWidth = (this.width - 3) - titlePart.length;
 		return CHR_TL + CHR_HORIZ + titlePart + CHR_HORIZ.repeat(Math.max(0, remainingWidth)) + CHR_TR;
 	}
 
@@ -348,18 +348,29 @@ class StatusMonitor extends BoxMonitor {
 			3: ['Online', ANSI_GREEN],
 			4: ['Stopping', ANSI_YELLOW],
 			5: ['Offline', ANSI_GRAY],
-			6: ['Offline', ANSI_GRAY],
+			6: ['Offline', ANSI_GRAY]
 		};
 		return stateMap[state] || ['Unknown', ANSI_RESET];
 	}
 
 	private hasCountData(status: Record<string, unknown>): boolean {
-		return (Number(status.totalSize) || 0) > 0 || (Number(status.totalCount) || 0) > 0 || (Number(status.completedSize) || 0) > 0 || (Number(status.completedCount) || 0) > 0 || (Number(status.failedSize) || 0) > 0 || (Number(status.failedCount) || 0) > 0 || (Number(status.rateSize) || 0) > 0 || (Number(status.rateCount) || 0) > 0;
+		return (
+			(Number(status.totalSize) || 0) > 0 ||
+			(Number(status.totalCount) || 0) > 0 ||
+			(Number(status.completedSize) || 0) > 0 ||
+			(Number(status.completedCount) || 0) > 0 ||
+			(Number(status.failedSize) || 0) > 0 ||
+			(Number(status.failedCount) || 0) > 0 ||
+			(Number(status.rateSize) || 0) > 0 ||
+			(Number(status.rateCount) || 0) > 0
+		);
 	}
 
 	private hasMetricsData(status: Record<string, unknown>): boolean {
 		const metrics = (status.metrics || {}) as Record<string, unknown>;
-		return Object.values(metrics).some((value) => typeof value === 'number' && value > 0);
+		return Object.values(metrics).some(value =>
+			typeof value === 'number' && value > 0
+		);
 	}
 
 	onEvent(message: DAPMessage): void {
@@ -420,7 +431,7 @@ class StatusMonitor extends BoxMonitor {
 			const startStr = new Date(startTime * 1000).toLocaleString();
 			lines.push(`Started: ${startStr}`);
 
-			const endTime = status.completed ? Number(status.endTime) || 0 : undefined;
+			const endTime = status.completed ? (Number(status.endTime) || 0) : undefined;
 			const duration = this.formatDuration(startTime, endTime);
 			lines.push(`Elapsed: ${duration}`);
 		}
@@ -430,7 +441,7 @@ class StatusMonitor extends BoxMonitor {
 			const dataTypes = [
 				['total', 'Total'],
 				['completed', 'Completed'],
-				['failed', 'Failed'],
+				['failed', 'Failed']
 			];
 
 			for (const [keyBase, label] of dataTypes) {
@@ -461,7 +472,7 @@ class StatusMonitor extends BoxMonitor {
 
 		for (const [key, value] of Object.entries(metrics)) {
 			if (typeof value === 'number' && value > 0) {
-				const label = key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+				const label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 				lines.push(`${label}: ${value}`);
 			}
 		}
@@ -483,7 +494,8 @@ class StatusMonitor extends BoxMonitor {
 				const errType = parts[0].trim();
 				const message = parts[1].replace(/`/g, '').trim();
 				const fileInfo = parts[2].trim();
-				const filename = fileInfo.includes('\\') || fileInfo.includes('/') ? path.basename(fileInfo) : fileInfo;
+				const filename = fileInfo.includes('\\') || fileInfo.includes('/') ?
+					path.basename(fileInfo) : fileInfo;
 
 				lines.push(`${color}${errType}${ANSI_RESET}: ${message}`);
 				if (filename) {
@@ -502,7 +514,7 @@ class StatusMonitor extends BoxMonitor {
 			return [];
 		}
 
-		return items.slice(-5).map((item) => `• ${item}`);
+		return items.slice(-5).map(item => `• ${item}`);
 	}
 
 	displayConnecting(url: string, attempt: number): void {
@@ -529,7 +541,7 @@ class UploadProgressMonitor extends BoxMonitor {
 	}
 
 	private createProgressBar(percent: number, width: number = 30): string {
-		const filledLength = Math.floor((width * percent) / 100);
+		const filledLength = Math.floor(width * percent / 100);
 		const bar = CHR_BLOCK.repeat(filledLength) + CHR_LIGHT_BLOCK.repeat(width - filledLength);
 		return `[${bar}] ${percent.toFixed(1).padStart(5)}%`;
 	}
@@ -570,7 +582,7 @@ class UploadProgressMonitor extends BoxMonitor {
 				filepath,
 				action,
 				bytes_sent: bytesSent,
-				file_size: fileSize,
+				file_size: fileSize
 			});
 		} else if (action === 'close') {
 			const existing = this.activeUploads.get(filename);
@@ -579,7 +591,7 @@ class UploadProgressMonitor extends BoxMonitor {
 					...existing,
 					action,
 					bytes_sent: bytesSent,
-					file_size: fileSize,
+					file_size: fileSize
 				});
 			}
 		} else if (action === 'complete') {
@@ -587,7 +599,7 @@ class UploadProgressMonitor extends BoxMonitor {
 			this.completedUploads.set(filename, {
 				filepath,
 				action,
-				file_size: fileSize,
+				file_size: fileSize
 			});
 		} else if (action === 'error') {
 			this.activeUploads.delete(filename);
@@ -596,7 +608,7 @@ class UploadProgressMonitor extends BoxMonitor {
 				filepath,
 				action,
 				file_size: fileSize,
-				error: errorMessage,
+				error: errorMessage
 			});
 		}
 
@@ -625,7 +637,7 @@ class UploadProgressMonitor extends BoxMonitor {
 				filepath,
 				action,
 				bytes_sent: bytesSent,
-				file_size: fileSize,
+				file_size: fileSize
 			});
 		} else if (action === 'close') {
 			const existing = this.activeUploads.get(filename);
@@ -634,7 +646,7 @@ class UploadProgressMonitor extends BoxMonitor {
 					...existing,
 					action,
 					bytes_sent: bytesSent,
-					file_size: fileSize,
+					file_size: fileSize
 				});
 			}
 		} else if (action === 'complete') {
@@ -642,7 +654,7 @@ class UploadProgressMonitor extends BoxMonitor {
 			this.completedUploads.set(filename, {
 				filepath,
 				action,
-				file_size: fileSize,
+				file_size: fileSize
 			});
 		} else if (action === 'error') {
 			this.activeUploads.delete(filename);
@@ -651,7 +663,7 @@ class UploadProgressMonitor extends BoxMonitor {
 				filepath,
 				action,
 				file_size: fileSize,
-				error: errorMessage,
+				error: errorMessage
 			});
 		}
 
@@ -684,7 +696,7 @@ class UploadProgressMonitor extends BoxMonitor {
 
 				const bytesSent = Number(data.bytes_sent) || 0;
 				const fileSize = Number(data.file_size) || 1;
-				const percent = fileSize > 0 ? (bytesSent / fileSize) * 100 : 0;
+				const percent = fileSize > 0 ? (bytesSent / fileSize * 100) : 0;
 
 				const progressBar = this.createProgressBar(percent, 12);
 				const sizeInfo = `${this.formatSize(bytesSent)}/${this.formatSize(fileSize)}`;
@@ -710,7 +722,8 @@ class UploadProgressMonitor extends BoxMonitor {
 				summaryLines.push(`Failed: ${this.failedUploads.size} files`);
 			}
 
-			const totalBytes = Array.from(this.completedUploads.values()).reduce((sum, data) => sum + (Number(data.file_size) || 0), 0);
+			const totalBytes = Array.from(this.completedUploads.values())
+				.reduce((sum, data) => sum + (Number(data.file_size) || 0), 0);
 			summaryLines.push(`Total size: ${this.formatSize(totalBytes)}`);
 
 			this.addBox('Upload Summary', summaryLines);
@@ -726,7 +739,8 @@ class UploadProgressMonitor extends BoxMonitor {
 			for (const [filename, data] of failedEntries.slice(-displayCount)) {
 				const displayName = this.truncateFilename(filename, 25);
 				const errorStr = String(data.error || '');
-				const errorMsg = errorStr.length > 30 ? `${errorStr.substring(0, 30)}...` : errorStr;
+				const errorMsg = errorStr.length > 30 ?
+					`${errorStr.substring(0, 30)}...` : errorStr;
 				failedLines.push(`${ANSI_RED}${CHR_CROSS}${ANSI_RESET} ${displayName} - ${errorMsg}`);
 			}
 
@@ -794,7 +808,7 @@ export class RocketRideCLI {
 		total_bytes: 0,
 		successful_uploads: 0,
 		failed_uploads: 0,
-		upload_times: [],
+		upload_times: []
 	};
 	private uri: string = '';
 	private monitor?: BoxMonitor;
@@ -815,44 +829,27 @@ export class RocketRideCLI {
 	}
 
 	private setupSignalHandlers(): void {
-		const FORCE_EXIT_TIMEOUT_MS = 5000;
-
-		const signalHandler = async (signal: string) => {
-			if (this.cancelled) {
-				// Second signal: force exit immediately
-				process.exit(128 + (signal === 'SIGINT' ? 2 : 15));
-			}
-
-			this.cancel();
-
-			// Force exit if cleanup hangs
-			const forceExitTimer = setTimeout(() => {
-				console.error(`\nCleanup timed out after ${FORCE_EXIT_TIMEOUT_MS}ms, forcing exit`);
-				process.exit(128 + (signal === 'SIGINT' ? 2 : 15));
-			}, FORCE_EXIT_TIMEOUT_MS);
-			forceExitTimer.unref();
-
-			try {
-				await this.cleanupClient();
-			} catch {
-				// Ignore cleanup errors during signal handling
-			}
-
-			process.exit(128 + (signal === 'SIGINT' ? 2 : 15));
-		};
-
-		process.on('SIGINT', () => signalHandler('SIGINT'));
-		process.on('SIGTERM', () => signalHandler('SIGTERM'));
+		// TODO: Enable proper signal handling
+		// const signalHandler = () => {
+		// 	this.cancel();
+		// };
+		// process.on('SIGINT', signalHandler);
+		// process.on('SIGTERM', signalHandler);
 	}
 
 	private createProgram(): Command {
 		const program = new Command();
 
-		program.name('rocketride').description('RocketRide Unified Pipeline and File Management CLI').version('1.3.0');
+		program
+			.name('rocketride')
+			.description('RocketRide Unified Pipeline and File Management CLI')
+			.version('1.3.0');
 
 		// Common options
 		const addCommonOptions = (cmd: Command) => {
-			return cmd.option('--uri <uri>', 'RocketRide server URI (can use ROCKETRIDE_URI env var)', process.env.ROCKETRIDE_URI || CONST_DEFAULT_WEB_LOCAL).option('--apikey <key>', 'API key for RocketRide server authentication (can use ROCKETRIDE_APIKEY in .env or env var)', process.env.ROCKETRIDE_APIKEY);
+			return cmd
+				.option('--uri <uri>', 'RocketRide server URI (can use ROCKETRIDE_URI env var)', process.env.ROCKETRIDE_URI || CONST_DEFAULT_WEB_LOCAL)
+				.option('--apikey <key>', 'API key for RocketRide server authentication (can use ROCKETRIDE_APIKEY in .env or env var)', process.env.ROCKETRIDE_APIKEY);
 		};
 
 		// Start command
@@ -874,7 +871,7 @@ export class RocketRideCLI {
 					command: 'start',
 					...options,
 					pipeline: options.pipeline,
-					threads: parseInt(options.threads),
+					threads: parseInt(options.threads)
 				};
 				this.uri = options.uri;
 
@@ -912,7 +909,7 @@ export class RocketRideCLI {
 					files,
 					threads: parseInt(options.threads),
 					max_concurrent: parseInt(options.maxConcurrent || '5'),
-					pipeline_args: options.args,
+					pipeline_args: options.args
 				};
 				this.uri = options.uri;
 
@@ -994,13 +991,16 @@ export class RocketRideCLI {
 		}
 	}
 
-	private async createAndConnectClient(onConnected?: (connectionInfo?: string) => Promise<void>, onDisconnected?: (reason?: string, hasError?: boolean) => Promise<void>): Promise<RocketRideClient> {
+	private async createAndConnectClient(
+		onConnected?: (connectionInfo?: string) => Promise<void>,
+		onDisconnected?: (reason?: string, hasError?: boolean) => Promise<void>
+	): Promise<RocketRideClient> {
 		this.client = new RocketRideClient({
 			uri: this.uri,
 			auth: this.args.apikey,
 			onEvent: this.handleEvent.bind(this),
 			onConnected,
-			onDisconnected,
+			onDisconnected
 		});
 
 		await this.client.connect();
@@ -1014,7 +1014,7 @@ export class RocketRideCLI {
 			const arguments_ = { subscribe };
 			const monitorRequest = this.client.buildRequest('rrext_monitor', {
 				token,
-				arguments: arguments_,
+				arguments: arguments_
 			});
 			const monitorResponse = await this.client.request(monitorRequest);
 
@@ -1079,10 +1079,16 @@ export class RocketRideCLI {
 				pipeline: pipelineData,
 				threads: this.args.threads,
 				token: this.args.token,
-				args: this.args.pipeline_args || [],
+				args: this.args.pipeline_args || []
 			});
 
-			const executionLines = ['Pipeline execution started successfully', `Task token: ${taskToken}`, '', 'Use the following command to monitor status:', `rocketride status --token ${taskToken} --apikey ${this.args.apikey}`];
+			const executionLines = [
+				'Pipeline execution started successfully',
+				`Task token: ${taskToken}`,
+				'',
+				'Use the following command to monitor status:',
+				`rocketride status --token ${taskToken} --apikey ${this.args.apikey}`
+			];
 
 			this.monitor.setCommandStatus(executionLines);
 			this.monitor.draw();
@@ -1115,7 +1121,7 @@ export class RocketRideCLI {
 				total_bytes: 0,
 				successful_uploads: 0,
 				failed_uploads: 0,
-				upload_times: [],
+				upload_times: []
 			};
 
 			let pipelineConfig: PipelineConfig | undefined;
@@ -1173,7 +1179,7 @@ export class RocketRideCLI {
 				this.monitor.draw();
 
 				// Wait briefly to show errors
-				await new Promise((resolve) => setTimeout(resolve, 3000));
+				await new Promise(resolve => setTimeout(resolve, 3000));
 			}
 
 			if (validFiles.length === 0) {
@@ -1197,7 +1203,7 @@ export class RocketRideCLI {
 					pipeline: pipelineConfig,
 					threads: this.args.threads,
 					token: 'UPLOAD_TASK',
-					args: this.args.pipeline_args || [],
+					args: this.args.pipeline_args || []
 				});
 
 				taskToken = result.token;
@@ -1210,25 +1216,28 @@ export class RocketRideCLI {
 			const startTime = Date.now();
 
 			// Convert file paths to File objects for sendFiles
-			const fileObjects = validFiles.map((filePath) => {
+			const fileObjects = validFiles.map(filePath => {
 				const stats = fs.statSync(filePath);
 				const content = fs.readFileSync(filePath);
 
 				return {
 					file: new File([content], path.basename(filePath), {
 						type: 'application/octet-stream',
-						lastModified: stats.mtimeMs,
+						lastModified: stats.mtimeMs
 					}),
 					objinfo: {
 						filepath: filePath,
-						size: stats.size,
-					},
+						size: stats.size
+					}
 				};
 			});
 
-			// Upload files - progress events come through event subscription
-			// Server handles concurrency automatically
-			const results = await this.client!.sendFiles(fileObjects, taskToken!);
+		// Upload files - progress events come through event subscription
+		// Server handles concurrency automatically
+		const results = await this.client!.sendFiles(
+			fileObjects,
+			taskToken!
+		);
 
 			const endTime = Date.now();
 
@@ -1238,7 +1247,11 @@ export class RocketRideCLI {
 			// Cleanup pipeline if we created it
 			if (shouldManagePipeline && taskToken) {
 				try {
-					this.monitor.setCommandStatus(['Upload completed successfully', 'Cleaning up...', 'Terminating pipeline...']);
+					this.monitor.setCommandStatus([
+						'Upload completed successfully',
+						'Cleaning up...',
+						'Terminating pipeline...'
+					]);
 					this.monitor.draw();
 
 					await this.client!.terminate(taskToken);
@@ -1272,6 +1285,8 @@ export class RocketRideCLI {
 		}
 	}
 
+
+
 	private findFiles(patterns: string[]): string[] {
 		const files: string[] = [];
 
@@ -1284,12 +1299,12 @@ export class RocketRideCLI {
 					files.push(fullPath);
 				} else if (stat.isDirectory()) {
 					const dirFiles = glob.sync(path.join(fullPath, '**/*'), { nodir: true });
-					files.push(...dirFiles.map((f) => path.resolve(f)));
+					files.push(...dirFiles.map(f => path.resolve(f)));
 				}
 			} catch {
 				// Try glob pattern
 				const matches = glob.sync(pattern, { nodir: true });
-				files.push(...matches.map((f) => path.resolve(f)));
+				files.push(...matches.map(f => path.resolve(f)));
 			}
 		}
 
@@ -1324,8 +1339,8 @@ export class RocketRideCLI {
 
 		this.monitor.clear();
 
-		const successfulFiles: Array<{ name: string; size: number; time: number }> = [];
-		const failedFiles: Array<{ name: string; error: string }> = [];
+		const successfulFiles: Array<{ name: string, size: number, time: number }> = [];
+		const failedFiles: Array<{ name: string, error: string }> = [];
 
 		for (const result of results) {
 			const filename = path.basename(result.filepath || '');
@@ -1338,12 +1353,12 @@ export class RocketRideCLI {
 				successfulFiles.push({
 					name: filename,
 					size: result.file_size || 0,
-					time: result.upload_time || 0,
+					time: result.upload_time || 0
 				});
 			} else {
 				failedFiles.push({
 					name: filename,
-					error: result.error || 'Unknown error',
+					error: result.error || 'Unknown error'
 				});
 				this.uploadStats.failed_uploads++;
 			}
@@ -1355,7 +1370,10 @@ export class RocketRideCLI {
 		const failed = this.uploadStats.failed_uploads;
 		const totalBytes = this.uploadStats.total_bytes;
 
-		const summaryLines = [`Total files processed: ${successful + failed}`, `Successful uploads: ${ANSI_GREEN}${successful}${ANSI_RESET}`];
+		const summaryLines = [
+			`Total files processed: ${successful + failed}`,
+			`Successful uploads: ${ANSI_GREEN}${successful}${ANSI_RESET}`
+		];
 
 		if (failed > 0) {
 			summaryLines.push(`Failed uploads: ${ANSI_RED}${failed}${ANSI_RESET}`);
@@ -1396,8 +1414,10 @@ export class RocketRideCLI {
 			const failureLines: string[] = [];
 
 			for (const failedFile of failedFiles.slice(0, 10)) {
-				const filename = failedFile.name.length > 25 ? `${failedFile.name.substring(0, 25)}...` : failedFile.name;
-				const errorMsg = failedFile.error.length > 40 ? `${failedFile.error.substring(0, 40)}...` : failedFile.error;
+				const filename = failedFile.name.length > 25 ?
+					`${failedFile.name.substring(0, 25)}...` : failedFile.name;
+				const errorMsg = failedFile.error.length > 40 ?
+					`${failedFile.error.substring(0, 40)}...` : failedFile.error;
 
 				failureLines.push(`${ANSI_RED}${CHR_CROSS}${ANSI_RESET} ${filename} - ${errorMsg}`);
 			}
@@ -1414,7 +1434,8 @@ export class RocketRideCLI {
 			const successLines: string[] = [];
 
 			for (const successFile of successfulFiles.slice(-5)) {
-				const truncatedName = successFile.name.length > 35 ? `${successFile.name.substring(0, 35)}...` : successFile.name;
+				const truncatedName = successFile.name.length > 35 ?
+					`${successFile.name.substring(0, 35)}...` : successFile.name;
 				const sizeStr = this.monitor.formatSize(successFile.size);
 				const timeStr = `${successFile.time.toFixed(1)}s`;
 
@@ -1460,11 +1481,11 @@ export class RocketRideCLI {
 						await this.createAndConnectClient(onConnected, onDisconnected);
 					} catch {
 						this.attempt++;
-						await new Promise((resolve) => setTimeout(resolve, 5000));
+						await new Promise(resolve => setTimeout(resolve, 5000));
 						continue;
 					}
 				}
-				await new Promise((resolve) => setTimeout(resolve, 1000));
+				await new Promise(resolve => setTimeout(resolve, 1000));
 			}
 
 			return 0;
@@ -1503,7 +1524,11 @@ export class RocketRideCLI {
 
 			await this.client!.terminate(this.args.token);
 
-			const stopLines = [`Task ${this.args.token} terminated successfully`, '', 'The task has been stopped and resources cleaned up.'];
+			const stopLines = [
+				`Task ${this.args.token} terminated successfully`,
+				'',
+				'The task has been stopped and resources cleaned up.'
+			];
 
 			this.monitor.setCommandStatus(stopLines);
 			this.monitor.draw();
@@ -1573,7 +1598,7 @@ export async function main(): Promise<void> {
 
 // Entry point when script is run directly
 if (require.main === module) {
-	main().catch((error) => {
+	main().catch(error => {
 		console.error('Fatal error:', error);
 		process.exit(1);
 	});
