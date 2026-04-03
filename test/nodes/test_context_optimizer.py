@@ -793,6 +793,38 @@ class TestIInstanceLifecycle:
         assert call_kwargs['question'] == 'What is AI?'
         assert call_kwargs['system_prompt'] == 'You are helpful.'
 
+    def test_empty_questions_with_optimized_result_logs_debug(self):
+        """When question.questions is empty but optimizer returns a question, a debug log should fire."""
+        mock_opt = MagicMock()
+        mock_opt.optimize.return_value = {
+            'system_prompt': 'optimized',
+            'question': 'optimized question text',
+            'documents': [],
+            'history': [],
+            'metadata': {
+                'tokens_used': 10,
+                'tokens_saved': 0,
+                'components_truncated': [],
+                'model': 'gpt-5',
+                'total_limit': 128000,
+                'budget': {},
+            },
+        }
+        inst = self._make_instance(optimizer=mock_opt)
+
+        from ai.common.schema import Question as _Q
+
+        q = _Q()
+        q.questions = []  # explicitly empty
+
+        with patch('nodes.src.nodes.context_optimizer.IInstance.debug') as mock_debug:
+            inst.writeQuestions(q)
+
+        # The debug log about discarding should have been called
+        mock_debug.assert_any_call('context_optimizer: optimized question text produced but question.questions is empty, discarding: optimized question text')
+        # Question should still be forwarded
+        inst.instance.writeQuestions.assert_called_once()
+
 
 # ===========================================================================
 # Input validation tests (issues #4 and #5)

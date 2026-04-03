@@ -90,6 +90,8 @@ class IInstance(IInstanceBase):
             # Remove any extra questions that were merged
             if len(question.questions) > 1:
                 question.questions = [question.questions[0]]
+        elif not question.questions and result['question']:
+            debug(f'context_optimizer: optimized question text produced but question.questions is empty, discarding: {result["question"][:200]}')
 
         # Update documents -- keep only the selected ones
         if question.documents is not None:
