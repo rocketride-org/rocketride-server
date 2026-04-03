@@ -54,12 +54,7 @@ class IInstance(IInstanceBase):
         # Extract the user's question text.
         question_text = ''
         if hasattr(question, 'questions') and question.questions:
-            parts = []
-            for q in question.questions:
-                if q is None:
-                    continue
-                parts.append(q.text if hasattr(q, 'text') else str(q))
-            question_text = ' '.join(parts)
+            question_text = ' '.join(str(getattr(q, 'text', '') or '') for q in question.questions if q is not None)
         if not question_text and hasattr(question, 'getPrompt'):
             question_text = question.getPrompt()
         if not question_text:

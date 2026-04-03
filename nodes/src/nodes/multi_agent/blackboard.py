@@ -82,21 +82,22 @@ class SharedBlackboard:
     def read(self, key: str) -> Optional[Any]:
         """Read a single value by key.  Returns ``None`` if absent."""
         with self._lock:
-            return self._store.get(key)
+            value = self._store.get(key)
+            return copy.deepcopy(value)
 
     def read_all(self) -> Dict[str, Any]:
-        """Return a shallow copy of the full blackboard state."""
+        """Return a deep copy of the full blackboard state."""
         with self._lock:
-            return dict(self._store)
+            return copy.deepcopy(self._store)
 
     # ------------------------------------------------------------------
     # History / introspection
     # ------------------------------------------------------------------
 
     def get_history(self) -> List[BlackboardEntry]:
-        """Return the ordered list of all write events (oldest first)."""
+        """Return a deep copy of all write events (oldest first)."""
         with self._lock:
-            return list(self._history)
+            return copy.deepcopy(self._history)
 
     def clear(self) -> None:
         """Reset all state and history."""

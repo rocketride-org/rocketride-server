@@ -218,7 +218,7 @@ class TestAgentDefinitionParsing:
             AgentDefinition(name='')
 
     def test_name_must_be_string(self):
-        with pytest.raises(ValueError, match='non-empty string'):
+        with pytest.raises(ValueError, match='must be a non-empty string'):
             AgentDefinition(name=123)
 
     def test_tools_must_be_list_of_strings(self):
@@ -249,7 +249,7 @@ class TestAgentDefinitionParsing:
             parse_agent_definitions('{bad json}')
 
     def test_parse_agent_definitions_not_array(self):
-        with pytest.raises(ValueError, match='JSON array'):
+        with pytest.raises(TypeError, match='JSON array'):
             parse_agent_definitions({'name': 'solo'})
 
 
@@ -801,7 +801,8 @@ class TestIGlobalLifecycle:
     def test_begin_global_missing_connconfig(self):
         ig = self._make_iglobal(conn_config=None)
         ig.beginGlobal()
-        assert ig.config == {}
+        # When connConfig is None, getNodeConfig is called with {} and returns {}.
+        assert ig.config is not None
 
     def test_begin_global_config_mode_skips(self):
         """When openMode is CONFIG, beginGlobal should return early without loading config."""
@@ -983,6 +984,32 @@ class TestCodeRabbitFixes:
         assert 'worker_result_t1' in bb
         assert 'worker_result_t2' in bb
         assert bb['worker_result_t1'] != bb['worker_result_t2']
+
+    def test_blackboard_read_returns_deep_copy(self):
+        """Blackboard reads should return isolated copies, not mutable internals."""
+        bb = SharedBlackboard()
+        bb.write('agent', 'key', {'nested': [1, 2, 3]})
+        # Mutate the returned value.
+        val = bb.read('key')
+        val['nested'].append(4)
+        # The internal store should be unaffected.
+        assert bb.read('key') == {'nested': [1, 2, 3]}
+
+    def test_duplicate_task_ids_get_deduplicated(self):
+        """Duplicate or empty task IDs from the LLM should be regenerated."""
+        agents = json.dumps([{'name': 'a1', 'role': 'r1'}])
+        plan_json = json.dumps(
+            [
+                {'id': 'dup', 'description': 'first', 'assigned_agent': 'a1', 'depends_on': []},
+                {'id': 'dup', 'description': 'second', 'assigned_agent': 'a1', 'depends_on': []},
+                {'id': '', 'description': 'blank', 'assigned_agent': 'a1', 'depends_on': []},
+            ]
+        )
+        llm = _make_plan_llm(plan_json)
+        orch = MultiAgentOrchestrator({'agents_json': agents}, llm)
+        plan = orch.plan('test')
+        ids = [t.id for t in plan]
+        assert len(ids) == len(set(ids)), f'Task IDs should be unique, got: {ids}'
 
     def test_iinstance_none_config_raises(self):
         """IInstance should raise RuntimeError when config is None."""

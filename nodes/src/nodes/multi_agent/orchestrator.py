@@ -254,6 +254,7 @@ class MultiAgentOrchestrator:
             items = [items]
 
         tasks: List[SubTask] = []
+        seen_ids: set = set()
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -273,9 +274,16 @@ class MultiAgentOrchestrator:
                 deps = [str(d) for d in raw_deps if d]
             else:
                 deps = [str(raw_deps)] if raw_deps else []
+
+            # Validate task ID — generate a fallback for blank/null/duplicate IDs.
+            task_id = str(item.get('id') or '')
+            if not task_id or task_id in seen_ids:
+                task_id = f'task-{len(tasks)}'
+            seen_ids.add(task_id)
+
             tasks.append(
                 SubTask(
-                    id=str(item.get('id', f'task-{len(tasks)}')),
+                    id=task_id,
                     description=str(item.get('description', '')),
                     assigned_agent=agent_name,
                     depends_on=deps,

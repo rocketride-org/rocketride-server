@@ -115,6 +115,6 @@ def parse_agent_definitions(raw: Any) -> List[AgentDefinition]:
             raise ValueError(f'agents_json is not valid JSON: {exc}') from exc
 
     if not isinstance(raw, list):
-        raise ValueError(f'agents_json must be a JSON array, got {type(raw).__name__}')
+        raise TypeError(f'agents_json must be a JSON array, got {type(raw).__name__}')
 
     return [AgentDefinition.from_dict(item) for item in raw]

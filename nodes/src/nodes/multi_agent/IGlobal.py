@@ -39,10 +39,7 @@ class IGlobal(IGlobalBase):
         """
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
-        conn_config = getattr(self.glb, 'connConfig', None)
-        if conn_config is None:
-            self.config = {}
-            return
+        conn_config = getattr(self.glb, 'connConfig', None) or {}
         self.config = Config.getNodeConfig(self.glb.logicalType, conn_config)
 
     def endGlobal(self) -> None:
