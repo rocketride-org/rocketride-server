@@ -218,6 +218,14 @@ class TestCobaltEvaluatorInit:
         evaluator = CobaltEvaluator({'eval_type': 'custom'}, {'custom_fn': 'not-a-callable'})
         assert evaluator._custom_fn is None
 
+    def test_eval_type_property(self):
+        evaluator = CobaltEvaluator({'eval_type': 'llm_judge'}, {})
+        assert evaluator.eval_type == 'llm_judge'
+
+    def test_eval_type_property_default(self):
+        evaluator = CobaltEvaluator({}, {})
+        assert evaluator.eval_type == 'similarity'
+
 
 class TestSemanticEvaluation:
     """Test semantic similarity evaluation."""
@@ -278,6 +286,37 @@ class TestSemanticEvaluation:
         assert result['score'] == 1.0
         assert result['passed'] is True
 
+    def test_semantic_with_mocked_cobalt(self):
+        """Test that semantic evaluation uses Evaluator(type='similarity') and calls evaluate()."""
+        mock_evaluator_instance = MagicMock()
+        mock_evaluator_instance.evaluate.return_value = {
+            'score': 0.92,
+            'reasoning': 'High semantic similarity',
+        }
+
+        with patch('eval_cobalt.cobalt_evaluator._cobalt_available', True), patch('eval_cobalt.cobalt_evaluator.Evaluator', return_value=mock_evaluator_instance) as mock_cls:
+            evaluator = CobaltEvaluator({'threshold': 0.5}, {})
+            result = evaluator.evaluate_semantic('Paris is capital of France', 'The capital of France is Paris')
+
+        mock_cls.assert_called_once_with(name='semantic-similarity', type='similarity', threshold=0.5)
+        mock_evaluator_instance.evaluate.assert_called_once_with(output='Paris is capital of France', expected='The capital of France is Paris')
+        assert result['score'] == 0.92
+        assert result['passed'] is True
+        assert result['evaluator'] == 'semantic'
+
+    def test_semantic_cobalt_exception_falls_back(self):
+        """Test that cobalt failure falls back to Jaccard similarity."""
+        mock_evaluator_instance = MagicMock()
+        mock_evaluator_instance.evaluate.side_effect = RuntimeError('Connection failed')
+
+        with patch('eval_cobalt.cobalt_evaluator._cobalt_available', True), patch('eval_cobalt.cobalt_evaluator.Evaluator', return_value=mock_evaluator_instance):
+            evaluator = CobaltEvaluator({'threshold': 0.3}, {})
+            result = evaluator.evaluate_semantic('hello world test', 'hello world test')
+
+        assert result['score'] == 1.0
+        assert result['passed'] is True
+        assert 'Fallback' in result['reasoning']
+
 
 class TestLLMJudgeEvaluation:
     """Test LLM-as-judge evaluation (mocked)."""
@@ -298,7 +337,7 @@ class TestLLMJudgeEvaluation:
     def test_llm_judge_with_mocked_cobalt(self):
         """Test that the evaluator calls cobalt correctly when available."""
         mock_evaluator_instance = MagicMock()
-        mock_evaluator_instance.evaluate_llm_judge.return_value = {
+        mock_evaluator_instance.evaluate.return_value = {
             'score': 0.85,
             'reasoning': 'Output is accurate and well-structured',
         }
@@ -314,7 +353,7 @@ class TestLLMJudgeEvaluation:
     def test_llm_judge_cobalt_exception(self):
         """Test graceful handling when cobalt raises an exception."""
         mock_evaluator_instance = MagicMock()
-        mock_evaluator_instance.evaluate_llm_judge.side_effect = RuntimeError('API timeout')
+        mock_evaluator_instance.evaluate.side_effect = RuntimeError('API timeout')
 
         with patch('eval_cobalt.cobalt_evaluator._cobalt_available', True), patch('eval_cobalt.cobalt_evaluator.Evaluator', return_value=mock_evaluator_instance):
             evaluator = CobaltEvaluator({'eval_type': 'llm_judge', 'apikey': 'test-key', 'threshold': 0.5}, {})

@@ -98,6 +98,11 @@ class CobaltEvaluator:
 
         debug(f'CobaltEvaluator initialized: type={self._eval_type} threshold={self._threshold}')
 
+    @property
+    def eval_type(self) -> str:
+        """Return the configured evaluation type."""
+        return self._eval_type
+
     # ------------------------------------------------------------------
     # Evaluation methods
     # ------------------------------------------------------------------
@@ -125,8 +130,8 @@ class CobaltEvaluator:
             return self._fallback_semantic(output, expected, threshold)
 
         try:
-            evaluator = Evaluator()
-            result = evaluator.evaluate_similarity(output=output, expected=expected)
+            evaluator = Evaluator(name='semantic-similarity', type='similarity', threshold=threshold)
+            result = evaluator.evaluate(output=output, expected=expected)
             score = float(result.get('score', 0.0)) if isinstance(result, dict) else float(getattr(result, 'score', 0.0))
             reasoning = result.get('reasoning', '') if isinstance(result, dict) else getattr(result, 'reasoning', '')
             return self._make_result(score, threshold, reasoning or 'Semantic similarity evaluated', 'semantic')
@@ -161,8 +166,8 @@ class CobaltEvaluator:
             return self._make_result(0.0, self._threshold, 'cobalt-ai not installed', 'llm_judge')
 
         try:
-            evaluator = Evaluator(api_key=self._apikey)
-            result = evaluator.evaluate_llm_judge(output=output, expected=expected, criteria=criteria, model=model)
+            evaluator = Evaluator(name='llm-judge', type='llm_judge', model=model, criteria=criteria, api_key=self._apikey)
+            result = evaluator.evaluate(output=output, expected=expected)
             score = float(result.get('score', 0.0)) if isinstance(result, dict) else float(getattr(result, 'score', 0.0))
             reasoning = result.get('reasoning', '') if isinstance(result, dict) else getattr(result, 'reasoning', '')
             return self._make_result(score, self._threshold, reasoning or 'LLM judge evaluation complete', 'llm_judge')
