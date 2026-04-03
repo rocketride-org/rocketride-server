@@ -479,29 +479,24 @@ class TestIGlobal:
     def test_validate_config_missing_apikey(self):
         """ValidateConfig warns when API key is missing."""
         iglobal = self._make_iglobal()
+        _mock_rocketlib.warning.reset_mock()
 
         with patch('rerank_cohere.IGlobal.Config') as mock_config_cls:
             mock_config_cls.getNodeConfig.return_value = {'apikey': '', 'model': 'rerank-v3.5'}
             iglobal.validateConfig()
 
-        _mock_rocketlib.warning.assert_called()
+        _mock_rocketlib.warning.assert_called_once()
 
-    def test_validate_config_invalid_apikey(self):
-        """ValidateConfig warns when API key is rejected by Cohere."""
+    def test_validate_config_empty_model(self):
+        """ValidateConfig warns when model name is empty."""
         iglobal = self._make_iglobal()
+        _mock_rocketlib.warning.reset_mock()
 
-        mock_client_instance = Mock()
-        mock_client_instance.rerank.side_effect = _MockUnauthorizedError('invalid key')
-
-        # CohereClient is imported inside validateConfig via `from cohere import ClientV2 as CohereClient`
-        # We need to patch the cohere module's ClientV2 attribute
         with patch('rerank_cohere.IGlobal.Config') as mock_config_cls:
-            mock_config_cls.getNodeConfig.return_value = {'apikey': 'bad-key', 'model': 'rerank-v3.5'}
-            with patch.dict(sys.modules, {'cohere': _mock_cohere}):
-                _mock_cohere.ClientV2 = Mock(return_value=mock_client_instance)
-                iglobal.validateConfig()
+            mock_config_cls.getNodeConfig.return_value = {'apikey': 'test-key', 'model': '  '}
+            iglobal.validateConfig()
 
-        _mock_rocketlib.warning.assert_called()
+        _mock_rocketlib.warning.assert_called_once()
 
 
 # ===========================================================================
@@ -606,7 +601,7 @@ class TestIInstance:
             inst.writeQuestions(question)
 
     def test_write_questions_no_reranker_raises(self):
-        """WriteQuestions raises Exception when reranker is not initialized."""
+        """WriteQuestions raises RuntimeError when reranker is not initialized."""
         inst = self._make_instance()
         inst.IGlobal._reranker = None
 
@@ -614,7 +609,7 @@ class TestIInstance:
         question.addQuestion('query')
         question.addDocuments(_MockDoc(page_content='doc'))
 
-        with pytest.raises(Exception, match='Reranker not initialized'):
+        with pytest.raises(RuntimeError, match='Reranker not initialized'):
             inst.writeQuestions(question)
 
     def test_write_questions_preserves_metadata(self):
@@ -637,7 +632,7 @@ class TestIInstance:
         assert docs[0].metadata['objectId'] == 'obj-123'
 
     def test_write_questions_empty_rerank_results(self):
-        """WriteQuestions with no rerank results does not call writeDocuments."""
+        """WriteQuestions with no rerank results still writes an answer."""
         inst = self._make_instance(rerank_results=[])
 
         question = _MockQuestion()
@@ -647,7 +642,8 @@ class TestIInstance:
         inst.writeQuestions(question)
 
         inst.instance.writeDocuments.assert_not_called()
-        inst.instance.writeAnswers.assert_not_called()
+        # An answer is always forwarded, even when all docs are filtered
+        inst.instance.writeAnswers.assert_called_once()
 
     def test_write_questions_dict_style_question(self):
         """WriteQuestions handles dict-style question text objects."""

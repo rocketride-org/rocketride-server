@@ -127,6 +127,9 @@ class RerankClient:
         effective_top_n = top_n if top_n is not None else self._top_n
         effective_model = model or self._model
 
+        if not isinstance(effective_top_n, int) or effective_top_n < 1:
+            raise ValueError(f'top_n must be an integer >= 1, got {effective_top_n}')
+
         try:
             response = self._client.rerank(
                 model=effective_model,
@@ -172,6 +175,9 @@ class RerankClient:
             List of dicts above the min_score threshold, sorted by relevance.
         """
         effective_min_score = min_score if min_score is not None else self._min_score
+
+        if not (0.0 <= effective_min_score <= 1.0):
+            raise ValueError(f'min_score must be between 0.0 and 1.0, got {effective_min_score}')
 
         results = self.rerank(query=query, documents=documents, top_n=top_n, model=model)
 
