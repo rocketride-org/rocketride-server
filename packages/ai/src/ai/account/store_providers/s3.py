@@ -1,5 +1,6 @@
 """AWS S3 storage implementation."""
 
+import asyncio
 import json
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -74,11 +75,7 @@ class S3Store(IStore):
             client = self._get_client()
             key = self._get_key(filename)
 
-            client.put_object(
-                Bucket=self._bucket,
-                Key=key,
-                Body=data.encode('utf-8'),
-            )
+            await asyncio.to_thread(client.put_object, Bucket=self._bucket, Key=key, Body=data.encode('utf-8'))
 
         except (ConnectionError, TimeoutError):
             # Let these bubble up for retry
@@ -102,8 +99,11 @@ class S3Store(IStore):
             client = self._get_client()
             key = self._get_key(filename)
 
-            response = client.get_object(Bucket=self._bucket, Key=key)
-            data = response['Body'].read()
+            def _read():
+                response = client.get_object(Bucket=self._bucket, Key=key)
+                return response['Body'].read()
+
+            data = await asyncio.to_thread(_read)
             return data.decode('utf-8')
 
         except (ConnectionError, TimeoutError):
@@ -131,12 +131,13 @@ class S3Store(IStore):
             client = self._get_client()
             key = self._get_key(filename)
 
-            response = client.get_object(Bucket=self._bucket, Key=key)
-            data = response['Body'].read()
-            content = data.decode('utf-8')
-            etag = response.get('ETag', '').strip('"')  # Remove quotes from ETag
+            def _read():
+                response = client.get_object(Bucket=self._bucket, Key=key)
+                data = response['Body'].read()
+                return data, response.get('ETag', '').strip('"')
 
-            return (content, etag)
+            data, etag = await asyncio.to_thread(_read)
+            return (data.decode('utf-8'), etag)
 
         except (ConnectionError, TimeoutError):
             raise
@@ -169,7 +170,7 @@ class S3Store(IStore):
             # Check if file exists - expected_version is REQUIRED for updates
             file_exists = False
             try:
-                client.head_object(Bucket=self._bucket, Key=key)
+                await asyncio.to_thread(client.head_object, Bucket=self._bucket, Key=key)
                 file_exists = True
             except Exception as e:
                 # Check if it's a NoSuchKey error (file doesn't exist)
@@ -193,7 +194,7 @@ class S3Store(IStore):
                 put_kwargs['IfMatch'] = expected_version
 
             try:
-                response = client.put_object(**put_kwargs)
+                response = await asyncio.to_thread(lambda: client.put_object(**put_kwargs))
             except Exception as put_error:
                 # Handle race condition: file was deleted between head_object and put_object
                 # When IfMatch is used but key doesn't exist, S3 returns NoSuchKey
@@ -236,7 +237,7 @@ class S3Store(IStore):
 
             # Verify file exists first
             try:
-                head_response = client.head_object(Bucket=self._bucket, Key=key)
+                head_response = await asyncio.to_thread(client.head_object, Bucket=self._bucket, Key=key)
                 current_etag = head_response.get('ETag', '').strip('"')
 
                 # expected_version is REQUIRED for delete operations
@@ -258,7 +259,7 @@ class S3Store(IStore):
                 raise
 
             # Delete the file
-            client.delete_object(Bucket=self._bucket, Key=key)
+            await asyncio.to_thread(client.delete_object, Bucket=self._bucket, Key=key)
 
         except (ConnectionError, TimeoutError):
             raise
@@ -281,32 +282,181 @@ class S3Store(IStore):
             client = self._get_client()
             key_prefix = self._get_key(prefix) if prefix else self._prefix
 
-            files = []
-            paginator = client.get_paginator('list_objects_v2')
+            def _list():
+                result = []
+                paginator = client.get_paginator('list_objects_v2')
+                page_kwargs = {'Bucket': self._bucket}
+                if key_prefix:
+                    page_kwargs['Prefix'] = key_prefix
+                for page in paginator.paginate(**page_kwargs):
+                    if 'Contents' in page:
+                        for obj in page['Contents']:
+                            k = obj['Key']
+                            if self._prefix and k.startswith(self._prefix + '/'):
+                                relative_key = k[len(self._prefix) + 1 :]
+                            elif self._prefix and k.startswith(self._prefix):
+                                relative_key = k[len(self._prefix) :]
+                            else:
+                                relative_key = k
+                            result.append(relative_key)
+                return sorted(result)
 
-            page_kwargs = {'Bucket': self._bucket}
-            if key_prefix:
-                page_kwargs['Prefix'] = key_prefix
-
-            for page in paginator.paginate(**page_kwargs):
-                if 'Contents' in page:
-                    for obj in page['Contents']:
-                        key = obj['Key']
-                        # Remove prefix to get relative path
-                        if self._prefix and key.startswith(self._prefix + '/'):
-                            relative_key = key[len(self._prefix) + 1 :]
-                        elif self._prefix and key.startswith(self._prefix):
-                            relative_key = key[len(self._prefix) :]
-                        else:
-                            relative_key = key
-                        files.append(relative_key)
-
-            return sorted(files)
+            return await asyncio.to_thread(_list)
 
         except (ConnectionError, TimeoutError):
             raise
         except Exception as e:
             raise StorageError(f'Failed to list files with prefix {prefix} from S3: {e}') from e
+
+    # =========================================================================
+    # Handle-Based I/O
+    # =========================================================================
+
+    # S3 minimum part size (5 MB) — all parts except the last must be >= this
+    _S3_MIN_PART_SIZE = 5 * 1024 * 1024
+
+    async def open_write(self, filename: str) -> dict:
+        """Prepare a write session. Multipart upload is deferred until needed."""
+        try:
+            key = self._get_key(filename)
+            return {
+                'context': {
+                    'key': key,
+                    'upload_id': None,
+                    'parts': [],
+                    'part_number': 1,
+                    'buffer': bytearray(),
+                },
+            }
+        except Exception as e:
+            raise StorageError(f'Failed to prepare upload for {filename}: {e}') from e
+
+    async def write_chunk(self, filename: str, context, data: bytes) -> int:
+        """Buffer data and flush as S3 parts when buffer reaches 5 MB."""
+        try:
+            context['buffer'].extend(data)
+            written = len(data)
+
+            # Flush parts while buffer is large enough
+            while len(context['buffer']) >= self._S3_MIN_PART_SIZE:
+                # Lazily create multipart upload on first flush
+                if context['upload_id'] is None:
+                    client = self._get_client()
+                    response = await asyncio.to_thread(client.create_multipart_upload, Bucket=self._bucket, Key=context['key'])
+                    context['upload_id'] = response['UploadId']
+
+                chunk = bytes(context['buffer'][: self._S3_MIN_PART_SIZE])
+                await self._upload_part(context, chunk)
+                del context['buffer'][: self._S3_MIN_PART_SIZE]
+
+            return written
+        except Exception as e:
+            raise StorageError(f'Failed to write chunk to {filename}: {e}') from e
+
+    async def close_write(self, filename: str, context) -> None:
+        """Finalize the upload — single put_object if small, complete multipart otherwise."""
+        try:
+            client = self._get_client()
+            remaining = bytes(context['buffer'])
+            context['buffer'].clear()
+
+            if context['upload_id'] is None:
+                # No multipart was started — simple put_object
+                await asyncio.to_thread(client.put_object, Bucket=self._bucket, Key=context['key'], Body=remaining)
+            else:
+                # Flush remaining buffer as the final part (can be < 5 MB)
+                if remaining:
+                    await self._upload_part(context, remaining)
+
+                await asyncio.to_thread(
+                    client.complete_multipart_upload,
+                    Bucket=self._bucket,
+                    Key=context['key'],
+                    UploadId=context['upload_id'],
+                    MultipartUpload={'Parts': context['parts']},
+                )
+        except Exception as e:
+            # Best-effort abort on failure (only if multipart was started)
+            if context.get('upload_id'):
+                try:
+                    await asyncio.to_thread(
+                        self._get_client().abort_multipart_upload,
+                        Bucket=self._bucket,
+                        Key=context['key'],
+                        UploadId=context['upload_id'],
+                    )
+                except Exception:
+                    pass
+            raise StorageError(f'Failed to finalize upload for {filename}: {e}') from e
+
+    async def open_read(self, filename: str) -> dict:
+        """Get file size via head_object for ranged reads."""
+        try:
+            client = self._get_client()
+            key = self._get_key(filename)
+            response = await asyncio.to_thread(client.head_object, Bucket=self._bucket, Key=key)
+            size = response['ContentLength']
+            return {'context': {'key': key}, 'size': size}
+        except Exception as e:
+            if self._is_no_such_key_error(e):
+                raise StorageError(f'File not found: {filename}')
+            raise StorageError(f'Failed to open {filename} for reading: {e}') from e
+
+    async def read_chunk(self, filename: str, context, offset: int, length: int = 4_194_304) -> bytes:
+        """Read a range of bytes from S3."""
+        try:
+            client = self._get_client()
+            end = offset + length - 1
+
+            def _read_range():
+                response = client.get_object(Bucket=self._bucket, Key=context['key'], Range=f'bytes={offset}-{end}')
+                return response['Body'].read()
+
+            return await asyncio.to_thread(_read_range)
+        except Exception as e:
+            # Empty response at EOF
+            error_str = str(e)
+            if 'InvalidRange' in error_str or '416' in error_str:
+                return b''
+            raise StorageError(f'Failed to read chunk from {filename}: {e}') from e
+
+    async def close_read(self, filename: str, context) -> None:
+        """No-op — S3 reads are stateless."""
+        pass
+
+    async def get_file_info(self, filename: str) -> dict:
+        """Get file size and modification time via head_object."""
+        try:
+            client = self._get_client()
+            key = self._get_key(filename)
+            response = await asyncio.to_thread(client.head_object, Bucket=self._bucket, Key=key)
+            return {
+                'size': response['ContentLength'],
+                'modified': response['LastModified'].timestamp(),
+            }
+        except Exception as e:
+            if self._is_no_such_key_error(e):
+                raise StorageError(f'File not found: {filename}')
+            raise StorageError(f'Failed to get file info for {filename}: {e}') from e
+
+    async def _upload_part(self, context: dict, data: bytes) -> None:
+        """Upload a single part and record its ETag."""
+        client = self._get_client()
+        response = await asyncio.to_thread(
+            client.upload_part,
+            Bucket=self._bucket,
+            Key=context['key'],
+            UploadId=context['upload_id'],
+            PartNumber=context['part_number'],
+            Body=data,
+        )
+        context['parts'].append(
+            {
+                'PartNumber': context['part_number'],
+                'ETag': response['ETag'],
+            }
+        )
+        context['part_number'] += 1
 
     # =========================================================================
     # Private Static Methods

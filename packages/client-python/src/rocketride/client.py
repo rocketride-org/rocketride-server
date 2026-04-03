@@ -48,6 +48,7 @@ from .mixins.chat import ChatMixin
 from .mixins.events import EventMixin
 from .mixins.ping import PingMixin
 from .mixins.services import ServicesMixin
+from .mixins.store import StoreMixin
 
 client_id = 0
 
@@ -65,6 +66,7 @@ class RocketRideClient(
     EventMixin,
     PingMixin,
     ServicesMixin,
+    StoreMixin,
     DAPClient,
 ):
     """
@@ -117,8 +119,8 @@ class RocketRideClient(
 
     def __init__(
         self,
-        uri: str = "",
-        auth: str = "",
+        uri: str = '',
+        auth: str = '',
         **kwargs,
     ):
         """
@@ -147,7 +149,7 @@ class RocketRideClient(
         if env is None:
             # Start with process environment so ROCKETRIDE_* vars work out of the box.
             self._env = dict(os.environ)
-            
+
             # Try to load .env file
             try:
                 env_path = os.path.join(os.getcwd(), '.env')
@@ -164,8 +166,7 @@ class RocketRideClient(
                                 key = key.strip()
                                 value = value.strip()
                                 # Remove quotes if present
-                                if (value.startswith('"') and value.endswith('"')) or \
-                                   (value.startswith("'") and value.endswith("'")):
+                                if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
                                     value = value[1:-1]
                                 # Preserve already-defined process env values.
                                 self._env.setdefault(key, value)
@@ -186,6 +187,7 @@ class RocketRideClient(
 
         # Normalize the URI into a fully-formed WebSocket address
         from .mixins.connection import ConnectionMixin
+
         self._uri = ConnectionMixin._get_websocket_uri(uri)
         self._apikey = auth
 
