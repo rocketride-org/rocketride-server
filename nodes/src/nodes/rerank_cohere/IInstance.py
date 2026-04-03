@@ -48,7 +48,7 @@ class IInstance(IInstanceBase):
 
         reranker = self.IGlobal._reranker
         if reranker is None:
-            raise Exception('Reranker not initialized')
+            raise RuntimeError('Reranker not initialized')
 
         # Extract the query text from the question
         query_text = ''
@@ -108,12 +108,16 @@ class IInstance(IInstanceBase):
             )
             reranked_docs.append(reranked_doc)
 
+        # Update the question's documents with the reranked results so
+        # downstream nodes always see the reranked set (even if empty).
+        question.documents = reranked_docs
+
         # Write reranked documents to the documents output lane
         if reranked_docs:
             self.instance.writeDocuments(reranked_docs)
 
-        # Build an Answer containing the reranked document texts so downstream
-        # nodes on the "answers" lane receive the results.
+        # Always forward an answer to the answers lane so downstream nodes
+        # receive a result regardless of whether documents survived filtering.
         answer = Answer()
         answer_text = '\n\n'.join(doc.page_content for doc in reranked_docs if doc.page_content)
         answer.setAnswer(answer_text)

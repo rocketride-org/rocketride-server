@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"rerank"
-	],
+	"classType": ["rerank"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -49,12 +47,7 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": [
-		"A reranking component powered by Cohere's Rerank API that improves ",
-		"search quality by reordering retrieved documents based on their ",
-		"relevance to a given query. Supports the latest rerank-v3.5 model ",
-		"with configurable top-K selection and minimum score thresholds."
-	],
+	"description": ["A reranking component powered by Cohere's Rerank API that improves ", "search quality by reordering retrieved documents based on their ", "relevance to a given query. Supports the latest rerank-v3.5 model ", "with configurable top-K selection and minimum score thresholds."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -70,19 +63,14 @@
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": [
-		"Model: ${parameters.rerank_cohere.profile}"
-	],
+	"tile": ["Cohere Rerank"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"questions": [
-			"documents",
-			"answers"
-		]
+		"questions": ["documents", "answers"]
 	},
 	"input": [
 		{
@@ -153,51 +141,34 @@
 		},
 		"rerank_cohere.rerank-v3.5": {
 			"object": "rerank-v3.5",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["top_n", "min_score", "llm.cloud.apikey"]
 		},
 		"rerank_cohere.rerank-v3.0": {
 			"object": "rerank-english-v3.0",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["top_n", "min_score", "llm.cloud.apikey"]
 		},
 		"rerank_cohere.custom": {
 			"object": "custom",
-			"properties": [
-				"model",
-				"top_n",
-				"min_score",
-				"llm.cloud.apikey"
-			]
+			"properties": ["model", "top_n", "min_score", "llm.cloud.apikey"]
 		},
 		"rerank_cohere.profile": {
 			"title": "Model",
 			"description": "Rerank model",
 			"type": "string",
 			"default": "rerank-v3.5",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "rerank-v3.5",
-					"properties": [
-						"rerank_cohere.rerank-v3.5"
-					]
+					"properties": ["rerank_cohere.rerank-v3.5"]
 				},
 				{
 					"value": "rerank-english-v3.0",
-					"properties": [
-						"rerank_cohere.rerank-v3.0"
-					]
+					"properties": ["rerank_cohere.rerank-v3.0"]
 				},
 				{
 					"value": "custom",
-					"properties": [
-						"rerank_cohere.custom"
-					]
+					"properties": ["rerank_cohere.custom"]
 				}
 			]
 		}
@@ -211,9 +182,7 @@
 		{
 			"section": "Pipe",
 			"title": "Cohere Rerank",
-			"properties": [
-				"rerank_cohere.profile"
-			]
+			"properties": ["rerank_cohere.profile"]
 		}
 	],
 	"test": {
