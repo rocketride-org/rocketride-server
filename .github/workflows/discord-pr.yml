@@ -1,0 +1,49 @@
+name: Discord PR Notification
+
+on:
+  pull_request:
+    types: [opened]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_PR_WEBHOOK_URL }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_AVATAR: ${{ github.event.pull_request.user.avatar_url }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Truncate body to 1500 chars (leave room for embed fields).
+          # Close any unclosed code blocks to prevent broken formatting.
+          BODY="${PR_BODY:0:1500}"
+          BACKTICK_COUNT=$(echo "$BODY" | grep -o '```' | wc -l)
+          if (( BACKTICK_COUNT % 2 != 0 )); then
+            BODY="${BODY}..."$'\n'"$BODY"'```'
+            BODY="${PR_BODY:0:1500}..."$'\n```'
+          fi
+
+          PAYLOAD=$(jq -n \
+            --arg title "#$PR_NUMBER $PR_TITLE" \
+            --arg url "$PR_URL" \
+            --arg desc "$BODY" \
+            --arg author "$PR_AUTHOR" \
+            --arg avatar "$PR_AVATAR" \
+            --arg branch "$HEAD_REF → $BASE_REF" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            '{embeds: [{title: $title, url: $url, description: $desc, color: 5814783,
+               author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
+               fields: [
+                 {name: "Branch", value: $branch, inline: true},
+                 {name: "Repo", value: $repo, inline: true}
+               ]}]}')
+          curl -sS -f -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"

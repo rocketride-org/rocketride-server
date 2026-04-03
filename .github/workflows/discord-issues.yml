@@ -1,0 +1,43 @@
+name: Discord Issue Notification
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_ISSUES_WEBHOOK_URL }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          ISSUE_AVATAR: ${{ github.event.issue.user.avatar_url }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          # Truncate body and close unclosed code blocks
+          BODY="${ISSUE_BODY:0:1500}"
+          BACKTICK_COUNT=$(echo "$BODY" | grep -o '```' | wc -l)
+          if (( BACKTICK_COUNT % 2 != 0 )); then
+            BODY="${ISSUE_BODY:0:1500}..."$'\n```'
+          fi
+
+          PAYLOAD=$(jq -n \
+            --arg title "#$ISSUE_NUMBER $ISSUE_TITLE" \
+            --arg url "$ISSUE_URL" \
+            --arg desc "$BODY" \
+            --arg author "$ISSUE_AUTHOR" \
+            --arg avatar "$ISSUE_AVATAR" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            '{embeds: [{title: $title, url: $url, description: $desc, color: 15548997,
+               author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
+               fields: [
+                 {name: "Repo", value: $repo, inline: true}
+               ]}]}')
+          curl -sS -f -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
