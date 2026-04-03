@@ -40,6 +40,7 @@ class IGlobal(IGlobalBase):
     auto_approve: bool = False
 
     def beginGlobal(self) -> None:
+        """Initialize shared approval manager and notifier from node configuration."""
         # Read this node's merged profile configuration
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
@@ -50,6 +51,8 @@ class IGlobal(IGlobalBase):
         except (TypeError, ValueError):
             timeout_seconds = 3600
         timeout_action = config.get('timeout_action', 'approve')
+        if timeout_action not in ('approve', 'reject'):
+            timeout_action = 'approve'
         notification_type = config.get('notification_type', 'log')
         webhook_url = config.get('webhook_url', None)
         self.auto_approve = bool(config.get('auto_approve', False))
@@ -69,5 +72,6 @@ class IGlobal(IGlobalBase):
         )
 
     def endGlobal(self) -> None:
+        """Release shared resources on pipeline shutdown."""
         self.approval_manager = None
         self.notifier = None

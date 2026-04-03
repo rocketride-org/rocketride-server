@@ -45,7 +45,7 @@
 	"prefix": "approval",
 	//
 	// Optional:
-	//		Description to of this driver
+	//		Description of this driver
 	//
 	"description": ["A filter component that pauses pipeline execution to request human review ", "and approval before forwarding data to downstream nodes. Supports configurable ", "timeout with auto-approve or auto-reject, webhook and log notifications, ", "and an auto-approve pass-through mode for testing or low-risk pipelines."],
 	//

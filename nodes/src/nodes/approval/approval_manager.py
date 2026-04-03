@@ -139,11 +139,13 @@ class ApprovalManager:
             KeyError: If *approval_id* is not found.
             ValueError: If the request is not in 'pending' status.
         """
-        if self._require_comment and not comment:
-            raise ValueError('A comment is required when approving (require_comment is enabled)')
-
         with self._lock:
+            if self._require_comment and not comment:
+                raise ValueError('A comment is required when approving (require_comment is enabled)')
             request = self._get_request(approval_id)
+            # _check_timeout is safe to call here: both it and the status
+            # check below execute under the same lock, so no other thread
+            # can mutate the request between the two calls.
             self._check_timeout(approval_id)
             if request['status'] != 'pending':
                 raise ValueError(f'Cannot approve request in status: {request["status"]}')
@@ -170,11 +172,12 @@ class ApprovalManager:
             ValueError: If the request is not in 'pending' status or a
                 reason is required but missing.
         """
-        if self._require_comment and not reason:
-            raise ValueError('A reason is required when rejecting (require_comment is enabled)')
-
         with self._lock:
+            if self._require_comment and not reason:
+                raise ValueError('A reason is required when rejecting (require_comment is enabled)')
             request = self._get_request(approval_id)
+            # _check_timeout is safe here for the same reason as in approve():
+            # the entire check-and-mutate sequence runs under self._lock.
             self._check_timeout(approval_id)
             if request['status'] != 'pending':
                 raise ValueError(f'Cannot reject request in status: {request["status"]}')

@@ -413,6 +413,13 @@ class TestApprovalManagerThreadSafety:
 class TestApprovalNotifierWebhook:
     """Test webhook payload formatting and validation."""
 
+    @staticmethod
+    def _fake_public_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        """Return a fake public IP for DNS resolution in tests."""
+        import socket as _sock
+
+        return [(_sock.AF_INET, _sock.SOCK_STREAM, 6, '', ('93.184.216.34', 0))]
+
     def test_webhook_payload_structure(self):
         notifier = ApprovalNotifier(notification_type='webhook', webhook_url='https://hooks.example.com/approve')
         req = {
@@ -424,7 +431,7 @@ class TestApprovalNotifierWebhook:
             'timeout_seconds': 3600,
             'timeout_action': 'approve',
         }
-        with patch('approval.notifier.urllib.request.urlopen'):
+        with patch('approval.notifier.urllib.request.urlopen'), patch('approval.notifier.socket.getaddrinfo', side_effect=self._fake_public_getaddrinfo):
             payload = notifier.notify(req)
         assert payload['event'] == 'approval_requested'
         assert payload['approval_id'] == 'abc-123'
@@ -441,7 +448,7 @@ class TestApprovalNotifierWebhook:
             'timeout_seconds': 3600,
             'timeout_action': 'approve',
         }
-        with patch('approval.notifier.urllib.request.urlopen') as mock_urlopen:
+        with patch('approval.notifier.urllib.request.urlopen') as mock_urlopen, patch('approval.notifier.socket.getaddrinfo', side_effect=self._fake_public_getaddrinfo):
             notifier.notify(req)
             mock_urlopen.assert_called_once()
             call_args = mock_urlopen.call_args
@@ -452,10 +459,31 @@ class TestApprovalNotifierWebhook:
     def test_webhook_delivery_failure_does_not_raise(self):
         notifier = ApprovalNotifier(notification_type='webhook', webhook_url='https://hooks.example.com/approve')
         req = {'approval_id': 'abc-123', 'item_id': 'item-1', 'status': 'pending'}
-        with patch('approval.notifier.urllib.request.urlopen', side_effect=Exception('connection refused')):
+        with patch('approval.notifier.urllib.request.urlopen', side_effect=Exception('connection refused')), patch('approval.notifier.socket.getaddrinfo', side_effect=self._fake_public_getaddrinfo):
             # Should not raise -- delivery failures are logged only
             payload = notifier.notify(req)
         assert payload['approval_id'] == 'abc-123'
+
+    def test_webhook_dns_rebinding_private_ip_blocked(self):
+        """DNS rebinding: hostname resolves to a private IP -> blocked."""
+        import socket as _sock
+
+        def _fake_private_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+            return [(_sock.AF_INET, _sock.SOCK_STREAM, 6, '', ('10.0.0.1', 0))]
+
+        notifier = ApprovalNotifier(notification_type='webhook', webhook_url='https://hooks.example.com/approve')
+        req = {'approval_id': 'abc-123', 'item_id': 'item-1', 'status': 'pending'}
+        with patch('approval.notifier.socket.getaddrinfo', side_effect=_fake_private_getaddrinfo), pytest.raises(ValueError, match='blocked address'):
+            notifier.notify(req)
+
+    def test_webhook_dns_resolution_failure_raises(self):
+        """Unresolvable hostname raises ValueError."""
+        import socket as _sock
+
+        notifier = ApprovalNotifier(notification_type='webhook', webhook_url='https://hooks.example.com/approve')
+        req = {'approval_id': 'abc-123', 'item_id': 'item-1', 'status': 'pending'}
+        with patch('approval.notifier.socket.getaddrinfo', side_effect=_sock.gaierror('fake')), pytest.raises(ValueError, match='Cannot resolve'):
+            notifier.notify(req)
 
     def test_webhook_missing_url_raises(self):
         with pytest.raises(ValueError, match='webhook_url is required'):
@@ -549,6 +577,18 @@ class TestIGlobalLifecycle:
     def test_begin_default_notification_is_log(self):
         iglobal = self._make_iglobal()
         assert iglobal.notifier._notification_type == 'log'
+
+    def test_begin_invalid_timeout_action_defaults_to_approve(self):
+        iglobal = self._make_iglobal({'timeout_action': 'ignore'})
+        assert iglobal.approval_manager._timeout_action == 'approve'
+
+    def test_begin_valid_timeout_action_reject(self):
+        iglobal = self._make_iglobal({'timeout_action': 'reject'})
+        assert iglobal.approval_manager._timeout_action == 'reject'
+
+    def test_begin_invalid_timeout_seconds_defaults(self):
+        iglobal = self._make_iglobal({'timeout_seconds': 'not-a-number'})
+        assert iglobal.approval_manager._timeout_seconds == 3600
 
     def test_end_clears_manager_and_notifier(self):
         iglobal = self._make_iglobal()

@@ -30,10 +30,12 @@
 # block the pipeline hot path.  Delivery failures are logged but never raise.
 # ------------------------------------------------------------------------------
 
+import ipaddress
 import json
 import logging
+import socket
 import urllib.request
-from typing import Any, Dict, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 
@@ -46,7 +48,7 @@ _ALLOWED_SCHEMES = {'http', 'https'}
 class ApprovalNotifier:
     """Send human-approval notifications through configurable channels."""
 
-    def __init__(self, notification_type: str = 'log', webhook_url: Optional[str] = None) -> None:
+    def __init__(self, notification_type: str = 'log', webhook_url: str | None = None) -> None:
         """Initialise the notifier.
 
         Args:
@@ -69,7 +71,7 @@ class ApprovalNotifier:
     # Public API
     # ------------------------------------------------------------------
 
-    def notify(self, approval_request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def notify(self, approval_request: dict[str, Any]) -> dict[str, Any] | None:
         """Dispatch a notification for the given approval request.
 
         Returns:
@@ -82,13 +84,17 @@ class ApprovalNotifier:
             return self.notify_log(approval_request)
         return None
 
-    def notify_webhook(self, url: Optional[str], approval_request: Dict[str, Any]) -> Dict[str, Any]:
+    def notify_webhook(self, url: str | None, approval_request: dict[str, Any]) -> dict[str, Any]:
         """Prepare a webhook POST payload and send it.
 
         The HTTP call uses a short timeout (10 s) so it does not block the
         pipeline hot path.  Delivery failures are logged but never raised --
         the structured payload is always returned so callers (and tests) can
         inspect it regardless of network outcome.
+
+        DNS rebinding is mitigated by resolving the hostname before the
+        request and validating the resolved IP against private/reserved
+        ranges.
 
         Args:
             url: The webhook endpoint URL.
@@ -98,8 +104,10 @@ class ApprovalNotifier:
             The payload that was POSTed (or attempted).
         """
         self._validate_webhook_url(url)
+        # Resolve hostname and validate the IP to prevent DNS rebinding attacks
+        self._validate_resolved_ip(url)
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             'event': 'approval_requested',
             'approval_id': approval_request.get('approval_id', ''),
             'item_id': approval_request.get('item_id', ''),
@@ -127,9 +135,9 @@ class ApprovalNotifier:
 
         return payload
 
-    def notify_log(self, approval_request: Dict[str, Any]) -> Dict[str, Any]:
+    def notify_log(self, approval_request: dict[str, Any]) -> dict[str, Any]:
         """Log the pending approval for monitoring and return a log-entry dict."""
-        entry: Dict[str, Any] = {
+        entry: dict[str, Any] = {
             'event': 'approval_requested',
             'approval_id': approval_request.get('approval_id', ''),
             'item_id': approval_request.get('item_id', ''),
@@ -151,7 +159,7 @@ class ApprovalNotifier:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _validate_webhook_url(url: Optional[str]) -> None:
+    def _validate_webhook_url(url: str | None) -> None:
         """Reject URLs that could enable SSRF (non-http(s), internal IPs, etc.)."""
         if not url:
             raise ValueError('webhook_url is required for webhook notifications')
@@ -183,3 +191,29 @@ class ApprovalNotifier:
                     second_octet = -1
                 if 16 <= second_octet <= 31:
                     raise ValueError(f'Webhook URL must not point to a private network address: {host!r}')
+
+    @staticmethod
+    def _validate_resolved_ip(url: str | None) -> None:
+        """Resolve the webhook hostname and reject private/reserved IPs.
+
+        This mitigates DNS rebinding attacks where a hostname resolves to
+        a public IP during URL validation but to a private IP at request
+        time.  By resolving *before* the HTTP call and checking the result,
+        we close the TOCTOU window.
+        """
+        if not url:
+            return
+
+        host = urlparse(url).hostname or ''
+        if not host:
+            return
+
+        try:
+            infos = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        except socket.gaierror:
+            raise ValueError(f'Cannot resolve webhook hostname: {host!r}')
+
+        for _family, _type, _proto, _canonname, sockaddr in infos:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                raise ValueError(f'Webhook hostname {host!r} resolved to a blocked address: {ip}')
