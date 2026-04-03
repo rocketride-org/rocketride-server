@@ -94,16 +94,15 @@ def _compute_length_ratio(output: str, expected: str) -> float:
 
     if 0.5 <= ratio <= 2.0:
         return 1.0
-    elif 0.3 <= ratio < 0.5:
+    if 0.3 <= ratio < 0.5:
         # Linear decay from 1.0 at 0.5 to 0.5 at 0.3
         return 0.5 + 2.5 * (ratio - 0.3)
-    elif 2.0 < ratio <= 3.0:
+    if 2.0 < ratio <= 3.0:
         # Linear decay from 1.0 at 2.0 to 0.5 at 3.0
         return 1.0 - 0.5 * (ratio - 2.0)
-    elif ratio < 0.3:
+    if ratio < 0.3:
         return max(0.0, ratio / 0.3 * 0.5)
-    else:
-        return max(0.0, 0.5 - 0.1 * (ratio - 3.0))
+    return max(0.0, 0.5 - 0.1 * (ratio - 3.0))
 
 
 def evaluate_relevance(output: str, expected: str, keyword_weight: float = 0.7, length_weight: float = 0.3, threshold: float = 0.5) -> dict:
@@ -136,6 +135,8 @@ def evaluate_relevance(output: str, expected: str, keyword_weight: float = 0.7, 
     length_score = _compute_length_ratio(output, expected)
 
     total_weight = keyword_weight + length_weight
+    if total_weight <= 0:
+        raise ValueError('keyword_weight + length_weight must be > 0')
     score = (keyword_weight * keyword_score + length_weight * length_score) / total_weight
 
     passed = score >= threshold

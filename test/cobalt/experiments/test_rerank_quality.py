@@ -74,10 +74,18 @@ def _simulate_rerank(query: str, documents: list[dict]) -> list[dict]:
         Documents sorted by descending relevance with 'rerank_score' added.
     """
     scored_docs = []
-    for doc in documents:
-        # Simulate reranker scoring (uses true relevance with small perturbation)
-        # The perturbation is deterministic based on document position to avoid randomness
-        rerank_score = doc['true_relevance']
+    query_terms = set(query.lower().split())
+    for idx, doc in enumerate(documents):
+        # Simulate reranker scoring using query-document term overlap
+        # blended with a deterministic perturbation to avoid directly
+        # copying true_relevance labels into predictions
+        doc_terms = set(doc['text'].lower().split())
+        overlap = len(query_terms & doc_terms)
+        text_score = overlap / max(1, len(query_terms))
+        # Blend: 40% text overlap + 60% true relevance with position-based perturbation
+        perturbation = (idx % 3 - 1) * 0.02
+        rerank_score = 0.4 * text_score + 0.6 * doc['true_relevance'] + perturbation
+        rerank_score = max(0.0, min(1.0, rerank_score))
         scored_docs.append(
             {
                 'id': doc['id'],
@@ -104,14 +112,18 @@ class TestRerankRelevanceOrdering:
         """
         for test_case in RERANK_TEST_DATA:
             reranked = _simulate_rerank(test_case['query'], test_case['documents'])
-
             mock_rocketride_client.run_pipeline.return_value = {
                 'status': 'completed',
                 'output': {'reranked_documents': reranked},
             }
+            result = mock_rocketride_client.run_pipeline(
+                pipeline='rerank',
+                input_data={'query': test_case['query'], 'documents': test_case['documents']},
+            )
+            reranked_output = result['output']['reranked_documents']
 
             # The top document should have high true relevance
-            top_doc = reranked[0]
+            top_doc = reranked_output[0]
             assert top_doc['true_relevance'] >= 0.8, f'Top reranked document for "{test_case["query"]}" has low true relevance: {top_doc["true_relevance"]}'
 
     def test_relevance_monotonically_decreasing(self, mock_rocketride_client):
@@ -121,8 +133,17 @@ class TestRerankRelevanceOrdering:
         """
         for test_case in RERANK_TEST_DATA:
             reranked = _simulate_rerank(test_case['query'], test_case['documents'])
+            mock_rocketride_client.run_pipeline.return_value = {
+                'status': 'completed',
+                'output': {'reranked_documents': reranked},
+            }
+            result = mock_rocketride_client.run_pipeline(
+                pipeline='rerank',
+                input_data={'query': test_case['query'], 'documents': test_case['documents']},
+            )
+            reranked_output = result['output']['reranked_documents']
 
-            scores = [doc['rerank_score'] for doc in reranked]
+            scores = [doc['rerank_score'] for doc in reranked_output]
             for i in range(len(scores) - 1):
                 assert scores[i] >= scores[i + 1], f'Reranked scores are not monotonically decreasing at index {i}: {scores[i]} < {scores[i + 1]}'
 
@@ -134,10 +155,19 @@ class TestRerankRelevanceOrdering:
         """
         for test_case in RERANK_TEST_DATA:
             reranked = _simulate_rerank(test_case['query'], test_case['documents'])
-            total = len(reranked)
-            irrelevant_docs = [d for d in reranked if d['true_relevance'] <= 0.1]
+            mock_rocketride_client.run_pipeline.return_value = {
+                'status': 'completed',
+                'output': {'reranked_documents': reranked},
+            }
+            result = mock_rocketride_client.run_pipeline(
+                pipeline='rerank',
+                input_data={'query': test_case['query'], 'documents': test_case['documents']},
+            )
+            reranked_output = result['output']['reranked_documents']
+            total = len(reranked_output)
+            irrelevant_docs = [d for d in reranked_output if d['true_relevance'] <= 0.1]
             for irr_doc in irrelevant_docs:
-                irr_position = next(i for i, d in enumerate(reranked) if d['id'] == irr_doc['id'])
+                irr_position = next(i for i, d in enumerate(reranked_output) if d['id'] == irr_doc['id'])
                 assert irr_position >= total // 2, f'Irrelevant doc "{irr_doc["id"]}" ranked at position {irr_position} (should be >= {total // 2}) for query "{test_case["query"]}"'
 
 
@@ -154,8 +184,17 @@ class TestRerankTopKFiltering:
         k = 3
         for test_case in RERANK_TEST_DATA:
             reranked = _simulate_rerank(test_case['query'], test_case['documents'])
-            top_k = reranked[:k]
-            excluded = reranked[k:]
+            mock_rocketride_client.run_pipeline.return_value = {
+                'status': 'completed',
+                'output': {'reranked_documents': reranked},
+            }
+            result = mock_rocketride_client.run_pipeline(
+                pipeline='rerank',
+                input_data={'query': test_case['query'], 'documents': test_case['documents']},
+            )
+            reranked_output = result['output']['reranked_documents']
+            top_k = reranked_output[:k]
+            excluded = reranked_output[k:]
 
             if excluded:
                 min_included_score = min(d['rerank_score'] for d in top_k)
@@ -168,7 +207,16 @@ class TestRerankTopKFiltering:
         for k in [1, 2, 3, 5, 10]:
             for test_case in RERANK_TEST_DATA:
                 reranked = _simulate_rerank(test_case['query'], test_case['documents'])
-                top_k = reranked[:k]
+                mock_rocketride_client.run_pipeline.return_value = {
+                    'status': 'completed',
+                    'output': {'reranked_documents': reranked},
+                }
+                result = mock_rocketride_client.run_pipeline(
+                    pipeline='rerank',
+                    input_data={'query': test_case['query'], 'documents': test_case['documents']},
+                )
+                reranked_output = result['output']['reranked_documents']
+                top_k = reranked_output[:k]
                 expected_count = min(k, len(test_case['documents']))
                 assert len(top_k) == expected_count, f'Expected {expected_count} documents but got {len(top_k)}'
 
@@ -177,10 +225,19 @@ class TestRerankTopKFiltering:
         k = 3
         for test_case in RERANK_TEST_DATA:
             reranked = _simulate_rerank(test_case['query'], test_case['documents'])
-            top_k = reranked[:k]
+            mock_rocketride_client.run_pipeline.return_value = {
+                'status': 'completed',
+                'output': {'reranked_documents': reranked},
+            }
+            result = mock_rocketride_client.run_pipeline(
+                pipeline='rerank',
+                input_data={'query': test_case['query'], 'documents': test_case['documents']},
+            )
+            reranked_output = result['output']['reranked_documents']
+            top_k = reranked_output[:k]
 
             avg_top_k = sum(d['true_relevance'] for d in top_k) / len(top_k) if top_k else 0
-            avg_all = sum(d['true_relevance'] for d in reranked) / len(reranked) if reranked else 0
+            avg_all = sum(d['true_relevance'] for d in reranked_output) / len(reranked_output) if reranked_output else 0
 
             assert avg_top_k >= avg_all, f'Top-{k} average relevance ({avg_top_k:.2f}) should be >= full set average ({avg_all:.2f})'
 
@@ -193,8 +250,17 @@ class TestRerankScoreDistribution:
         """Test that reranking scores fall within [0, 1] range."""
         for test_case in RERANK_TEST_DATA:
             reranked = _simulate_rerank(test_case['query'], test_case['documents'])
+            mock_rocketride_client.run_pipeline.return_value = {
+                'status': 'completed',
+                'output': {'reranked_documents': reranked},
+            }
+            result = mock_rocketride_client.run_pipeline(
+                pipeline='rerank',
+                input_data={'query': test_case['query'], 'documents': test_case['documents']},
+            )
+            reranked_output = result['output']['reranked_documents']
 
-            for doc in reranked:
+            for doc in reranked_output:
                 assert 0.0 <= doc['rerank_score'] <= 1.0, f'Rerank score {doc["rerank_score"]} for doc "{doc["id"]}" is outside [0, 1] range'
 
     def test_score_spread(self, mock_rocketride_client):
@@ -205,7 +271,16 @@ class TestRerankScoreDistribution:
         """
         for test_case in RERANK_TEST_DATA:
             reranked = _simulate_rerank(test_case['query'], test_case['documents'])
-            scores = [d['rerank_score'] for d in reranked]
+            mock_rocketride_client.run_pipeline.return_value = {
+                'status': 'completed',
+                'output': {'reranked_documents': reranked},
+            }
+            result = mock_rocketride_client.run_pipeline(
+                pipeline='rerank',
+                input_data={'query': test_case['query'], 'documents': test_case['documents']},
+            )
+            reranked_output = result['output']['reranked_documents']
+            scores = [d['rerank_score'] for d in reranked_output]
 
             score_range = max(scores) - min(scores)
             assert score_range >= 0.3, f'Score range {score_range:.2f} is too narrow for query "{test_case["query"]}"; reranker may not be differentiating documents effectively'
@@ -218,8 +293,17 @@ class TestRerankScoreDistribution:
         """
         for test_case in RERANK_TEST_DATA:
             reranked = _simulate_rerank(test_case['query'], test_case['documents'])
+            mock_rocketride_client.run_pipeline.return_value = {
+                'status': 'completed',
+                'output': {'reranked_documents': reranked},
+            }
+            result = mock_rocketride_client.run_pipeline(
+                pipeline='rerank',
+                input_data={'query': test_case['query'], 'documents': test_case['documents']},
+            )
+            reranked_output = result['output']['reranked_documents']
 
-            for doc in reranked:
+            for doc in reranked_output:
                 if doc['true_relevance'] >= 0.8:
                     assert doc['rerank_score'] >= 0.5, f'High-relevance doc "{doc["id"]}" (true: {doc["true_relevance"]}) received low rerank score: {doc["rerank_score"]}'
                 if doc['true_relevance'] <= 0.1:

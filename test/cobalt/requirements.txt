@@ -1,1 +1,1 @@
-cobalt-ai>=0.1.0,<1.0.0
+basalt-ai-cobalt>=0.1.0,<1.0.0

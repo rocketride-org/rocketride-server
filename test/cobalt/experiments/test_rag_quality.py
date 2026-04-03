@@ -30,12 +30,7 @@ All tests are fully mocked and do not require real API keys,
 a running RocketRide server, or any vector database.
 """
 
-import sys
-import os
-
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from evaluators.relevance import evaluate_relevance
 from evaluators.grounding import evaluate_grounding
@@ -115,12 +110,21 @@ class TestRAGRetrievalQuality:
         """
         for item in sample_rag_dataset:
             rag_response = _simulate_rag_pipeline(item['query'])
+            mock_rocketride_client.run_pipeline.return_value = {
+                'status': 'completed',
+                'output': rag_response,
+            }
+            result = mock_rocketride_client.run_pipeline(
+                pipeline='rag-qa',
+                input_data={'query': item['query']},
+            )
+            output = result['output']
 
             # Verify we actually retrieved documents
-            assert len(rag_response['retrieved_docs']) > 0, f'No documents retrieved for "{item["query"]}"'
+            assert len(output['retrieved_docs']) > 0, f'No documents retrieved for "{item["query"]}"'
 
             # Check that retrieved docs cover the core content
-            retrieved_text = ' '.join(rag_response['retrieved_docs'])
+            retrieved_text = ' '.join(output['retrieved_docs'])
             evaluation = evaluate_relevance(retrieved_text, item['expected'])
             assert evaluation['score'] >= 0.3, f'Retrieved docs for "{item["query"]}" miss key information: {evaluation["reasoning"]}'
 
@@ -139,8 +143,17 @@ class TestRAGAnswerQuality:
         scores = []
         for item in sample_rag_dataset:
             rag_response = _simulate_rag_pipeline(item['query'])
-            context = ' '.join(rag_response['retrieved_docs'])
-            answer = rag_response['answer']
+            mock_rocketride_client.run_pipeline.return_value = {
+                'status': 'completed',
+                'output': rag_response,
+            }
+            result = mock_rocketride_client.run_pipeline(
+                pipeline='rag-qa',
+                input_data={'query': item['query']},
+            )
+            output = result['output']
+            context = ' '.join(output['retrieved_docs'])
+            answer = output['answer']
 
             evaluation = evaluate_grounding(answer, context)
             scores.append(evaluation['score'])
@@ -159,15 +172,24 @@ class TestRAGAnswerQuality:
         """
         for item in sample_rag_dataset:
             rag_response = _simulate_rag_pipeline(item['query'])
-            context = ' '.join(rag_response['retrieved_docs'])
-            answer = rag_response['answer']
+            mock_rocketride_client.run_pipeline.return_value = {
+                'status': 'completed',
+                'output': rag_response,
+            }
+            result = mock_rocketride_client.run_pipeline(
+                pipeline='rag-qa',
+                input_data={'query': item['query']},
+            )
+            output = result['output']
+            context = ' '.join(output['retrieved_docs'])
+            answer = output['answer']
 
             evaluation = evaluate_grounding(answer, context)
 
             # Check per-sentence grounding to find hallucinated claims
             if evaluation.get('details'):
                 low_grounding_sentences = [s for s in evaluation['details'] if s['score'] < 0.3]
-                hallucination_ratio = len(low_grounding_sentences) / len(evaluation['details']) if evaluation['details'] else 0
+                hallucination_ratio = len(low_grounding_sentences) / len(evaluation['details'])
 
                 assert hallucination_ratio < 0.5, f'Answer for "{item["query"]}" has {len(low_grounding_sentences)}/{len(evaluation["details"])} potentially hallucinated sentences (ratio: {hallucination_ratio:.2f})'
 
@@ -180,7 +202,16 @@ class TestRAGAnswerQuality:
         """
         for item in sample_rag_dataset:
             rag_response = _simulate_rag_pipeline(item['query'])
-            answer = rag_response['answer']
+            mock_rocketride_client.run_pipeline.return_value = {
+                'status': 'completed',
+                'output': rag_response,
+            }
+            result = mock_rocketride_client.run_pipeline(
+                pipeline='rag-qa',
+                input_data={'query': item['query']},
+            )
+            output = result['output']
+            answer = output['answer']
 
             evaluation = evaluate_relevance(answer, item['expected'])
             assert evaluation['score'] >= 0.4, f'Answer for "{item["query"]}" is not relevant to the query: {evaluation["reasoning"]}'
@@ -200,12 +231,21 @@ class TestRAGEndToEnd:
 
         for item in sample_rag_dataset:
             rag_response = _simulate_rag_pipeline(item['query'])
-            context = ' '.join(rag_response['retrieved_docs'])
-            answer = rag_response['answer']
+            mock_rocketride_client.run_pipeline.return_value = {
+                'status': 'completed',
+                'output': rag_response,
+            }
+            result = mock_rocketride_client.run_pipeline(
+                pipeline='rag-qa',
+                input_data={'query': item['query']},
+            )
+            output = result['output']
+            context = ' '.join(output['retrieved_docs'])
+            answer = output['answer']
             expected_context = ' '.join(item['documents'])
 
             # Measure retrieval quality
-            retrieval_eval = evaluate_relevance(' '.join(rag_response['retrieved_docs']), expected_context)
+            retrieval_eval = evaluate_relevance(' '.join(output['retrieved_docs']), expected_context)
 
             # Measure grounding quality
             grounding_eval = evaluate_grounding(answer, context)

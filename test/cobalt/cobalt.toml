@@ -1,7 +1,7 @@
 # =============================================================================
 # Cobalt configuration for RocketRide pipeline testing
 #
-# Cobalt (cobalt-ai) runs AI experiments: load a dataset, run each item
+# Cobalt (basalt-ai-cobalt) runs AI experiments: load a dataset, run each item
 # through an AI pipeline, evaluate outputs, and report scores.
 #
 # See docs/README-cobalt-testing.md for usage details.

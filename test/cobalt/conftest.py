@@ -23,8 +23,14 @@
 
 """Shared fixtures for Cobalt AI evaluation experiments."""
 
+import os
+import sys
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+# Make the evaluators package importable from experiment test files
+sys.path.insert(0, os.path.dirname(__file__))
 
 
 @pytest.fixture
@@ -36,8 +42,8 @@ def mock_rocketride_client():
     are fully mocked so no real API keys or server connections are needed.
     """
     client = MagicMock()
-    client.connect = MagicMock(return_value=True)
-    client.disconnect = MagicMock(return_value=True)
+    client.connect = AsyncMock(return_value=None)
+    client.disconnect = AsyncMock(return_value=None)
     client.is_connected = MagicMock(return_value=True)
 
     # Mock pipeline execution

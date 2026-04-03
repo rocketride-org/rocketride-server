@@ -2,13 +2,13 @@
 
 ## What is Cobalt?
 
-[Cobalt](https://github.com/cobalt-ai/cobalt) (cobalt-ai) is a unit testing framework for AI agents and LLM-powered systems. It runs experiments by loading datasets, executing each item through your AI system, evaluating outputs against quality criteria, and reporting scores.
+[Cobalt](https://github.com/basalt-ai/cobalt-python) (basalt-ai-cobalt) is a unit testing framework for AI agents and LLM-powered systems. It runs experiments by loading datasets, executing each item through your AI system, evaluating outputs against quality criteria, and reporting scores.
 
 RocketRide uses Cobalt to validate the quality of its AI pipeline outputs -- LLM responses, RAG answers, and reranking results -- in an automated, reproducible way.
 
 ## Why RocketRide Uses Cobalt
 
-RocketRide's pipeline nodes handle LLM calls, vector database queries, embedding generation, reranking, and more. Traditional unit tests verify that code runs without errors, but they cannot assess whether an LLM pipeline produces *good* outputs. Cobalt fills this gap by providing:
+RocketRide's pipeline nodes handle LLM calls, vector database queries, embedding generation, reranking, and more. Traditional unit tests verify that code runs without errors, but they cannot assess whether an LLM pipeline produces _good_ outputs. Cobalt fills this gap by providing:
 
 - **Quality scoring** -- Measure relevance, grounding, and formatting of pipeline outputs
 - **Threshold enforcement** -- Fail CI if average quality drops below configured thresholds
@@ -155,10 +155,12 @@ Tests that fall below these thresholds will fail, blocking the CI pipeline.
 ### relevance.evaluate_relevance(output, expected, ...)
 
 Measures response relevance using two signals:
+
 - **Keyword overlap** (default weight 0.7): Jaccard similarity of content words (stop words excluded)
 - **Length ratio** (default weight 0.3): Penalizes responses that are much shorter or longer than expected
 
 Parameters:
+
 - `output` (str): The actual response
 - `expected` (str): The reference answer
 - `keyword_weight` (float): Weight for keyword overlap (default 0.7)
@@ -168,11 +170,13 @@ Parameters:
 ### grounding.evaluate_grounding(output, context, ...)
 
 Measures whether output claims are supported by the provided context:
+
 - Splits output into sentences
 - For each sentence, checks what fraction of content words appear in the context
 - Returns average grounding score and per-sentence details
 
 Parameters:
+
 - `output` (str): The LLM-generated answer
 - `context` (str): Source documents (concatenated)
 - `threshold` (float): Minimum score to pass (default 0.5)
@@ -180,12 +184,14 @@ Parameters:
 ### format_check.evaluate_format(output, expected_format, ...)
 
 Checks structural formatting of the output. Supported formats:
+
 - **prose**: Continuous sentences with punctuation, not lists or code
 - **list**: Bullet points or numbered items
 - **code**: Code blocks or code-like syntax
 - **json**: Valid JSON structure
 
 Parameters:
+
 - `output` (str): The text to check
 - `expected_format` (str): One of 'prose', 'list', 'code', 'json'
 - `threshold` (float): Minimum score to pass (default 0.5)
