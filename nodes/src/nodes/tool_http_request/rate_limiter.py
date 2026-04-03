@@ -84,19 +84,24 @@ class RateLimiter:
 
     def acquire(self) -> None:
         """Acquire a rate-limit slot, or raise ``RateLimitError``."""
-        # 1. Check token buckets (per-second + per-minute).
-        with self._lock:
-            self._refill()
-            if self._ps_tokens < 1.0:
-                raise RateLimitError(f'Rate limit exceeded: max {self._ps_capacity} requests per second. Please retry after a short delay.')
-            if self._pm_tokens < 1.0:
-                raise RateLimitError(f'Rate limit exceeded: max {self._pm_capacity} requests per minute. Please retry after a short delay.')
-            self._ps_tokens -= 1.0
-            self._pm_tokens -= 1.0
-
-        # 2. Check concurrency limit (non-blocking).
+        # 1. Check concurrency limit first (non-blocking) so we never
+        #    consume tokens for a request that would be rejected anyway.
         if not self._semaphore.acquire(blocking=False):
             raise RateLimitError(f'Too many concurrent requests: max {self._max_concurrent} in-flight. Please wait for an ongoing request to complete.')
+
+        # 2. Check token buckets (per-second + per-minute).
+        try:
+            with self._lock:
+                self._refill()
+                if self._ps_tokens < 1.0:
+                    raise RateLimitError(f'Rate limit exceeded: max {self._ps_capacity} requests per second. Please retry after a short delay.')
+                if self._pm_tokens < 1.0:
+                    raise RateLimitError(f'Rate limit exceeded: max {self._pm_capacity} requests per minute. Please retry after a short delay.')
+                self._ps_tokens -= 1.0
+                self._pm_tokens -= 1.0
+        except RateLimitError:
+            self._semaphore.release()
+            raise
 
     def release(self) -> None:
         """Release the concurrency slot after a request completes."""
