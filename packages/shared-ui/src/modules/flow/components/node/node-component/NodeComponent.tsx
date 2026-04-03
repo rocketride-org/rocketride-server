@@ -151,6 +151,9 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 	/** Whether this node can be invoked by other nodes (shows a diamond target handle on top). */
 	const isInvocable = (IServiceCapabilities.Invoke & capabilities) === IServiceCapabilities.Invoke;
 
+	/** Whether this node's service is flagged as experimental. */
+	const isExperimental = (IServiceCapabilities.Experimental & capabilities) === IServiceCapabilities.Experimental;
+
 	/** Keys of invoke channels this node can source (e.g. ["llm", "memory", "tool"]). */
 	const invokeSourceKeys = useMemo(() => Object.keys(invokeConfig ?? {}), [invokeConfig]);
 
@@ -218,7 +221,7 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 			<NodeTop id={id} edges={edges} isInvocable={isInvocable} setQuickAddState={setQuickAddState} />
 
 			{/* Header — icon, title, class type, gear, overflow menu, error badge */}
-			<NodeHeader id={id} icon={icon} title={displayTitle} handleClick={handleClick} nodeType={type} hideEdit={false} formDataValid={data.formDataValid} description={displayDescription} documentation={documentation} parentId={mostRecentParentId} classType={classType} errorCount={isSourceNode ? errorCount : undefined} warningCount={isSourceNode ? warningCount : undefined} onBadgeClick={isSourceNode && onOpenStatus ? () => onOpenStatus(id) : undefined} />
+			<NodeHeader id={id} icon={icon} title={displayTitle} handleClick={handleClick} nodeType={type} hideEdit={false} formDataValid={data.formDataValid} description={displayDescription} documentation={documentation} parentId={mostRecentParentId} classType={classType} errorCount={isSourceNode ? errorCount : undefined} warningCount={isSourceNode ? warningCount : undefined} onBadgeClick={isSourceNode && onOpenStatus ? () => onOpenStatus(id) : undefined} isExperimental={isExperimental} />
 			{children}
 
 			{/* Data lanes — input/output handles */}

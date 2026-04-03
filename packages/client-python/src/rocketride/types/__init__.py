@@ -95,6 +95,10 @@ from .data import (
     UPLOAD_RESULT,
 )
 
+from .service import (
+    PROTOCOL_CAPS,
+)
+
 __all__ = [
     # Client types
     'RocketRideClientConfig',
@@ -124,4 +128,6 @@ __all__ = [
     # Data types
     'PIPELINE_RESULT',
     'UPLOAD_RESULT',
+    # Service types
+    'PROTOCOL_CAPS',
 ]

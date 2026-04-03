@@ -84,6 +84,8 @@ interface INodeHeaderProps {
 	warningCount?: number;
 	/** Callback when error/warning badge is clicked (opens status page). */
 	onBadgeClick?: () => void;
+	/** Whether this node's service is flagged as experimental. */
+	isExperimental?: boolean;
 }
 
 /**
@@ -92,7 +94,7 @@ interface INodeHeaderProps {
  * @param props - Node identity, metadata, and an optional click handler.
  * @returns The fully rendered header bar element.
  */
-export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title, description, documentation, formDataValid, parentId: _parentId, handleClick, classType, errorCount, warningCount, onBadgeClick }: INodeHeaderProps): ReactElement {
+export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title, description, documentation, formDataValid, parentId: _parentId, handleClick, classType, errorCount, warningCount, onBadgeClick, isExperimental }: INodeHeaderProps): ReactElement {
 	// ========================================================================
 	// FlowContext state and actions
 	// ========================================================================
@@ -194,6 +196,11 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 					</Box>
 				)}
 			</Typography>
+			{isExperimental && (
+				<Box component="span" sx={styles.experimentalBadge}>
+					EXPERIMENTAL
+				</Box>
+			)}
 			<ConditionalRender condition={subtitleText}>
 				<Typography sx={styles.subtitle}>{subtitleText}</Typography>
 			</ConditionalRender>
@@ -395,5 +402,17 @@ const styles = {
 		lineHeight: 1,
 		cursor: 'pointer',
 		verticalAlign: 'middle',
+	},
+
+	/** Yellow experimental badge below the title. */
+	experimentalBadge: {
+		display: 'inline-block',
+		fontSize: '8px',
+		fontWeight: 600,
+		padding: '1px 4px',
+		borderRadius: '3px',
+		backgroundColor: '#c89b0a',
+		color: '#fff',
+		lineHeight: '14px',
 	},
 };
