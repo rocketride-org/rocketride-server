@@ -7,12 +7,8 @@
 	"node": "python",
 	"path": "nodes.tool_bland_ai",
 	"prefix": "bland",
-	"icon": "phone.svg",
-	"description": [
-		"Make and manage AI-powered phone calls via Bland AI.",
-		"The agent can initiate outbound calls, retrieve call transcripts, and analyze completed calls.",
-		"Requires a Bland AI API key from https://www.bland.ai"
-	],
+	"icon": "bland-ai.svg",
+	"description": ["Make and manage AI-powered phone calls via Bland AI.", "The agent can initiate outbound calls, retrieve call transcripts, and analyze completed calls.", "Requires a Bland AI API key from https://www.bland.ai"],
 	"tile": ["Tool: ${parameters.bland_ai.serverName}.bland_ai"],
 	"lanes": {},
 	"preconfig": {
@@ -90,14 +86,7 @@
 		{
 			"section": "Pipe",
 			"title": "Bland AI Voice Agent",
-			"properties": [
-				"type",
-				"bland_ai.apikey",
-				"bland_ai.voice",
-				"bland_ai.maxDuration",
-				"bland_ai.record",
-				"bland_ai.language"
-			]
+			"properties": ["type", "bland_ai.apikey", "bland_ai.voice", "bland_ai.maxDuration", "bland_ai.record", "bland_ai.language"]
 		}
 	]
 }

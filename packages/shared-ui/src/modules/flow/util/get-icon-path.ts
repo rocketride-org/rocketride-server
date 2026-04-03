@@ -105,6 +105,7 @@ import xaiIcon from '../../../assets/nodes/xai.svg';
 import accessibilityDescribeIcon from '../../../assets/nodes/accessibility-describe.svg';
 import deepagentIcon from '../../../assets/nodes/deepagent.svg';
 import twelvelabsIcon from '../../../assets/nodes/twelvelabs.svg';
+import blandAiIcon from '../../../assets/nodes/bland-ai.svg';
 
 /**
  * Static lookup table mapping icon names (without file extensions) to their
@@ -192,6 +193,7 @@ const iconMap: Record<string, string> = {
 	'accessibility-describe': accessibilityDescribeIcon,
 	deepagent: deepagentIcon,
 	twelvelabs: twelvelabsIcon,
+	'bland-ai': blandAiIcon,
 };
 
 /**

@@ -29,7 +29,7 @@ Handles authenticated requests to the Bland AI API (https://api.bland.ai/v1).
 
 from __future__ import annotations
 
-import json
+import time
 from typing import Any, Dict, Optional
 
 import requests
@@ -96,6 +96,23 @@ def get_call(api_key: str, call_id: str) -> Dict[str, Any]:
     return resp.json()
 
 
+def get_call_when_complete(
+    api_key: str,
+    call_id: str,
+    poll_interval: int = 10,
+    timeout: int = 300,
+) -> Dict[str, Any]:
+    """Poll get_call until completed=True or timeout is reached."""
+    deadline = time.monotonic() + timeout
+    while True:
+        result = get_call(api_key, call_id)
+        if result.get('completed'):
+            return result
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f'Call {call_id} did not complete within {timeout}s. Last status: {result.get("status")}')
+        time.sleep(poll_interval)
+
+
 def analyze_call(
     api_key: str,
     call_id: str,
@@ -105,7 +122,7 @@ def analyze_call(
     """Run post-call AI analysis on a completed call."""
     if questions is None:
         questions = [
-            ['What was the caller\'s mood?', 'string'],
+            ["What was the caller's mood?", 'string'],
             ['What key information was discussed?', 'string'],
             ['Were there any action items?', 'string'],
         ]
@@ -115,28 +132,6 @@ def analyze_call(
         headers={'authorization': api_key, 'Content-Type': 'application/json'},
         json={'goal': goal, 'questions': questions},
         timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json()
-
-
-def stop_call(api_key: str, call_id: str) -> Dict[str, Any]:
-    """Stop an ongoing call."""
-    resp = requests.post(
-        f'{BLAND_BASE_URL}/calls/{call_id}/stop',
-        headers={'authorization': api_key},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    return resp.json()
-
-
-def list_calls(api_key: str, limit: int = 20) -> Dict[str, Any]:
-    """List recent calls."""
-    resp = requests.get(
-        f'{BLAND_BASE_URL}/calls?limit={limit}',
-        headers={'authorization': api_key},
-        timeout=15,
     )
     resp.raise_for_status()
     return resp.json()

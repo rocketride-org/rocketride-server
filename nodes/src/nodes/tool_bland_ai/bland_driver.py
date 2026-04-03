@@ -34,7 +34,6 @@ API docs: https://docs.bland.ai
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List
 
 from ai.common.tools import ToolsBase
@@ -85,6 +84,10 @@ GET_CALL_SCHEMA: Dict[str, Any] = {
             'type': 'string',
             'description': 'The call ID returned by make_call',
         },
+        'wait_for_completion': {
+            'type': 'boolean',
+            'description': ('If true, poll until the call finishes before returning (recommended for pipelines). Waits up to 5 minutes. Default: false.'),
+        },
     },
 }
 
@@ -115,7 +118,7 @@ ANALYZE_CALL_SCHEMA: Dict[str, Any] = {
 class BlandDriver(ToolsBase):
     """Tool driver that exposes Bland AI voice call capabilities to agents."""
 
-    def __init__(
+    def __init__(  # noqa: D107
         self,
         *,
         server_name: str,
@@ -134,27 +137,15 @@ class BlandDriver(ToolsBase):
 
         self._tools = {
             'make_call': {
-                'description': (
-                    'Initiate an AI-powered outbound phone call via Bland AI. '
-                    'Required: phone_number (E.164 format) and task (instructions for the AI agent). '
-                    'Optional: first_sentence, voice, webhook (HTTPS), max_duration. '
-                    'Returns call_id to track the call.'
-                ),
+                'description': ('Initiate an AI-powered outbound phone call via Bland AI. Required: phone_number (E.164 format) and task (instructions for the AI agent). Optional: first_sentence, voice, webhook (HTTPS), max_duration. Returns call_id to track the call.'),
                 'schema': MAKE_CALL_SCHEMA,
             },
             'get_call': {
-                'description': (
-                    'Get details for a Bland AI call including status, transcript, '
-                    'recording URL, duration, and summary. Required: call_id.'
-                ),
+                'description': ('Get details for a Bland AI call including status, transcript, recording URL, duration, and summary. Required: call_id. Set wait_for_completion=true to block until the call finishes (use this in pipelines to avoid polling).'),
                 'schema': GET_CALL_SCHEMA,
             },
             'analyze_call': {
-                'description': (
-                    'Run AI analysis on a completed Bland AI call. '
-                    'Provide a goal and questions to extract structured insights from the transcript. '
-                    'Required: call_id. Optional: goal, questions.'
-                ),
+                'description': ('Run AI analysis on a completed Bland AI call. Provide a goal and questions to extract structured insights from the transcript. Required: call_id. Optional: goal, questions.'),
                 'schema': ANALYZE_CALL_SCHEMA,
             },
         }
@@ -177,10 +168,7 @@ class BlandDriver(ToolsBase):
         # Strip namespace prefix
         bare_name = tool_name.split('.', 1)[-1] if '.' in tool_name else tool_name
         if bare_name not in self._tools:
-            raise ValueError(
-                f'Unknown tool {tool_name!r}. '
-                f'Available: {", ".join(f"{self._server_name}.{t}" for t in self._tools)}'
-            )
+            raise ValueError(f'Unknown tool {tool_name!r}. Available: {", ".join(f"{self._server_name}.{t}" for t in self._tools)}')
 
         if not isinstance(input_obj, dict):
             raise TypeError('Tool input must be a JSON object')
@@ -237,6 +225,8 @@ class BlandDriver(ToolsBase):
 
         if bare_name == 'get_call':
             call_id = str(input_obj.get('call_id') or '').strip()
+            if input_obj.get('wait_for_completion'):
+                return bland_client.get_call_when_complete(self._api_key, call_id)
             return bland_client.get_call(self._api_key, call_id)
 
         if bare_name == 'analyze_call':
