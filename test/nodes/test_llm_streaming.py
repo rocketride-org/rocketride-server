@@ -34,6 +34,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Direct module loading — bypass the heavy ``nodes`` and ``rocketlib``
 # package __init__.py chains that require the C++ engine runtime.
@@ -42,10 +44,16 @@ from unittest.mock import MagicMock, patch
 # ``streaming.py`` uses a relative import from ``streaming_config`` and a
 #   lazy ``from ai.common.schema import Answer`` inside ``stream_response``.
 #   The lazy import is patched in tests that exercise that path.
+#
+# All synthetic sys.modules entries are scoped to a session fixture so they
+# are cleaned up after testing and cannot leak into other test modules.
 # ---------------------------------------------------------------------------
 
 _REPO = Path(__file__).resolve().parent.parent.parent
 _LLM_BASE = _REPO / 'nodes' / 'src' / 'nodes' / 'llm_base'
+
+# Keys injected into sys.modules by _setup_llm_modules; tracked for cleanup.
+_INJECTED_MODULE_KEYS: list[str] = []
 
 
 def _load_module(name: str, path: Path):
@@ -53,36 +61,55 @@ def _load_module(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, str(path))
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
+    _INJECTED_MODULE_KEYS.append(name)
     spec.loader.exec_module(mod)
     return mod
 
 
-# 1) streaming_config — no dependencies at all
-streaming_config = _load_module(
-    'nodes.llm_base.streaming_config',
-    _LLM_BASE / 'streaming_config.py',
-)
+def _setup_llm_modules():
+    """Register synthetic ``nodes.llm_base`` packages and load the target modules."""
+    # 1) streaming_config — no dependencies at all
+    config_mod = _load_module(
+        'nodes.llm_base.streaming_config',
+        _LLM_BASE / 'streaming_config.py',
+    )
+
+    # 2) streaming — has ``from .streaming_config import ...``.
+    #    The relative import resolves correctly when we also register a
+    #    minimal ``nodes.llm_base`` package entry.
+    _pkg = type(sys)('nodes.llm_base')
+    _pkg.__path__ = [str(_LLM_BASE)]
+    _pkg.__package__ = 'nodes.llm_base'
+    if 'nodes' not in sys.modules:
+        sys.modules['nodes'] = type(sys)('nodes')
+        _INJECTED_MODULE_KEYS.append('nodes')
+    sys.modules['nodes.llm_base'] = _pkg
+    _INJECTED_MODULE_KEYS.append('nodes.llm_base')
+
+    stream_mod = _load_module(
+        'nodes.llm_base.streaming',
+        _LLM_BASE / 'streaming.py',
+    )
+
+    return config_mod, stream_mod
+
+
+@pytest.fixture(scope='session', autouse=True)
+def _llm_modules():
+    """Session-scoped fixture that loads LLM modules and cleans up sys.modules after."""
+    _setup_llm_modules()
+    yield
+    for key in _INJECTED_MODULE_KEYS:
+        sys.modules.pop(key, None)
+
+
+# Perform the initial load so that module-level references are available.
+streaming_config, streaming_mod = _setup_llm_modules()
 
 STREAMING_CAPABLE_PROVIDERS = streaming_config.STREAMING_CAPABLE_PROVIDERS
 get_provider_name = streaming_config.get_provider_name
 is_provider_streaming_capable = streaming_config.is_provider_streaming_capable
 is_streaming_enabled = streaming_config.is_streaming_enabled
-
-# 2) streaming — has ``from .streaming_config import ...``.
-#    Since we already registered ``nodes.llm_base.streaming_config`` in
-#    sys.modules the relative import resolves correctly *only if* we also
-#    register a minimal ``nodes.llm_base`` package entry.
-_pkg = type(sys)('nodes.llm_base')
-_pkg.__path__ = [str(_LLM_BASE)]
-_pkg.__package__ = 'nodes.llm_base'
-sys.modules.setdefault('nodes', type(sys)('nodes'))
-sys.modules['nodes.llm_base'] = _pkg
-
-streaming_mod = _load_module(
-    'nodes.llm_base.streaming',
-    _LLM_BASE / 'streaming.py',
-)
-
 StreamingHandler = streaming_mod.StreamingHandler
 
 
@@ -159,6 +186,11 @@ class TestStreamingConfig:
 
     def test_get_provider_deep_dotted(self):
         assert get_provider_name('a.b.llm_gemini.c') == 'gemini'
+
+    def test_get_provider_canonicalizes_suffixed_names(self):
+        """Suffixed variants like llm_openai_api should map to the canonical provider."""
+        assert get_provider_name('llm_openai_api') == 'openai'
+        assert get_provider_name('nodes.llm_mistral_v2.IInstance') == 'mistral'
 
     # -- is_provider_streaming_capable --
 
@@ -450,6 +482,26 @@ class TestStreamResponse:
 
         assert answer.getText() == 'recovered'
         assert chat_fn.call_count == 2
+        # A stream_end event must be emitted so SSE clients don't hang.
+        end_calls = [c for c in mock_sse.call_args_list if c.args[0] == 'stream_end']
+        assert len(end_calls) == 1
+
+    def test_fallback_returns_existing_answer_unchanged(self):
+        """When chat_fn already returns an Answer, don't re-wrap it."""
+        inst, _ = _make_instance()
+        h = StreamingHandler(inst, provider='unknown_provider')
+        question = _make_question('test')
+
+        fake_mod = _fake_schema_module()
+        existing_answer = fake_mod.Answer(expectJson=False)
+        existing_answer.setAnswer('already an answer')
+        chat_fn = MagicMock(return_value=existing_answer)
+
+        with patch.dict('sys.modules', {'ai.common.schema': fake_mod}):
+            answer = h.stream_response(chat_fn, question)
+
+        assert answer is existing_answer
+        assert answer.getText() == 'already an answer'
 
     def test_expect_json_propagated(self):
         """The ``expectJson`` flag from the question is carried to the Answer."""
@@ -546,7 +598,7 @@ class TestStreamInterruption:
 
     def test_generator_raises_mid_stream(self):
         """If the generator raises mid-stream, fall back and recover."""
-        inst, mock_sse = _make_instance()
+        inst, _mock_sse = _make_instance()
         h = StreamingHandler(inst, provider='openai')
         question = _make_question('test')
 

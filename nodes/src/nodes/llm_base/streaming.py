@@ -198,6 +198,8 @@ class StreamingHandler:
 
         except Exception:
             logger.debug('Streaming failed for provider=%s, falling back to non-streaming', self._provider, exc_info=True)
+            # Emit stream_end so SSE clients don't hang waiting for it.
+            self._emit_stream_end({'input_tokens': 0, 'output_tokens': 0})
             return self._fallback(chat_fn, prompt, expect_json, Answer, **kwargs)
 
     # ------------------------------------------------------------------
@@ -370,7 +372,11 @@ class StreamingHandler:
         kwargs.pop('stream', None)
         result = chat_fn(prompt, **kwargs)
 
-        # The result may already be an Answer or a raw string/content obj.
+        # If the result is already an Answer, return it directly.
+        if isinstance(result, answer_cls):
+            return result
+
+        # The result may be a raw string or a content-bearing object.
         content = result
         if hasattr(result, 'content'):
             content = result.content

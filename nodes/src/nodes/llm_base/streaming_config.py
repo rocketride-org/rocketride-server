@@ -63,22 +63,40 @@ def is_streaming_enabled(config: Dict[str, Any]) -> bool:
     return bool(config.get('streaming') or config.get('stream'))
 
 
+def _canonicalize_provider(raw: str) -> str:
+    """Map a raw provider suffix to its canonical key.
+
+    Handles suffixed names like ``openai_api`` -> ``openai`` by checking
+    whether any canonical provider key is a prefix of *raw*.  Returns
+    *raw* unchanged when no canonical prefix matches.
+    """
+    lower = raw.lower()
+    if lower in STREAMING_CAPABLE_PROVIDERS:
+        return lower
+    # Check if a canonical provider is a prefix (e.g. 'openai' in 'openai_api')
+    for canonical in STREAMING_CAPABLE_PROVIDERS:
+        if lower.startswith(canonical + '_') or lower.startswith(canonical):
+            return canonical
+    return lower
+
+
 def get_provider_name(logical_type: str) -> Optional[str]:
-    """Extract the provider name from a logical type / module path.
+    """Extract the canonical provider name from a logical type / module path.
 
     The convention in RocketRide is that LLM logical types follow the
     pattern ``llm_<provider>`` (e.g. ``llm_openai``, ``llm_anthropic``).
-    This helper strips the ``llm_`` prefix and returns the bare provider
-    name.  If *logical_type* uses a dotted module path
-    (``nodes.llm_openai.IInstance``), only the ``llm_*`` segment is
-    considered.
+    This helper strips the ``llm_`` prefix and returns the canonical
+    provider name.  Suffixed variants like ``llm_openai_api`` are
+    normalised to the base provider (``openai``).  If *logical_type*
+    uses a dotted module path (``nodes.llm_openai.IInstance``), only the
+    ``llm_*`` segment is considered.
 
     Args:
         logical_type: The logical type string from the engine endpoint.
 
     Returns:
-        The bare provider name (e.g. ``'openai'``) or ``None`` if the
-        string does not follow the expected pattern.
+        The canonical provider name (e.g. ``'openai'``) or ``None`` if
+        the string does not follow the expected pattern.
     """
     if not logical_type:
         return None
@@ -89,7 +107,7 @@ def get_provider_name(logical_type: str) -> Optional[str]:
     # matched on the first iteration.
     for segment in logical_type.split('.'):
         if segment.startswith('llm_'):
-            return segment[4:]  # strip "llm_"
+            return _canonicalize_provider(segment[4:])
 
     return None
 
