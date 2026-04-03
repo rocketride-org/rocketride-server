@@ -111,16 +111,13 @@ class Store(DocumentStoreBase):
         # Establish a connection to the Milvus instance with configurable timeout
         try:
             if profile != 'local':
-                # Init the store
-                if self.host.startswith('https:') or self.host.startswith('http:'):
-                    self.client = MilvusClient(uri=self.host, token=self.apikey, timeout=self.timeout)
-                else:
-                    self.client = MilvusClient(uri=f'https://{self.host}', token=self.apikey, timeout=self.timeout)
+                # Init the store (host was stripped of protocol at line 87, so always add https://)
+                self.client = MilvusClient(uri=f'https://{self.host}', token=self.apikey, timeout=self.timeout)
             else:
                 self.client = MilvusClient(uri=f'http://{self.host}:{self.port}', timeout=self.timeout)
         except Exception as e:
             self.client = None
-            raise Exception(f'Failed to connect to Milvus at {self.host}: {e}')
+            raise Exception(f'Failed to connect to Milvus at {self.host}: {e}') from e
 
         return
 
@@ -570,7 +567,7 @@ class Store(DocumentStoreBase):
         if not filter_expression:
             return
 
-        results = self.client.query(collection_name=self.collection, filter=filter_expression)
+        results = self.client.query(collection_name=self.collection, filter=filter_expression, output_fields=['id', 'vector', 'content', 'meta'])
 
         # Batch-update instead of one-at-a-time to avoid performance bottleneck
         self._batchUpsertResults(results, isDeleted=True)
@@ -598,7 +595,7 @@ class Store(DocumentStoreBase):
         if not filter_expression:
             return
 
-        results = self.client.query(collection_name=self.collection, filter=filter_expression)
+        results = self.client.query(collection_name=self.collection, filter=filter_expression, output_fields=['id', 'vector', 'content', 'meta'])
 
         # Batch-update instead of one-at-a-time to avoid performance bottleneck
         self._batchUpsertResults(results, isDeleted=False)
@@ -626,7 +623,7 @@ class Store(DocumentStoreBase):
             # Build filter for getting a set of chunks within the offset range
             must_condition = f"(meta['objectId'] == '{_escape_milvus_str(objectId)}') && ({offset - 1} < meta['chunkId'] < {offset + self.renderChunkSize})"
 
-            results = self.client.query(collection_name=self.collection, filter=must_condition)
+            results = self.client.query(collection_name=self.collection, filter=must_condition, output_fields=['meta', 'content'])
 
             # Create a renderChunkSize array with empty
             # entries. This will allow us to join even when

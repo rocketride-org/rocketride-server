@@ -350,6 +350,9 @@ export const PageStatus: React.FC = () => {
 		const state = taskStatus?.state ?? TASK_STATE.NONE;
 		const runLabel = tracingEnabled ? 'Run & Trace' : 'Run';
 
+		if (state === TASK_STATE.STOPPING) {
+			return { label: 'Stopping...', action: 'stop' as const, disabled: true, className: 'action-btn stopping-btn disabled' };
+		}
 		if (state === TASK_STATE.RUNNING || state === TASK_STATE.INITIALIZING) {
 			return { label: 'Stop', action: 'stop' as const, disabled: false, className: 'action-btn stop-btn' };
 		}
