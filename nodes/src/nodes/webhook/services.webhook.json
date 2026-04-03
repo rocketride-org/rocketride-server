@@ -73,6 +73,21 @@
 			"lane": "_source",
 			"output": [
 				{
+					"lane": "tags"
+				},
+				{
+					"lane": "text"
+				},
+				{
+					"lane": "audio"
+				},
+				{
+					"lane": "video"
+				},
+				{
+					"lane": "image"
+				},
+				{
 					"lane": "questions",
 					"description": "Produces questions to be answered by the pipeline."
 				}
