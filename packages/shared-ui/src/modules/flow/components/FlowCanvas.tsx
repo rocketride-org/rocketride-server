@@ -34,7 +34,7 @@
  *   - Applies navigation mode (pan vs lasso-select) and lock state
  */
 
-import { ReactElement, useCallback, useEffect, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import { ReactFlow, Background, SelectionMode, useReactFlow } from '@xyflow/react';
 import { IconButton, Snackbar, Tooltip } from '@mui/material';
 import { Settings } from '@mui/icons-material';
@@ -131,6 +131,19 @@ export default function Canvas(): ReactElement {
 
 	// --- Auto-layout -------------------------------------------------------
 	const { autoLayout, isLayouting } = useAutoLayout(nodes, edges, setNodes, onToolchainUpdated);
+
+	// Auto-apply tidy layout on first load (when nodes appear from a file)
+	const hasAutoLayouted = useRef(false);
+	useEffect(() => {
+		if (nodes.length > 0 && !hasAutoLayouted.current && !isLayouting) {
+			hasAutoLayouted.current = true;
+			// Delay to let nodes measure first
+			const timer = setTimeout(() => {
+				autoLayout();
+			}, 500);
+			return () => clearTimeout(timer);
+		}
+	}, [nodes.length, isLayouting, autoLayout]);
 
 	// --- Template instantiation (must live here, not in the dialog) ---------
 	const { instantiateTemplate: rawInstantiateTemplate, requestFitView } = useTemplateInstantiator();
