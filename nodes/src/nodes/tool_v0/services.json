@@ -1,82 +1,29 @@
 {
 	//
-	// Required:
-	//		The displayable name of this node
+	// v0 by Vercel — Generative UI tool node
+	//
+	// Generates React + Tailwind CSS components from natural-language prompts
+	// using the Vercel v0 API. Exposes two tools:
+	//   - generate_ui: create a component from a text description
+	//   - refine_ui:   iterate on a previous generation with follow-up instructions
 	//
 	"title": "v0 by Vercel",
-	//
-	// Required:
-	//		The protocol is the endpoint protocol
-	//
 	"protocol": "tool_v0://",
-	//
-	// Required:
-	//		Class type of the node - what it does
-	//
 	"classType": ["tool"],
-	//
-	// Required:
-	//		Capabilities are flags that change the behavior of the underlying
-	//		engine
-	//
 	"capabilities": ["invoke"],
-	//
-	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the
-	//		type is specified, a factory is registered of that given type
-	//
 	"register": "filter",
-	//
-	// Optional:
-	//		The node is the actual physical node to instantiate - if
-	//		not specified, the protocol will be used
-	//
 	"node": "python",
-	//
-	// Optional:
-	//		The path is the executable/script code - it is node dependent
-	//		and is optional for most nodes
-	//
 	"path": "nodes.tool_v0",
-	//
-	// Required:
-	//		The prefix map when added/removed when converting URLs <=> paths
-	//
 	"prefix": "v0",
-	//
-	// Optional:
-	//		The icon is the icon to display in the UI for this node
-	//
 	"icon": "vercel.svg",
-	//
-	// Optional:
-	//		Description of this driver
-	//
 	"description": [
 		"Generates React UI components from natural-language prompts using Vercel's v0 API.",
 		"Provides generate_ui (create component) and refine_ui (iterate on existing generation)."
 	],
-	//
-	// Optional:
-	//		Tile labels shown on the node in the visual builder
-	//
 	"tile": ["Tool: v0.generate_ui"],
-	//
-	// Optional:
-	//		As a pipe component, define what this pipe component takes
-	//		and what it produces
-	//
 	"lanes": {},
-	//
-	// Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
-	//
 	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
 		"default": "default",
-		// Defines profiles used with the "profile": key
 		"profiles": {
 			"default": {
 				"title": "v0 by Vercel",
@@ -84,12 +31,6 @@
 			}
 		}
 	},
-	//
-	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
-	//
 	"fields": {
 		"tool_v0.apikey": {
 			"type": "string",
@@ -102,11 +43,6 @@
 			}
 		}
 	},
-	//
-	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		may be specified, or both, but at least one is required
-	//
 	"shape": [
 		{
 			"section": "Pipe",
