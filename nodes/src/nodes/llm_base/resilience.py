@@ -103,6 +103,12 @@ class CircuitBreaker:
         provider_name: str = 'unknown',
     ):
         """Create a circuit breaker with the given thresholds and provider label."""
+        if failure_threshold < 1:
+            raise ValueError('failure_threshold must be >= 1')
+        if recovery_timeout < 0:
+            raise ValueError('recovery_timeout must be >= 0')
+        if half_open_max_calls < 1:
+            raise ValueError('half_open_max_calls must be >= 1')
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.half_open_max_calls = half_open_max_calls
@@ -113,6 +119,7 @@ class CircuitBreaker:
         self._failure_count = 0
         self._last_failure_time: Optional[float] = None
         self._half_open_calls = 0
+        self._epoch = 0
 
     # -- public properties ---------------------------------------------------
 
@@ -137,35 +144,53 @@ class CircuitBreaker:
                 _log(f'[CircuitBreaker:{self.provider_name}] OPEN -> HALF_OPEN after {elapsed:.1f}s')
                 self._state = CircuitState.HALF_OPEN
                 self._half_open_calls = 0
+                self._epoch += 1
 
     # -- public interface ----------------------------------------------------
 
-    def allow_request(self) -> bool:
-        """Return True if the breaker allows a request through."""
+    def allow_request(self) -> Tuple[bool, int]:
+        """Return ``(allowed, epoch)``; callers pass the epoch back to record methods.
+
+        The epoch prevents stale in-flight completions from affecting a breaker
+        that has already moved to a different phase.
+        """
         with self._lock:
             self._maybe_transition_to_half_open()
             if self._state is CircuitState.CLOSED:
-                return True
+                return True, self._epoch
             if self._state is CircuitState.HALF_OPEN:
                 if self._half_open_calls < self.half_open_max_calls:
                     self._half_open_calls += 1
-                    return True
-                return False
+                    return True, self._epoch
+                return False, self._epoch
             # OPEN
-            return False
+            return False, self._epoch
 
-    def record_success(self) -> None:
-        """Record a successful call and reset the breaker to CLOSED if needed."""
+    def record_success(self, epoch: Optional[int] = None) -> None:
+        """Record a successful call and reset the breaker to CLOSED if needed.
+
+        If *epoch* is supplied and does not match the current epoch the call is
+        silently ignored (the breaker has already moved to a different phase).
+        """
         with self._lock:
+            if epoch is not None and epoch != self._epoch:
+                return
             if self._state is CircuitState.HALF_OPEN:
                 _log(f'[CircuitBreaker:{self.provider_name}] HALF_OPEN -> CLOSED (success)')
             self._state = CircuitState.CLOSED
             self._failure_count = 0
             self._half_open_calls = 0
+            self._epoch += 1
 
-    def record_failure(self) -> None:
-        """Record a failed call. Opens the breaker when the threshold is reached."""
+    def record_failure(self, epoch: Optional[int] = None) -> None:
+        """Record a failed call. Opens the breaker when the threshold is reached.
+
+        If *epoch* is supplied and does not match the current epoch the call is
+        silently ignored (the breaker has already moved to a different phase).
+        """
         with self._lock:
+            if epoch is not None and epoch != self._epoch:
+                return
             self._failure_count += 1
             self._last_failure_time = time.monotonic()
 
@@ -173,9 +198,11 @@ class CircuitBreaker:
                 _log(f'[CircuitBreaker:{self.provider_name}] HALF_OPEN -> OPEN (failure)')
                 self._state = CircuitState.OPEN
                 self._half_open_calls = 0
+                self._epoch += 1
             elif self._state is CircuitState.CLOSED and self._failure_count >= self.failure_threshold:
                 _log(f'[CircuitBreaker:{self.provider_name}] CLOSED -> OPEN (failures={self._failure_count})')
                 self._state = CircuitState.OPEN
+                self._epoch += 1
 
     def recovery_remaining(self) -> float:
         """Seconds remaining before the breaker moves to HALF_OPEN (0 if not OPEN)."""
@@ -246,9 +273,7 @@ def _is_retryable(exc: BaseException, retryable_types: Optional[Tuple[Type[BaseE
     if any(keyword in name for keyword in _DEFAULT_RETRYABLE_NAMES):
         return True
     # Treat generic connection / timeout errors as retryable.
-    if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
-        return True
-    return False
+    return isinstance(exc, (ConnectionError, TimeoutError, OSError))
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +329,7 @@ def retry_with_backoff(
                     delay = min(base_delay * (2**attempt) + random.uniform(0, base_delay), max_delay)
                     _log(f'[retry] attempt {attempt + 1}/{max_retries} failed ({type(exc).__name__}), retrying in {delay:.2f}s')
                     time.sleep(delay)
-            raise last_exc  # pragma: no cover – unreachable but keeps mypy happy
+            raise last_exc  # pragma: no cover -- unreachable but keeps mypy happy
 
         @functools.wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -341,7 +366,7 @@ def retry_with_backoff(
 # all instances of a given provider share one breaker, even when instantiated
 # by different pipelines running in parallel threads.
 # Provider breaker registry. In practice, bounded by the number of LLM providers
-# (openai, anthropic, gemini, etc.) — typically < 15 entries.
+# (openai, anthropic, gemini, etc.) -- typically < 15 entries.
 _provider_breakers: Dict[str, CircuitBreaker] = {}
 _provider_breakers_lock = threading.Lock()
 
@@ -372,6 +397,12 @@ class LLMResiliencePolicy:
         retryable_types: Optional[Tuple[Type[BaseException], ...]] = None,
     ):
         """Create a resilience policy combining circuit breaker and retry for *provider_name*."""
+        if max_retries < 0:
+            raise ValueError('max_retries must be >= 0')
+        if base_delay < 0:
+            raise ValueError('base_delay must be >= 0')
+        if max_delay < 0:
+            raise ValueError('max_delay must be >= 0')
         self.provider_name = provider_name
         self.max_retries = max_retries
         self.base_delay = base_delay
@@ -387,6 +418,10 @@ class LLMResiliencePolicy:
                     half_open_max_calls=half_open_max_calls,
                     provider_name=provider_name,
                 )
+            else:
+                existing = _provider_breakers[provider_name]
+                if existing.failure_threshold != failure_threshold or existing.recovery_timeout != recovery_timeout or existing.half_open_max_calls != half_open_max_calls:
+                    _log(f'[LLMResiliencePolicy:{provider_name}] reusing existing breaker; ignoring new params (threshold={failure_threshold}, timeout={recovery_timeout}, half_open={half_open_max_calls})')
             self._breaker = _provider_breakers[provider_name]
 
     @property
@@ -398,7 +433,8 @@ class LLMResiliencePolicy:
 
         Raises ``CircuitBreakerOpenError`` immediately if the breaker is OPEN.
         """
-        if not self._breaker.allow_request():
+        allowed, epoch = self._breaker.allow_request()
+        if not allowed:
             raise CircuitBreakerOpenError(self.provider_name, self._breaker.recovery_remaining())
 
         @retry_with_backoff(max_retries=self.max_retries, base_delay=self.base_delay, max_delay=self.max_delay, retryable_types=self.retryable_types)
@@ -407,16 +443,17 @@ class LLMResiliencePolicy:
 
         try:
             result = _inner()
-            self._breaker.record_success()
+            self._breaker.record_success(epoch)
             return result
         except Exception as exc:
             if _is_retryable(exc, self.retryable_types):
-                self._breaker.record_failure()
+                self._breaker.record_failure(epoch)
             raise
 
     async def execute_async(self, fn: Callable, *args: Any, **kwargs: Any) -> Any:
         """Async variant of :meth:`execute`."""
-        if not self._breaker.allow_request():
+        allowed, epoch = self._breaker.allow_request()
+        if not allowed:
             raise CircuitBreakerOpenError(self.provider_name, self._breaker.recovery_remaining())
 
         @retry_with_backoff(max_retries=self.max_retries, base_delay=self.base_delay, max_delay=self.max_delay, retryable_types=self.retryable_types)
@@ -425,11 +462,11 @@ class LLMResiliencePolicy:
 
         try:
             result = await _inner()
-            self._breaker.record_success()
+            self._breaker.record_success(epoch)
             return result
         except Exception as exc:
             if _is_retryable(exc, self.retryable_types):
-                self._breaker.record_failure()
+                self._breaker.record_failure(epoch)
             raise
 
 

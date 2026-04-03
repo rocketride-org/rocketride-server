@@ -32,6 +32,7 @@ All settings can be overridden via environment variables:
     ROCKETRIDE_RETRY_MAX_DELAY            -- backoff delay ceiling in seconds (default 60.0)
 """
 
+import math
 import os
 from dataclasses import dataclass
 from typing import Dict, Optional
@@ -61,7 +62,7 @@ class ResilienceConfig:
 # ---------------------------------------------------------------------------
 
 
-def _env_int(key: str, default: int) -> int:
+def _env_int(key: str, default: int, *, minimum: int = 0) -> int:
     raw = os.environ.get(key)
     if raw is None:
         return default
@@ -69,12 +70,12 @@ def _env_int(key: str, default: int) -> int:
         value = int(raw)
     except ValueError:
         return default
-    if value < 0:
+    if value < minimum:
         return default
     return value
 
 
-def _env_float(key: str, default: float) -> float:
+def _env_float(key: str, default: float, *, minimum: float = 0.0) -> float:
     raw = os.environ.get(key)
     if raw is None:
         return default
@@ -82,7 +83,7 @@ def _env_float(key: str, default: float) -> float:
         value = float(raw)
     except ValueError:
         return default
-    if value < 0:
+    if not math.isfinite(value) or value < minimum:
         return default
     return value
 
@@ -90,12 +91,12 @@ def _env_float(key: str, default: float) -> float:
 def get_default_config() -> ResilienceConfig:
     """Build a ``ResilienceConfig`` from environment variables (or built-in defaults)."""
     return ResilienceConfig(
-        failure_threshold=_env_int('ROCKETRIDE_CIRCUIT_BREAKER_THRESHOLD', 5),
-        recovery_timeout=_env_float('ROCKETRIDE_CIRCUIT_BREAKER_TIMEOUT', 60.0),
+        failure_threshold=_env_int('ROCKETRIDE_CIRCUIT_BREAKER_THRESHOLD', 5, minimum=1),
+        recovery_timeout=_env_float('ROCKETRIDE_CIRCUIT_BREAKER_TIMEOUT', 60.0, minimum=0.0),
         half_open_max_calls=1,
-        max_retries=_env_int('ROCKETRIDE_RETRY_MAX_ATTEMPTS', 3),
-        base_delay=_env_float('ROCKETRIDE_RETRY_BASE_DELAY', 1.0),
-        max_delay=_env_float('ROCKETRIDE_RETRY_MAX_DELAY', 60.0),
+        max_retries=_env_int('ROCKETRIDE_RETRY_MAX_ATTEMPTS', 3, minimum=0),
+        base_delay=_env_float('ROCKETRIDE_RETRY_BASE_DELAY', 1.0, minimum=0.0),
+        max_delay=_env_float('ROCKETRIDE_RETRY_MAX_DELAY', 60.0, minimum=0.0),
     )
 
 
@@ -110,7 +111,7 @@ _PROVIDER_OVERRIDES: Dict[str, Dict[str, object]] = {
     'gemini': {},
     'mistral': {},
     'ollama': {
-        # Local model server – short recovery, fewer retries.
+        # Local model server -- short recovery, fewer retries.
         'recovery_timeout': 10.0,
         'max_retries': 1,
     },

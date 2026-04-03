@@ -37,42 +37,17 @@ Tests cover:
 
 import asyncio
 import os
-import sys
 import threading
 import time
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 # ---------------------------------------------------------------------------
-# Path setup – ensure nodes/src/nodes is importable
+# Path setup and stubs are provided by test/nodes/conftest.py
+# (session-scoped fixture with proper teardown to avoid leaking into
+# unrelated tests).
 # ---------------------------------------------------------------------------
-NODES_SRC = Path(__file__).resolve().parent.parent.parent / 'nodes' / 'src' / 'nodes'
-if str(NODES_SRC) not in sys.path:
-    sys.path.insert(0, str(NODES_SRC))
-
-# Provide a stub ``rocketlib`` so imports inside the resilience module work
-# without the real C++ engine runtime.
-if 'rocketlib' not in sys.modules:
-    _mock_rocketlib = type(sys)('rocketlib')
-    _mock_rocketlib.debug = lambda *a, **kw: None
-    _mock_rocketlib.IInstanceBase = type('IInstanceBase', (), {})
-    sys.modules['rocketlib'] = _mock_rocketlib
-
-    _mock_rocketlib_types = type(sys)('rocketlib.types')
-    _mock_rocketlib_types.IInvokeLLM = type('IInvokeLLM', (), {})
-    sys.modules['rocketlib.types'] = _mock_rocketlib_types
-
-if 'ai' not in sys.modules:
-    _mock_ai = type(sys)('ai')
-    sys.modules['ai'] = _mock_ai
-    _mock_ai_common = type(sys)('ai.common')
-    sys.modules['ai.common'] = _mock_ai_common
-    _mock_ai_common_schema = type(sys)('ai.common.schema')
-    _mock_ai_common_schema.Question = type('Question', (), {})
-    _mock_ai_common_schema.Answer = type('Answer', (), {})
-    sys.modules['ai.common.schema'] = _mock_ai_common_schema
 
 from llm_base.resilience import (
     CircuitBreaker,
@@ -92,7 +67,7 @@ from llm_base.resilience_config import (
 
 
 # ---------------------------------------------------------------------------
-# Helpers – custom exception types that mimic SDK errors by name
+# Helpers -- custom exception types that mimic SDK errors by name
 # ---------------------------------------------------------------------------
 
 
@@ -134,7 +109,7 @@ def _clean_breakers():
 
 
 # ===========================================================================
-# Circuit Breaker – State Transitions
+# Circuit Breaker -- State Transitions
 # ===========================================================================
 
 
@@ -159,7 +134,8 @@ class TestCircuitBreakerStates:
         cb = CircuitBreaker(failure_threshold=1, provider_name='test')
         cb.record_failure()
         assert cb.state is CircuitState.OPEN
-        assert cb.allow_request() is False
+        allowed, _epoch = cb.allow_request()
+        assert allowed is False
 
     def test_transitions_to_half_open_after_recovery(self):
         cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.1, provider_name='test')
@@ -172,15 +148,17 @@ class TestCircuitBreakerStates:
         cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.05, half_open_max_calls=1, provider_name='test')
         cb.record_failure()
         time.sleep(0.1)
-        assert cb.allow_request() is True  # first call allowed
-        assert cb.allow_request() is False  # second call rejected
+        allowed1, _epoch1 = cb.allow_request()
+        assert allowed1 is True  # first call allowed
+        allowed2, _epoch2 = cb.allow_request()
+        assert allowed2 is False  # second call rejected
 
     def test_half_open_success_closes_breaker(self):
         cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.05, provider_name='test')
         cb.record_failure()
         time.sleep(0.1)
-        cb.allow_request()
-        cb.record_success()
+        _allowed, epoch = cb.allow_request()
+        cb.record_success(epoch)
         assert cb.state is CircuitState.CLOSED
         assert cb.failure_count == 0
 
@@ -188,8 +166,8 @@ class TestCircuitBreakerStates:
         cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.05, provider_name='test')
         cb.record_failure()
         time.sleep(0.1)
-        cb.allow_request()
-        cb.record_failure()
+        _allowed, epoch = cb.allow_request()
+        cb.record_failure(epoch)
         assert cb.state is CircuitState.OPEN
 
     def test_full_cycle_closed_open_half_open_closed(self):
@@ -203,8 +181,8 @@ class TestCircuitBreakerStates:
         time.sleep(0.1)
         # HALF_OPEN
         assert cb.state is CircuitState.HALF_OPEN
-        cb.allow_request()
-        cb.record_success()
+        _allowed, epoch = cb.allow_request()
+        cb.record_success(epoch)
         # CLOSED again
         assert cb.state is CircuitState.CLOSED
 
@@ -237,7 +215,81 @@ class TestCircuitBreakerStates:
 
 
 # ===========================================================================
-# Circuit Breaker – Thread Safety
+# Circuit Breaker -- Constructor Validation
+# ===========================================================================
+
+
+class TestCircuitBreakerValidation:
+    def test_rejects_zero_failure_threshold(self):
+        with pytest.raises(ValueError, match='failure_threshold'):
+            CircuitBreaker(failure_threshold=0, provider_name='test')
+
+    def test_rejects_negative_recovery_timeout(self):
+        with pytest.raises(ValueError, match='recovery_timeout'):
+            CircuitBreaker(recovery_timeout=-1.0, provider_name='test')
+
+    def test_rejects_zero_half_open_max_calls(self):
+        with pytest.raises(ValueError, match='half_open_max_calls'):
+            CircuitBreaker(half_open_max_calls=0, provider_name='test')
+
+    def test_rejects_negative_max_retries(self):
+        with pytest.raises(ValueError, match='max_retries'):
+            LLMResiliencePolicy(provider_name='val-test', max_retries=-1)
+
+    def test_rejects_negative_base_delay(self):
+        with pytest.raises(ValueError, match='base_delay'):
+            LLMResiliencePolicy(provider_name='val-test2', base_delay=-0.5)
+
+    def test_rejects_negative_max_delay(self):
+        with pytest.raises(ValueError, match='max_delay'):
+            LLMResiliencePolicy(provider_name='val-test3', max_delay=-1.0)
+
+
+# ===========================================================================
+# Circuit Breaker -- Epoch (stale completion handling)
+# ===========================================================================
+
+
+class TestCircuitBreakerEpoch:
+    def test_allow_request_returns_epoch(self):
+        cb = CircuitBreaker(provider_name='epoch-test')
+        allowed, epoch = cb.allow_request()
+        assert allowed is True
+        assert isinstance(epoch, int)
+
+    def test_stale_success_is_ignored(self):
+        cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.05, provider_name='epoch-stale')
+        cb.record_failure()
+        assert cb.state is CircuitState.OPEN
+        # Wait for HALF_OPEN
+        time.sleep(0.1)
+        _allowed, epoch_half_open = cb.allow_request()
+        # Simulate a success from the half-open probe
+        cb.record_success(epoch_half_open)
+        assert cb.state is CircuitState.CLOSED
+        # Now a stale success with the old epoch should be ignored
+        cb.record_failure()  # bump to 1 failure
+        cb.record_success(epoch_half_open)  # stale epoch -- ignored
+        assert cb.failure_count == 1  # not reset
+
+    def test_stale_failure_is_ignored(self):
+        cb = CircuitBreaker(failure_threshold=2, recovery_timeout=0.05, provider_name='epoch-stale-fail')
+        _allowed, epoch0 = cb.allow_request()
+        cb.record_failure()
+        cb.record_failure()
+        assert cb.state is CircuitState.OPEN
+        # Wait for HALF_OPEN
+        time.sleep(0.1)
+        _allowed, epoch_half = cb.allow_request()
+        cb.record_success(epoch_half)
+        assert cb.state is CircuitState.CLOSED
+        # A stale failure from the old epoch should be ignored
+        cb.record_failure(epoch0)
+        assert cb.failure_count == 0
+
+
+# ===========================================================================
+# Circuit Breaker -- Thread Safety
 # ===========================================================================
 
 
@@ -283,7 +335,7 @@ class TestCircuitBreakerThreadSafety:
             t.join()
 
         assert not errors
-        # State should be deterministic — either CLOSED or OPEN depending on
+        # State should be deterministic -- either CLOSED or OPEN depending on
         # the final operation. The important assertion is no exception/deadlock.
         assert cb.state in (CircuitState.CLOSED, CircuitState.OPEN)
 
@@ -494,7 +546,7 @@ class TestAsyncRetry:
 
 
 # ===========================================================================
-# LLMResiliencePolicy – End-to-end
+# LLMResiliencePolicy -- End-to-end
 # ===========================================================================
 
 
@@ -546,13 +598,14 @@ class TestLLMResiliencePolicy:
         assert err.provider == 'test-err'
         assert err.recovery_remaining > 0
 
-    def test_non_retryable_still_records_failure(self):
+    def test_non_retryable_does_not_trip_breaker(self):
         policy = LLMResiliencePolicy(provider_name='test-nonretry', failure_threshold=2, max_retries=3, base_delay=0.01)
 
         with pytest.raises(AuthenticationError):
             policy.execute(self._always_auth_error)
-        # Even though we didn't retry, the failure is recorded.
-        assert policy.circuit_breaker.failure_count == 1
+        # Non-retryable errors (e.g. auth) should NOT trip the breaker.
+        assert policy.circuit_breaker.failure_count == 0
+        assert policy.circuit_breaker.state is CircuitState.CLOSED
 
     @staticmethod
     def _always_rate_limit():
@@ -623,6 +676,26 @@ class TestResilienceConfig:
         with patch.dict(os.environ, {'ROCKETRIDE_CIRCUIT_BREAKER_THRESHOLD': 'not-a-number'}):
             cfg = get_default_config()
         assert cfg.failure_threshold == 5
+
+    def test_negative_env_falls_back_to_default(self):
+        with patch.dict(os.environ, {'ROCKETRIDE_CIRCUIT_BREAKER_THRESHOLD': '-1'}):
+            cfg = get_default_config()
+        assert cfg.failure_threshold == 5
+
+    def test_zero_threshold_env_falls_back_to_default(self):
+        with patch.dict(os.environ, {'ROCKETRIDE_CIRCUIT_BREAKER_THRESHOLD': '0'}):
+            cfg = get_default_config()
+        assert cfg.failure_threshold == 5
+
+    def test_inf_env_falls_back_to_default(self):
+        with patch.dict(os.environ, {'ROCKETRIDE_RETRY_BASE_DELAY': 'inf'}):
+            cfg = get_default_config()
+        assert cfg.base_delay == 1.0
+
+    def test_nan_env_falls_back_to_default(self):
+        with patch.dict(os.environ, {'ROCKETRIDE_RETRY_MAX_DELAY': 'nan'}):
+            cfg = get_default_config()
+        assert cfg.max_delay == 60.0
 
     def test_ollama_override(self):
         cfg = get_provider_config('ollama')
