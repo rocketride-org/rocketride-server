@@ -96,8 +96,8 @@ class Store(DocumentStoreBase):
         self.threshold_search = config.get('score', 0.5)
 
         # Configurable timeout (seconds) and bulk insert batch size
-        self.timeout = config.get('timeout', DEFAULT_TIMEOUT)
-        self.bulkInsertBatchSize = config.get('bulkInsertBatchSize', DEFAULT_BULK_INSERT_BATCH_SIZE)
+        self.timeout = max(int(config.get('timeout', DEFAULT_TIMEOUT)), 1)
+        self.bulkInsertBatchSize = max(int(config.get('bulkInsertBatchSize', DEFAULT_BULK_INSERT_BATCH_SIZE)), 1)
 
         profile = config.get('mode')
 
@@ -522,7 +522,7 @@ class Store(DocumentStoreBase):
 
         return
 
-    def _batchUpsertResults(self, results: List[dict], isDeleted: bool) -> None:
+    def _batchUpsertResults(self, results: List[dict], *, isDeleted: bool) -> None:
         """
         Batch-update the isDeleted metadata field on a list of query results.
 
