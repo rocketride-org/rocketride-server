@@ -66,8 +66,19 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"_source": ["tags", "text", "audio", "video", "image"]
+		"_source": ["tags", "text", "audio", "video", "image", "questions"]
 	},
+	"input": [
+		{
+			"lane": "_source",
+			"output": [
+				{
+					"lane": "questions",
+					"description": "Produces questions to be answered by the pipeline."
+				}
+			]
+		}
+	],
 	//
 	//	Optional:
 	//		Profile section are configuration options used by the driver
