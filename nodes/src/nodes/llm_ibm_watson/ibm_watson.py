@@ -25,7 +25,6 @@ import re
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from ai.common.validation import sanitize_prompt
 from ibm_watsonx_ai import Credentials
 from ibm_watsonx_ai.foundation_models import ModelInference
 from ibm_watsonx_ai.foundation_models.schema import TextChatParameters
@@ -139,12 +138,6 @@ class Chat(ChatBase):
         Returns:
             str: The generated text response from the model
         """
-        if not prompt:
-            raise ValueError('Prompt is empty.')
-
-        # Sanitize control characters before sending to API
-        prompt = sanitize_prompt(prompt)
-
         messages = [{'role': 'user', 'content': prompt}]
 
         response = self._llm.chat(messages=messages)
