@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from rocketlib import debug, warning
+from rocketlib import debug, error
 from rocketlib.types import IInvokeLLM
 
 from ai.common.agent import AgentBase, extract_text, safe_str
@@ -135,12 +135,8 @@ class RocketRideDriver(AgentBase):
                     current_scratch=current_scratch,
                 )
             except Exception as exc:
-                # Use warning() instead of error() to prevent the engine from
-                # aborting the entire pipeline when this execution path fails.
-                # Other parallel paths should continue unaffected.
-                # See: https://github.com/rocketride-org/rocketride-server/issues/444
-                warning(f'rocketride wave plan failed run_id={run_id}: {exc}')
-                return f'LLM error: {exc}', trace
+                error(f'rocketride wave plan failed run_id={run_id}: {exc}')
+                raise
 
             # Update scratch from the LLM response.  Fall back to the previous
             # scratch if the LLM returned an empty string — we never want to

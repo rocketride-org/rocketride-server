@@ -33,7 +33,7 @@ from typing import Any, Dict, List
 
 import jmespath
 
-from rocketlib import debug, warning
+from rocketlib import debug, error
 
 from rocketlib.types import IInvokeLLM
 
@@ -325,7 +325,7 @@ def _store_and_preview(tool: str, key: str, result: Any, host: AgentHost) -> Dic
     try:
         host.memory.put(key, result)
     except Exception as exc:
-        warning(f'rocketride wave memory.put key={key!r} failed: {exc}')
+        error(f'rocketride wave memory.put key={key!r} failed: {exc}')
         raise
 
     summary = _describe(result)
@@ -449,10 +449,7 @@ def _execute_wave_calls(
 
         except Exception as exc:
             err_msg = f'{type(exc).__name__}: {exc}'
-            # Use warning() instead of error() so the engine does not abort
-            # the entire pipeline when a single tool call fails.
-            # See: https://github.com/rocketride-org/rocketride-server/issues/444
-            warning(f'rocketride wave execute tool={tool!r} error={err_msg}')
+            error(f'rocketride wave execute tool={tool!r} error={err_msg}')
             # Return an error dict rather than propagating — the LLM sees the
             # error in the next prompt and can decide how to recover.
             return {'tool': tool, 'key': key, 'error': err_msg}

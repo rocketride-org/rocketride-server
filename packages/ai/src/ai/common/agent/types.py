@@ -72,6 +72,7 @@ class AgentMeta(TypedDict, total=False):
     state_ref: str
     started_at: str
     ended_at: str
+    status: str
     task_id: str
 
 
