@@ -74,7 +74,12 @@ class IInstance(IInstanceBase):
             import json
 
             json_data = answer.getJson()
-            output_text = json.dumps(json_data) if json_data is not None else ''
+            # Strip reserved reference fields before scoring to prevent
+            # the evaluator from grading text that contains the reference.
+            eval_payload = json_data
+            if isinstance(json_data, dict):
+                eval_payload = {k: v for k, v in json_data.items() if k not in {'expected', 'context', 'reference'}}
+            output_text = json.dumps(eval_payload) if eval_payload is not None else ''
         else:
             output_text = answer.getText() or ''
 

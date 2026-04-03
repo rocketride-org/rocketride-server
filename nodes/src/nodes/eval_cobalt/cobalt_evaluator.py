@@ -74,11 +74,27 @@ class CobaltEvaluator:
             debug(f'Unknown eval_type "{self._eval_type}", falling back to similarity')
             self._eval_type = 'similarity'
 
-        self._threshold = float(config.get('threshold', 0.7))
+        try:
+            self._threshold = float(config.get('threshold', 0.7))
+        except (TypeError, ValueError):
+            debug('Invalid threshold configured; falling back to 0.7')
+            self._threshold = 0.7
+        self._threshold = max(0.0, min(1.0, self._threshold))
+
         self._model = config.get('model', 'gpt-4')
         self._criteria = config.get('criteria', 'Is the output correct, complete, and well-structured?')
         self._apikey = config.get('apikey', '')
-        self._custom_fn = custom_fn
+
+        # Resolve custom evaluation function: explicit arg > config > bag
+        resolved_fn = custom_fn
+        if resolved_fn is None:
+            resolved_fn = config.get('custom_fn')
+        if resolved_fn is None:
+            resolved_fn = bag.get('custom_fn')
+        if resolved_fn is not None and not callable(resolved_fn):
+            debug('Configured custom_fn is not callable; ignoring it')
+            resolved_fn = None
+        self._custom_fn = resolved_fn
 
         debug(f'CobaltEvaluator initialized: type={self._eval_type} threshold={self._threshold}')
 
