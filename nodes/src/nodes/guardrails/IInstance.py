@@ -142,7 +142,12 @@ class IInstance(IInstanceBase):
             documents: List of Doc objects from the pipeline.
         """
         for doc in documents:
-            content = doc.page_content if hasattr(doc, 'page_content') else (doc.get('page_content') if isinstance(doc, dict) else doc)
+            if hasattr(doc, 'page_content'):
+                content = doc.page_content
+            elif isinstance(doc, dict):
+                content = doc.get('page_content')
+            else:
+                content = doc
             if content and str(content).strip():
                 self.source_documents.append(str(content))
 
