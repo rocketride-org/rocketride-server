@@ -30,7 +30,7 @@ summarizing content to fit within model limits.
 
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class ContextOptimizer:
     """
 
     # Built-in token limits per model family
-    MODEL_LIMITS: Dict[str, int] = {
+    MODEL_LIMITS: ClassVar[Dict[str, int]] = {
         'gpt-5': 128000,
         'gpt-5-mini': 128000,
         'gpt-5-nano': 128000,
@@ -142,13 +142,13 @@ class ContextOptimizer:
             self._encoding = tiktoken.get_encoding(encoding_name)
         return self._encoding
 
-    def count_tokens(self, text: str, encoding: str = 'cl100k_base') -> int:
+    def count_tokens(self, text: Optional[str], encoding: str = 'cl100k_base') -> int:
         """Count tokens in *text* using the specified tiktoken encoding.
 
-        Handles unicode, emoji, and empty strings gracefully.
+        Handles unicode, emoji, None, and empty strings gracefully.
 
         Args:
-            text: The text to tokenize.
+            text: The text to tokenize (None is treated as empty).
             encoding: tiktoken encoding name (default ``cl100k_base``).
 
         Returns:
@@ -158,6 +158,11 @@ class ContextOptimizer:
             return 0
         enc = self._get_encoding(encoding)
         return len(enc.encode(text))
+
+    def _message_tokens(self, msg: Dict[str, str], encoding: str = 'cl100k_base') -> int:
+        """Return the token cost of a single chat message including role overhead."""
+        role_overhead = self.count_tokens(msg.get('role', ''), encoding) + 4
+        return role_overhead + self.count_tokens(msg.get('content', ''), encoding)
 
     # ------------------------------------------------------------------
     # Budget allocation
@@ -256,6 +261,7 @@ class ContextOptimizer:
                 break
 
         if result_parts:
+            # Note: joining normalizes inter-sentence whitespace to single spaces
             return ' '.join(result_parts)
 
         # Fallback: first sentence is too long -- truncate at token level
@@ -293,21 +299,17 @@ class ContextOptimizer:
             return [{'role': messages[0].get('role', 'user'), 'content': content}]
 
         # Measure total cost
-        def _msg_tokens(msg: Dict[str, str]) -> int:
-            role_overhead = self.count_tokens(msg.get('role', ''), encoding) + 4  # role + formatting
-            return role_overhead + self.count_tokens(msg.get('content', ''), encoding)
-
-        total = sum(_msg_tokens(m) for m in messages)
+        total = sum(self._message_tokens(m, encoding) for m in messages)
         if total <= max_tokens:
             return list(messages)
 
         # Keep first message + try to fit as many recent messages as possible
         first_msg = messages[0]
-        first_cost = _msg_tokens(first_msg)
+        first_cost = self._message_tokens(first_msg, encoding)
 
         # Summary placeholder
         summary_placeholder = {'role': 'system', 'content': '[Earlier conversation summarized]'}
-        summary_cost = _msg_tokens(summary_placeholder)
+        summary_cost = self._message_tokens(summary_placeholder, encoding)
 
         budget_for_recent = max_tokens - first_cost - summary_cost
         if budget_for_recent <= 0:
@@ -319,12 +321,13 @@ class ContextOptimizer:
         recent: List[Dict[str, str]] = []
         recent_cost = 0
         for msg in reversed(messages[1:]):
-            cost = _msg_tokens(msg)
+            cost = self._message_tokens(msg, encoding)
             if recent_cost + cost <= budget_for_recent:
-                recent.insert(0, msg)
+                recent.append(msg)
                 recent_cost += cost
             else:
                 break
+        recent.reverse()
 
         # If we kept all remaining messages, no summary needed
         if len(recent) == len(messages) - 1:
@@ -460,7 +463,7 @@ class ContextOptimizer:
         original_system = self.count_tokens(system_prompt)
         original_question = self.count_tokens(question)
         original_docs = sum(self.count_tokens(str(d.get('content', d.get('page_content', '')))) for d in documents)
-        original_history = sum(self.count_tokens(m.get('content', '')) + self.count_tokens(m.get('role', '')) + 4 for m in history)
+        original_history = sum(self._message_tokens(m) for m in history)
         original_total = original_system + original_question + original_docs + original_history
 
         # ------------------------------------------------------------------
@@ -504,7 +507,7 @@ class ContextOptimizer:
             components_truncated.append('documents')
 
         opt_history = self.summarize_history(history, budget['history'])
-        opt_history_tokens = sum(self.count_tokens(m.get('content', '')) + self.count_tokens(m.get('role', '')) + 4 for m in opt_history)
+        opt_history_tokens = sum(self._message_tokens(m) for m in opt_history)
         if opt_history_tokens < original_history:
             components_truncated.append('history')
 

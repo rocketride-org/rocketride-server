@@ -789,8 +789,9 @@ class TestIInstanceLifecycle:
         inst.writeQuestions(q)
 
         mock_opt.optimize.assert_called_once()
-        call_kwargs = mock_opt.optimize.call_args
-        assert 'question' in call_kwargs.kwargs or len(call_kwargs.args) > 0
+        call_kwargs = mock_opt.optimize.call_args.kwargs
+        assert call_kwargs['question'] == 'What is AI?'
+        assert call_kwargs['system_prompt'] == 'You are helpful.'
 
 
 # ===========================================================================

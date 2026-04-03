@@ -26,6 +26,7 @@ import copy
 from rocketlib import IInstanceBase, Entry, debug, warning
 from .IGlobal import IGlobal
 from ai.common.schema import Question
+from ai.common.schema import QuestionHistory
 
 
 class IInstance(IInstanceBase):
@@ -96,8 +97,6 @@ class IInstance(IInstanceBase):
             question.documents = selected_originals
 
         # Update history
-        from ai.common.schema import QuestionHistory
-
         if result['history']:
             question.history = [QuestionHistory(role=m['role'], content=m['content']) for m in result['history']]
 
