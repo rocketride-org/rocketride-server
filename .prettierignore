@@ -26,3 +26,6 @@ packages/server/**/*.cmake
 # Java
 **/*.java
 
+# Helm chart templates (contain Go template syntax)
+deploy/helm/**/templates/**
+
