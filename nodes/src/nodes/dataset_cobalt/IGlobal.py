@@ -137,10 +137,9 @@ class IGlobal(IGlobalBase):
 
         When Config.getNodeConfig returns a dict wrapped under a 'default'
         key (the engine's convention for nodes that expose a single config
-        panel), this method unwraps it so callers always see a flat dict.
-        Note: any non-default top-level keys in the raw config are discarded
-        during unwrap; this is intentional because the engine only persists
-        user-editable fields inside 'default'.
+        panel), this method merges the nested defaults over the top-level
+        config so that profile defaults (e.g. source_type) are preserved
+        while user-editable fields from 'default' take precedence.
 
         Returns:
             Processed config dictionary.
@@ -149,10 +148,12 @@ class IGlobal(IGlobalBase):
         config = Config.getNodeConfig(self.glb.logicalType, current_conn_config)
 
         # Unwrap 'default' envelope — the engine nests user-editable fields
-        # under this key for single-panel nodes. Non-default keys (if any)
-        # are engine metadata and are intentionally discarded here.
-        if 'default' in config:
-            config = config.get('default', {})
+        # under this key for single-panel nodes. Merge nested defaults over
+        # top-level keys so profile defaults (e.g. source_type) are preserved.
+        if isinstance(config.get('default'), dict):
+            nested_default = config.get('default', {})
+            config = {k: v for k, v in config.items() if k != 'default'}
+            config.update(nested_default)
 
         return config
 

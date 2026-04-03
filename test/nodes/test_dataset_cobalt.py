@@ -771,3 +771,55 @@ class TestValidatePathHelper:
 
         with pytest.raises(ValueError, match='traversal'):
             _validate_path('/data/../../../etc/passwd')
+
+
+class TestExtractConfigMergesDefault:
+    """Fix: _extractConfig merges nested 'default' over top-level config."""
+
+    def _make_global(self, config):
+        g = IGlobal()
+        g.IEndpoint = MagicMock()
+        g.IEndpoint.endpoint.bag = {}
+        g.IEndpoint.endpoint.connConfig = config
+        g.glb = MagicMock()
+        g.glb.connConfig = config
+        g.glb.logicalType = 'dataset_cobalt'
+        return g
+
+    def test_top_level_keys_preserved_after_unwrap(self):
+        """Profile defaults like source_type must survive the 'default' unwrap."""
+        raw_config = {
+            'source_type': 'file',
+            'default': {'file_path': '/data/test.json', 'sample_size': 5},
+        }
+        g = self._make_global(raw_config)
+        result = g._extractConfig()
+        assert result['source_type'] == 'file'
+        assert result['file_path'] == '/data/test.json'
+        assert result['sample_size'] == 5
+        assert 'default' not in result
+
+    def test_default_keys_override_top_level(self):
+        """Keys inside 'default' should take precedence over top-level keys."""
+        raw_config = {
+            'source_type': 'inline',
+            'default': {'source_type': 'file', 'file_path': '/data/test.json'},
+        }
+        g = self._make_global(raw_config)
+        result = g._extractConfig()
+        assert result['source_type'] == 'file'
+
+    def test_no_default_key_returns_config_as_is(self):
+        """Config without a 'default' key should be returned unchanged."""
+        raw_config = {'source_type': 'file', 'file_path': '/data/test.json'}
+        g = self._make_global(raw_config)
+        result = g._extractConfig()
+        assert result == raw_config
+
+    def test_non_dict_default_is_ignored(self):
+        """A non-dict 'default' value should not trigger unwrap."""
+        raw_config = {'source_type': 'file', 'default': 'not-a-dict'}
+        g = self._make_global(raw_config)
+        result = g._extractConfig()
+        assert result['default'] == 'not-a-dict'
+        assert result['source_type'] == 'file'
