@@ -14,6 +14,7 @@ configuration field — a JSON array of agent descriptors.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
@@ -100,8 +101,6 @@ def parse_agent_definitions(raw: Any) -> List[AgentDefinition]:
     Raises:
         ValueError: On malformed input.
     """
-    import json
-
     if raw is None:
         return []
 

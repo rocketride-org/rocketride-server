@@ -14,7 +14,7 @@ IInstance because it carries per-run state (blackboard, message queues).
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from rocketlib import IGlobalBase, OPEN_MODE
 from ai.common.config import Config
@@ -27,7 +27,7 @@ class IGlobal(IGlobalBase):
         config: The node configuration dict, loaded in :meth:`beginGlobal`.
     """
 
-    config: Dict[str, Any] = None
+    config: Optional[Dict[str, Any]] = None
 
     def beginGlobal(self) -> None:
         """Load node configuration for the multi-agent orchestrator.

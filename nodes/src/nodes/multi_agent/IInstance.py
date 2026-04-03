@@ -19,6 +19,7 @@ import copy
 import threading
 
 from rocketlib import IInstanceBase
+from rocketlib.types import IInvokeLLM
 from ai.common.schema import Question, Answer
 
 from .IGlobal import IGlobal
@@ -71,7 +72,7 @@ class IInstance(IInstanceBase):
             q.role = system_prompt
             q.addQuestion(user_prompt)
             with _llm_lock:
-                result = self.instance.invoke('llm', {'op': 'ask', 'question': q})
+                result = self.instance.invoke('llm', IInvokeLLM(op='ask', question=q))
             if isinstance(result, Answer):
                 return result.getText()
             if hasattr(result, 'getText'):

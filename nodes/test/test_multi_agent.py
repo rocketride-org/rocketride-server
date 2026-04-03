@@ -123,6 +123,18 @@ _mock_rocketlib.IGlobalBase = _MockIGlobalBase
 _mock_rocketlib.IInstanceBase = _MockIInstanceBase
 _mock_rocketlib.OPEN_MODE = type('OPEN_MODE', (), {'CONFIG': 'CONFIG'})()
 
+
+class _MockIInvokeLLM:
+    """Lightweight stand-in for rocketlib.types.IInvokeLLM."""
+
+    def __init__(self, **kwargs):
+        self.op = kwargs.get('op', 'ask')
+        self.question = kwargs.get('question', None)
+
+
+_mock_rocketlib_types = MagicMock()
+_mock_rocketlib_types.IInvokeLLM = _MockIInvokeLLM
+
 _mock_ai_schema = MagicMock()
 _mock_ai_schema.Question = _MockQuestion
 _mock_ai_schema.Answer = _MockAnswer
@@ -137,6 +149,7 @@ _mock_ai.common.schema = _mock_ai_schema
 _mock_ai_config = MagicMock()
 
 sys.modules.setdefault('rocketlib', _mock_rocketlib)
+sys.modules.setdefault('rocketlib.types', _mock_rocketlib_types)
 sys.modules.setdefault('ai', _mock_ai)
 sys.modules.setdefault('ai.common', _mock_ai_common)
 sys.modules.setdefault('ai.common.config', _mock_ai_config)
