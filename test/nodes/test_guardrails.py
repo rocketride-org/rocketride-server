@@ -688,7 +688,7 @@ class TestIInstanceLifecycle:
         assert len(forwarded) == 1
 
     def test_write_questions_blocks_injection(self):
-        IInstance, EngineClass, ViolationClass, FakeQuestion, FakeQuestionText, _ = self._load_iinstance_class()
+        IInstance, EngineClass, _ViolationClass, FakeQuestion, FakeQuestionText, _ = self._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'block', 'enable_prompt_injection': True})
         mock_iglobal = types.SimpleNamespace(engine=engine, config={})
@@ -719,7 +719,7 @@ class TestIInstanceLifecycle:
         assert len(forwarded) == 1
 
     def test_write_answers_blocks_pii(self):
-        IInstance, EngineClass, ViolationClass, _, _, FakeAnswer = self._load_iinstance_class()
+        IInstance, EngineClass, _ViolationClass, _, _, FakeAnswer = self._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'block', 'enable_pii_detection': True, 'enable_content_safety': True})
         mock_iglobal = types.SimpleNamespace(engine=engine, config={})
@@ -865,8 +865,8 @@ class TestConfigWiring:
 
         # Collect all keys from all profiles
         profile_keys = set()
-        for profile_name, profile_config in profiles.items():
-            profile_keys.update(k for k in profile_config.keys() if k != 'title')
+        for profile_config in profiles.values():
+            profile_keys.update(k for k in profile_config if k != 'title')
 
         missing = engine_keys - profile_keys
         assert not missing, f'Engine reads keys not defined in any preconfig profile: {missing}'

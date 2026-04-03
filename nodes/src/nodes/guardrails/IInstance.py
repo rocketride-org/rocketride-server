@@ -61,11 +61,9 @@ class IInstance(IInstanceBase):
         # Collect question text for evaluation
         text_parts = []
         if question.questions:
-            for q in question.questions:
-                text_parts.append(q.text)
+            text_parts.extend(q.text for q in question.questions)
         if question.context:
-            for ctx in question.context:
-                text_parts.append(ctx)
+            text_parts.extend(question.context)
 
         full_text = ' '.join(text_parts)
 
