@@ -2,7 +2,7 @@
 	"title": "RocketRide Wave",
 	"protocol": "agent_rocketride://",
 	"classType": ["agent", "tool"],
-	"capabilities": ["invoke"],
+	"capabilities": ["invoke", "experimental"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.agent_rocketride",

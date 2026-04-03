@@ -175,6 +175,16 @@ const styles = {
 		flexShrink: 0,
 		lineHeight: '14px',
 	},
+	experimentalBadge: {
+		fontSize: '9px',
+		padding: '1px 4px',
+		borderRadius: '3px',
+		backgroundColor: '#c89b0a',
+		color: '#fff',
+		marginLeft: '4px',
+		flexShrink: 0,
+		lineHeight: '14px',
+	},
 	empty: {
 		padding: '16px',
 		textAlign: 'center' as const,
@@ -432,6 +442,7 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 											{service.icon && <img src={service.icon} alt="" style={styles.itemIcon} />}
 											<span style={styles.itemTitle}>{service.title ?? key}</span>
 											{Array.isArray(service.classType) && service.classType.includes('tool') && <span style={styles.badge}>Tool</span>}
+											{!!(service.capabilities && IServiceCapabilities.Experimental & service.capabilities) && <span style={styles.experimentalBadge}>Experimental</span>}
 										</div>
 									))}
 							</div>
