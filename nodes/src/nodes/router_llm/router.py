@@ -84,7 +84,7 @@ def _get_model_info(model_name: str) -> Dict[str, Any]:
     return {'provider': 'unknown', 'model': model_name, 'tier': 2}
 
 
-def _estimate_complexity(text: str, threshold: int = 50) -> int:
+def _estimate_complexity(text: Optional[str], threshold: int = 50) -> int:
     """Return a complexity score for the given text.
 
     Scoring heuristic:
@@ -236,6 +236,10 @@ class ModelRouter:
         cumulative spend is tracked.  Without that integration the budget
         will never be consumed and the router will always use the primary
         model.
+
+        TODO: Wire up cost recording in the pipeline flow — either by
+        having downstream nodes call ``record_cost()`` after each LLM
+        invocation, or by estimating cost from token counts.
         """
         with self._lock:
             self._request_count += 1

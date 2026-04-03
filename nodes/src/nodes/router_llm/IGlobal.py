@@ -54,6 +54,18 @@ class IGlobal(IGlobalBase):
         if strategy not in valid_strategies:
             raise APERR(Ec.InvalidParam, f'Invalid routing strategy "{strategy}". Must be one of: {", ".join(sorted(valid_strategies))}')
 
+        budget_limit = float(config.get('budget_limit', 0.0))
+        if budget_limit < 0:
+            raise APERR(Ec.InvalidParam, f'budget_limit must be >= 0, got {budget_limit}')
+
+        complexity_threshold = int(config.get('complexity_threshold', 50))
+        if complexity_threshold < 1:
+            raise APERR(Ec.InvalidParam, f'complexity_threshold must be >= 1, got {complexity_threshold}')
+
+        ab_split_percent = int(config.get('ab_split_percent', 50))
+        if not (0 <= ab_split_percent <= 100):
+            raise APERR(Ec.InvalidParam, f'ab_split_percent must be between 0 and 100, got {ab_split_percent}')
+
         if syntaxOnly:
             return
 
@@ -67,6 +79,19 @@ class IGlobal(IGlobalBase):
                 models = []
             if not models:
                 raise APERR(Ec.InvalidParam, 'fallback_chain strategy requires at least one model in fallback_models')
+
+        if strategy == 'ab_test':
+            primary_model = config.get('primary_model', 'claude-sonnet')
+            fallback_raw = config.get('fallback_models', '')
+            if isinstance(fallback_raw, str):
+                fallback_list = [m.strip() for m in fallback_raw.split(',') if m.strip()]
+            elif isinstance(fallback_raw, list):
+                fallback_list = [m.strip() for m in fallback_raw if m.strip()]
+            else:
+                fallback_list = []
+            distinct = [m for m in fallback_list if m != primary_model]
+            if not distinct:
+                raise APERR(Ec.InvalidParam, 'ab_test strategy requires at least one fallback model that differs from primary_model for meaningful A/B testing')
 
     def beginGlobal(self) -> None:
         """Initialize the ModelRouter with the node configuration."""

@@ -136,7 +136,8 @@ class TestComplexityEstimation:
         assert _estimate_complexity('') == 0
 
     def test_none_returns_zero(self):
-        assert _estimate_complexity(None) == 0
+        # Implementation handles None gracefully despite Optional[str] type hint
+        assert _estimate_complexity(None) == 0  # type: ignore[arg-type]
 
     def test_short_simple_query(self):
         score = _estimate_complexity('Hi')
@@ -618,6 +619,8 @@ class TestIGlobalLifecycle:
             config = {'strategy': strategy}
             if strategy == 'fallback_chain':
                 config['fallback_models'] = 'claude-haiku'
+            if strategy == 'ab_test':
+                config['fallback_models'] = 'gpt-5-mini'
             with patch.object(MockConfig, 'getNodeConfig', return_value=config):
                 iglobal.validateConfig(False)  # should not raise
 
@@ -626,6 +629,41 @@ class TestIGlobalLifecycle:
         with patch.object(MockConfig, 'getNodeConfig', return_value={'strategy': 'fallback_chain', 'fallback_models': ''}):
             with pytest.raises(Exception, match='requires at least one model'):
                 iglobal.validateConfig(False)
+
+    def test_validate_rejects_negative_budget_limit(self):
+        iglobal = self._make_iglobal({})
+        with patch.object(MockConfig, 'getNodeConfig', return_value={'strategy': 'complexity', 'budget_limit': -1}):
+            with pytest.raises(Exception, match='budget_limit must be >= 0'):
+                iglobal.validateConfig(False)
+
+    def test_validate_rejects_invalid_complexity_threshold(self):
+        iglobal = self._make_iglobal({})
+        with patch.object(MockConfig, 'getNodeConfig', return_value={'strategy': 'complexity', 'complexity_threshold': 0}):
+            with pytest.raises(Exception, match='complexity_threshold must be >= 1'):
+                iglobal.validateConfig(False)
+
+    def test_validate_rejects_invalid_ab_split_percent(self):
+        iglobal = self._make_iglobal({})
+        with patch.object(MockConfig, 'getNodeConfig', return_value={'strategy': 'complexity', 'ab_split_percent': 101}):
+            with pytest.raises(Exception, match='ab_split_percent must be between 0 and 100'):
+                iglobal.validateConfig(False)
+
+    def test_validate_ab_test_rejects_same_model(self):
+        iglobal = self._make_iglobal({})
+        with patch.object(MockConfig, 'getNodeConfig', return_value={'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': 'claude-sonnet'}):
+            with pytest.raises(Exception, match='ab_test strategy requires at least one fallback model that differs'):
+                iglobal.validateConfig(False)
+
+    def test_validate_ab_test_rejects_empty_fallback(self):
+        iglobal = self._make_iglobal({})
+        with patch.object(MockConfig, 'getNodeConfig', return_value={'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': ''}):
+            with pytest.raises(Exception, match='ab_test strategy requires at least one fallback model that differs'):
+                iglobal.validateConfig(False)
+
+    def test_validate_syntax_only_skips_full_validation(self):
+        iglobal = self._make_iglobal({})
+        with patch.object(MockConfig, 'getNodeConfig', return_value={'strategy': 'fallback_chain', 'fallback_models': ''}):
+            iglobal.validateConfig(True)  # should not raise, skips full validation
 
     def test_begin_global_creates_router(self):
         iglobal = self._make_iglobal({})
