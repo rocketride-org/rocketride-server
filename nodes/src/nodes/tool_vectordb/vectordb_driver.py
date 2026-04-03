@@ -69,7 +69,9 @@ SEARCH_TOOL: Dict[str, Any] = {
 
 UPSERT_TOOL: Dict[str, Any] = {
     'name': 'upsert',
-    'description': ('Add or update documents in the vector database. Each document requires content text and an object ID for deduplication.'),
+    'description': (
+        'Add or update documents in the vector database. Each document requires content text and an object ID for deduplication. Note: documents are stored as text chunks without embeddings; the backend must be configured to compute embeddings on ingest, or an upstream embedding node must be present in the pipeline.'
+    ),
     'inputSchema': {
         'type': 'object',
         'properties': {
@@ -202,7 +204,9 @@ class VectorDBDriver(ToolsBase):
         bare = self._bare_name(tool_name)
         tool_def = self._enabled_tools.get(bare)
         if tool_def is None:
-            raise ValueError(f'Unknown or disabled tool {tool_name!r}')
+            if bare in _ALL_TOOLS:
+                raise ValueError(f"Tool {tool_name!r} is disabled in this node's configuration")
+            raise ValueError(f'Unknown tool {tool_name!r}')
 
         args = _normalize_input(input_obj)
         schema = tool_def.get('inputSchema', {})
@@ -256,10 +260,10 @@ class VectorDBDriver(ToolsBase):
                 doc_filter.parent = parent
 
         # Build the question for the store's search interface
-        question = QuestionText(
-            text=query_text,
-            topK=top_k,
-        )
+        question = QuestionText(text=query_text)
+
+        # Control result count via the filter's limit field
+        doc_filter.limit = top_k
 
         # Use semantic search (the primary use case for vector DBs)
         try:
@@ -330,6 +334,11 @@ class VectorDBDriver(ToolsBase):
 
         if not docs:
             raise ValueError('upsert: no valid documents provided')
+
+        # Warn if documents lack embeddings — addChunks may fail or produce
+        # unsearchable records depending on the backend configuration.
+        if any(not getattr(doc, 'embedding', None) for doc in docs):
+            warning('tool_vectordb: upserting documents without pre-computed embeddings. Ensure the backend is configured to generate embeddings on ingest, or results may not be searchable via semantic search.')
 
         self._store.addChunks(docs)
         return {'success': True, 'count': len(docs)}
