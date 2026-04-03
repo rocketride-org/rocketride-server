@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": ["Converts incoming text into speech audio using local or cloud TTS engines.", "Output is driven by wiring: audio lane streams PCM chunks; text lane emits JSON with mime type and base64 (no server file path — suitable when the engine runs remotely).", "Encoding (WAV vs MP3) is chosen automatically from connected output lanes (not a form field).", "Routing: without a model server, the engine runs locally and chooses CPU/GPU on the engine host; each profile downloads its weights/voices there. With --modelserver, Bark uses HF transformers on the server; Kokoro uses the kokoro loader; Piper uses the Piper loader; OpenAI/ElevenLabs call their APIs directly from the engine host.", "Every profile uses curated dropdowns — see requirements.txt + depends() on load: piper-tts, transformers, kokoro, lameenc, imageio-ffmpeg, requests, etc."],
+	"description": ["Converts incoming text into speech audio using local or cloud TTS engines.", "Output is sent on the audio lane as container-format bytes (WAV for most engines, MP3 for ElevenLabs).", "Routing: without a model server, the engine runs locally and chooses CPU/GPU on the engine host; each profile downloads its weights/voices there. With --modelserver, Bark uses HF transformers on the server; Kokoro uses the kokoro loader; Piper uses the Piper loader; OpenAI/ElevenLabs call their APIs directly from the engine host.", "Every profile uses curated dropdowns — see requirements.txt + depends() on load: piper-tts, transformers, kokoro, lameenc, requests, etc."],
 	//
 	// Optional:
 	//	  The icon to display in the UI for this node
@@ -59,7 +59,7 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"text": ["audio", "text"]
+		"text": ["audio"]
 	},
 	"input": [
 		{
@@ -68,9 +68,6 @@
 			"output": [
 				{
 					"lane": "audio"
-				},
-				{
-					"lane": "text"
 				}
 			]
 		}
@@ -360,13 +357,13 @@
 	"test": {
 		"requires": ["ROCKETRIDE_TTS_TEST_ENABLED"],
 		"profiles": ["kokoro", "bark"],
-		"outputs": ["text"],
+		"outputs": ["audio"],
 		"cases": [
 			{
-				"name": "Kokoro/Bark return payload",
+				"name": "Kokoro/Bark return audio",
 				"text": "Hello from RocketRide",
 				"expect": {
-					"text": {
+					"audio": {
 						"notEmpty": true
 					}
 				}

@@ -21,56 +21,38 @@
 # SOFTWARE.
 # =============================================================================
 
-import base64
-import json
 import os
 
 from rocketlib import IInstanceBase, AVI_ACTION, warning
 from .IGlobal import IGlobal
 
 
-def _infer_output_format(want_audio: bool, want_text: bool, engine: str) -> str:
-    """Determine the audio encoding from connected output lanes and engine constraints.
+def _infer_output_format(engine: str) -> str:
+    """Determine the audio container format from the engine.
 
-    Encoding is driven by wiring, not by a node settings field:
-
-    - **Audio lane connected:** WAV for broadest player/pipeline compatibility.
-      (OpenAI can produce WAV; ElevenLabs is the exception below.)
-    - **Text lane only:** MP3 for a smaller base64 payload.
-    - **ElevenLabs (any wiring):** always MP3 — the API only returns MPEG audio.
+    ElevenLabs always returns MPEG audio from its API; all other engines
+    produce WAV.
 
     Args:
-        want_audio: ``True`` when the ``audio`` output lane has a downstream
-            connection.
-        want_text: ``True`` when the ``text`` output lane has a downstream
-            connection.
         engine: Canonical engine name (e.g. ``'elevenlabs'``, ``'piper'``).
 
     Returns:
-        ``'mp3'`` or ``'wav'``.
+        ``'mp3'`` for ElevenLabs; ``'wav'`` for all other engines.
     """
-    eng = (engine or 'piper').lower().strip()
-    if eng == 'elevenlabs':
-        return 'mp3'
-    if want_audio:
-        return 'wav'
-    return 'mp3'
+    return 'mp3' if (engine or '').lower().strip() == 'elevenlabs' else 'wav'
 
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     def writeText(self, text: str):
-        """Synthesize the incoming text and emit the audio on the audio and/or text lanes.
+        """Synthesize the incoming text and stream the audio on the audio lane.
 
-        Determines which output lanes are wired, infers the audio format, calls
-        ``IGlobal.synthesize``, reads the temp file once, streams raw bytes on
-        the ``audio`` lane (``BEGIN`` / ``WRITE`` / ``END``), and/or emits a
-        JSON payload with ``mime_type`` and ``base64`` on the ``text`` lane.
+        Calls ``IGlobal.synthesize``, reads the temp file, and streams
+        container-format bytes via ``writeAudio`` (BEGIN / WRITE / END).
         The temp file is always deleted in the ``finally`` block.
 
-        Empty or whitespace-only input is silently skipped.  When neither lane
-        is connected a warning is logged and synthesis is skipped entirely.
+        Empty or whitespace-only input is silently skipped.
 
         Args:
             text: Plain-text utterance received from the upstream node.
@@ -85,43 +67,21 @@ class IInstance(IInstanceBase):
 
         temp_path: str | None = None
         try:
-            want_audio = self.instance.hasListener('audio')
-            want_text = self.instance.hasListener('text')
-            if not want_audio and not want_text:
-                warning('TTS: no downstream connection on audio or text lane; skipping synthesis')
-                return
-
-            # Refresh merged config for format/logging only — do **not** assign to ``IGlobal._config``
-            # here: ``synthesize`` must see the *previous* effective engine to dispose/recreate
-            # ``TTSEngine`` when switching (e.g. OpenAI → Kokoro). Pre-stomping _config made
-            # old_engine == new_engine and left the old engine instance/caches in place.
             cfg_now = self.IGlobal._build_tts_config_dict()
             eng = str(cfg_now.get('engine', '') or '').strip()
-            out_fmt = _infer_output_format(want_audio, want_text, eng)
+            out_fmt = _infer_output_format(eng)
             payload = self.IGlobal.synthesize(value, out_fmt)
             temp_path = payload.get('path')
 
-            raw: bytes | None = None
-            if want_audio or want_text:
-                with open(temp_path, 'rb') as fin:
-                    raw = fin.read()
+            with open(temp_path, 'rb') as fin:
+                raw = fin.read()
 
-            if want_audio and raw is not None:
-                mime = payload.get('mime_type', 'audio/wav')
-                self.instance.writeAudio(AVI_ACTION.BEGIN, mime)
-                self.instance.writeAudio(AVI_ACTION.WRITE, mime, raw)
-                self.instance.writeAudio(AVI_ACTION.END, mime)
-
-            if want_text and raw is not None:
-                # Server-side temp paths are not downloadable URLs; consumers use base64 or the audio lane.
-                text_payload = {
-                    'mime_type': payload.get('mime_type', 'audio/wav'),
-                    'base64': base64.b64encode(raw).decode('ascii'),
-                }
-                self.instance.writeText(json.dumps(text_payload))
+            mime = payload.get('mime_type', 'audio/wav')
+            self.instance.writeAudio(AVI_ACTION.BEGIN, mime)
+            self.instance.writeAudio(AVI_ACTION.WRITE, mime, raw)
+            self.instance.writeAudio(AVI_ACTION.END, mime)
         except Exception as e:
             warning(f'TTS synthesis failed: {e}')
-            # Do not swallow synthesis failures; propagate to pipeline execution.
             raise
         finally:
             if temp_path:

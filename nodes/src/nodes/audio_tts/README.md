@@ -5,13 +5,9 @@ Text-to-speech node for RocketRide pipelines.
 ## What it does
 
 - Input lane: `text`
-- Outputs depend on **what you connect** (not a separate "output mode" setting):
-  - **`audio` lane connected:** sends container-format audio bytes (WAV or MP3) via `writeAudio` (BEGIN / WRITE / END) with the matching MIME type for downstream audio nodes.
-  - **`text` lane connected:** emits one JSON string per utterance with `mime_type` and **`base64`** (no `path` — the file lived only briefly on the server host and is removed after handoff).
-  - **Both connected:** same bytes are streamed on `audio` and embedded as `base64` on `text` (one read, then temp file deleted).
-  - **Neither connected:** synthesis is skipped (warning logged).
+- Output lane: `audio` — streams container-format audio bytes (WAV or MP3) via `writeAudio` (BEGIN / WRITE / END) with the matching MIME type.
 
-**WAV vs MP3** is not configurable in the form: it is inferred from wiring — **audio lane connected → WAV** (except ElevenLabs, which stays MP3 from the API); **text lane only → MP3** for a smaller base64 payload. For Piper and HF engines, MP3 is produced with **`lameenc`** in-process (no ffmpeg subprocess or external binary required).
+**WAV vs MP3** is determined by the engine: all engines produce WAV except ElevenLabs, which always returns MP3 from its API. For Piper and HF engines, MP3 conversion uses **`lameenc`** in-process (no ffmpeg subprocess or external binary required).
 
 ## Supported engines
 
@@ -70,13 +66,11 @@ The model server installs loader deps on demand (**`requirements_piper.txt`**, *
 
 ## Server / client note
 
-The pipeline often runs on a **server**. A filesystem path on that machine is **not** something a browser or another host can "download" by itself. This node therefore:
+The pipeline often runs on a **server**. This node:
 
-- Puts the audio **in the lane** (`audio` stream or `text` JSON with `base64`).
+- Puts the audio directly **in the `audio` lane** as container-format bytes.
 - **Deletes** the temporary file after emitting so the server does not accumulate `tts_*` files.
 - Periodically cleans up any stale `tts_*` temp files older than 1 hour (configurable via `temp_output_max_age_sec`).
-
-Downstream nodes (e.g. response / webhook) can turn `base64` into a download link or attachment if your product needs that.
 
 ## Troubleshooting Kokoro + `wasabi` / `Exception: 1`
 
