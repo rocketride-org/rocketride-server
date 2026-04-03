@@ -298,30 +298,36 @@ class StoreMixin(DAPClient):
         await self.fs_write_json(f'.logs/{project_id}/{filename}', contents)
         return filename
 
-    async def get_log(self, project_id: str, source: str, start_time: float) -> Dict[str, Any]:
-        """Get a log file by source name and start time."""
+    async def get_log(self, project_id: str, name: str) -> Dict[str, Any]:
+        """Get a log file by name (as returned by list_logs or save_log)."""
         self._validate_id(project_id, 'project_id')
-        self._validate_id(source, 'source')
-        if start_time is None:
-            raise ValueError('start_time is required')
+        if not name:
+            raise ValueError('name is required')
 
-        filename = f'{source}-{start_time}.log'
-        return await self.fs_read_json(f'.logs/{project_id}/{filename}')
+        return await self.fs_read_json(f'.logs/{project_id}/{name}')
 
-    async def list_logs(self, project_id: str, source: Optional[str] = None) -> Dict[str, Any]:
-        """List log files for a project."""
+    async def delete_log(self, project_id: str, name: str) -> None:
+        """Delete a log file by name."""
+        self._validate_id(project_id, 'project_id')
+        if not name:
+            raise ValueError('name is required')
+
+        await self.fs_delete(f'.logs/{project_id}/{name}')
+
+    async def list_logs(self, project_id: str, source: Optional[str] = None) -> list[dict]:
+        """List log files for a project. Returns list of {name, modified} sorted by modified time."""
         self._validate_id(project_id, 'project_id')
         if source:
             self._validate_id(source, 'source')
 
         dir_result = await self.fs_list_dir(f'.logs/{project_id}')
-        logs = [e['name'] for e in dir_result.get('entries', []) if e['type'] == 'file' and e['name'].endswith('.log')]
+        logs = [{'name': e['name'], 'modified': e.get('modified')} for e in dir_result.get('entries', []) if e['type'] == 'file' and e['name'].endswith('.log')]
 
         if source:
-            logs = [f for f in logs if f.startswith(f'{source}-')]
+            logs = [entry for entry in logs if entry['name'].startswith(f'{source}-')]
 
-        logs.sort()
-        return {'success': True, 'logs': logs, 'count': len(logs)}
+        logs.sort(key=lambda entry: entry.get('modified') or 0)
+        return logs
 
     # =========================================================================
     # Private
