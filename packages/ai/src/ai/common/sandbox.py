@@ -317,7 +317,7 @@ def _pip_install(package: str) -> None:
         subprocess.check_call(
             [sys.executable, '-m', 'pip', 'install', '--quiet', package],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             timeout=60,
         )
         # Clear the import cache so the freshly installed module is found

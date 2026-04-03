@@ -49,6 +49,7 @@ class PreProcessor(PreProcessorBase):
     # conservative token estimator configuration (no transformers import)
     _bytes_per_token: float = 3.0  # conservative default; lower => safer (more tokens estimated)
     _token_limit: int | None = None  # hard cap for model max tokens (minus safety margin)
+    _MAX_SEPARATOR_INPUT_LEN: int = 1024
 
     def _estimate_tokens(self, text: str) -> int:
         """Estimate token count without importing HF. Conservative by design."""
@@ -74,9 +75,8 @@ class PreProcessor(PreProcessorBase):
         """
         Parse a quoted, comma-separated string into a list of actual separator strings.
         """
-        _MAX_SEPARATOR_INPUT_LEN = 1024
-        if len(user_input) > _MAX_SEPARATOR_INPUT_LEN:
-            raise ValueError(f'Separator input too long ({len(user_input)} chars, max {_MAX_SEPARATOR_INPUT_LEN})')
+        if len(user_input) > self._MAX_SEPARATOR_INPUT_LEN:
+            raise ValueError(f'Separator input too long ({len(user_input)} chars, max {self._MAX_SEPARATOR_INPUT_LEN})')
         try:
             # Convert user input into a list
             separators = ast.literal_eval(f'[{user_input}]')
