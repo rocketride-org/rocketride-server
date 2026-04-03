@@ -43,6 +43,8 @@ class IInstance(IInstanceBase):
     def _get_template_context(self) -> dict:
         """Build the context dictionary for template rendering."""
         config = self.IGlobal.config
+        if config is None:
+            config = {}
         variables = dict(config.get('variables', {}))
         if not isinstance(variables, dict):
             variables = {}
@@ -54,7 +56,7 @@ class IInstance(IInstanceBase):
         return variables
 
     def writeQuestions(self, question: Question):
-        config = self.IGlobal.config
+        config = self.IGlobal.config or {}
         template = config.get('template', '{{input}}')
         context = self._get_template_context()
 
@@ -68,7 +70,7 @@ class IInstance(IInstanceBase):
 
     def closing(self):
         try:
-            config = self.IGlobal.config
+            config = self.IGlobal.config or {}
             template = config.get('template', '{{input}}')
             context = self._get_template_context()
 
