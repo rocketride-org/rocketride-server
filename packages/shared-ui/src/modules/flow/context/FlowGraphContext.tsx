@@ -684,7 +684,12 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			}
 
 			// config is the persisted form data — use resolved defaults if empty
-			const config = data.config && Object.keys(data.config).length > 0 ? data.config : formData;
+			const config = data.config && Object.keys(data.config).length > 0 ? { ...data.config } : { ...formData };
+
+			// Default the display name from the service catalog if not already set
+			if (!config.name && service?.title) {
+				config.name = service.title;
+			}
 
 			const node: FlowNode = {
 				id,

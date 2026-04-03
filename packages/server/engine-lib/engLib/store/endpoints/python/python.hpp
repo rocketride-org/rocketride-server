@@ -45,7 +45,7 @@ _const auto Type = "python"_tv;
 ///	@details
 ///		The trace flag for this filter
 //-------------------------------------------------------------------------
-_const auto Level = Lvl::ServicePython;
+_const auto Level = Lvl::DebugOut;
 
 //-------------------------------------------------------------------------
 /// @details

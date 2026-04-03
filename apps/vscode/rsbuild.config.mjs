@@ -21,6 +21,7 @@
 // SOFTWARE.
 // =============================================================================
 
+/* global process */
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import path from 'path';
@@ -29,49 +30,43 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
-	plugins: [
-		pluginReact(),
-	],
+	plugins: [pluginReact()],
 
 	source: {
 		include: ['./src/**/*'],
-		exclude: [
-			'./dist/**',
-			'./node_modules/**',
-			'./**/*.test.*',
-			'./**/*.spec.*'
-		],
+		exclude: ['./dist/**', './node_modules/**', './**/*.test.*', './**/*.spec.*'],
 		entry: {
 			'page-connection': './src/providers/views/PageConnection/index.tsx',
 			'page-settings': './src/providers/views/PageSettings/index.tsx',
 			'page-editor': './src/providers/views/PageEditor/index.tsx',
 			'page-status': './src/providers/views/PageStatus/index.tsx',
 			'page-deploy': './src/providers/views/PageDeploy/index.tsx',
-			'page-welcome': './src/providers/views/PageWelcome/index.tsx'
-		}
+			'page-welcome': './src/providers/views/PageWelcome/index.tsx',
+			'page-dashboard': './src/providers/views/PageDashboard/index.tsx',
+		},
 	},
 
 	resolve: {
 		alias: {
-			'shared': path.resolve(__dirname, '../../packages/shared-ui/src/index.tsx'),
-			'react': path.resolve(__dirname, 'node_modules/react'),
+			shared: path.resolve(__dirname, '../../packages/shared-ui/src/index.tsx'),
+			react: path.resolve(__dirname, 'node_modules/react'),
 			'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
-		}
+		},
 	},
 
 	output: {
 		distPath: {
-			root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'vscode/webview')
+			root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'vscode/webview'),
 		},
 		filename: {
-			js: '[name].js'
+			js: '[name].js',
 		},
 		sourceMap: {
 			js: false,
-			css: false
+			css: false,
 		},
 		externals: {
-			'vscode': 'commonjs vscode'
+			vscode: 'commonjs vscode',
 		},
 		cleanDistPath: true,
 		// Inline all static assets as data URIs — VS Code webviews cannot
@@ -91,16 +86,15 @@ export default defineConfig({
 				minimize: false,
 				// CRITICAL: Disable all code splitting for VS Code webviews
 				splitChunks: false,
-				runtimeChunk: false
-			}
-		}
+				runtimeChunk: false,
+			},
+		},
 	},
 
 	performance: {
 		// Disable chunk splitting at the Rsbuild level too
 		chunkSplit: {
-			strategy: 'all-in-one'
-		}
-	}
+			strategy: 'all-in-one',
+		},
+	},
 });
-

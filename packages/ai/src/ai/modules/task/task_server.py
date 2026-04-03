@@ -58,6 +58,7 @@ from ai.account.store import Store
 from .task_conn import TaskConn
 from .task_engine import Task
 from .types import LAUNCH_TYPE
+from .pipeline import resolve_implied_source
 
 
 @dataclass
@@ -142,8 +143,6 @@ class TaskServer(DAPBase):
         _connections: Registry of active DAP client connections
         _task_control: Registry of all managed tasks with metadata
         _connection_id: Monotonic counter for connection identification
-        _tasks_peak: Historical maximum concurrent task count
-        _tasks_total: Lifetime counter of created tasks
         _server: Reference to parent web server for statistics
     """
 
@@ -172,10 +171,6 @@ class TaskServer(DAPBase):
         self._task_control: Dict[str, TASK_CONTROL] = {}  # Task registry and metadata
         self._connections: Dict[int, TaskConn] = {}  # Active client connections
         self._connection_id = 0  # Monotonic connection identifier generator
-
-        # Performance and usage metrics for monitoring and capacity planning
-        self._tasks_peak: int = 0  # Maximum concurrent tasks ever achieved
-        self._tasks_total: int = 0  # Lifetime total of created tasks
 
         # Global port allocation tracking
         self._allocated_ports: List[int] = []
@@ -405,6 +400,22 @@ class TaskServer(DAPBase):
         if connection_id in self._connections:
             del self._connections[connection_id]
 
+        conn_apikey = getattr(getattr(conn, '_account_info', None), 'apikey', None)
+        await self.broadcast_server_event(
+            EVENT_TYPE.DASHBOARD,
+            {
+                'event': 'apaevt_dashboard',
+                'body': {
+                    'action': 'connection_removed',
+                    'timestamp': time.time(),
+                    'connectionId': connection_id,
+                    'clientName': getattr(conn, '_client_info', {}).get('name'),
+                    'clientVersion': getattr(conn, '_client_info', {}).get('version'),
+                },
+            },
+            apikey=conn_apikey,
+        )
+
         # Process all tasks for disconnection cleanup
         for control in list(self._task_control.values()):
             try:
@@ -463,6 +474,24 @@ class TaskServer(DAPBase):
                     return account_info
 
             # Not found - raise PermissionError for proper HTTP 401 response
+            raise ValueError('Your pipeline is not running')
+
+        if authorization.startswith('tk_'):
+            # Task token validation - grants full control of a single task.
+            # O(1) lookup because _task_control is keyed by control.token.
+            control = self._task_control.get(authorization)
+            if control:
+                # Get the account info for the task's owner
+                account_info = await self._server.account.authenticate(control.apikey)
+
+                # Track that this was a task token authentication
+                account_info.auth = authorization
+
+                # Task tokens get full control of their scoped task
+                account_info.permissions = ['task.control', 'task.data', 'task.monitor', 'task.debug']
+                return account_info
+
+            # Not found
             raise ValueError('Your pipeline is not running')
 
         # Could not authenticate
@@ -591,43 +620,25 @@ class TaskServer(DAPBase):
         if port in self._allocated_ports:
             self._allocated_ports.remove(port)
 
-    async def broadcast_event(
-        self,
-        type: EVENT_TYPE,
-        token: str,
-        event: Dict[str, Any],
-    ) -> None:
-        """
-        Broadcast task events to all interested monitoring connections.
-
-        This method implements the event distribution system that notifies
-        subscribed clients about task state changes, data updates, and other
-        significant events. It respects client subscription preferences and
-        handles broadcast failures gracefully.
+    async def broadcast_server_event(self, type: EVENT_TYPE, event: Dict[str, Any], apikey: str = None) -> None:
+        """Broadcast a server-level event to subscribed connections.
 
         Args:
-            listen_type (EVENT_TYPE): Category of event being broadcast
-                                    (PASSIVE, ACTIVE, DEBUG, etc.)
-            id (str): Short identifier for the specific task instance
-            token (str): Unique task identifier for event source
-            event (Dict[str, Any]): Event payload containing event details and data
-
-        Event Distribution Logic:
-        - Iterates through all active connections
-        - Each connection filters events based on subscription preferences
-        - Individual broadcast failures don't affect other recipients
-        - Events are only sent to connections with matching access rights
-
-        Error Handling:
-        - Individual monitor failures are logged but don't stop broadcasting
-        - Ensures robust event delivery even with problematic connections
-        - Maintains system stability despite client-side issues
+            type: Event type bitmask.
+            event: DAP event payload.
+            apikey: If provided, only deliver to connections whose account matches.
         """
-        # Broadcast to all active connections with error isolation
+        for conn in list(self._connections.values()):
+            try:
+                await conn.send_server_event(type, event=event, apikey=apikey)
+            except Exception:
+                pass
+
+    async def broadcast_task_event(self, event_type: EVENT_TYPE, token: str, event: Dict[str, Any]) -> None:
+        """Broadcast a task-scoped event to all subscribed connections."""
         for conn in self._connections.values():
             try:
-                # Delegate to connection's event filtering and forwarding logic
-                await conn.forward_event(type, token=token, event=event)
+                await conn.send_task_event(event_type, token=token, event=event)
 
             except PermissionError:
                 # This is a normal error - when the connection is typically
@@ -663,85 +674,6 @@ class TaskServer(DAPBase):
             # Log pause failure with task context
             self.debug_message(f'Failed to get debug state for task: {str(e)}')
             raise
-
-    def get_server_status(self, status: Dict[str, Any]) -> None:
-        """
-        Populate status dictionary with comprehensive server and task metrics.
-
-        This method provides detailed operational status suitable for monitoring
-        dashboards, administrative interfaces, and automated health checks. It
-        includes both current state and historical performance metrics.
-
-        Args:
-            status (Dict[str, Any]): Dictionary to populate with server status.
-                                   Method adds 'task' key with complete task metrics.
-
-        Status Information Included:
-        - Current active task count and detailed task list
-        - Historical peak concurrent task count
-        - Lifetime total of created tasks
-        - Per-task details including runtime, status, and performance metrics
-        - Obfuscated tokens for security while maintaining identifiability
-
-        Data Structure:
-        {
-            'task': {
-                'tasks': [array of detailed task objects],
-                'peak': maximum concurrent tasks ever achieved,
-                'active': current number of active tasks,
-                'total': lifetime total of created tasks
-            }
-        }
-        """
-        # Initialize comprehensive task metrics structure
-        task_info = {
-            'tasks': [],  # Detailed information for each active task
-            'peak': self._tasks_peak,  # Historical peak concurrent task count
-            'active': len(self._task_control),  # Current active task count
-            'total': self._tasks_total,  # Lifetime total of created tasks
-        }
-
-        # Build detailed status for each active task
-        for control in self._task_control.values():
-            # Get current task status with comprehensive details
-            task_status: TASK_STATUS = control.task.get_status()
-
-            # Calculate task runtime for performance monitoring
-            current_time = time.time()
-            if task_status.completed:
-                elapsed_time = task_status.endTime - task_status.startTime
-            else:
-                elapsed_time = current_time - task_status.startTime
-
-            # Build comprehensive task information object
-            task_obj = {
-                'id': control.id,  # Human-readable task identifier
-                'startTime': task_status.startTime,  # Task creation timestamp
-                'completed': task_status.completed,  # Completion status flag
-                'elapsedTime': elapsed_time,  # Runtime duration in seconds
-                'launchType': control.launch_type.value,  # How task was created
-            }
-
-            # Add completion-specific information
-            if task_status.completed:
-                task_obj['endTime'] = task_status.endTime
-                task_obj['exitCode'] = getattr(task_status, 'exitCode', None)
-            else:
-                # For running tasks, include current status message
-                task_obj['status'] = task_status.status
-
-            # Include performance and resource metrics if available
-            if hasattr(task_status, 'metrics'):
-                task_obj['metrics'] = task_status.metrics
-
-            # Include connection and attachment information
-            task_obj['connections'] = control.task.get_connection_count()
-
-            # Add this task's information to the status report
-            task_info['tasks'].append(task_obj)
-
-        # Add complete task information to the status dictionary
-        status['task'] = task_info
 
     def get_task_status(self, token: str) -> TASK_STATUS:
         """
@@ -801,6 +733,25 @@ class TaskServer(DAPBase):
 
         # Ensure task is properly stopped and resources are cleaned up
         await control.task.stop_task()
+
+        # Remove monitor subscriptions that reference this task from all connections
+        project_key = f'p.{control.project_id}.{control.source}'
+        for conn in self._connections.values():
+            if hasattr(conn, '_monitors'):
+                # Remove exact source key, pipe-scoped keys, and token-scoped keys
+                keys_to_remove = [k for k in conn._monitors if k == project_key or k.startswith(f'{project_key}.') or k == token or k.startswith(f'{token}.')]
+                for key in keys_to_remove:
+                    conn._monitors.pop(key, None)
+
+        # Notify dashboard subscribers
+        await self.broadcast_server_event(
+            EVENT_TYPE.DASHBOARD,
+            {
+                'event': 'apaevt_dashboard',
+                'body': {'action': 'task_removed', 'timestamp': time.time(), 'taskId': control.id},
+            },
+            apikey=control.apikey,
+        )
 
         # Log task removal for audit trail and debugging
         self.debug_message(f'Task status for "{control.id}" removed')
@@ -900,20 +851,9 @@ class TaskServer(DAPBase):
         if not control.source:
             control.source = control.pipeline.get('source', None)
 
-        # If the pipeline doesn't have a source, try and find the implied
-        # source. We can get the implied source by looking at the components
-        # list and finding the one, and only source. If we find multiple
-        # sources, it is ambigouous and we should raise an error.
+        # If the pipeline doesn't have a source, find the implied source
         if not control.source:
-            # Look for the source component
-            for component in control.pipeline.get('components', []):
-                config = component.get('config', {})
-                if config.get('mode', '') == 'Source':
-                    if control.source is not None:
-                        raise ValueError('Pipeline has multiple source components, please specify one explicitly')
-                    control.source = component.get('id', None)
-
-            # Check to make sure we found one
+            control.source = resolve_implied_source(control.pipeline)
             if control.source is None:
                 raise ValueError('Pipeline does not have a source component defined')
 
@@ -932,7 +872,6 @@ class TaskServer(DAPBase):
 
         if 'config' not in source_component:
             source_component['config'] = {}
-        config = source_component['config']
 
         # Project identity is project_id on the flat project.
         control.project_id = control.pipeline.get('project_id', None)
@@ -961,7 +900,8 @@ class TaskServer(DAPBase):
                     'apikey': control.apikey,
                     'project_id': control.project_id,
                     'source': control.source,
-                }
+                },
+                prefix='tk_',
             )
 
         # Build the public token
@@ -973,8 +913,14 @@ class TaskServer(DAPBase):
             prefix='pk_',
         )
 
-        # Give it a short identifying name
-        control.id = f'{control.token[:8]}.{control.source}'
+        # Display id: 8-char hash (stripping known auth prefixes) + source component id
+        _AUTH_PREFIXES = ('tk_', 'pk_')
+        token_hash = control.token
+        for _p in _AUTH_PREFIXES:
+            if token_hash.startswith(_p):
+                token_hash = token_hash[len(_p) :]
+                break
+        control.id = f'{token_hash[:8]}.{control.source}'
 
         # Parse and validate launch type from request command
         try:
@@ -1033,12 +979,6 @@ class TaskServer(DAPBase):
 
             # Register task in central registry
             self._task_control[control.token] = control
-            self._tasks_total += 1
-
-            # Update peak concurrent task counter for metrics
-            current_count = len(self._task_control)
-            if current_count > self._tasks_peak:
-                self._tasks_peak = current_count
 
             # Start task execution
             await control.task.start_task()
@@ -1332,7 +1272,7 @@ class TaskServer(DAPBase):
 
         except Exception as e:
             # Handle errors gracefully - task may not exist or be accessible
-            self.debug_message(f'Task detachment handled (task may be gone): "{control.id}": {e}')
+            self.debug_message(f'Task detachment handled (task may be gone): "{token}": {e}')
 
     def get_connection_count(self) -> int:
         """

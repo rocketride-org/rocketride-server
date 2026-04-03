@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -26,34 +26,42 @@ import { DAPBase } from './DAPBase.js';
 import { DAPMessage, RocketRideClientConfig } from '../types/index.js';
 import { TransportBase } from './TransportBase.js';
 import { AuthenticationException } from '../exceptions/index.js';
+import { SDK_VERSION } from '../constants.js';
 
 /**
  * DAP (Debug Adapter Protocol) client for communicating with RocketRide servers.
- * 
+ *
  * This class implements the client side of the DAP communication protocol,
  * managing request/response correlation, pending request tracking, and message
  * sequencing. It extends DAPBase to inherit common protocol functionality.
- * 
+ *
  * Key responsibilities:
  * - Request/response correlation via sequence numbers
  * - Pending request management with promises
  * - Connection lifecycle management
  * - Message routing and handling
- * 
+ *
  * @extends DAPBase
  */
 export class DAPClient extends DAPBase {
-	private _pendingRequests = new Map<number, {
-		resolve: (value: DAPMessage) => void;
-		reject: (reason: unknown) => void;
-		timer?: ReturnType<typeof setTimeout>;
-	}>();
+	private _pendingRequests = new Map<
+		number,
+		{
+			resolve: (value: DAPMessage) => void;
+			reject: (reason: unknown) => void;
+			timer?: ReturnType<typeof setTimeout>;
+		}
+	>();
 	private _sequenceNumber = 0;
 	protected _requestTimeout?: number;
+	protected _clientDisplayName?: string;
+	protected _clientDisplayVersion?: string;
 
 	constructor(module: string, transport: TransportBase | undefined, config: RocketRideClientConfig = {}) {
 		super(module, transport, config);
 		this._requestTimeout = config.requestTimeout;
+		this._clientDisplayName = config.clientName || 'TypeScript SDK';
+		this._clientDisplayVersion = config.clientVersion || SDK_VERSION;
 	}
 
 	/**
@@ -177,18 +185,17 @@ export class DAPClient extends DAPBase {
 			this._pendingRequests.set(seq, entry);
 
 			// Send request through transport
-			this._send(message)
-				.catch(_error => {
-					this.debugMessage(`Clearing request due to error: ${seq}`);
+			this._send(message).catch((_error) => {
+				this.debugMessage(`Clearing request due to error: ${seq}`);
 
-					// Clean up on send failure
-					if (this._pendingRequests.has(seq)) {
-						const pending = this._pendingRequests.get(seq)!;
-						if (pending.timer) clearTimeout(pending.timer);
-						this._pendingRequests.delete(seq);
-					}
-					reject(new Error('Could not send request'));
-				});
+				// Clean up on send failure
+				if (this._pendingRequests.has(seq)) {
+					const pending = this._pendingRequests.get(seq)!;
+					if (pending.timer) clearTimeout(pending.timer);
+					this._pendingRequests.delete(seq);
+				}
+				reject(new Error('Could not send request'));
+			});
 		});
 	}
 
@@ -218,12 +225,18 @@ export class DAPClient extends DAPBase {
 
 		// First DAP message must be auth
 		const auth = this._transport.getAuth() ?? '';
-		const resp = await this.request({
-			type: 'request',
-			command: 'auth',
-			seq: 0, // request() overwrites with next seq
-			arguments: { auth },
-		}, authTimeout);
+		const authArgs: Record<string, unknown> = { auth };
+		if (this._clientDisplayName) authArgs.clientName = this._clientDisplayName;
+		if (this._clientDisplayVersion) authArgs.clientVersion = this._clientDisplayVersion;
+		const resp = await this.request(
+			{
+				type: 'request',
+				command: 'auth',
+				seq: 0, // request() overwrites with next seq
+				arguments: authArgs,
+			},
+			authTimeout
+		);
 		const success = (resp as { success?: boolean }).success;
 		if (!success) {
 			await this._transport.disconnect(resp.message ?? 'Authentication failed', true);

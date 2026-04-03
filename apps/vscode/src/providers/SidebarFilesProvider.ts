@@ -42,6 +42,7 @@ import { getLogger } from '../shared/util/output';
 import { PipelineFileParser, ParsedPipelineFile, ParsedSourceComponent, ServiceClassInfo } from '../shared/util/pipelineParser';
 import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
+import { MonitorManager } from '../connection/monitor-manager';
 import { GenericEvent, GenericResponse } from '../shared/types';
 
 /** Parsed location from structured error format (ErrorType*`message`*filepath:linenumber) */
@@ -224,11 +225,13 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					const sourceId = context?.componentId ?? '';
 
 					// Use DAP command to execute pipeline without debugging
+					const pipeName = resourceUri ? path.basename(resourceUri.fsPath).replace(/\.pipe(?:\.json)?$/, '') : undefined;
 					await this.connectionManager.request('execute', {
 						projectId: projectId,
 						source: sourceId,
 						pipeline: pipelineTransformed,
 						args: ConfigManager.getInstance().getEffectiveEngineArgs(),
+						...(pipeName ? { name: pipeName } : {}),
 					});
 				} catch (error) {
 					vscode.window.showErrorMessage(`Failed to run pipeline: ${error}`);
@@ -384,9 +387,17 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			this.handleEvent(e);
 		});
 
+		// Subscribe to task lifecycle and output events (once — MonitorManager
+		// handles reconnection replay, so no need to re-add on each connect)
+		MonitorManager.getInstance()
+			.addMonitor({ token: '*' }, ['task', 'output'])
+			.catch((err) => {
+				this.logger.error(`Failed to subscribe to task events: ${err}`);
+			});
+
 		// Listen for connected events
 		const connectedEventListener = this.connectionManager.addListener('connected', (_e) => {
-			// Global task/output monitors are now registered in ConnectionManager.onConnectionEstablished
+			// Subscriptions are restored by MonitorManager.resubscribeAll() in connection.ts
 		});
 
 		// Listen for disconnected events
@@ -692,7 +703,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 
 				const message = runningComponents.length === 1 ? `Pipeline component "${componentNames}" in ${fileName} is running. Restart it?` : `${runningComponents.length} components (${componentNames}) in ${fileName} are running. Restart them?`;
 
-				const choice = await vscode.window.showInformationMessage(message, { modal: true }, 'Yes', 'No');
+				const choice = await vscode.window.showInformationMessage(message, 'Yes', 'No');
 
 				if (choice === 'Yes') {
 					for (const component of runningComponents) {
@@ -1215,6 +1226,13 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	 * Cleans up event listeners and resources
 	 */
 	dispose(): void {
+		// Balance the wildcard monitor added in setupEventListeners
+		void MonitorManager.getInstance()
+			.removeMonitor({ token: '*' }, ['task', 'output'])
+			.catch((error) => {
+				this.logger.error(`Failed to unsubscribe from task events: ${error}`);
+			});
+
 		this.disposables.forEach((disposable) => disposable.dispose());
 		this.disposables = [];
 	}

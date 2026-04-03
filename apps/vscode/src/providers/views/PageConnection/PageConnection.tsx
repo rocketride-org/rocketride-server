@@ -25,7 +25,7 @@ import React, { useState, useEffect } from 'react';
 import { useMessaging } from '../../../shared/util/useMessaging';
 
 // Import the styles
-import '../../styles/vscode.css'
+import '../../styles/vscode.css';
 import '../../styles/app.css';
 import './styles.css';
 
@@ -38,6 +38,8 @@ interface ConnectionState {
 	hasCredentials: boolean;
 	progressMessage?: string;
 }
+
+const TRANSITIONAL_STATES: ReadonlySet<ConnectionState['state']> = new Set(['connecting', 'downloading-engine', 'starting-engine', 'stopping-engine']);
 
 interface Config {
 	hostUrl: string;
@@ -62,14 +64,7 @@ type PageConnectionIncomingMessage = {
 	data: ConnectionData;
 };
 
-type PageConnectionOutgoingMessage =
-	| { type: 'ready' }
-	| { type: 'connect' }
-	| { type: 'disconnect' }
-	| { type: 'reconnect' }
-	| { type: 'openSettings' }
-	| { type: 'openDocs' }
-	| { type: 'openDeploy' };
+type PageConnectionOutgoingMessage = { type: 'ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'reconnect' } | { type: 'openSettings' } | { type: 'openDocs' } | { type: 'openDeploy' } | { type: 'openDashboard' };
 
 export const PageConnection: React.FC = () => {
 	const [connectionData, setConnectionData] = useState<ConnectionData | null>(null);
@@ -80,15 +75,12 @@ export const PageConnection: React.FC = () => {
 			if (message.type === 'connectionUpdate') {
 				setConnectionData(message.data);
 			}
-		}
+		},
 	});
 
 	// Animate connecting dots
 	useEffect(() => {
-		const isConnecting = connectionData?.connectionState.state === 'connecting' ||
-			connectionData?.connectionState.state === 'downloading-engine' ||
-			connectionData?.connectionState.state === 'starting-engine' ||
-			connectionData?.connectionState.state === 'stopping-engine';
+		const isConnecting = connectionData?.connectionState.state && TRANSITIONAL_STATES.has(connectionData.connectionState.state);
 
 		if (isConnecting) {
 			const interval = setInterval(() => {
@@ -100,66 +92,41 @@ export const PageConnection: React.FC = () => {
 
 	const getAnimatedDots = (): string => {
 		switch (animationPhase) {
-			case 0: return '';
-			case 1: return '.';
-			case 2: return '..';
-			case 3: return '...';
-			default: return '';
+			case 0:
+				return '';
+			case 1:
+				return '.';
+			case 2:
+				return '..';
+			case 3:
+				return '...';
+			default:
+				return '';
 		}
 	};
 
 	const getStatusLabel = (): string => {
 		if (!connectionData) return 'Loading...';
-
-		switch (connectionData.connectionState.state) {
-			case 'connected':
-				return 'Connected';
-			case 'downloading-engine':
-			case 'starting-engine':
-			case 'connecting':
-			case 'stopping-engine':
-				return `Connecting${getAnimatedDots()}`;
-			case 'disconnected':
-			case 'engine-startup-failed':
-			default:
-				return 'Disconnected';
-		}
+		const { state } = connectionData.connectionState;
+		if (state === 'connected') return 'Connected';
+		if (TRANSITIONAL_STATES.has(state)) return `Connecting${getAnimatedDots()}`;
+		return 'Disconnected';
 	};
 
 	const getStatusClass = (): string => {
 		if (!connectionData) return 'status-loading';
-
-		switch (connectionData.connectionState.state) {
-			case 'connected':
-				return 'status-connected';
-			case 'downloading-engine':
-			case 'starting-engine':
-			case 'connecting':
-			case 'stopping-engine':
-				return 'status-connecting';
-			case 'disconnected':
-			case 'engine-startup-failed':
-			default:
-				return 'status-disconnected';
-		}
+		const { state } = connectionData.connectionState;
+		if (state === 'connected') return 'status-connected';
+		if (TRANSITIONAL_STATES.has(state)) return 'status-connecting';
+		return 'status-disconnected';
 	};
 
 	const getStatusIcon = (): string => {
 		if (!connectionData) return '○';
-
-		switch (connectionData.connectionState.state) {
-			case 'connected':
-				return '✓';
-			case 'downloading-engine':
-			case 'starting-engine':
-			case 'connecting':
-			case 'stopping-engine':
-				return '◷';
-			case 'disconnected':
-			case 'engine-startup-failed':
-			default:
-				return '○';
-		}
+		const { state } = connectionData.connectionState;
+		if (state === 'connected') return '✓';
+		if (TRANSITIONAL_STATES.has(state)) return '◷';
+		return '○';
 	};
 
 	const getStatusDetailLine = (): string => {
@@ -216,10 +183,7 @@ export const PageConnection: React.FC = () => {
 		sendMessage({ type: 'openDocs' });
 	};
 
-	const isConnecting = connectionData?.connectionState.state === 'connecting' ||
-		connectionData?.connectionState.state === 'downloading-engine' ||
-		connectionData?.connectionState.state === 'starting-engine' ||
-		connectionData?.connectionState.state === 'stopping-engine';
+	const isConnecting = connectionData?.connectionState.state === 'connecting' || connectionData?.connectionState.state === 'downloading-engine' || connectionData?.connectionState.state === 'starting-engine' || connectionData?.connectionState.state === 'stopping-engine';
 
 	const isConnected = connectionData?.connectionState.state === 'connected';
 	const needsApiKeySetup = (connectionData?.config.connectionMode === 'cloud' || connectionData?.config.connectionMode === 'onprem') && !connectionData?.hasApiKey;
@@ -254,7 +218,7 @@ export const PageConnection: React.FC = () => {
 				<div className="connection-info">
 					<div className="info-row">
 						<span className="info-label">Server:</span>
-						<span className="info-value">{connectionData?.config.connectionMode === 'local' ? 'Local' : (connectionData?.config.hostUrl || 'N/A')}</span>
+						<span className="info-value">{connectionData?.config.connectionMode === 'local' ? 'Local' : connectionData?.config.hostUrl || 'N/A'}</span>
 					</div>
 					{connectionData?.config.connectionMode === 'local' && connectionData?.engineInfo?.version && (
 						<div className="info-row">
@@ -269,44 +233,28 @@ export const PageConnection: React.FC = () => {
 
 				<div className="action-buttons">
 					{isConnected ? (
-						<button
-							className="btn btn-secondary"
-							onClick={handleDisconnect}
-							disabled={isConnecting}
-						>
+						<button className="btn btn-secondary" onClick={handleDisconnect} disabled={isConnecting}>
 							Disconnect
 						</button>
 					) : (
-						<button
-							className="btn btn-primary"
-							onClick={handleConnect}
-							disabled={isConnecting || needsApiKeySetup}
-						>
+						<button className="btn btn-primary" onClick={handleConnect} disabled={isConnecting || needsApiKeySetup}>
 							Connect
 						</button>
 					)}
-			<button
-				className="btn btn-secondary"
-				onClick={handleOpenSettings}
-			>
-				Settings
-			</button>
-			<button
-				className="btn btn-secondary"
-				onClick={() => sendMessage({ type: 'openDeploy' })}
-				title="Deploy to RocketRide.ai cloud or on-prem"
-			>
-				Deploy
-			</button>
-			<button
-				className="btn btn-secondary"
-				onClick={handleOpenDocs}
-				title="View RocketRide API documentation and integration guide"
-			>
-				Documentation
-			</button>
+					<button className="btn btn-secondary" onClick={() => sendMessage({ type: 'openDashboard' })} title="Open server monitoring dashboard" disabled={!isConnected}>
+						Monitor
+					</button>
+					<button className="btn btn-secondary" onClick={handleOpenSettings}>
+						Settings
+					</button>
+					<button className="btn btn-secondary" onClick={() => sendMessage({ type: 'openDeploy' })} title="Deploy to RocketRide.ai cloud or on-prem">
+						Deploy
+					</button>
+					<button className="btn btn-secondary" onClick={handleOpenDocs} title="View RocketRide API documentation and integration guide">
+						Documentation
+					</button>
+				</div>
+			</div>
 		</div>
-		</div>
-	</div>
 	);
 };

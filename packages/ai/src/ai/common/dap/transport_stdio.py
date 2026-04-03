@@ -551,6 +551,9 @@ class TransportStdio(TransportBase):
         - '>SSE*json' - Real-time node-to-UI message (pipe_id + message + optional data)
         - '>EXIT*exit_code_hex*exit_message' - Process exit
         """
+        if message is None:
+            return
+
         # Parse object status messages: '>OBJ*size_hex*object_name'
         if message.startswith('>OBJ*'):
             try:
@@ -558,7 +561,7 @@ class TransportStdio(TransportBase):
                 if len(parts) >= 3:
                     _, s_size, name = parts
                     size = int(s_size, 16)
-                    await self._transport_receive({'type': 'event', 'event': 'apaevt_status_status_object', 'body': {'object': name, 'size': size}})
+                    await self._transport_receive({'type': 'event', 'event': 'apaevt_status_object', 'body': {'object': name, 'size': size}})
                 else:
                     await self._transport_receive({'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Incomplete OBJ message: {message}\n'}})
             except (ValueError, IndexError) as e:
@@ -716,13 +719,7 @@ class TransportStdio(TransportBase):
                     {
                         'type': 'event',
                         'event': 'apaevt_trace',
-                        'body': {
-                            'op': op.lower(),
-                            'id': int(id, 16),
-                            'total_pipes': int(total_pipes, 16),
-                            'pipe_id': pipe_id,
-                            'trace': trace
-                        },
+                        'body': {'op': op.lower(), 'id': int(id, 16), 'total_pipes': int(total_pipes, 16), 'pipe_id': pipe_id, 'trace': trace},
                     }
                 )
             except (ValueError, IndexError) as e:
@@ -745,12 +742,12 @@ class TransportStdio(TransportBase):
                     await self._transport_disconnected(f'Process exited: {exitMessage} (code: {exitCode})', has_error=(exitCode != 0))
 
                 elif len(parts) == 3:
-                    _, s_exitCode = parts
+                    _, s_exitCode, exitMessage = parts
                     try:
                         exitCode = int(s_exitCode, 16)
                     except ValueError:
                         exitCode = 1
-                    await self._transport_receive({'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': exitCode, 'message': 'Process exited'}})
+                    await self._transport_receive({'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': exitCode, 'message': exitMessage}})
 
                     # TRIGGER ON_DISCONNECTED CALLBACK (process exit)
                     await self._transport_disconnected(f'Process exited with code: {exitCode}', has_error=(exitCode != 0))
@@ -770,11 +767,13 @@ class TransportStdio(TransportBase):
             try:
                 parts = message.split('*', 1)
                 payload = json.loads(parts[1]) if len(parts) > 1 else {}
-                await self._transport_receive({
-                    'type': 'event',
-                    'event': 'apaevt_sse',
-                    'body': payload,
-                })
+                await self._transport_receive(
+                    {
+                        'type': 'event',
+                        'event': 'apaevt_sse',
+                        'body': payload,
+                    }
+                )
             except Exception as e:
                 self._debug_message(f'Malformed SSE message: {message}, error: {e}')
 

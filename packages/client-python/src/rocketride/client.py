@@ -40,7 +40,7 @@ Basic Usage:
 """
 
 import os
-from .core import DAPClient, TransportWebSocket, RocketRideException, CONST_DEFAULT_WEB_CLOUD
+from .core import DAPClient, RocketRideException, CONST_DEFAULT_WEB_CLOUD
 from .mixins.connection import ConnectionMixin
 from .mixins.execution import ExecutionMixin
 from .mixins.data import DataMixin
@@ -48,6 +48,7 @@ from .mixins.chat import ChatMixin
 from .mixins.events import EventMixin
 from .mixins.ping import PingMixin
 from .mixins.services import ServicesMixin
+from .mixins.dashboard import DashboardMixin
 from .mixins.store import StoreMixin
 
 client_id = 0
@@ -66,6 +67,7 @@ class RocketRideClient(
     EventMixin,
     PingMixin,
     ServicesMixin,
+    DashboardMixin,
     StoreMixin,
     DAPClient,
 ):
@@ -205,6 +207,12 @@ class RocketRideClient(
         # Create unique client identifier
         client_name = f'CLIENT-{client_id}'
         client_id += 1
+
+        # Client identification for auth handshake
+        from rocketride import __version__
+
+        self._client_display_name = kwargs.get('client_name', None) or 'Python SDK'
+        self._client_display_version = kwargs.get('client_version', None) or __version__
 
         # Initialize the underlying DAP client; transport is created in _internal_connect
         super().__init__(transport=None, module=kwargs.get('module', client_name), **kwargs)
