@@ -18,6 +18,10 @@ spec:
     {{- include "rocketride.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: chroma
 ---
+# NOTE: This PVC is intentionally standalone (not a StatefulSet volumeClaimTemplate).
+# It will NOT be automatically deleted when the Helm release is removed, preserving
+# Chroma data across upgrades and accidental uninstalls. Delete the PVC manually
+# if data cleanup is desired.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

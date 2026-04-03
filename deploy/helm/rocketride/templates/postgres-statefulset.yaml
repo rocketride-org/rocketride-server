@@ -49,6 +49,8 @@ spec:
       app.kubernetes.io/component: postgres
   template:
     metadata:
+      annotations:
+        checksum/postgres-secret: {{ include (print $.Template.BasePath "/postgres-statefulset.yaml") . | sha256sum }}
       labels:
         {{- include "rocketride.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: postgres

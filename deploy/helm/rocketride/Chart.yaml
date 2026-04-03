@@ -1,9 +1,9 @@
 apiVersion: v2
 name: rocketride
-description: A Helm chart for RocketRide data processing engine
+description: A Helm chart for deploying RocketRide data processing engine (community/self-hosted)
 type: application
 version: 0.1.0
-appVersion: "3.1.1"
+appVersion: '3.1.1'
 keywords:
   - ai
   - ml

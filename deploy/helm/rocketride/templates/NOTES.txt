@@ -11,7 +11,8 @@ Access the engine via your ingress:
 
 Get the application URL by running:
   export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "rocketride.fullname" . }}-engine)
-  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}')
+  [ -z "$NODE_IP" ] && export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
   echo http://$NODE_IP:$NODE_PORT
 
 {{- else if contains "LoadBalancer" .Values.engine.service.type }}

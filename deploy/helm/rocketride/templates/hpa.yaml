@@ -1,4 +1,7 @@
 {{- if .Values.engine.autoscaling.enabled }}
+{{- if and (not .Values.engine.autoscaling.targetCPUUtilizationPercentage) (not .Values.engine.autoscaling.targetMemoryUtilizationPercentage) }}
+{{- fail "At least one of engine.autoscaling.targetCPUUtilizationPercentage or engine.autoscaling.targetMemoryUtilizationPercentage must be set when autoscaling is enabled" }}
+{{- end }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -13,7 +16,6 @@ spec:
     name: {{ include "rocketride.fullname" . }}-engine
   minReplicas: {{ .Values.engine.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.engine.autoscaling.maxReplicas }}
-  {{- if or .Values.engine.autoscaling.targetCPUUtilizationPercentage .Values.engine.autoscaling.targetMemoryUtilizationPercentage }}
   metrics:
     {{- if .Values.engine.autoscaling.targetCPUUtilizationPercentage }}
     - type: Resource
@@ -31,5 +33,4 @@ spec:
           type: Utilization
           averageUtilization: {{ .Values.engine.autoscaling.targetMemoryUtilizationPercentage }}
     {{- end }}
-  {{- end }}
 {{- end }}

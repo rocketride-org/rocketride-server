@@ -3,7 +3,7 @@ global:
   # -- List of image pull secrets for private registries
   imagePullSecrets: []
   # -- Override default storage class for all PVCs
-  storageClass: ""
+  storageClass: ''
 
 # -- Engine (core RocketRide data processing server)
 engine:
@@ -16,14 +16,14 @@ engine:
     # -- Image pull policy
     pullPolicy: IfNotPresent
     # -- Engine image tag (defaults to Chart appVersion)
-    tag: ""
+    tag: ''
 
   # -- Service account configuration for the engine pods
   serviceAccount:
     # -- Create a dedicated service account
     create: true
     # -- Service account name (auto-generated if empty)
-    name: ""
+    name: ''
     # -- Annotations for the service account (e.g. IAM role bindings)
     annotations: {}
 
@@ -36,12 +36,16 @@ engine:
     targetPort: 5565
 
   # -- Resource requests and limits for engine pods
+  # For GPU workloads, add nvidia.com/gpu to limits and set appropriate
+  # nodeSelector/tolerations below. Example:
+  #   limits:
+  #     nvidia.com/gpu: "1"
   resources:
     requests:
       cpu: 250m
       memory: 512Mi
     limits:
-      cpu: "2"
+      cpu: '2'
       memory: 2Gi
 
   # -- Readiness probe configuration
@@ -78,6 +82,9 @@ engine:
     failureThreshold: 30
 
   # -- Horizontal Pod Autoscaler configuration
+  # NOTE: CPU/memory-based HPA may not be suitable for GPU inference workloads.
+  # For GPU workloads, consider using KEDA ScaledObject with queue depth or
+  # GPU utilization metrics instead.
   autoscaling:
     # -- Enable HPA for the engine deployment
     enabled: false
@@ -93,17 +100,18 @@ engine:
   # -- Extra environment variables for engine pods (key-value pairs added to ConfigMap)
   env:
     # -- Log level (debug, info, warn, error)
-    LOG_LEVEL: "info"
+    LOG_LEVEL: 'info'
     # -- Number of worker threads
-    WORKER_THREADS: "4"
+    WORKER_THREADS: '4'
 
   # -- Name of an existing Secret to use instead of creating one
   # If set, the chart will not create a Secret resource
-  existingSecret: ""
+  existingSecret: ''
 
   # -- Secret values (only used when existingSecret is empty)
   # These will be base64-encoded and stored in a Kubernetes Secret
-  secrets: {}
+  secrets:
+    {}
     # OPENAI_API_KEY: ""
     # ANTHROPIC_API_KEY: ""
     # HUGGINGFACE_TOKEN: ""
@@ -115,9 +123,15 @@ engine:
   volumes: []
 
   # -- Node selector for engine pods
+  # For GPU workloads, set e.g.:
+  #   accelerator: nvidia-gpu
   nodeSelector: {}
 
   # -- Tolerations for engine pods
+  # For GPU nodes, add e.g.:
+  #   - key: nvidia.com/gpu
+  #     operator: Exists
+  #     effect: NoSchedule
   tolerations: []
 
   # -- Affinity rules for engine pods
@@ -146,9 +160,10 @@ ingress:
   # -- Enable ingress resource
   enabled: false
   # -- Ingress class name (e.g. nginx, traefik)
-  className: ""
+  className: ''
   # -- Ingress annotations
-  annotations: {}
+  annotations:
+    {}
     # kubernetes.io/tls-acme: "true"
     # cert-manager.io/cluster-issuer: letsencrypt-prod
   # -- Ingress host rules
@@ -172,7 +187,7 @@ postgres:
     # -- PostgreSQL + pgvector image repository
     repository: ankane/pgvector
     # -- Image tag (pinned version)
-    tag: "v0.8.0"
+    tag: 'v0.8.0'
     # -- Image pull policy
     pullPolicy: IfNotPresent
 
@@ -181,9 +196,10 @@ postgres:
 
   # -- Name of an existing Secret containing postgres credentials
   # Must contain keys: POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
-  existingSecret: ""
+  existingSecret: ''
 
   # -- PostgreSQL credentials (only used when existingSecret is empty)
+  # WARNING: Override these defaults in production! Use existingSecret for production deployments.
   auth:
     username: rocketride
     password: changeme
@@ -195,7 +211,7 @@ postgres:
       cpu: 100m
       memory: 256Mi
     limits:
-      cpu: "1"
+      cpu: '1'
       memory: 1Gi
 
   # -- Service port
@@ -220,7 +236,7 @@ chroma:
     # -- ChromaDB image repository
     repository: chromadb/chroma
     # -- Image tag (pinned version)
-    tag: "0.6.3"
+    tag: '0.6.3'
     # -- Image pull policy
     pullPolicy: IfNotPresent
 
