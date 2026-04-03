@@ -136,6 +136,7 @@ async def webhook_trigger(request: Request, pipeline_id: str, body: Optional[Dic
                 return error(message=f'Too many concurrent webhook executions (limit: {_MAX_CONCURRENT})', httpStatus=429)
             _running_count += 1
 
+        task_dispatched = False
         try:
             # ----------------------------------------------------------------
             # 4. Create a task token and start execution
@@ -154,7 +155,11 @@ async def webhook_trigger(request: Request, pipeline_id: str, body: Optional[Dic
             # Dispatch the pipeline execution as a background task so the
             # webhook caller receives a response immediately and can poll
             # /webhook/{pipeline_id}/status/{token} for progress.
-            asyncio.create_task(_execute_pipeline(token, pipeline_id, body))
+            # Store the task reference to prevent garbage collection of
+            # long-running pipelines (Python only holds weak refs to tasks).
+            task = asyncio.create_task(_execute_pipeline(token, pipeline_id, body))
+            _active_tasks[token]['_task'] = task
+            task_dispatched = True
 
             logger.info('Webhook triggered pipeline %s — token=%s', pipeline_id, token)
 
@@ -167,10 +172,13 @@ async def webhook_trigger(request: Request, pipeline_id: str, body: Optional[Dic
 
             return response(data=webhook_resp.model_dump(mode='json'))
         except Exception:
-            # Ensure the concurrency counter is released on unexpected errors
-            # before re-raising into the outer handler.
-            async with _running_lock:
-                _running_count -= 1
+            # Only decrement if the background task was NOT dispatched.
+            # Once dispatched, _execute_pipeline owns the decrement in its
+            # finally block — decrementing here too would cause a double
+            # decrement and drive _running_count negative.
+            if not task_dispatched:
+                async with _running_lock:
+                    _running_count -= 1
             raise
 
     except Exception:
@@ -194,11 +202,8 @@ async def webhook_status(request: Request, pipeline_id: str, token: str) -> Resu
     """
     try:
         task = _active_tasks.get(token)
-        if task is None:
-            return error(message=f'Task token {token!r} not found', httpStatus=404)
-
-        if task['pipeline_id'] != pipeline_id:
-            return error(message='Token does not belong to the specified pipeline', httpStatus=404)
+        if task is None or task['pipeline_id'] != pipeline_id:
+            return error(message='Task not found', httpStatus=404)
 
         # Return a copy without internal bookkeeping fields.
         public_task = {k: v for k, v in task.items() if not k.startswith('_')}

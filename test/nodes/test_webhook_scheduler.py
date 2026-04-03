@@ -231,8 +231,9 @@ class TestWebhookTrigger:
         payload = b'{}'
         sig = _make_signature(payload)
         req = _make_request(headers={'x-webhook-signature': sig}, body=payload)
+        mock_task = MagicMock()
         with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}), patch('ai.web.endpoints.webhook.asyncio.create_task') as mock_ct:
-            mock_ct.return_value = None
+            mock_ct.return_value = mock_task
             result = await webhook_trigger(req, 'my-pipeline', {})
         body = json.loads(result.body.decode())
         assert body['status'] == 'OK'
@@ -241,6 +242,9 @@ class TestWebhookTrigger:
         assert 'token' in body['data']
         # Background task was dispatched
         mock_ct.assert_called_once()
+        # Task reference stored to prevent GC
+        token = body['data']['token']
+        assert _active_tasks[token]['_task'] is mock_task
 
     @pytest.mark.asyncio
     async def test_rate_limiting(self):
@@ -284,6 +288,7 @@ class TestWebhookStatus:
         body = json.loads(result.body.decode())
         assert body['status'] == 'Error'
         assert result.status_code == 404
+        assert 'Task not found' in body['error']['error']
 
     @pytest.mark.asyncio
     async def test_status_pipeline_mismatch(self):
@@ -297,6 +302,9 @@ class TestWebhookStatus:
         result = await webhook_status(req, 'wrong-pipeline', token)
         body = json.loads(result.body.decode())
         assert body['status'] == 'Error'
+        # Mismatch returns the same generic message as missing token
+        # to prevent leaking token existence
+        assert 'Task not found' in body['error']['error']
         assert result.status_code == 404
 
     @pytest.mark.asyncio
@@ -747,7 +755,8 @@ class TestRunningCountDecrement:
         payload = b'{}'
         sig = _make_signature(payload)
         req = _make_request(headers={'x-webhook-signature': sig}, body=payload)
-        with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}), patch('ai.web.endpoints.webhook.asyncio.create_task'):
+        with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}), patch('ai.web.endpoints.webhook.asyncio.create_task') as mock_ct:
+            mock_ct.return_value = MagicMock()
             result = await webhook_trigger(req, 'my-pipeline', {})
         body = json.loads(result.body.decode())
         assert body['status'] == 'OK'
@@ -782,6 +791,75 @@ class TestRunningCountDecrement:
         # Use a token not in _active_tasks to trigger a KeyError inside _execute_pipeline
         await _execute_pipeline('missing-token', 'my-pipeline', None)
         assert wh_mod._running_count == 0
+
+    @pytest.mark.asyncio
+    async def test_no_double_decrement_on_create_task_error(self):
+        """If create_task raises, only the except block decrements (not the background task)."""
+        import ai.web.endpoints.webhook as wh_mod
+
+        payload = b'{}'
+        sig = _make_signature(payload)
+        req = _make_request(headers={'x-webhook-signature': sig}, body=payload)
+        with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}), patch('ai.web.endpoints.webhook.asyncio.create_task', side_effect=RuntimeError('boom')):
+            result = await webhook_trigger(req, 'my-pipeline', {})
+        assert result.status_code == 500
+        # _running_count must be back to 0 (incremented once, decremented once)
+        assert wh_mod._running_count == 0
+
+    @pytest.mark.asyncio
+    async def test_no_decrement_when_task_dispatched_and_error_after(self):
+        """If the task was dispatched but a later error occurs, the except block must NOT decrement."""
+        import ai.web.endpoints.webhook as wh_mod
+
+        payload = b'{}'
+        sig = _make_signature(payload)
+        req = _make_request(headers={'x-webhook-signature': sig}, body=payload)
+        mock_task = MagicMock()
+        with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}), patch('ai.web.endpoints.webhook.asyncio.create_task') as mock_ct, patch('ai.web.endpoints.webhook.WebhookResponse', side_effect=RuntimeError('model error')):
+            mock_ct.return_value = mock_task
+            result = await webhook_trigger(req, 'my-pipeline', {})
+        assert result.status_code == 500
+        # The background task was dispatched, so it owns the decrement.
+        # The except block must NOT decrement, leaving count at 1.
+        assert wh_mod._running_count == 1
+        # Cleanup
+        wh_mod._running_count = 0
+
+
+# ===========================================================================
+# Status endpoint token-existence leak prevention tests
+# ===========================================================================
+
+
+class TestStatusTokenLeakPrevention:
+    """Verify that the status endpoint does not leak whether a token exists."""
+
+    def setup_method(self):
+        _active_tasks.clear()
+
+    @pytest.mark.asyncio
+    async def test_missing_token_and_wrong_pipeline_return_same_message(self):
+        """Both missing-token and wrong-pipeline cases must return identical error responses."""
+        token = 'real-token'
+        _active_tasks[token] = {
+            'pipeline_id': 'real-pipeline',
+            'status': 'accepted',
+            'created_at': datetime.now(timezone.utc).isoformat(),
+        }
+        req = _make_request()
+
+        # Case 1: token does not exist at all
+        result_missing = await webhook_status(req, 'any-pipeline', 'nonexistent-token')
+        body_missing = json.loads(result_missing.body.decode())
+
+        # Case 2: token exists but pipeline_id does not match
+        result_mismatch = await webhook_status(req, 'wrong-pipeline', token)
+        body_mismatch = json.loads(result_mismatch.body.decode())
+
+        # Both must return 404 with identical error messages
+        assert result_missing.status_code == 404
+        assert result_mismatch.status_code == 404
+        assert body_missing['error']['error'] == body_mismatch['error']['error']
 
 
 # ===========================================================================
