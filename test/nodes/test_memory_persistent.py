@@ -282,15 +282,17 @@ class TestSessionIsolation:
 class TestRedisBackendMocked:
     """Test Redis backend with a mocked redis.Redis client."""
 
-    def _make_backend(self) -> RedisBackend:
-        mock_client = MagicMock()
+    @pytest.fixture(autouse=True)
+    def _mock_redis(self, monkeypatch):
+        """Inject a mock redis module for each test, restored automatically by monkeypatch."""
+        self._mock_client = MagicMock()
         mock_redis_module = MagicMock()
-        mock_redis_module.Redis.return_value = mock_client
-        # Inject mock redis module so RedisBackend.__init__ can import it
-        sys.modules['redis'] = mock_redis_module
+        mock_redis_module.Redis.return_value = self._mock_client
+        monkeypatch.setitem(sys.modules, 'redis', mock_redis_module)
 
+    def _make_backend(self) -> RedisBackend:
         backend = RedisBackend(host='localhost', port=6379)
-        backend._client = mock_client
+        backend._client = self._mock_client
         return backend
 
     def test_create_session_calls_redis(self):
@@ -775,43 +777,52 @@ class TestInMemoryBounds:
 # =============================================================================
 
 
-def _ensure_engine_mocks():
-    """Mock the C++ engine modules so rocketlib can be imported in tests.
+def _build_engine_mock_entries() -> dict:
+    """Build a dict of mock sys.modules entries for the C++ engine and ai packages.
 
-    The rocketlib package depends on engLib (C++ engine) and depends (uv
-    package manager) which are not available in unit test environments.
-    We mock them before rocketlib is first imported.
+    Returns a mapping suitable for ``patch.dict(sys.modules, ...)``.
     """
-    if 'engLib' not in sys.modules:
-        mock_englib = MagicMock()
-        # Provide the enum/constant values that rocketlib.types expects
-        mock_englib.PROTOCOL_CAPS = MagicMock()
-        mock_englib.TAG_ID = MagicMock()
-        mock_englib.TAG = MagicMock()
-        sys.modules['engLib'] = mock_englib
+    mock_englib = MagicMock()
+    mock_englib.PROTOCOL_CAPS = MagicMock()
+    mock_englib.TAG_ID = MagicMock()
+    mock_englib.TAG = MagicMock()
 
-    if 'depends' not in sys.modules:
-        mock_depends_mod = MagicMock()
-        # depends() is called at module scope in rocketlib/types.py
-        mock_depends_mod.depends = MagicMock(return_value=None)
-        sys.modules['depends'] = mock_depends_mod
+    mock_depends_mod = MagicMock()
+    mock_depends_mod.depends = MagicMock(return_value=None)
 
-    # Clear cached rocketlib modules so they re-import with mocks
+    entries: dict = {
+        'engLib': mock_englib,
+        'depends': mock_depends_mod,
+        'ai': MagicMock(),
+        'ai.common': MagicMock(),
+        'ai.common.schema': MagicMock(),
+        'ai.common.config': MagicMock(),
+    }
+    return entries
+
+
+@pytest.fixture
+def engine_mocks(monkeypatch):
+    """Install engine mocks into sys.modules for the duration of the test.
+
+    Yields the mock entries dict so tests can inspect individual mocks.
+    Cleanup is automatic via monkeypatch.
+    """
+    entries = _build_engine_mock_entries()
+    for name, mod in entries.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+    # Clear cached rocketlib modules so they re-import with the mocks
     for key in list(sys.modules.keys()):
         if key.startswith('rocketlib'):
-            del sys.modules[key]
-
-    # Also mock ai.common.schema and ai.common.config if not available
-    if 'ai' not in sys.modules:
-        sys.modules['ai'] = MagicMock()
-        sys.modules['ai.common'] = MagicMock()
-        sys.modules['ai.common.schema'] = MagicMock()
-        sys.modules['ai.common.config'] = MagicMock()
+            monkeypatch.delitem(sys.modules, key, raising=False)
+    yield entries
 
 
 def _import_iglobal():
-    """Import IGlobal via importlib to avoid triggering package __init__.py."""
-    _ensure_engine_mocks()
+    """Import IGlobal via importlib to avoid triggering package __init__.py.
+
+    Caller must ensure engine mocks are installed (e.g. via the ``engine_mocks`` fixture).
+    """
     spec = importlib.util.spec_from_file_location(
         'memory_persistent.IGlobal',
         NODES_SRC / 'memory_persistent' / 'IGlobal.py',
@@ -822,8 +833,10 @@ def _import_iglobal():
 
 
 def _import_iinstance():
-    """Import IInstance via importlib to avoid triggering package __init__.py."""
-    _ensure_engine_mocks()
+    """Import IInstance via importlib to avoid triggering package __init__.py.
+
+    Caller must ensure engine mocks are installed (e.g. via the ``engine_mocks`` fixture).
+    """
     spec = importlib.util.spec_from_file_location(
         'memory_persistent.IInstance',
         NODES_SRC / 'memory_persistent' / 'IInstance.py',
@@ -836,7 +849,7 @@ def _import_iinstance():
 class TestIGlobalLifecycle:
     """Tests for IGlobal initialization and teardown."""
 
-    def test_iglobal_config_mode_skips_store(self):
+    def test_iglobal_config_mode_skips_store(self, engine_mocks):
         """In CONFIG mode, store should not be created."""
         IGlobal = _import_iglobal()
 
@@ -849,7 +862,7 @@ class TestIGlobalLifecycle:
         iglobal.beginGlobal()
         assert iglobal.store is None
 
-    def test_endglobal_clears_store(self):
+    def test_endglobal_clears_store(self, engine_mocks):
         IGlobal = _import_iglobal()
 
         iglobal = IGlobal.__new__(IGlobal)
@@ -867,6 +880,10 @@ class TestIGlobalLifecycle:
 
 class TestIInstanceLifecycle:
     """Tests for IInstance writeQuestions and writeAnswers."""
+
+    @pytest.fixture(autouse=True)
+    def _setup_engine_mocks(self, engine_mocks):
+        """Ensure engine mocks are active for every test in this class."""
 
     def _make_instance(self, store=None):
         IInstance = _import_iinstance()

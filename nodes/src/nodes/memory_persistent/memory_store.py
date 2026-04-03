@@ -113,6 +113,19 @@ class InMemoryBackend(MemoryBackend):
         # {session_id: created_at_timestamp}
         self._metadata: Dict[str, Dict[str, Any]] = {}
 
+    def _expire_if_needed(self, session_id: str) -> bool:
+        """Check and remove an expired session. Must be called while holding ``_lock``.
+
+        Returns ``True`` if the session was expired and removed.
+        """
+        meta = self._metadata.get(session_id)
+        if meta and meta.get('expires_at') and time.time() > meta['expires_at']:
+            self._sessions.pop(session_id, None)
+            self._history.pop(session_id, None)
+            self._metadata.pop(session_id, None)
+            return True
+        return False
+
     def create_session(self, session_id: str, ttl_seconds: Optional[int] = None) -> Dict[str, Any]:
         _validate_session_id(session_id)
         with self._lock:
@@ -170,7 +183,7 @@ class InMemoryBackend(MemoryBackend):
         _validate_session_id(session_id)
         _validate_key(key)
         with self._lock:
-            if session_id not in self._sessions:
+            if self._expire_if_needed(session_id) or session_id not in self._sessions:
                 return {'ok': False, 'error': f'Session {session_id!r} not found'}
             self._sessions[session_id][key] = copy.deepcopy(value)
             self._history[session_id].append(
@@ -186,7 +199,7 @@ class InMemoryBackend(MemoryBackend):
         _validate_session_id(session_id)
         _validate_key(key)
         with self._lock:
-            if session_id not in self._sessions:
+            if self._expire_if_needed(session_id) or session_id not in self._sessions:
                 return {'ok': False, 'error': f'Session {session_id!r} not found'}
             store = self._sessions[session_id]
             if key not in store:
@@ -196,7 +209,7 @@ class InMemoryBackend(MemoryBackend):
     def list_keys(self, session_id: str) -> Dict[str, Any]:
         _validate_session_id(session_id)
         with self._lock:
-            if session_id not in self._sessions:
+            if self._expire_if_needed(session_id) or session_id not in self._sessions:
                 return {'ok': False, 'error': f'Session {session_id!r} not found'}
             return {'ok': True, 'session_id': session_id, 'keys': sorted(self._sessions[session_id].keys())}
 
@@ -205,7 +218,7 @@ class InMemoryBackend(MemoryBackend):
         if key is not None:
             _validate_key(key)
         with self._lock:
-            if session_id not in self._sessions:
+            if self._expire_if_needed(session_id) or session_id not in self._sessions:
                 return {'ok': False, 'error': f'Session {session_id!r} not found'}
             store = self._sessions[session_id]
             if key:
@@ -228,7 +241,7 @@ class InMemoryBackend(MemoryBackend):
     def get_history(self, session_id: str, limit: int = 50) -> Dict[str, Any]:
         _validate_session_id(session_id)
         with self._lock:
-            if session_id not in self._sessions:
+            if self._expire_if_needed(session_id) or session_id not in self._sessions:
                 return {'ok': False, 'error': f'Session {session_id!r} not found'}
             history = self._history.get(session_id, [])
             # Return most recent entries (tail)
@@ -238,7 +251,7 @@ class InMemoryBackend(MemoryBackend):
     def replace_history(self, session_id: str, entries: List[Dict[str, Any]]) -> None:
         with self._lock:
             if session_id in self._history:
-                self._history[session_id] = list(entries)
+                self._history[session_id] = copy.deepcopy(entries)
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +396,13 @@ class RedisBackend(MemoryBackend):
         with self._lock:
             if not self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
                 return {'ok': False, 'error': f'Session {session_id!r} not found'}
+            # Guard against reviving an expired session whose meta key has
+            # already been evicted by Redis TTL but whose session ID is still
+            # in the global sessions set.
+            remaining_ms = self._client.pttl(self._meta_key(session_id))
+            if remaining_ms == -2:
+                self._client.srem(_REDIS_SESSIONS_KEY, session_id)
+                return {'ok': False, 'error': f'Session {session_id!r} has expired'}
             serialized = json.dumps(value)
             pipe = self._client.pipeline()
             pipe.set(self._data_key(session_id, key), serialized)

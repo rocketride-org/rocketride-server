@@ -53,11 +53,17 @@ class IInstance(IInstanceBase):
             session_id = question.metadata.get('session_id')
 
         if session_id:
-            # Ensure session exists (resume or create)
-            resume = store.resume_session(session_id)
-            if not resume.get('ok'):
-                # Auto-create session if it doesn't exist
-                store.create_session(session_id)
+            # Ensure session exists (resume or create).
+            # Catch ValueError from malformed session_id so the pipeline
+            # continues with the question forwarded unchanged.
+            try:
+                resume = store.resume_session(session_id)
+                if not resume.get('ok'):
+                    store.create_session(session_id)
+            except ValueError:
+                debug(f'Ignoring invalid session_id in question metadata: {session_id!r}')
+                self.instance.writeQuestions(question)
+                return
 
             # Load all keys from the session
             keys_result = store.list_keys(session_id)
@@ -98,10 +104,17 @@ class IInstance(IInstanceBase):
             session_id = answer.metadata.get('session_id')
 
         if session_id:
-            # Ensure session exists
-            resume = store.resume_session(session_id)
-            if not resume.get('ok'):
-                store.create_session(session_id)
+            # Ensure session exists.
+            # Catch ValueError from malformed session_id so the pipeline
+            # continues with the answer forwarded unchanged.
+            try:
+                resume = store.resume_session(session_id)
+                if not resume.get('ok'):
+                    store.create_session(session_id)
+            except ValueError:
+                debug(f'Ignoring invalid session_id in answer metadata: {session_id!r}')
+                self.instance.writeAnswers(answer)
+                return
 
             # Store the answer text
             answer_text = answer.getText() if hasattr(answer, 'getText') else str(answer)
