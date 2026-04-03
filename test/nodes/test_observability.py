@@ -225,6 +225,10 @@ class TestMetricsEndpoint:
         os.environ.pop('ROCKETRIDE_METRICS_PUBLIC', None)
         assert metrics_endpoint.is_metrics_public() is False
 
+    def test_is_metrics_public_true(self):
+        with patch.dict(os.environ, {'ROCKETRIDE_METRICS_PUBLIC': 'true'}):
+            assert metrics_endpoint.is_metrics_public() is True
+
     def test_is_metrics_public_false(self):
         with patch.dict(os.environ, {'ROCKETRIDE_METRICS_PUBLIC': 'false'}):
             assert metrics_endpoint.is_metrics_public() is False
@@ -451,3 +455,37 @@ class TestMetricsMiddleware:
 
         counter_after = REGISTRY.get_sample_value('rocketride_http_requests_total', {'method': 'GET', 'endpoint': '/not-found-mw', 'status_code': '404'})
         assert counter_after == counter_before + 1.0
+
+
+class TestPathNormalisation:
+    """Validate regex-based path normalisation anchors to segment boundaries."""
+
+    def test_numeric_segment_replaced(self):
+        """Pure numeric segment should be replaced with {id}."""
+        path = middleware._NUMERIC_RE.sub('/{id}', '/pipeline/123/run')
+        assert path == '/pipeline/{id}/run'
+
+    def test_numeric_prefix_not_replaced(self):
+        """Numeric prefix followed by letters should NOT be replaced (partial segment)."""
+        path = middleware._NUMERIC_RE.sub('/{id}', '/pipeline/123abc/run')
+        assert path == '/pipeline/123abc/run'
+
+    def test_uuid_segment_replaced(self):
+        """UUID segment should be replaced with {id}."""
+        path = middleware._UUID_RE.sub('/{id}', '/pipeline/3fa85f64-5717-4562-b3fc-2c963f66afa6/run')
+        assert path == '/pipeline/{id}/run'
+
+    def test_uuid_prefix_not_replaced(self):
+        """UUID-like prefix followed by extra chars should NOT be replaced."""
+        path = middleware._UUID_RE.sub('/{id}', '/pipeline/3fa85f64-5717-4562-b3fc-2c963f66afa6extra/run')
+        assert path == '/pipeline/3fa85f64-5717-4562-b3fc-2c963f66afa6extra/run'
+
+    def test_numeric_at_end_of_path(self):
+        """Numeric segment at end of path (no trailing slash) should be replaced."""
+        path = middleware._NUMERIC_RE.sub('/{id}', '/pipeline/456')
+        assert path == '/pipeline/{id}'
+
+    def test_uuid_at_end_of_path(self):
+        """UUID segment at end of path (no trailing slash) should be replaced."""
+        path = middleware._UUID_RE.sub('/{id}', '/pipeline/3fa85f64-5717-4562-b3fc-2c963f66afa6')
+        assert path == '/pipeline/{id}'

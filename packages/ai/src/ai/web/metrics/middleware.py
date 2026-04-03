@@ -26,7 +26,8 @@
 Automatically records Prometheus counters/histograms and OpenTelemetry
 span attributes for every inbound HTTP request.
 
-Usage — add *after* the auth middleware so the route path is resolved::
+Usage — add *before* the auth middleware (Starlette middleware is LIFO,
+so this will execute after auth has resolved the route path)::
 
     from ai.web.metrics.middleware import MetricsMiddleware
 
@@ -47,8 +48,8 @@ __all__ = ['MetricsMiddleware']
 
 # Patterns used to normalise dynamic path segments when route matching
 # is unavailable (e.g. catch-all or mounted sub-apps).
-_UUID_RE = re.compile(r'/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', re.IGNORECASE)
-_NUMERIC_RE = re.compile(r'/\d+')
+_UUID_RE = re.compile(r'/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=/|$)', re.IGNORECASE)
+_NUMERIC_RE = re.compile(r'/\d+(?=/|$)')
 
 
 def _normalise_path(request: Request) -> str:
