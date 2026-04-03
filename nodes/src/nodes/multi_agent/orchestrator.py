@@ -278,7 +278,10 @@ class MultiAgentOrchestrator:
             # Validate task ID — generate a fallback for blank/null/duplicate IDs.
             task_id = str(item.get('id') or '')
             if not task_id or task_id in seen_ids:
-                task_id = f'task-{len(tasks)}'
+                counter = len(tasks)
+                while f'task-{counter}' in seen_ids:
+                    counter += 1
+                task_id = f'task-{counter}'
             seen_ids.add(task_id)
 
             tasks.append(

@@ -1024,6 +1024,23 @@ class TestCodeRabbitFixes:
         ids = [t.id for t in plan]
         assert len(ids) == len(set(ids)), f'Task IDs should be unique, got: {ids}'
 
+    def test_duplicate_id_matching_fallback_pattern(self):
+        """IDs like 'task-1' that collide with the fallback pattern."""
+        agents = json.dumps([{'name': 'a', 'role': 'r'}])
+        plan_json = json.dumps(
+            [
+                {'id': 'task-1', 'description': 'first', 'assigned_agent': 'a', 'depends_on': []},
+                {'id': 'task-1', 'description': 'dup', 'assigned_agent': 'a', 'depends_on': []},
+            ]
+        )
+        llm = _make_plan_llm(plan_json)
+        orch = MultiAgentOrchestrator({'agents_json': agents}, llm)
+        plan = orch.plan('test')
+        ids = [t.id for t in plan]
+        # Second task should get task-2, NOT task-1 (which would collide)
+        assert ids == ['task-1', 'task-2'], f'Expected [task-1, task-2], got: {ids}'
+        assert len(ids) == len(set(ids)), f'Task IDs should be unique, got: {ids}'
+
     def test_iinstance_none_config_raises(self):
         """IInstance should raise RuntimeError when config is None."""
         from multi_agent.IGlobal import IGlobal
