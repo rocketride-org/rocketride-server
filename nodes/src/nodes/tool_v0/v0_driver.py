@@ -73,6 +73,17 @@ REFINE_UI_TOOL: Dict[str, Any] = {
                 'type': 'string',
                 'description': 'The message_id returned from a previous generate_ui or refine_ui call.',
             },
+            'prior_messages': {
+                'type': 'array',
+                'description': 'Prior conversation messages (user/assistant pairs) for stateless API fallback. Include the original prompt and response so the server has full context.',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'role': {'type': 'string'},
+                        'content': {'type': 'string'},
+                    },
+                },
+            },
             'model': {
                 'type': 'string',
                 'description': 'The v0 model to use (default: "v0-1.0-md").',
@@ -206,6 +217,12 @@ class V0Driver(ToolsBase):
         response = self._call_v0_api(messages, model)
         code, message_id = self._extract_code(response)
 
+        if not code:
+            return {
+                'success': False,
+                'error': 'No code generated',
+            }
+
         return {
             'success': True,
             'code': code,
@@ -223,12 +240,23 @@ class V0Driver(ToolsBase):
 
         model = args.get('model') or 'v0-1.0-md'
 
-        messages = [
-            {'role': 'user', 'content': prompt},
-        ]
+        # Build the messages array with prior history as a stateless fallback.
+        # The v0 /v1/chat endpoint may be stateful (server-side history keyed by
+        # parent_message_id) or stateless (standard OpenAI-compatible, requiring
+        # the full conversation in messages).  We include both: the prior context
+        # in `messages` and `parent_message_id` as an extra parameter so the
+        # request works correctly regardless of the server's behaviour.
+        prior_messages: List[Dict[str, str]] = args.get('prior_messages') or []
+        messages = [*prior_messages, {'role': 'user', 'content': prompt}]
 
         response = self._call_v0_api(messages, model, parent_message_id=message_id)
         code, new_message_id = self._extract_code(response)
+
+        if not code:
+            return {
+                'success': False,
+                'error': 'No code generated',
+            }
 
         return {
             'success': True,
