@@ -225,7 +225,12 @@ class BlandDriver(ToolsBase):
 
         if bare_name == 'get_call':
             call_id = str(input_obj.get('call_id') or '').strip()
-            if input_obj.get('wait_for_completion'):
+            raw_wait = input_obj.get('wait_for_completion')
+            if isinstance(raw_wait, str):
+                wait = raw_wait.strip().lower() in {'true', '1', 'yes'}
+            else:
+                wait = bool(raw_wait)
+            if wait:
                 return bland_client.get_call_when_complete(self._api_key, call_id)
             return bland_client.get_call(self._api_key, call_id)
 

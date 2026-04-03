@@ -9,7 +9,7 @@
 	"prefix": "bland",
 	"icon": "bland-ai.svg",
 	"description": ["Make and manage AI-powered phone calls via Bland AI.", "The agent can initiate outbound calls, retrieve call transcripts, and analyze completed calls.", "Requires a Bland AI API key from https://www.bland.ai"],
-	"tile": ["Tool: ${parameters.bland_ai.serverName}.bland_ai"],
+	"tile": ["Tool: ${parameters.bland_ai.serverName}"],
 	"lanes": {},
 	"preconfig": {
 		"default": "default",
