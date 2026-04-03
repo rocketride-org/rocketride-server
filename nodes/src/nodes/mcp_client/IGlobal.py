@@ -44,13 +44,12 @@ from rocketlib import IGlobalBase, OPEN_MODE, warning
 from .mcp_stdio_client import McpStdioClient, McpToolDef
 from .mcp_sse_client import McpSseClient
 from .mcp_streamable_http_client import McpStreamableHttpClient
-from .mcp_driver import McpDriver
 
 
 class IGlobal(IGlobalBase):
     """Global state for mcp_client."""
 
-    driver: McpDriver | None = None
+    serverName: str = 'mcp'
 
     @staticmethod
     def _is_mapping(obj: Any) -> bool:
@@ -138,21 +137,11 @@ class IGlobal(IGlobalBase):
                     self._client = McpStreamableHttpClient(endpoint=endpoint, headers=headers)
 
             else:
-                raise Exception(
-                    f'mcp_client transport {self.transport!r} not supported '
-                    '(use stdio, streamable-http, or sse)'
-                )
+                raise Exception(f'mcp_client transport {self.transport!r} not supported (use stdio, streamable-http, or sse)')
 
             self._client.start()
             tools = self._client.list_tools()
             self._cache_tools(tools)
-
-            self.driver = McpDriver(
-                server_name=self.serverName,
-                list_namespaced_tools=self.list_namespaced_tools,
-                get_tool=lambda server, name: self.get_tool(server_name=server, tool_name=name),
-                call_tool=lambda server, name, args: self.call_tool(server_name=server, tool_name=name, arguments=args),
-            )
         except Exception as e:
             warning(str(e))
             raise
@@ -220,7 +209,6 @@ class IGlobal(IGlobalBase):
             if client is not None:
                 client.stop()
         finally:
-            self.driver = None
             self._client = None
             self._tools_by_original = {}
             self._tools_by_namespaced = {}
@@ -248,10 +236,7 @@ class IGlobal(IGlobalBase):
 
     def call_tool(self, *, server_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         if server_name != self.serverName:
-            raise Exception(
-                f'Unknown MCP serverName {server_name!r} (this node configured as {self.serverName!r})'
-            )
+            raise Exception(f'Unknown MCP serverName {server_name!r} (this node configured as {self.serverName!r})')
         if self._client is None:
             raise Exception('MCP client is not connected')
         return self._client.call_tool(name=tool_name, arguments=arguments or {})
-

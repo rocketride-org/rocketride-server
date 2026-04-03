@@ -31,7 +31,7 @@ from typing import Any, Callable
 
 from ai.common.agent import AgentBase
 from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
-from ai.common.tools import ToolsBase
+from rocketlib import ToolDescriptor
 
 
 class DeepAgentDriver(AgentBase):
@@ -181,7 +181,7 @@ class DeepAgentDriver(AgentBase):
         self,
         *,
         host: AgentHost,
-        tool_descriptors: list[ToolsBase.ToolDescriptor],
+        tool_descriptors: list[ToolDescriptor],
         invoke_tool: Callable[..., Any],
         log_tool_call: Callable[..., None],
         ctx: dict[str, Any],
@@ -197,7 +197,7 @@ class DeepAgentDriver(AgentBase):
         Args:
             host: The ``AgentHost`` context for the current run (unused here; present for
                 interface compatibility).
-            tool_descriptors: List of ``ToolsBase.ToolDescriptor`` dicts describing the
+            tool_descriptors: List of ``ToolDescriptor`` dicts describing the
                 tools available to the agent.
             invoke_tool: Callable that executes a named host tool and returns its output.
             log_tool_call: Callable invoked after each tool execution for audit logging;
@@ -314,7 +314,7 @@ class DeepAgentDriver(AgentBase):
             if not isinstance(name, str) or not name.strip():
                 continue
             desc = td.get('description') if isinstance(td.get('description'), str) else f'Invoke host tool: {name}'
-            input_schema = td.get('input_schema')
+            input_schema = td.get('inputSchema')
             if isinstance(input_schema, dict):
                 try:
                     schema_text = json.dumps(input_schema, ensure_ascii=False)

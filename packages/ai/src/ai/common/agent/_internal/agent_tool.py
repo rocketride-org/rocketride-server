@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ai.common.schema import Question
 from ai.common.tools import ToolsBase
+from rocketlib import ToolDescriptor
 
 from .host import AgentHostServices
 from .utils import normalize_invocation_payload
@@ -105,7 +106,7 @@ class _AgentAsToolProvider(ToolsBase):
         if not query.strip():
             raise ValueError('agent tool: input.query must be a non-empty string')
 
-    def _tool_query(self) -> List[ToolsBase.ToolDescriptor]:
+    def _tool_query(self) -> List[ToolDescriptor]:
         """Return the single tool descriptor that exposes this agent."""
         tools_available = self._connected_tools_available()
         agent_description = getattr(self._agent, '_agent_description', '') or ''

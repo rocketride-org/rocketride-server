@@ -32,7 +32,7 @@ from ._internal.utils import (
     safe_str,
     truncate_at_stop_words,
 )
-from ai.common.tools import ToolsBase
+from rocketlib import ToolDescriptor
 
 
 class AgentBase(ABC):
@@ -218,7 +218,7 @@ class AgentBase(ABC):
     # ---------------------------------------------------------------------
     # Framework-facing host operations
     # ---------------------------------------------------------------------
-    def discover_tools(self, *, host: AgentHost) -> List[ToolsBase.ToolDescriptor]:
+    def discover_tools(self, *, host: AgentHost) -> List[ToolDescriptor]:
         """
         Discover available tools for framework drivers to expose.
 
@@ -308,7 +308,7 @@ class AgentBase(ABC):
         self,
         *,
         host: AgentHost,
-        tool_descriptors: List[ToolsBase.ToolDescriptor],
+        tool_descriptors: List[ToolDescriptor],
         invoke_tool: Callable[..., Any],
         log_tool_call: Callable[..., None],
         ctx: Dict[str, Any],

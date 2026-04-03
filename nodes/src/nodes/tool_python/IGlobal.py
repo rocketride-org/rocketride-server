@@ -24,46 +24,34 @@
 """
 Python tool node - global (shared) state.
 
-Creates a ``PythonDriver`` that exposes a single ``execute`` tool for agent
-invocation.
+Reads config and stores sandbox settings (allowed modules, timeout)
+for IInstance tool methods.
 """
 
 from __future__ import annotations
 
-from typing import Set
 
 from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
-
-from .python_driver import PythonDriver
+from rocketlib import IGlobalBase, OPEN_MODE
 
 
 class IGlobal(IGlobalBase):
     """Global state for tool_python."""
 
-    driver: PythonDriver | None = None
+    allowed_modules: set[str] | None = None
+    timeout: int | None = None
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        server_name = str(cfg.get('serverName') or 'python').strip()
-        allowed_modules = _parse_allowed_modules(cfg)
-        timeout = _parse_timeout(cfg)
-
-        try:
-            self.driver = PythonDriver(
-                server_name=server_name,
-                allowed_modules=allowed_modules,
-                timeout=timeout,
-            )
-        except Exception as e:
-            warning(str(e))
-            raise
+        self.allowed_modules = _parse_allowed_modules(cfg)
+        self.timeout = _parse_timeout(cfg)
 
     def endGlobal(self) -> None:
-        self.driver = None
+        self.allowed_modules = None
+        self.timeout = None
 
 
 def _parse_timeout(cfg: dict) -> int | None:
@@ -78,7 +66,7 @@ def _parse_timeout(cfg: dict) -> int | None:
     return max(1, min(value, 1200))
 
 
-def _parse_allowed_modules(cfg: dict) -> Set[str] | None:
+def _parse_allowed_modules(cfg: dict) -> set[str] | None:
     """Extract allowed module names from the array config field.
 
     Returns ``None`` if the field is absent (use sandbox defaults),
@@ -95,8 +83,10 @@ def _parse_allowed_modules(cfg: dict) -> Set[str] | None:
             raw = json.loads(str(raw))
         except (json.JSONDecodeError, TypeError, ValueError):
             return set()
+        if not isinstance(raw, list):
+            return set()
 
-    modules: Set[str] = set()
+    modules: set[str] = set()
     for row in raw:
         if not hasattr(row, 'get'):
             continue

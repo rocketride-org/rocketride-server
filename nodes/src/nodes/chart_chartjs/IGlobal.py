@@ -24,44 +24,15 @@
 """
 Chart (Chart.js) tool node — global (shared) state.
 
-Reads the node configuration and creates a ``ChartjsDriver`` that exposes
-a ``generate_chart`` tool for agent invocation.
+Tool logic lives on IInstance via @tool_function. Nothing to hold here.
 """
 
 from __future__ import annotations
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
-
-from .chartjs_driver import ChartjsDriver
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
     """Global state for chart_chartjs."""
 
-    driver: ChartjsDriver | None = None
-
-    def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        server_name = str((cfg.get('serverName') or 'chartjs')).strip()
-
-        try:
-            self.driver = ChartjsDriver(server_name=server_name)
-        except Exception as e:
-            warning(str(e))
-            raise
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            server_name = str((cfg.get('serverName') or '')).strip()
-            if not server_name:
-                warning('serverName is required')
-        except Exception as e:
-            warning(str(e))
-
-    def endGlobal(self) -> None:
-        self.driver = None
+    pass

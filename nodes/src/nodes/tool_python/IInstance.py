@@ -24,14 +24,14 @@
 """
 Python tool node instance.
 
-Delegates tool invocation to the ``PythonDriver`` created by ``IGlobal``.
+Exposes a single ``execute`` tool that runs agent-supplied Python code in a
+restricted in-process sandbox.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
-from rocketlib import IInstanceBase
+from rocketlib import IInstanceBase, tool_function
+from ai.common.sandbox import execute_sandboxed, _TIMEOUT, _DEFAULT_ALLOWED_MODULES
 
 from .IGlobal import IGlobal
 
@@ -39,8 +39,41 @@ from .IGlobal import IGlobal
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
-    def invoke(self, param: Any) -> Any:  # noqa: ANN401
-        driver = getattr(self.IGlobal, 'driver', None)
-        if driver is None:
-            raise RuntimeError('tool_python: driver not initialized')
-        return driver.handle_invoke(param)
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['code'],
+            'properties': {
+                'code': {
+                    'type': 'string',
+                    'description': 'Python source code to execute. Use print() to produce output. Assign to a variable named "result" to return structured data. Only whitelisted modules can be imported — check the tool description for the list.',
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'stdout': {'type': 'string', 'description': 'Captured print() output from the script.'},
+                'stderr': {'type': 'string', 'description': 'Error traceback if the script raised an exception.'},
+                'exit_code': {'type': 'integer', 'description': 'Exit code (0 = success, 1 = exception, -1 = timeout).'},
+                'timed_out': {'type': 'boolean', 'description': 'True if the script was killed due to timeout.'},
+                'result': {'description': 'Value of the "result" variable if set by the script.'},
+            },
+        },
+        description=lambda self: (
+            f'Execute Python code in a sandboxed environment and return stdout/stderr. '
+            f'Use print() to produce visible output. Assign to a variable named "result" '
+            f'to return structured data (dict, list, etc.). '
+            f'Timeout: {self.IGlobal.timeout if self.IGlobal.timeout is not None else _TIMEOUT}s. '
+            f'Allowed imports: {", ".join(sorted(_DEFAULT_ALLOWED_MODULES | (self.IGlobal.allowed_modules or set())))}. '
+            f'All other imports will raise ImportError.'
+        ),
+    )
+    def execute(self, args):
+        """Execute Python code in a sandboxed environment."""
+        if not isinstance(args, dict):
+            raise ValueError('Tool input must be a JSON object (dict)')
+        code = args.get('code')
+        if not code or not isinstance(code, str) or not code.strip():
+            raise ValueError('"code" is required and must be a non-empty string')
+        return execute_sandboxed(code, allowed_modules=self.IGlobal.allowed_modules, timeout=self.IGlobal.timeout)

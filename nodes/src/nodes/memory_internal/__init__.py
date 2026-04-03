@@ -6,9 +6,8 @@
 """
 Memory (Internal) tool node for RocketRide Engine.
 
-Exposes:
-- IGlobal: creates the MemoryDriver on pipe open
-- IInstance: delegates tool invoke to the driver
+Exposes keyed memory tools (put, get, list, clear) via @tool_function
+decorators on IInstance.
 """
 
 from .IGlobal import IGlobal as IGlobal
