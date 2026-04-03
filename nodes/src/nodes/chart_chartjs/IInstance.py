@@ -85,9 +85,9 @@ class IInstance(IInstanceBase):
             raise ValueError('Tool input must be a JSON object')
 
         data = args.get('data')
-        if data is None:
-            raise ValueError('"data" is required')
-        if isinstance(data, (list, dict)) and len(data) == 0:
+        if not isinstance(data, (list, dict)):
+            raise ValueError('"data" is required and must be a list or dict')
+        if len(data) == 0:
             raise ValueError('"data" must not be empty')
 
         valid_types = ['bar', 'line', 'pie', 'doughnut', 'radar', 'polarArea', 'scatter', 'bubble']
@@ -95,13 +95,21 @@ class IInstance(IInstanceBase):
         if chart_type and chart_type not in valid_types:
             raise ValueError(f'"chart_type" must be one of {valid_types}; got {chart_type!r}')
 
-        # Truncate large datasets to keep the LLM prompt manageable
+        title = args.get('title')
+        if title is not None and not isinstance(title, str):
+            raise ValueError('"title" must be a string')
+        description = args.get('description')
+        if description is not None and not isinstance(description, str):
+            raise ValueError('"description" must be a string')
+
+        # Truncate large list datasets to keep the LLM prompt manageable
         if isinstance(data, list) and len(data) > 200:
             data = data[:200]
 
-        data_str = json.dumps(data, indent=2, default=str) if not isinstance(data, str) else data
-        title = args.get('title')
-        description = args.get('description')
+        MAX_SERIALIZED_BYTES = 20_000
+        data_str = json.dumps(data, indent=2, default=str)
+        if len(data_str) > MAX_SERIALIZED_BYTES:
+            data_str = data_str[: MAX_SERIALIZED_BYTES - 40] + '\n...[truncated]...\n' + data_str[-20:]
 
         # Build the LLM question
         q = Question(role='You are a Chart.js v4 configuration generator.')
@@ -153,5 +161,24 @@ class IInstance(IInstanceBase):
         else:
             response_text = str(result).strip()
 
+        # Strip any fenced code markers the LLM may have added
+        if response_text.startswith('```'):
+            first_nl = response_text.find('\n')
+            if first_nl != -1:
+                response_text = response_text[first_nl + 1 :]
+        if response_text.endswith('```'):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+
+        if not response_text:
+            raise RuntimeError('LLM returned empty Chart.js configuration')
+
+        try:
+            parsed = json.loads(response_text)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f'LLM returned invalid JSON for Chart.js configuration: {e}') from e
+
+        normalized = json.dumps(parsed, ensure_ascii=False)
+
         # Wrap in a ```chartjs fence so the UI renders this as a chart.
-        return f'```chartjs\n{response_text}\n```'
+        return f'```chartjs\n{normalized}\n```'

@@ -83,6 +83,8 @@ def _parse_allowed_modules(cfg: dict) -> set[str] | None:
             raw = json.loads(str(raw))
         except (json.JSONDecodeError, TypeError, ValueError):
             return set()
+        if not isinstance(raw, list):
+            return set()
 
     modules: set[str] = set()
     for row in raw:

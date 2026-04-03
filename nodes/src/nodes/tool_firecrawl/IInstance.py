@@ -48,7 +48,7 @@ class IInstance(IInstanceBase):
             'required': ['url'],
             'properties': {
                 'url': {'type': 'string', 'description': 'The URL of the web page to scrape.'},
-                'formats': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Output formats (default: ["markdown"]).', 'default': ['markdown']},
+                'format': {'type': 'string', 'enum': ['markdown', 'html'], 'description': 'Output format (default: "markdown").', 'default': 'markdown'},
             },
         },
         output_schema={
@@ -70,7 +70,8 @@ class IInstance(IInstanceBase):
 
         result = firecrawl_wrapper(lambda: self.IGlobal.app.scrape(url))
 
-        content = getattr(result, 'markdown', None) or getattr(result, 'html', None) or ''
+        fmt = args.get('format', 'markdown')
+        content = getattr(result, fmt, None) or getattr(result, 'markdown', None) or ''
         if not isinstance(content, str):
             content = json.dumps(content)
 
@@ -142,7 +143,7 @@ def _normalize_tool_input(input_obj):
             warning(f'firecrawl: failed to parse input as JSON: {e}')
             pass
     if not isinstance(input_obj, dict):
-        warning(f'firecrawl: unexpected input type {type(input_obj).__name__}: {input_obj!r}')
+        warning(f'firecrawl: unexpected input type {type(input_obj).__name__}')
         return {}
     if 'input' in input_obj and isinstance(input_obj['input'], dict):
         inner = input_obj['input']

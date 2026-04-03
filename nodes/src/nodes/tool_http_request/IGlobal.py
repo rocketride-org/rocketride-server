@@ -72,8 +72,10 @@ class IGlobal(IGlobalBase):
 
             try:
                 raw_whitelist = json.loads(str(raw_whitelist))
-            except (json.JSONDecodeError, TypeError, ValueError):
-                raw_whitelist = []
+                if not isinstance(raw_whitelist, list):
+                    raise ValueError(f'urlWhitelist must be a JSON array, got {type(raw_whitelist).__name__}')
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
+                raise ValueError(f'urlWhitelist is malformed and cannot be parsed: {e}') from e
         patterns: list[re.Pattern] = []
         for row in raw_whitelist:
             if not hasattr(row, 'get'):

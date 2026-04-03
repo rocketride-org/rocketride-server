@@ -161,19 +161,38 @@ class IInstance(IInstanceBase):
             raise ValueError(f'URL "{url}" does not match any allowed URL pattern.')
 
         auth = args.get('auth')
-        if isinstance(auth, dict):
-            auth_type = (auth.get('type') or 'none').strip().lower()
+        if auth is not None:
+            if not isinstance(auth, dict):
+                raise ValueError('auth must be a JSON object')
+            auth_type_val = auth.get('type', 'none')
+            if not isinstance(auth_type_val, str):
+                raise ValueError('auth.type must be a string')
+            auth_type = auth_type_val.strip().lower()
             if auth_type not in valid_auth_types:
                 raise ValueError(f'auth.type must be one of {sorted(valid_auth_types)}; got {auth_type!r}')
+            if auth_type == 'basic':
+                basic = auth.get('basic')
+                if not isinstance(basic, dict):
+                    raise ValueError('auth.basic must be a JSON object with username and password')
 
         body = args.get('body')
-        if isinstance(body, dict):
-            body_type = (body.get('type') or 'none').strip().lower()
+        if body is not None:
+            if not isinstance(body, dict):
+                raise ValueError('body must be a JSON object')
+            body_type_val = body.get('type', 'none')
+            if not isinstance(body_type_val, str):
+                raise ValueError('body.type must be a string')
+            body_type = body_type_val.strip().lower()
             if body_type not in valid_body_types:
                 raise ValueError(f'body.type must be one of {sorted(valid_body_types)}; got {body_type!r}')
             if body_type == 'raw':
-                raw = body.get('raw') or {}
-                ct = (raw.get('content_type') or 'application/json').strip().lower()
+                raw = body.get('raw')
+                if not isinstance(raw, dict):
+                    raise ValueError('body.raw must be a JSON object')
+                ct_val = raw.get('content_type', 'application/json')
+                if not isinstance(ct_val, str):
+                    raise ValueError('body.raw.content_type must be a string')
+                ct = ct_val.strip().lower()
                 if ct not in valid_raw_content_types:
                     raise ValueError(f'body.raw.content_type must be one of {sorted(valid_raw_content_types)}; got {ct!r}')
 

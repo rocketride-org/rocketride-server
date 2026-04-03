@@ -34,15 +34,15 @@ class IInstanceGenericLLM(IInstanceBase):
         self.instance.writeAnswers(answer)
 
     @invoke_function
-    def getContextLength(self, param):
+    def getContextLength(self, _param):
         return self.IGlobal._chat.getTotalTokens()
 
     @invoke_function
-    def getOutputLength(self, param):
+    def getOutputLength(self, _param):
         return self.IGlobal._chat.getOutputTokens()
 
     @invoke_function
-    def getTokenCounter(self, param):
+    def getTokenCounter(self, _param):
         return self.IGlobal._chat.getTokens
 
     @invoke_function

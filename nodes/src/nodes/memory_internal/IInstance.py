@@ -50,7 +50,12 @@ class IInstance(IInstanceBase):
         """Store a value under a key."""
         if not isinstance(args, dict):
             raise ValueError('args must be a dict')
-        return self._store.put(args.get('key', ''), args.get('value'))
+        key = args.get('key')
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError('"key" is required and must be a non-empty string')
+        if 'value' not in args:
+            raise ValueError('"value" is required')
+        return self._store.put(key, args['value'])
 
     @tool_function(
         input_schema={
@@ -74,7 +79,10 @@ class IInstance(IInstanceBase):
         """Retrieve a value by key."""
         if not isinstance(args, dict):
             raise ValueError('args must be a dict')
-        return self._store.get(args.get('key', ''))
+        key = args.get('key')
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError('"key" is required and must be a non-empty string')
+        return self._store.get(key)
 
     @tool_function(
         input_schema={'type': 'object', 'properties': {}, 'required': []},
@@ -89,6 +97,8 @@ class IInstance(IInstanceBase):
     )
     def list(self, args):
         """List all keys."""
+        if not isinstance(args, dict):
+            raise ValueError('args must be a dict')
         return self._store.list()
 
     @tool_function(
@@ -112,4 +122,7 @@ class IInstance(IInstanceBase):
         """Clear one or all keys."""
         if not isinstance(args, dict):
             raise ValueError('args must be a dict')
-        return self._store.clear(args.get('key'))
+        key = args.get('key')
+        if key is not None and not isinstance(key, str):
+            raise ValueError('"key" must be a string if provided')
+        return self._store.clear(key)

@@ -26,8 +26,8 @@ Shared instance-level base class for relational database nodes.
 
 Derived classes must implement one method:
 
-- ``_create_driver``: instantiate and return the concrete tool-provider driver
-  for this database engine (e.g. ``MySQLDriver``, ``PostgreSQLDriver``).
+- ``_db_display_name()``: return the human-readable database name
+  (e.g. ``'MySQL'``, ``'PostgreSQL'``) used in tool descriptions.
 
 All pipeline lane handlers (``writeQuestions``, ``writeTable``,
 ``writeAnswers``), query execution, and data insertion are implemented here
@@ -125,10 +125,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         sql_query = sql_result['sql']
         result = self._executeSQLQuery(sql_query)
         if result is None:
-            return {'error': 'Query execution failed', 'sql': sql_query, 'rows': []}
+            return {'valid': False, 'error': 'Query execution failed', 'sql': sql_query, 'rows': []}
 
         rows = [self._sanitize_row(row) for row in result]
-        return {'rows': rows, 'sql': sql_query, 'row_limit': limit}
+        return {'valid': True, 'rows': rows, 'sql': sql_query, 'row_limit': limit}
 
     @tool_function(
         input_schema={
