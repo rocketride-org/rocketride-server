@@ -31,8 +31,8 @@ class KeyStore:
         #   str:3 = endpoint
         self.token_map: Dict[str, Tuple[str, str, str, str]] = {}
 
-        # Initialize the base class with the provided configuration
-        super().__init__(config if config is not None else {}, **kwargs)
+        # Store the configuration
+        self.config = config if config is not None else {}
 
     async def assign_node(self, apikey: str, pipeline: str) -> Tuple[str, str]:
         """

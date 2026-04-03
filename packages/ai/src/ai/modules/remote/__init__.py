@@ -1,3 +1,5 @@
+from typing import Optional
+
 from ai.web import WebServer
 from ai.common.schema import Autopipe
 
@@ -6,7 +8,7 @@ from .remote_delete import remote_delete
 from .remote_pipe import remote_pipe
 
 
-def initModule(server: WebServer, config: Autopipe = None):
+def initModule(server: WebServer, _config: Optional[Autopipe] = None):
     """
     Initialize the module by registering API routes for search and configuration.
 
