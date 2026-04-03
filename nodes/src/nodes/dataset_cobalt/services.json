@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"source"
-	],
+	"classType": ["source"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -49,11 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"Loads evaluation datasets using Cobalt AI's Dataset class. ",
-		"Supports JSON, CSV, JSONL files with filtering, sampling, and transformation. ",
-		"Feeds test data into pipelines for batch evaluation and quality testing."
-	],
+	"description": ["Loads evaluation datasets using Cobalt AI's Dataset class. ", "Supports JSON, CSV, JSONL files with filtering, sampling, and transformation. ", "Feeds test data into pipelines for batch evaluation and quality testing."],
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
@@ -66,9 +60,7 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"questions": [
-			"questions"
-		]
+		"questions": ["questions"]
 	},
 	"input": [
 		{
@@ -93,9 +85,6 @@
 			},
 			"inline": {
 				"source_type": "inline"
-			},
-			"custom": {
-				"source_type": "file"
 			}
 		}
 	},
@@ -104,10 +93,7 @@
 	//		Test configuration for automated node testing
 	//
 	"test": {
-		"profiles": [
-			"file",
-			"inline"
-		],
+		"profiles": ["file", "inline"],
 		"cases": [
 			{
 				"text": "Load dataset",
@@ -132,27 +118,17 @@
 			"description": "Where to load the dataset from: file (JSON/CSV/JSONL) or inline items.",
 			"default": "file",
 			"enum": [
-				[
-					"file",
-					"File (JSON, CSV, JSONL)"
-				],
-				[
-					"inline",
-					"Inline Items"
-				]
+				["file", "File (JSON, CSV, JSONL)"],
+				["inline", "Inline Items"]
 			],
 			"conditional": [
 				{
 					"value": "file",
-					"properties": [
-						"dataset.file_path"
-					]
+					"properties": ["dataset.file_path"]
 				},
 				{
 					"value": "inline",
-					"properties": [
-						"dataset.items"
-					]
+					"properties": ["dataset.items"]
 				}
 			]
 		},
@@ -162,9 +138,9 @@
 			"description": "Absolute path to the dataset file (JSON, CSV, or JSONL format)."
 		},
 		"dataset.items": {
-			"type": "array",
+			"type": "string",
 			"title": "Inline Items (JSON)",
-			"description": "JSON array of dataset items, e.g. [{\"input\": \"...\", \"expected\": \"...\"}].",
+			"description": "JSON array of dataset items as a string, e.g. [{\"input\": \"...\", \"expected\": \"...\"}]. Parsed as JSON at runtime.",
 			"format": "textarea",
 			"default": "[{\"input\": \"What is 2+2?\", \"expected\": \"4\"}]"
 		},
@@ -198,14 +174,7 @@
 		},
 		"dataset.default": {
 			"object": "default",
-			"properties": [
-				"dataset.source_type",
-				"dataset.sample_size",
-				"dataset.filter_field",
-				"dataset.filter_value",
-				"dataset.slice_start",
-				"dataset.slice_end"
-			]
+			"properties": ["dataset.source_type", "dataset.sample_size", "dataset.filter_field", "dataset.filter_value", "dataset.slice_start", "dataset.slice_end"]
 		}
 	},
 	//
@@ -217,9 +186,7 @@
 		{
 			"section": "Pipe",
 			"title": "Cobalt Dataset",
-			"properties": [
-				"dataset.default"
-			]
+			"properties": ["dataset.default"]
 		}
 	]
 }

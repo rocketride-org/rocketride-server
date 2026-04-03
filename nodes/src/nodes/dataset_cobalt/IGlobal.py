@@ -121,7 +121,7 @@ class IGlobal(IGlobalBase):
             items = []
         except ImportError as e:
             warning(f'Cobalt Dataset Global: Failed to import cobalt library: {str(e)}')
-            warning('Cobalt Dataset Global: Ensure cobalt-ai is installed. pip install cobalt-ai')
+            warning('Cobalt Dataset Global: Ensure basalt-ai-cobalt is installed. pip install basalt-ai-cobalt')
             items = []
 
         # Apply transforms
