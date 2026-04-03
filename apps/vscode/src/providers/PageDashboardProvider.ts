@@ -30,6 +30,8 @@ export class PageDashboardProvider {
 	private logger = getLogger();
 	private connectionManager = ConnectionManager.getInstance();
 	private hasWildcardMonitor = false;
+	private fetchInProgress = false;
+	private fetchPending = false;
 
 	constructor(private context: vscode.ExtensionContext) {
 		this.setupEventListeners();
@@ -102,6 +104,14 @@ export class PageDashboardProvider {
 	private async fetchAndPost(): Promise<void> {
 		if (!this.panel || !this.connectionManager.isConnected()) return;
 
+		// Coalesce overlapping requests: if a fetch is already running,
+		// mark pending and let the in-flight request trigger a follow-up.
+		if (this.fetchInProgress) {
+			this.fetchPending = true;
+			return;
+		}
+
+		this.fetchInProgress = true;
 		try {
 			const response = await this.connectionManager.request('rrext_dashboard', {});
 			if (!response) {
@@ -123,6 +133,14 @@ export class PageDashboardProvider {
 			}
 		} catch (error) {
 			this.logger.error(`[PageDashboardProvider] Failed to fetch dashboard: ${error}`);
+		} finally {
+			this.fetchInProgress = false;
+			if (this.fetchPending) {
+				this.fetchPending = false;
+				this.fetchAndPost().catch((err) => {
+					this.logger.error(`[PageDashboardProvider] Coalesced fetch error: ${err}`);
+				});
+			}
 		}
 	}
 

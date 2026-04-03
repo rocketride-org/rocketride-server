@@ -215,8 +215,12 @@ class MiscCommands(DAPConn):
                     continue
                 task_name = getattr(control.task.get_status(), 'name', None) or control.source
                 for cid, conn in conn_items:
+                    if not hasattr(conn, '_monitors'):
+                        continue
                     project_key = f'p.{control.project_id}.{control.source}'
-                    if hasattr(conn, '_monitors') and (project_key in conn._monitors or '*' in conn._monitors):
+                    project_wildcard_key = f'p.{control.project_id}.*'
+                    pipe_prefix = f'{project_key}.'
+                    if project_key in conn._monitors or project_wildcard_key in conn._monitors or '*' in conn._monitors or any(k.startswith(pipe_prefix) for k in conn._monitors):
                         conn_tasks.setdefault(cid, []).append(task_name)
 
             # Build project ID → friendly name map from task controls
@@ -302,8 +306,9 @@ class MiscCommands(DAPConn):
                     self.debug_message(f'Error building task info for "{control.id}": {e}')
                     continue
 
-            # Build overview — scoped to caller's tasks and connections
-            active_count = sum(1 for c in task_controls if not getattr(c.task.get_status(), 'completed', False))
+            # Build overview — derive from sanitized tasks list to avoid
+            # re-calling get_status() on potentially torn-down controls
+            active_count = sum(1 for task in tasks if not task['completed'])
             start_time = getattr(server._server, '_startTime', None) or current_time
             overview = {
                 'totalConnections': len(conn_items),

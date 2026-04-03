@@ -798,6 +798,10 @@ class Task(DAPBase):
 
                 # Notify dashboard of task errors (non-zero exit)
                 if self._status.exitCode and self._status.exitCode != 0:
+                    try:
+                        task_apikey = self._server.get_task_control(self.token).apikey if self.token else None
+                    except Exception:
+                        task_apikey = None
                     await self._server.broadcast_server_event(
                         EVENT_TYPE.DASHBOARD,
                         {
@@ -810,6 +814,7 @@ class Task(DAPBase):
                                 'exitMessage': self._status.exitMessage or None,
                             },
                         },
+                        apikey=task_apikey,
                     )
 
         self.debug_message('Resource cleanup completed successfully')

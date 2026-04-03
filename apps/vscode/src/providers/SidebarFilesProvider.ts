@@ -1226,6 +1226,13 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	 * Cleans up event listeners and resources
 	 */
 	dispose(): void {
+		// Balance the wildcard monitor added in setupEventListeners
+		void MonitorManager.getInstance()
+			.removeMonitor({ token: '*' }, ['task', 'output'])
+			.catch((error) => {
+				this.logger.error(`Failed to unsubscribe from task events: ${error}`);
+			});
+
 		this.disposables.forEach((disposable) => disposable.dispose());
 		this.disposables = [];
 	}

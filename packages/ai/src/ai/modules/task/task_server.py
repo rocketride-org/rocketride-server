@@ -400,6 +400,7 @@ class TaskServer(DAPBase):
         if connection_id in self._connections:
             del self._connections[connection_id]
 
+        conn_apikey = getattr(getattr(conn, '_account_info', None), 'apikey', None)
         await self.broadcast_server_event(
             EVENT_TYPE.DASHBOARD,
             {
@@ -412,6 +413,7 @@ class TaskServer(DAPBase):
                     'clientVersion': getattr(conn, '_client_info', {}).get('version'),
                 },
             },
+            apikey=conn_apikey,
         )
 
         # Process all tasks for disconnection cleanup
@@ -618,11 +620,17 @@ class TaskServer(DAPBase):
         if port in self._allocated_ports:
             self._allocated_ports.remove(port)
 
-    async def broadcast_server_event(self, type: EVENT_TYPE, event: Dict[str, Any]) -> None:
-        """Broadcast a server-level event (not task-scoped) to all subscribed connections."""
+    async def broadcast_server_event(self, type: EVENT_TYPE, event: Dict[str, Any], apikey: str = None) -> None:
+        """Broadcast a server-level event to subscribed connections.
+
+        Args:
+            type: Event type bitmask.
+            event: DAP event payload.
+            apikey: If provided, only deliver to connections whose account matches.
+        """
         for conn in list(self._connections.values()):
             try:
-                await conn.send_server_event(type, event=event)
+                await conn.send_server_event(type, event=event, apikey=apikey)
             except Exception:
                 pass
 
@@ -742,6 +750,7 @@ class TaskServer(DAPBase):
                 'event': 'apaevt_dashboard',
                 'body': {'action': 'task_removed', 'timestamp': time.time(), 'taskId': control.id},
             },
+            apikey=control.apikey,
         )
 
         # Log task removal for audit trail and debugging

@@ -242,6 +242,7 @@ class TaskConn(
                     'clientId': self._account_info.clientid if self._account_info else None,
                 },
             },
+            apikey=self._account_info.apikey,
         )
 
         return self.build_response(request, body={})
