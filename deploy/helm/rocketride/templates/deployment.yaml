@@ -82,14 +82,18 @@ spec:
             {{- toYaml .Values.engine.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.engine.securityContext | nindent 12 }}
-          {{- with .Values.engine.volumeMounts }}
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.engine.volumeMounts }}
             {{- toYaml . | nindent 12 }}
-          {{- end }}
-      {{- with .Values.engine.volumes }}
+            {{- end }}
       volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- with .Values.engine.volumes }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
       {{- with .Values.engine.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
