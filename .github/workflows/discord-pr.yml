@@ -1,49 +1,168 @@
 name: Discord PR Notification
-
 on:
   pull_request:
-    types: [opened]
+    types:
+      - opened
+      - edited
+      - synchronize
+      - labeled
+      - unlabeled
+      - assigned
+      - unassigned
+      - review_requested
+      - review_request_removed
+      - ready_for_review
+      - converted_to_draft
+      - closed
+      - reopened
+  check_run:
+    types: [completed]
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   notify:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_PR_WEBHOOK_URL }}
+      REPO: ${{ github.repository }}
+      EVENT_NAME: ${{ github.event_name }}
     steps:
-      - name: Post to Discord
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_PR_WEBHOOK_URL }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR_AVATAR: ${{ github.event.pull_request.user.avatar_url }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+      - name: Resolve PR, build embed, post or patch Discord
         run: |
-          # Truncate body to 1500 chars (leave room for embed fields).
-          # Close any unclosed code blocks to prevent broken formatting.
-          BODY="${PR_BODY:0:1500}"
-          BACKTICK_COUNT=$(echo "$BODY" | grep -o '```' | wc -l)
-          if (( BACKTICK_COUNT % 2 != 0 )); then
-            BODY="${BODY}..."$'\n'"$BODY"'```'
-            BODY="${PR_BODY:0:1500}..."$'\n```'
+          # ── Resolve PR number ────────────────────────────────────────────
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          else
+            HEAD_SHA="${{ github.event.check_run.head_sha }}"
+            # check_run.pull_requests is populated for same-repo PRs; fall back to API for forks
+            PR_NUMBER=$(echo '${{ toJson(github.event.check_run.pull_requests) }}' \
+              | jq -r '.[0].number // empty')
+            if [ -z "$PR_NUMBER" ]; then
+              PR_NUMBER=$(gh api "/repos/$REPO/commits/$HEAD_SHA/pulls" \
+                --jq '.[0].number // empty' 2>/dev/null)
+            fi
+            if [ -z "$PR_NUMBER" ]; then
+              echo "No open PR for $HEAD_SHA — skipping"
+              exit 0
+            fi
           fi
 
+          # ── Fetch current PR state (always fresh, not from stale event payload) ──
+          PR=$(gh api "/repos/$REPO/pulls/$PR_NUMBER")
+
+          PR_TITLE=$(echo  "$PR" | jq -r '.title')
+          PR_URL=$(echo    "$PR" | jq -r '.html_url')
+          PR_BODY=$(echo   "$PR" | jq -r '.body // ""')
+          PR_AUTHOR=$(echo "$PR" | jq -r '.user.login')
+          PR_AVATAR=$(echo "$PR" | jq -r '.user.avatar_url')
+          HEAD_REF=$(echo  "$PR" | jq -r '.head.ref')
+          BASE_REF=$(echo  "$PR" | jq -r '.base.ref')
+          HEAD_SHA=$(echo  "$PR" | jq -r '.head.sha')
+          PR_STATE=$(echo  "$PR" | jq -r '.state')
+          PR_DRAFT=$(echo  "$PR" | jq -r '.draft')
+          PR_MERGED=$(echo "$PR" | jq -r '.merged')
+
+          LABELS=$(echo    "$PR" | jq -r '[.labels[].name]           | if length==0 then "None"       else join(", ") end')
+          ASSIGNEES=$(echo "$PR" | jq -r '[.assignees[].login]       | if length==0 then "Unassigned" else join(", ") end')
+          REVIEWERS=$(echo "$PR" | jq -r '[.requested_reviewers[].login] | if length==0 then "None"  else join(", ") end')
+
+          # ── Status + color ───────────────────────────────────────────────
+          if   [ "$PR_MERGED" = "true"  ]; then COLOR=7419530;  STATUS="🟣 Merged"
+          elif [ "$PR_STATE"  = "closed" ]; then COLOR=15158332; STATUS="🔴 Closed"
+          elif [ "$PR_DRAFT"  = "true"  ]; then COLOR=9807270;  STATUS="⚫ Draft"
+          else                                   COLOR=5814783;  STATUS="🟢 Open"
+          fi
+
+          # ── Fetch all check runs for this commit ─────────────────────────
+          # --paginate handles repos with >30 checks
+          CHECKS=$(gh api "/repos/$REPO/commits/$HEAD_SHA/check-runs" \
+            --paginate --jq '[.check_runs[]]' 2>/dev/null \
+            | jq -s 'add // []')
+
+          TOTAL=$(echo "$CHECKS" | jq 'length')
+
+          if [ "$TOTAL" = "0" ]; then
+            CHECKS_FIELD="⏳ Pending"
+          else
+            PASSING=$(echo "$CHECKS" | jq '[.[] | select(.conclusion=="success")] | length')
+            FAILING=$(echo "$CHECKS" | jq '[.[] | select(.conclusion | . == "failure" or . == "timed_out" or . == "cancelled")] | length')
+            PENDING=$(echo "$CHECKS" | jq '[.[] | select(.status == "in_progress" or .status == "queued")] | length')
+            SKIPPED=$(echo "$CHECKS" | jq '[.[] | select(.conclusion=="skipped")] | length')
+
+            CHECKS_FIELD=""
+            [ "$PASSING" -gt 0 ] && CHECKS_FIELD="✅ $PASSING passed"
+            [ "$FAILING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD:+$CHECKS_FIELD · }❌ $FAILING failed"
+            [ "$PENDING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD:+$CHECKS_FIELD · }⏳ $PENDING running"
+            [ "$SKIPPED" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD:+$CHECKS_FIELD · }⏭️ $SKIPPED skipped"
+
+            # If everything passed, make it obvious
+            if [ "$FAILING" = "0" ] && [ "$PENDING" = "0" ]; then
+              CHECKS_FIELD="✅ All $PASSING passed"
+            fi
+          fi
+
+          # ── Truncate + repair body ───────────────────────────────────────
+          BODY="${PR_BODY:0:1200}"
+          if (( $(echo "$BODY" | grep -o '```' | wc -l) % 2 != 0 )); then
+            BODY="${BODY}..."$'\n```'
+          fi
+
+          # ── Build payload ────────────────────────────────────────────────
           PAYLOAD=$(jq -n \
-            --arg title "#$PR_NUMBER $PR_TITLE" \
-            --arg url "$PR_URL" \
-            --arg desc "$BODY" \
-            --arg author "$PR_AUTHOR" \
-            --arg avatar "$PR_AVATAR" \
-            --arg branch "$HEAD_REF → $BASE_REF" \
-            --arg repo "$GITHUB_REPOSITORY" \
-            '{embeds: [{title: $title, url: $url, description: $desc, color: 5814783,
-               author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
-               fields: [
-                 {name: "Branch", value: $branch, inline: true},
-                 {name: "Repo", value: $repo, inline: true}
-               ]}]}')
-          curl -sS -f -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
+            --arg  title     "#$PR_NUMBER $PR_TITLE" \
+            --arg  url       "$PR_URL" \
+            --arg  desc      "$BODY" \
+            --arg  author    "$PR_AUTHOR" \
+            --arg  avatar    "$PR_AVATAR" \
+            --arg  branch    "$HEAD_REF → $BASE_REF" \
+            --arg  repo      "$REPO" \
+            --arg  status    "$STATUS" \
+            --arg  labels    "$LABELS" \
+            --arg  assignees "$ASSIGNEES" \
+            --arg  reviewers "$REVIEWERS" \
+            --arg  checks    "$CHECKS_FIELD" \
+            --argjson color  "$COLOR" \
+            '{embeds: [{
+              title: $title, url: $url, description: $desc, color: $color,
+              author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
+              fields: [
+                {name: "Status",    value: $status,    inline: true},
+                {name: "Branch",    value: $branch,    inline: true},
+                {name: "Repo",      value: $repo,      inline: true},
+                {name: "Labels",    value: $labels,    inline: true},
+                {name: "Assignees", value: $assignees, inline: true},
+                {name: "Reviewers", value: $reviewers, inline: true},
+                {name: "Checks",    value: $checks,    inline: false}
+              ]
+            }]}')
+
+          # ── Look up stored message ID ────────────────────────────────────
+          COMMENTS=$(gh api "/repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq '[.[] | {id: .id, body: .body}]')
+
+          DISCORD_MSG_ID=$(echo "$COMMENTS" | \
+            jq -r '.[] | select(.body | contains("discord-msg-id:")) | .body' | \
+            grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2 | head -1)
+
+          WEBHOOK_ID=$(echo    "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $(NF-1)}')
+          WEBHOOK_TOKEN=$(echo "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $NF}')
+
+          if [ -n "$DISCORD_MSG_ID" ]; then
+            curl -sS -f -X PATCH \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID"
+          else
+            RESPONSE=$(curl -sS -f \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "${DISCORD_WEBHOOK_URL}?wait=true")
+            DISCORD_MSG_ID=$(echo "$RESPONSE" | jq -r '.id')
+            gh api "/repos/$REPO/issues/$PR_NUMBER/comments" \
+              -X POST \
+              -f body="<!-- discord-msg-id:${DISCORD_MSG_ID} -->"
+          fi
