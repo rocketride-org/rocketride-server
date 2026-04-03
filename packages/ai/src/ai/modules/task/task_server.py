@@ -626,11 +626,11 @@ class TaskServer(DAPBase):
             except Exception:
                 pass
 
-    async def broadcast_task_event(self, type: EVENT_TYPE, token: str, event: Dict[str, Any]) -> None:
+    async def broadcast_task_event(self, event_type: EVENT_TYPE, token: str, event: Dict[str, Any]) -> None:
         """Broadcast a task-scoped event to all subscribed connections."""
         for conn in self._connections.values():
             try:
-                await conn.send_task_event(type, token=token, event=event)
+                await conn.send_task_event(event_type, token=token, event=event)
 
             except PermissionError:
                 # This is a normal error - when the connection is typically
@@ -730,8 +730,8 @@ class TaskServer(DAPBase):
         project_key = f'p.{control.project_id}.{control.source}'
         for conn in self._connections.values():
             if hasattr(conn, '_monitors'):
-                # Remove exact source key and any pipe-scoped keys under it
-                keys_to_remove = [k for k in conn._monitors if k == project_key or k.startswith(f'{project_key}.')]
+                # Remove exact source key, pipe-scoped keys, and token-scoped keys
+                keys_to_remove = [k for k in conn._monitors if k == project_key or k.startswith(f'{project_key}.') or k == token or k.startswith(f'{token}.')]
                 for key in keys_to_remove:
                     conn._monitors.pop(key, None)
 
@@ -904,8 +904,13 @@ class TaskServer(DAPBase):
             prefix='pk_',
         )
 
-        # Display id: 8-char hash (stripping auth prefix) + source component id
-        token_hash = control.token.split('_', 1)[-1] if '_' in control.token else control.token
+        # Display id: 8-char hash (stripping known auth prefixes) + source component id
+        _AUTH_PREFIXES = ('tk_', 'pk_')
+        token_hash = control.token
+        for _p in _AUTH_PREFIXES:
+            if token_hash.startswith(_p):
+                token_hash = token_hash[len(_p) :]
+                break
         control.id = f'{token_hash[:8]}.{control.source}'
 
         # Parse and validate launch type from request command

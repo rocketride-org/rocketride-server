@@ -196,16 +196,14 @@ export interface EVENT_STATUS_UPDATE {
  *
  * @example
  * ```typescript
- * function handleTaskEvent(event: EVENT_TASK): void {
+ * function handleTaskEvent(event: { body: TaskEvent }): void {
  *     if (event.body.action === 'running') {
- *         // TypeScript ensures tasks array exists
  *         console.log(`Found ${event.body.tasks.length} running tasks`);
  *         event.body.tasks.forEach(task => {
  *             console.log(`Task ${task.id} in project ${task.projectId}`);
  *         });
  *     } else {
- *         // TypeScript ensures id and body fields exist
- *         console.log(`Task ${event.id} has ${event.body.action}`);
+ *         console.log(`Task ${event.body.name} has ${event.body.action}`);
  *         console.log(`Project: ${event.body.projectId}, Source: ${event.body.source}`);
  *     }
  * }

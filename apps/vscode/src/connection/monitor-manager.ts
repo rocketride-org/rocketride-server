@@ -101,8 +101,23 @@ export class MonitorManager {
 			refCounts.set(t, (refCounts.get(t) ?? 0) + 1);
 		}
 
-		// Send merged types to server
-		await this.syncKey(key, keyStr, refCounts);
+		// Send merged types to server — rollback on failure
+		try {
+			await this.syncKey(key, keyStr, refCounts);
+		} catch (error) {
+			for (const t of types) {
+				const current = refCounts.get(t) ?? 0;
+				if (current <= 1) {
+					refCounts.delete(t);
+				} else {
+					refCounts.set(t, current - 1);
+				}
+			}
+			if (refCounts.size === 0) {
+				this.keys.delete(keyStr);
+			}
+			throw error;
+		}
 	}
 
 	/**
@@ -194,6 +209,7 @@ export class MonitorManager {
 			}
 		} catch (error) {
 			this.logger.error(`[MonitorManager] Failed to sync ${keyStr} [${mergedTypes.join(',')}]: ${error}`);
+			throw error;
 		}
 	}
 

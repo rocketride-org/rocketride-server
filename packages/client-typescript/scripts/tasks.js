@@ -85,7 +85,11 @@ function makeSyncVersionAction() {
 
 			const constantsPath = path.join(SRC_DIR, 'client', 'constants.ts');
 			const content = fs.readFileSync(constantsPath, 'utf8');
-			const updated = content.replace(/export const SDK_VERSION = '[^']*'/, `export const SDK_VERSION = '${version}'`);
+			const pattern = /export const SDK_VERSION\s*(?::\s*string\s*)?=\s*['"`][^'"`]*['"`]/;
+			if (!pattern.test(content)) {
+				throw new Error(`SDK_VERSION declaration not found in ${constantsPath}`);
+			}
+			const updated = content.replace(pattern, `export const SDK_VERSION = '${version}'`);
 
 			if (content !== updated) {
 				fs.writeFileSync(constantsPath, updated, 'utf8');

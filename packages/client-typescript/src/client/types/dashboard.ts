@@ -130,11 +130,11 @@ interface DashboardConnectionAdded extends DashboardEventBase {
 	/** Unique monotonic connection identifier. */
 	connectionId: number;
 	/** Client display name from auth handshake. */
-	clientName?: string;
+	clientName?: string | null;
 	/** Client version from auth handshake. */
-	clientVersion?: string;
+	clientVersion?: string | null;
 	/** Account identifier. */
-	clientId?: string;
+	clientId?: string | null;
 }
 
 /** A connection was closed. */
@@ -143,9 +143,9 @@ interface DashboardConnectionRemoved extends DashboardEventBase {
 	/** Unique monotonic connection identifier. */
 	connectionId: number;
 	/** Client display name from auth handshake. */
-	clientName?: string;
+	clientName?: string | null;
 	/** Client version from auth handshake. */
-	clientVersion?: string;
+	clientVersion?: string | null;
 }
 
 /** A task was started or restarted. */
@@ -177,7 +177,7 @@ interface DashboardTaskError extends DashboardEventBase {
 	/** Process exit code. */
 	exitCode: number;
 	/** Exit message from the engine. */
-	exitMessage?: string;
+	exitMessage?: string | null;
 }
 
 /** An authentication attempt failed. */
@@ -195,9 +195,9 @@ interface DashboardMonitorChanged extends DashboardEventBase {
 	/** Unique monotonic connection identifier. */
 	connectionId: number;
 	/** Client display name from auth handshake. */
-	clientName?: string;
+	clientName?: string | null;
 	/** Client version from auth handshake. */
-	clientVersion?: string;
+	clientVersion?: string | null;
 	/** The monitor key that changed. */
 	key: string;
 	/** Whether the monitor was added or removed. */

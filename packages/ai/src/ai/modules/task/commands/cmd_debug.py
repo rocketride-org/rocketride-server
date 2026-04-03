@@ -236,9 +236,10 @@ class DebugCommands(DAPConn):
             if self._debug_token:
                 raise RuntimeError('Debugger already active on this session')
 
+            token = self.get_task_token(request)
+
             # Validate ownership and permissions via get_task
             task = self.get_task(request, 'task.debug')
-            token = self.get_task_token(request)
 
             # If debugging is available, attach to it
             if not task.is_debug_available():
@@ -284,9 +285,10 @@ class DebugCommands(DAPConn):
             # the debug token if it was not specified
             request.setdefault('token', self._debug_token)
 
+            token = self.get_task_token(request)
+
             # Validate ownership and permissions via get_task
             self.get_task(request, 'task.control')
-            token = self.get_task_token(request)
 
             # Log the termination request
             self.debug_message('Terminating task and cleaning up resources')

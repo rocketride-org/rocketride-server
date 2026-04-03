@@ -29,6 +29,7 @@ export class PageDashboardProvider {
 	private disposables: vscode.Disposable[] = [];
 	private logger = getLogger();
 	private connectionManager = ConnectionManager.getInstance();
+	private hasWildcardMonitor = false;
 
 	constructor(private context: vscode.ExtensionContext) {
 		this.setupEventListeners();
@@ -126,20 +127,24 @@ export class PageDashboardProvider {
 	}
 
 	private async subscribeDashboardEvents(): Promise<void> {
+		if (this.hasWildcardMonitor) return;
 		try {
 			// Subscribe via MonitorManager (reference-counted, safe for shared connection)
 			await MonitorManager.getInstance().addMonitor({ token: '*' }, ['task', 'summary', 'dashboard']);
+			this.hasWildcardMonitor = true;
 		} catch (error) {
 			this.logger.error(`[PageDashboardProvider] Failed to subscribe dashboard events: ${error}`);
 		}
 	}
 
 	private async unsubscribeDashboardEvents(): Promise<void> {
+		if (!this.hasWildcardMonitor) return;
 		try {
 			await MonitorManager.getInstance().removeMonitor({ token: '*' }, ['task', 'summary', 'dashboard']);
 		} catch (_error) {
 			// Best-effort; connection may already be gone
 		}
+		this.hasWildcardMonitor = false;
 	}
 
 	// =========================================================================

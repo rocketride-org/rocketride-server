@@ -178,7 +178,7 @@ class TaskConn(
         self._last_activity = time.time()
         await super().send(message)
 
-    async def on_receive(self, message: Dict[str, Any] = None) -> None:
+    async def on_receive(self, message: Optional[Dict[str, Any]] = None) -> None:
         """
         Intercept DAP dispatch: if not authenticated, only allow auth command; otherwise require auth first.
         """

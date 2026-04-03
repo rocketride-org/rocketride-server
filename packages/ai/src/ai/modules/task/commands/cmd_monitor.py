@@ -95,7 +95,7 @@ class MonitorCommands(DAPConn):
 
     async def send_task_event(
         self,
-        type: EVENT_TYPE,
+        event_type: EVENT_TYPE,
         token: str,
         event: Dict[str, Any] = None,
     ) -> None:
@@ -121,16 +121,16 @@ class MonitorCommands(DAPConn):
 
         async def _send_event(pref: EVENT_TYPE) -> None:
             # If this is not being listened for, skip the forwarding
-            if not (type & pref):
+            if not (event_type & pref):
                 return
 
             # Extract event details for DAP-compliant forwarding
-            event_type = event.get('event', 'unknown')
+            evt_name = event.get('event', 'unknown')
             body = event.get('body', None)
 
             # Send the event to the subscribed client using DAP protocol
             await self.send_event(
-                event_type,
+                evt_name,
                 id=control.id,
                 body=body,
             )
@@ -140,7 +140,7 @@ class MonitorCommands(DAPConn):
 
         # Verify we are allowed to receive events for this task - for SSE events, it requires data
         # access, for all others, it's monitor access
-        if type == EVENT_TYPE.SSE:
+        if event_type == EVENT_TYPE.SSE:
             self.verify_permission('task.data')
         else:
             self.verify_permission('task.monitor')

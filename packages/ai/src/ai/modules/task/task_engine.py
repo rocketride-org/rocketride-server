@@ -904,7 +904,7 @@ class Task(DAPBase):
         else:
             # Route through server broadcast system
             await self._server.broadcast_task_event(
-                type=type,
+                event_type=type,
                 token=self.token,
                 event=message,
             )
