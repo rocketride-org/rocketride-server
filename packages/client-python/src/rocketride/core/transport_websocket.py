@@ -55,7 +55,6 @@ Usage (Internal):
 
 import json
 import asyncio
-import threading
 from typing import Dict, Any, Union, Optional
 from .constants import CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT, CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 
@@ -120,7 +119,6 @@ class TransportWebSocket(TransportBase):
         self._uri = uri
         self._auth = kwargs.get('auth', None)
         self._message_tasks: set = set()
-        self._message_tasks_lock = threading.Lock()
 
     def get_auth(self) -> Optional[str]:
         """Return auth credential for use by connect flow (e.g. first DAP auth command)."""
@@ -140,8 +138,7 @@ class TransportWebSocket(TransportBase):
 
     def _on_message_task_done(self, task: asyncio.Task) -> None:
         """Callback for when a message processing task completes."""
-        with self._message_tasks_lock:
-            self._message_tasks.discard(task)
+        self._message_tasks.discard(task)
 
     def _is_fastapi_websocket(self) -> bool:
         """
@@ -153,6 +150,32 @@ class TransportWebSocket(TransportBase):
         if not fastapi or WebSocket is None:
             return False
         return isinstance(self._websocket, WebSocket)
+
+    async def _cleanup_and_disconnect(self, reason: str, has_error: bool) -> None:
+        """
+        Stop accepting new messages, cancel in-flight tasks, then notify disconnection.
+
+        Ensures _receive_data cannot interleave with _transport_disconnected callback
+        by setting _connected=False first and waiting for all tasks to complete.
+
+        Args:
+            reason: Reason for disconnection
+            has_error: Whether this was an error disconnection
+        """
+        # Stop accepting new messages immediately
+        self._connected = False
+
+        # Cancel and await all in-flight message tasks
+        if self._message_tasks:
+            tasks_to_cancel = [t for t in self._message_tasks if not t.done()]
+            for task in tasks_to_cancel:
+                task.cancel()
+            if tasks_to_cancel:
+                await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+            self._message_tasks.clear()
+
+        # Now safe to notify disconnection
+        await self._transport_disconnected(reason, has_error)
 
     async def _receive_data(self, data: Union[str, bytes]) -> None:
         """
@@ -249,32 +272,26 @@ class TransportWebSocket(TransportBase):
 
                 # Process each message in its own task so others can be processed concurrently
                 task = asyncio.create_task(self._receive_data(data))
-                with self._message_tasks_lock:
-                    self._message_tasks.add(task)
+                self._message_tasks.add(task)
                 task.add_done_callback(self._on_message_task_done)
 
         except asyncio.CancelledError:
             self._debug_message('WebSocket receive loop cancelled')
-            self._connected = False
-            await self._transport_disconnected('Cancelled by application', has_error=False)
+            await self._cleanup_and_disconnect('Cancelled by application', has_error=False)
 
         except Exception as e:
             # Handle different exception types
             if fastapi and WebSocketDisconnect and isinstance(e, WebSocketDisconnect):
-                self._connected = False
-                await self._transport_disconnected('Connection closed', has_error=False)
+                await self._cleanup_and_disconnect('Connection closed', has_error=False)
 
             elif websockets and hasattr(websockets.exceptions, 'ConnectionClosed') and isinstance(e, websockets.exceptions.ConnectionClosed):
-                self._connected = False
-                await self._transport_disconnected('Connection closed', has_error=False)
+                await self._cleanup_and_disconnect('Connection closed', has_error=False)
 
             elif isinstance(e, (ConnectionResetError, ConnectionAbortedError)):
-                self._connected = False
-                await self._transport_disconnected(f'Connection error: {e}', has_error=True)
+                await self._cleanup_and_disconnect(f'Connection error: {e}', has_error=True)
 
             else:
-                self._connected = False
-                await self._transport_disconnected(f'Unexpected error: {e}', has_error=True)
+                await self._cleanup_and_disconnect(f'Unexpected error: {e}', has_error=True)
 
         finally:
             self._connected = False
@@ -412,8 +429,6 @@ class TransportWebSocket(TransportBase):
         if not self._connected or not self._websocket:
             return
 
-        callback_called = False
-
         try:
             self._debug_message('Gracefully disconnecting WebSocket')
 
@@ -433,46 +448,25 @@ class TransportWebSocket(TransportBase):
             self._debug_message('WebSocket disconnected successfully')
 
             # Stop accepting new messages and cancel in-flight message tasks before notifying
-            # This prevents _receive_data from interleaving with on_disconnected callback
-            self._connected = False
-            if hasattr(self, '_message_tasks'):
-                tasks_to_cancel = []
-                with self._message_tasks_lock:
-                    tasks_to_cancel = [t for t in self._message_tasks if not t.done()]
-                    for task in tasks_to_cancel:
-                        task.cancel()
-                    self._message_tasks.clear()
-                if tasks_to_cancel:
-                    await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
-
-            # Notify about disconnection (use caller-provided reason/has_error when given)
-            await self._transport_disconnected(reason or 'Disconnected by request', has_error)
-            callback_called = True
+            await self._cleanup_and_disconnect(reason or 'Disconnected by request', has_error)
 
         except asyncio.TimeoutError:
             self._debug_message('Timeout during disconnect - forcing close')
-            if not callback_called:
-                await self._transport_disconnected('Disconnect timeout', has_error=True)
-                callback_called = True
+            await self._cleanup_and_disconnect('Disconnect timeout', has_error=True)
 
         except (ConnectionResetError, ConnectionAbortedError):
             self._debug_message('Connection closed by peer during disconnect')
-            if not callback_called:
-                await self._transport_disconnected('Connection closed by peer', has_error=False)
-                callback_called = True
+            await self._cleanup_and_disconnect('Connection closed by peer', has_error=False)
 
         except Exception as e:
             self._debug_message(f'Error during disconnect: {e}')
-            if not callback_called:
-                await self._transport_disconnected(f'Disconnect error: {e}', has_error=True)
-                callback_called = True
+            await self._cleanup_and_disconnect(f'Disconnect error: {e}', has_error=True)
 
         finally:
             # Always clean up remaining resources
             self._websocket = None
             self._receive_task = None
-            with self._message_tasks_lock:
-                self._message_tasks.clear()
+            self._message_tasks.clear()
 
     async def send(self, message: Dict[str, Any]) -> None:
         """
