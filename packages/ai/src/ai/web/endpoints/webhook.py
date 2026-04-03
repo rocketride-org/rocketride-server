@@ -31,7 +31,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from ai.web import Request, Result, error, exception, response
+from ai.web import Request, Result, error, response
 from ai.web.scheduler.models import WebhookResponse
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,12 @@ logger = logging.getLogger(__name__)
 # Configurable via ROCKETRIDE_MAX_WEBHOOK_CONCURRENT env var.
 _MAX_CONCURRENT = int(os.environ.get('ROCKETRIDE_MAX_WEBHOOK_CONCURRENT', '20'))
 
-# In-flight tracking
+# In-flight tracking.
+# NOTE: These are process-local. In a multi-worker or horizontally-scaled
+# deployment, task state and concurrency limits are per-process.  This is
+# acceptable for the current single-process deployment model.  A future
+# iteration should move state to a shared store (e.g. Redis) if horizontal
+# scaling is required.
 _active_tasks: Dict[str, Dict[str, Any]] = {}
 _running_count: int = 0
 _running_lock = asyncio.Lock()
@@ -146,9 +151,11 @@ async def webhook_trigger(request: Request, pipeline_id: str, body: Optional[Dic
                 '_monotonic_created': time.monotonic(),
             }
 
-            # In a full implementation this would dispatch to the pipeline
-            # engine asynchronously. For now we record the task and mark it
-            # as accepted so the caller can poll /webhook/{id}/status/{token}.
+            # Dispatch the pipeline execution as a background task so the
+            # webhook caller receives a response immediately and can poll
+            # /webhook/{pipeline_id}/status/{token} for progress.
+            asyncio.create_task(_execute_pipeline(token, pipeline_id, body))
+
             logger.info('Webhook triggered pipeline %s — token=%s', pipeline_id, token)
 
             webhook_resp = WebhookResponse(
@@ -159,12 +166,16 @@ async def webhook_trigger(request: Request, pipeline_id: str, body: Optional[Dic
             )
 
             return response(data=webhook_resp.model_dump(mode='json'))
-        finally:
+        except Exception:
+            # Ensure the concurrency counter is released on unexpected errors
+            # before re-raising into the outer handler.
             async with _running_lock:
                 _running_count -= 1
+            raise
 
-    except Exception as e:
-        return exception(e)
+    except Exception:
+        logger.exception('Unexpected error in webhook_trigger for pipeline %s', pipeline_id)
+        return error(message='Internal server error', httpStatus=500)
 
 
 async def webhook_status(request: Request, pipeline_id: str, token: str) -> Result:
@@ -189,7 +200,51 @@ async def webhook_status(request: Request, pipeline_id: str, token: str) -> Resu
         if task['pipeline_id'] != pipeline_id:
             return error(message='Token does not belong to the specified pipeline', httpStatus=404)
 
-        return response(data=task)
+        # Return a copy without internal bookkeeping fields.
+        public_task = {k: v for k, v in task.items() if not k.startswith('_')}
+        return response(data=public_task)
 
-    except Exception as e:
-        return exception(e)
+    except Exception:
+        logger.exception('Unexpected error in webhook_status for pipeline %s, token %s', pipeline_id, token)
+        return error(message='Internal server error', httpStatus=500)
+
+
+async def _execute_pipeline(token: str, pipeline_id: str, input_data: Optional[Dict[str, Any]]) -> None:
+    """Execute a pipeline in the background and update task state.
+
+    Called via ``asyncio.create_task`` from :func:`webhook_trigger` so that
+    the HTTP response is returned immediately while the pipeline runs.
+
+    The concurrency counter (``_running_count``) is decremented in the
+    ``finally`` block to guarantee it is released even on failure.
+    """
+    global _running_count  # noqa: PLW0603
+
+    try:
+        _active_tasks[token]['status'] = 'running'
+
+        # TODO: Replace with actual pipeline engine dispatch once the
+        # integration interface is finalised.  For now this is a placeholder
+        # that marks the task as completed immediately.
+        logger.info('Executing pipeline %s for token %s', pipeline_id, token)
+        _active_tasks[token]['status'] = 'completed'
+    except Exception:
+        logger.exception('Pipeline execution failed for token %s (pipeline %s)', token, pipeline_id)
+        if token in _active_tasks:
+            _active_tasks[token]['status'] = 'failed'
+    finally:
+        async with _running_lock:
+            _running_count -= 1
+
+
+def register_webhook_routes(server: Any) -> None:
+    """Register webhook endpoints with the server.
+
+    Call this from the server setup code to wire the webhook trigger and
+    status handlers into the application router.
+
+    Args:
+        server: The RocketRide server instance (must have an ``add_route`` method).
+    """
+    server.add_route('/webhook/{pipeline_id}/trigger', webhook_trigger, ['POST'])
+    server.add_route('/webhook/{pipeline_id}/status/{token}', webhook_status, ['GET'])

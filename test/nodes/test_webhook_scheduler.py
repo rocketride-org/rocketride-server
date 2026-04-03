@@ -101,7 +101,7 @@ _inject('ai.web.middleware', MagicMock())
 # Now import the real modules that we will test.
 # These go through ai.web which triggers depends() and pulls in FastAPI etc.
 from ai.web.scheduler.models import ScheduleCreate, ScheduleList, ScheduleResponse, WebhookResponse  # noqa: E402
-from ai.web.endpoints.webhook import _verify_signature, webhook_trigger, webhook_status, _active_tasks, _cleanup_expired_tasks, _TASK_TTL  # noqa: E402
+from ai.web.endpoints.webhook import _verify_signature, webhook_trigger, webhook_status, _active_tasks, _cleanup_expired_tasks, _execute_pipeline, _TASK_TTL, register_webhook_routes  # noqa: E402
 
 
 def teardown_module() -> None:
@@ -231,13 +231,16 @@ class TestWebhookTrigger:
         payload = b'{}'
         sig = _make_signature(payload)
         req = _make_request(headers={'x-webhook-signature': sig}, body=payload)
-        with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}):
+        with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}), patch('ai.web.endpoints.webhook.asyncio.create_task') as mock_ct:
+            mock_ct.return_value = None
             result = await webhook_trigger(req, 'my-pipeline', {})
         body = json.loads(result.body.decode())
         assert body['status'] == 'OK'
         assert body['data']['pipeline_id'] == 'my-pipeline'
         assert body['data']['status'] == 'accepted'
         assert 'token' in body['data']
+        # Background task was dispatched
+        mock_ct.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_rate_limiting(self):
@@ -252,7 +255,7 @@ class TestWebhookTrigger:
             payload = b'{}'
             sig = _make_signature(payload)
             req = _make_request(headers={'x-webhook-signature': sig}, body=payload)
-            with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}):
+            with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}), patch('ai.web.endpoints.webhook.asyncio.create_task'):
                 result = await webhook_trigger(req, 'my-pipeline', {})
             body = json.loads(result.body.decode())
             assert body['status'] == 'Error'
@@ -501,10 +504,18 @@ class TestPipelineScheduler:
         sched._scheduler.remove_job.assert_called_once_with('sched-1')
 
     def test_remove_schedule_not_found(self):
+        from apscheduler.jobstores.base import JobLookupError
+
         sched = self._make_scheduler()
-        sched._scheduler.remove_job.side_effect = Exception('not found')
+        sched._scheduler.remove_job.side_effect = JobLookupError('nonexistent')
         result = sched.remove_schedule('nonexistent')
         assert result is False
+
+    def test_remove_schedule_unexpected_error_propagates(self):
+        sched = self._make_scheduler()
+        sched._scheduler.remove_job.side_effect = RuntimeError('db failure')
+        with pytest.raises(RuntimeError, match='db failure'):
+            sched.remove_schedule('sched-1')
 
     def test_list_schedules_empty(self):
         sched = self._make_scheduler()
@@ -562,10 +573,18 @@ class TestPipelineScheduler:
         sched._scheduler.pause_job.assert_called_once_with('sched-1')
 
     def test_pause_schedule_not_found(self):
+        from apscheduler.jobstores.base import JobLookupError
+
         sched = self._make_scheduler()
-        sched._scheduler.pause_job.side_effect = Exception('not found')
+        sched._scheduler.pause_job.side_effect = JobLookupError('nonexistent')
         result = sched.pause_schedule('nonexistent')
         assert result is False
+
+    def test_pause_schedule_unexpected_error_propagates(self):
+        sched = self._make_scheduler()
+        sched._scheduler.pause_job.side_effect = RuntimeError('db failure')
+        with pytest.raises(RuntimeError, match='db failure'):
+            sched.pause_schedule('sched-1')
 
     def test_resume_schedule_success(self):
         sched = self._make_scheduler()
@@ -574,10 +593,18 @@ class TestPipelineScheduler:
         sched._scheduler.resume_job.assert_called_once_with('sched-1')
 
     def test_resume_schedule_not_found(self):
+        from apscheduler.jobstores.base import JobLookupError
+
         sched = self._make_scheduler()
-        sched._scheduler.resume_job.side_effect = Exception('not found')
+        sched._scheduler.resume_job.side_effect = JobLookupError('nonexistent')
         result = sched.resume_schedule('nonexistent')
         assert result is False
+
+    def test_resume_schedule_unexpected_error_propagates(self):
+        sched = self._make_scheduler()
+        sched._scheduler.resume_job.side_effect = RuntimeError('db failure')
+        with pytest.raises(RuntimeError, match='db failure'):
+            sched.resume_schedule('sched-1')
 
 
 # ===========================================================================
@@ -703,7 +730,7 @@ class TestConcurrentJobLimit:
 
 
 class TestRunningCountDecrement:
-    """Verify that _running_count is properly decremented after webhook execution."""
+    """Verify that _running_count is properly decremented after pipeline execution."""
 
     def setup_method(self):
         _active_tasks.clear()
@@ -713,32 +740,47 @@ class TestRunningCountDecrement:
         wh_mod._running_lock = asyncio.Lock()
 
     @pytest.mark.asyncio
-    async def test_running_count_decremented_after_success(self):
-        """After a successful webhook trigger, _running_count must return to 0."""
+    async def test_running_count_incremented_by_trigger(self):
+        """After webhook_trigger, _running_count should be 1 (background task owns decrement)."""
         import ai.web.endpoints.webhook as wh_mod
 
         payload = b'{}'
         sig = _make_signature(payload)
         req = _make_request(headers={'x-webhook-signature': sig}, body=payload)
-        with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}):
+        with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}), patch('ai.web.endpoints.webhook.asyncio.create_task'):
             result = await webhook_trigger(req, 'my-pipeline', {})
         body = json.loads(result.body.decode())
         assert body['status'] == 'OK'
-        # The count must be back to 0 after the call completes
-        assert wh_mod._running_count == 0
+        # The background task is responsible for decrementing; trigger increments.
+        assert wh_mod._running_count == 1
+        # Reset for teardown
+        wh_mod._running_count = 0
 
     @pytest.mark.asyncio
-    async def test_running_count_decremented_after_multiple_calls(self):
-        """Multiple sequential calls must each decrement properly."""
+    async def test_running_count_decremented_by_execute_pipeline(self):
+        """_execute_pipeline must decrement _running_count after completion."""
         import ai.web.endpoints.webhook as wh_mod
 
-        for _ in range(5):
-            payload = b'{}'
-            sig = _make_signature(payload)
-            req = _make_request(headers={'x-webhook-signature': sig}, body=payload)
-            with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}):
-                await webhook_trigger(req, 'my-pipeline', {})
+        wh_mod._running_count = 1
+        token = 'test-token'
+        _active_tasks[token] = {
+            'pipeline_id': 'my-pipeline',
+            'status': 'accepted',
+            'created_at': '2026-01-01T00:00:00+00:00',
+            '_monotonic_created': time.monotonic(),
+        }
+        await _execute_pipeline(token, 'my-pipeline', None)
+        assert wh_mod._running_count == 0
+        assert _active_tasks[token]['status'] == 'completed'
 
+    @pytest.mark.asyncio
+    async def test_running_count_decremented_on_execute_error(self):
+        """Even if _execute_pipeline raises internally, count must decrement."""
+        import ai.web.endpoints.webhook as wh_mod
+
+        wh_mod._running_count = 1
+        # Use a token not in _active_tasks to trigger a KeyError inside _execute_pipeline
+        await _execute_pipeline('missing-token', 'my-pipeline', None)
         assert wh_mod._running_count == 0
 
 
@@ -865,3 +907,81 @@ class TestSchedulerMetadataPersistence:
         assert result is not None
         assert result.pipeline_id == 'p2'
         assert result.cron_expression == '0 0 * * *'
+
+
+# ===========================================================================
+# Route registration tests
+# ===========================================================================
+
+
+class TestRegisterWebhookRoutes:
+    """Test that register_webhook_routes wires up the correct paths."""
+
+    def test_routes_registered(self):
+        mock_server = MagicMock()
+        register_webhook_routes(mock_server)
+        assert mock_server.add_route.call_count == 2
+        calls = mock_server.add_route.call_args_list
+        assert calls[0].args[0] == '/webhook/{pipeline_id}/trigger'
+        assert calls[0].args[2] == ['POST']
+        assert calls[1].args[0] == '/webhook/{pipeline_id}/status/{token}'
+        assert calls[1].args[2] == ['GET']
+
+
+# ===========================================================================
+# webhook_status filters internal fields
+# ===========================================================================
+
+
+class TestWebhookStatusFiltering:
+    """Verify that webhook_status does not expose internal bookkeeping fields."""
+
+    def setup_method(self):
+        _active_tasks.clear()
+
+    @pytest.mark.asyncio
+    async def test_internal_fields_stripped(self):
+        token = 'abc-123'
+        _active_tasks[token] = {
+            'pipeline_id': 'my-pipeline',
+            'status': 'accepted',
+            'created_at': datetime.now(timezone.utc).isoformat(),
+            '_monotonic_created': time.monotonic(),
+        }
+        req = _make_request()
+        result = await webhook_status(req, 'my-pipeline', token)
+        body = json.loads(result.body.decode())
+        assert body['status'] == 'OK'
+        # Internal fields starting with '_' must not be in the response
+        assert '_monotonic_created' not in body['data']
+
+
+# ===========================================================================
+# Error response tests (generic 500, no internal details)
+# ===========================================================================
+
+
+class TestGenericErrorResponses:
+    """Verify that unexpected errors return generic 500 without internal details."""
+
+    def setup_method(self):
+        _active_tasks.clear()
+        import ai.web.endpoints.webhook as wh_mod
+
+        wh_mod._running_count = 0
+        wh_mod._running_lock = asyncio.Lock()
+
+    @pytest.mark.asyncio
+    async def test_webhook_trigger_returns_generic_500(self):
+        """Unexpected errors in webhook_trigger must not leak exception details."""
+        payload = b'{}'
+        sig = _make_signature(payload)
+        req = _make_request(headers={'x-webhook-signature': sig}, body=payload)
+        with patch.dict('os.environ', {'ROCKETRIDE_WEBHOOK_SECRET': WEBHOOK_SECRET}), patch('ai.web.endpoints.webhook.asyncio.create_task', side_effect=RuntimeError('boom')):
+            result = await webhook_trigger(req, 'my-pipeline', {})
+        body = json.loads(result.body.decode())
+        assert result.status_code == 500
+        assert body['status'] == 'Error'
+        assert 'Internal server error' in body['error']['error']
+        # Must not contain exception details
+        assert 'boom' not in json.dumps(body)

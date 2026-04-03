@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
+from apscheduler.jobstores.base import JobLookupError
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -171,7 +172,7 @@ class PipelineScheduler:
             self._scheduler.remove_job(schedule_id)
             logger.info('Schedule removed: id=%s', schedule_id)
             return True
-        except Exception:
+        except JobLookupError:
             logger.warning('Schedule not found for removal: id=%s', schedule_id)
             return False
 
@@ -223,7 +224,7 @@ class PipelineScheduler:
             self._scheduler.pause_job(schedule_id)
             logger.info('Schedule paused: id=%s', schedule_id)
             return True
-        except Exception:
+        except JobLookupError:
             logger.warning('Schedule not found for pause: id=%s', schedule_id)
             return False
 
@@ -233,7 +234,7 @@ class PipelineScheduler:
             self._scheduler.resume_job(schedule_id)
             logger.info('Schedule resumed: id=%s', schedule_id)
             return True
-        except Exception:
+        except JobLookupError:
             logger.warning('Schedule not found for resume: id=%s', schedule_id)
             return False
 
