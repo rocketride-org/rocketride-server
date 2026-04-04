@@ -38,6 +38,12 @@ jobs:
     steps:
       - name: Resolve PR, build embed, post or patch Discord
         run: |
+          # ── Guard: bail if webhook is not configured ─────────────────────
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_PR_WEBHOOK_URL secret is not set — skipping"
+            exit 0
+          fi
+
           # ── Resolve PR number ────────────────────────────────────────────
           if [ "$EVENT_NAME" = "pull_request" ]; then
             PR_NUMBER="${{ github.event.pull_request.number }}"
@@ -111,7 +117,7 @@ jobs:
             [ "$SKIPPED" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD:+$CHECKS_FIELD · }⏭️ $SKIPPED skipped"
 
             # If everything passed, make it obvious
-            if [ "$FAILING" = "0" ] && [ "$PENDING" = "0" ]; then
+            if [ "$FAILING" = "0" ] && [ "$PENDING" = "0" ] && [ "$PASSING" -gt 0 ]; then
               CHECKS_FIELD="✅ All $PASSING passed"
             fi
           fi
