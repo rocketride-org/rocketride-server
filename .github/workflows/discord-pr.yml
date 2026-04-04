@@ -111,6 +111,16 @@ jobs:
             BODY="${BODY}..."$'\n```'
           fi
 
+          # ── Clean body for Discord ───────────────────────────────────────
+          # Strip HTML comments
+          BODY=$(echo "$BODY" | sed 's/<!--[^>]*-->//g')
+          # Collapse consecutive blank lines left by stripped comments
+          BODY=$(echo "$BODY" | awk 'NF || prev { print } { prev = NF }')
+          # Convert GH markdown checkboxes to unicode
+          BODY=$(echo "$BODY" | sed 's/- \[ \]/☐/g; s/- \[x\]/☑/g; s/- \[X\]/☑/g')
+          # Convert ## headings to Discord bold
+          BODY=$(echo "$BODY" | sed 's/^#{1,6} \(.*\)$/\n**\1**/g')
+
           # ── Build payload ────────────────────────────────────────────────
           PAYLOAD=$(jq -n \
             --arg  title     "#$PR_NUMBER $PR_TITLE" \
@@ -151,12 +161,22 @@ jobs:
           WEBHOOK_ID=$(echo    "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $(NF-1)}')
           WEBHOOK_TOKEN=$(echo "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $NF}')
 
+          # ── Post or patch ────────────────────────────────────────────────
           if [ -n "$DISCORD_MSG_ID" ]; then
-            curl -sS -f -X PATCH \
+            PATCH_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" -X PATCH \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
-              "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID"
-          else
+              "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID")
+
+            if [ "$PATCH_STATUS" = "404" ]; then
+              STALE_COMMENT_ID=$(echo "$COMMENTS" | \
+                jq -r '.[] | select(.body | contains("discord-msg-id:")) | .id' | head -1)
+              gh api -X DELETE "/repos/$REPO/issues/comments/$STALE_COMMENT_ID"
+              DISCORD_MSG_ID=""
+            fi
+          fi
+
+          if [ -z "$DISCORD_MSG_ID" ]; then
             RESPONSE=$(curl -sS -f \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
