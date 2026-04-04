@@ -141,10 +141,8 @@ jobs:
           BODY=$(echo "$BODY" | sed 's/- \[ \]/☐/g; s/- \[x\]/☑/g; s/- \[X\]/☑/g')
           # Convert ## headings to Discord bold
           BODY=$(echo "$BODY" | sed -E 's/^#{1,6} (.*)$/**\1**/g')
-          # Collapse all double newlines to single (Discord renders \n as line breaks)
-          BODY=$(echo "$BODY" | perl -0pe 's/\n{2,}/\n/g')
-          # Trim leading/trailing whitespace
-          BODY=$(echo "$BODY" | sed '/./,$!d' | sed -e :a -e '/^\s*$/d;N;ba')
+          # Collapse all double newlines to single and trim leading/trailing whitespace
+          BODY=$(echo "$BODY" | perl -0pe 's/\n{2,}/\n/g; s/^\s+//; s/\s+$//')
 
           # ── Build payload ────────────────────────────────────────────────
           PAYLOAD=$(jq -n \
