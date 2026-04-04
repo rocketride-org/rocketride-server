@@ -82,11 +82,17 @@ jobs:
           else                                   COLOR=3066993;  STATUS="🟢 Open"
           fi
 
-          # ── Fetch all check runs for this commit ─────────────────────────
+          # ── Fetch check runs for this commit ─────────────────────────────
           # --paginate handles repos with >30 checks
-          CHECKS=$(gh api "/repos/$REPO/commits/$HEAD_SHA/check-runs" \
+          # Deduplicate by name, keeping only the latest run per check
+          # (mirrors what GitHub's UI shows). Also filters out unexpanded
+          # matrix placeholders like "${{ matrix.label }}".
+          CHECKS=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" \
             --paginate --jq '[.check_runs[]]' 2>/dev/null \
-            | jq -s 'add // []')
+            | jq -s 'add // []
+              | map(select(.name | contains("${{") | not))
+              | group_by(.name)
+              | map(sort_by(.started_at) | last)')
 
           TOTAL=$(echo "$CHECKS" | jq 'length')
 
@@ -94,9 +100,9 @@ jobs:
             CHECKS_FIELD="⏳ Pending"
           else
             PASSING=$(echo "$CHECKS" | jq '[.[] | select(.conclusion=="success")] | length')
-            FAILING=$(echo "$CHECKS" | jq '[.[] | select(.conclusion | . == "failure" or . == "timed_out" or . == "cancelled")] | length')
+            FAILING=$(echo "$CHECKS" | jq '[.[] | select(.conclusion | . == "failure" or . == "timed_out")] | length')
             PENDING=$(echo "$CHECKS" | jq '[.[] | select(.status == "in_progress" or .status == "queued")] | length')
-            SKIPPED=$(echo "$CHECKS" | jq '[.[] | select(.conclusion=="skipped")] | length')
+            SKIPPED=$(echo "$CHECKS" | jq '[.[] | select(.conclusion | . == "skipped" or . == "cancelled")] | length')
 
             CHECKS_FIELD=""
             [ "$PASSING" -gt 0 ] && CHECKS_FIELD="✅ $PASSING passed"
