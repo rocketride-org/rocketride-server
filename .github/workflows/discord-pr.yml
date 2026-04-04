@@ -97,11 +97,12 @@ jobs:
           # --paginate handles repos with >30 checks
           # Deduplicate by name, keeping only the latest run per check
           # (mirrors what GitHub's UI shows). Also filters out unexpanded
-          # matrix placeholders like "${{ matrix.label }}".
+          # matrix placeholders like "matrix.label".
+          MATRIX_MARKER='${{'
           CHECKS=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" \
             --paginate --jq '[.check_runs[]]' 2>/dev/null \
-            | jq -s 'add // []
-              | map(select(.name | contains("${{") | not))
+            | jq -s --arg marker "$MATRIX_MARKER" 'add // []
+              | map(select(.name | contains($marker) | not))
               | group_by(.name)
               | map(sort_by(.started_at) | last)')
 
