@@ -134,16 +134,10 @@ jobs:
             PENDING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="pending")] | length')
             SKIPPED=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="skipped")] | length')
 
-            CHECKS_FIELD=""
-            [ "$PASSING" -gt 0 ] && CHECKS_FIELD="✅ $PASSING passed"
-            [ "$FAILING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD:+$CHECKS_FIELD · }❌ $FAILING failed"
-            [ "$PENDING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD:+$CHECKS_FIELD · }⏳ $PENDING running"
-            [ "$SKIPPED" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD:+$CHECKS_FIELD · }⏭️ $SKIPPED skipped"
-
-            # If everything passed, make it obvious
-            if [ "$FAILING" = "0" ] && [ "$PENDING" = "0" ] && [ "$SKIPPED" = "0" ] && [ "$PASSING" -gt 0 ]; then
-              CHECKS_FIELD="✅ All $PASSING passed"
-            fi
+            # Always show passed and failed; only show running/skipped if > 0
+            CHECKS_FIELD="✅ $PASSING passed · ❌ $FAILING failed"
+            [ "$PENDING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD} · ⏳ $PENDING running"
+            [ "$SKIPPED" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD} · ⏭️ $SKIPPED skipped"
           fi
 
           # ── Truncate + repair body ───────────────────────────────────────
