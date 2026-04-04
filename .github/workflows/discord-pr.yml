@@ -139,6 +139,8 @@ jobs:
           BODY=$(echo "$BODY" | perl -0pe 's/<!--.*?-->\n?//gs')
           # Remove all empty lines
           BODY=$(echo "$BODY" | sed '/^\s*$/d')
+          # Add trailing blank line to separate description from fields
+          BODY="${BODY}"$'\n'
 
           # ── Build payload ────────────────────────────────────────────────
           PAYLOAD=$(jq -n \
