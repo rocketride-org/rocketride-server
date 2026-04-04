@@ -137,6 +137,8 @@ jobs:
           # ── Clean body for Discord ───────────────────────────────────────
           # Strip HTML comments and the blank line following them
           BODY=$(echo "$BODY" | perl -0pe 's/<!--.*?-->\n?//gs')
+          # Remove all empty lines
+          BODY=$(echo "$BODY" | sed '/^\s*$/d')
 
           # ── Build payload ────────────────────────────────────────────────
           PAYLOAD=$(jq -n \
