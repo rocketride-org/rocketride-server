@@ -72,7 +72,6 @@ jobs:
 
           PR_TITLE=$(echo  "$PR" | jq -r '.title')
           PR_URL=$(echo    "$PR" | jq -r '.html_url')
-          PR_BODY=$(echo   "$PR" | jq -r '.body // ""')
           PR_AUTHOR=$(echo "$PR" | jq -r '.user.login')
           PR_AVATAR=$(echo "$PR" | jq -r '.user.avatar_url')
           HEAD_REF=$(echo  "$PR" | jq -r '.head.ref')
@@ -149,27 +148,10 @@ jobs:
             CHECKS_FIELD="${CHECKS_FIELD} · ⏳ CI starting..."
           fi
 
-          # ── Truncate + repair body ───────────────────────────────────────
-          BODY="${PR_BODY:0:1200}"
-          if (( $(echo "$BODY" | grep -o '```' | wc -l) % 2 != 0 )); then
-            BODY="${BODY}..."$'\n```'
-          fi
-
-          # ── Clean body for Discord ───────────────────────────────────────
-          # Strip HTML comments and the blank line following them
-          BODY=$(echo "$BODY" | perl -0pe 's/<!--.*?-->\n?//gs')
-          # Convert markdown checkboxes to unicode
-          BODY=$(echo "$BODY" | sed 's/- \[x\]/☑/g; s/- \[X\]/☑/g; s/- \[ \]/☐/g')
-          # Remove all empty lines
-          BODY=$(echo "$BODY" | sed '/^\s*$/d')
-          # Add trailing spacer to separate description from fields
-          BODY="${BODY}"$'\n\u200b'
-
           # ── Build payload ────────────────────────────────────────────────
           PAYLOAD=$(jq -n \
             --arg  title     "#$PR_NUMBER $PR_TITLE" \
             --arg  url       "$PR_URL" \
-            --arg  desc      "$BODY" \
             --arg  author    "$PR_AUTHOR" \
             --arg  avatar    "$PR_AVATAR" \
             --arg  branch    "$HEAD_REF → $BASE_REF" \
@@ -181,7 +163,7 @@ jobs:
             --arg  checks    "$CHECKS_FIELD" \
             --argjson color  "$COLOR" \
             '{embeds: [{
-              title: $title, url: $url, description: $desc, color: $color,
+              title: $title, url: $url, color: $color,
               author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
               fields: [
                 {name: "Status",    value: $status,    inline: true},
