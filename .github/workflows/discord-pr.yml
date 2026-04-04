@@ -26,7 +26,7 @@ permissions:
   checks: read
 
 concurrency:
-  group: discord-pr-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
+  group: discord-pr-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -65,7 +65,10 @@ jobs:
           fi
 
           # ── Fetch current PR state (always fresh, not from stale event payload) ──
-          PR=$(gh api "/repos/$REPO/pulls/$PR_NUMBER")
+          if ! PR=$(gh api "/repos/$REPO/pulls/$PR_NUMBER") || [ -z "$PR" ]; then
+            echo "Failed to fetch PR #$PR_NUMBER — skipping"
+            exit 0
+          fi
 
           PR_TITLE=$(echo  "$PR" | jq -r '.title')
           PR_URL=$(echo    "$PR" | jq -r '.html_url')
