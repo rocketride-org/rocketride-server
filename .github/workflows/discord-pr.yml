@@ -53,12 +53,21 @@ jobs:
             PR_NUMBER="${{ github.event.pull_request.number }}"
           elif [ "$EVENT_NAME" = "check_run" ]; then
             HEAD_SHA="${{ github.event.check_run.head_sha }}"
+
+            # Try payload first
             PR_NUMBER=$(echo '${{ toJson(github.event.check_run.pull_requests) }}' \
               | jq -r '.[0].number // empty')
+            echo "check_run: sha=$HEAD_SHA pr_from_payload=$PR_NUMBER"
+
+            # Fallback: search open PRs by head SHA directly
             if [ -z "$PR_NUMBER" ]; then
-              PR_NUMBER=$(gh api "/repos/$REPO/commits/$HEAD_SHA/pulls" \
-                --jq '.[0].number // empty' 2>/dev/null)
+              PR_NUMBER=$(gh api "/repos/$REPO/pulls" \
+                -f state=open \
+                --jq ".[] | select(.head.sha == \"$HEAD_SHA\") | .number" \
+                2>/dev/null | head -1)
+              echo "check_run: pr_from_api=$PR_NUMBER"
             fi
+
             if [ -z "$PR_NUMBER" ]; then
               echo "No open PR for $HEAD_SHA — skipping"
               exit 0
@@ -68,8 +77,10 @@ jobs:
             PR_NUMBER=$(echo '${{ toJson(github.event.workflow_run.pull_requests) }}' \
               | jq -r '.[0].number // empty')
             if [ -z "$PR_NUMBER" ]; then
-              PR_NUMBER=$(gh api "/repos/$REPO/commits/$HEAD_SHA/pulls" \
-                --jq '.[0].number // empty' 2>/dev/null)
+              PR_NUMBER=$(gh api "/repos/$REPO/pulls" \
+                -f state=open \
+                --jq ".[] | select(.head.sha == \"$HEAD_SHA\") | .number" \
+                2>/dev/null | head -1)
             fi
             if [ -z "$PR_NUMBER" ]; then
               echo "No open PR for $HEAD_SHA — skipping"
@@ -106,12 +117,7 @@ jobs:
           fi
 
           # ── Fetch check runs + commit statuses for this commit ────────────
-          # GitHub's PR checks page merges both APIs, so we must too.
-          # Deduplicate check runs by name (keep latest), filter out
-          # unexpanded matrix placeholders.
           MATRIX_MARKER=$(printf '\044\173\173')
-          # Exclude own check run ("notify") since it's always in-progress
-          # at query time; add it back as success below.
           CHECK_RUNS=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" \
             --paginate --jq '[.check_runs[]]' 2>/dev/null \
             | jq -s --arg marker "$MATRIX_MARKER" 'add // []
@@ -126,7 +132,6 @@ jobs:
                 )})
               + [{name: "notify", state: "success"}]')
 
-          # Fetch commit statuses (used by CodeRabbit, external CI, etc.)
           COMMIT_STATUSES=$(gh api "repos/$REPO/commits/$HEAD_SHA/status" \
             --jq '[.statuses[] | {name: .context, state: (
                 if .state == "success" then "success"
@@ -135,7 +140,6 @@ jobs:
                 else "skipped" end
               )}]' 2>/dev/null || echo '[]')
 
-          # Merge both sources, dedup by name (check runs take priority)
           ALL_CHECKS=$(echo "$CHECK_RUNS"$'\n'"$COMMIT_STATUSES" \
             | jq -s 'add // [] | group_by(.name) | map(.[0])')
 
@@ -149,7 +153,6 @@ jobs:
             PENDING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="pending")] | length')
             SKIPPED=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="skipped")] | length')
 
-            # Always show passed and failed; only show running/skipped if > 0
             CHECKS_FIELD="✅ $PASSING passed · ❌ $FAILING failed"
             [ "$PENDING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD} · 🔄 $PENDING running"
             [ "$SKIPPED" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD} · ⏭️ $SKIPPED skipped"
@@ -184,7 +187,6 @@ jobs:
             }]}')
 
           # ── Look up stored message ID ────────────────────────────────────
-          # Only match bot-authored hidden markers to avoid spoofing
           COMMENTS=$(gh api "/repos/$REPO/issues/$PR_NUMBER/comments" \
             --jq '[.[] | {id: .id, body: .body, author: .user.login}]')
 
@@ -197,16 +199,23 @@ jobs:
 
           # ── Post or patch ────────────────────────────────────────────────
           if [ -n "$DISCORD_MSG_ID" ]; then
-            PATCH_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" -X PATCH \
+            PATCH_RESPONSE=$(curl -sS -w "\n%{http_code}" -X PATCH \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
               "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID")
+
+            PATCH_BODY=$(echo "$PATCH_RESPONSE" | head -n -1)
+            PATCH_STATUS=$(echo "$PATCH_RESPONSE" | tail -n 1)
+            echo "PATCH status: $PATCH_STATUS"
 
             if [ "$PATCH_STATUS" = "404" ]; then
               STALE_COMMENT_ID=$(echo "$COMMENTS" | \
                 jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$"))) | .id' | head -1)
               gh api -X DELETE "/repos/$REPO/issues/comments/$STALE_COMMENT_ID"
               DISCORD_MSG_ID=""
+            elif [ "$PATCH_STATUS" != "200" ]; then
+              echo "PATCH failed ($PATCH_STATUS): $PATCH_BODY"
+              exit 1
             fi
           fi
 
