@@ -137,6 +137,8 @@ jobs:
           # ── Clean body for Discord ───────────────────────────────────────
           # Strip HTML comments and the blank line following them
           BODY=$(echo "$BODY" | perl -0pe 's/<!--.*?-->\n?//gs')
+          # Convert markdown checkboxes to unicode
+          BODY=$(echo "$BODY" | sed 's/- \[x\]/☑/g; s/- \[X\]/☑/g; s/- \[ \]/☐/g')
           # Remove all empty lines
           BODY=$(echo "$BODY" | sed '/^\s*$/d')
           # Add trailing spacer to separate description from fields
