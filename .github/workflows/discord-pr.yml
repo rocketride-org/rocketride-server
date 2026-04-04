@@ -98,7 +98,7 @@ jobs:
           # Deduplicate by name, keeping only the latest run per check
           # (mirrors what GitHub's UI shows). Also filters out unexpanded
           # matrix placeholders like "matrix.label".
-          MATRIX_MARKER='${{'
+          MATRIX_MARKER=$(printf '\044\173\173')
           CHECKS=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" \
             --paginate --jq '[.check_runs[]]' 2>/dev/null \
             | jq -s --arg marker "$MATRIX_MARKER" 'add // []
