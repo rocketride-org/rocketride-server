@@ -34,11 +34,11 @@
  * Given a template definition and a map of resolved providers for each
  * `requires` slot, this hook:
  *   1. Builds all nodes with connections in a single setNodes batch
- *   2. Waits for ReactFlow to measure them (via useEffect on nodes)
- *   3. Once measured, recomputes edges, updates internals, and calls fitView
+ *   2. Waits for isFlowReady (all nodes measured) via FlowGraphContext
+ *   3. Once ready, recomputes edges, updates internals, and calls fitView
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Node, useReactFlow, useUpdateNodeInternals } from '@xyflow/react';
 
 import { useFlowGraph } from '../context/FlowGraphContext';
@@ -56,167 +56,144 @@ import type { INodeData, INode } from '../types';
  *          of slot-name → chosen provider key.
  */
 export function useTemplateInstantiator() {
-	const { setNodes, setEdges, nodes, onToolchainUpdated } = useFlowGraph();
+	const { nodes, loadCanvas, onToolchainUpdated, isFlowReady } = useFlowGraph();
 	const { servicesJson } = useFlowProject();
 	const { fitView } = useReactFlow();
 	const updateNodeInternals = useUpdateNodeInternals();
 
-	// IDs of nodes waiting to be measured before edges are recomputed
+	// IDs of nodes waiting for measurement before post-ready work
 	const [pendingIds, setPendingIds] = useState<string[]>([]);
-	// Flag to trigger fitView in a separate render cycle after edges are set
-	const [needsFit, setNeedsFit] = useState(false);
-	// Guard to prevent running post-measure logic more than once
-	const doneRef = useRef(false);
 
 	// -----------------------------------------------------------------
-	// Phase 1: wait for all pending nodes to have measured dimensions,
-	// then recompute edges and update internals.
+	// Post-ready: once isFlowReady is true and we have pending nodes,
+	// update internals, notify host, and fitView. Handles both the
+	// false→true transition (template/loadCanvas) and the case where
+	// isFlowReady was already true (single addNode).
 	// -----------------------------------------------------------------
 	useEffect(() => {
-		if (pendingIds.length === 0) return;
+		if (!isFlowReady || pendingIds.length === 0) return;
 
+		// Check that all pending nodes are actually measured
 		const allMeasured = pendingIds.every((id) => {
 			const node = nodes.find((n) => n.id === id);
-			return node?.measured?.width != null && node?.measured?.height != null;
+			return node?.measured?.width != null;
 		});
-
-		if (!allMeasured || doneRef.current) return;
-		doneRef.current = true;
-
-		// Recompute edges now that nodes are measured
-		const edges = getEdgesFromNodes(nodes as unknown as INode[]);
-		setEdges(edges);
+		if (!allMeasured) return;
 
 		updateNodeInternals(pendingIds);
-
 		setPendingIds([]);
-		doneRef.current = false;
 
-		// Schedule fitView for the next render cycle
-		setNeedsFit(true);
-	}, [pendingIds, nodes, setEdges, updateNodeInternals]);
-
-	// -----------------------------------------------------------------
-	// Phase 2: fitView runs on its own render cycle, after edges and
-	// node internals have been committed to the DOM.
-	// -----------------------------------------------------------------
-	useEffect(() => {
-		if (!needsFit) return;
-		setNeedsFit(false);
+		onToolchainUpdated();
 		fitView({ padding: 0.15, duration: 300 });
-	}, [needsFit, fitView]);
+	}, [isFlowReady, pendingIds, nodes, updateNodeInternals, onToolchainUpdated, fitView]);
 
 	// -----------------------------------------------------------------
 	// instantiateTemplate — builds nodes with template positions
 	// -----------------------------------------------------------------
 	const instantiateTemplate = useCallback(
 		(template: ITemplate, resolvedProviders: Record<string, string>): number => {
-			doneRef.current = false;
 			const newIds: string[] = [];
 			let unconfiguredCount = 0;
 
-			setNodes((currentNodes) => {
-				const templateIdToNodeId = new Map<string, string>();
-				const allExisting = [...currentNodes];
+			// Read current nodes synchronously via the ref-backed value
+			const currentNodes = [...nodes];
+			const templateIdToNodeId = new Map<string, string>();
+			const allExisting = [...currentNodes];
 
-				// First pass: generate all node IDs
-				for (const comp of template.components) {
-					const provider = comp.provider ?? resolvedProviders[comp.ref!];
-					const id = generateNodeId(allExisting, provider);
-					templateIdToNodeId.set(comp.id, id);
-					newIds.push(id);
-					allExisting.push({ id } as Node<INodeData>);
+			// First pass: generate all node IDs
+			for (const comp of template.components) {
+				const provider = comp.provider ?? resolvedProviders[comp.ref!];
+				const id = generateNodeId(allExisting, provider);
+				templateIdToNodeId.set(comp.id, id);
+				newIds.push(id);
+				allExisting.push({ id } as Node<INodeData>);
+			}
+
+			// Second pass: build actual nodes with patched connections
+			// and resolved config/formData from the service schema
+			const newNodes: Node<INodeData>[] = template.components.map((comp, i) => {
+				const provider = comp.provider ?? resolvedProviders[comp.ref!];
+				const nodeId = templateIdToNodeId.get(comp.id)!;
+
+				const input = comp.input.map((inp) => ({
+					lane: inp.lane,
+					from: templateIdToNodeId.get(inp.from) ?? inp.from,
+				}));
+
+				const control = comp.control.map((ctrl) => ({
+					classType: ctrl.classType,
+					from: templateIdToNodeId.get(ctrl.from) ?? ctrl.from,
+				}));
+
+				// Use template position, fall back to horizontal stagger
+				const position = comp.position ?? { x: i * 230, y: 0 };
+
+				// Resolve default config from the service JSON schema
+				// (same logic as addNode in FlowGraphContext)
+				const service = servicesJson?.[provider];
+				const pipe = service?.Pipe as { schema?: Record<string, unknown> } | undefined;
+				let formData: Record<string, unknown> = {};
+				let formDataValid = true;
+
+				if (pipe?.schema) {
+					formData = resolveDefaultFormData(nodeId, pipe.schema);
+					const validation = validateFormData(pipe.schema, formData);
+					formDataValid = validation.errors.length === 0;
+				} else if (service) {
+					// Service exists but has no schema — check if it needs config
+					const pipeSchema = pipe?.schema as { properties?: Record<string, unknown> } | undefined;
+					const hasSchema = pipeSchema?.properties?.hideForm == undefined && pipeSchema?.properties != undefined;
+					formDataValid = !hasSchema;
 				}
 
-				// Second pass: build actual nodes with patched connections
-				// and resolved config/formData from the service schema
-				const newNodes: Node<INodeData>[] = template.components.map((comp, i) => {
-					const provider = comp.provider ?? resolvedProviders[comp.ref!];
-					const nodeId = templateIdToNodeId.get(comp.id)!;
+				if (!formDataValid) unconfiguredCount++;
 
-					const input = comp.input.map((inp) => ({
-						lane: inp.lane,
-						from: templateIdToNodeId.get(inp.from) ?? inp.from,
-					}));
-
-					const control = comp.control.map((ctrl) => ({
-						classType: ctrl.classType,
-						from: templateIdToNodeId.get(ctrl.from) ?? ctrl.from,
-					}));
-
-					// Use template position, fall back to horizontal stagger
-					const position = comp.position ?? { x: i * 230, y: 0 };
-
-					// Resolve default config from the service JSON schema
-					// (same logic as addNode in FlowGraphContext)
-					const service = servicesJson?.[provider];
-					const pipe = service?.Pipe as { schema?: Record<string, unknown> } | undefined;
-					let formData: Record<string, unknown> = {};
-					let formDataValid = true;
-
-					if (pipe?.schema) {
-						formData = resolveDefaultFormData(nodeId, pipe.schema);
-						const validation = validateFormData(pipe.schema, formData);
-						formDataValid = validation.errors.length === 0;
-					} else if (service) {
-						// Service exists but has no schema — check if it needs config
-						const pipeSchema = pipe?.schema as { properties?: Record<string, unknown> } | undefined;
-						const hasSchema = pipeSchema?.properties?.hideForm == undefined && pipeSchema?.properties != undefined;
-						formDataValid = !hasSchema;
-					}
-
-					if (!formDataValid) unconfiguredCount++;
-
-					return {
-						id: nodeId,
-						type: 'default',
-						position,
-						data: {
-							provider,
-							name: '',
-							description: '',
-							config: formData,
-							formData,
-							formDataValid,
-							input,
-							control,
-						},
-						deletable: true,
-						selectable: true,
-					};
-				});
-
-				// Compute edges immediately so handles show connected state
-				const allNodes = [...currentNodes, ...newNodes];
-				const edges = getEdgesFromNodes(allNodes as unknown as INode[]);
-				setEdges(edges);
-
-				return allNodes;
+				return {
+					id: nodeId,
+					type: 'default',
+					position,
+					data: {
+						provider,
+						name: '',
+						description: '',
+						config: formData,
+						formData,
+						formDataValid,
+						input,
+						control,
+					},
+					deletable: true,
+					selectable: true,
+				};
 			});
 
-			// Start watching for measurement (runs after setNodes commits)
-			setPendingIds(newIds);
+			// Merge existing + new nodes and compute edges, then load via loadCanvas
+			const allNodes = [...currentNodes, ...newNodes];
+			const edges = getEdgesFromNodes(allNodes as unknown as INode[]);
+			loadCanvas(allNodes, edges);
 
-			onToolchainUpdated();
+			// Track new IDs so the post-ready effect can update internals + fitView
+			setPendingIds(newIds);
 
 			return unconfiguredCount;
 		},
-		[setNodes, setEdges, onToolchainUpdated, servicesJson]
+		[nodes, loadCanvas, servicesJson]
 	);
 
 	/**
 	 * Schedule a fitView. If nodeIds are provided, waits for those nodes
-	 * to be measured first (Phase 1 → Phase 2). Otherwise fires immediately
-	 * on the next render cycle.
+	 * to be measured first (via isFlowReady). Otherwise fires immediately.
 	 */
-	const requestFitView = useCallback((nodeIds?: string[]) => {
-		if (nodeIds && nodeIds.length > 0) {
-			doneRef.current = false;
-			setPendingIds(nodeIds);
-		} else {
-			setNeedsFit(true);
-		}
-	}, []);
+	const requestFitView = useCallback(
+		(nodeIds?: string[]) => {
+			if (nodeIds && nodeIds.length > 0) {
+				setPendingIds(nodeIds);
+			} else {
+				fitView({ padding: 0.15, duration: 300 });
+			}
+		},
+		[fitView]
+	);
 
 	return { instantiateTemplate, requestFitView };
 }

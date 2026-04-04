@@ -197,15 +197,11 @@ export function FlowPreferencesProvider({ children, projectId, getPreference: ho
 
 	// --- Canvas lock -------------------------------------------------------
 
-	const [isLocked, setIsLocked] = useState<boolean>(() => projectLayout.isLocked ?? DEFAULT_PROJECT_LAYOUT.isLocked ?? false);
+	const isLocked = projectLayout.isLocked ?? false;
 
 	const toggleLock = useCallback(() => {
-		setIsLocked((prev) => {
-			const next = !prev;
-			updateProjectLayout({ isLocked: next });
-			return next;
-		});
-	}, [updateProjectLayout]);
+		updateProjectLayout({ isLocked: !isLocked });
+	}, [updateProjectLayout, isLocked]);
 
 	// --- Context value (stable references via useCallback) -----------------
 
