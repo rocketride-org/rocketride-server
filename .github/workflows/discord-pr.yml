@@ -94,60 +94,59 @@ jobs:
           fi
 
           # ── Fetch check runs + commit statuses for this commit ────────────
-          # On pull_request events, CI checks haven't been created yet (timing
-          # gap), so show a placeholder. The workflow_run trigger fires after
-          # CI completes and will update the embed with accurate counts.
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            CHECKS_FIELD="⏳ Waiting for CI..."
+          # GitHub's PR checks page merges both APIs, so we must too.
+          # Deduplicate check runs by name (keep latest), filter out
+          # unexpanded matrix placeholders.
+          MATRIX_MARKER=$(printf '\044\173\173')
+          # Exclude own check run ("notify") since it's always in-progress
+          # at query time; add it back as success below.
+          CHECK_RUNS=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" \
+            --paginate --jq '[.check_runs[]]' 2>/dev/null \
+            | jq -s --arg marker "$MATRIX_MARKER" 'add // []
+              | map(select((.name | contains($marker) | not) and .name != "notify"))
+              | group_by(.name)
+              | map(sort_by(.started_at) | last)
+              | map({name: .name, state: (
+                  if .status != "completed" then "pending"
+                  elif .conclusion == "success" then "success"
+                  elif .conclusion == "skipped" or .conclusion == "cancelled" then "skipped"
+                  else "failure" end
+                )})
+              + [{name: "notify", state: "success"}]')
+
+          # Fetch commit statuses (used by CodeRabbit, external CI, etc.)
+          COMMIT_STATUSES=$(gh api "repos/$REPO/commits/$HEAD_SHA/status" \
+            --jq '[.statuses[] | {name: .context, state: (
+                if .state == "success" then "success"
+                elif .state == "pending" then "pending"
+                elif .state == "failure" or .state == "error" then "failure"
+                else "skipped" end
+              )}]' 2>/dev/null || echo '[]')
+
+          # Merge both sources, dedup by name (check runs take priority)
+          ALL_CHECKS=$(echo "$CHECK_RUNS"$'\n'"$COMMIT_STATUSES" \
+            | jq -s 'add // [] | group_by(.name) | map(.[0])')
+
+          TOTAL=$(echo "$ALL_CHECKS" | jq 'length')
+
+          if [ "$TOTAL" = "0" ]; then
+            CHECKS_FIELD="⏳ Pending"
           else
-            # GitHub's PR checks page merges both APIs, so we must too.
-            # Deduplicate check runs by name (keep latest), filter out
-            # unexpanded matrix placeholders.
-            MATRIX_MARKER=$(printf '\044\173\173')
-            # Exclude own check run ("notify") since it's always in-progress
-            # at query time; add it back as success below.
-            CHECK_RUNS=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" \
-              --paginate --jq '[.check_runs[]]' 2>/dev/null \
-              | jq -s --arg marker "$MATRIX_MARKER" 'add // []
-                | map(select((.name | contains($marker) | not) and .name != "notify"))
-                | group_by(.name)
-                | map(sort_by(.started_at) | last)
-                | map({name: .name, state: (
-                    if .status != "completed" then "pending"
-                    elif .conclusion == "success" then "success"
-                    elif .conclusion == "skipped" or .conclusion == "cancelled" then "skipped"
-                    else "failure" end
-                  )})
-                + [{name: "notify", state: "success"}]')
+            PASSING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="success")] | length')
+            FAILING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="failure")] | length')
+            PENDING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="pending")] | length')
+            SKIPPED=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="skipped")] | length')
 
-            # Fetch commit statuses (used by CodeRabbit, external CI, etc.)
-            COMMIT_STATUSES=$(gh api "repos/$REPO/commits/$HEAD_SHA/status" \
-              --jq '[.statuses[] | {name: .context, state: (
-                  if .state == "success" then "success"
-                  elif .state == "pending" then "pending"
-                  elif .state == "failure" or .state == "error" then "failure"
-                  else "skipped" end
-                )}]' 2>/dev/null || echo '[]')
+            # Always show passed and failed; only show running/skipped if > 0
+            CHECKS_FIELD="✅ $PASSING passed · ❌ $FAILING failed"
+            [ "$PENDING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD} · 🔄 $PENDING running"
+            [ "$SKIPPED" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD} · ⏭️ $SKIPPED skipped"
+          fi
 
-            # Merge both sources, dedup by name (check runs take priority)
-            ALL_CHECKS=$(echo "$CHECK_RUNS"$'\n'"$COMMIT_STATUSES" \
-              | jq -s 'add // [] | group_by(.name) | map(.[0])')
-
-            TOTAL=$(echo "$ALL_CHECKS" | jq 'length')
-
-            if [ "$TOTAL" = "0" ]; then
-              CHECKS_FIELD="⏳ Pending"
-            else
-              PASSING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="success")] | length')
-              FAILING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="failure")] | length')
-              PENDING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="pending")] | length')
-              SKIPPED=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="skipped")] | length')
-
-              # Always show passed and failed; only show running/skipped if > 0
-              CHECKS_FIELD="✅ $PASSING passed · ❌ $FAILING failed"
-              [ "$PENDING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD} · 🔄 $PENDING running"
-              [ "$SKIPPED" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD} · ⏭️ $SKIPPED skipped"
-            fi
+          # On pull_request events, CI checks may not exist yet (timing gap).
+          # The workflow_run trigger updates the embed after CI completes.
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            CHECKS_FIELD="${CHECKS_FIELD} · ⏳ CI starting..."
           fi
 
           # ── Truncate + repair body ───────────────────────────────────────
