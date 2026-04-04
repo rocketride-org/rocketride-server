@@ -74,7 +74,7 @@ jobs:
           if   [ "$PR_MERGED" = "true"  ]; then COLOR=7419530;  STATUS="🟣 Merged"
           elif [ "$PR_STATE"  = "closed" ]; then COLOR=15158332; STATUS="🔴 Closed"
           elif [ "$PR_DRAFT"  = "true"  ]; then COLOR=9807270;  STATUS="⚫ Draft"
-          else                                   COLOR=5814783;  STATUS="🟢 Open"
+          else                                   COLOR=3066993;  STATUS="🟢 Open"
           fi
 
           # ── Fetch all check runs for this commit ─────────────────────────
