@@ -135,14 +135,8 @@ jobs:
           fi
 
           # ── Clean body for Discord ───────────────────────────────────────
-          # Strip HTML comments (perl handles multi-line spans)
-          BODY=$(echo "$BODY" | perl -0pe 's/<!--.*?-->\s*//gs')
-          # Convert GH markdown checkboxes to unicode
-          BODY=$(echo "$BODY" | sed 's/- \[ \]/☐/g; s/- \[x\]/☑/g; s/- \[X\]/☑/g')
-          # Convert ## headings to Discord bold
-          BODY=$(echo "$BODY" | sed -E 's/^#{1,6} (.*)$/**\1**/g')
-          # Collapse all double newlines to single and trim leading/trailing whitespace
-          BODY=$(echo "$BODY" | perl -0pe 's/\n{2,}/\n/g; s/^\s+//; s/\s+$//')
+          # Strip HTML comments and the blank line following them
+          BODY=$(echo "$BODY" | perl -0pe 's/<!--.*?-->\n?//gs')
 
           # ── Build payload ────────────────────────────────────────────────
           PAYLOAD=$(jq -n \
