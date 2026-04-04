@@ -711,8 +711,8 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		(data: INodeData, position?: { x: number; y: number }, type: INodeType = INodeType.Default): string => {
 			const id = generateNodeId(nodes, data.provider);
 
-			// Default to center of viewport if no position given, then nudge
-			// down until we find a spot that doesn't overlap existing nodes.
+			// Default to center of viewport if no position given, then search
+			// outward in a spiral pattern to find the nearest non-overlapping spot.
 			let nodePosition =
 				position ??
 				screenToFlowPosition({
@@ -723,14 +723,32 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			if (!position) {
 				const estW = 200;
 				const estH = 80;
+				const gap = 20;
+				const stepX = estW + gap;
+				const stepY = estH + gap;
 				const overlaps = (x: number, y: number) =>
 					nodes.some((n) => {
 						const nw = n.measured?.width ?? 200;
 						const nh = n.measured?.height ?? 80;
 						return x < n.position.x + nw && x + estW > n.position.x && y < n.position.y + nh && y + estH > n.position.y;
 					});
-				for (let i = 0; i < 30 && overlaps(nodePosition.x, nodePosition.y); i++) {
-					nodePosition = { x: nodePosition.x, y: nodePosition.y + estH + 20 };
+				const cx = nodePosition.x;
+				const cy = nodePosition.y;
+				if (overlaps(cx, cy)) {
+					let found = false;
+					for (let ring = 1; ring <= 10 && !found; ring++) {
+						for (let dy = -ring; dy <= ring && !found; dy++) {
+							for (let dx = -ring; dx <= ring && !found; dx++) {
+								if (Math.abs(dx) !== ring && Math.abs(dy) !== ring) continue;
+								const tx = cx + dx * stepX;
+								const ty = cy + dy * stepY;
+								if (!overlaps(tx, ty)) {
+									nodePosition = { x: tx, y: ty };
+									found = true;
+								}
+							}
+						}
+					}
 				}
 			}
 
