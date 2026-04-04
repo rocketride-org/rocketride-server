@@ -164,10 +164,13 @@ jobs:
               fields: [
                 {name: "Status",    value: $status,    inline: true},
                 {name: "Branch",    value: $branch,    inline: true},
-                {name: "Repo",      value: $repo,      inline: true},
+                {name: "\u200b",    value: "\u200b",   inline: false},
                 {name: "Labels",    value: $labels,    inline: true},
+                {name: "Repo",      value: $repo,      inline: true},
+                {name: "\u200b",    value: "\u200b",   inline: false},
                 {name: "Assignees", value: $assignees, inline: true},
                 {name: "Reviewers", value: $reviewers, inline: true},
+                {name: "\u200b",    value: "\u200b",   inline: false},
                 {name: "Checks",    value: $checks,    inline: false}
               ]
             }]}')
