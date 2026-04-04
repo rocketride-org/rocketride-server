@@ -15,16 +15,18 @@ on:
       - converted_to_draft
       - closed
       - reopened
-  check_run:
+  workflow_run:
+    workflows: ['CI', 'PR checks']
     types: [completed]
 
 permissions:
   contents: read
   pull-requests: write
   issues: write
+  checks: read
 
 concurrency:
-  group: discord-pr-${{ github.event.pull_request.number || github.event.check_run.pull_requests[0].number }}
+  group: discord-pr-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
   cancel-in-progress: true
 
 jobs:
@@ -48,9 +50,9 @@ jobs:
           if [ "$EVENT_NAME" = "pull_request" ]; then
             PR_NUMBER="${{ github.event.pull_request.number }}"
           else
-            HEAD_SHA="${{ github.event.check_run.head_sha }}"
-            # check_run.pull_requests is populated for same-repo PRs; fall back to API for forks
-            PR_NUMBER=$(echo '${{ toJson(github.event.check_run.pull_requests) }}' \
+            HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
+            # workflow_run.pull_requests is populated for same-repo PRs; fall back to API for forks
+            PR_NUMBER=$(echo '${{ toJson(github.event.workflow_run.pull_requests) }}' \
               | jq -r '.[0].number // empty')
             if [ -z "$PR_NUMBER" ]; then
               PR_NUMBER=$(gh api "/repos/$REPO/commits/$HEAD_SHA/pulls" \
@@ -168,11 +170,12 @@ jobs:
             }]}')
 
           # ── Look up stored message ID ────────────────────────────────────
+          # Only match bot-authored hidden markers to avoid spoofing
           COMMENTS=$(gh api "/repos/$REPO/issues/$PR_NUMBER/comments" \
-            --jq '[.[] | {id: .id, body: .body}]')
+            --jq '[.[] | {id: .id, body: .body, author: .user.login}]')
 
           DISCORD_MSG_ID=$(echo "$COMMENTS" | \
-            jq -r '.[] | select(.body | contains("discord-msg-id:")) | .body' | \
+            jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$"))) | .body' | \
             grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2 | head -1)
 
           WEBHOOK_ID=$(echo    "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $(NF-1)}')
@@ -187,7 +190,7 @@ jobs:
 
             if [ "$PATCH_STATUS" = "404" ]; then
               STALE_COMMENT_ID=$(echo "$COMMENTS" | \
-                jq -r '.[] | select(.body | contains("discord-msg-id:")) | .id' | head -1)
+                jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$"))) | .id' | head -1)
               gh api -X DELETE "/repos/$REPO/issues/comments/$STALE_COMMENT_ID"
               DISCORD_MSG_ID=""
             fi
