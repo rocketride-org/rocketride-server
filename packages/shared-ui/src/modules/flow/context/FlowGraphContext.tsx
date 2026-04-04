@@ -50,7 +50,7 @@ import { createContext, ReactElement, ReactNode, useCallback, useContext, useEff
 
 import { Connection, Edge, EdgeChange, Node, NodeChange, useEdgesState, useNodesState, useReactFlow, getConnectedEdges } from '@xyflow/react';
 
-import { INode, INodeData, IInputConnection, IControlConnection, IProject, INodeType, PIPELINE_SCHEMA_VERSION } from '../types';
+import { INode, INodeData, IInputConnection, IControlConnection, IProject, IProjectLayout, INodeType, PIPELINE_SCHEMA_VERSION } from '../types';
 
 /** ReactFlow Node with strongly-typed data. Used throughout this context. */
 type FlowNode = Node<INodeData>;
@@ -202,6 +202,28 @@ export interface IFlowGraphContext {
 	 * @param project - The project to load.
 	 */
 	loadData: (project: IProject) => void;
+
+	/**
+	 * Low-level canvas loader. Sets nodes and edges, resets isFlowReady,
+	 * and guards against spurious content-change notifications until
+	 * ReactFlow has measured all nodes.
+	 *
+	 * Use loadData for project loads (handles layout prefs + viewport).
+	 * Use loadCanvas directly when building nodes programmatically
+	 * (e.g. template instantiation).
+	 *
+	 * @param nodes - Nodes to set on the canvas.
+	 * @param edges - Edges to set on the canvas.
+	 */
+	loadCanvas: (nodes: FlowNode[], edges: Edge[]) => void;
+
+	/**
+	 * True once ReactFlow has rendered and measured all nodes after a
+	 * structural change (loadData, loadCanvas, addNode).
+	 * Resets to false when nodes change structurally, flips to true
+	 * when all nodes have measured dimensions.
+	 */
+	isFlowReady: boolean;
 }
 
 const FlowGraphContext = createContext<IFlowGraphContext | null>(null);
@@ -252,14 +274,14 @@ export interface IFlowGraphProviderProps {
  * so it can read isLocked, currentProject, servicesJson, etc.
  */
 export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactElement {
-	const { isLocked } = useFlowPreferences();
+	const { isLocked, projectLayout, updateProjectLayout } = useFlowPreferences();
 	const { currentProject, servicesJson, onContentChanged, patchToolchainState } = useFlowProject();
 
 	// --- ReactFlow hooks ---------------------------------------------------
 
 	const [nodes, setNodes, onNodesChangeInternal] = useNodesState<FlowNode>([]);
 	const [edges, setEdges, onEdgesChangeInternal] = useEdgesState<Edge>([]);
-	const { screenToFlowPosition, toObject, getNode, setCenter, getIntersectingNodes, deleteElements } = useReactFlow();
+	const { screenToFlowPosition, toObject, getNode, setCenter, setViewport, fitView, getIntersectingNodes, deleteElements } = useReactFlow();
 
 	// --- Refs --------------------------------------------------------------
 
@@ -267,6 +289,9 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 	/** True while loadData is replacing all nodes/edges. Prevents onNodesChange from notifying the host. */
 	const isLoadingRef = useRef(false);
+
+	/** True once ReactFlow has measured all nodes after a structural change. */
+	const [isFlowReady, setFlowReady] = useState(false);
 
 	/** The last docRevision number we sent to the host. -1 ensures initial load always runs. */
 	const lastSentVersion = useRef(-1);
@@ -296,6 +321,10 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	const currentProjectRef = useRef(currentProject);
 	currentProjectRef.current = currentProject;
 
+	/** Ref to the latest projectLayout so onToolchainUpdated reads current values without re-creating. */
+	const projectLayoutRef = useRef(projectLayout);
+	projectLayoutRef.current = projectLayout;
+
 	/**
 	 * Marks the project as dirty and notifies the host of content changes.
 	 *
@@ -314,10 +343,14 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			const { viewport } = toObject();
 			const components = getProjectComponents(nodesRef.current as INode[]);
 			const nextVersion = (lastSentVersion.current ?? 0) + 1;
+			const layout = projectLayoutRef.current;
 			const project: IProject = {
 				...currentProjectRef.current,
 				components,
 				viewport,
+				isLocked: layout.isLocked,
+				snapToGrid: layout.snapToGrid,
+				snapGridSize: layout.snapGridSize,
 				version: PIPELINE_SCHEMA_VERSION,
 				docRevision: nextVersion,
 			};
@@ -659,17 +692,47 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		[servicesJson]
 	);
 
+	/**
+	 * Low-level canvas loader. Sets nodes/edges, guards against spurious
+	 * content-change notifications, and resets isFlowReady so downstream
+	 * effects wait until ReactFlow has measured all nodes.
+	 */
+	const loadCanvas = useCallback(
+		(newNodes: FlowNode[], newEdges: Edge[]) => {
+			isLoadingRef.current = true;
+			setFlowReady(false);
+			setNodes(newNodes);
+			setEdges(newEdges);
+		},
+		[setNodes, setEdges]
+	);
+
 	const addNode = useCallback(
 		(data: INodeData, position?: { x: number; y: number }, type: INodeType = INodeType.Default): string => {
 			const id = generateNodeId(nodes, data.provider);
 
-			// Default to center of viewport if no position given
-			const nodePosition =
+			// Default to center of viewport if no position given, then nudge
+			// down until we find a spot that doesn't overlap existing nodes.
+			let nodePosition =
 				position ??
 				screenToFlowPosition({
 					x: (canvasRef.current?.clientWidth ?? 800) / 2,
 					y: (canvasRef.current?.clientHeight ?? 600) / 2,
 				});
+
+			if (!position) {
+				const estW = 200;
+				const estH = 80;
+				const overlaps = (x: number, y: number) =>
+					nodes.some((n) => {
+						const nw = n.measured?.width ?? 200;
+						const nh = n.measured?.height ?? 80;
+						return x < n.position.x + nw && x + estW > n.position.x && y < n.position.y + nh && y + estH > n.position.y;
+					});
+				for (let i = 0; i < 30 && overlaps(nodePosition.x, nodePosition.y); i++) {
+					nodePosition = { x: nodePosition.x, y: nodePosition.y + estH + 20 };
+				}
+			}
 
 			// Resolve default config from the service JSON schema (same as old FlowContext)
 			const service = servicesJson?.[data.provider];
@@ -707,12 +770,13 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				selectable: true,
 			};
 
-			setNodes((nds) => [...nds, node]);
-			onToolchainUpdated();
+			const allNodes = [...nodes, node];
+			const allEdges = getEdgesFromNodes(allNodes as unknown as INode[]);
+			loadCanvas(allNodes, allEdges);
 
 			return id;
 		},
-		[nodes, screenToFlowPosition, onToolchainUpdated, setNodes, getInitialFormDataValid, servicesJson]
+		[nodes, screenToFlowPosition, loadCanvas, getInitialFormDataValid, servicesJson]
 	);
 
 	const updateNode = useCallback(
@@ -808,21 +872,55 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	 * edges from the node connection data. Restores the viewport if
 	 * a saved viewport exists in project layout preferences.
 	 */
+	/** Viewport to restore once isFlowReady becomes true. */
+	const pendingViewportRef = useRef<{ x: number; y: number; zoom: number } | 'fitView' | null>(null);
+
+	/**
+	 * Loads a full project into the canvas. Converts the IProject component
+	 * tree into nodes/edges via loadCanvas, syncs layout preferences, and
+	 * queues viewport restoration for when isFlowReady transitions to true.
+	 */
 	const loadData = useCallback(
 		(project: IProject) => {
-			isLoadingRef.current = true;
-
 			const newNodes = getNodesFromProject(project);
 			const sortedNodes = sortNodesParentFirst(newNodes as FlowNode[]);
 			const newEdges = getEdgesFromNodes(sortedNodes);
 
-			setNodes(sortedNodes);
-			setEdges(newEdges);
+			loadCanvas(sortedNodes, newEdges);
 
-			isLoadingRef.current = false;
+			// Sync layout preferences from the project document
+			const layoutPatch: Partial<IProjectLayout> = {};
+			if (project.isLocked !== undefined) layoutPatch.isLocked = project.isLocked;
+			if (project.snapToGrid !== undefined) layoutPatch.snapToGrid = project.snapToGrid;
+			if (project.snapGridSize !== undefined) layoutPatch.snapGridSize = project.snapGridSize;
+			if (Object.keys(layoutPatch).length > 0) {
+				updateProjectLayout(layoutPatch);
+			}
+
+			// Queue viewport restoration — applied when isFlowReady transitions to true.
+			if (project.viewport) {
+				pendingViewportRef.current = project.viewport;
+			} else if (sortedNodes.length > 0) {
+				pendingViewportRef.current = 'fitView';
+			} else {
+				pendingViewportRef.current = null;
+			}
 		},
-		[setNodes, setEdges]
+		[loadCanvas, updateProjectLayout]
 	);
+
+	// --- Detect when ReactFlow has measured all nodes -----------------------
+	// Transitions isFlowReady:
+	//   false → true: when all nodes have measured dimensions (or canvas is empty)
+	//   true → false: when unmeasured nodes appear (e.g. template instantiation, addNode)
+	useEffect(() => {
+		const allMeasured = nodes.length === 0 || nodes.every((n) => n.measured?.width != null);
+		if (allMeasured && !isFlowReady) {
+			setFlowReady(true);
+		} else if (!allMeasured && isFlowReady) {
+			setFlowReady(false);
+		}
+	}, [nodes, isFlowReady]);
 
 	// --- Load project on mount / when host sends a new docRevision ----------
 	// Reloads the canvas whenever the host sends a project with a different
@@ -842,6 +940,22 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		loadData(currentProject);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [incomingVersion]);
+
+	// --- Restore viewport + clear loading guard when flow is ready ----------
+	useEffect(() => {
+		if (!isFlowReady) return;
+
+		const pending = pendingViewportRef.current;
+		pendingViewportRef.current = null;
+
+		if (pending === 'fitView') {
+			fitView({ padding: 0.15, duration: 0 });
+		} else if (pending) {
+			setViewport(pending, { duration: 0 });
+		}
+
+		isLoadingRef.current = false;
+	}, [isFlowReady, fitView, setViewport]);
 
 	// =====================================================================
 	// Context value
@@ -872,6 +986,8 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		setEditingNodeId,
 		onToolchainUpdated,
 		loadData,
+		loadCanvas,
+		isFlowReady,
 		quickAddState,
 		setQuickAddState,
 	};

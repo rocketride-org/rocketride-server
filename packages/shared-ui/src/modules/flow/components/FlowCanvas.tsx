@@ -114,10 +114,10 @@ const DEFAULT_ZOOM = 0.75;
  */
 export default function Canvas(): ReactElement {
 	// --- Graph state from context ------------------------------------------
-	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onToolchainUpdated } = useFlowGraph();
+	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onToolchainUpdated, isFlowReady } = useFlowGraph();
 
 	// --- Preferences from context ------------------------------------------
-	const { navigationMode, setNavigationMode, isLocked, toggleLock, getPreference, setPreference } = useFlowPreferences();
+	const { navigationMode, setNavigationMode, isLocked, toggleLock, projectLayout, getPreference, setPreference } = useFlowPreferences();
 
 	const { features, onUndo, onRedo } = useFlowProject();
 	const { fitView, zoomIn, zoomOut } = useReactFlow();
@@ -312,6 +312,7 @@ export default function Canvas(): ReactElement {
 				onDragOver={onDragOver}
 				onDrop={onDrop}
 				onNodeDragStop={onNodeDragStop}
+				onMoveEnd={() => onToolchainUpdated()}
 				/* Navigation mode: pan on drag vs lasso-select on drag */
 				selectionMode={SelectionMode.Partial}
 				panOnScroll={!isPanMode}
@@ -323,16 +324,17 @@ export default function Canvas(): ReactElement {
 				nodesFocusable={editable}
 				edgesFocusable={editable}
 				elementsSelectable={editable}
-				/* Viewport defaults */
+				/* Viewport defaults — fitView is handled programmatically in loadData */
 				defaultViewport={{ x: 0, y: 0, zoom: DEFAULT_ZOOM }}
 				proOptions={{ hideAttribution: true }}
-				fitView
+				snapToGrid={projectLayout.snapToGrid ?? true}
+				snapGrid={projectLayout.snapGridSize ?? [10, 10]}
 			>
 				<Background color="var(--rr-text-disabled)" gap={20} style={{ backgroundColor: 'var(--rr-bg-paper)' }} />
 			</ReactFlow>
 
 			{/* Empty canvas prompt — shown when no nodes and create panel is closed */}
-			{nodes.length === 0 && !showCreatePanel && <EmptyCanvasPrompt instantiateTemplate={instantiateTemplate} onNodeAdded={onNodeAdded} />}
+			{nodes.length === 0 && !showCreatePanel && isFlowReady && <EmptyCanvasPrompt instantiateTemplate={instantiateTemplate} onNodeAdded={onNodeAdded} />}
 
 			{/* Quick-add popup — appears at handle click position */}
 			<QuickAddPopup />
