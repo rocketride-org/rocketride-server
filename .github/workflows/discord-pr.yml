@@ -136,7 +136,7 @@ jobs:
 
             # Always show passed and failed; only show running/skipped if > 0
             CHECKS_FIELD="✅ $PASSING passed · ❌ $FAILING failed"
-            [ "$PENDING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD} · ⏳ $PENDING running"
+            [ "$PENDING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD} · 🔄 $PENDING running"
             [ "$SKIPPED" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD} · ⏭️ $SKIPPED skipped"
           fi
 
