@@ -25,6 +25,10 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import { FormContextType, TitleFieldProps, RJSFSchema, StrictRJSFSchema } from '@rjsf/utils';
 
+// =============================================================================
+// Component
+// =============================================================================
+
 /**
  * Custom RJSF title field template that renders the schema's title as an h2
  * Typography element. Returns null when no title is provided, preventing

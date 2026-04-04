@@ -28,6 +28,10 @@ import FormGroup from '@mui/material/FormGroup';
 import FormLabel from '@mui/material/FormLabel';
 import { ariaDescribedByIds, enumOptionsDeselectValue, enumOptionsIsSelected, enumOptionsSelectValue, enumOptionsValueForIndex, labelValue, optionId, FormContextType, WidgetProps, RJSFSchema, StrictRJSFSchema } from '@rjsf/utils';
 
+// =============================================================================
+// Component
+// =============================================================================
+
 /**
  * Custom RJSF widget for rendering a group of checkboxes from an enum schema.
  * Displays multiple checkbox options that allow multi-select behavior, where

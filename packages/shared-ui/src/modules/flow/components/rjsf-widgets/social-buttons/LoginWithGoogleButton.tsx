@@ -31,6 +31,10 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { useFlow } from '../../../hooks/useFlowContext';
 import '../google-api-types';
 
+// =============================================================================
+// Component
+// =============================================================================
+
 /**
  * RJSF widget button that initiates Google OAuth2 authentication for the
  * current canvas node. Saves pending changes, then redirects (or opens via

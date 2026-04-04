@@ -27,6 +27,10 @@ import { InputAdornment, TextField, Tooltip } from '@mui/material';
 import { Delete } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 
+// =============================================================================
+// Helpers
+// =============================================================================
+
 /** Number of trailing characters to display unmasked when an API key is present. */
 const lastCharsToShow = 4;
 
@@ -47,6 +51,10 @@ const getMaskedValue = (val: string): string => {
 	const maskedPart = '•'.repeat(val.length - lastCharsToShow);
 	return maskedPart + val.slice(-lastCharsToShow);
 };
+
+// =============================================================================
+// Component
+// =============================================================================
 
 /**
  * RJSF widget for securely entering and displaying API keys.

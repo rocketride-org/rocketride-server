@@ -17,14 +17,14 @@
  * For **non-source nodes**, shows a "Pipes X/Y" progress bar during execution.
  */
 
-import { ReactElement } from 'react';
-import { Box, Typography, LinearProgress } from '@mui/material';
+import React, { ReactElement } from 'react';
+
 import { ITaskStatus, ITaskState } from '../../../../types';
 import { PipelineActions } from '../../../../../../components/pipeline-actions';
 
-// ============================================================================
+// =============================================================================
 // Helpers
-// ============================================================================
+// =============================================================================
 
 const formatElapsedTime = (seconds: number): string => {
 	const totalSeconds = Math.floor(seconds);
@@ -40,9 +40,9 @@ const formatElapsedTime = (seconds: number): string => {
 	return `${hours}h ${minutes}m ${remainingSeconds}s`;
 };
 
-// ============================================================================
+// =============================================================================
 // Component
-// ============================================================================
+// =============================================================================
 
 interface INodeStatusProps {
 	/** Node ID used to look up this component's pipe count in the flow data. */
@@ -82,16 +82,15 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 		const elapsed = taskStatus.startTime > 0 ? Math.max(0, currentTimeSeconds - taskStatus.startTime) : 0;
 
 		const statusLink = onOpenStatus ? (
-			<Typography
-				component="a"
+			<a
 				onClick={(e: React.MouseEvent) => {
 					e.stopPropagation();
 					onOpenStatus(componentProvider);
 				}}
-				sx={styles.statusLink}
+				style={styles.statusLink}
 			>
 				Status ↗
-			</Typography>
+			</a>
 		) : null;
 
 		const pipelineActions = <PipelineActions notes={taskStatus.notes} host={serverHost} onOpenLink={onOpenLink} displayName={displayName} />;
@@ -99,53 +98,48 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 		// ── Starting / Initializing ──────────────────────────────────────
 		if (isRunning && (taskStatus.state === ITaskState.STARTING || taskStatus.state === ITaskState.INITIALIZING)) {
 			return (
-				<Box sx={styles.footer}>
-					<Box sx={styles.sourceFooterMain}>
-						<Typography sx={{ ...styles.footerText, color: 'var(--rr-text-disabled)' }}>Initializing...</Typography>
+				<div style={styles.footer}>
+					<div style={styles.sourceFooterMain}>
+						<span style={{ ...styles.footerText, color: 'var(--rr-text-disabled)' }}>Initializing...</span>
 						{statusLink}
-					</Box>
+					</div>
 					{taskStatus.status && (
-						<Typography sx={styles.statusMessage} title={taskStatus.status}>
+						<span style={styles.statusMessage} title={taskStatus.status}>
 							{taskStatus.status}
-						</Typography>
+						</span>
 					)}
 					{pipelineActions}
-					<LinearProgress sx={styles.indeterminateBar} />
-				</Box>
+					<div style={{ height: 3, borderRadius: 2, marginTop: 5, backgroundColor: 'var(--rr-border)', overflow: 'hidden' }}>
+						<div style={{ width: '30%', height: '100%', backgroundColor: 'var(--rr-accent, #007acc)', borderRadius: 2, animation: 'rr-indeterminate 1.5s ease-in-out infinite', transformOrigin: '0% 50%' }} />
+					</div>
+				</div>
 			);
 		}
 
 		// ── Running ──────────────────────────────────────────────────────
 		if (isRunning) {
 			return (
-				<Box sx={styles.footer}>
-					<Box sx={styles.sourceFooterMain}>
-						<Typography sx={styles.footerText}>
-							<Box component="span" sx={{ color: 'var(--rr-success, #4ec9b0)' }}>
-								{completedCount} done
-							</Box>
+				<div style={styles.footer}>
+					<div style={styles.sourceFooterMain}>
+						<span style={styles.footerText}>
+							<span style={{ color: 'var(--rr-success, #4ec9b0)' }}>{completedCount} done</span>
 							{failedCount > 0 && (
 								<>
 									{' · '}
-									<Box component="span" sx={{ color: 'var(--rr-error, #f14c4c)' }}>
-										{failedCount} errors
-									</Box>
+									<span style={{ color: 'var(--rr-error, #f14c4c)' }}>{failedCount} errors</span>
 								</>
 							)}
-							<Box component="span" sx={{ color: 'var(--rr-text-disabled)', ml: '2px' }}>
-								{' '}
-								· {formatElapsedTime(elapsed)}
-							</Box>
-						</Typography>
+							<span style={{ color: 'var(--rr-text-disabled)', marginLeft: '2px' }}> · {formatElapsedTime(elapsed)}</span>
+						</span>
 						{statusLink}
-					</Box>
+					</div>
 					{taskStatus.status && (
-						<Typography sx={styles.statusMessage} title={taskStatus.status}>
+						<span style={styles.statusMessage} title={taskStatus.status}>
 							{taskStatus.status}
-						</Typography>
+						</span>
 					)}
 					{pipelineActions}
-				</Box>
+				</div>
 			);
 		}
 
@@ -159,50 +153,37 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 
 			if (isStartupError) {
 				return (
-					<Box sx={styles.footer}>
-						<Box sx={styles.sourceFooterMain}>
-							<Typography sx={styles.footerText}>
-								<Box component="span" sx={{ color: 'var(--rr-error, #f14c4c)' }}>
-									✕ Failed to start
-								</Box>
-							</Typography>
+					<div style={styles.footer}>
+						<div style={styles.sourceFooterMain}>
+							<span style={styles.footerText}>
+								<span style={{ color: 'var(--rr-error, #f14c4c)' }}>✕ Failed to start</span>
+							</span>
 							{statusLink}
-						</Box>
-						{firstError && <Typography sx={styles.errorMessage}>{firstError}</Typography>}
-						<Box sx={styles.accentBarError} />
-					</Box>
+						</div>
+						{firstError && <span style={styles.errorMessage}>{firstError}</span>}
+						<div style={styles.accentBarError} />
+					</div>
 				);
 			}
 
 			return (
-				<Box sx={styles.footer}>
-					<Box sx={styles.sourceFooterMain}>
-						<Typography sx={styles.footerText}>
-							{!hasErrors && (
-								<Box component="span" sx={{ color: 'var(--rr-success, #4ec9b0)' }}>
-									✓{' '}
-								</Box>
-							)}
-							<Box component="span" sx={{ color: 'var(--rr-success, #4ec9b0)' }}>
-								{completedCount} done
-							</Box>
+				<div style={styles.footer}>
+					<div style={styles.sourceFooterMain}>
+						<span style={styles.footerText}>
+							{!hasErrors && <span style={{ color: 'var(--rr-success, #4ec9b0)' }}>✓ </span>}
+							<span style={{ color: 'var(--rr-success, #4ec9b0)' }}>{completedCount} done</span>
 							{failedCount > 0 && (
 								<>
 									{' · '}
-									<Box component="span" sx={{ color: 'var(--rr-error, #f14c4c)' }}>
-										{failedCount} errors
-									</Box>
+									<span style={{ color: 'var(--rr-error, #f14c4c)' }}>{failedCount} errors</span>
 								</>
 							)}
-							<Box component="span" sx={{ color: 'var(--rr-text-disabled)', ml: '2px' }}>
-								{' '}
-								· {formatElapsedTime(elapsedFinal)}
-							</Box>
-						</Typography>
+							<span style={{ color: 'var(--rr-text-disabled)', marginLeft: '2px' }}> · {formatElapsedTime(elapsedFinal)}</span>
+						</span>
 						{statusLink}
-					</Box>
+					</div>
 					{pipelineActions}
-				</Box>
+				</div>
 			);
 		}
 
@@ -220,105 +201,73 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 	const progressPercentage = totalPipes > 0 ? (pipesInComponent / totalPipes) * 100 : 0;
 
 	return (
-		<Box sx={styles.footer}>
-			<Box sx={styles.pipesFooter}>
-				<Typography sx={styles.pipesLabel}>Pipes</Typography>
-				<Box sx={styles.progressBarContainer}>
-					<LinearProgress variant="determinate" value={progressPercentage} sx={styles.progressBarGreen} />
-				</Box>
-				<Typography sx={styles.pipesCount}>
+		<div style={styles.footer}>
+			<div style={styles.pipesFooter}>
+				<span style={styles.pipesLabel}>Pipes</span>
+				<div style={styles.progressBarContainer}>
+					<div style={{ height: 3, borderRadius: 2, marginTop: 5, backgroundColor: 'var(--rr-border)', overflow: 'hidden' }}>
+						<div style={{ width: `${progressPercentage}%`, height: '100%', backgroundColor: 'var(--rr-success, #4ec9b0)', borderRadius: 2, transition: 'width 0.1s ease-in-out' }} />
+					</div>
+				</div>
+				<span style={styles.pipesCount}>
 					{pipesInComponent}/{totalPipes}
-				</Typography>
-			</Box>
-		</Box>
+				</span>
+			</div>
+		</div>
 	);
 }
 
-// ============================================================================
+// =============================================================================
 // Styles
-// ============================================================================
+// =============================================================================
 
 const styles = {
 	footer: {
-		borderTop: '1px solid',
-		borderColor: 'var(--rr-border)',
+		borderTop: '1px solid var(--rr-border)',
 		backgroundColor: 'var(--rr-bg-surface)',
 		padding: '0.4rem 0.6rem 0.2rem',
 		fontSize: 'var(--rr-font-size-xs)',
 		borderRadius: 0,
-	},
+	} as React.CSSProperties,
 	sourceFooterMain: {
 		display: 'flex',
 		alignItems: 'center',
 		justifyContent: 'space-between',
 		gap: '0.5rem',
-	},
+	} as React.CSSProperties,
 	footerText: {
 		fontSize: 'var(--rr-font-size-xs)',
 		color: 'var(--rr-text-secondary)',
 		fontWeight: 500,
-		whiteSpace: 'nowrap',
-	},
+		whiteSpace: 'nowrap' as const,
+	} as React.CSSProperties,
 	statusLink: {
 		fontSize: '9px',
 		color: 'var(--rr-accent, #007acc)',
 		cursor: 'pointer',
-		whiteSpace: 'nowrap',
+		whiteSpace: 'nowrap' as const,
 		textDecoration: 'none',
 		flexShrink: 0,
-		'&:hover': { textDecoration: 'underline' },
-	},
+	} as React.CSSProperties,
 	statusMessage: {
 		fontSize: '9px',
 		color: 'var(--rr-text-disabled)',
 		marginTop: '3px',
-		whiteSpace: 'nowrap',
+		whiteSpace: 'nowrap' as const,
 		overflow: 'hidden',
 		textOverflow: 'ellipsis',
-	},
+		display: 'block',
+	} as React.CSSProperties,
 	errorMessage: {
 		fontSize: '9px',
 		color: 'var(--rr-error, #f14c4c)',
 		marginTop: '3px',
-		whiteSpace: 'nowrap',
+		whiteSpace: 'nowrap' as const,
 		overflow: 'hidden',
 		textOverflow: 'ellipsis',
 		opacity: 0.85,
-	},
-
-	// Progress bars
-	indeterminateBar: {
-		height: '3px',
-		borderRadius: '2px',
-		marginTop: '5px',
-		backgroundColor: 'action.hover',
-		'& .MuiLinearProgress-bar': {
-			backgroundColor: 'var(--rr-accent, #007acc)',
-			borderRadius: '2px',
-		},
-	},
-	progressBarGreen: {
-		height: '3px',
-		borderRadius: '2px',
-		marginTop: '5px',
-		backgroundColor: 'action.hover',
-		'& .MuiLinearProgress-bar': {
-			backgroundColor: 'var(--rr-success, #4ec9b0)',
-			borderRadius: '2px',
-			transition: 'transform 0.1s ease-in-out !important',
-		},
-	},
-	progressBarOrange: {
-		height: '3px',
-		borderRadius: '2px',
-		marginTop: '5px',
-		backgroundColor: 'action.hover',
-		'& .MuiLinearProgress-bar': {
-			backgroundColor: 'var(--rr-warning, #cca700)',
-			borderRadius: '2px',
-			transition: 'transform 0.1s ease-in-out !important',
-		},
-	},
+		display: 'block',
+	} as React.CSSProperties,
 
 	// Accent bars (thin 2px bar at bottom of completed status)
 	accentBarSuccess: {
@@ -326,19 +275,19 @@ const styles = {
 		marginTop: '5px',
 		borderRadius: '1px',
 		backgroundColor: 'var(--rr-success, #4ec9b0)',
-	},
+	} as React.CSSProperties,
 	accentBarWarning: {
 		height: '2px',
 		marginTop: '5px',
 		borderRadius: '1px',
 		backgroundColor: 'var(--rr-warning, #cca700)',
-	},
+	} as React.CSSProperties,
 	accentBarError: {
 		height: '2px',
 		marginTop: '5px',
 		borderRadius: '1px',
 		backgroundColor: 'var(--rr-error, #f14c4c)',
-	},
+	} as React.CSSProperties,
 
 	// Non-source node pipes footer
 	pipesFooter: {
@@ -346,21 +295,21 @@ const styles = {
 		alignItems: 'center',
 		gap: '0.5rem',
 		width: '100%',
-	},
+	} as React.CSSProperties,
 	pipesLabel: {
 		fontSize: 'var(--rr-font-size-xs)',
 		color: 'var(--rr-text-secondary)',
 		fontWeight: 400,
 		minWidth: 'fit-content',
-	},
+	} as React.CSSProperties,
 	progressBarContainer: {
 		flex: 1,
 		minWidth: '60px',
-	},
+	} as React.CSSProperties,
 	pipesCount: {
 		fontSize: 'var(--rr-font-size-xs)',
 		color: 'var(--rr-text-primary)',
 		fontWeight: 500,
 		minWidth: 'fit-content',
-	},
+	} as React.CSSProperties,
 };

@@ -32,6 +32,10 @@ import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import DeleteIcon from '@mui/icons-material/Delete';
 import '../google-api-types';
 
+// =============================================================================
+// Types
+// =============================================================================
+
 /**
  * Represents a single include/exclude path item in the Google Drive source
  * configuration. The path field holds the Google Drive file/folder ID used
@@ -41,6 +45,10 @@ interface PathItem {
 	path: string;
 	name?: string; // Optional name for display purposes (not used by backend)
 }
+
+// =============================================================================
+// Helpers
+// =============================================================================
 
 /** Base URL for Google Drive REST API v3 requests. */
 const GOOGLE_DRIVE_API_BASE_URL = 'https://www.googleapis.com/drive/v3';
@@ -71,6 +79,10 @@ function loadGoogleApi(): Promise<void> {
 		document.body.appendChild(script);
 	});
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 /**
  * RJSF widget that integrates the Google Drive Picker UI for selecting files

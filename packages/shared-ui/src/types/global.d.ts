@@ -30,6 +30,9 @@
 /** Ambient declaration for the `d3` data visualization library. */
 declare module 'd3';
 
+/** Allows importing `.css` files as side-effect modules (handled by the bundler). */
+declare module '*.css' {}
+
 /** Allows importing `.svg` files as string URLs (handled by the bundler). */
 declare module '*.svg' {
 	const content: string;

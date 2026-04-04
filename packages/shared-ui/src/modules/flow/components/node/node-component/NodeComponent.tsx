@@ -49,7 +49,6 @@
  */
 
 import React, { ReactElement, useMemo } from 'react';
-import { Box } from '@mui/material';
 import { Edge, Position } from '@xyflow/react';
 
 import { useFlow } from '../../../hooks';
@@ -236,29 +235,16 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 
 			{/* Spacer to reserve vertical space for invoke source labels */}
 			<ConditionalRender condition={hasInvokeSource}>
-				<Box sx={{ height: '20px', backgroundColor: 'var(--rr-bg-paper)' }} />
+				<div style={{ height: '20px', backgroundColor: 'var(--rr-bg-paper)' }} />
 			</ConditionalRender>
 
 			{/* Bottom corner cap */}
-			<Box
-				sx={{
-					height: '4px',
-					borderRadius: '0 0 4px 4px',
-					...(bottomCapMatchesHeader
-						? {
-								backgroundColor: 'var(--rr-bg-titleBar-inactive)',
-								'.react-flow__node:hover &, .react-flow__node.selected &': {
-									backgroundColor: 'var(--rr-bg-titleBar-active)',
-								},
-							}
-						: { backgroundColor: 'var(--rr-bg-paper)' }),
-				}}
-			/>
+			{bottomCapMatchesHeader ? <div className="rr-corner-cap-bottom-header" /> : <div style={{ height: '4px', borderRadius: '0 0 4px 4px', backgroundColor: 'var(--rr-bg-paper)' }} />}
 
 			{/* Invoke source diamonds — positioned on the bottom edge, labels above */}
 			<ConditionalRender condition={hasInvokeSource}>
-				<Box
-					sx={{
+				<div
+					style={{
 						position: 'absolute',
 						bottom: 0,
 						left: 0,
@@ -290,7 +276,7 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 							}
 						/>
 					))}
-				</Box>
+				</div>
 			</ConditionalRender>
 		</>
 	);

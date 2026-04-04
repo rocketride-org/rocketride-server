@@ -31,11 +31,15 @@
  */
 
 import React, { ReactElement, useState } from 'react';
-import { IconButton, Menu, MenuItem, SxProps, Typography, Divider } from '@mui/material';
-import { MoreVert } from '@mui/icons-material';
+import { Menu, MenuItem, SxProps, Divider } from '@mui/material';
+import { MoreVertical } from 'lucide-react';
 
 import { Option } from '../../../../../../../types/ui';
 import KeyboardChip from '../KeyboardChip';
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /**
  * Props for the MoreMenu component.
@@ -48,6 +52,10 @@ interface IMoreMenuProps {
 	/** Optional MUI sx overrides applied to the trigger IconButton. */
 	buttonSx?: SxProps;
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 export default function MoreMenu({ options, isDisabled, buttonSx }: IMoreMenuProps): ReactElement {
 	const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
@@ -66,9 +74,9 @@ export default function MoreMenu({ options, isDisabled, buttonSx }: IMoreMenuPro
 
 	return (
 		<>
-			<IconButton aria-label="More options" onMouseDown={(event) => event.stopPropagation()} onClick={handleMenuClick} disabled={isDisabled} sx={{ ...buttonSx }}>
-				<MoreVert sx={{ fontSize: '1.75rem' }} />
-			</IconButton>
+			<button aria-label="More options" onMouseDown={(event) => event.stopPropagation()} onClick={handleMenuClick} disabled={isDisabled} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'inline-flex', alignItems: 'center', ...(typeof buttonSx === 'object' && !Array.isArray(buttonSx) ? (buttonSx as React.CSSProperties) : {}) }}>
+				<MoreVertical size={18} />
+			</button>
 
 			<Menu
 				anchorEl={anchorEl}
@@ -100,8 +108,8 @@ export default function MoreMenu({ options, isDisabled, buttonSx }: IMoreMenuPro
 							}}
 							sx={{ display: 'flex', justifyContent: 'space-between' }}
 						>
-							<Typography sx={{ fontWeight: 800, fontSize: '0.75rem' }}>{label} </Typography>
-							<Typography sx={{ fontSize: '0.725rem' }}>{keys?.length ? keys.map((value: string, i: number) => <KeyboardChip key={i} text={value} />) : null}</Typography>
+							<span style={{ fontWeight: 800, fontSize: '0.75rem' }}>{label} </span>
+							<span style={{ fontSize: '0.725rem' }}>{keys?.length ? keys.map((value: string, i: number) => <KeyboardChip key={i} text={value} />) : null}</span>
 						</MenuItem>
 					);
 				})}

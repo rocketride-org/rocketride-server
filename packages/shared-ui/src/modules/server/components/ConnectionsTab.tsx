@@ -7,9 +7,17 @@ import React, { useState } from 'react';
 import type { DashboardConnection } from '../types';
 import { formatTime, formatTimeAgo, formatNumber } from '../util';
 
+// =============================================================================
+// Types
+// =============================================================================
+
 interface ConnectionsTabProps {
 	connections: DashboardConnection[];
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 export const ConnectionsTab: React.FC<ConnectionsTabProps> = ({ connections }) => {
 	const [selectedId, setSelectedId] = useState<number | null>(null);

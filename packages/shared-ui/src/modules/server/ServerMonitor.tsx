@@ -19,13 +19,13 @@ import React, { useState } from 'react';
 import type { DashboardResponse, ActivityEvent } from './types';
 import { OverviewTab, ConnectionsTab, TasksTab, ActivityTab } from './components';
 
-// Theme CSS — web defaults first, then VS Code overrides on top
-import '../../themes/rocketride-web.css';
+// Theme CSS — light defaults, then VS Code overrides on top
+import '../../themes/rocketride-default.css';
 import '../../themes/rocketride-vscode.css';
 import './styles/server-monitor.css';
 
 // =============================================================================
-// Props
+// Types
 // =============================================================================
 
 export interface IServerMonitorProps {
@@ -39,10 +39,6 @@ export interface IServerMonitorProps {
 	onRefresh?: () => void;
 }
 
-// =============================================================================
-// Tabs
-// =============================================================================
-
 type TabId = 'overview' | 'connections' | 'tasks' | 'activity';
 
 interface TabDef {
@@ -50,6 +46,10 @@ interface TabDef {
 	label: string;
 	badge?: (data: DashboardResponse | null, events: ActivityEvent[]) => string | undefined;
 }
+
+// =============================================================================
+// Helpers
+// =============================================================================
 
 const TABS: TabDef[] = [
 	{ id: 'overview', label: 'Overview' },

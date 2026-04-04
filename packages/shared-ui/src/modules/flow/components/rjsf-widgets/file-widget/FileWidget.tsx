@@ -27,6 +27,25 @@ import { IconButton } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import Markdown from 'markdown-to-jsx';
 
+// =============================================================================
+// Types
+// =============================================================================
+
+/**
+ * Represents metadata about a file selected for upload, including its
+ * base64 data URL, original name, size in bytes, and MIME type.
+ */
+type FileInfoType = {
+	dataURL?: string | null;
+	name: string;
+	size: number;
+	type: string;
+};
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
 /**
  * Injects the file name into a data URL's MIME segment so that the name
  * is preserved when the data URL is later decoded. This is necessary because
@@ -42,17 +61,6 @@ function addNameToDataURL(dataURL: string, name: string) {
 	}
 	return dataURL.replace(';base64', `;name=${encodeURIComponent(name)};base64`);
 }
-
-/**
- * Represents metadata about a file selected for upload, including its
- * base64 data URL, original name, size in bytes, and MIME type.
- */
-type FileInfoType = {
-	dataURL?: string | null;
-	name: string;
-	size: number;
-	type: string;
-};
 
 /**
  * Reads a single File object using FileReader and resolves with its metadata
@@ -220,6 +228,10 @@ function extractFileInfo(dataURLs: string[]): FileInfoType[] {
 		}
 	}, [] as FileInfoType[]);
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 /**
  *  The `FileWidget` is a widget for rendering file upload fields.

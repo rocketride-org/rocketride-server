@@ -42,6 +42,10 @@
 
 import { ReactElement, ReactNode } from 'react';
 
+// =============================================================================
+// Types
+// =============================================================================
+
 interface IConditionalRenderProps {
 	/** When truthy, children are rendered; when falsy, fallback is rendered. */
 	condition: unknown;
@@ -50,6 +54,10 @@ interface IConditionalRenderProps {
 	/** Content to render when condition is falsy. Defaults to null (render nothing). */
 	fallback?: ReactNode;
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 export default function ConditionalRender({ condition, children, fallback = null }: IConditionalRenderProps): ReactElement | null {
 	return (condition ? children : fallback) as ReactElement | null;

@@ -29,6 +29,10 @@ import { restrictToVerticalAxis, restrictToWindowEdges } from '@dnd-kit/modifier
 import Box from '@mui/material/Box';
 import { getTemplate, getUiOptions, ArrayFieldTemplateProps, ArrayFieldTemplateItemType, FormContextType, RJSFSchema, StrictRJSFSchema } from '@rjsf/utils';
 
+// =============================================================================
+// Helpers
+// =============================================================================
+
 /**
  * Configuration for the drop animation displayed when an array item finishes
  * being dragged. Reduces the active item's opacity during the transition
@@ -43,6 +47,10 @@ const dropAnimationConfig: DropAnimation = {
 		},
 	}),
 };
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /**
  * Empty props interface for the SortableOverlay component.
@@ -60,6 +68,10 @@ interface Props {
 export function SortableOverlay({ children }: PropsWithChildren<Props>) {
 	return <DragOverlay dropAnimation={dropAnimationConfig}>{children}</DragOverlay>;
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 /**
  * Custom RJSF template for rendering array fields with drag-and-drop reordering.

@@ -9,9 +9,17 @@ import { StatCard } from './StatCard';
 import { StatusPill } from './StatusPill';
 import { formatUptime, formatTimeAgo, formatNumber } from '../util';
 
+// =============================================================================
+// Types
+// =============================================================================
+
 interface OverviewTabProps {
 	data: DashboardResponse;
 }
+
+// =============================================================================
+// Helpers
+// =============================================================================
 
 /** Aggregate metrics across all running tasks. */
 function aggregateMetrics(tasks: DashboardTask[]) {
@@ -43,6 +51,10 @@ function getTaskStatePill(task: DashboardTask) {
 	}
 	return <StatusPill label="running" variant="success" pulse />;
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 export const OverviewTab: React.FC<OverviewTabProps> = ({ data }) => {
 	const { overview, connections, tasks } = data;

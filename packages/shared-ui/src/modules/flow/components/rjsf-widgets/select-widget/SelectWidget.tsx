@@ -26,6 +26,10 @@ import MenuItem from '@mui/material/MenuItem';
 import TextField, { TextFieldProps } from '@mui/material/TextField';
 import { ariaDescribedByIds, enumOptionsIndexForValue, enumOptionsValueForIndex, labelValue, FormContextType, RJSFSchema, StrictRJSFSchema, WidgetProps } from '@rjsf/utils';
 
+// =============================================================================
+// Component
+// =============================================================================
+
 /**
  * Custom RJSF select widget that renders enum schema options as a MUI TextField
  * with select mode. Supports single and multiple selection, disabled options,

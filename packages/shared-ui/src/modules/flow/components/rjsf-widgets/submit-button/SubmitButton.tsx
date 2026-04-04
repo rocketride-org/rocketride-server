@@ -25,6 +25,10 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import { getSubmitButtonOptions, FormContextType, RJSFSchema, StrictRJSFSchema, SubmitButtonProps } from '@rjsf/utils';
 
+// =============================================================================
+// Component
+// =============================================================================
+
 /**
  * Custom RJSF submit button template that renders a full-width MUI Button
  * of type "submit". Respects the uiSchema's submitButtonOptions to control

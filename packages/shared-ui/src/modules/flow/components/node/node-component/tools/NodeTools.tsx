@@ -33,9 +33,17 @@
  */
 
 import { ReactElement } from 'react';
-import { Box, Typography } from '@mui/material';
+
+// =============================================================================
+// Styles
+// =============================================================================
+
 /** Label text color — resolved via CSS custom property. */
 const labelColor = 'var(--rr-text-disabled)';
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /**
  * Props for the NodeTools component.
@@ -44,6 +52,10 @@ interface INodeToolsProps {
 	/** Invoke source channel keys (e.g. ["llm", "memory", "tool"]). */
 	invokeSourceKeys: string[];
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 /**
  * Renders invoke source type labels inside the node body.
@@ -56,8 +68,8 @@ export default function NodeTools({ invokeSourceKeys }: INodeToolsProps): ReactE
 	if (invokeSourceKeys.length === 0) return null;
 
 	return (
-		<Box
-			sx={{
+		<div
+			style={{
 				display: 'flex',
 				justifyContent: 'center',
 				gap: '40px',
@@ -66,10 +78,9 @@ export default function NodeTools({ invokeSourceKeys }: INodeToolsProps): ReactE
 			}}
 		>
 			{invokeSourceKeys.map((key) => (
-				<Typography
+				<span
 					key={key}
-					variant="caption"
-					sx={{
+					style={{
 						fontSize: '0.5rem',
 						lineHeight: 1,
 						color: labelColor,
@@ -79,8 +90,8 @@ export default function NodeTools({ invokeSourceKeys }: INodeToolsProps): ReactE
 				>
 					{/* "llm" is an acronym — render as uppercase; others get title case */}
 					{key === 'llm' ? 'LLM' : key.charAt(0).toUpperCase() + key.slice(1)}
-				</Typography>
+				</span>
 			))}
-		</Box>
+		</div>
 	);
 }

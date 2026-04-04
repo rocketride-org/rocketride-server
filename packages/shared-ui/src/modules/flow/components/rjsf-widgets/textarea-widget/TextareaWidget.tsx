@@ -8,6 +8,10 @@ import { ChangeEvent, FocusEvent, useState, useEffect, FC } from 'react';
 import TextField from '@mui/material/TextField';
 import { WidgetProps } from '@rjsf/utils';
 
+// =============================================================================
+// Component
+// =============================================================================
+
 const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, disabled, readonly, rawErrors, onChange, onBlur, onFocus, options }) => {
 	const [controlledValue, setControlledValue] = useState(value ?? '');
 

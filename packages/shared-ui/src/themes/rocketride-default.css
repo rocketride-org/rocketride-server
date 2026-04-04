@@ -1,10 +1,12 @@
 /**
- * RocketRide Design Tokens — Standalone Web Defaults
+ * RocketRide Design Tokens — Light Theme
  *
  * Defines the --rr-* CSS custom properties used by all RocketRide
  * webview components (flow canvas, status, token, etc.).
  *
- * This file provides the default values for a standard web application.
+ * This file provides the light-theme defaults for a standard web
+ * application.  rocketride-dark.css overrides these when the user
+ * selects the dark theme (via [data-theme="dark"] on <html>).
  * When running inside VS Code, rocketride-vscode.css overrides these
  * with VS Code theme variables so the UI matches the user's editor theme.
  *
@@ -55,7 +57,7 @@
 	--rr-bg-default: #ffffff;
 
 	/** Primary opaque surface — canvas, node bodies, content areas. */
-	--rr-bg-paper: #f5f5f5;
+	--rr-bg-paper: #ffffff;
 
 	/** Alternate surface for visually distinct sections (e.g. lanes). */
 	--rr-bg-surface-alt: #fafafa;
@@ -125,13 +127,13 @@
 	/* ================================================================== */
 
 	/** Secondary accent — toolbar icons, secondary buttons. */
-	--rr-color-secondary: #666666;
+	--rr-color-secondary: #007acc;
 
 	/** Error — destructive actions, validation failures. */
-	--rr-color-error: #fa3c3c;
+	--rr-color-error: #f44336;
 
-	/** Error light variant — error icon idle state. */
-	--rr-color-error-light: #f44f55;
+	/** Error variant — error icon idle state. */
+	--rr-color-error-light: #f44336;
 
 	/** Warning — non-blocking alerts. */
 	--rr-color-warning: #e8b931;
@@ -140,7 +142,7 @@
 	--rr-color-info: #3182ce;
 
 	/** Success — completed tasks, positive feedback. */
-	--rr-color-success: #22e02c;
+	--rr-color-success: #229954;
 
 	/* ================================================================== */
 	/* Borders                                                             */
@@ -156,10 +158,10 @@
 	--rr-border-focus: #0078d4;
 
 	/** Input field border. */
-	--rr-border-input: #a8a8a8;
+	--rr-border-input: #858585;
 
-	/** MUI Paper border style. */
-	--rr-border-paper: 2px solid #eee;
+	/** Paper border — disabled in favour of shadow. */
+	--rr-border-paper: none;
 
 	/* ================================================================== */
 	/* Accent                                                              */
@@ -241,7 +243,7 @@
 	--rr-grey-200: #d9d9d9;
 
 	/** Grey 400 — annotation borders, muted separators. */
-	--rr-grey-400: #a8a8a8;
+	--rr-grey-400: #858585;
 
 	/** Grey 500 — menu text, secondary icons. */
 	--rr-grey-500: #8e8e8e;
@@ -273,7 +275,7 @@
 	--rr-font-size-h1: 2rem;
 
 	/** Heading 2 font size. */
-	--rr-font-size-h2: 1.475rem;
+	--rr-font-size-h2: 1.5rem;
 
 	/** Heading 3 font size. */
 	--rr-font-size-h3: 1.2rem;
@@ -282,7 +284,7 @@
 	--rr-font-size-h4: 1.25rem;
 
 	/** Heading 5 font size. */
-	--rr-font-size-h5: 1.25rem;
+	--rr-font-size-h5: 1.1rem;
 
 	/** Body text font size ("inherit" = use browser default). */
 	--rr-font-size-body: inherit;
@@ -301,4 +303,11 @@
 
 	/** Button label font weight. */
 	--rr-font-weight-button: 600;
+
+	/* ================================================================== */
+	/* Annotations                                                         */
+	/* ================================================================== */
+
+	/** Default annotation sticky-note background colour. */
+	--rr-annotation-bg-default: #fff9c4;
 }

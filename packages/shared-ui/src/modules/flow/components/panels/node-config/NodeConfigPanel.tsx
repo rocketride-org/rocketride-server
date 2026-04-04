@@ -227,8 +227,8 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		const raw = (node.data.config?.content ?? '') as string;
 		return raw.replace(/\\n/g, '\n');
 	});
-	const [bgColor, setBgColor] = useState<string>((node.data.config?.bgColor as string) || '#fff9c4');
-	const [fgColor, setFgColor] = useState<string>((node.data.config?.fgColor as string) || '#000000');
+	const [bgColor, setBgColor] = useState<string>((node.data.config?.bgColor as string) || 'var(--rr-annotation-bg-default)');
+	const [fgColor, setFgColor] = useState<string>((node.data.config?.fgColor as string) || 'var(--rr-text-primary)');
 
 	// --- Secured field transforms -------------------------------------------
 	const securedFormData = getSecuredFormData(formValues);
@@ -254,8 +254,8 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		if (node.data.provider === 'annotation') {
 			const raw = (config.content ?? '') as string;
 			setAnnotationContent(raw.replace(/\\n/g, '\n'));
-			setBgColor((config.bgColor as string) || '#fff9c4');
-			setFgColor((config.fgColor as string) || '#000000');
+			setBgColor((config.bgColor as string) || 'var(--rr-annotation-bg-default)');
+			setFgColor((config.fgColor as string) || 'var(--rr-text-primary)');
 		}
 
 		// If OAuth tokens are in the URL, persist to node and save immediately

@@ -20,8 +20,8 @@
  */
 
 import { ReactElement, ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Paper } from '@mui/material';
-import { DragIndicator } from '@mui/icons-material';
+
+import { GripVertical } from 'lucide-react';
 
 // =============================================================================
 // Position type
@@ -218,10 +218,10 @@ export default function FloatingToolbar({ children, position = DEFAULT_POSITION,
 	const rendered = isDragging && dragPixels ? dragPixels : getRenderedPosition();
 
 	return (
-		<Box
+		<div
 			ref={toolbarRef}
-			className="nopan nodrag"
-			sx={{
+			className="nopan nodrag rr-floating-toolbar"
+			style={{
 				position: 'absolute',
 				left: `${rendered.left}px`,
 				top: `${rendered.top}px`,
@@ -229,35 +229,34 @@ export default function FloatingToolbar({ children, position = DEFAULT_POSITION,
 				userSelect: isDragging ? 'none' : 'auto',
 			}}
 		>
-			<Paper
-				elevation={2}
-				sx={{
+			<div
+				style={{
 					display: 'flex',
 					alignItems: 'center',
 					border: '1px solid var(--rr-border)',
 					borderRadius: '4px',
 					backgroundColor: 'var(--rr-bg-widget)',
 					overflow: 'hidden',
+					boxShadow: '0px 3px 1px -2px rgba(0,0,0,0.2), 0px 2px 2px 0px rgba(0,0,0,0.14), 0px 1px 5px 0px rgba(0,0,0,0.12)',
 				}}
 			>
 				{/* Drag handle — vertical grip dots */}
-				<Box
+				<div
 					onMouseDown={onMouseDown}
-					sx={{
+					style={{
 						display: 'flex',
 						alignItems: 'center',
 						cursor: isDragging ? 'grabbing' : 'grab',
 						padding: '4px 2px',
 						color: 'var(--rr-text-disabled)',
-						'&:hover': { color: 'var(--rr-text-secondary)' },
 					}}
 				>
-					<DragIndicator sx={{ fontSize: '14px' }} />
-				</Box>
+					<GripVertical size={14} />
+				</div>
 
 				{/* Toolbar content */}
-				<Box
-					sx={{
+				<div
+					style={{
 						display: 'flex',
 						alignItems: 'center',
 						gap: '4px',
@@ -265,8 +264,8 @@ export default function FloatingToolbar({ children, position = DEFAULT_POSITION,
 					}}
 				>
 					{children}
-				</Box>
-			</Paper>
-		</Box>
+				</div>
+			</div>
+		</div>
 	);
 }

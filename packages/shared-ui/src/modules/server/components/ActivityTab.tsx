@@ -7,9 +7,17 @@ import React from 'react';
 import type { ActivityEvent, DashboardEvent, TaskEvent } from '../types';
 import { formatTime } from '../util';
 
+// =============================================================================
+// Types
+// =============================================================================
+
 interface ActivityTabProps {
 	events: ActivityEvent[];
 }
+
+// =============================================================================
+// Helpers
+// =============================================================================
 
 function formatClient(clientName?: string, clientVersion?: string, connectionId?: number): string {
 	if (clientName) {
@@ -56,6 +64,10 @@ function getEventDisplay(event: ActivityEvent): { color: string; label: string; 
 	const display = getDashboardEventDisplay(event.body);
 	return { ...display, timestamp: event.receivedAt };
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 export const ActivityTab: React.FC<ActivityTabProps> = ({ events }) => (
 	<div className="sm-card">
