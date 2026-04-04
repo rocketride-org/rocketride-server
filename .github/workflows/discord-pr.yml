@@ -98,10 +98,12 @@ jobs:
           # Deduplicate check runs by name (keep latest), filter out
           # unexpanded matrix placeholders.
           MATRIX_MARKER=$(printf '\044\173\173')
+          # Exclude own check run ("notify") since it's always in-progress
+          # at query time; add it back as success below.
           CHECK_RUNS=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" \
             --paginate --jq '[.check_runs[]]' 2>/dev/null \
             | jq -s --arg marker "$MATRIX_MARKER" 'add // []
-              | map(select(.name | contains($marker) | not))
+              | map(select((.name | contains($marker) | not) and .name != "notify"))
               | group_by(.name)
               | map(sort_by(.started_at) | last)
               | map({name: .name, state: (
@@ -109,7 +111,8 @@ jobs:
                   elif .conclusion == "success" then "success"
                   elif .conclusion == "skipped" or .conclusion == "cancelled" then "skipped"
                   else "failure" end
-                )})')
+                )})
+              + [{name: "notify", state: "success"}]')
 
           # Fetch commit statuses (used by CodeRabbit, external CI, etc.)
           COMMIT_STATUSES=$(gh api "repos/$REPO/commits/$HEAD_SHA/status" \
