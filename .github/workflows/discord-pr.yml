@@ -155,12 +155,6 @@ jobs:
             [ "$SKIPPED" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD} · ⏭️ $SKIPPED skipped"
           fi
 
-          # On pull_request events, CI checks may not exist yet (timing gap).
-          # check_run and workflow_run triggers update the embed as checks complete.
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            CHECKS_FIELD="${CHECKS_FIELD} · ⏳ CI starting..."
-          fi
-
           # ── Build payload ────────────────────────────────────────────────
           PAYLOAD=$(jq -n \
             --arg  title     "#$PR_NUMBER $PR_TITLE" \
