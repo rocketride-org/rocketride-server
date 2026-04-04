@@ -131,14 +131,14 @@ jobs:
           fi
 
           # ── Clean body for Discord ───────────────────────────────────────
-          # Strip HTML comments
-          BODY=$(echo "$BODY" | sed 's/<!--[^>]*-->//g')
+          # Strip HTML comments (perl handles multi-line spans)
+          BODY=$(echo "$BODY" | perl -0pe 's/<!--.*?-->//gs')
           # Collapse consecutive blank lines left by stripped comments
           BODY=$(echo "$BODY" | awk 'NF || prev { print } { prev = NF }')
           # Convert GH markdown checkboxes to unicode
           BODY=$(echo "$BODY" | sed 's/- \[ \]/☐/g; s/- \[x\]/☑/g; s/- \[X\]/☑/g')
           # Convert ## headings to Discord bold
-          BODY=$(echo "$BODY" | sed 's/^#{1,6} \(.*\)$/\n**\1**/g')
+          BODY=$(echo "$BODY" | sed -E 's/^#{1,6} (.*)$/\n**\1**/g')
 
           # ── Build payload ────────────────────────────────────────────────
           PAYLOAD=$(jq -n \
