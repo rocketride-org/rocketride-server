@@ -93,28 +93,46 @@ jobs:
           else                                   COLOR=3066993;  STATUS="🟢 Open"
           fi
 
-          # ── Fetch check runs for this commit ─────────────────────────────
-          # --paginate handles repos with >30 checks
-          # Deduplicate by name, keeping only the latest run per check
-          # (mirrors what GitHub's UI shows). Also filters out unexpanded
-          # matrix placeholders like "matrix.label".
+          # ── Fetch check runs + commit statuses for this commit ────────────
+          # GitHub's PR checks page merges both APIs, so we must too.
+          # Deduplicate check runs by name (keep latest), filter out
+          # unexpanded matrix placeholders.
           MATRIX_MARKER=$(printf '\044\173\173')
-          CHECKS=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" \
+          CHECK_RUNS=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" \
             --paginate --jq '[.check_runs[]]' 2>/dev/null \
             | jq -s --arg marker "$MATRIX_MARKER" 'add // []
               | map(select(.name | contains($marker) | not))
               | group_by(.name)
-              | map(sort_by(.started_at) | last)')
+              | map(sort_by(.started_at) | last)
+              | map({name: .name, state: (
+                  if .status != "completed" then "pending"
+                  elif .conclusion == "success" then "success"
+                  elif .conclusion == "skipped" or .conclusion == "cancelled" then "skipped"
+                  else "failure" end
+                )})')
 
-          TOTAL=$(echo "$CHECKS" | jq 'length')
+          # Fetch commit statuses (used by CodeRabbit, external CI, etc.)
+          COMMIT_STATUSES=$(gh api "repos/$REPO/commits/$HEAD_SHA/status" \
+            --jq '[.statuses[] | {name: .context, state: (
+                if .state == "success" then "success"
+                elif .state == "pending" then "pending"
+                elif .state == "failure" or .state == "error" then "failure"
+                else "skipped" end
+              )}]' 2>/dev/null || echo '[]')
+
+          # Merge both sources, dedup by name (check runs take priority)
+          ALL_CHECKS=$(echo "$CHECK_RUNS"$'\n'"$COMMIT_STATUSES" \
+            | jq -s 'add // [] | group_by(.name) | map(.[0])')
+
+          TOTAL=$(echo "$ALL_CHECKS" | jq 'length')
 
           if [ "$TOTAL" = "0" ]; then
             CHECKS_FIELD="⏳ Pending"
           else
-            PASSING=$(echo "$CHECKS" | jq '[.[] | select(.conclusion=="success")] | length')
-            FAILING=$(echo "$CHECKS" | jq '[.[] | select(.conclusion | . == "failure" or . == "timed_out")] | length')
-            PENDING=$(echo "$CHECKS" | jq '[.[] | select(.status == "in_progress" or .status == "queued")] | length')
-            SKIPPED=$(echo "$CHECKS" | jq '[.[] | select(.conclusion | . == "skipped" or . == "cancelled")] | length')
+            PASSING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="success")] | length')
+            FAILING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="failure")] | length')
+            PENDING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="pending")] | length')
+            SKIPPED=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="skipped")] | length')
 
             CHECKS_FIELD=""
             [ "$PASSING" -gt 0 ] && CHECKS_FIELD="✅ $PASSING passed"
