@@ -39,9 +39,8 @@ import { ReactFlow, Background, SelectionMode, useReactFlow } from '@xyflow/reac
 import { Settings, Undo2, Redo2, Move, BoxSelect, PlusSquare } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 
-// Design tokens — light defaults, then VS Code overrides (cascade order matters)
+// Design tokens — light defaults
 import '../../../themes/rocketride-default.css';
-import '../../../themes/rocketride-vscode.css';
 import './reactflow-overrides.css';
 
 // Flow node components

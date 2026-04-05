@@ -12,23 +12,20 @@
  * boundary between host and view.
  */
 
-import React, { useState, useCallback, useRef, useEffect, lazy, Suspense, CSSProperties } from 'react';
+import React, { useState, useCallback, useRef, useEffect, CSSProperties } from 'react';
 
 // Theme CSS — defines --rr-* tokens in the iframe/webview context
 import '../../themes/rocketride-default.css';
-import '../../themes/rocketride-vscode.css';
 
 import { TabPanel } from '../../components/tab-panel/TabPanel';
 import { useTraceState } from './hooks/useTraceState';
 import { useElapsedTimer } from './hooks/useElapsedTimer';
-
-// Lazy-load all tab content so only the active tab's code is fetched
-const Canvas = lazy(() => import('../../components/canvas'));
-const Status = lazy(() => import('../../components/status/Status'));
-const Tokens = lazy(() => import('../../components/tokens/Tokens'));
-const Flow = lazy(() => import('../../components/flow/Flow'));
-const Trace = lazy(() => import('../../components/trace/Trace'));
-const Errors = lazy(() => import('../../components/errors/Errors'));
+import Canvas from '../../components/canvas';
+import Status from '../../components/status/Status';
+import Tokens from '../../components/tokens/Tokens';
+import Flow from '../../components/flow/Flow';
+import Trace from '../../components/trace/Trace';
+import Errors from '../../components/errors/Errors';
 import type { IProjectViewProps, ProjectViewMode } from './types';
 
 // =============================================================================
@@ -50,8 +47,8 @@ const styles = {
 		minHeight: 0,
 		overflow: 'auto',
 	} as CSSProperties,
-	canvasWrapper: {
-		flex: 1,
+	canvasPadding: {
+		padding: 2,
 		minHeight: 0,
 		width: '100%',
 		height: '100%',
@@ -143,52 +140,36 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 		},
 	];
 
-	// --- Panels (all rendered, TabPanel controls visibility) -----------------
+	// --- Panels (only the active panel is mounted) ----------------------------
 
 	const panels: Record<string, React.ReactNode> = {
 		design: (
-			<Suspense fallback={<div style={styles.empty}>Loading...</div>}>
-				<div style={styles.canvasWrapper}>
-					<Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} handleValidatePipeline={handleValidate} onContentChanged={onContentChanged} isConnected={isConnected} />
-				</div>
-			</Suspense>
+			<div style={styles.canvasPadding}>
+				<Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} handleValidatePipeline={handleValidate} onContentChanged={onContentChanged} isConnected={isConnected} />
+			</div>
 		),
 		status: (
-			<Suspense fallback={<div style={styles.empty}>Loading...</div>}>
-				<div style={styles.viewPadding}>
-					<Status taskStatus={taskStatus} currentElapsed={currentElapsed} />
-				</div>
-			</Suspense>
+			<div style={styles.viewPadding}>
+				<Status taskStatus={taskStatus} currentElapsed={currentElapsed} onPipelineAction={onPipelineAction} />
+			</div>
 		),
-		tokens: (
-			<Suspense fallback={<div style={styles.empty}>Loading...</div>}>
-				<div style={styles.viewPadding}>
-					<Tokens taskStatus={taskStatus} />
-				</div>
-			</Suspense>
-		),
+		tokens: <div style={styles.viewPadding}>{taskStatus?.tokens ? <Tokens taskStatus={taskStatus} /> : <div style={styles.empty}>No token data available</div>}</div>,
 		flow: (
-			<Suspense fallback={<div style={styles.empty}>Loading...</div>}>
-				<div style={styles.viewPadding}>
-					<Flow taskStatus={taskStatus} viewMode={flowViewMode} onViewModeChange={setFlowViewMode} />
-				</div>
-			</Suspense>
+			<div style={styles.viewPadding}>
+				<Flow taskStatus={taskStatus} viewMode={flowViewMode} onViewModeChange={setFlowViewMode} />
+			</div>
 		),
 		trace: (
-			<Suspense fallback={<div style={styles.empty}>Loading...</div>}>
-				<div style={styles.viewPadding}>
-					<Trace rows={traceRows} onClear={handleTraceClear} />
-				</div>
-			</Suspense>
+			<div style={styles.viewPadding}>
+				<Trace rows={traceRows} onClear={handleTraceClear} />
+			</div>
 		),
 		errors: (
-			<Suspense fallback={<div style={styles.empty}>Loading...</div>}>
-				<div style={styles.viewPadding}>
-					{errorCount > 0 && <Errors title="Errors" items={taskStatus!.errors} type="error" />}
-					{warningCount > 0 && <Errors title="Warnings" items={taskStatus!.warnings} type="warning" />}
-					{errorCount === 0 && warningCount === 0 && <div style={styles.empty}>No errors or warnings</div>}
-				</div>
-			</Suspense>
+			<div style={styles.viewPadding}>
+				{errorCount > 0 && <Errors title="Errors" items={taskStatus!.errors} type="error" />}
+				{warningCount > 0 && <Errors title="Warnings" items={taskStatus!.warnings} type="warning" />}
+				{errorCount === 0 && warningCount === 0 && <div style={styles.empty}>No errors or warnings</div>}
+			</div>
 		),
 	};
 
