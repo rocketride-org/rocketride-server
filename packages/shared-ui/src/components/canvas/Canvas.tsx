@@ -152,10 +152,9 @@ export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuse
 	return (
 		<ThemeProvider theme={currentTheme}>
 			<CssBaseline />
-			{/* Fixed-position container fills the entire viewport */}
 			<div
 				style={{
-					position: 'fixed',
+					position: 'absolute',
 					inset: 0,
 					display: 'flex',
 					flexDirection: 'column',

@@ -27,8 +27,8 @@
  * Exports the Flow component (as Canvas) and all shared types.
  */
 
-export { default as Canvas } from './modules/flow';
-export type { IFlowProps } from './modules/flow';
+export { default as Canvas } from './components/canvas';
+export type { IFlowProps } from './components/canvas';
 
 export { default as ServerMonitor } from './modules/server';
 export type { IServerMonitorProps } from './modules/server';
@@ -41,3 +41,6 @@ export type { IntegrationTabId } from './components/pipeline-actions/endpointInt
 
 export { TabPanel } from './components/tab-panel/TabPanel';
 export type { ITabPanelTab, ITabPanelProps } from './components/tab-panel/TabPanel';
+
+export { ProjectView } from './modules/project';
+export type { IProjectViewProps, IViewProps, ProjectViewMode, ProjectViewIncoming, ProjectViewOutgoing, TaskStatus, TraceEvent } from './modules/project';
