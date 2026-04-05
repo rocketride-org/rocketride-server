@@ -4,10 +4,12 @@
 // =============================================================================
 
 /**
- * StatusHeader — State badge and elapsed-time display for a running pipeline.
+ * StatusHeader — Full status header bar with state badge, Run/Stop button,
+ * and elapsed-time display.
  *
- * Ported from vscode StatusSection/StatusHeader.tsx.
- * Plain React + inline styles using --rr-* theme tokens. No MUI.
+ * Layout:
+ *   Left:  state indicator dot + "Running"/"Offline" + status subtitle
+ *   Right: Run/Stop button + "Started Xs ago"
  */
 
 import React from 'react';
@@ -19,17 +21,37 @@ import { ITaskState } from '../../types/project';
 // STYLES
 // =============================================================================
 
-const styles: Record<string, CSSProperties> = {
+const styles = {
+	header: {
+		display: 'flex',
+		justifyContent: 'space-between',
+		alignItems: 'flex-start',
+		gap: 16,
+		marginBottom: 16,
+	} as CSSProperties,
+	left: {
+		flex: 1,
+		minWidth: 0,
+	} as CSSProperties,
+	right: {
+		display: 'flex',
+		flexDirection: 'column',
+		alignItems: 'flex-end',
+		gap: 6,
+		flexShrink: 0,
+	} as CSSProperties,
+
+	// State badge
 	stack: {
 		display: 'flex',
 		flexDirection: 'column',
-		gap: '2px',
-	},
+		gap: 2,
+	} as CSSProperties,
 	badge: {
 		display: 'flex',
 		alignItems: 'center',
-		gap: '6px',
-	},
+		gap: 6,
+	} as CSSProperties,
 	indicatorBox: {
 		display: 'flex',
 		alignItems: 'center',
@@ -37,83 +59,75 @@ const styles: Record<string, CSSProperties> = {
 		width: 16,
 		height: 16,
 		flexShrink: 0,
-	},
-	indicator: {
-		width: 8,
-		height: 8,
-		borderRadius: '50%',
-		backgroundColor: 'var(--rr-text-secondary, #888)',
-	},
-	indicatorRunning: {
-		width: 8,
-		height: 8,
-		borderRadius: '50%',
-		backgroundColor: 'var(--rr-chart-green, #2e7d32)',
-		boxShadow: '0 0 4px var(--rr-chart-green, #2e7d32)',
-	},
-	indicatorInitializing: {
-		width: 8,
-		height: 8,
-		borderRadius: '50%',
-		backgroundColor: 'var(--rr-chart-blue, #1976d2)',
-	},
-	indicatorStopping: {
-		width: 8,
-		height: 8,
-		borderRadius: '50%',
-		backgroundColor: 'var(--rr-chart-purple, #9c27b0)',
-	},
-	indicatorCompleted: {
-		width: 8,
-		height: 8,
-		borderRadius: '50%',
-		backgroundColor: 'var(--rr-text-secondary, #888)',
-	},
-	indicatorOffline: {
-		width: 8,
-		height: 8,
-		borderRadius: '50%',
-		backgroundColor: 'var(--rr-text-secondary, #888)',
-		opacity: 0.5,
-	},
+	} as CSSProperties,
 	stateLabel: {
 		fontSize: 13,
 		fontWeight: 600,
-		color: 'var(--rr-text-primary, #e0e0e0)',
-	},
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
 	subtitle: {
 		display: 'flex',
 		alignItems: 'center',
-		gap: '6px',
+		gap: 6,
 		fontSize: 12,
-		color: 'var(--rr-brand, #1976d2)',
-	},
+		color: 'var(--rr-brand)',
+	} as CSSProperties,
+
+	// Elapsed
 	elapsed: {
 		fontSize: 12,
-		color: 'var(--rr-text-secondary, rgba(204,204,204,0.6))',
-	},
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
 	elapsedValue: {
 		fontWeight: 600,
-		color: 'var(--rr-text-primary, #e0e0e0)',
-	},
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+
+	// Action button
+	actionRow: {
+		display: 'flex',
+		gap: 6,
+	} as CSSProperties,
 };
+
+// Indicator dot styles by state
+const indicatorBase: CSSProperties = { width: 8, height: 8, borderRadius: '50%' };
+
+const indicators: Record<string, CSSProperties> = {
+	running: { ...indicatorBase, backgroundColor: 'var(--rr-color-success)', boxShadow: '0 0 4px var(--rr-color-success)' },
+	initializing: { ...indicatorBase, backgroundColor: 'var(--rr-color-info)' },
+	stopping: { ...indicatorBase, backgroundColor: 'var(--rr-color-warning)' },
+	completed: { ...indicatorBase, backgroundColor: 'var(--rr-text-secondary)' },
+	offline: { ...indicatorBase, backgroundColor: 'var(--rr-text-secondary)', opacity: 0.5 },
+};
+
+const actionBtnStyle = (variant: 'run' | 'stop' | 'disabled'): CSSProperties => ({
+	padding: '6px 16px',
+	fontSize: 'var(--rr-font-size-widget)',
+	fontWeight: 500,
+	borderRadius: 6,
+	border: 'none',
+	cursor: variant === 'disabled' ? 'default' : 'pointer',
+	opacity: variant === 'disabled' ? 0.5 : 1,
+	backgroundColor: variant === 'stop' ? 'var(--rr-color-error)' : 'var(--rr-brand)',
+	color: 'var(--rr-fg-button)',
+	transition: 'opacity 0.15s',
+});
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-interface StatusHeaderProps {
+export interface StatusHeaderProps {
 	taskStatus: ITaskStatus | null | undefined;
 	currentElapsed: number;
+	onPipelineAction?: (action: 'run' | 'stop' | 'restart') => void;
 }
 
 // =============================================================================
-// COMPONENT
+// HELPERS
 // =============================================================================
 
-/**
- * Format elapsed time for compact display.
- */
 const formatElapsedTime = (seconds: number): string => {
 	const totalSeconds = Math.floor(seconds);
 	if (totalSeconds < 60) return `${totalSeconds}s`;
@@ -128,9 +142,6 @@ const formatElapsedTime = (seconds: number): string => {
 	return `${hours}h ${minutes}m ${remainingSeconds}s`;
 };
 
-/**
- * Get task state display label.
- */
 const getTaskStateDisplay = (state: number): string => {
 	switch (state) {
 		case ITaskState.RUNNING:
@@ -150,75 +161,78 @@ const getTaskStateDisplay = (state: number): string => {
 	}
 };
 
-/**
- * Get the inline style for the status indicator dot based on state.
- */
-const getIndicatorStyle = (state: number): CSSProperties => {
+const getIndicator = (state: number): CSSProperties => {
 	switch (state) {
 		case ITaskState.RUNNING:
-			return styles.indicatorRunning;
+			return indicators.running;
 		case ITaskState.INITIALIZING:
-			return styles.indicatorInitializing;
+			return indicators.initializing;
 		case ITaskState.STOPPING:
-			return styles.indicatorStopping;
+			return indicators.stopping;
 		case ITaskState.COMPLETED:
-			return styles.indicatorCompleted;
-		case ITaskState.CANCELLED:
-			return styles.indicatorOffline;
-		case ITaskState.NONE:
-			return styles.indicatorOffline;
+			return indicators.completed;
 		default:
-			return styles.indicatorOffline;
+			return indicators.offline;
 	}
 };
 
-/**
- * StatusHeader Component
- *
- * Two-line stacked layout:
- * - Line 1: State badge (dot + Running / Initializing / etc.)
- * - Line 2: Job status message in accent color
- */
-export const StatusHeader: React.FC<StatusHeaderProps> = ({ taskStatus }) => {
-	const hasSubtitle = !!taskStatus?.status;
-
-	return (
-		<div style={styles.stack}>
-			<div style={styles.badge}>
-				<div style={styles.indicatorBox}>
-					<div style={taskStatus ? getIndicatorStyle(taskStatus.state) : styles.indicatorOffline} />
-				</div>
-				<span style={styles.stateLabel}>{taskStatus ? getTaskStateDisplay(taskStatus.state) : 'Offline'}</span>
-			</div>
-			<div
-				style={{
-					...styles.subtitle,
-					visibility: hasSubtitle ? 'visible' : 'hidden',
-				}}
-			>
-				<div style={styles.indicatorBox} />
-				<span>{taskStatus?.status || '\u00A0'}</span>
-			</div>
-		</div>
-	);
+const getControlButton = (state: number) => {
+	if (state === ITaskState.STOPPING) {
+		return { label: 'Stopping...', action: 'stop' as const, disabled: true, variant: 'disabled' as const };
+	}
+	if (state === ITaskState.RUNNING || state === ITaskState.INITIALIZING) {
+		return { label: 'Stop', action: 'stop' as const, disabled: false, variant: 'stop' as const };
+	}
+	return { label: 'Run', action: 'run' as const, disabled: false, variant: 'run' as const };
 };
 
-/**
- * StatusElapsed Component
- *
- * Renders "Started Xs ago" — placed in the right column by the parent layout.
- */
-export const StatusElapsed: React.FC<StatusHeaderProps> = ({ taskStatus, currentElapsed }) => {
-	const isVisible = !!taskStatus && taskStatus.startTime > 0 && !taskStatus.completed;
+// =============================================================================
+// COMPONENT
+// =============================================================================
+
+export const StatusHeader: React.FC<StatusHeaderProps> = ({ taskStatus, currentElapsed, onPipelineAction }) => {
+	const hasSubtitle = !!taskStatus?.status;
+	const state = taskStatus?.state ?? ITaskState.NONE;
+	const controlButton = getControlButton(state);
+	const showElapsed = !!taskStatus && taskStatus.startTime > 0 && !taskStatus.completed;
 
 	return (
-		<div
-			style={{
-				...styles.elapsed,
-				visibility: isVisible ? 'visible' : 'hidden',
-			}}
-		>
-			Started <span style={styles.elapsedValue}>{formatElapsedTime(currentElapsed)}</span> ago
+		<div style={styles.header}>
+			{/* Left: state badge */}
+			<div style={styles.left}>
+				<div style={styles.stack}>
+					<div style={styles.badge}>
+						<div style={styles.indicatorBox}>
+							<div style={getIndicator(state)} />
+						</div>
+						<span style={styles.stateLabel}>{getTaskStateDisplay(state)}</span>
+					</div>
+					<div style={{ ...styles.subtitle, visibility: hasSubtitle ? 'visible' : 'hidden' }}>
+						<div style={styles.indicatorBox} />
+						<span>{taskStatus?.status || '\u00A0'}</span>
+					</div>
+				</div>
+			</div>
+
+			{/* Right: action button + elapsed */}
+			<div style={styles.right}>
+				{onPipelineAction && (
+					<div style={styles.actionRow}>
+						<button
+							style={actionBtnStyle(controlButton.variant)}
+							disabled={controlButton.disabled}
+							onClick={() => {
+								if (!controlButton.disabled) onPipelineAction(controlButton.action);
+							}}
+						>
+							{controlButton.label}
+						</button>
+					</div>
+				)}
+				<div style={{ ...styles.elapsed, visibility: showElapsed ? 'visible' : 'hidden' }}>
+					Started <span style={styles.elapsedValue}>{formatElapsedTime(currentElapsed)}</span> ago
+				</div>
+			</div>
 		</div>
 	);
 };

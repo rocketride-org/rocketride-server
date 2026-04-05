@@ -5,13 +5,11 @@
 
 /**
  * TabPanel — centered pill-style tab bar with content panels.
- * Panels are rendered on first activation and kept mounted thereafter,
- * with visibility toggled via display. This avoids mounting hidden panels
- * (which causes issues with components like ReactFlow that need measured
- * containers) while still preserving state once a panel has been shown.
+ * Only the active panel is mounted; switching tabs unmounts the previous
+ * panel and mounts the new one.
  */
 
-import React, { useState, useEffect, CSSProperties } from 'react';
+import React, { CSSProperties } from 'react';
 
 // =============================================================================
 // STYLES
@@ -33,7 +31,7 @@ const styles = {
 		overflow: 'hidden',
 	} as CSSProperties,
 	segment: (active: boolean): CSSProperties => ({
-		padding: '4px 16px',
+		padding: '6px 16px',
 		fontSize: 'var(--rr-font-size-widget)',
 		fontWeight: 500,
 		cursor: 'pointer',
@@ -43,19 +41,20 @@ const styles = {
 		color: active ? 'var(--rr-fg-button)' : 'var(--rr-text-secondary)',
 		transition: 'background-color 0.15s, color 0.15s',
 	}),
-	badge: {
-		marginLeft: 4,
-		fontSize: 'var(--rr-font-size-widget)',
-		opacity: 0.8,
-	} as CSSProperties,
-	panelVisible: {
+	badge: (active: boolean): CSSProperties => ({
+		marginLeft: 6,
+		padding: '1px 6px',
+		fontSize: '10px',
+		fontWeight: 600,
+		borderRadius: 8,
+		backgroundColor: active ? 'color-mix(in srgb, var(--rr-fg-button) 30%, transparent)' : 'color-mix(in srgb, var(--rr-text-disabled) 20%, transparent)',
+		color: active ? 'var(--rr-fg-button)' : 'var(--rr-text-disabled)',
+	}),
+	panel: {
 		flex: 1,
 		minHeight: 0,
 		display: 'flex',
 		flexDirection: 'column',
-	} as CSSProperties,
-	panelHidden: {
-		display: 'none',
 	} as CSSProperties,
 };
 
@@ -73,7 +72,7 @@ export interface ITabPanelProps {
 	tabs: ITabPanelTab[];
 	activeTab: string;
 	onTabChange: (id: string) => void;
-	/** Map of tab id → content. Panels mount on first activation and stay mounted. */
+	/** Map of tab id → content. Only the active panel is mounted. */
 	panels: Record<string, React.ReactNode>;
 }
 
@@ -82,18 +81,6 @@ export interface ITabPanelProps {
 // =============================================================================
 
 export function TabPanel({ tabs, activeTab, onTabChange, panels }: ITabPanelProps): React.ReactElement {
-	// Track which panels have been activated at least once
-	const [activated, setActivated] = useState<Set<string>>(() => new Set([activeTab]));
-
-	useEffect(() => {
-		setActivated((prev) => {
-			if (prev.has(activeTab)) return prev;
-			const next = new Set(prev);
-			next.add(activeTab);
-			return next;
-		});
-	}, [activeTab]);
-
 	return (
 		<>
 			<div style={styles.bar}>
@@ -103,20 +90,13 @@ export function TabPanel({ tabs, activeTab, onTabChange, panels }: ITabPanelProp
 						return (
 							<button key={tab.id} type="button" style={styles.segment(isActive)} onClick={() => onTabChange(tab.id)}>
 								{tab.label}
-								{tab.badge && <span style={styles.badge}>{tab.badge}</span>}
+								{tab.badge && <span style={styles.badge(isActive)}>{tab.badge}</span>}
 							</button>
 						);
 					})}
 				</div>
 			</div>
-			{tabs.map((tab) => {
-				if (!activated.has(tab.id)) return null;
-				return (
-					<div key={tab.id} style={activeTab === tab.id ? styles.panelVisible : styles.panelHidden}>
-						{panels[tab.id]}
-					</div>
-				);
-			})}
+			<div style={styles.panel}>{panels[activeTab]}</div>
 		</>
 	);
 }

@@ -18,6 +18,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import type { ITaskStatus } from '../../types/project';
+import { StatusHeader } from './StatusHeader';
 import { CompletionsChart } from './CompletionsChart';
 import { StatusFooter } from './StatusFooter';
 import type { ChartStats, StatusDataPoint, TimeRange } from './types';
@@ -79,6 +80,7 @@ const styles: Record<string, CSSProperties> = {
 interface StatusProps {
 	taskStatus: ITaskStatus | null | undefined;
 	currentElapsed: number;
+	onPipelineAction?: (action: 'run' | 'stop' | 'restart') => void;
 }
 
 // =============================================================================
@@ -106,7 +108,7 @@ const buildEmptyPoints = (count: number, now: number): StatusDataPoint[] => {
 	return pts;
 };
 
-export const Status: React.FC<StatusProps> = ({ taskStatus, currentElapsed }) => {
+export const Status: React.FC<StatusProps> = ({ taskStatus, currentElapsed, onPipelineAction }) => {
 	// State
 	const [dataPoints, setDataPoints] = useState<StatusDataPoint[]>([]);
 	const [timeRange, setTimeRange] = useState<TimeRange>('1min');
@@ -210,6 +212,7 @@ export const Status: React.FC<StatusProps> = ({ taskStatus, currentElapsed }) =>
 
 	return (
 		<section style={styles.section}>
+			<StatusHeader taskStatus={taskStatus} currentElapsed={currentElapsed} onPipelineAction={onPipelineAction} />
 			<header style={styles.header}>
 				<span style={styles.headerLabel}>Performance Metrics</span>
 				<div style={styles.timeRangeButtons}>

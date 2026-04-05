@@ -20,92 +20,16 @@
 	line-height: 1.5;
 }
 
-/* ================================================================== */
-/* Header                                                              */
-/* ================================================================== */
-
-.sm-header {
+.sm-root-tabpanel {
 	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	margin-bottom: 16px;
+	flex-direction: column;
+	height: 100%;
+	padding: 0;
 }
 
-.sm-header-title {
-	font-weight: 600;
-	font-size: 15px;
-	color: var(--rr-text-primary);
-}
-
-.sm-refresh-btn {
-	padding: 5px 14px;
-	font-size: 12px;
-	font-weight: 500;
-	background: var(--rr-bg-paper);
-	color: var(--rr-text-secondary);
-	border: 1px solid var(--rr-border);
-	border-radius: 4px;
-	cursor: pointer;
-	font-family: inherit;
-	transition: all 0.2s;
-}
-
-.sm-refresh-btn:hover {
-	background: var(--rr-bg-widget-hover);
-	color: var(--rr-text-primary);
-	border-color: var(--rr-border-hover);
-}
-
-/* ================================================================== */
-/* Tab Bar                                                             */
-/* ================================================================== */
-
-.sm-tab-bar {
-	display: flex;
-	gap: 0;
-	border-bottom: 1px solid var(--rr-border);
-	margin-bottom: 20px;
-}
-
-.sm-tab {
-	padding: 10px 20px;
-	font-size: 13px;
-	font-weight: 500;
-	color: var(--rr-text-secondary);
-	cursor: pointer;
-	border: none;
-	border-bottom: 2px solid transparent;
-	background: none;
-	font-family: inherit;
-	transition: all 0.2s;
-	user-select: none;
-}
-
-.sm-tab:hover {
-	color: var(--rr-text-primary);
-	background: var(--rr-bg-widget-hover);
-}
-
-.sm-tab-active {
-	color: var(--rr-border-focus);
-	border-bottom-color: var(--rr-border-focus);
-	font-weight: 600;
-}
-
-.sm-tab-badge {
-	display: inline-block;
-	margin-left: 6px;
-	padding: 1px 7px;
-	font-size: 10px;
-	font-weight: 600;
-	border-radius: 8px;
-	background: rgba(128, 128, 128, 0.1);
-	color: var(--rr-text-disabled);
-	vertical-align: middle;
-}
-.sm-tab-active .sm-tab-badge {
-	background: var(--rr-border-focus);
-	color: var(--rr-bg-default);
+.sm-root-tabpanel > div:last-child {
+	padding: 15px;
+	overflow: auto;
 }
 
 /* ================================================================== */

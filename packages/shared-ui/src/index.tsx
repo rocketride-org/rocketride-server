@@ -32,6 +32,7 @@ export type { IFlowProps } from './components/canvas';
 
 export { default as ServerMonitor } from './modules/server';
 export type { IServerMonitorProps } from './modules/server';
+export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent } from './modules/server';
 export type { IProject, IValidateResponse, IServiceCatalog } from './types/project';
 
 export { default as EndpointInfoModal } from './components/pipeline-actions/EndpointInfoModal';
