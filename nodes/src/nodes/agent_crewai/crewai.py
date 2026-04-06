@@ -222,6 +222,10 @@ class CrewDriver(CrewAgentBase):
         return IInvokeCrew.DescribeResponse(
             role=self._role,
             task_description=self._task_description,
+            goal=self._goal,
+            backstory=self._backstory,
+            expected_output=self._expected_output,
+            instructions=list(self._instructions),
             node_id=node_id,
             invoke=pSelf,
         )
@@ -486,10 +490,15 @@ class ManagerDriver(CrewAgentBase):
                 ctx=ctx,
             )
 
+            sub_backstory = d.backstory or _DEFAULT_BACKSTORY
+            sub_instructions = [i.strip() for i in (d.instructions or []) if i and i.strip()]
+            if sub_instructions:
+                sub_backstory = sub_backstory + '\n\nInstructions:\n' + '\n'.join(f'- {i}' for i in sub_instructions)
+
             agent_obj = Agent(
                 role=d.role,
-                goal=_DEFAULT_GOAL,
-                backstory=_DEFAULT_BACKSTORY,
+                goal=d.goal or _DEFAULT_GOAL,
+                backstory=sub_backstory,
                 tools=sub_tools,
                 llm=sub_llm,
                 verbose=False,
@@ -506,7 +515,7 @@ class ManagerDriver(CrewAgentBase):
 
             task_obj = Task(
                 description=task_desc,
-                expected_output=_DEFAULT_EXPECTED_OUTPUT,
+                expected_output=d.expected_output or _DEFAULT_EXPECTED_OUTPUT,
                 agent=agent_obj,
             )
 

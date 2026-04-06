@@ -285,6 +285,10 @@ class IInvokeCrew(IInvoke):
         op: str = Field(default='crewai.describe', frozen=True)
         role: str
         task_description: str
+        goal: str = ''
+        backstory: str = ''
+        expected_output: str = ''
+        instructions: List[str] = Field(default_factory=list)
         node_id: str = ''  # pSelf.instance.pipeType['id'] — used to filter sub-agents from tool list
         invoke: Any = Field(default=None)  # full pSelf IInstance — passed to AgentHostServices(d.invoke)
         model_config = ConfigDict(extra='allow')
