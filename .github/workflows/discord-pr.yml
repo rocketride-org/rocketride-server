@@ -20,6 +20,7 @@ on:
   workflow_run:
     workflows: ['CI', 'PR checks']
     types: [completed]
+  workflow_call:
 
 permissions:
   contents: read
@@ -49,7 +50,7 @@ jobs:
           fi
 
           # ── Resolve PR number ────────────────────────────────────────────
-          if [ "$EVENT_NAME" = "pull_request" ]; then
+          if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "pull_request_target" ]; then
             PR_NUMBER="${{ github.event.pull_request.number }}"
           elif [ "$EVENT_NAME" = "check_run" ]; then
             HEAD_SHA="${{ github.event.check_run.head_sha }}"

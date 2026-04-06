@@ -22,3 +22,14 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           sync-labels: true
+
+  discord-notify:
+    needs: [label]
+    if: always()
+    uses: ./.github/workflows/discord-pr.yml
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      checks: read
+    secrets: inherit
