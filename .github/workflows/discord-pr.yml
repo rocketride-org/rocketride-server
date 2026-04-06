@@ -122,7 +122,7 @@ jobs:
           CHECK_RUNS=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" \
             --paginate --jq '[.check_runs[]]' 2>/dev/null \
             | jq -s --arg marker "$MATRIX_MARKER" 'add // []
-              | map(select((.name | contains($marker) | not) and .name != "notify"))
+              | map(select((.name | contains($marker) | not) and (.name | test("^(notify|discord-notify|Discord PR Notification)") | not)))
               | group_by(.name)
               | map(sort_by(.started_at) | last)
               | map({name: .name, state: (
@@ -131,7 +131,7 @@ jobs:
                   elif .conclusion == "skipped" or .conclusion == "cancelled" then "skipped"
                   else "failure" end
                 )})
-              + [{name: "notify", state: "success"}]')
+              + [{name: "notify", state: "success"}, {name: "discord-notify", state: "success"}]')
 
           COMMIT_STATUSES=$(gh api "repos/$REPO/commits/$HEAD_SHA/status" \
             --jq '[.statuses[] | {name: .context, state: (
