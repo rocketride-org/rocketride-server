@@ -137,6 +137,25 @@ engine:
   # -- Affinity rules for engine pods
   affinity: {}
 
+  # -- GPU configuration for engine pods
+  # When enabled, adds nvidia.com/gpu resource limits plus GPU-specific
+  # nodeSelector and tolerations. For autoscaling GPU workloads, disable
+  # the built-in HPA and use KEDA instead (see deploy/helm/examples/keda-gpu-scaling.yaml).
+  gpu:
+    # -- Enable GPU resource requests
+    enabled: false
+    # -- Number of GPUs to request per pod
+    count: '1'
+    # -- Additional node selector labels for GPU nodes
+    # Example: { "accelerator": "nvidia-a100" }
+    nodeSelector: {}
+    # -- Additional tolerations for GPU nodes
+    # Example:
+    #   - key: nvidia.com/gpu
+    #     operator: Exists
+    #     effect: NoSchedule
+    tolerations: []
+
   # -- Pod-level annotations
   podAnnotations: {}
 

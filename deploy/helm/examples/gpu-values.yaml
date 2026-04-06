@@ -1,0 +1,35 @@
+# Example: Deploy RocketRide with NVIDIA GPU support
+#
+# Use this with: helm install rocketride deploy/helm/rocketride -f deploy/helm/examples/gpu-values.yaml
+#
+# Prerequisites:
+#   1. NVIDIA GPU drivers installed on nodes (or NVIDIA GPU Operator)
+#   2. NVIDIA device plugin deployed: https://github.com/NVIDIA/k8s-device-plugin
+#   3. GPU nodes labeled and tainted (see nodeSelector/tolerations below)
+#
+# For autoscaling GPU workloads, disable the built-in HPA and use KEDA instead.
+# See deploy/helm/examples/keda-gpu-scaling.yaml.
+
+engine:
+  gpu:
+    enabled: true
+    count: '1'
+    nodeSelector:
+      accelerator: nvidia-gpu
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+  # Increase memory for GPU workloads
+  resources:
+    requests:
+      cpu: '1'
+      memory: 4Gi
+    limits:
+      cpu: '4'
+      memory: 8Gi
+
+  # Disable CPU/memory HPA -- it cannot observe GPU utilization
+  autoscaling:
+    enabled: false
