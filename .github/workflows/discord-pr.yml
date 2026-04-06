@@ -153,9 +153,12 @@ jobs:
             PENDING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="pending")] | length')
             SKIPPED=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="skipped")] | length')
 
-            CHECKS_FIELD="✅ $PASSING passed · ❌ $FAILING failed"
-            [ "$PENDING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD} · 🔄 $PENDING running"
-            [ "$SKIPPED" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD} · ⏭️ $SKIPPED skipped"
+            CHECKS_FIELD=""
+            [ "$PASSING" -gt 0 ] && CHECKS_FIELD="✅ $PASSING passed"
+            [ "$FAILING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD:+$CHECKS_FIELD · }❌ $FAILING failed"
+            [ "$PENDING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD:+$CHECKS_FIELD · }🔄 $PENDING running"
+            [ "$SKIPPED" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD:+$CHECKS_FIELD · }⏭️ $SKIPPED skipped"
+            [ -z "$CHECKS_FIELD" ] && CHECKS_FIELD="⏳ Pending"
           fi
 
           # ── Build payload ────────────────────────────────────────────────
