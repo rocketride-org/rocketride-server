@@ -26,8 +26,7 @@
 """
 v0 by Vercel tool node - global (shared) state.
 
-Reads the v0 API key from config and creates a V0Driver that implements the
-ToolsBase interface for generating React UI components from text prompts.
+Reads the v0 API key from config and stores it for IInstance tool methods.
 """
 
 from __future__ import annotations
@@ -35,13 +34,11 @@ from __future__ import annotations
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
-from .v0_driver import V0Driver
-
 
 class IGlobal(IGlobalBase):
     """Global state for tool_v0."""
 
-    driver: V0Driver | None = None
+    apikey: str = ''
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -49,16 +46,10 @@ class IGlobal(IGlobalBase):
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        apikey = str((cfg.get('apikey') or '')).strip()
+        self.apikey = str((cfg.get('apikey') or '')).strip()
 
-        if not apikey:
+        if not self.apikey:
             raise Exception('tool_v0: apikey is required')
-
-        try:
-            self.driver = V0Driver(server_name='v0', apikey=apikey)
-        except Exception as e:
-            warning(str(e))
-            raise
 
     def validateConfig(self) -> None:
         try:
@@ -70,4 +61,4 @@ class IGlobal(IGlobalBase):
             warning(str(e))
 
     def endGlobal(self) -> None:
-        self.driver = None
+        self.apikey = ''
