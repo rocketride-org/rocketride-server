@@ -75,6 +75,8 @@ class PreProcessor(PreProcessorBase):
         """
         Parse a quoted, comma-separated string into a list of actual separator strings.
         """
+        if not isinstance(user_input, str):
+            raise ValueError(f'Separator input must be a string, got {type(user_input).__name__}')
         if len(user_input) > self._MAX_SEPARATOR_INPUT_LEN:
             raise ValueError(f'Separator input too long ({len(user_input)} chars, max {self._MAX_SEPARATOR_INPUT_LEN})')
         try:
