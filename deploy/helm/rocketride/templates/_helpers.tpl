@@ -73,6 +73,17 @@ Return the secret name for engine credentials
 {{- end }}
 
 {{/*
+Validate that engine secrets are configured.
+Users must provide credentials via engine.existingSecret or engine.secrets.
+This prevents deploying with missing API keys.
+*/}}
+{{- define "rocketride.validateSecrets" -}}
+{{- if and (not .Values.engine.existingSecret) (not .Values.engine.secrets) }}
+{{- fail "Engine secrets must be configured. Set engine.secrets with your API keys or provide engine.existingSecret referencing a pre-created Kubernetes Secret." }}
+{{- end }}
+{{- end }}
+
+{{/*
 Return the engine image reference
 */}}
 {{- define "rocketride.engine.image" -}}
