@@ -14,6 +14,7 @@ Runs without a live server -- tiktoken is mocked where needed.
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 import types
 from typing import Any, Dict
@@ -24,20 +25,20 @@ import pytest
 # ---------------------------------------------------------------------------
 # Stub external dependencies so the optimizer module can be imported without
 # a running RocketRide server or tiktoken installed in the test env.
+#
+# Stubs are applied via patch.dict(sys.modules, ...) so they do not leak
+# into other test files in the same pytest session.
 # ---------------------------------------------------------------------------
 
-_STUBS_INSTALLED = False
 
-
-def _install_stubs() -> None:
-    global _STUBS_INSTALLED
-    if _STUBS_INSTALLED:
-        return
+def _build_stub_modules():
+    """Build stub modules dict for use with patch.dict(sys.modules, ...)."""
+    stubs = {}
 
     # depends
     mod_depends = types.ModuleType('depends')
     mod_depends.depends = lambda *_a, **_k: None
-    sys.modules['depends'] = mod_depends
+    stubs['depends'] = mod_depends
 
     # rocketlib
     rocketlib = types.ModuleType('rocketlib')
@@ -58,18 +59,18 @@ def _install_stubs() -> None:
     rocketlib.IInstanceBase = _IInstanceBase
     rocketlib.Entry = _Entry
     rocketlib.OPEN_MODE = _OPEN_MODE
-    rocketlib.debug = lambda *a, **k: None
-    rocketlib.warning = lambda *a, **k: None
-    sys.modules['rocketlib'] = rocketlib
+    rocketlib.debug = lambda *_a, **_k: None
+    rocketlib.warning = lambda *_a, **_k: None
+    stubs['rocketlib'] = rocketlib
 
     # ai.common.config
     ai_pkg = types.ModuleType('ai')
     ai_pkg.__path__ = []
-    sys.modules['ai'] = ai_pkg
+    stubs['ai'] = ai_pkg
 
     ai_common = types.ModuleType('ai.common')
     ai_common.__path__ = []
-    sys.modules['ai.common'] = ai_common
+    stubs['ai.common'] = ai_common
 
     ai_config = types.ModuleType('ai.common.config')
 
@@ -79,24 +80,24 @@ def _install_stubs() -> None:
             return {}
 
     ai_config.Config = _Config
-    sys.modules['ai.common.config'] = ai_config
+    stubs['ai.common.config'] = ai_config
 
     # ai.common.schema -- minimal Question stub
     ai_schema = types.ModuleType('ai.common.schema')
 
     class _QuestionText:
-        def __init__(self, text='', embedding_model=None, embedding=None):
+        def __init__(self, text='', embedding_model=None, embedding=None) -> None:
             self.text = text
             self.embedding_model = embedding_model
             self.embedding = embedding
 
     class _QuestionHistory:
-        def __init__(self, role='', content=''):
+        def __init__(self, role='', content='') -> None:
             self.role = role
             self.content = content
 
     class _Doc:
-        def __init__(self, page_content='', **kwargs):
+        def __init__(self, page_content='', **kwargs) -> None:
             self.page_content = page_content
             self._data = kwargs
 
@@ -109,7 +110,7 @@ def _install_stubs() -> None:
             return self.model_dump()
 
     class _Question:
-        def __init__(self, **kwargs):
+        def __init__(self, **kwargs) -> None:
             self.role = kwargs.get('role', '')
             self.questions = kwargs.get('questions', [])
             self.documents = kwargs.get('documents', [])
@@ -119,10 +120,10 @@ def _install_stubs() -> None:
             self.examples = kwargs.get('examples', [])
             self.goals = kwargs.get('goals', [])
             self.type = kwargs.get('type', 'question')
-            self.filter = kwargs.get('filter', None)
+            self.filter = kwargs.get('filter')
             self.expectJson = kwargs.get('expectJson', False)
 
-        def addQuestion(self, text):
+        def addQuestion(self, text) -> None:
             self.questions.append(_QuestionText(text=text))
 
     ai_schema.Question = _Question
@@ -132,26 +133,22 @@ def _install_stubs() -> None:
     ai_schema.Answer = MagicMock
     ai_schema.QuestionType = MagicMock
     ai_schema.DocFilter = MagicMock
-    sys.modules['ai.common.schema'] = ai_schema
+    stubs['ai.common.schema'] = ai_schema
 
-    _STUBS_INSTALLED = True
+    return stubs
 
 
-_install_stubs()
+_STUB_MODULES = _build_stub_modules()
 
 # ---------------------------------------------------------------------------
-# Now import the optimizer -- tiktoken must be available (install or mock).
-# We try a real import first; if unavailable we create a mock.
+# Check for tiktoken availability.  find_spec returns None (no exception)
+# when the package is absent, so the mock setup must run outside the except
+# block -- otherwise it is unreachable in the normal missing-module case.
 # ---------------------------------------------------------------------------
 
-try:
-    import importlib.util
+_TIKTOKEN_AVAILABLE = importlib.util.find_spec('tiktoken') is not None
 
-    _TIKTOKEN_AVAILABLE = importlib.util.find_spec('tiktoken') is not None
-except Exception:
-    _TIKTOKEN_AVAILABLE = False
-
-    # Build a mock tiktoken module
+if not _TIKTOKEN_AVAILABLE:
     tiktoken_mod = types.ModuleType('tiktoken')
 
     class _MockEncoding:
@@ -172,10 +169,22 @@ except Exception:
 
     tiktoken_mod.get_encoding = _get_encoding
     tiktoken_mod.Encoding = _MockEncoding
-    sys.modules['tiktoken'] = tiktoken_mod
+    _STUB_MODULES['tiktoken'] = tiktoken_mod
 
-# Import the optimizer after stubs + tiktoken are available
+# Apply stubs via patch.dict so they are cleaned up when the patcher is
+# stopped.  We start the patcher at module level (stubs must be visible to
+# lifecycle tests that import IGlobal/IInstance inside test methods) and
+# stop it in a module-level teardown so the fakes do not leak into
+# subsequent test files in the same pytest session.
+_patcher = patch.dict(sys.modules, _STUB_MODULES)
+_patcher.start()
+
 from nodes.src.nodes.context_optimizer.optimizer import ContextOptimizer
+
+
+def teardown_module() -> None:
+    """Remove stub modules after all tests in this file have run."""
+    _patcher.stop()
 
 
 # ===========================================================================

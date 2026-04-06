@@ -60,12 +60,17 @@ class IInstance(IInstanceBase):
         query_texts = [q.text for q in (question.questions or []) if q.text]
         query_str = ' '.join(query_texts)
 
-        # Convert documents to optimizer format
+        # Convert documents to optimizer format, preserving all fields (e.g. score)
         docs = []
         for doc in question.documents or []:
             doc_dict = doc.model_dump() if hasattr(doc, 'model_dump') else doc.dict()
-            content = doc_dict.get('page_content', '')
-            docs.append({'content': content, '_original': doc})
+            docs.append(
+                {
+                    **doc_dict,
+                    'content': doc_dict.get('content', doc_dict.get('page_content', '')),
+                    '_original': doc,
+                }
+            )
 
         # Convert history to optimizer format
         history = [{'role': h.role, 'content': h.content} for h in (question.history or [])]
@@ -84,13 +89,13 @@ class IInstance(IInstanceBase):
         question.role = result['system_prompt'] or ''
 
         # Update questions -- replace text with optimized version
-        if question.questions and result['question']:
+        if question.questions:
             # Keep the first question's embedding info but update text
-            question.questions[0].text = result['question']
+            question.questions[0].text = result['question'] or ''
             # Remove any extra questions that were merged
             if len(question.questions) > 1:
                 question.questions = [question.questions[0]]
-        elif not question.questions and result['question']:
+        elif result['question']:
             debug(f'context_optimizer: optimized question text produced but question.questions is empty, discarding: {result["question"][:200]}')
 
         # Update documents -- keep only the selected ones
@@ -98,9 +103,8 @@ class IInstance(IInstanceBase):
             selected_originals = [d['_original'] for d in result['documents'] if '_original' in d]
             question.documents = selected_originals
 
-        # Update history
-        if result['history']:
-            question.history = [QuestionHistory(role=m['role'], content=m['content']) for m in result['history']]
+        # Update history -- always apply optimizer result (empty list clears history)
+        question.history = [QuestionHistory(role=m['role'], content=m['content']) for m in result['history']]
 
         # ---- Attach optimization metadata as context ----
         meta = result['metadata']
