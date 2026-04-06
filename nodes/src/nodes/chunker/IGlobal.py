@@ -41,7 +41,7 @@ class IGlobal(IGlobalBase):
 
             requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
             depends(requirements)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - intentional broad catch for dependency probing
             warning(str(e))
 
     def beginGlobal(self):
@@ -59,6 +59,13 @@ class IGlobal(IGlobalBase):
             chunk_size = int(config.get('chunk_size', 1000))
             chunk_overlap = int(config.get('chunk_overlap', 200))
             encoding_name = config.get('encoding_name', 'cl100k_base')
+
+            if chunk_size <= 0:
+                raise ValueError(f'chunk_size must be positive, got {chunk_size}')
+            if chunk_overlap < 0:
+                raise ValueError(f'chunk_overlap must be non-negative, got {chunk_overlap}')
+            if chunk_overlap >= chunk_size:
+                raise ValueError(f'chunk_overlap ({chunk_overlap}) must be less than chunk_size ({chunk_size})')
 
             # Build the appropriate strategy
             if strategy_name == 'token':
