@@ -17,14 +17,23 @@
  * visible. If the viewport shrinks, the toolbar floats inward. When
  * the viewport grows again, it returns to its stored position.
  * The stored value is never modified by resize — only by user drag.
+ *
+ * When within 30px of the left or right edge, the toolbar switches to
+ * vertical orientation automatically.
  */
 
 import { ReactElement, ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 
-import { GripVertical } from 'lucide-react';
+import { GripVertical, GripHorizontal } from 'lucide-react';
 
 // =============================================================================
-// Position type
+// CONSTANTS
+// =============================================================================
+
+const EDGE_THRESHOLD = 30;
+
+// =============================================================================
+// POSITION TYPE
 // =============================================================================
 
 export interface IToolbarPosition {
@@ -42,7 +51,7 @@ const DEFAULT_POSITION: IToolbarPosition = {
 };
 
 // =============================================================================
-// Props
+// PROPS
 // =============================================================================
 
 interface IFloatingToolbarProps {
@@ -52,7 +61,7 @@ interface IFloatingToolbarProps {
 }
 
 // =============================================================================
-// Component
+// COMPONENT
 // =============================================================================
 
 export default function FloatingToolbar({ children, position = DEFAULT_POSITION, onPositionChange }: IFloatingToolbarProps): ReactElement {
@@ -84,6 +93,8 @@ export default function FloatingToolbar({ children, position = DEFAULT_POSITION,
 		observer.observe(parent);
 		return () => observer.disconnect();
 	}, []);
+
+	// --- Position helpers ---------------------------------------------------
 
 	/**
 	 * Converts the stored anchor position to clamped pixel coordinates.
@@ -147,7 +158,40 @@ export default function FloatingToolbar({ children, position = DEFAULT_POSITION,
 		};
 	}, []);
 
-	// --- Drag handlers ---
+	// --- Orientation (vertical when in an edge zone) -------------------------
+	// Only switches when entering a zone — stays in current orientation otherwise.
+
+	const [orientation, setOrientation] = useState<'horizontal' | 'vertical'>(() => (storedPos.offsetX < EDGE_THRESHOLD ? 'vertical' : 'horizontal'));
+
+	// Sync orientation when stored position changes (e.g. preference restored)
+	useEffect(() => {
+		setOrientation(storedPos.offsetX < EDGE_THRESHOLD ? 'vertical' : 'horizontal');
+	}, [storedPos]);
+
+	/**
+	 * Determine orientation from the mouse cursor's proximity to parent edges.
+	 * Uses the cursor — not toolbar bounds — so it's stable across dimension changes.
+	 * Only activates when the cursor is within EDGE_THRESHOLD of any edge.
+	 * Nearest side edge → vertical. Nearest top/bottom edge → horizontal (preferred on tie).
+	 */
+	const checkOrientation = useCallback((clientX: number, clientY: number) => {
+		const parent = toolbarRef.current?.parentElement;
+		if (!parent) return;
+		const r = parent.getBoundingClientRect();
+		const mx = clientX - r.left;
+		const my = clientY - r.top;
+
+		const nearestSide = Math.min(mx, r.width - mx);
+		const nearestTopBottom = Math.min(my, r.height - my);
+
+		if (nearestSide >= EDGE_THRESHOLD && nearestTopBottom >= EDGE_THRESHOLD) return;
+
+		setOrientation(nearestSide < nearestTopBottom ? 'vertical' : 'horizontal');
+	}, []);
+
+	const isVertical = orientation === 'vertical';
+
+	// --- Drag handlers -----------------------------------------------------
 
 	const onMouseDown = useCallback(
 		(e: React.MouseEvent) => {
@@ -183,6 +227,8 @@ export default function FloatingToolbar({ children, position = DEFAULT_POSITION,
 			const newLeft = dragStart.current.left + (e.clientX - dragStart.current.mouseX);
 			const newTop = dragStart.current.top + (e.clientY - dragStart.current.mouseY);
 
+			checkOrientation(e.clientX, e.clientY);
+
 			// Clamp during drag
 			const clampedLeft = Math.max(0, Math.min(newLeft, parentRect.width - toolbar.offsetWidth));
 			const clampedTop = Math.max(0, Math.min(newTop, parentRect.height - toolbar.offsetHeight));
@@ -214,6 +260,8 @@ export default function FloatingToolbar({ children, position = DEFAULT_POSITION,
 		};
 	}, [isDragging, dragPixels, pixelsToAnchor, onPositionChange]);
 
+	// --- Render ------------------------------------------------------------
+
 	// Use drag pixels during drag, clamped stored position otherwise
 	const rendered = isDragging && dragPixels ? dragPixels : getRenderedPosition();
 
@@ -225,13 +273,14 @@ export default function FloatingToolbar({ children, position = DEFAULT_POSITION,
 				position: 'absolute',
 				left: `${rendered.left}px`,
 				top: `${rendered.top}px`,
-				zIndex: 10,
+				zIndex: 20,
 				userSelect: isDragging ? 'none' : 'auto',
 			}}
 		>
 			<div
 				style={{
 					display: 'flex',
+					flexDirection: isVertical ? 'column' : 'row',
 					alignItems: 'center',
 					border: '1px solid var(--rr-border)',
 					borderRadius: '4px',
@@ -240,27 +289,28 @@ export default function FloatingToolbar({ children, position = DEFAULT_POSITION,
 					boxShadow: '0px 3px 1px -2px rgba(0,0,0,0.2), 0px 2px 2px 0px rgba(0,0,0,0.14), 0px 1px 5px 0px rgba(0,0,0,0.12)',
 				}}
 			>
-				{/* Drag handle — vertical grip dots */}
+				{/* Drag handle */}
 				<div
 					onMouseDown={onMouseDown}
 					style={{
 						display: 'flex',
 						alignItems: 'center',
 						cursor: isDragging ? 'grabbing' : 'grab',
-						padding: '4px 2px',
+						padding: isVertical ? '2px 4px' : '4px 2px',
 						color: 'var(--rr-text-disabled)',
 					}}
 				>
-					<GripVertical size={14} />
+					{isVertical ? <GripHorizontal size={14} /> : <GripVertical size={14} />}
 				</div>
 
 				{/* Toolbar content */}
 				<div
 					style={{
 						display: 'flex',
+						flexDirection: isVertical ? 'column' : 'row',
 						alignItems: 'center',
 						gap: '4px',
-						padding: '4px 8px 4px 4px',
+						padding: isVertical ? '4px 4px 8px' : '4px 8px 4px 4px',
 					}}
 				>
 					{children}
