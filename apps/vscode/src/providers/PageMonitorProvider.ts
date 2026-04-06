@@ -4,7 +4,7 @@
 // =============================================================================
 
 /**
- * Dashboard Page Provider for Server Monitor
+ * Monitor Page Provider for Server Monitor
  *
  * Creates and manages a webview panel showing the <ServerMonitor /> component.
  * Handles DAP communication (rrext_dashboard polling + apaevt_dashboard events)
@@ -18,12 +18,12 @@ import { getLogger } from '../shared/util/output';
 import { ConnectionManager } from '../connection/connection';
 import { MonitorManager } from '../connection/monitor-manager';
 import { ConnectionStatus, ConnectionState, GenericEvent } from '../shared/types';
-import type { PageDashboardIncomingMessage } from '../shared/types/pageDashboard';
+import type { PageMonitorIncomingMessage } from '../shared/types/pageMonitor';
 import type { DashboardResponse, DashboardEvent } from 'rocketride';
 
 const POLL_INTERVAL_MS = 5_000;
 
-export class PageDashboardProvider {
+export class PageMonitorProvider {
 	private panel: vscode.WebviewPanel | null = null;
 	private pollTimer: ReturnType<typeof setInterval> | null = null;
 	private disposables: vscode.Disposable[] = [];
@@ -43,7 +43,7 @@ export class PageDashboardProvider {
 	// =========================================================================
 
 	private registerCommands(): void {
-		const cmd = vscode.commands.registerCommand('rocketride.page.dashboard.open', () => {
+		const cmd = vscode.commands.registerCommand('rocketride.page.monitor.open', () => {
 			this.show();
 		});
 		this.disposables.push(cmd);
@@ -60,7 +60,7 @@ export class PageDashboardProvider {
 			return;
 		}
 
-		const panel = vscode.window.createWebviewPanel('rocketride.pageDashboard', 'Server Monitor', vscode.ViewColumn.One, {
+		const panel = vscode.window.createWebviewPanel('rocketride.pageMonitor', 'Server Monitor', vscode.ViewColumn.One, {
 			enableScripts: true,
 			retainContextWhenHidden: true,
 			localResourceRoots: [this.context.extensionUri],
@@ -76,7 +76,7 @@ export class PageDashboardProvider {
 					case 'ready':
 						await this.fetchAndPost();
 						this.subscribeDashboardEvents().catch((err) => {
-							this.logger.error(`[PageDashboardProvider] Event subscription error: ${err}`);
+							this.logger.error(`[PageMonitorProvider] Event subscription error: ${err}`);
 						});
 						this.startPolling();
 						break;
@@ -85,7 +85,7 @@ export class PageDashboardProvider {
 						break;
 				}
 			} catch (error) {
-				this.logger.error(`[PageDashboardProvider] Message handling error: ${error}`);
+				this.logger.error(`[PageMonitorProvider] Message handling error: ${error}`);
 			}
 		});
 
@@ -115,30 +115,30 @@ export class PageDashboardProvider {
 		try {
 			const response = await this.connectionManager.request('rrext_dashboard', {});
 			if (!response) {
-				this.logger.error(`[PageDashboardProvider] No response from rrext_dashboard`);
+				this.logger.error(`[PageMonitorProvider] No response from rrext_dashboard`);
 				return;
 			}
 			if (!response.success) {
-				this.logger.error(`[PageDashboardProvider] rrext_dashboard failed: ${response.message}`);
+				this.logger.error(`[PageMonitorProvider] rrext_dashboard failed: ${response.message}`);
 				return;
 			}
 			if (response.body) {
 				// response.body is GenericBody (Record<string, any>) — upcast to the
 				// concrete dashboard shape returned by rrext_dashboard.
-				const msg: PageDashboardIncomingMessage = {
+				const msg: PageMonitorIncomingMessage = {
 					type: 'dashboardData',
 					data: response.body as DashboardResponse,
 				};
 				await this.panel.webview.postMessage(msg);
 			}
 		} catch (error) {
-			this.logger.error(`[PageDashboardProvider] Failed to fetch dashboard: ${error}`);
+			this.logger.error(`[PageMonitorProvider] Failed to fetch dashboard: ${error}`);
 		} finally {
 			this.fetchInProgress = false;
 			if (this.fetchPending) {
 				this.fetchPending = false;
 				this.fetchAndPost().catch((err) => {
-					this.logger.error(`[PageDashboardProvider] Coalesced fetch error: ${err}`);
+					this.logger.error(`[PageMonitorProvider] Coalesced fetch error: ${err}`);
 				});
 			}
 		}
@@ -151,7 +151,7 @@ export class PageDashboardProvider {
 			await MonitorManager.getInstance().addMonitor({ token: '*' }, ['task', 'summary', 'dashboard']);
 			this.hasWildcardMonitor = true;
 		} catch (error) {
-			this.logger.error(`[PageDashboardProvider] Failed to subscribe dashboard events: ${error}`);
+			this.logger.error(`[PageMonitorProvider] Failed to subscribe dashboard events: ${error}`);
 		}
 	}
 
@@ -159,7 +159,7 @@ export class PageDashboardProvider {
 		if (!this.hasWildcardMonitor) return;
 		try {
 			await MonitorManager.getInstance().removeMonitor({ token: '*' }, ['task', 'summary', 'dashboard']);
-		} catch (_error) {
+		} catch {
 			// Best-effort; connection may already be gone
 		}
 		this.hasWildcardMonitor = false;
@@ -173,7 +173,7 @@ export class PageDashboardProvider {
 		this.stopPolling();
 		this.pollTimer = setInterval(() => {
 			this.fetchAndPost().catch((error) => {
-				this.logger.error(`[PageDashboardProvider] Poll error: ${error}`);
+				this.logger.error(`[PageMonitorProvider] Poll error: ${error}`);
 			});
 		}, POLL_INTERVAL_MS);
 	}
@@ -192,7 +192,7 @@ export class PageDashboardProvider {
 	private setupEventListeners(): void {
 		const connectionStateListener = this.connectionManager.on('connectionStateChanged', (status: ConnectionStatus) => {
 			this.handleConnectionStateChange(status).catch((error) => {
-				this.logger.error(`[PageDashboardProvider] Connection state change error: ${error}`);
+				this.logger.error(`[PageMonitorProvider] Connection state change error: ${error}`);
 			});
 		});
 
@@ -206,7 +206,7 @@ export class PageDashboardProvider {
 	private async handleConnectionStateChange(status: ConnectionStatus): Promise<void> {
 		if (!this.panel) return;
 
-		const msg: PageDashboardIncomingMessage = { type: 'connectionState', state: status.state };
+		const msg: PageMonitorIncomingMessage = { type: 'connectionState', state: status.state };
 		await this.panel.webview.postMessage(msg);
 
 		if (status.state === ConnectionState.CONNECTED) {
@@ -223,17 +223,17 @@ export class PageDashboardProvider {
 
 		if (event.event === 'apaevt_task') {
 			this.fetchAndPost().catch((err) => {
-				this.logger.error(`[PageDashboardProvider] Refresh error: ${err}`);
+				this.logger.error(`[PageMonitorProvider] Refresh error: ${err}`);
 			});
 			this.panel.webview.postMessage({ type: 'taskEvent', body: event.body as Record<string, unknown> }).then(undefined, (err: unknown) => {
-				this.logger.error(`[PageDashboardProvider] Failed to post task event: ${err}`);
+				this.logger.error(`[PageMonitorProvider] Failed to post task event: ${err}`);
 			});
 		} else if (event.event === 'apaevt_dashboard') {
 			this.fetchAndPost().catch((err) => {
-				this.logger.error(`[PageDashboardProvider] Refresh error: ${err}`);
+				this.logger.error(`[PageMonitorProvider] Refresh error: ${err}`);
 			});
 			this.panel.webview.postMessage({ type: 'dashboardEvent', body: event.body as DashboardEvent }).then(undefined, (err: unknown) => {
-				this.logger.error(`[PageDashboardProvider] Failed to post dashboard event: ${err}`);
+				this.logger.error(`[PageMonitorProvider] Failed to post dashboard event: ${err}`);
 			});
 		}
 	}
@@ -244,7 +244,7 @@ export class PageDashboardProvider {
 
 	private getHtmlForWebview(webview: vscode.Webview): string {
 		const nonce = this.generateNonce();
-		const htmlPath = vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'page-dashboard.html');
+		const htmlPath = vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'page-monitor.html');
 
 		try {
 			let htmlContent = readFileSync(htmlPath.fsPath, 'utf8');

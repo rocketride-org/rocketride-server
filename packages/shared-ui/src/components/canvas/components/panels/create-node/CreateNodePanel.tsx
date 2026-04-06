@@ -24,6 +24,7 @@ import { Search } from 'lucide-react';
 import { useFlowGraph } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
 import { IService, IServiceCapabilities } from '../../../types';
+import { commonStyles } from '../../../../../themes/styles';
 
 // =============================================================================
 // Constants
@@ -92,10 +93,8 @@ const styles = {
 		backgroundColor: 'var(--rr-bg-widget-header)',
 	},
 	headerTitle: {
+		...commonStyles.labelUppercase,
 		fontWeight: 700,
-		textTransform: 'uppercase' as const,
-		letterSpacing: '0.5px',
-		fontSize: '11px',
 	},
 	closeButton: {
 		background: 'none',
@@ -129,6 +128,7 @@ const styles = {
 		minHeight: 0,
 	},
 	sectionHeader: {
+		...commonStyles.labelUppercase,
 		display: 'flex',
 		alignItems: 'center',
 		height: '22px',
@@ -136,9 +136,6 @@ const styles = {
 		cursor: 'pointer',
 		userSelect: 'none' as const,
 		fontWeight: 700,
-		fontSize: '11px',
-		textTransform: 'uppercase' as const,
-		letterSpacing: '0.5px',
 	},
 	chevron: {
 		width: '16px',
@@ -160,11 +157,7 @@ const styles = {
 		height: '16px',
 		flexShrink: 0,
 	},
-	itemTitle: {
-		whiteSpace: 'nowrap' as const,
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-	},
+	itemTitle: commonStyles.textEllipsis,
 	badge: {
 		fontSize: '9px',
 		padding: '1px 4px',

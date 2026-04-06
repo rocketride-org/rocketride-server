@@ -4,9 +4,9 @@
 // =============================================================================
 
 /**
- * PageDashboard — Thin host wrapper for the <ServerMonitor /> shared component.
+ * PageMonitor — Thin host wrapper for the <ServerMonitor /> shared component.
  *
- * Receives data from the PageDashboardProvider via useMessaging and passes it
+ * Receives data from the PageMonitorProvider via useMessaging and passes it
  * as props to the shared-ui ServerMonitor component.
  */
 
@@ -14,18 +14,20 @@ import React, { useState, useCallback } from 'react';
 import ServerMonitor, { type ActivityEvent } from 'shared/modules/server';
 import type { DashboardResponse } from 'rocketride';
 import { useMessaging } from '../../../shared/util/useMessaging';
-import '../../styles/vscode.css';
-import type { PageDashboardIncomingMessage } from '../../../shared/types/pageDashboard';
+import 'shared/themes/rocketride-default.css';
+import 'shared/themes/rocketride-vscode.css';
+import '../../styles/root.css';
+import type { PageMonitorIncomingMessage } from '../../../shared/types/pageMonitor';
 type OutgoingMessage = { type: 'ready' } | { type: 'refresh' };
 
 const MAX_EVENTS = 100;
 
-export const PageDashboard: React.FC = () => {
+export const PageMonitor: React.FC = () => {
 	const [data, setData] = useState<DashboardResponse | null>(null);
 	const [events, setEvents] = useState<ActivityEvent[]>([]);
 	const [isConnected, setIsConnected] = useState(true);
 
-	const handleMessage = useCallback((message: PageDashboardIncomingMessage) => {
+	const handleMessage = useCallback((message: PageMonitorIncomingMessage) => {
 		switch (message.type) {
 			case 'dashboardData':
 				setData(message.data);
@@ -42,7 +44,7 @@ export const PageDashboard: React.FC = () => {
 		}
 	}, []);
 
-	const { sendMessage } = useMessaging<OutgoingMessage, PageDashboardIncomingMessage>({
+	const { sendMessage } = useMessaging<OutgoingMessage, PageMonitorIncomingMessage>({
 		onMessage: handleMessage,
 	});
 

@@ -15,3 +15,4 @@
 export { default } from './Canvas';
 export type { IFlowProps } from './Canvas';
 export * from './types';
+export { CanvasToolbarProvider, useCanvasToolbar } from './context/CanvasToolbarContext';

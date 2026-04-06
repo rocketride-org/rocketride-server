@@ -18,6 +18,7 @@
 
 import React, { ReactElement, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { commonStyles } from '../../themes/styles';
 import EndpointInfoModal from './EndpointInfoModal';
 
 // =============================================================================
@@ -52,53 +53,51 @@ const styles: Record<string, CSSProperties> = {
 		gap: '6px',
 		width: '100%',
 		backgroundColor: 'var(--rr-bg-surface-alt, var(--rr-bg-paper))',
-		border: '1px solid var(--rr-border, #dcdcdc)',
+		border: '1px solid var(--rr-border)',
 		borderRadius: '4px',
 		padding: '3px 6px',
 	},
 	endpointLabel: {
 		fontSize: '9px',
-		color: 'var(--rr-text-disabled, #666)',
+		color: 'var(--rr-text-disabled)',
 		flexShrink: 0,
 	},
 	endpointValue: {
 		flex: 1,
 		minWidth: 0,
 		fontSize: '9px',
-		fontFamily: 'monospace',
-		color: 'var(--rr-text-secondary, #666)',
-		whiteSpace: 'nowrap',
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
+		...commonStyles.fontMono,
+		color: 'var(--rr-text-secondary)',
+		...commonStyles.textEllipsis,
 	},
 	endpointCopyBtn: {
 		...btnSmBase,
 		height: '14px',
 		padding: '0 5px',
 		fontSize: '8px',
-		border: '1px solid var(--rr-border, #dcdcdc)',
+		border: '1px solid var(--rr-border)',
 		backgroundColor: 'transparent',
-		color: 'var(--rr-text-secondary, #666)',
+		color: 'var(--rr-text-secondary)',
 		flexShrink: 0,
 	},
 	endpointCopyBtnSuccess: {
-		backgroundColor: 'var(--rr-accent, #007acc)',
-		borderColor: 'var(--rr-accent, #007acc)',
-		color: 'var(--rr-fg-button, #fff)',
+		backgroundColor: 'var(--rr-accent)',
+		borderColor: 'var(--rr-accent)',
+		color: 'var(--rr-fg-button)',
 	},
 	primaryBtn: {
 		...btnSmBase,
 		flex: 1,
 		border: 'none',
-		backgroundColor: 'var(--rr-accent, #007acc)',
-		color: 'var(--rr-fg-button, #fff)',
+		backgroundColor: 'var(--rr-accent)',
+		color: 'var(--rr-fg-button)',
 	},
 	secondaryBtn: {
 		...btnSmBase,
 		flex: 1,
-		border: '1px solid var(--rr-border, #dcdcdc)',
-		backgroundColor: 'var(--rr-bg-paper, #fff)',
-		color: 'var(--rr-text-secondary, #666)',
+		border: '1px solid var(--rr-border)',
+		backgroundColor: 'var(--rr-bg-paper)',
+		color: 'var(--rr-text-secondary)',
 	},
 };
 

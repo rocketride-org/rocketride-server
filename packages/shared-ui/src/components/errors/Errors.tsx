@@ -15,24 +15,17 @@
 
 import React from 'react';
 import type { CSSProperties } from 'react';
+import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
-// STYLES
+// STYLES (component-specific only)
 // =============================================================================
 
 const styles: Record<string, CSSProperties> = {
-	section: {
-		display: 'flex',
-		flexDirection: 'column',
-		gap: '8px',
-	},
 	header: {
 		display: 'flex',
 		alignItems: 'center',
-		gap: '8px',
-		fontSize: '13px',
-		fontWeight: 600,
-		color: 'var(--rr-text-primary, #ccc)',
+		gap: 8,
 	},
 	countBadge: {
 		display: 'inline-flex',
@@ -46,7 +39,7 @@ const styles: Record<string, CSSProperties> = {
 		fontWeight: 600,
 		lineHeight: 1,
 		color: '#fff',
-		backgroundColor: 'var(--rr-brand, #007acc)',
+		backgroundColor: 'var(--rr-brand)',
 	},
 	content: {
 		display: 'flex',
@@ -61,8 +54,8 @@ const styles: Record<string, CSSProperties> = {
 		gap: '4px',
 		padding: '6px 8px',
 		borderRadius: '4px',
-		border: '1px solid var(--rr-border, #333)',
-		backgroundColor: 'var(--rr-bg-default, #1e1e1e)',
+		border: '1px solid var(--rr-border)',
+		backgroundColor: 'var(--rr-bg-default)',
 	},
 	errorHeader: {
 		display: 'flex',
@@ -81,15 +74,15 @@ const styles: Record<string, CSSProperties> = {
 	},
 	errorBadge: {
 		color: '#fff',
-		backgroundColor: 'var(--rr-color-error, #f44747)',
+		backgroundColor: 'var(--rr-color-error)',
 	},
 	warningBadge: {
 		color: '#fff',
-		backgroundColor: 'var(--rr-color-warning, #cca700)',
+		backgroundColor: 'var(--rr-color-warning)',
 	},
 	message: {
 		fontSize: '12px',
-		color: 'var(--rr-text-primary, #ccc)',
+		color: 'var(--rr-text-primary)',
 		wordBreak: 'break-word',
 	},
 	location: {
@@ -99,22 +92,20 @@ const styles: Record<string, CSSProperties> = {
 	},
 	fileInfo: {
 		fontSize: '11px',
-		fontFamily: 'monospace',
-		color: 'var(--rr-text-secondary, #999)',
+		...commonStyles.fontMono,
+		color: 'var(--rr-text-secondary)',
 	},
 	fileName: {
 		fontWeight: 600,
 	},
 	lineNumber: {
-		color: 'var(--rr-text-secondary, #999)',
+		color: 'var(--rr-text-secondary)',
 	},
 	fullPath: {
 		fontSize: '10px',
-		color: 'var(--rr-text-secondary, #999)',
+		color: 'var(--rr-text-secondary)',
 		opacity: 0.7,
-		whiteSpace: 'nowrap',
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
+		...commonStyles.textEllipsis,
 	},
 };
 
@@ -188,9 +179,9 @@ export const Errors: React.FC<ErrorsProps> = ({ title, items, type }) => {
 	};
 
 	return (
-		<section style={styles.section}>
+		<section style={commonStyles.section}>
 			<header style={styles.header}>
-				{title}
+				<span style={commonStyles.sectionHeaderLabel}>{title}</span>
 				<span style={styles.countBadge}>{items.length}</span>
 			</header>
 

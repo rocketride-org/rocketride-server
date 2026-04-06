@@ -56,8 +56,7 @@ import QuickAddPopup from './panels/quick-add/QuickAddPopup';
 
 import { useFlowGraph } from '../context/FlowGraphContext';
 import { useFlowPreferences, NavigationMode } from '../context/FlowPreferencesContext';
-import { FloatingToolbar } from './toolbar';
-import type { IToolbarPosition } from './toolbar/FloatingToolbar';
+import { useCanvasToolbar } from '../context/CanvasToolbarContext';
 import CreateNodePanel from './panels/create-node/CreateNodePanel';
 import EmptyCanvasPrompt from './EmptyCanvasPrompt';
 import NodeConfigPanel from './panels/node-config';
@@ -116,7 +115,7 @@ export default function Canvas(): ReactElement {
 	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onToolchainUpdated, isFlowReady } = useFlowGraph();
 
 	// --- Preferences from context ------------------------------------------
-	const { navigationMode, setNavigationMode, isLocked, toggleLock, projectLayout, getPreference, setPreference } = useFlowPreferences();
+	const { navigationMode, setNavigationMode, isLocked, toggleLock, projectLayout } = useFlowPreferences();
 
 	const { features, onUndo, onRedo } = useFlowProject();
 	const { fitView, zoomIn, zoomOut } = useReactFlow();
@@ -161,18 +160,6 @@ export default function Canvas(): ReactElement {
 	const editable = !isLocked;
 	const isPanMode = navigationMode === NavigationMode.DRAG;
 
-	// --- Toolbar position from preferences ---------------------------------
-	const defaultToolbarPos: IToolbarPosition = { anchorX: 'right', offsetX: 20, anchorY: 'top', offsetY: 20 };
-	const storedToolbarPos = getPreference('toolbarPosition') as IToolbarPosition | undefined;
-	const toolbarPosition = storedToolbarPos?.anchorX ? storedToolbarPos : defaultToolbarPos;
-
-	const onToolbarPositionChange = useCallback(
-		(pos: IToolbarPosition) => {
-			setPreference('toolbarPosition', pos);
-		},
-		[setPreference]
-	);
-
 	// --- Annotation shortcut -----------------------------------------------
 	const addAnnotation = useCallback(() => {
 		addNode(
@@ -212,7 +199,7 @@ export default function Canvas(): ReactElement {
 		return () => document.removeEventListener('keydown', handler, true);
 	}, [setNodes]);
 
-	// --- Toolbar button style ----------------------------------------------
+	// --- Canvas toolbar component (registered in context for external use) ---
 	const iconButtonStyle: React.CSSProperties = {
 		padding: '4px',
 		color: 'var(--rr-text-secondary)',
@@ -226,77 +213,66 @@ export default function Canvas(): ReactElement {
 		height: 28,
 	};
 
+	const canvasToolbar = (
+		<>
+			<button
+				title="Add node"
+				onClick={() => {
+					setShowCreatePanel((v) => {
+						if (!v) setEditingNodeId(undefined);
+						return !v;
+					});
+				}}
+				style={{ ...iconButtonStyle, color: showCreatePanel ? 'var(--rr-accent)' : iconButtonStyle.color }}
+			>
+				<PlusSquare size={16} />
+			</button>
+			{features.addAnnotation && (
+				<button title="Add annotation" onClick={addAnnotation} style={iconButtonStyle}>
+					<NoteIcon color="currentColor" size={18} />
+				</button>
+			)}
+			<button title={isLocked ? 'Unlock canvas' : 'Lock canvas'} onClick={toggleLock} style={iconButtonStyle}>
+				{isLocked ? <LockIcon color="currentColor" size={18} /> : <UnlockIcon color="currentColor" size={18} />}
+			</button>
+			<button title="Fit to screen" onClick={() => fitView()} style={iconButtonStyle}>
+				<FitIcon color="currentColor" size={18} />
+			</button>
+			{features.autoLayout !== false && (
+				<button title="Tidy layout" onClick={autoLayout} disabled={isLayouting || nodes.length === 0} style={iconButtonStyle}>
+					<TidyIcon color="currentColor" size={18} />
+				</button>
+			)}
+			<button title="Zoom in" onClick={() => zoomIn()} style={iconButtonStyle}>
+				<ZoomInIcon color="currentColor" size={18} />
+			</button>
+			<button title="Zoom out" onClick={() => zoomOut()} style={iconButtonStyle}>
+				<ZoomOutIcon color="currentColor" size={18} />
+			</button>
+			{onUndo && (
+				<button title="Undo" onClick={onUndo} style={iconButtonStyle}>
+					<Undo2 size={16} />
+				</button>
+			)}
+			{onRedo && (
+				<button title="Redo" onClick={onRedo} style={iconButtonStyle}>
+					<Redo2 size={16} />
+				</button>
+			)}
+			<button title={isPanMode ? 'Switch to lasso select' : 'Switch to pan'} onClick={() => setNavigationMode(isPanMode ? NavigationMode.SELECT : NavigationMode.DRAG)} style={iconButtonStyle}>
+				{isPanMode ? <BoxSelect size={16} /> : <Move size={16} />}
+			</button>
+		</>
+	);
+
+	// Register toolbar in context so ProjectView can render it in the tab bar
+	const { setToolbar } = useCanvasToolbar();
+	useEffect(() => {
+		setToolbar(canvasToolbar);
+	});
+
 	return (
 		<div ref={canvasRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
-			{/* Floating toolbar — draggable, position persisted as % */}
-			<FloatingToolbar position={toolbarPosition} onPositionChange={onToolbarPositionChange}>
-				{/* Add Node — toggles the create-node panel */}
-				<button
-					title="Add node"
-					onClick={() => {
-						setShowCreatePanel((v) => {
-							if (!v) setEditingNodeId(undefined);
-							return !v;
-						});
-					}}
-					style={{
-						...iconButtonStyle,
-						color: showCreatePanel ? 'var(--rr-accent)' : iconButtonStyle.color,
-					}}
-				>
-					<PlusSquare size={16} />
-				</button>
-
-				{/* Add Annotation */}
-				{features.addAnnotation && (
-					<button title="Add annotation" onClick={addAnnotation} style={iconButtonStyle}>
-						<NoteIcon color="currentColor" size={18} />
-					</button>
-				)}
-
-				{/* Lock / Unlock */}
-				<button title={isLocked ? 'Unlock canvas' : 'Lock canvas'} onClick={toggleLock} style={iconButtonStyle}>
-					{isLocked ? <LockIcon color="currentColor" size={18} /> : <UnlockIcon color="currentColor" size={18} />}
-				</button>
-
-				{/* Fit view */}
-				<button title="Fit to screen" onClick={() => fitView()} style={iconButtonStyle}>
-					<FitIcon color="currentColor" size={18} />
-				</button>
-
-				{/* Auto-layout (Tidy) */}
-				{features.autoLayout !== false && (
-					<button title="Tidy layout" onClick={autoLayout} disabled={isLayouting || nodes.length === 0} style={iconButtonStyle}>
-						<TidyIcon color="currentColor" size={18} />
-					</button>
-				)}
-
-				{/* Zoom in / out */}
-				<button title="Zoom in" onClick={() => zoomIn()} style={iconButtonStyle}>
-					<ZoomInIcon color="currentColor" size={18} />
-				</button>
-				<button title="Zoom out" onClick={() => zoomOut()} style={iconButtonStyle}>
-					<ZoomOutIcon color="currentColor" size={18} />
-				</button>
-
-				{/* Undo / Redo */}
-				{onUndo && (
-					<button title="Undo" onClick={onUndo} style={iconButtonStyle}>
-						<Undo2 size={16} />
-					</button>
-				)}
-				{onRedo && (
-					<button title="Redo" onClick={onRedo} style={iconButtonStyle}>
-						<Redo2 size={16} />
-					</button>
-				)}
-
-				{/* Navigation mode toggle */}
-				<button title={isPanMode ? 'Switch to lasso select' : 'Switch to pan'} onClick={() => setNavigationMode(isPanMode ? NavigationMode.SELECT : NavigationMode.DRAG)} style={iconButtonStyle}>
-					{isPanMode ? <BoxSelect size={16} /> : <Move size={16} />}
-				</button>
-			</FloatingToolbar>
-
 			<ReactFlow
 				nodes={nodes}
 				edges={edges}

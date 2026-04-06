@@ -21,6 +21,7 @@ import { IService, IServiceCapabilities, IServiceLane } from '../../../types';
 import { getOutputLaneDisplayValues } from '../../../util/helpers';
 import { generateNodeId } from '../../../util';
 import { getIconPath } from '../../../util/get-icon-path';
+import { commonStyles } from '../../../../../themes/styles';
 
 // =============================================================================
 // Positioning
@@ -133,11 +134,7 @@ const styles = {
 		height: '16px',
 		flexShrink: 0,
 	},
-	itemTitle: {
-		whiteSpace: 'nowrap' as const,
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-	},
+	itemTitle: commonStyles.textEllipsis,
 	badge: {
 		fontSize: '9px',
 		padding: '1px 4px',

@@ -16,62 +16,11 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import type { CSSProperties } from 'react';
 import type { ITaskStatus } from '../../types/project';
-import { StatusHeader } from './StatusHeader';
+import { commonStyles } from '../../themes/styles';
 import { CompletionsChart } from './CompletionsChart';
 import { StatusFooter } from './StatusFooter';
 import type { ChartStats, StatusDataPoint, TimeRange } from './types';
-
-// =============================================================================
-// STYLES
-// =============================================================================
-
-const styles: Record<string, CSSProperties> = {
-	section: {
-		display: 'flex',
-		flexDirection: 'column',
-		gap: '8px',
-		width: '100%',
-	},
-	header: {
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'space-between',
-	},
-	headerLabel: {
-		fontSize: 13,
-		fontWeight: 600,
-		color: 'var(--rr-text-primary, #e0e0e0)',
-	},
-	timeRangeButtons: {
-		display: 'flex',
-		gap: '4px',
-	},
-	timeBtn: {
-		padding: '2px 8px',
-		fontSize: 11,
-		border: '1px solid var(--rr-border, #444)',
-		borderRadius: 3,
-		backgroundColor: 'transparent',
-		color: 'var(--rr-text-secondary, rgba(204,204,204,0.6))',
-		cursor: 'pointer',
-	},
-	timeBtnActive: {
-		padding: '2px 8px',
-		fontSize: 11,
-		border: '1px solid var(--rr-brand, #1976d2)',
-		borderRadius: 3,
-		backgroundColor: 'var(--rr-brand, #1976d2)',
-		color: '#fff',
-		cursor: 'pointer',
-	},
-	content: {
-		display: 'flex',
-		flexDirection: 'column',
-		gap: '4px',
-	},
-};
 
 // =============================================================================
 // TYPES
@@ -80,7 +29,8 @@ const styles: Record<string, CSSProperties> = {
 interface StatusProps {
 	taskStatus: ITaskStatus | null | undefined;
 	currentElapsed: number;
-	onPipelineAction?: (action: 'run' | 'stop' | 'restart') => void;
+	/** When true, the built-in StatusHeader is hidden (caller renders its own). */
+	hideHeader?: boolean;
 }
 
 // =============================================================================
@@ -108,7 +58,7 @@ const buildEmptyPoints = (count: number, now: number): StatusDataPoint[] => {
 	return pts;
 };
 
-export const Status: React.FC<StatusProps> = ({ taskStatus, currentElapsed, onPipelineAction }) => {
+export const Status: React.FC<StatusProps> = ({ taskStatus, currentElapsed }) => {
 	// State
 	const [dataPoints, setDataPoints] = useState<StatusDataPoint[]>([]);
 	const [timeRange, setTimeRange] = useState<TimeRange>('1min');
@@ -211,22 +161,19 @@ export const Status: React.FC<StatusProps> = ({ taskStatus, currentElapsed, onPi
 	}, []);
 
 	return (
-		<section style={styles.section}>
-			<StatusHeader taskStatus={taskStatus} currentElapsed={currentElapsed} onPipelineAction={onPipelineAction} />
-			<header style={styles.header}>
-				<span style={styles.headerLabel}>Performance Metrics</span>
-				<div style={styles.timeRangeButtons}>
+		<section>
+			<div style={commonStyles.cardHeader}>
+				<span style={commonStyles.sectionHeaderLabel}>Performance Metrics</span>
+				<div style={commonStyles.toggleGroup}>
 					{(['1min', '5min', '15min', 'all'] as TimeRange[]).map((range) => (
-						<button key={range} style={timeRange === range ? styles.timeBtnActive : styles.timeBtn} onClick={() => setTimeRange(range)}>
+						<button key={range} style={commonStyles.toggleButton(timeRange === range)} onClick={() => setTimeRange(range)}>
 							{range === '1min' ? '1 min' : range === '5min' ? '5 min' : range === '15min' ? '15 min' : 'All'}
 						</button>
 					))}
 				</div>
-			</header>
-			<div style={styles.content}>
-				<CompletionsChart dataPoints={dataPoints} timeRange={timeRange} onTimeRangeChange={setTimeRange} currentElapsed={currentElapsed} onStatsCalculated={setChartStats} />
-				<StatusFooter stats={chartStats} />
 			</div>
+			<CompletionsChart dataPoints={dataPoints} timeRange={timeRange} onTimeRangeChange={setTimeRange} currentElapsed={currentElapsed} onStatsCalculated={setChartStats} />
+			<StatusFooter stats={chartStats} />
 		</section>
 	);
 };

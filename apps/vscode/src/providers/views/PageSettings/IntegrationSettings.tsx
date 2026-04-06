@@ -22,7 +22,11 @@
 // =============================================================================
 
 import React from 'react';
-import { SettingsData } from './PageSettings';
+import { SettingsData, settingsStyles as S } from './PageSettings';
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 interface IntegrationSettingsProps {
 	settings: SettingsData;
@@ -30,6 +34,10 @@ interface IntegrationSettingsProps {
 }
 
 type BooleanKeys<T> = { [K in keyof T]: T[K] extends boolean ? K : never }[keyof T];
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
 
 const INTEGRATIONS: { key: BooleanKeys<SettingsData>; label: string; description: string }[] = [
 	{
@@ -64,30 +72,34 @@ const INTEGRATIONS: { key: BooleanKeys<SettingsData>; label: string; description
 	},
 ];
 
+// ============================================================================
+// COMPONENT
+// ============================================================================
+
 export const IntegrationSettings: React.FC<IntegrationSettingsProps> = ({ settings, onSettingsChange }) => {
 	return (
-		<div className="section">
-			<div className="section-title">Integrations</div>
-			<div className="section-description">Enable integrations with AI coding assistants</div>
+		<div style={S.section}>
+			<div style={S.sectionTitle}>Integrations</div>
+			<div style={S.sectionDescription}>Enable integrations with AI coding assistants</div>
 
-			<div className="form-grid">
-				<div className="form-group">
-					<div className="checkbox-group">
-						<label>
-							<input type="checkbox" checked={!!settings.autoAgentIntegration} onChange={(e) => onSettingsChange({ autoAgentIntegration: e.target.checked })} aria-describedby="autoAgentIntegration-help" />
-							<span>Automatic Agent Integration</span>
+			<div style={S.formGrid}>
+				<div style={S.formGroup}>
+					<div style={S.checkboxGroup}>
+						<label style={S.checkboxLabel}>
+							<input type="checkbox" checked={!!settings.autoAgentIntegration} onChange={(e) => onSettingsChange({ autoAgentIntegration: e.target.checked })} aria-describedby="autoAgentIntegration-help" style={S.checkboxInput} />
+							<span style={S.checkboxSpan}>Automatic Agent Integration</span>
 						</label>
-						<div id="autoAgentIntegration-help" className="help-text">
+						<div id="autoAgentIntegration-help" style={S.checkboxHelpText}>
 							Automatically detect and install RocketRide documentation for coding agents on startup
 						</div>
 
 						{INTEGRATIONS.map(({ key, label, description }) => (
 							<React.Fragment key={key}>
-								<label>
-									<input type="checkbox" checked={!!settings[key]} onChange={(e) => onSettingsChange({ [key]: e.target.checked })} aria-describedby={`${key}-help`} />
-									<span>{label}</span>
+								<label style={S.checkboxLabel}>
+									<input type="checkbox" checked={!!settings[key]} onChange={(e) => onSettingsChange({ [key]: e.target.checked })} aria-describedby={`${key}-help`} style={S.checkboxInput} />
+									<span style={S.checkboxSpan}>{label}</span>
 								</label>
-								<div id={`${key}-help`} className="help-text">
+								<div id={`${key}-help`} style={S.checkboxHelpText}>
 									{description}
 								</div>
 							</React.Fragment>

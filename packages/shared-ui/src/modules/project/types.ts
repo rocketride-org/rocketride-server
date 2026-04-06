@@ -90,22 +90,15 @@ export type ProjectViewOutgoing = CanvasOutgoing | StatusOutgoing | TraceOutgoin
 
 export type ProjectViewMode = 'design' | 'status' | 'tokens' | 'flow' | 'trace' | 'errors';
 
-/** ProjectView props — data in, callbacks out. */
-export interface IProjectViewProps {
-	project: any;
-	servicesJson: Record<string, any>;
-	isConnected: boolean;
-	taskStatus?: TaskStatus | null;
-	traceEvents?: TraceEvent[];
-	initialState?: Record<string, unknown>;
+/** ProjectView ref handle — imperative API for the host bridge. */
+export interface ProjectViewRef {
+	handleMessage: (msg: ProjectViewIncoming) => void;
+}
 
-	onContentChanged?: (project: any) => void;
-	onSave?: () => void;
-	onValidate?: (pipeline: any) => Promise<any>;
-	onStateChange?: (state: Record<string, unknown>) => void;
-	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
-	onOpenExternal?: (url: string) => void;
-	onTraceClear?: () => void;
+/** ProjectView props — outgoing callbacks only. All incoming data flows via ref.handleMessage. */
+export interface IProjectViewProps {
+	/** Send outgoing messages back to the host. */
+	onMessage?: (msg: ProjectViewOutgoing) => void;
 }
 
 /** Base view props (for ServerView, WelcomeView, etc.). */

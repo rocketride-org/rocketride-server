@@ -3,8 +3,11 @@
 // Copyright (c) 2026 Aparavi Software AG
 // =============================================================================
 
-import { PageDashboard } from './PageDashboard';
+// Make sure react is setup prior to loading shared-ui components
+import './setup.react';
+
+import { PageProject } from './PageProject';
 import { mountComponent } from '../../../shared/util/mount';
 
-mountComponent(PageDashboard, 'Dashboard');
-export default PageDashboard;
+mountComponent(PageProject, 'PageProject');
+export default PageProject;

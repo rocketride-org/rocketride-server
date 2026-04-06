@@ -4,7 +4,11 @@
 // =============================================================================
 
 /**
- * TabPanel — centered pill-style tab bar with content panels.
+ * TabPanel — pill-style tab bar with content panels and an actions slot.
+ *
+ * Layout:  [ pill tabs ]                              [ actions ]
+ *          [ ──────────────── panel content ──────────────────── ]
+ *
  * Only the active panel is mounted; switching tabs unmounts the previous
  * panel and mounts the new one.
  */
@@ -18,17 +22,23 @@ import React, { CSSProperties } from 'react';
 const styles = {
 	bar: {
 		display: 'flex',
-		justifyContent: 'center',
 		alignItems: 'center',
 		flexShrink: 0,
 		backgroundColor: 'var(--rr-bg-paper)',
-		padding: '10px 0px 6px 0px',
+		padding: '15px',
 	} as CSSProperties,
 	pill: {
 		display: 'flex',
 		borderRadius: 6,
 		border: '1px solid var(--rr-border)',
 		overflow: 'hidden',
+		height: 34,
+	} as CSSProperties,
+	actions: {
+		marginLeft: 'auto',
+		display: 'flex',
+		alignItems: 'center',
+		gap: 2,
 	} as CSSProperties,
 	segment: (active: boolean): CSSProperties => ({
 		padding: '6px 16px',
@@ -53,6 +63,7 @@ const styles = {
 	panel: {
 		flex: 1,
 		minHeight: 0,
+		overflow: 'auto',
 		display: 'flex',
 		flexDirection: 'column',
 	} as CSSProperties,
@@ -68,12 +79,17 @@ export interface ITabPanelTab {
 	badge?: React.ReactNode;
 }
 
+export interface ITabPanelPanel {
+	content: React.ReactNode;
+	actions?: React.ReactNode;
+}
+
 export interface ITabPanelProps {
 	tabs: ITabPanelTab[];
 	activeTab: string;
 	onTabChange: (id: string) => void;
-	/** Map of tab id → content. Only the active panel is mounted. */
-	panels: Record<string, React.ReactNode>;
+	/** Map of tab id → { content, actions? }. Only the active panel is mounted. */
+	panels: Record<string, ITabPanelPanel>;
 }
 
 // =============================================================================
@@ -81,6 +97,8 @@ export interface ITabPanelProps {
 // =============================================================================
 
 export function TabPanel({ tabs, activeTab, onTabChange, panels }: ITabPanelProps): React.ReactElement {
+	const activePanel = panels[activeTab];
+
 	return (
 		<>
 			<div style={styles.bar}>
@@ -95,8 +113,13 @@ export function TabPanel({ tabs, activeTab, onTabChange, panels }: ITabPanelProp
 						);
 					})}
 				</div>
+				{activePanel?.actions && <div style={styles.actions}>{activePanel.actions}</div>}
 			</div>
-			<div style={styles.panel}>{panels[activeTab]}</div>
+			{Object.entries(panels).map(([id, panel]) => (
+				<div key={id} style={{ ...styles.panel, display: id === activeTab ? undefined : 'none' }}>
+					{panel.content}
+				</div>
+			))}
 		</>
 	);
 }

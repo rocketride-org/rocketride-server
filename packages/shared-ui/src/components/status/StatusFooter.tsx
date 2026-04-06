@@ -33,17 +33,17 @@ const styles: Record<string, CSSProperties> = {
 	},
 	label: {
 		fontSize: 11,
-		color: 'var(--rr-text-secondary, rgba(204,204,204,0.6))',
+		color: 'var(--rr-text-secondary)',
 	},
 	value: {
 		fontSize: 11,
 		fontWeight: 600,
-		color: 'var(--rr-text-primary, #e0e0e0)',
+		color: 'var(--rr-text-primary)',
 	},
 	separator: {
 		width: 1,
 		height: 12,
-		backgroundColor: 'var(--rr-border, #444)',
+		backgroundColor: 'var(--rr-border)',
 	},
 };
 

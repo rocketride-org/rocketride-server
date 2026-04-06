@@ -4,50 +4,22 @@
 // =============================================================================
 
 import React, { CSSProperties } from 'react';
-import type { TaskStatus, FlowData, Pipeline } from '../../modules/project/types';
+import type { TaskStatus, Pipeline } from '../../modules/project/types';
+import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
-// Styles
+// STYLES (component-specific only)
 // =============================================================================
 
 const styles = {
-	section: {
-		display: 'flex',
-		flexDirection: 'column',
-		gap: 12,
-	} as CSSProperties,
-	header: {
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'space-between',
-		fontSize: 'var(--rr-font-size-subtitle)',
-		fontWeight: 600,
-		color: 'var(--rr-text-primary)',
-	} as CSSProperties,
-	controls: {
-		display: 'flex',
-		gap: 4,
-	} as CSSProperties,
-	viewToggle: (active: boolean): CSSProperties => ({
-		padding: '4px 12px',
-		fontSize: 'var(--rr-font-size-widget)',
-		fontWeight: 500,
-		border: '1px solid var(--rr-border)',
-		borderRadius: 4,
-		cursor: 'pointer',
-		backgroundColor: active ? 'var(--rr-brand)' : 'transparent',
-		color: active ? 'var(--rr-fg-button)' : 'var(--rr-text-secondary)',
-		transition: 'background-color 0.15s, color 0.15s',
-	}),
 	content: {
 		display: 'flex',
 		flexDirection: 'column',
 		gap: 8,
 	} as CSSProperties,
 	pipeline: {
-		border: '1px solid var(--rr-border)',
+		...commonStyles.card,
 		borderRadius: 6,
-		overflow: 'hidden',
 	} as CSSProperties,
 	pipelineHeader: {
 		display: 'flex',
@@ -85,12 +57,6 @@ const styles = {
 		border: running ? '1px solid var(--rr-brand)' : '1px solid var(--rr-border)',
 	}),
 	flowArrow: {
-		color: 'var(--rr-text-disabled)',
-		fontSize: 'var(--rr-font-size-widget)',
-	} as CSSProperties,
-	noData: {
-		padding: 16,
-		textAlign: 'center',
 		color: 'var(--rr-text-disabled)',
 		fontSize: 'var(--rr-font-size-widget)',
 	} as CSSProperties,
@@ -187,19 +153,19 @@ const Flow: React.FC<FlowProps> = ({ taskStatus, viewMode, onViewModeChange }) =
 	);
 
 	return (
-		<div style={styles.section}>
-			<div style={styles.header}>
-				<span>Pipeline Flow</span>
-				<div style={styles.controls}>
-					<button style={styles.viewToggle(viewMode === 'pipeline')} onClick={() => onViewModeChange('pipeline')}>
+		<div style={commonStyles.section}>
+			<div style={commonStyles.sectionHeader}>
+				<span style={commonStyles.sectionHeaderLabel}>Pipeline Flow</span>
+				<div style={commonStyles.toggleGroup}>
+					<button style={commonStyles.toggleButton(viewMode === 'pipeline')} onClick={() => onViewModeChange('pipeline')}>
 						Pipeline View
 					</button>
-					<button style={styles.viewToggle(viewMode === 'component')} onClick={() => onViewModeChange('component')}>
+					<button style={commonStyles.toggleButton(viewMode === 'component')} onClick={() => onViewModeChange('component')}>
 						Component View
 					</button>
 				</div>
 			</div>
-			<div style={styles.content}>{viewMode === 'pipeline' ? activePipelines.length > 0 ? activePipelines.map(renderPipelineCard) : <div style={styles.noData}>No active pipelines</div> : Object.keys(componentData).length > 0 ? Object.entries(componentData).map(([name, data]) => renderComponentCard(name, data)) : <div style={styles.noData}>No active components</div>}</div>
+			<div style={styles.content}>{viewMode === 'pipeline' ? activePipelines.length > 0 ? activePipelines.map(renderPipelineCard) : <div style={commonStyles.empty}>No active pipelines</div> : Object.keys(componentData).length > 0 ? Object.entries(componentData).map(([name, data]) => renderComponentCard(name, data)) : <div style={commonStyles.empty}>No active components</div>}</div>
 		</div>
 	);
 };
