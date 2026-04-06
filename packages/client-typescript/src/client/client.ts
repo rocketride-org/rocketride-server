@@ -28,7 +28,7 @@ import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, Dis
 import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
-import { AuthenticationException, ConnectionException } from './exceptions/index.js';
+import { AuthenticationException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
 let clientId = 0;
@@ -395,17 +395,7 @@ export class RocketRideClient extends DAPClient {
 		try {
 			const url = new URL(normalized);
 
-			// The URL API silently strips ports that are default-for-scheme
-			// (e.g. :443 on https, :80 on http), so url.port alone cannot
-			// distinguish "no port given" from "scheme-default port given".
-			// Check the raw input for an explicit `:digits` after the scheme.
-			const withoutScheme = normalized.replace(/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//, '');
-			const authority = withoutScheme.split(/[/?#]/, 1)[0] ?? '';
-			const hasExplicitPort = authority.startsWith('[')
-				? /\]:\d+$/.test(authority) // IPv6 literal with explicit port
-				: /:\d+$/.test(authority);  // hostname/IPv4 with explicit port
-
-			if (!url.port && !hasExplicitPort && !url.hostname.includes('rocketride.ai')) {
+			if (!url.port && !url.hostname.includes('rocketride.ai')) {
 				url.port = CONST_DEFAULT_WEB_PORT;
 			}
 
@@ -1370,8 +1360,7 @@ export class RocketRideClient extends DAPClient {
 	async onConnectError(error: Error): Promise<void> {
 		if (this._callerOnConnectError) {
 			try {
-				const connectionError = error instanceof ConnectionException ? error : new ConnectionException({ message: String(error) });
-				await this._callerOnConnectError(connectionError);
+				await this._callerOnConnectError(error instanceof Error ? error.message : String(error));
 			} catch (e) {
 				this.debugMessage(`Error in user onConnectError handler: ${e}`);
 			}

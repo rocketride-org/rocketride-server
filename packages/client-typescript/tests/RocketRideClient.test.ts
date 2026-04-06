@@ -76,11 +76,7 @@ describe('RocketRideClient Integration Tests', () => {
 
 	afterEach(async () => {
 		if (client.isConnected()) {
-			// Use a bounded timeout so teardown never hangs the suite
-			await Promise.race([
-				client.disconnect(),
-				new Promise<void>(resolve => setTimeout(resolve, 10000)),
-			]);
+			await client.disconnect();
 		}
 	});
 
@@ -1566,19 +1562,16 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 		});
 
 		afterEach(async () => {
-			// Clean up all pipelines with a bounded timeout so teardown never hangs
-			await Promise.race([
-				Promise.all(
-					pipelineTokens.map(async (token) => {
-						try {
-							await client.terminate(token);
-						} catch {
-							// Ignore cleanup errors
-						}
-					})
-				),
-				new Promise<void>(resolve => setTimeout(resolve, 15000)),
-			]);
+			// Clean up all pipelines
+			await Promise.all(
+				pipelineTokens.map(async (token) => {
+					try {
+						await client.terminate(token);
+					} catch {
+						// Ignore cleanup errors
+					}
+				})
+			);
 			pipelineTokens = [];
 		});
 
@@ -1667,7 +1660,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			const pipelineIndices = results.map(r => r.pipelineIndex).sort((a, b) => a - b);
 			const expectedIndices = Array.from({ length: PIPELINE_COUNT }, (_, i) => i);
 			expect(pipelineIndices).toEqual(expectedIndices);
-		}, TEST_CONFIG.timeout);
+		}, 30000);
 
 		it('should handle concurrent data sends to the same pipeline', async () => {
 			// Create a single pipeline
@@ -1811,7 +1804,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			const allResponseTexts = sendResults.map(r => r.response!.text[0]);
 			const uniqueResponseTexts = new Set(allResponseTexts);
 			expect(uniqueResponseTexts.size).toBe(totalExpectedSends);
-		}, TEST_CONFIG.timeout);
+		}, 30000);
 
 		it('should handle 4 independent pipelines each cycling 32 send/recv operations', async () => {
 			const SUBPROCESS_COUNT = 4;
@@ -1822,22 +1815,12 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			await Promise.all(tokens.map(token => client.use({ pipeline: getEchoPipeline(), token })));
 			pipelineTokens.push(...tokens);
 
-			// Each pipeline independently cycles send/recv — all 4 run in parallel.
-			// Individual send failures are retried once to tolerate transient
-			// "Connection closed" errors under heavy concurrent load.
+			// Each pipeline independently cycles 32 send/recv — all 4 run in parallel
 			async function runPipeline(token: string, pipelineIndex: number) {
 				const results = [];
 				for (let cycle = 0; cycle < CYCLES_PER_PIPELINE; cycle++) {
 					const text = `pipe-${pipelineIndex}-cycle-${cycle}-${Math.random().toString(36).slice(2)}`;
-					let result: PIPELINE_RESULT | undefined;
-					try {
-						result = await client.send(token, text, {}, 'text/plain');
-					} catch {
-						// Retry once — the server may have briefly dropped the
-						// WebSocket frame under heavy concurrent load.
-						await new Promise(resolve => setTimeout(resolve, 250));
-						result = await client.send(token, text, {}, 'text/plain');
-					}
+					const result = await client.send(token, text, {}, 'text/plain');
 					expect(result).toBeDefined();
 					expect(result!.text[0]).toContain(text);
 					results.push({ text, response: result!.text[0] });
@@ -1855,7 +1838,7 @@ Line 3: random data ${Math.random().toString(36).substring(2)}`;
 			// All responses unique across all pipelines and cycles
 			const unique = new Set(allResults.flat().map(r => r.response));
 			expect(unique.size).toBe(SUBPROCESS_COUNT * CYCLES_PER_PIPELINE);
-		}, TEST_CONFIG.timeout);
+		}, 30000);
 	});
 });
 
