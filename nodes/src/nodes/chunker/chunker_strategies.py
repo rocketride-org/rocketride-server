@@ -210,9 +210,11 @@ class SentenceChunker(ChunkingStrategy):
 
             # If adding this sentence exceeds chunk_size and we have content, finalize current
             if current_sentences and current_len + (1 if current_len > 0 else 0) + sentence_len > self.chunk_size:
-                chunk_text = ' '.join(current_sentences)
                 start_char = sentence_positions[0] if sentence_positions else 0
-                end_char = start_char + len(chunk_text)
+                last_sent_pos = sentence_positions[-1] if sentence_positions else start_char
+                last_sent = current_sentences[-1] if current_sentences else ''
+                end_char = last_sent_pos + len(last_sent)
+                chunk_text = text[start_char:end_char]
 
                 result.append(
                     {
@@ -257,9 +259,11 @@ class SentenceChunker(ChunkingStrategy):
 
         # Emit the final chunk
         if current_sentences:
-            chunk_text = ' '.join(current_sentences)
             start_char = sentence_positions[0] if sentence_positions else 0
-            end_char = start_char + len(chunk_text)
+            last_sent_pos = sentence_positions[-1] if sentence_positions else start_char
+            last_sent = current_sentences[-1] if current_sentences else ''
+            end_char = last_sent_pos + len(last_sent)
+            chunk_text = text[start_char:end_char]
 
             result.append(
                 {
