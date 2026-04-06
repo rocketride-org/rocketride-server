@@ -47,6 +47,7 @@ class IInstance(IInstanceBase):
     def open(self, obj: Entry):
         # Reset the start times
         self._startTimes = []
+        self._prev_frame = None
 
     def close(self):
         # If we are listening on tables
@@ -77,12 +78,25 @@ class IInstance(IInstanceBase):
             self._startTimes.append([frame_number, time_stamp, format_seconds(time_stamp)])
 
         if self.instance.hasListener('documents'):
+            # Compute scene change score vs previous frame (grayscale mean-abs-diff, 0–1)
+            scene_score = 0.0
+            if self._prev_frame is not None:
+                import io
+                import numpy as np
+                from PIL import Image
+
+                a = np.array(Image.open(io.BytesIO(self._prev_frame)).convert('L'), dtype=np.float32)
+                b = np.array(Image.open(io.BytesIO(image)).convert('L'), dtype=np.float32)
+                scene_score = float(np.mean(np.abs(a - b))) / 255.0
+            self._prev_frame = image
+
             # Create the default metadata for the document
             metadata = DocMetadata(self)
 
-            # Save the frame and time stamp in the metadata
+            # Save the frame, time stamp, and scene score in the metadata
             metadata.chunkId = frame_number
             metadata.time_stamp = time_stamp
+            metadata.scene_change_score = scene_score
 
             # Create the document object and save the base64 encoded image
             doc = Doc(type='Image', page_content=base64.b64encode(image).decode('utf-8'), metadata=metadata)
