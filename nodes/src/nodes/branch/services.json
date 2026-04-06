@@ -256,6 +256,16 @@
 			"minLength": 0,
 			"maxLength": 256
 		},
+		"expected": {
+			"type": "string",
+			"title": "Expected Sentiment",
+			"description": "Route when text sentiment matches this value",
+			"enum": [
+				["positive", "Positive"],
+				["negative", "Negative"],
+				["neutral", "Neutral"]
+			]
+		},
 		"default_lane": {
 			"type": "string",
 			"title": "Default Lane",
@@ -279,7 +289,7 @@
 		},
 		"branch.sentiment": {
 			"object": "sentiment",
-			"properties": ["default_lane"]
+			"properties": ["expected", "default_lane"]
 		},
 		"branch.profile": {
 			"title": "Profile",
