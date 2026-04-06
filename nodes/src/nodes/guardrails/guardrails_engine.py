@@ -23,21 +23,8 @@
 
 """Guardrails engine for input/output safety checks on AI pipelines."""
 
-import logging
 import re
 from typing import Any, Dict, List, Optional
-
-logger = logging.getLogger(__name__)
-
-
-class GuardrailsViolation(Exception):
-    """Raised when a guardrails check fails in block mode."""
-
-    def __init__(self, violations: List[Dict[str, Any]]):
-        """Initialize with a list of violation result dicts."""
-        self.violations = violations
-        messages = [v.get('details', v.get('rule', 'unknown violation')) for v in violations]
-        super().__init__(f'Guardrails violation: {"; ".join(messages)}')
 
 
 class GuardrailsEngine:
@@ -47,6 +34,13 @@ class GuardrailsEngine:
     input length, hallucination detection, content safety, PII leak detection,
     and format compliance.
     """
+
+    # -------------------------------------------------------------------------
+    # Tuning constants
+    # -------------------------------------------------------------------------
+    TOKEN_ESTIMATE_MULTIPLIER = 1.3
+    HALLUCINATION_COVERAGE_THRESHOLD = 0.3
+    MIN_SENTENCE_LENGTH = 10
 
     # -------------------------------------------------------------------------
     # Prompt injection detection patterns
@@ -90,6 +84,55 @@ class GuardrailsEngine:
     }
 
     INJECTION_KEYWORD_THRESHOLD = 0.7
+
+    # Stop words excluded from hallucination grounding checks
+    STOP_WORDS = frozenset(
+        {
+            'the',
+            'and',
+            'for',
+            'are',
+            'but',
+            'not',
+            'you',
+            'all',
+            'can',
+            'had',
+            'her',
+            'was',
+            'one',
+            'our',
+            'out',
+            'has',
+            'have',
+            'been',
+            'will',
+            'with',
+            'this',
+            'that',
+            'from',
+            'they',
+            'were',
+            'said',
+            'each',
+            'which',
+            'their',
+            'there',
+            'would',
+            'about',
+            'could',
+            'other',
+            'into',
+            'more',
+            'some',
+            'than',
+            'them',
+            'very',
+            'when',
+            'what',
+            'your',
+        }
+    )
 
     # -------------------------------------------------------------------------
     # Content safety patterns
@@ -250,9 +293,9 @@ class GuardrailsEngine:
             max_tokens_estimate = self.max_tokens_estimate
 
         char_count = len(text)
-        # Rough token estimate: split on whitespace, multiply by 1.3 for subword tokens
+        # Rough token estimate: split on whitespace, multiply for subword tokens
         word_count = len(text.split())
-        token_estimate = int(word_count * 1.3)
+        token_estimate = int(word_count * self.TOKEN_ESTIMATE_MULTIPLIER)
 
         if max_chars > 0 and char_count > max_chars:
             return {
@@ -308,7 +351,7 @@ class GuardrailsEngine:
 
         # Split output into sentences
         sentences = re.split(r'[.!?]+', output)
-        sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
+        sentences = [s.strip() for s in sentences if len(s.strip()) > self.MIN_SENTENCE_LENGTH]
 
         if not sentences:
             return {
@@ -322,53 +365,7 @@ class GuardrailsEngine:
         for sentence in sentences:
             # Extract meaningful words (3+ chars, not stop words)
             words = re.findall(r'\b[a-zA-Z]{3,}\b', sentence.lower())
-            # Filter common stop words
-            stop_words = {
-                'the',
-                'and',
-                'for',
-                'are',
-                'but',
-                'not',
-                'you',
-                'all',
-                'can',
-                'had',
-                'her',
-                'was',
-                'one',
-                'our',
-                'out',
-                'has',
-                'have',
-                'been',
-                'will',
-                'with',
-                'this',
-                'that',
-                'from',
-                'they',
-                'were',
-                'said',
-                'each',
-                'which',
-                'their',
-                'there',
-                'would',
-                'about',
-                'could',
-                'other',
-                'into',
-                'more',
-                'some',
-                'than',
-                'them',
-                'very',
-                'when',
-                'what',
-                'your',
-            }
-            meaningful_words = [w for w in words if w not in stop_words]
+            meaningful_words = [w for w in words if w not in self.STOP_WORDS]
 
             if not meaningful_words:
                 continue
@@ -377,7 +374,7 @@ class GuardrailsEngine:
             found_count = sum(1 for w in meaningful_words if w in combined_sources)
             coverage = found_count / len(meaningful_words) if meaningful_words else 1.0
 
-            if coverage < 0.3:
+            if coverage < self.HALLUCINATION_COVERAGE_THRESHOLD:
                 ungrounded.append(sentence[:100])
 
         if ungrounded:
