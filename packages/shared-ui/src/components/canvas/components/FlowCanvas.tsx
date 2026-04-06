@@ -56,7 +56,7 @@ import QuickAddPopup from './panels/quick-add/QuickAddPopup';
 
 import { useFlowGraph } from '../context/FlowGraphContext';
 import { useFlowPreferences, NavigationMode } from '../context/FlowPreferencesContext';
-import { useCanvasToolbar } from '../context/CanvasToolbarContext';
+import FloatingToolbar, { type IToolbarPosition } from './toolbar/FloatingToolbar';
 import CreateNodePanel from './panels/create-node/CreateNodePanel';
 import EmptyCanvasPrompt from './EmptyCanvasPrompt';
 import NodeConfigPanel from './panels/node-config';
@@ -115,7 +115,16 @@ export default function Canvas(): ReactElement {
 	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onToolchainUpdated, isFlowReady } = useFlowGraph();
 
 	// --- Preferences from context ------------------------------------------
-	const { navigationMode, setNavigationMode, isLocked, toggleLock, projectLayout } = useFlowPreferences();
+	const { navigationMode, setNavigationMode, isLocked, toggleLock, projectLayout, getPreference, setPreference } = useFlowPreferences();
+
+	// --- Floating toolbar position (persisted via workspace state) ----------
+	const toolbarPosition = getPreference('toolbarPosition') as IToolbarPosition | undefined;
+	const handleToolbarPositionChange = useCallback(
+		(pos: IToolbarPosition) => {
+			setPreference('toolbarPosition', pos);
+		},
+		[setPreference]
+	);
 
 	const { features, onUndo, onRedo } = useFlowProject();
 	const { fitView, zoomIn, zoomOut } = useReactFlow();
@@ -265,14 +274,11 @@ export default function Canvas(): ReactElement {
 		</>
 	);
 
-	// Register toolbar in context so ProjectView can render it in the tab bar
-	const { setToolbar } = useCanvasToolbar();
-	useEffect(() => {
-		setToolbar(canvasToolbar);
-	});
-
 	return (
 		<div ref={canvasRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
+			<FloatingToolbar position={toolbarPosition} onPositionChange={handleToolbarPositionChange}>
+				{canvasToolbar}
+			</FloatingToolbar>
 			<ReactFlow
 				nodes={nodes}
 				edges={edges}

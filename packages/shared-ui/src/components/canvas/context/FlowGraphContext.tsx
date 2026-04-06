@@ -772,12 +772,16 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				config.name = service.title;
 			}
 
+			// Default the node display name from the service catalog
+			const name = data.name || config.name || service?.title || data.provider;
+
 			const node: FlowNode = {
 				id,
 				type,
 				position: nodePosition,
 				data: {
 					...data,
+					name,
 					config,
 					formData,
 					formDataValid,

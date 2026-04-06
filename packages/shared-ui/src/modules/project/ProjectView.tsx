@@ -22,7 +22,7 @@ import '../../themes/rocketride-default.css';
 import { TabPanel } from '../../components/tab-panel/TabPanel';
 import { useTraceState } from './hooks/useTraceState';
 import { useElapsedTimer } from './hooks/useElapsedTimer';
-import Canvas, { CanvasToolbarProvider, useCanvasToolbar } from '../../components/canvas';
+import Canvas from '../../components/canvas';
 import Status from '../../components/status/Status';
 import { StatusHeader } from '../../components/status/StatusHeader';
 import Tokens from '../../components/tokens/Tokens';
@@ -83,6 +83,7 @@ const styles = {
 interface ProjectViewState {
 	mode: ProjectViewMode;
 	flowViewMode?: 'pipeline' | 'component';
+	preferences?: Record<string, unknown>;
 }
 
 interface SourceInfo {
@@ -182,9 +183,32 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	// --- View state -----------------------------------------------------------
 
-	const initial = (initialState as ProjectViewState | undefined) ?? {};
-	const [mode, setMode] = useState<ProjectViewMode>(initial.mode ?? 'design');
-	const [flowViewMode, setFlowViewMode] = useState<'pipeline' | 'component'>(initial.flowViewMode ?? 'pipeline');
+	const [mode, setMode] = useState<ProjectViewMode>('design');
+	const [flowViewMode, setFlowViewMode] = useState<'pipeline' | 'component'>('pipeline');
+
+	// --- Canvas preferences (toolbar position, etc.) — persisted in workspace state
+	const prefsRef = useRef<Record<string, unknown>>({});
+	const [prefsVersion, setPrefsVersion] = useState(0);
+
+	const getPreference = useCallback((key: string) => prefsRef.current[key], []);
+	const setPreference = useCallback((key: string, value: unknown) => {
+		prefsRef.current = { ...prefsRef.current, [key]: value };
+		setPrefsVersion((v) => v + 1);
+	}, []);
+
+	// Restore view state when initialState arrives (it comes via postMessage after mount)
+	const restoredRef = useRef(false);
+	useEffect(() => {
+		if (!initialState || restoredRef.current) return;
+		restoredRef.current = true;
+		const saved = initialState as ProjectViewState;
+		if (saved.mode) setMode(saved.mode);
+		if (saved.flowViewMode) setFlowViewMode(saved.flowViewMode);
+		if (saved.preferences) {
+			prefsRef.current = saved.preferences;
+			setPrefsVersion((v) => v + 1);
+		}
+	}, [initialState]);
 
 	const { rows: traceRows, clearTrace } = useTraceState(traceEvents);
 	const activeStatus = useMemo(() => pickActiveStatus(statusMap), [statusMap]);
@@ -194,9 +218,14 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	const onMessageRef = useRef(onMessage);
 	onMessageRef.current = onMessage;
 
+	const skipFirstPersist = useRef(true);
 	useEffect(() => {
-		onMessageRef.current?.({ type: 'project:stateChange', state: { mode, flowViewMode } });
-	}, [mode, flowViewMode]);
+		if (skipFirstPersist.current) {
+			skipFirstPersist.current = false;
+			return;
+		}
+		onMessageRef.current?.({ type: 'project:stateChange', state: { mode, flowViewMode, preferences: prefsRef.current } });
+	}, [mode, flowViewMode, prefsVersion]);
 
 	// --- Validate callback for Canvas ----------------------------------------
 
@@ -287,8 +316,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} isConnected={isConnected} />}</div>,
-			actions: <CanvasToolbarSlot />,
+			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} />}</div>,
 		},
 		status: {
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} onPipelineAction={handlePipelineAction} />) : <div style={styles.empty}>No source components found</div>}</div>,
@@ -334,11 +362,9 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	// --- Render --------------------------------------------------------------
 
 	return (
-		<CanvasToolbarProvider>
-			<div style={styles.container}>
-				<TabPanel tabs={tabs} activeTab={mode} onTabChange={handleModeChange} panels={panels} />
-			</div>
-		</CanvasToolbarProvider>
+		<div style={styles.container}>
+			<TabPanel tabs={tabs} activeTab={mode} onTabChange={handleModeChange} panels={panels} />
+		</div>
 	);
 });
 
@@ -363,16 +389,6 @@ const SourceStatusPane: React.FC<{
 			</div>
 		</div>
 	);
-};
-
-// =============================================================================
-// CANVAS TOOLBAR SLOT
-// =============================================================================
-
-const CanvasToolbarSlot: React.FC = () => {
-	const { toolbar } = useCanvasToolbar();
-	if (!toolbar) return null;
-	return <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '0 6px', borderRadius: 6, border: '1px solid var(--rr-border)', height: 34 }}>{toolbar}</div>;
 };
 
 export default ProjectView;
