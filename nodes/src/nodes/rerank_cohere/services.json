@@ -126,6 +126,12 @@
 	//		in the shape
 	//
 	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Cohere rerank model name",
+			"default": "rerank-v3.5"
+		},
 		"top_n": {
 			"type": "number",
 			"title": "Top N",
