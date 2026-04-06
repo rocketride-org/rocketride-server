@@ -4,11 +4,15 @@
 
 import type { ThemeTokens } from './tokens';
 
+/** Last-applied tokens — used by readTheme() instead of fragile DOM iteration. */
+let _cachedTokens: ThemeTokens = {};
+
 /**
  * Apply a theme by setting all --rr-* CSS custom properties on :root.
  * Works in any document context (main app, iframe, webview).
  */
 export function applyTheme(tokens: ThemeTokens): void {
+	_cachedTokens = { ...tokens };
 	const root = document.documentElement;
 	for (const [key, value] of Object.entries(tokens)) {
 		root.style.setProperty(key, value);
@@ -16,19 +20,11 @@ export function applyTheme(tokens: ThemeTokens): void {
 }
 
 /**
- * Read current --rr-* token values from the document root.
- * Useful for forwarding the active theme to iframes.
+ * Read current theme tokens. Returns the cached copy from the last
+ * applyTheme() call — avoids brittle DOM style iteration.
  */
-export function readTheme(): Record<string, string> {
-	const style = getComputedStyle(document.documentElement);
-	const tokens: Record<string, string> = {};
-	for (let i = 0; i < document.documentElement.style.length; i++) {
-		const prop = document.documentElement.style[i];
-		if (prop.startsWith('--rr-')) {
-			tokens[prop] = style.getPropertyValue(prop).trim();
-		}
-	}
-	return tokens;
+export function readTheme(): ThemeTokens {
+	return { ..._cachedTokens };
 }
 
 /**
