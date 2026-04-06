@@ -21,14 +21,9 @@
 # SOFTWARE.
 # =============================================================================
 
-import copy
-import logging
-
-from rocketlib import IInstanceBase, Entry
+from rocketlib import IInstanceBase, Entry, warning
 from ai.common.schema import Question, Answer
 from .IGlobal import IGlobal
-
-logger = logging.getLogger(__name__)
 
 
 class IInstance(IInstanceBase):
@@ -47,16 +42,16 @@ class IInstance(IInstanceBase):
         """Run input guardrails on the question before forwarding.
 
         Extracts the question text, runs input-mode evaluation, then
-        either blocks (raises), warns (logs + forwards), or passes
-        (forwards silently) depending on the policy mode.
+        either blocks, warns (logs + forwards), or passes (forwards
+        silently) depending on the policy mode.
 
         Args:
             question: The incoming Question object.
         """
         engine = self.IGlobal.engine
-
-        # Deep copy to prevent mutation of the original
-        question = copy.deepcopy(question)
+        if engine is None:
+            self.instance.writeQuestions(question)
+            return
 
         # Collect question text for evaluation
         text_parts = []
@@ -77,13 +72,13 @@ class IInstance(IInstanceBase):
 
         if result['action'] == 'block':
             for violation in result['violations']:
-                logger.warning('Guardrails input blocked: %s — %s', violation['rule'], violation['details'])
+                warning(f'Guardrails input blocked: {violation["rule"]} \u2014 {violation["details"]}')
             self.preventDefault()
             return
 
         if result['action'] == 'warn':
             for violation in result['violations']:
-                logger.warning('Guardrails input warning: %s — %s', violation['rule'], violation['details'])
+                warning(f'Guardrails input warning: {violation["rule"]} \u2014 {violation["details"]}')
 
         # Forward the question downstream
         self.instance.writeQuestions(question)
@@ -99,9 +94,9 @@ class IInstance(IInstanceBase):
             answer: The incoming Answer object.
         """
         engine = self.IGlobal.engine
-
-        # Deep copy to prevent mutation of the original
-        answer = copy.deepcopy(answer)
+        if engine is None:
+            self.instance.writeAnswers(answer)
+            return
 
         # Extract answer text
         text = answer.getText() if answer else ''
@@ -121,13 +116,13 @@ class IInstance(IInstanceBase):
 
         if result['action'] == 'block':
             for violation in result['violations']:
-                logger.warning('Guardrails output blocked: %s — %s', violation['rule'], violation['details'])
+                warning(f'Guardrails output blocked: {violation["rule"]} \u2014 {violation["details"]}')
             self.preventDefault()
             return
 
         if result['action'] == 'warn':
             for violation in result['violations']:
-                logger.warning('Guardrails output warning: %s — %s', violation['rule'], violation['details'])
+                warning(f'Guardrails output warning: {violation["rule"]} \u2014 {violation["details"]}')
 
         # Forward the answer downstream
         self.instance.writeAnswers(answer)
