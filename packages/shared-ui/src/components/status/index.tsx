@@ -4,3 +4,4 @@
 // =============================================================================
 
 export { Status } from './Status';
+export { StatusHeader, StatusActions } from './StatusHeader';

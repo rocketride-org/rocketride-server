@@ -111,9 +111,9 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 								<Delete
 									sx={{
 										cursor: 'pointer',
-										color: 'var(--rr-color-error-light, #f44f55)',
+										color: 'var(--rr-color-error-light)',
 										'&:hover': {
-											color: 'var(--rr-color-error, #fa3c3c)',
+											color: 'var(--rr-color-error)',
 										},
 									}}
 									onClick={() => {

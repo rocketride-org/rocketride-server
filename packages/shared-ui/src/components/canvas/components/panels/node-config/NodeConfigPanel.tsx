@@ -56,6 +56,7 @@ import { getComponentFromNode } from '../../../util/graph';
 
 import { IAuthTokensRef, persistTokensFromFormData, mergeAuthTokensIntoFormData, persistOAuthTokensAndSave } from './authTokenHelpers';
 import { useOAuthCallbacks } from './useOAuthCallbacks';
+import { commonStyles } from '../../../../../themes/styles';
 
 // =============================================================================
 // Constants
@@ -100,12 +101,7 @@ const styles = {
 		borderBottom: '1px solid var(--rr-border)',
 		flexShrink: 0,
 	},
-	headerTitle: {
-		fontWeight: 600,
-		fontSize: '11px',
-		textTransform: 'uppercase' as const,
-		letterSpacing: '0.5px',
-	},
+	headerTitle: commonStyles.labelUppercase,
 	closeButton: {
 		background: 'none',
 		border: 'none',

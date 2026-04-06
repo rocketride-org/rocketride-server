@@ -38,10 +38,9 @@ import { ConfigManager } from './config';
 
 import { PageConnectionProvider } from './providers/PageConnectionProvider';
 import { SidebarFilesProvider } from './providers/SidebarFilesProvider';
-import { PageEditorProvider } from './providers/PageEditorProvider';
+import { PageProjectProvider } from './providers/PageProjectProvider';
 import { PageSettingsProvider } from './providers/PageSettingsProvider';
-import { PageStatusProvider } from './providers/PageStatusProvider';
-import { PageDashboardProvider } from './providers/PageDashboardProvider';
+import { PageMonitorProvider } from './providers/PageMonitorProvider';
 import { PageDeployProvider } from './providers/PageDeployProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
@@ -56,10 +55,9 @@ let configManager: ConfigManager | undefined;
 // Provider references
 let pageConnection: PageConnectionProvider | undefined;
 let sidebarFiles: SidebarFilesProvider | undefined;
-let pageEditor: PageEditorProvider | undefined;
+let pageProject: PageProjectProvider | undefined;
 let pageSettings: PageSettingsProvider | undefined;
-let pageStatus: PageStatusProvider | undefined;
-let _pageDashboard: PageDashboardProvider | undefined;
+let _pageMonitor: PageMonitorProvider | undefined;
 let pageDeploy: PageDeployProvider | undefined;
 let barStatus: BarStatus | undefined;
 let pageWelcome: PageWelcomeProvider | undefined;
@@ -176,18 +174,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				progress.report({ increment: 60, message: 'Creating webview providers...' });
 
 				pageSettings = new PageSettingsProvider(context.extensionUri);
-				pageStatus = new PageStatusProvider(context);
-				_pageDashboard = new PageDashboardProvider(context);
+				_pageMonitor = new PageMonitorProvider(context);
 				pageDeploy = new PageDeployProvider(context);
 				pageWelcome = new PageWelcomeProvider(context, context.extensionUri);
 
-				// Register custom editor provider
-				pageEditor = new PageEditorProvider(context);
-				const pageEditorRegistration = vscode.window.registerCustomEditorProvider('rocketride.PageEditor', pageEditor, {
+				// Register unified project editor (canvas + status + trace)
+				pageProject = new PageProjectProvider(context);
+				const pageProjectRegistration = vscode.window.registerCustomEditorProvider('rocketride.PageProject', pageProject, {
 					webviewOptions: {
-						retainContextWhenHidden: true, // Better performance for complex editors
+						retainContextWhenHidden: true,
 					},
-					supportsMultipleEditorsPerDocument: false, // One editor per file
+					supportsMultipleEditorsPerDocument: false,
 				});
 
 				//-------------------------------------
@@ -210,7 +207,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				setupConnectionEventHandlers();
 
 				// Add all providers to context subscriptions for proper cleanup
-				context.subscriptions.push(pageEditorRegistration, pageSettings, pageEditor, pageConnection, sidebarFiles, pageStatus, pageWelcome!);
+				context.subscriptions.push(pageProjectRegistration, pageSettings, pageProject, pageConnection, sidebarFiles, pageWelcome!);
 
 				//-------------------------------------
 				// Update tree providers with initial data
@@ -362,24 +359,12 @@ async function refreshAllProviders(): Promise<void> {
  * Extension deactivation cleanup
  */
 export async function deactivate(): Promise<void> {
-	// Close all status pages first
-	if (pageStatus) {
+	if (_pageMonitor) {
 		try {
-			pageStatus.closeAll();
-		} catch (error: unknown) {
-			// Silently ignore cancellation errors during shutdown
-			if (!(error instanceof Error) || error.name !== 'Canceled') {
-				console.error('[ROCKETRIDE] Error closing status pages:', error);
-			}
-		}
-	}
-
-	if (_pageDashboard) {
-		try {
-			_pageDashboard.dispose();
+			_pageMonitor.dispose();
 		} catch (error: unknown) {
 			if (!(error instanceof Error) || error.name !== 'Canceled') {
-				console.error('[ROCKETRIDE] Error disposing dashboard page:', error);
+				console.error('[ROCKETRIDE] Error disposing monitor page:', error);
 			}
 		}
 	}
@@ -422,10 +407,9 @@ export async function deactivate(): Promise<void> {
 // Export getters for provider access
 export const getConnectionManager = () => connectionManager;
 export const getSettingsProvider = () => pageSettings;
-export const getStatusPageProvider = () => pageStatus;
 export const getConfigManager = () => configManager;
 export const getPipelineFilesTreeProvider = () => sidebarFiles;
 export const getConnectionTreeProvider = () => pageConnection;
-export const getPageEditorProvider = () => pageEditor;
+export const getPageProjectProvider = () => pageProject;
 export const getBarStatus = () => barStatus;
 export const getPageWelcomeProvider = () => pageWelcome;

@@ -44,4 +44,4 @@ export { TabPanel } from './components/tab-panel/TabPanel';
 export type { ITabPanelTab, ITabPanelProps } from './components/tab-panel/TabPanel';
 
 export { ProjectView } from './modules/project';
-export type { IProjectViewProps, IViewProps, ProjectViewMode, ProjectViewIncoming, ProjectViewOutgoing, TaskStatus, TraceEvent } from './modules/project';
+export type { IProjectViewProps, ProjectViewRef, IViewProps, ProjectViewMode, ProjectViewIncoming, ProjectViewOutgoing, TaskStatus, TraceEvent } from './modules/project';

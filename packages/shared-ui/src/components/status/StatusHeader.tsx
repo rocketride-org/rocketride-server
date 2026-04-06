@@ -4,44 +4,21 @@
 // =============================================================================
 
 /**
- * StatusHeader — Full status header bar with state badge, Run/Stop button,
- * and elapsed-time display.
- *
- * Layout:
- *   Left:  state indicator dot + "Running"/"Offline" + status subtitle
- *   Right: Run/Stop button + "Started Xs ago"
+ * StatusHeader — State badge and elapsed-time display for a pipeline.
+ * StatusActions — Run/Stop button for the tab bar actions slot.
  */
 
 import React from 'react';
 import type { CSSProperties } from 'react';
 import type { ITaskStatus } from '../../types/project';
 import { ITaskState } from '../../types/project';
+import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
-// STYLES
+// STYLES (component-specific only)
 // =============================================================================
 
 const styles = {
-	header: {
-		display: 'flex',
-		justifyContent: 'space-between',
-		alignItems: 'flex-start',
-		gap: 16,
-		marginBottom: 16,
-	} as CSSProperties,
-	left: {
-		flex: 1,
-		minWidth: 0,
-	} as CSSProperties,
-	right: {
-		display: 'flex',
-		flexDirection: 'column',
-		alignItems: 'flex-end',
-		gap: 6,
-		flexShrink: 0,
-	} as CSSProperties,
-
-	// State badge
 	stack: {
 		display: 'flex',
 		flexDirection: 'column',
@@ -72,56 +49,28 @@ const styles = {
 		fontSize: 12,
 		color: 'var(--rr-brand)',
 	} as CSSProperties,
-
-	// Elapsed
-	elapsed: {
-		fontSize: 12,
-		color: 'var(--rr-text-secondary)',
-	} as CSSProperties,
 	elapsedValue: {
 		fontWeight: 600,
 		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
-
-	// Action button
-	actionRow: {
-		display: 'flex',
-		gap: 6,
-	} as CSSProperties,
 };
-
-// Indicator dot styles by state
-const indicatorBase: CSSProperties = { width: 8, height: 8, borderRadius: '50%' };
-
-const indicators: Record<string, CSSProperties> = {
-	running: { ...indicatorBase, backgroundColor: 'var(--rr-color-success)', boxShadow: '0 0 4px var(--rr-color-success)' },
-	initializing: { ...indicatorBase, backgroundColor: 'var(--rr-color-info)' },
-	stopping: { ...indicatorBase, backgroundColor: 'var(--rr-color-warning)' },
-	completed: { ...indicatorBase, backgroundColor: 'var(--rr-text-secondary)' },
-	offline: { ...indicatorBase, backgroundColor: 'var(--rr-text-secondary)', opacity: 0.5 },
-};
-
-const actionBtnStyle = (variant: 'run' | 'stop' | 'disabled'): CSSProperties => ({
-	padding: '6px 16px',
-	fontSize: 'var(--rr-font-size-widget)',
-	fontWeight: 500,
-	borderRadius: 6,
-	border: 'none',
-	cursor: variant === 'disabled' ? 'default' : 'pointer',
-	opacity: variant === 'disabled' ? 0.5 : 1,
-	backgroundColor: variant === 'stop' ? 'var(--rr-color-error)' : 'var(--rr-brand)',
-	color: 'var(--rr-fg-button)',
-	transition: 'opacity 0.15s',
-});
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
 export interface StatusHeaderProps {
+	/** Source display name (shown as title when provided). */
+	name?: string;
 	taskStatus: ITaskStatus | null | undefined;
 	currentElapsed: number;
-	onPipelineAction?: (action: 'run' | 'stop' | 'restart') => void;
+	/** Pipeline action callback. When provided, Run/Stop buttons are rendered. */
+	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
+}
+
+export interface StatusActionsProps {
+	taskStatus: ITaskStatus | null | undefined;
+	onPipelineAction: (action: 'run' | 'stop' | 'restart', source?: string) => void;
 }
 
 // =============================================================================
@@ -164,15 +113,15 @@ const getTaskStateDisplay = (state: number): string => {
 const getIndicator = (state: number): CSSProperties => {
 	switch (state) {
 		case ITaskState.RUNNING:
-			return indicators.running;
+			return commonStyles.indicatorSuccess;
 		case ITaskState.INITIALIZING:
-			return indicators.initializing;
+			return commonStyles.indicatorInfo;
 		case ITaskState.STOPPING:
-			return indicators.stopping;
+			return commonStyles.indicatorWarning;
 		case ITaskState.COMPLETED:
-			return indicators.completed;
+			return { ...commonStyles.indicatorBase, backgroundColor: 'var(--rr-text-secondary)' };
 		default:
-			return indicators.offline;
+			return commonStyles.indicatorMuted;
 	}
 };
 
@@ -187,53 +136,70 @@ const getControlButton = (state: number) => {
 };
 
 // =============================================================================
-// COMPONENT
+// COMPONENTS
 // =============================================================================
 
-export const StatusHeader: React.FC<StatusHeaderProps> = ({ taskStatus, currentElapsed, onPipelineAction }) => {
-	const hasSubtitle = !!taskStatus?.status;
+/**
+ * StatusHeader — source name, state, status, elapsed time, and action buttons.
+ *
+ * Layout:
+ *   Row 1: ● Name  StateLabel                          [Run/Stop]
+ *   Row 2:   Status message
+ *   Row 3:   Started Xs ago (when running)
+ */
+export const StatusHeader: React.FC<StatusHeaderProps> = ({ name, taskStatus, currentElapsed, onPipelineAction }) => {
 	const state = taskStatus?.state ?? ITaskState.NONE;
-	const controlButton = getControlButton(state);
+	const hasStatus = !!taskStatus?.status;
 	const showElapsed = !!taskStatus && taskStatus.startTime > 0 && !taskStatus.completed;
 
 	return (
-		<div style={styles.header}>
-			{/* Left: state badge */}
-			<div style={styles.left}>
-				<div style={styles.stack}>
-					<div style={styles.badge}>
-						<div style={styles.indicatorBox}>
-							<div style={getIndicator(state)} />
-						</div>
-						<span style={styles.stateLabel}>{getTaskStateDisplay(state)}</span>
+		<div style={{ padding: '8px 12px', display: 'flex', justifyContent: 'space-between', gap: 12, borderBottom: '1px solid var(--rr-border)' }}>
+			{/* Left column: name, state, status */}
+			<div style={styles.stack}>
+				<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+					<div style={styles.indicatorBox}>
+						<div style={getIndicator(state)} />
 					</div>
-					<div style={{ ...styles.subtitle, visibility: hasSubtitle ? 'visible' : 'hidden' }}>
-						<div style={styles.indicatorBox} />
-						<span>{taskStatus?.status || '\u00A0'}</span>
-					</div>
+					{name && <span style={styles.stateLabel}>{name}</span>}
+					<span style={{ fontSize: 'var(--rr-font-size-caption)', color: 'var(--rr-text-secondary)' }}>{getTaskStateDisplay(state)}</span>
+				</div>
+				<div style={{ ...styles.subtitle, visibility: hasStatus ? 'visible' : 'hidden' }}>
+					<div style={styles.indicatorBox} />
+					<span>{taskStatus?.status || '\u00A0'}</span>
 				</div>
 			</div>
-
-			{/* Right: action button + elapsed */}
-			<div style={styles.right}>
-				{onPipelineAction && (
-					<div style={styles.actionRow}>
-						<button
-							style={actionBtnStyle(controlButton.variant)}
-							disabled={controlButton.disabled}
-							onClick={() => {
-								if (!controlButton.disabled) onPipelineAction(controlButton.action);
-							}}
-						>
-							{controlButton.label}
-						</button>
-					</div>
-				)}
-				<div style={{ ...styles.elapsed, visibility: showElapsed ? 'visible' : 'hidden' }}>
+			{/* Right column: buttons on top, elapsed below */}
+			<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+				{onPipelineAction && <StatusActions taskStatus={taskStatus} onPipelineAction={onPipelineAction} />}
+				<div style={{ ...commonStyles.textMuted, fontSize: 'var(--rr-font-size-caption)', visibility: showElapsed ? 'visible' : 'hidden' }}>
 					Started <span style={styles.elapsedValue}>{formatElapsedTime(currentElapsed)}</span> ago
 				</div>
 			</div>
 		</div>
+	);
+};
+
+/**
+ * StatusActions — Run/Stop button for the tab bar actions slot.
+ * Renders in the TabPanel bar, not inside the panel content.
+ */
+export const StatusActions: React.FC<StatusActionsProps> = ({ taskStatus, onPipelineAction }) => {
+	const state = taskStatus?.state ?? ITaskState.NONE;
+	const btn = getControlButton(state);
+
+	return (
+		<button
+			style={{
+				...(btn.variant === 'stop' ? commonStyles.buttonDanger : commonStyles.buttonPrimary),
+				...(btn.disabled ? commonStyles.buttonDisabled : {}),
+			}}
+			disabled={btn.disabled}
+			onClick={() => {
+				if (!btn.disabled) onPipelineAction(btn.action, taskStatus?.source);
+			}}
+		>
+			{btn.label}
+		</button>
 	);
 };
 

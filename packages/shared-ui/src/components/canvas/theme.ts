@@ -32,14 +32,6 @@
 
 import { getMuiTheme } from '../../themes/getMuiTheme';
 
-import '@fontsource/roboto';
-import '@fontsource/roboto/300.css';
-import '@fontsource/roboto/400.css';
-import '@fontsource/roboto/500.css';
-import '@fontsource/roboto/700.css';
-import '@fontsource/roboto-condensed';
-import '@fontsource/ubuntu-mono';
-
 // Re-export for convenience
 export { buildMuiTheme } from '../../themes/buildMuiTheme';
 

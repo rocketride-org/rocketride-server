@@ -15,18 +15,47 @@
  *   <ServerMonitor data={snapshot} events={activityLog} isConnected={true} />
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, CSSProperties } from 'react';
 import type { DashboardResponse, ActivityEvent } from './types';
 import { OverviewTab, ConnectionsTab, TasksTab, ActivityTab } from './components';
 import { TabPanel } from '../../components/tab-panel/TabPanel';
-import type { ITabPanelTab } from '../../components/tab-panel/TabPanel';
-
-// Theme CSS — light defaults
-import '../../themes/rocketride-default.css';
-import './styles/server-monitor.css';
+import type { ITabPanelTab, ITabPanelPanel } from '../../components/tab-panel/TabPanel';
+import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
-// Types
+// STYLES
+// =============================================================================
+
+const styles = {
+	root: {
+		display: 'flex',
+		flexDirection: 'column',
+		height: '100%',
+		fontFamily: 'var(--rr-font-family-widget)',
+		fontSize: 'var(--rr-font-size-widget)',
+		color: 'var(--rr-text-primary)',
+		backgroundColor: 'var(--rr-bg-default)',
+		lineHeight: 1.5,
+	} as CSSProperties,
+	disconnected: {
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		flexDirection: 'column',
+		gap: 8,
+		padding: '60px 24px',
+		color: 'var(--rr-text-secondary)',
+		textAlign: 'center',
+	} as CSSProperties,
+	disconnectedIcon: {
+		fontSize: 32,
+		color: 'var(--rr-text-disabled)',
+		marginBottom: 8,
+	} as CSSProperties,
+};
+
+// =============================================================================
+// TYPES
 // =============================================================================
 
 export interface IServerMonitorProps {
@@ -43,7 +72,7 @@ export interface IServerMonitorProps {
 type TabId = 'overview' | 'connections' | 'tasks' | 'activity';
 
 // =============================================================================
-// Component
+// COMPONENT
 // =============================================================================
 
 const ServerMonitor: React.FC<IServerMonitorProps> = ({ data, events, isConnected, onRefresh }) => {
@@ -59,38 +88,46 @@ const ServerMonitor: React.FC<IServerMonitorProps> = ({ data, events, isConnecte
 		[data, events.length]
 	);
 
-	const panels = useMemo(() => {
+	const refreshBtn = onRefresh && (
+		<button style={commonStyles.buttonSecondary} onClick={onRefresh}>
+			Refresh
+		</button>
+	);
+
+	const panels = useMemo<Record<string, ITabPanelPanel>>(() => {
 		if (!data) {
-			const loading = (
-				<div className="sm-disconnected">
-					<div className="sm-text-muted">Loading dashboard data...</div>
-				</div>
-			);
+			const loading = {
+				content: (
+					<div style={styles.disconnected}>
+						<div style={commonStyles.textMuted}>Loading dashboard data...</div>
+					</div>
+				),
+			};
 			return { overview: loading, connections: loading, tasks: loading, activity: loading };
 		}
 		return {
-			overview: <OverviewTab data={data} />,
-			connections: <ConnectionsTab connections={data.connections} />,
-			tasks: <TasksTab tasks={data.tasks} />,
-			activity: <ActivityTab events={events} />,
+			overview: { content: <OverviewTab data={data} />, actions: refreshBtn },
+			connections: { content: <ConnectionsTab connections={data.connections} />, actions: refreshBtn },
+			tasks: { content: <TasksTab tasks={data.tasks} />, actions: refreshBtn },
+			activity: { content: <ActivityTab events={events} />, actions: refreshBtn },
 		};
-	}, [data, events]);
+	}, [data, events, refreshBtn]);
 
 	// Disconnected state
 	if (!isConnected) {
 		return (
-			<div className="sm-root">
-				<div className="sm-disconnected">
-					<div className="sm-disconnected-icon">&#9675;</div>
+			<div style={{ ...styles.root, padding: 15 }}>
+				<div style={styles.disconnected}>
+					<div style={styles.disconnectedIcon}>&#9675;</div>
 					<div>Disconnected from server</div>
-					<div className="sm-text-muted">Reconnect to view server status</div>
+					<div style={commonStyles.textMuted}>Reconnect to view server status</div>
 				</div>
 			</div>
 		);
 	}
 
 	return (
-		<div className="sm-root sm-root-tabpanel">
+		<div style={styles.root}>
 			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as TabId)} panels={panels} />
 		</div>
 	);

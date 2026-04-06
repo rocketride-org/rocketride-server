@@ -40,6 +40,7 @@ import { useFlowProject } from '../context/FlowProjectContext';
 import { useFlowGraph } from '../context/FlowGraphContext';
 import { IService, IServiceCapabilities } from '../types';
 import { templates as templateCatalog } from '../templates';
+import { commonStyles } from '../../../themes/styles';
 import type { ITemplate } from '../templates/types';
 import { getIconPath } from '../util/get-icon-path';
 import { resolveDefaultFormData } from '../util/helpers';
@@ -110,11 +111,7 @@ const styles = {
 		height: '18px',
 		flexShrink: 0,
 	},
-	itemTitle: {
-		whiteSpace: 'nowrap' as const,
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-	},
+	itemTitle: commonStyles.textEllipsis,
 	divider: {
 		margin: '16px 0',
 		borderTop: '1px solid var(--rr-border)',

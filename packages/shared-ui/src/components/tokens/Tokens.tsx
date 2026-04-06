@@ -15,33 +15,21 @@
 
 import React from 'react';
 import type { CSSProperties } from 'react';
+import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
-// STYLES
+// STYLES (component-specific only)
 // =============================================================================
 
 const styles: Record<string, CSSProperties> = {
-	section: {
-		display: 'flex',
-		flexDirection: 'column',
-		gap: '8px',
-	},
-	header: {
-		display: 'flex',
-		justifyContent: 'space-between',
-		alignItems: 'center',
-		fontSize: '13px',
-		fontWeight: 600,
-		color: 'var(--rr-text-primary, #ccc)',
-	},
 	totalDisplay: {
-		fontSize: '12px',
+		fontSize: 12,
 		fontWeight: 400,
-		color: 'var(--rr-text-secondary, #999)',
+		color: 'var(--rr-text-secondary)',
 	},
 	totalValue: {
 		fontWeight: 600,
-		color: 'var(--rr-brand, #007acc)',
+		color: 'var(--rr-brand)',
 	},
 	bars: {
 		display: 'flex',
@@ -56,30 +44,28 @@ const styles: Record<string, CSSProperties> = {
 	barLabel: {
 		flex: '0 0 130px',
 		fontSize: '12px',
-		color: 'var(--rr-text-secondary, #999)',
-		whiteSpace: 'nowrap',
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
+		color: 'var(--rr-text-secondary)',
+		...commonStyles.textEllipsis,
 	},
 	barContainer: {
 		flex: 1,
 		height: '6px',
 		borderRadius: '3px',
-		backgroundColor: 'var(--rr-bg-default, #1e1e1e)',
+		backgroundColor: 'var(--rr-bg-default)',
 		overflow: 'hidden',
 	},
 	barFill: {
 		height: '100%',
 		borderRadius: '3px',
-		backgroundColor: 'var(--rr-brand, #007acc)',
+		backgroundColor: 'var(--rr-brand)',
 		transition: 'width 0.3s ease',
 	},
 	barValue: {
 		flex: '0 0 50px',
 		textAlign: 'right',
 		fontSize: '12px',
-		fontFamily: 'monospace',
-		color: 'var(--rr-text-primary, #ccc)',
+		...commonStyles.fontMono,
+		color: 'var(--rr-text-primary)',
 	},
 };
 
@@ -120,9 +106,9 @@ export const Tokens: React.FC<TokensProps> = ({ taskStatus }) => {
 	];
 
 	return (
-		<section style={styles.section}>
-			<header style={styles.header}>
-				<span>Tokens</span>
+		<section style={commonStyles.section}>
+			<header style={commonStyles.sectionHeader}>
+				<span style={commonStyles.sectionHeaderLabel}>Tokens</span>
 				{tokens.total !== undefined && (
 					<div style={styles.totalDisplay}>
 						Total: <span style={styles.totalValue}>{tokens.total.toFixed(1)}</span>

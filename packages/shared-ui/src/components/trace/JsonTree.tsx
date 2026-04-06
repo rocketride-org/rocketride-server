@@ -7,6 +7,7 @@
  * Colour tokens use the --rr-* namespace.
  */
 import React, { useState, CSSProperties } from 'react';
+import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
 // TYPES
@@ -77,7 +78,7 @@ const styles = {
 	} as CSSProperties,
 
 	key: {
-		color: 'var(--rr-chart-purple, #9c27b0)',
+		color: 'var(--rr-chart-purple)',
 		fontWeight: 600,
 		whiteSpace: 'nowrap',
 	} as CSSProperties,
@@ -85,9 +86,7 @@ const styles = {
 	preview: {
 		color: 'var(--rr-text-secondary)',
 		fontStyle: 'italic',
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-		whiteSpace: 'nowrap',
+		...commonStyles.textEllipsis,
 	} as CSSProperties,
 
 	bracket: {
@@ -97,7 +96,7 @@ const styles = {
 
 	children: {
 		paddingLeft: 14,
-		borderLeft: '1px solid var(--rr-border-subtle, rgba(128,128,128,0.15))',
+		borderLeft: '1px solid var(--rr-border-subtle)',
 		marginLeft: 5,
 	} as CSSProperties,
 
@@ -113,18 +112,18 @@ const styles = {
 	} as CSSProperties,
 
 	valBool: {
-		color: 'var(--rr-chart-blue, #1976d2)',
+		color: 'var(--rr-chart-blue)',
 		fontWeight: 600,
 		wordBreak: 'break-all',
 	} as CSSProperties,
 
 	valNum: {
-		color: 'var(--rr-chart-green, #2e7d32)',
+		color: 'var(--rr-chart-green)',
 		wordBreak: 'break-all',
 	} as CSSProperties,
 
 	valStr: {
-		color: 'var(--rr-chart-orange, #e65100)',
+		color: 'var(--rr-chart-orange)',
 		wordBreak: 'break-all',
 	} as CSSProperties,
 } as const;

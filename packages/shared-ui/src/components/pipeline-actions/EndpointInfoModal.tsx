@@ -15,6 +15,7 @@ import { createPortal } from 'react-dom';
 import { TabPanel } from '../tab-panel/TabPanel';
 import { IEndpointInfo } from './PipelineActions';
 import { appendAuthQueryParam, buildIntegrationExamples, type IntegrationTabId } from './endpointIntegrationExamples';
+import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
 // Styles
@@ -23,19 +24,11 @@ import { appendAuthQueryParam, buildIntegrationExamples, type IntegrationTabId }
 import type { CSSProperties } from 'react';
 
 const styles: Record<string, CSSProperties> = {
-	overlay: {
-		position: 'fixed',
-		inset: 0,
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		backgroundColor: 'rgba(0, 0, 0, 0.5)',
-		zIndex: 10000,
-	},
+	overlay: commonStyles.overlay,
 
 	modal: {
-		backgroundColor: 'var(--rr-bg-paper, #1e1e1e)',
-		border: '1px solid var(--rr-border, #dcdcdc)',
+		backgroundColor: 'var(--rr-bg-paper)',
+		border: '1px solid var(--rr-border)',
 		borderRadius: '8px',
 		width: '100%',
 		maxWidth: '780px',
@@ -51,8 +44,8 @@ const styles: Record<string, CSSProperties> = {
 		alignItems: 'center',
 		justifyContent: 'space-between',
 		padding: '14px 18px',
-		borderBottom: '1px solid var(--rr-border, #dcdcdc)',
-		backgroundColor: 'var(--rr-bg-widget-header, rgba(0,0,0,0.08))',
+		borderBottom: '1px solid var(--rr-border)',
+		backgroundColor: 'var(--rr-bg-widget-header)',
 		borderRadius: '8px 8px 0 0',
 	},
 
@@ -65,7 +58,7 @@ const styles: Record<string, CSSProperties> = {
 	closeBtn: {
 		background: 'none',
 		border: 'none',
-		color: 'var(--rr-text-secondary, #666)',
+		color: 'var(--rr-text-secondary)',
 		fontSize: '18px',
 		cursor: 'pointer',
 		padding: '4px 8px',
@@ -91,7 +84,7 @@ const styles: Record<string, CSSProperties> = {
 	envLabel: {
 		fontSize: '11px',
 		fontWeight: 600,
-		color: 'var(--rr-text-secondary, #666)',
+		color: 'var(--rr-text-secondary)',
 	},
 	envBadgeLocal: {
 		fontSize: '10px',
@@ -99,7 +92,7 @@ const styles: Record<string, CSSProperties> = {
 		padding: '2px 6px',
 		borderRadius: '10px',
 		backgroundColor: 'rgba(255, 193, 7, 0.15)',
-		color: 'var(--rr-color-warning, #e8b931)',
+		color: 'var(--rr-color-warning)',
 		border: '1px solid rgba(255, 193, 7, 0.35)',
 	},
 	envBadgeProd: {
@@ -108,12 +101,12 @@ const styles: Record<string, CSSProperties> = {
 		padding: '2px 6px',
 		borderRadius: '10px',
 		backgroundColor: 'rgba(78, 201, 176, 0.15)',
-		color: 'var(--rr-success, #4ec9b0)',
+		color: 'var(--rr-success)',
 		border: '1px solid rgba(78, 201, 176, 0.35)',
 	},
 	envHint: {
 		fontSize: '11px',
-		color: 'var(--rr-text-disabled, #666)',
+		color: 'var(--rr-text-disabled)',
 		marginBottom: '14px',
 		lineHeight: 1.45,
 	},
@@ -121,20 +114,16 @@ const styles: Record<string, CSSProperties> = {
 		marginTop: '14px',
 		padding: '10px',
 		backgroundColor: 'var(--rr-bg-surface-alt, var(--rr-bg-paper))',
-		border: '1px solid var(--rr-border, #dcdcdc)',
+		border: '1px solid var(--rr-border)',
 		borderRadius: '4px',
 	},
 	testTitle: {
-		fontSize: '11px',
-		fontWeight: 600,
-		color: 'var(--rr-text-secondary, #666)',
+		...commonStyles.labelUppercase,
 		marginBottom: '8px',
-		textTransform: 'uppercase',
-		letterSpacing: '0.5px',
 	},
 	curlBlock: {
 		fontSize: '11px',
-		fontFamily: 'monospace',
+		...commonStyles.fontMono,
 		lineHeight: 1.45,
 		color: 'var(--rr-text-primary, inherit)',
 		whiteSpace: 'pre-wrap',
@@ -151,17 +140,13 @@ const styles: Record<string, CSSProperties> = {
 		maxHeight: '220px',
 		overflow: 'auto',
 		padding: '10px',
-		backgroundColor: 'var(--rr-bg-paper, #1e1e1e)',
-		border: '1px solid var(--rr-border, #dcdcdc)',
+		backgroundColor: 'var(--rr-bg-paper)',
+		border: '1px solid var(--rr-border)',
 		borderRadius: '4px',
 	},
 
 	configLabel: {
-		fontSize: '11px',
-		fontWeight: 600,
-		color: 'var(--rr-text-secondary, #666)',
-		textTransform: 'uppercase',
-		letterSpacing: '0.5px',
+		...commonStyles.labelUppercase,
 		marginBottom: '6px',
 	},
 
@@ -175,13 +160,11 @@ const styles: Record<string, CSSProperties> = {
 
 	configValueLink: {
 		flex: 1,
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-		whiteSpace: 'nowrap',
+		...commonStyles.textEllipsis,
 	},
 
 	link: {
-		color: 'var(--rr-text-link, #007acc)',
+		color: 'var(--rr-text-link)',
 		textDecoration: 'none',
 		fontSize: '12px',
 	},
@@ -190,17 +173,15 @@ const styles: Record<string, CSSProperties> = {
 		flex: 1,
 		fontSize: '12px',
 		color: 'var(--rr-text-primary, inherit)',
-		fontFamily: 'monospace',
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-		whiteSpace: 'nowrap',
+		...commonStyles.fontMono,
+		...commonStyles.textEllipsis,
 	},
 
 	configValueMasked: {
 		flex: 1,
 		fontSize: '12px',
-		color: 'var(--rr-text-disabled, #666)',
-		fontFamily: 'monospace',
+		color: 'var(--rr-text-disabled)',
+		...commonStyles.fontMono,
 		letterSpacing: '2px',
 	},
 
@@ -210,29 +191,29 @@ const styles: Record<string, CSSProperties> = {
 		justifyContent: 'center',
 		padding: '4px 8px',
 		borderRadius: '3px',
-		border: '1px solid var(--rr-border, #dcdcdc)',
+		border: '1px solid var(--rr-border)',
 		cursor: 'pointer',
 		backgroundColor: 'transparent',
-		color: 'var(--rr-text-secondary, #666)',
+		color: 'var(--rr-text-secondary)',
 		fontSize: '11px',
 		fontWeight: 500,
 		whiteSpace: 'nowrap',
 	},
 
 	iconBtnSuccess: {
-		backgroundColor: 'var(--rr-accent, #007acc)',
-		borderColor: 'var(--rr-accent, #007acc)',
-		color: 'var(--rr-fg-button, #fff)',
+		backgroundColor: 'var(--rr-accent)',
+		borderColor: 'var(--rr-accent)',
+		color: 'var(--rr-fg-button)',
 	},
 
 	securityNote: {
 		marginTop: '16px',
 		padding: '10px 12px',
 		background: 'rgba(255, 152, 0, 0.1)',
-		borderLeft: '3px solid var(--rr-color-warning, #e8b931)',
+		borderLeft: '3px solid var(--rr-color-warning)',
 		borderRadius: '4px',
 		fontSize: '11px',
-		color: 'var(--rr-text-secondary, #666)',
+		color: 'var(--rr-text-secondary)',
 		lineHeight: 1.5,
 	},
 };

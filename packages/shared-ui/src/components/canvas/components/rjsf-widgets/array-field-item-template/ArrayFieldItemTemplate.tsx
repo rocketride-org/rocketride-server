@@ -63,7 +63,7 @@ const styles = {
 		backgroundColor: 'transparent',
 		WebkitTapHighlightColor: 'transparent',
 		'&:hover': {
-			backgroundColor: 'var(--rr-bg-widget-hover, rgba(0, 0, 0, 0.05))',
+			backgroundColor: 'var(--rr-bg-widget-hover)',
 		},
 		'&:focus-visible': {
 			boxShadow: '0 0 0 2px var(--rr-border-focus)',
@@ -73,7 +73,7 @@ const styles = {
 			margin: 'auto',
 			height: '100%',
 			overflow: 'visible',
-			fill: 'var(--rr-text-disabled, #919eab)',
+			fill: 'var(--rr-text-disabled)',
 		},
 	},
 };

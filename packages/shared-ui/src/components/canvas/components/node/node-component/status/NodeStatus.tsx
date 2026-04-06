@@ -21,6 +21,7 @@ import React, { ReactElement } from 'react';
 
 import { ITaskStatus, ITaskState } from '../../../../types';
 import { PipelineActions } from '../../../../../../components/pipeline-actions';
+import { commonStyles } from '../../../../../../themes/styles';
 
 // =============================================================================
 // Helpers
@@ -110,7 +111,7 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 					)}
 					{pipelineActions}
 					<div style={{ height: 3, borderRadius: 2, marginTop: 5, backgroundColor: 'var(--rr-border)', overflow: 'hidden' }}>
-						<div style={{ width: '30%', height: '100%', backgroundColor: 'var(--rr-accent, #007acc)', borderRadius: 2, animation: 'rr-indeterminate 1.5s ease-in-out infinite', transformOrigin: '0% 50%' }} />
+						<div style={{ width: '30%', height: '100%', backgroundColor: 'var(--rr-accent)', borderRadius: 2, animation: 'rr-indeterminate 1.5s ease-in-out infinite', transformOrigin: '0% 50%' }} />
 					</div>
 				</div>
 			);
@@ -122,11 +123,11 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 				<div style={styles.footer}>
 					<div style={styles.sourceFooterMain}>
 						<span style={styles.footerText}>
-							<span style={{ color: 'var(--rr-success, #4ec9b0)' }}>{completedCount} done</span>
+							<span style={{ color: 'var(--rr-success)' }}>{completedCount} done</span>
 							{failedCount > 0 && (
 								<>
 									{' · '}
-									<span style={{ color: 'var(--rr-error, #f14c4c)' }}>{failedCount} errors</span>
+									<span style={{ color: 'var(--rr-error)' }}>{failedCount} errors</span>
 								</>
 							)}
 							<span style={{ color: 'var(--rr-text-disabled)', marginLeft: '2px' }}> · {formatElapsedTime(elapsed)}</span>
@@ -156,7 +157,7 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 					<div style={styles.footer}>
 						<div style={styles.sourceFooterMain}>
 							<span style={styles.footerText}>
-								<span style={{ color: 'var(--rr-error, #f14c4c)' }}>✕ Failed to start</span>
+								<span style={{ color: 'var(--rr-error)' }}>✕ Failed to start</span>
 							</span>
 							{statusLink}
 						</div>
@@ -170,12 +171,12 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 				<div style={styles.footer}>
 					<div style={styles.sourceFooterMain}>
 						<span style={styles.footerText}>
-							{!hasErrors && <span style={{ color: 'var(--rr-success, #4ec9b0)' }}>✓ </span>}
-							<span style={{ color: 'var(--rr-success, #4ec9b0)' }}>{completedCount} done</span>
+							{!hasErrors && <span style={{ color: 'var(--rr-success)' }}>✓ </span>}
+							<span style={{ color: 'var(--rr-success)' }}>{completedCount} done</span>
 							{failedCount > 0 && (
 								<>
 									{' · '}
-									<span style={{ color: 'var(--rr-error, #f14c4c)' }}>{failedCount} errors</span>
+									<span style={{ color: 'var(--rr-error)' }}>{failedCount} errors</span>
 								</>
 							)}
 							<span style={{ color: 'var(--rr-text-disabled)', marginLeft: '2px' }}> · {formatElapsedTime(elapsedFinal)}</span>
@@ -206,7 +207,7 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 				<span style={styles.pipesLabel}>Pipes</span>
 				<div style={styles.progressBarContainer}>
 					<div style={{ height: 3, borderRadius: 2, marginTop: 5, backgroundColor: 'var(--rr-border)', overflow: 'hidden' }}>
-						<div style={{ width: `${progressPercentage}%`, height: '100%', backgroundColor: 'var(--rr-success, #4ec9b0)', borderRadius: 2, transition: 'width 0.1s ease-in-out' }} />
+						<div style={{ width: `${progressPercentage}%`, height: '100%', backgroundColor: 'var(--rr-success)', borderRadius: 2, transition: 'width 0.1s ease-in-out' }} />
 					</div>
 				</div>
 				<span style={styles.pipesCount}>
@@ -243,7 +244,7 @@ const styles = {
 	} as React.CSSProperties,
 	statusLink: {
 		fontSize: '9px',
-		color: 'var(--rr-accent, #007acc)',
+		color: 'var(--rr-accent)',
 		cursor: 'pointer',
 		whiteSpace: 'nowrap' as const,
 		textDecoration: 'none',
@@ -253,18 +254,14 @@ const styles = {
 		fontSize: '9px',
 		color: 'var(--rr-text-disabled)',
 		marginTop: '3px',
-		whiteSpace: 'nowrap' as const,
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
+		...commonStyles.textEllipsis,
 		display: 'block',
 	} as React.CSSProperties,
 	errorMessage: {
 		fontSize: '9px',
-		color: 'var(--rr-error, #f14c4c)',
+		color: 'var(--rr-error)',
 		marginTop: '3px',
-		whiteSpace: 'nowrap' as const,
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
+		...commonStyles.textEllipsis,
 		opacity: 0.85,
 		display: 'block',
 	} as React.CSSProperties,
@@ -274,19 +271,19 @@ const styles = {
 		height: '2px',
 		marginTop: '5px',
 		borderRadius: '1px',
-		backgroundColor: 'var(--rr-success, #4ec9b0)',
+		backgroundColor: 'var(--rr-success)',
 	} as React.CSSProperties,
 	accentBarWarning: {
 		height: '2px',
 		marginTop: '5px',
 		borderRadius: '1px',
-		backgroundColor: 'var(--rr-warning, #cca700)',
+		backgroundColor: 'var(--rr-warning)',
 	} as React.CSSProperties,
 	accentBarError: {
 		height: '2px',
 		marginTop: '5px',
 		borderRadius: '1px',
-		backgroundColor: 'var(--rr-error, #f14c4c)',
+		backgroundColor: 'var(--rr-error)',
 	} as React.CSSProperties,
 
 	// Non-source node pipes footer

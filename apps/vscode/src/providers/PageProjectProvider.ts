@@ -1,0 +1,661 @@
+// =============================================================================
+// MIT License
+// Copyright (c) 2026 Aparavi Software AG
+// =============================================================================
+
+/**
+ * PageProjectProvider — Unified custom editor for .pipeline files.
+ *
+ * Combines the former PageEditorProvider (canvas editing, file I/O, undo/redo)
+ * and PageStatusProvider (status, trace, flow monitoring) into a single provider
+ * that renders the shared-ui ProjectView component.
+ *
+ * Uses the ProjectViewIncoming / ProjectViewOutgoing message protocol to
+ * communicate with the PageProject webview.
+ */
+
+import * as vscode from 'vscode';
+import * as path from 'path';
+import { TaskStatus, GenericEvent, GenericResponse, ConnectionState } from '../shared/types';
+import { ConnectionManager } from '../connection/connection';
+import { MonitorManager } from '../connection/monitor-manager';
+import { ConfigManager } from '../config';
+import { getLogger } from '../shared/util/output';
+import { icons } from '../shared/util/icons';
+import { PipelineFileParser } from '../shared/util/pipelineParser';
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+const CANVAS_PREFERENCES_KEY = 'canvasPreferences';
+
+// =============================================================================
+// TYPES
+// =============================================================================
+
+interface EditorState {
+	document: vscode.TextDocument;
+	webviewPanel: vscode.WebviewPanel;
+	projectId?: string;
+	isMonitoring: boolean;
+	isDisposed: boolean;
+	isReady: boolean;
+	cachedStatuses: Record<string, TaskStatus>;
+}
+
+// =============================================================================
+// PROVIDER
+// =============================================================================
+
+export class PageProjectProvider implements vscode.CustomTextEditorProvider {
+	private disposables: vscode.Disposable[] = [];
+	private editorStates: Map<string, EditorState> = new Map();
+	private connectionManager = ConnectionManager.getInstance();
+	private logger = getLogger();
+	private savesForRun: Set<string> = new Set();
+
+	constructor(private readonly context: vscode.ExtensionContext) {
+		this.registerCommands();
+		this.setupEventListeners();
+	}
+
+	// =========================================================================
+	// SAVE-FOR-RUN CHECK
+	// =========================================================================
+
+	public isSaveForRun(uri: vscode.Uri): boolean {
+		return this.savesForRun.has(uri.toString());
+	}
+
+	public getTaskStatus(projectId: string, sourceId: string): TaskStatus | undefined {
+		for (const editorState of this.editorStates.values()) {
+			if (editorState.projectId === projectId) {
+				return editorState.cachedStatuses[sourceId];
+			}
+		}
+		return undefined;
+	}
+
+	// =========================================================================
+	// EVENT LISTENERS
+	// =========================================================================
+
+	private setupEventListeners(): void {
+		const eventListener = this.connectionManager.on('event', (event) => {
+			try {
+				this.handleEvent(event);
+			} catch (error) {
+				this.logger.error(`Handling event: ${error}`);
+			}
+		});
+
+		const connectionStateListener = this.connectionManager.on('connectionStateChanged', async (connectionStatus) => {
+			try {
+				if (connectionStatus.state === ConnectionState.CONNECTED) {
+					await this.startMonitoringForAllEditors();
+				} else {
+					await this.stopMonitoringForAllEditors();
+				}
+				this.broadcastConnectionState(this.connectionManager.isConnected());
+			} catch (error) {
+				this.logger.error(`Handling connection state change: ${error}`);
+			}
+		});
+
+		const servicesUpdatedListener = this.connectionManager.on('servicesUpdated', (payload: { services: Record<string, unknown>; servicesError?: string }) => {
+			this.broadcastServicesToAllEditors(payload);
+		});
+
+		this.disposables.push(eventListener, connectionStateListener, servicesUpdatedListener);
+	}
+
+	// =========================================================================
+	// EVENT ROUTING
+	// =========================================================================
+
+	private handleEvent(event: GenericEvent): void {
+		switch (event.event) {
+			case 'apaevt_status_update': {
+				const projectId = event.body?.project_id;
+				const source = event.body?.source;
+				if (!projectId || !source) return;
+
+				const editorState = Array.from(this.editorStates.values()).find((state) => !state.isDisposed && state.projectId === projectId);
+				if (!editorState) return;
+
+				const taskStatus = event.body as TaskStatus;
+				editorState.cachedStatuses[source] = taskStatus;
+
+				if (editorState.isReady) {
+					editorState.webviewPanel.webview.postMessage({
+						type: 'status:update',
+						taskStatus,
+					});
+				}
+				break;
+			}
+
+			case 'apaevt_flow': {
+				const body = event.body;
+				if (!body?.trace) break;
+
+				for (const editorState of this.editorStates.values()) {
+					if (!editorState.isDisposed && editorState.isReady) {
+						editorState.webviewPanel.webview.postMessage({
+							type: 'trace:event',
+							event: {
+								pipelineId: body.id ?? 0,
+								op: body.op || 'enter',
+								pipes: body.pipes || [],
+								trace: body.trace || {},
+							},
+						});
+					}
+				}
+				break;
+			}
+		}
+	}
+
+	// =========================================================================
+	// BROADCASTING
+	// =========================================================================
+
+	private broadcastServicesToAllEditors(payload: { services: Record<string, unknown>; servicesError?: string }): void {
+		for (const editorState of this.editorStates.values()) {
+			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
+				editorState.webviewPanel.webview
+					.postMessage({
+						type: 'canvas:services',
+						services: payload.services,
+					})
+					.then(undefined, (err: unknown) => {
+						this.logger.error(`Failed to post services to webview: ${err}`);
+					});
+			}
+		}
+	}
+
+	private broadcastConnectionState(isConnected: boolean): void {
+		for (const editorState of this.editorStates.values()) {
+			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
+				editorState.webviewPanel.webview.postMessage({ type: 'project:connectionState', isConnected }).then(undefined, (err: unknown) => {
+					this.logger.error(`Failed to post connectionState to webview: ${err}`);
+				});
+			}
+		}
+	}
+
+	// =========================================================================
+	// MONITORING
+	// =========================================================================
+
+	private async startMonitoring(documentUri: string): Promise<void> {
+		const editorState = this.editorStates.get(documentUri);
+		if (!editorState || editorState.isMonitoring || editorState.isDisposed || !editorState.projectId || !this.connectionManager.isConnected()) {
+			return;
+		}
+
+		try {
+			await MonitorManager.getInstance().addMonitor({ projectId: editorState.projectId, source: '*' }, ['summary', 'flow']);
+			editorState.isMonitoring = true;
+		} catch (error) {
+			this.logger.error(`Starting monitoring for project ${editorState.projectId}: ${error}`);
+			editorState.isMonitoring = false;
+		}
+	}
+
+	private async stopMonitoring(documentUri: string): Promise<void> {
+		const editorState = this.editorStates.get(documentUri);
+		if (!editorState || !editorState.projectId) return;
+
+		try {
+			await MonitorManager.getInstance().removeMonitor({ projectId: editorState.projectId, source: '*' }, ['summary', 'flow']);
+		} catch (error) {
+			this.logger.error(`Stopping monitoring for project ${editorState.projectId}: ${error}`);
+		}
+
+		editorState.isMonitoring = false;
+	}
+
+	private async startMonitoringForAllEditors(): Promise<void> {
+		for (const [documentUri, editorState] of this.editorStates) {
+			try {
+				await this.startMonitoring(documentUri);
+				if (!editorState.isDisposed && editorState.isReady && editorState.webviewPanel.webview) {
+					for (const [source, taskStatus] of Object.entries(editorState.cachedStatuses)) {
+						editorState.webviewPanel.webview.postMessage({
+							type: 'status:update',
+							taskStatus: { ...taskStatus, source },
+						});
+					}
+				}
+			} catch (error) {
+				this.logger.error(`Starting monitoring for ${documentUri}: ${error}`);
+			}
+		}
+	}
+
+	private async stopMonitoringForAllEditors(): Promise<void> {
+		for (const editorState of this.editorStates.values()) {
+			editorState.isMonitoring = false;
+		}
+	}
+
+	// =========================================================================
+	// COMMANDS
+	// =========================================================================
+
+	private registerCommands(): void {
+		const commands = [
+			vscode.commands.registerCommand('rocketride.openPipelineAsText', (uri: vscode.Uri) => {
+				const targetUri = uri || vscode.window.activeTextEditor?.document.uri;
+				if (targetUri) {
+					vscode.commands.executeCommand('vscode.openWith', targetUri, 'default');
+				} else {
+					vscode.window.showErrorMessage('No pipeline file selected');
+				}
+			}),
+
+			vscode.commands.registerCommand('rocketride.editor.save', async () => {
+				if (vscode.window.activeTextEditor?.document.languageId === 'pipeline') {
+					await vscode.commands.executeCommand('workbench.action.files.save');
+				}
+			}),
+
+			vscode.commands.registerCommand('rocketride.editor.refresh', async () => {
+				if (vscode.window.activeTextEditor?.document.languageId === 'pipeline') {
+					await vscode.commands.executeCommand('workbench.action.reloadWindow');
+				}
+			}),
+		];
+
+		this.disposables.push(...commands);
+		commands.forEach((command) => this.context.subscriptions.push(command));
+	}
+
+	// =========================================================================
+	// RESOLVE CUSTOM TEXT EDITOR
+	// =========================================================================
+
+	public async resolveCustomTextEditor(document: vscode.TextDocument, webviewPanel: vscode.WebviewPanel, _token: vscode.CancellationToken): Promise<void> {
+		const webview = webviewPanel.webview;
+
+		const fileName = document.uri.fsPath.split(/[\\/]/).pop() ?? document.uri.fsPath;
+		webviewPanel.title = fileName.replace(/\.pipe(\.json)?$/i, '');
+
+		const { projectId } = this.extractPipelineIds(document);
+
+		const editorState: EditorState = {
+			document,
+			webviewPanel,
+			projectId,
+			isMonitoring: false,
+			isDisposed: false,
+			isReady: false,
+			cachedStatuses: {},
+		};
+
+		this.editorStates.set(document.uri.toString(), editorState);
+
+		webview.options = {
+			enableScripts: true,
+			localResourceRoots: [this.context.extensionUri],
+		};
+
+		webview.html = this.getHtmlForWebview(webview);
+
+		// --- Handle messages from the webview (ProjectViewOutgoing) -----------
+
+		webview.onDidReceiveMessage(async (data) => {
+			switch (data.type) {
+				case 'ready': {
+					editorState.isReady = true;
+
+					// Send initial document content
+					this.sendCanvasUpdate(webview, document);
+
+					// Send cached services
+					const cached = this.connectionManager.getCachedServices();
+					webview.postMessage({
+						type: 'canvas:services',
+						services: cached.services,
+					});
+
+					// Kick off background refresh
+					this.connectionManager.refreshServices().catch((err) => {
+						this.logger.error(`Background services refresh failed: ${err}`);
+					});
+
+					// Send persisted view state (includes canvas preferences)
+					const storedPrefs = this.context.workspaceState.get<Record<string, unknown>>(CANVAS_PREFERENCES_KEY) ?? {};
+					if (Object.keys(storedPrefs).length > 0) {
+						webview.postMessage({ type: 'project:initialState', state: storedPrefs });
+					}
+
+					// Send all cached status updates
+					for (const [_source, taskStatus] of Object.entries(editorState.cachedStatuses)) {
+						webview.postMessage({
+							type: 'status:update',
+							taskStatus,
+						});
+					}
+
+					// Send initial connection state
+					webview.postMessage({ type: 'project:connectionState', isConnected: this.connectionManager.isConnected() });
+
+					// Start monitoring
+					if (!editorState.isMonitoring) {
+						try {
+							await this.startMonitoring(document.uri.toString());
+						} catch (error) {
+							this.logger.error(`Starting monitoring after webview ready: ${error}`);
+						}
+					}
+					break;
+				}
+
+				// Canvas messages
+				case 'canvas:contentChanged': {
+					if (data.project) {
+						const content = typeof data.project === 'string' ? data.project : JSON.stringify(data.project);
+						this.applyDocumentEdit(document, content);
+					}
+					break;
+				}
+
+				case 'canvas:validate': {
+					this.logger.output(`${icons.pipeline} Validating pipeline...`);
+					const pipeline = ConfigManager.getInstance().substituteEnvVariables(data.pipeline);
+					try {
+						const client = this.connectionManager.getClient();
+						if (!client) throw new Error('Not connected to server');
+						const result = await client.validate({ pipeline });
+						this.logger.output(`${icons.success} Pipeline validation passed`);
+						webview.postMessage({ type: 'canvas:validateResponse', requestId: data.requestId, result });
+					} catch (error) {
+						const msg = error instanceof Error ? error.message : String(error);
+						this.logger.output(`${icons.error} Pipeline validation failed: ${msg}`);
+						webview.postMessage({ type: 'canvas:validateResponse', requestId: data.requestId, result: { errors: [], warnings: [] }, error: msg });
+					}
+					break;
+				}
+
+				case 'canvas:requestSave':
+				case 'project:requestSave': {
+					await this.saveDocument(document, document.getText());
+					break;
+				}
+
+				// Status messages
+				case 'status:pipelineAction': {
+					const action = data.action as 'run' | 'stop' | 'restart';
+					const source = data.source as string | undefined;
+					if (action === 'run' || action === 'restart') {
+						const uriKey = document.uri.toString();
+						this.savesForRun.add(uriKey);
+						try {
+							await this.saveDocument(document, document.getText());
+							const parsed = JSON.parse(document.getText());
+							const pipeName = path.basename(document.uri.fsPath, '.pipe');
+							await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
+						} catch (error: unknown) {
+							const message = error instanceof Error ? error.message : String(error);
+							vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
+						}
+						setTimeout(() => this.savesForRun.delete(uriKey), 2000);
+					} else if (action === 'stop') {
+						if (source) {
+							await this.stopPipeline(source, document);
+						}
+					}
+					break;
+				}
+
+				// Trace messages
+				case 'trace:clear':
+					// No-op on host side
+					break;
+
+				// Project state
+				case 'project:stateChange': {
+					if (data.state) {
+						this.context.workspaceState.update(CANVAS_PREFERENCES_KEY, data.state).then(undefined, (err: unknown) => {
+							this.logger.error(`Failed to persist view state: ${err}`);
+						});
+					}
+					break;
+				}
+			}
+		});
+
+		// Listen for document changes (undo/redo) and sync to webview
+		const changeDocumentSubscription = vscode.workspace.onDidChangeTextDocument((e) => {
+			if (e.document.uri.toString() === document.uri.toString()) {
+				const { projectId: newProjectId } = this.extractPipelineIds(e.document);
+				editorState.projectId = newProjectId;
+				this.sendCanvasUpdate(webview, e.document);
+			}
+		});
+
+		// Clean up when panel is disposed
+		webviewPanel.onDidDispose(async () => {
+			await this.stopMonitoring(document.uri.toString());
+			editorState.cachedStatuses = {};
+			editorState.isDisposed = true;
+			this.editorStates.delete(document.uri.toString());
+			changeDocumentSubscription.dispose();
+		});
+
+		// Send initial content
+		this.sendCanvasUpdate(webview, document);
+
+		// Start monitoring immediately if connected
+		if (this.connectionManager.isConnected()) {
+			this.startMonitoring(document.uri.toString()).catch((error) => {
+				this.logger.error(`Starting initial monitoring: ${error}`);
+			});
+		}
+	}
+
+	// =========================================================================
+	// DOCUMENT I/O
+	// =========================================================================
+
+	private sendCanvasUpdate(webview: vscode.Webview, document: vscode.TextDocument): void {
+		const text = document.getText();
+		const parsed = PipelineFileParser.parseContent(text, document.uri.fsPath);
+		if (!parsed.isValid) {
+			return;
+		}
+
+		const enriched = this.enrichComponentNames(text);
+		try {
+			const project = JSON.parse(enriched);
+			webview.postMessage({ type: 'canvas:update', project });
+		} catch {
+			// Invalid JSON — skip
+		}
+	}
+
+	private enrichComponentNames(text: string): string {
+		const cached = this.connectionManager.getCachedServices();
+		const services = cached?.services;
+		if (!services || Object.keys(services).length === 0) return text;
+
+		const pipeline = JSON.parse(text);
+		const components = pipeline.components as Array<{ provider: string; name?: string }> | undefined;
+		if (!components) return text;
+
+		let changed = false;
+		for (const component of components) {
+			if (!component.name) {
+				const service = services[component.provider] as { title?: string } | undefined;
+				if (service?.title) {
+					component.name = service.title;
+					changed = true;
+				}
+			}
+		}
+
+		return changed ? JSON.stringify(pipeline, null, 2) : text;
+	}
+
+	private toVerboseJson(content: string | Record<string, unknown>): string {
+		const obj = typeof content === 'string' ? JSON.parse(content) : content;
+		return JSON.stringify(obj, null, 2);
+	}
+
+	private async applyDocumentEdit(document: vscode.TextDocument, content: string): Promise<{ changed: boolean; applied: boolean }> {
+		let normalizedNew: string;
+		try {
+			normalizedNew = this.toVerboseJson(content);
+		} catch {
+			normalizedNew = content;
+		}
+		const currentText = document.getText();
+		let normalizedCurrent: string;
+		try {
+			normalizedCurrent = this.toVerboseJson(currentText);
+		} catch {
+			normalizedCurrent = currentText;
+		}
+		if (normalizedNew === normalizedCurrent) {
+			return { changed: false, applied: false };
+		}
+		const edit = new vscode.WorkspaceEdit();
+		const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(currentText.length));
+		edit.replace(document.uri, fullRange, normalizedNew);
+		const success = await vscode.workspace.applyEdit(edit);
+		if (!success) {
+			this.logger.error('[PageProjectProvider] Failed to apply document edit');
+		}
+		return { changed: true, applied: success };
+	}
+
+	private async saveDocument(document: vscode.TextDocument, content: string | Record<string, unknown>): Promise<void> {
+		const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+		const { changed, applied } = await this.applyDocumentEdit(document, contentStr);
+		if (applied) {
+			await document.save();
+		} else if (changed) {
+			vscode.window.showErrorMessage('Failed to save pipeline file');
+		}
+	}
+
+	private extractPipelineIds(document: vscode.TextDocument): { projectId?: string; sourceId?: string } {
+		try {
+			const content = document.getText();
+			const parsed = JSON.parse(content);
+			return { projectId: parsed.project_id, sourceId: parsed.source };
+		} catch {
+			return { projectId: undefined, sourceId: undefined };
+		}
+	}
+
+	// =========================================================================
+	// PIPELINE EXECUTION
+	// =========================================================================
+
+	private async runPipeline(document: { pipeline: Record<string, unknown> }, name?: string): Promise<void> {
+		try {
+			const project = document.pipeline;
+			const projectTransformed = ConfigManager.getInstance().substituteEnvVariables(project);
+			const projectId = project.project_id;
+			const source = project.source;
+
+			await this.connectionManager.request('execute', {
+				projectId,
+				source,
+				pipeline: projectTransformed,
+				pipelineTraceLevel: 'full',
+				args: ConfigManager.getInstance().getEffectiveEngineArgs(),
+				...(name ? { name } : {}),
+			});
+		} catch (error: unknown) {
+			const message = error instanceof Error ? error.message : String(error);
+			vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
+		}
+	}
+
+	private async stopPipeline(componentId: string, document: vscode.TextDocument): Promise<void> {
+		try {
+			const parsed = JSON.parse(document.getText());
+			const projectId = parsed.project_id;
+
+			if (!projectId || !componentId) {
+				this.logger.error(`[PageProjectProvider] Missing projectId or componentId`);
+				vscode.window.showErrorMessage('Invalid pipeline: missing project ID or component ID');
+				return;
+			}
+
+			const response = (await this.connectionManager.request('rrext_get_token', {
+				projectId,
+				source: componentId,
+			})) as GenericResponse | undefined;
+
+			const token = response?.body?.token;
+
+			if (!token) {
+				this.logger.error('[PageProjectProvider] No token found for running task');
+				vscode.window.showErrorMessage('No running task found to stop');
+				return;
+			}
+
+			await this.connectionManager.request('terminate', {}, token);
+		} catch (error: unknown) {
+			this.logger.error(`[PageProjectProvider] Unable to stop pipeline: ${error}`);
+			const message = error instanceof Error ? error.message : String(error);
+			vscode.window.showErrorMessage(`Failed to stop pipeline: ${message}`);
+		}
+	}
+
+	// =========================================================================
+	// HTML GENERATION
+	// =========================================================================
+
+	private getHtmlForWebview(webview: vscode.Webview): string {
+		const nonce = this.generateNonce();
+		const htmlPath = vscode.Uri.joinPath(this.context.extensionUri, 'webview', 'page-project.html');
+
+		try {
+			let htmlContent = require('fs').readFileSync(htmlPath.fsPath, 'utf8');
+
+			htmlContent = htmlContent.replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, webview.cspSource);
+
+			return htmlContent.replace(/(?:src|href)="(\/static\/[^"]+)"/g, (match: string, relativePath: string): string => {
+				const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+				const resourceUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', cleanPath));
+				return match.replace(relativePath, resourceUri.toString());
+			});
+		} catch (error) {
+			this.logger.error(`Error loading project editor HTML: ${error}`);
+			return `<!DOCTYPE html>
+            <html><body style="padding:20px;color:#f44336;">
+                <h3>Error Loading Project Editor</h3>
+                <p>${error}</p>
+                <p>Run <code>pnpm run build:webview</code> to build the webview.</p>
+                <p>Expected: <code>${htmlPath.fsPath}</code></p>
+            </body></html>`;
+		}
+	}
+
+	private generateNonce(): string {
+		let text = '';
+		const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+		for (let i = 0; i < 32; i++) {
+			text += possible.charAt(Math.floor(Math.random() * possible.length));
+		}
+		return text;
+	}
+
+	// =========================================================================
+	// DISPOSAL
+	// =========================================================================
+
+	public dispose(): void {
+		this.disposables.forEach((disposable) => disposable.dispose());
+		this.disposables = [];
+	}
+}

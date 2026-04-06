@@ -136,7 +136,7 @@ export default function ArrayFieldTemplate<
 					pt: '6px',
 					pb: '6px',
 					px: '8px',
-					border: '1px solid var(--rr-border, #dcdcdc)',
+					border: '1px solid var(--rr-border)',
 					borderRadius: '4px',
 				}}
 			>

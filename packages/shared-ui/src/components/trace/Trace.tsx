@@ -9,6 +9,7 @@
 import React, { useState, useMemo, useCallback, useEffect, CSSProperties } from 'react';
 import { JsonTree } from './JsonTree';
 import type { TraceRow } from '../../modules/project/types';
+import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
 // INTERNAL TYPES
@@ -39,12 +40,12 @@ interface TraceObjectGroup {
 // =============================================================================
 
 const LANE_COLORS: Record<string, string> = {
-	open: 'var(--rr-chart-blue, #1976d2)',
-	tags: 'var(--rr-chart-green, #2e7d32)',
-	text: 'var(--rr-chart-yellow, #f9a825)',
-	documents: 'var(--rr-chart-purple, #9c27b0)',
-	closing: 'var(--rr-chart-orange, #e65100)',
-	close: 'var(--rr-chart-red, #c62828)',
+	open: 'var(--rr-chart-blue)',
+	tags: 'var(--rr-chart-green)',
+	text: 'var(--rr-chart-yellow)',
+	documents: 'var(--rr-chart-purple)',
+	closing: 'var(--rr-chart-orange)',
+	close: 'var(--rr-chart-red)',
 };
 
 const LANE_DISPLAY_NAMES: Record<string, string> = {
@@ -80,7 +81,7 @@ const S = {
 		padding: '6px 12px',
 		fontWeight: 600,
 		fontSize: 13,
-		borderBottom: '1px solid var(--rr-border-default, rgba(128,128,128,0.2))',
+		borderBottom: '1px solid var(--rr-border-default)',
 		flexShrink: 0,
 	} as CSSProperties,
 
@@ -90,13 +91,10 @@ const S = {
 	} as CSSProperties,
 
 	clearBtn: {
-		background: 'none',
-		border: '1px solid var(--rr-border-default, rgba(128,128,128,0.3))',
-		borderRadius: 3,
-		color: 'var(--rr-text-primary)',
+		...commonStyles.buttonSecondary,
 		padding: '2px 8px',
-		cursor: 'pointer',
 		fontSize: 12,
+		borderRadius: 3,
 	} as CSSProperties,
 
 	content: {
@@ -105,9 +103,7 @@ const S = {
 	} as CSSProperties,
 
 	noData: {
-		padding: '24px 16px',
-		textAlign: 'center',
-		color: 'var(--rr-text-secondary)',
+		...commonStyles.empty,
 		fontStyle: 'italic',
 	} as CSSProperties,
 
@@ -135,7 +131,7 @@ const S = {
 		color: 'var(--rr-text-secondary)',
 		textTransform: 'uppercase',
 		letterSpacing: '0.04em',
-		borderBottom: '1px solid var(--rr-border-default, rgba(128,128,128,0.2))',
+		borderBottom: '1px solid var(--rr-border-default)',
 		flexShrink: 0,
 	} as CSSProperties,
 
@@ -163,31 +159,31 @@ const S = {
 		alignItems: 'center',
 		padding: '3px 8px',
 		cursor: 'pointer',
-		borderBottom: '1px solid var(--rr-border-subtle, rgba(128,128,128,0.08))',
+		borderBottom: '1px solid var(--rr-border-subtle)',
 	} as CSSProperties,
 
 	rowSelected: {
-		backgroundColor: 'var(--rr-bg-active, rgba(25, 118, 210, 0.12))',
+		backgroundColor: 'var(--rr-bg-active)',
 	} as CSSProperties,
 
 	rowError: {
-		backgroundColor: 'var(--rr-bg-error, rgba(198, 40, 40, 0.08))',
+		backgroundColor: 'var(--rr-bg-error)',
 	} as CSSProperties,
 
 	rowHover: {
 		// applied via onMouseEnter/Leave
-		backgroundColor: 'var(--rr-bg-hover, rgba(128,128,128,0.06))',
+		backgroundColor: 'var(--rr-bg-hover)',
 	} as CSSProperties,
 
 	// -- object row -------------------------------------------------------------
 	objectRow: {
 		fontWeight: 600,
-		backgroundColor: 'var(--rr-bg-surface, rgba(128,128,128,0.04))',
+		backgroundColor: 'var(--rr-bg-surface)',
 	} as CSSProperties,
 
 	objectRowInFlight: {
 		fontWeight: 600,
-		backgroundColor: 'var(--rr-bg-surface, rgba(128,128,128,0.04))',
+		backgroundColor: 'var(--rr-bg-surface)',
 		opacity: 0.85,
 	} as CSSProperties,
 
@@ -205,27 +201,21 @@ const S = {
 	name: {
 		flex: 1,
 		minWidth: 0,
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-		whiteSpace: 'nowrap',
+		...commonStyles.textEllipsis,
 	} as CSSProperties,
 
 	nameFile: {
 		flex: 1,
 		minWidth: 0,
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-		whiteSpace: 'nowrap',
+		...commonStyles.textEllipsis,
 		fontWeight: 700,
 	} as CSSProperties,
 
 	nameError: {
 		flex: 1,
 		minWidth: 0,
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-		whiteSpace: 'nowrap',
-		color: 'var(--rr-color-error, #c62828)',
+		...commonStyles.textEllipsis,
+		color: 'var(--rr-color-error)',
 	} as CSSProperties,
 
 	// -- dot (lane colour) ------------------------------------------------------
@@ -240,7 +230,7 @@ const S = {
 	// -- error icon -------------------------------------------------------------
 	errIcon: {
 		marginRight: 4,
-		color: 'var(--rr-color-error, #c62828)',
+		color: 'var(--rr-color-error)',
 		fontSize: 12,
 		flexShrink: 0,
 	} as CSSProperties,
@@ -267,7 +257,7 @@ const S = {
 		textTransform: 'uppercase',
 		letterSpacing: '0.03em',
 		lineHeight: '16px',
-		color: 'var(--rr-chart-blue, #1976d2)',
+		color: 'var(--rr-chart-blue)',
 		backgroundColor: 'rgba(25, 118, 210, 0.12)',
 	} as CSSProperties,
 
@@ -289,13 +279,13 @@ const S = {
 		paddingRight: 8,
 		fontSize: 11,
 		fontFamily: 'var(--rr-font-mono, monospace)',
-		color: 'var(--rr-color-error, #c62828)',
+		color: 'var(--rr-color-error)',
 		fontWeight: 600,
 	} as CSSProperties,
 
 	// -- "more..." row ----------------------------------------------------------
 	moreLabel: {
-		color: 'var(--rr-chart-blue, #1976d2)',
+		color: 'var(--rr-chart-blue)',
 		fontStyle: 'italic',
 		cursor: 'pointer',
 		fontSize: 12,
@@ -307,7 +297,7 @@ const S = {
 		flexShrink: 0,
 		overflowY: 'auto',
 		overflowX: 'hidden',
-		borderLeft: '1px solid var(--rr-border-default, rgba(128,128,128,0.2))',
+		borderLeft: '1px solid var(--rr-border-default)',
 	} as CSSProperties,
 
 	resizeHandle: {
@@ -329,7 +319,7 @@ const S = {
 		height: '100%',
 		cursor: 'col-resize',
 		zIndex: 10,
-		background: 'var(--rr-chart-blue, #1976d2)',
+		background: 'var(--rr-chart-blue)',
 		opacity: 0.4,
 	} as CSSProperties,
 
@@ -406,7 +396,7 @@ const S = {
 	dpBar: {
 		height: 6,
 		borderRadius: 3,
-		backgroundColor: 'var(--rr-bg-surface, rgba(128,128,128,0.12))',
+		backgroundColor: 'var(--rr-bg-surface)',
 		overflow: 'hidden',
 		marginTop: 4,
 	} as CSSProperties,
@@ -414,7 +404,7 @@ const S = {
 	dpBarFill: {
 		height: '100%',
 		borderRadius: 3,
-		backgroundColor: 'var(--rr-chart-blue, #1976d2)',
+		backgroundColor: 'var(--rr-chart-blue)',
 	} as CSSProperties,
 
 	dpBarLabel: {

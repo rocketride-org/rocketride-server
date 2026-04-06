@@ -35,6 +35,7 @@ import { useFlowProject } from '../context/FlowProjectContext';
 import type { ITemplate } from '../templates/types';
 import { IService, IServiceCapabilities } from '../types';
 import { getIconPath } from '../util/get-icon-path';
+import { commonStyles } from '../../../themes/styles';
 
 // =============================================================================
 // Styles
@@ -42,12 +43,7 @@ import { getIconPath } from '../util/get-icon-path';
 
 const styles = {
 	backdrop: {
-		position: 'fixed' as const,
-		inset: 0,
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		backgroundColor: 'rgba(0, 0, 0, 0.4)',
+		...commonStyles.overlay,
 		zIndex: 100,
 	},
 	dialog: {
@@ -75,12 +71,9 @@ const styles = {
 		color: 'var(--rr-text-secondary)',
 	},
 	sectionLabel: {
+		...commonStyles.labelUppercase,
 		margin: '0 0 8px 0',
-		fontSize: '12px',
-		fontWeight: 600,
 		color: 'var(--rr-text-primary)',
-		textTransform: 'uppercase' as const,
-		letterSpacing: '0.5px',
 	},
 	section: {
 		marginBottom: '16px',
@@ -114,11 +107,7 @@ const styles = {
 		height: '18px',
 		flexShrink: 0,
 	},
-	itemTitle: {
-		whiteSpace: 'nowrap' as const,
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-	},
+	itemTitle: commonStyles.textEllipsis,
 	footer: {
 		display: 'flex',
 		justifyContent: 'flex-end',

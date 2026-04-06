@@ -37,7 +37,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { getStatusPageProvider, getPageEditorProvider } from '../extension';
+import { getPageProjectProvider } from '../extension';
 import { getLogger } from '../shared/util/output';
 import { PipelineFileParser, ParsedPipelineFile, ParsedSourceComponent, ServiceClassInfo } from '../shared/util/pipelineParser';
 import { ConfigManager } from '../config';
@@ -160,36 +160,9 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 				const unknownTask = item?.unknownTask as UnknownTask;
 
 				try {
-					let projectId: string;
-					let source: string;
-					let displayName: string;
-
-					// Check if this is an unknown task
-					if (unknownTask) {
-						projectId = unknownTask.projectId;
-						source = unknownTask.sourceId;
-						displayName = unknownTask.displayName || source;
-					} else {
-						if (knownContext?.parsedPipeline?.isValid && knownContext.parsedPipeline.projectId && knownContext.componentId) {
-							projectId = knownContext.parsedPipeline.projectId;
-							source = knownContext.componentId;
-							displayName = knownContext.displayName;
-						} else {
-							vscode.window.showErrorMessage(`Invalid pipeline file or missing project_id: ${path.basename(resourceUri.fsPath)}`);
-							return;
-						}
-					}
-
-					// Show the status page for this project with the specific component as source
-					const statusPageProvider = getStatusPageProvider();
-					if (statusPageProvider) {
-						// Pass title and tooltip to the status page provider
-						statusPageProvider.show(displayName, resourceUri, projectId, source);
-					} else {
-						vscode.window.showErrorMessage('Status page provider not available');
-					}
+					await vscode.commands.executeCommand('vscode.openWith', resourceUri, 'rocketride.PageProject');
 				} catch (error) {
-					vscode.window.showErrorMessage(`Failed to open status page for component: ${error}`);
+					vscode.window.showErrorMessage(`Failed to open pipeline: ${error}`);
 				}
 			}),
 
@@ -305,18 +278,8 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					vscode.window.showErrorMessage(`Invalid pipeline file or missing project_id`);
 					return;
 				}
-				const projectId = parsedPipeline.projectId;
-				const sourceId = sourceComponent.id;
-				const services = this.connectionManager.getCachedServices()?.services ?? {};
-				const providerDef = sourceComponent.provider ? (services[sourceComponent.provider] as { title?: string } | undefined) : undefined;
-				const displayName = sourceComponent.name || providerDef?.title || sourceId;
-				const statusPageProvider = getStatusPageProvider();
-				if (!statusPageProvider) {
-					vscode.window.showErrorMessage('Status page provider not available');
-					return;
-				}
-				await statusPageProvider.show(displayName, resourceUri, projectId, sourceId);
-				statusPageProvider.revealErrorsSection(projectId, sourceId, item.folderType);
+				// Open the pipeline file in the unified project editor (errors tab is within ProjectView)
+				await vscode.commands.executeCommand('vscode.openWith', resourceUri, 'rocketride.PageProject');
 			}),
 		];
 
@@ -663,8 +626,8 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 
 		// Check if this file save is part of a Run operation
 		// If so, skip restart check (the save is from clicking Run, not a manual edit)
-		const pageEditorProvider = getPageEditorProvider();
-		if (pageEditorProvider?.isSaveForRun(uri)) {
+		const pageProjectProvider = getPageProjectProvider();
+		if (pageProjectProvider?.isSaveForRun(uri)) {
 			return;
 		}
 
@@ -868,7 +831,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					});
 					contextValue = hasRunningComponents ? 'pipelineFile:running' : 'pipelineFile:stopped';
 					// Aggregate task errors/warnings across all sources for pipeline file description
-					const statusProvider = getStatusPageProvider();
+					const statusProvider = getPageProjectProvider();
 					let totalErrors = 0;
 					let totalWarnings = 0;
 					for (const comp of parsedFile.sourceComponents) {
@@ -1045,7 +1008,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 		if (element.contextValue === 'pipelineFile' && element.parsedFile?.isValid) {
 			const parsedFile = element.parsedFile;
 			const projectId = parsedFile.projectId!;
-			const statusProvider = getStatusPageProvider();
+			const statusProvider = getPageProjectProvider();
 			const sortedSources = [...parsedFile.sourceComponents].sort((a, b) => {
 				const nameA = (a.name || a.id || '').toLowerCase();
 				const nameB = (b.name || b.id || '').toLowerCase();

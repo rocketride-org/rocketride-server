@@ -153,7 +153,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 					}}
 				>
 					<span style={styles.button}>
-						<RefreshCw size={16} style={{ ...styles.icon, color: 'var(--rr-warning, #ed6c02)' }} className="rotate" />
+						<RefreshCw size={16} style={{ ...styles.icon, color: 'var(--rr-warning)' }} className="rotate" />
 					</span>
 					<span style={styles.label} className="run-btn-label">
 						Stopping...
@@ -172,7 +172,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 				}}
 			>
 				<span style={styles.button}>
-					<StopCircle size={16} style={{ ...styles.icon, color: 'var(--rr-error, #d32f2f)' }} />
+					<StopCircle size={16} style={{ ...styles.icon, color: 'var(--rr-error)' }} />
 				</span>
 				<span style={styles.label} className="run-btn-label">
 					Stop
@@ -190,7 +190,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 				e.preventDefault();
 			}}
 		>
-			<span style={styles.button}>{isPending ? <RefreshCw size={16} style={{ ...styles.icon, color: 'var(--rr-warning, #ed6c02)' }} className="rotate" /> : <Play size={16} style={{ ...styles.icon, color: 'var(--rr-accent, #007acc)' }} />}</span>
+			<span style={styles.button}>{isPending ? <RefreshCw size={16} style={{ ...styles.icon, color: 'var(--rr-warning)' }} className="rotate" /> : <Play size={16} style={{ ...styles.icon, color: 'var(--rr-accent)' }} />}</span>
 			<span style={styles.label} className="run-btn-label">
 				Run Pipeline
 			</span>
