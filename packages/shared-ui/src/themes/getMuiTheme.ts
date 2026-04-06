@@ -141,14 +141,6 @@ export function getMuiTheme(): Theme {
 	const effectiveBg = vscodeEditorBg || bgDefault;
 	const isDark = isVsCodeDark || declaredMode === 'dark' || (declaredMode !== 'light' && isColorDark(effectiveBg));
 
-	// Set --icon-filter on <body> so it doesn't conflict with the CSS rules
-	// in rocketride-vscode.css (which also target body). For the web fallback
-	// and non-VS Code hosts, this ensures the variable is always defined.
-	const iconFilter = isDark ? 'brightness(0) invert(1)' : 'none';
-	if (typeof document !== 'undefined') {
-		document.body.style.setProperty('--icon-filter', iconFilter);
-	}
-
 	// Body-level font size in px (used for htmlFontSize and component sizing)
 	const bodyFontSizePx = fontSizeBody !== 'inherit' ? parseFloat(fontSizeBody) || 16 : 16;
 

@@ -139,6 +139,14 @@ export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuse
 	// Rebuild MUI theme from --rr-* CSS custom properties
 	const currentTheme = useMemo(() => getMuiTheme(), [themeVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
+	// Sync --icon-filter on <body> whenever the theme changes.
+	// Kept as a side effect here (not inside getMuiTheme) so the theme
+	// function stays pure and safe to call from useMemo.
+	useEffect(() => {
+		const iconFilter = currentTheme.palette.mode === 'dark' ? 'brightness(0) invert(1)' : 'none';
+		document.body.style.setProperty('--icon-filter', iconFilter);
+	}, [currentTheme]);
+
 	// --- Render --------------------------------------------------------------
 
 	return (
