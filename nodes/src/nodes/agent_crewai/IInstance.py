@@ -45,7 +45,7 @@ class IInstance(IInstanceBase):
         op = param.get('op') if isinstance(param, dict) else getattr(param, 'op', None)
 
         # crewai.describe fan-out: only sub-agents (CrewDriver) respond — guarded by hasattr.
-        # OrchestratorDriver has no describe() so it silently falls through.
+        # ManagerDriver has no describe() so it silently falls through.
         if isinstance(op, str) and op == 'crewai.describe' and hasattr(self.IGlobal.agent, 'describe'):
             descriptor = self.IGlobal.agent.describe(self)
             existing = getattr(param, 'agents', None)

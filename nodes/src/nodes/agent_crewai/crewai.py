@@ -27,7 +27,7 @@ CrewAI drivers implementing the shared `ai.common.agent.AGENT` interface.
 Contains:
   - CrewAgentBase: shared LLM/tool-binding logic
   - CrewDriver:    sub-agent mode / standalone single-agent Crew
-  - OrchestratorDriver: hierarchical multi-agent Crew
+  - ManagerDriver: hierarchical multi-agent Crew
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ _DEFAULT_EXPECTED_OUTPUT = 'A clear, direct answer to the assigned task.'
 
 
 class CrewAgentBase(AgentBase):
-    """Shared base for CrewDriver and OrchestratorDriver."""
+    """Shared base for CrewDriver and ManagerDriver."""
 
     def _bind_framework_llm(
         self,
@@ -211,7 +211,7 @@ class CrewDriver(CrewAgentBase):
     def describe(self, pSelf: Any) -> Any:
         """Return a DescribeResponse for crewai.describe fan-out.
 
-        Called by IInstance.invoke() when the orchestrator fans out crewai.describe.
+        Called by IInstance.invoke() when the manager fans out crewai.describe.
         Stores the full pSelf IInstance in `invoke` so AgentHostServices(d.invoke)
         can call d.invoke.instance.* correctly.
         """
@@ -348,27 +348,27 @@ class CrewDriver(CrewAgentBase):
         return final_text, result
 
 
-# ── OrchestratorDriver ────────────────────────────────────────────────────────
+# ── ManagerDriver ─────────────────────────────────────────────────────────────
 
-_MGR_ROLE = 'Orchestrator'
+_MGR_ROLE = 'Manager'
 _MGR_GOAL = 'Coordinate the team to complete the user request. Delegate to the appropriate agents and synthesize their outputs into a final answer.'
-_MGR_BACKSTORY = 'You are a senior orchestrator managing a team of specialized agents. Delegate tasks to the right agent and synthesize their outputs into a final answer.'
+_MGR_BACKSTORY = 'You are a senior manager coordinating a team of specialized agents. Delegate tasks to the right agent and synthesize their outputs into a final answer.'
 
 
-class OrchestratorDriver(CrewAgentBase):
+class ManagerDriver(CrewAgentBase):
     """Hierarchical multi-agent Crew.
 
     Fans out `crewai.describe` to all nodes on the 'crewai' invoke channel,
     assembles each into a CrewAI Agent + Task, and kicks off a hierarchical
     Crew with this node acting as the manager.
 
-    Does NOT implement `describe()` — orchestrators cannot be used as sub-agents.
+    Does NOT implement `describe()` — the manager cannot be used as a sub-agent.
     """
 
-    FRAMEWORK = 'crewai_orchestrator'
+    FRAMEWORK = 'crewai_manager'
 
     def __init__(self, iGlobal: Any):
-        """Initialise the orchestrator driver.
+        """Initialise the manager driver.
 
         Stores a reference to iGlobal for accessing expert config fields at
         run time, and initialises the pSelf stash used to capture the engine
@@ -410,7 +410,7 @@ class OrchestratorDriver(CrewAgentBase):
 
         run_id = ctx.get('run_id', '')
         prompt = _safe_str(agent_input.question.getPrompt() if hasattr(agent_input, 'question') else '')
-        debug('agent_crewai_orchestrator _run start run_id={} prompt_len={}'.format(run_id, len(prompt)))
+        debug('agent_crewai_manager _run start run_id={} prompt_len={}'.format(run_id, len(prompt)))
 
         pSelf = self._current_pSelf
 
@@ -420,7 +420,7 @@ class OrchestratorDriver(CrewAgentBase):
         #    each crewai node individually with nodeId= to reach all of them.
         crewai_node_ids = pSelf.instance.getControllerNodeIds('crewai')
         if not crewai_node_ids:
-            raise RuntimeError('CrewAI Orchestrator: no sub-agents connected on the crewai channel')
+            raise RuntimeError('CrewAI Manager: no sub-agents connected on the crewai channel')
 
         descriptors = []
         for node_id in crewai_node_ids:
@@ -434,9 +434,9 @@ class OrchestratorDriver(CrewAgentBase):
                     descriptors.append(agent_desc)
 
         if not descriptors:
-            raise RuntimeError('CrewAI Orchestrator: no sub-agents responded to crewai.describe')
+            raise RuntimeError('CrewAI Manager: no sub-agents responded to crewai.describe')
 
-        # 2. Build the manager's LLM (uses this orchestrator's own llm channel).
+        # 2. Build the manager's LLM (uses this node's own llm channel).
         def _mgr_call_llm_text(messages: Any, stop_words: Any = None, _h: AgentHost = host) -> str:
             return self.call_host_llm(
                 host=_h,
@@ -545,7 +545,7 @@ class OrchestratorDriver(CrewAgentBase):
             verbose=False,
         )
 
-        debug('agent_crewai_orchestrator kicking off crew with {} sub-agents run_id={}'.format(len(sub_agents), run_id))
+        debug('agent_crewai_manager kicking off crew with {} sub-agents run_id={}'.format(len(sub_agents), run_id))
         result = crew.kickoff(inputs={'user_request': prompt} if prompt else {})
 
         final_text = _safe_str(getattr(result, 'raw', None)) or _safe_str(result)

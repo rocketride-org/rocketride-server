@@ -56,16 +56,17 @@ class IGlobal(IGlobalBase):
         self.goal = str(conn_config.get('goal') or '').strip()
         self.backstory = str(conn_config.get('backstory') or '').strip()
 
-        if self.glb.logicalType == 'agent_crewai_orchestrator':
-            from .crewai import OrchestratorDriver
-            self.agent = OrchestratorDriver(self)
+        if self.glb.logicalType == 'agent_crewai_manager':
+            from .crewai import ManagerDriver
+
+            self.agent = ManagerDriver(self)
         else:
             self.role = str(conn_config.get('role') or 'Assistant').strip() or 'Assistant'
             self.task_description = str(conn_config.get('task_description') or '').strip()
             self.expected_output = str(conn_config.get('expected_output') or '').strip()
             from .crewai import CrewDriver
-            self.agent = CrewDriver(self, process=self.process, role=self.role, task_description=self.task_description,
-                                    goal=self.goal, backstory=self.backstory, expected_output=self.expected_output)
+
+            self.agent = CrewDriver(self, process=self.process, role=self.role, task_description=self.task_description, goal=self.goal, backstory=self.backstory, expected_output=self.expected_output)
 
     def endGlobal(self) -> None:
         self.agent = None
