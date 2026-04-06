@@ -1,4 +1,7 @@
 # Default owners for everything
+# NOTE: Verify that all handles below are members of the rocketride-org organization.
+# GitHub usernames confirmed to exist: @jmaionchi, @Rod-Christensen, @stepmikhaylov, @kwit75
+# Org membership could not be verified programmatically (requires admin access).
 * @jmaionchi @Rod-Christensen @stepmikhaylov
 
 # DevOps maintainers

@@ -29,8 +29,8 @@ jobs:
           if [ -f nodes/requirements.txt ]; then pip install -r nodes/requirements.txt; fi
           if [ -f packages/ai/requirements.txt ]; then pip install -r packages/ai/requirements.txt; fi
           # Install packages in editable mode for coverage tracking
-          if [ -f nodes/setup.py ] || [ -f nodes/pyproject.toml ]; then pip install -e nodes/ 2>/dev/null || true; fi
-          if [ -f packages/ai/setup.py ] || [ -f packages/ai/pyproject.toml ]; then pip install -e packages/ai/ 2>/dev/null || true; fi
+          if [ -f nodes/setup.py ] || [ -f nodes/pyproject.toml ]; then pip install -e nodes/; fi
+          if [ -f packages/ai/setup.py ] || [ -f packages/ai/pyproject.toml ]; then pip install -e packages/ai/; fi
 
       - name: Run tests with coverage
         id: tests
