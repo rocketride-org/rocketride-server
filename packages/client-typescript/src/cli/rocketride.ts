@@ -1023,16 +1023,20 @@ export class RocketRideCLI {
 		}
 	}
 
+	private _cleanupPromise?: Promise<void>;
+
 	private async cleanupClient(): Promise<void> {
-		if (this.client) {
-			try {
-				await this.client.disconnect();
-			} catch {
-				// Ignore cleanup errors
-			} finally {
-				this.client = undefined;
-			}
+		if (this._cleanupPromise) {
+			return this._cleanupPromise;
 		}
+		const client = this.client;
+		if (!client) {
+			return;
+		}
+		this.client = undefined;
+		this._cleanupPromise = client.disconnect().catch(() => {});
+		await this._cleanupPromise;
+		this._cleanupPromise = undefined;
 	}
 
 	private loadPipelineConfig(pipelineFile: string): PipelineConfig {
