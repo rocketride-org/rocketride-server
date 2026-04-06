@@ -6,7 +6,7 @@ engine:
 
   image:
     repository: ghcr.io/rocketride-org/rocketride-engine
-    tag: '3.1.1-test'
+    tag: '3.1.2-test'
     pullPolicy: Always
 
   serviceAccount:
