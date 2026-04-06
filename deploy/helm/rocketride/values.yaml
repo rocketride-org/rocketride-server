@@ -177,81 +177,20 @@ ingress:
   #  - secretName: rocketride-tls
   #    hosts:
   #      - rocketride.local
-
-# -- PostgreSQL with pgvector extension
-postgres:
-  # -- Enable PostgreSQL deployment
-  enabled: true
-
-  image:
-    # -- PostgreSQL + pgvector image repository
-    repository: ankane/pgvector
-    # -- Image tag (pinned version)
-    tag: 'v0.8.0'
-    # -- Image pull policy
-    pullPolicy: IfNotPresent
-
-  # -- Persistent volume claim size for PostgreSQL data
-  storage: 10Gi
-
-  # -- Name of an existing Secret containing postgres credentials
-  # Must contain keys: POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
-  existingSecret: ''
-
-  # -- PostgreSQL credentials (only used when existingSecret is empty)
-  # WARNING: Override these defaults in production! Use existingSecret for production deployments.
-  auth:
-    username: rocketride
-    password: changeme
-    database: rocketride
-
-  # -- Resource requests and limits
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: '1'
-      memory: 1Gi
-
-  # -- Service port
-  service:
-    port: 5432
-
-# -- Milvus vector database
-# Milvus is NOT deployed by this chart. To use Milvus, add the official
-# Milvus Helm chart as a subchart dependency in Chart.yaml:
+# -- External services
+# This chart does NOT bundle databases or vector stores. Use managed services
+# (e.g. AWS RDS, Cloud SQL, Aiven) or deploy them separately.
+# See deploy/helm/examples/ for configuration examples.
+#
+# To connect to external PostgreSQL, set environment variables via engine.env:
+#   POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_DB
+# and store POSTGRES_PASSWORD in engine.secrets or engine.existingSecret.
+#
+# To connect to external ChromaDB, set CHROMA_HOST and CHROMA_PORT via engine.env.
+#
+# For Milvus, add the official Milvus Helm chart as a subchart dependency:
 #   dependencies:
 #     - name: milvus
 #       version: "4.x.x"
 #       repository: https://zilliztech.github.io/milvus-helm
 #       condition: milvus.enabled
-
-# -- ChromaDB vector database
-chroma:
-  # -- Enable ChromaDB deployment
-  enabled: false
-
-  image:
-    # -- ChromaDB image repository
-    repository: chromadb/chroma
-    # -- Image tag (pinned version)
-    tag: '0.6.3'
-    # -- Image pull policy
-    pullPolicy: IfNotPresent
-
-  # -- Persistent volume claim size for ChromaDB data
-  storage: 5Gi
-
-  # -- Resource requests and limits
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
-
-  # -- Service port
-  service:
-    port: 8000

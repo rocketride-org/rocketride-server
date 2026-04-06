@@ -18,9 +18,6 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
-        {{- if .Values.postgres.enabled }}
-        checksum/postgres-secret: {{ include (print $.Template.BasePath "/postgres-statefulset.yaml") . | sha256sum }}
-        {{- end }}
         {{- with .Values.engine.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -50,28 +47,6 @@ spec:
             - secretRef:
                 name: {{ include "rocketride.secretName" . }}
             {{- end }}
-          {{- if .Values.postgres.enabled }}
-          env:
-            - name: POSTGRES_HOST
-              value: {{ include "rocketride.fullname" . }}-postgres
-            - name: POSTGRES_PORT
-              value: {{ .Values.postgres.service.port | quote }}
-            - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "rocketride.postgres.secretName" . }}
-                  key: POSTGRES_USER
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "rocketride.postgres.secretName" . }}
-                  key: POSTGRES_PASSWORD
-            - name: POSTGRES_DB
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "rocketride.postgres.secretName" . }}
-                  key: POSTGRES_DB
-          {{- end }}
           readinessProbe:
             {{- toYaml .Values.engine.readinessProbe | nindent 12 }}
           livenessProbe:

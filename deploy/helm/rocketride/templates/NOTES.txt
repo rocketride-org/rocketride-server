@@ -35,17 +35,10 @@ Components deployed:
 {{- else }}
   - Engine: {{ .Values.engine.replicaCount }} replica(s)
 {{- end }}
-{{- if .Values.postgres.enabled }}
-  - PostgreSQL (pgvector): 1 replica (StatefulSet)
-{{- end }}
-{{- if .Values.chroma.enabled }}
-  - ChromaDB: 1 replica
-{{- end }}
-{{- if .Values.milvus }}
-{{- if .Values.milvus.enabled }}
-  - Milvus: enabled (deployed via subchart)
-{{- end }}
-{{- end }}
+
+NOTE: This chart does not bundle databases or vector stores.
+  Configure external services via engine.env and engine.secrets.
+  See deploy/helm/examples/ for configuration examples.
 
 Verify the deployment:
   helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }}

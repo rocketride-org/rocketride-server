@@ -73,17 +73,6 @@ Return the secret name for engine credentials
 {{- end }}
 
 {{/*
-Return the secret name for PostgreSQL credentials
-*/}}
-{{- define "rocketride.postgres.secretName" -}}
-{{- if .Values.postgres.existingSecret }}
-{{- .Values.postgres.existingSecret }}
-{{- else }}
-{{- printf "%s-postgres" (include "rocketride.fullname" .) }}
-{{- end }}
-{{- end }}
-
-{{/*
 Return the engine image reference
 */}}
 {{- define "rocketride.engine.image" -}}

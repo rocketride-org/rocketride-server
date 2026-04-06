@@ -6,14 +6,14 @@ engine:
 
   image:
     repository: ghcr.io/rocketride-org/rocketride-engine
-    tag: "3.1.1-test"
+    tag: '3.1.1-test'
     pullPolicy: Always
 
   serviceAccount:
     create: true
-    name: "rocketride-test-sa"
+    name: 'rocketride-test-sa'
     annotations:
-      eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/rocketride-test"
+      eks.amazonaws.com/role-arn: 'arn:aws:iam::123456789012:role/rocketride-test'
 
   service:
     type: ClusterIP
@@ -35,18 +35,18 @@ engine:
     targetMemoryUtilizationPercentage: 85
 
   env:
-    LOG_LEVEL: "debug"
-    WORKER_THREADS: "2"
+    LOG_LEVEL: 'debug'
+    WORKER_THREADS: '2'
 
-  existingSecret: ""
+  existingSecret: ''
 
   secrets:
-    OPENAI_API_KEY: "sk-test-key-not-real"
-    ANTHROPIC_API_KEY: "sk-ant-test-key-not-real"
+    OPENAI_API_KEY: 'sk-test-key-not-real'
+    ANTHROPIC_API_KEY: 'sk-ant-test-key-not-real'
 
   podAnnotations:
-    prometheus.io/scrape: "true"
-    prometheus.io/port: "5565"
+    prometheus.io/scrape: 'true'
+    prometheus.io/port: '5565'
 
   nodeSelector:
     kubernetes.io/arch: amd64
@@ -56,7 +56,7 @@ ingress:
   className: nginx
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-staging
-    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-body-size: '50m'
   hosts:
     - host: rocketride-test.example.com
       paths:
@@ -66,31 +66,5 @@ ingress:
     - secretName: rocketride-test-tls
       hosts:
         - rocketride-test.example.com
-
-postgres:
-  enabled: true
-  image:
-    repository: ankane/pgvector
-    tag: "v0.8.0"
-  storage: 5Gi
-  auth:
-    username: test_user
-    password: test_password_not_real
-    database: rocketride_test
-
-chroma:
-  enabled: true
-  image:
-    repository: chromadb/chroma
-    tag: "0.6.3"
-  storage: 2Gi
-  resources:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      cpu: 250m
-      memory: 256Mi
-
-milvus:
-  enabled: false
+# External service configuration example (no bundled databases)
+# engine.env and engine.secrets are used to connect to external services
