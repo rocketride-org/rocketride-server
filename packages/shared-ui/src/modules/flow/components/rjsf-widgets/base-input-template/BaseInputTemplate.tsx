@@ -25,11 +25,19 @@ import { ChangeEvent, FocusEvent, useState, useEffect } from 'react';
 import TextField, { TextFieldProps } from '@mui/material/TextField';
 import { ariaDescribedByIds, BaseInputTemplateProps, examplesId, getInputProps, labelValue, FormContextType, RJSFSchema, StrictRJSFSchema } from '@rjsf/utils';
 
+// =============================================================================
+// Helpers
+// =============================================================================
+
 /**
  * Input types whose labels should always be shrunk (floated above the input),
  * because these types have built-in browser UI that would overlap a non-shrunk label.
  */
 const TYPES_THAT_SHRINK_LABEL = ['date', 'datetime-local', 'file', 'time'];
+
+// =============================================================================
+// Component
+// =============================================================================
 
 /**
  * Custom RJSF base input template that renders a MUI TextField for all primitive

@@ -137,4 +137,4 @@ class IGlobal(IGlobalBase):
             self._chat = Chat(self.glb.logicalType, config, bag)
 
     def endGlobal(self):
-        self.chat = None
+        self._chat = None

@@ -28,9 +28,9 @@ import { IIconProps } from './types';
  * SVG icon representing an auto-layout / tidy action.
  * Shows a hierarchical tree structure to convey automatic node arrangement.
  */
-const TidyIcon: FunctionComponent<IIconProps> = ({ color }) => {
+const TidyIcon: FunctionComponent<IIconProps> = ({ color, size }) => {
 	return (
-		<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+		<svg xmlns="http://www.w3.org/2000/svg" width={size ?? 24} height={size ?? 24} viewBox="0 0 24 24" fill="none">
 			{/* Top center box */}
 			<rect x="9" y="2" width="6" height="4" rx="1" fill={color} />
 			{/* Bottom-left box */}

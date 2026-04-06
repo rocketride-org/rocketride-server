@@ -36,16 +36,11 @@
 
 import { ReactElement, useCallback, useEffect, useState } from 'react';
 import { ReactFlow, Background, SelectionMode, useReactFlow } from '@xyflow/react';
-import { IconButton, Snackbar, Tooltip } from '@mui/material';
-import { Settings } from '@mui/icons-material';
-import UndoIcon from '@mui/icons-material/Undo';
-import RedoIcon from '@mui/icons-material/Redo';
-import { OpenWith, HighlightAlt, AddBox } from '@mui/icons-material';
-import WebhookIcon from '@mui/icons-material/Webhook';
+import { Settings, Undo2, Redo2, Move, BoxSelect, PlusSquare } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 
-// Design tokens — web defaults, then VS Code overrides (cascade order matters)
-import '../../../themes/rocketride-web.css';
+// Design tokens — light defaults, then VS Code overrides (cascade order matters)
+import '../../../themes/rocketride-default.css';
 import '../../../themes/rocketride-vscode.css';
 import './reactflow-overrides.css';
 
@@ -79,8 +74,6 @@ import { INodeType } from '../types';
 import { useFlowProject } from '../context/FlowProjectContext';
 import { useAutoLayout } from '../hooks/useAutoLayout';
 import { useTemplateInstantiator } from '../hooks/useTemplateInstantiator';
-import EndpointInfoModal from '../../../components/pipeline-actions/EndpointInfoModal';
-import type { IEndpointInfo } from '../../../components/pipeline-actions/PipelineActions';
 
 // =============================================================================
 // Node type registry — maps NodeType to its React component
@@ -126,7 +119,7 @@ export default function Canvas(): ReactElement {
 	// --- Preferences from context ------------------------------------------
 	const { navigationMode, setNavigationMode, isLocked, toggleLock, getPreference, setPreference } = useFlowPreferences();
 
-	const { features, onUndo, onRedo, taskStatuses, serverHost, onOpenLink } = useFlowProject();
+	const { features, onUndo, onRedo } = useFlowProject();
 	const { fitView, zoomIn, zoomOut } = useReactFlow();
 
 	// --- Auto-layout -------------------------------------------------------
@@ -135,7 +128,13 @@ export default function Canvas(): ReactElement {
 	// --- Template instantiation (must live here, not in the dialog) ---------
 	const { instantiateTemplate: rawInstantiateTemplate, requestFitView } = useTemplateInstantiator();
 	const [configSnackbar, setConfigSnackbar] = useState<string | null>(null);
-	const [isWebhookModalOpen, setIsWebhookModalOpen] = useState(false);
+
+	// Auto-hide config snackbar after 6 seconds
+	useEffect(() => {
+		if (configSnackbar === null) return;
+		const timer = setTimeout(() => setConfigSnackbar(null), 6000);
+		return () => clearTimeout(timer);
+	}, [configSnackbar]);
 
 	const instantiateTemplate = useCallback(
 		(...args: Parameters<typeof rawInstantiateTemplate>) => {
@@ -181,7 +180,7 @@ export default function Canvas(): ReactElement {
 			{
 				provider: 'annotation',
 				name: 'Note',
-				config: { content: '', bgColor: '#fff9c4', fgColor: '#000000' },
+				config: { content: '', bgColor: 'var(--rr-annotation-bg-default)', fgColor: 'var(--rr-text-primary)' },
 			},
 			undefined, // centres in viewport
 			INodeType.Annotation
@@ -195,20 +194,6 @@ export default function Canvas(): ReactElement {
 	const showConfigPanel = !!editingNodeId;
 	/** The node being edited (derived from editingNodeId). */
 	const editingNode = editingNodeId ? nodeMap[editingNodeId] : undefined;
-
-	const endpointEntries = Object.entries(taskStatuses ?? {}).filter(([, status]) => {
-		const note = status.notes?.[0];
-		if (!(note && typeof note === 'object' && 'url-text' in note && 'url-link' in note && 'auth-text' in note && 'auth-key' in note)) {
-			return false;
-		}
-		const endpointNote = note as IEndpointInfo;
-		return /web[\s-]?hook/i.test(endpointNote['url-link']) || /web[\s-]?hook/i.test(endpointNote['url-text'] ?? '');
-	}) as [string, { notes: [IEndpointInfo] }][];
-
-	const selectedNodeIds = new Set(nodes.filter((node) => node.selected).map((node) => node.id));
-	const activeEndpointEntry = endpointEntries.find(([nodeId]) => selectedNodeIds.has(nodeId)) ?? (endpointEntries.length === 1 ? endpointEntries[0] : undefined);
-	const activeEndpointNodeId = activeEndpointEntry?.[0];
-	const activeEndpointInfo = activeEndpointEntry?.[1]?.notes?.[0] ?? null;
 
 	// Close create panel when config panel opens
 	useEffect(() => {
@@ -229,11 +214,17 @@ export default function Canvas(): ReactElement {
 	}, [setNodes]);
 
 	// --- Toolbar button style ----------------------------------------------
-	const iconButtonSx = {
+	const iconButtonStyle: React.CSSProperties = {
 		padding: '4px',
 		color: 'var(--rr-text-secondary)',
-		'&:hover': { color: 'var(--rr-text-primary)' },
-		'& svg': { width: 'auto', height: '16px' },
+		background: 'none',
+		border: 'none',
+		cursor: 'pointer',
+		display: 'inline-flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		width: 28,
+		height: 28,
 	};
 
 	return (
@@ -241,101 +232,70 @@ export default function Canvas(): ReactElement {
 			{/* Floating toolbar — draggable, position persisted as % */}
 			<FloatingToolbar position={toolbarPosition} onPositionChange={onToolbarPositionChange}>
 				{/* Add Node — toggles the create-node panel */}
-				<Tooltip title="Add node">
-					<IconButton
-						onClick={() => {
-							setShowCreatePanel((v) => {
-								if (!v) setEditingNodeId(undefined);
-								return !v;
-							});
-						}}
-						size="small"
-						sx={{
-							...iconButtonSx,
-							color: showCreatePanel ? 'var(--rr-accent)' : iconButtonSx.color,
-						}}
-					>
-						<AddBox />
-					</IconButton>
-				</Tooltip>
+				<button
+					title="Add node"
+					onClick={() => {
+						setShowCreatePanel((v) => {
+							if (!v) setEditingNodeId(undefined);
+							return !v;
+						});
+					}}
+					style={{
+						...iconButtonStyle,
+						color: showCreatePanel ? 'var(--rr-accent)' : iconButtonStyle.color,
+					}}
+				>
+					<PlusSquare size={16} />
+				</button>
 
 				{/* Add Annotation */}
 				{features.addAnnotation && (
-					<Tooltip title="Add annotation">
-						<IconButton onClick={addAnnotation} size="small" sx={iconButtonSx}>
-							<NoteIcon color="currentColor" />
-						</IconButton>
-					</Tooltip>
+					<button title="Add annotation" onClick={addAnnotation} style={iconButtonStyle}>
+						<NoteIcon color="currentColor" size={18} />
+					</button>
 				)}
 
 				{/* Lock / Unlock */}
-				<Tooltip title={isLocked ? 'Unlock canvas' : 'Lock canvas'}>
-					<IconButton onClick={toggleLock} size="small" sx={iconButtonSx}>
-						{isLocked ? <LockIcon color="currentColor" /> : <UnlockIcon color="currentColor" />}
-					</IconButton>
-				</Tooltip>
+				<button title={isLocked ? 'Unlock canvas' : 'Lock canvas'} onClick={toggleLock} style={iconButtonStyle}>
+					{isLocked ? <LockIcon color="currentColor" size={18} /> : <UnlockIcon color="currentColor" size={18} />}
+				</button>
 
 				{/* Fit view */}
-				<Tooltip title="Fit to screen">
-					<IconButton onClick={() => fitView()} size="small" sx={iconButtonSx}>
-						<FitIcon color="currentColor" />
-					</IconButton>
-				</Tooltip>
+				<button title="Fit to screen" onClick={() => fitView()} style={iconButtonStyle}>
+					<FitIcon color="currentColor" size={18} />
+				</button>
 
 				{/* Auto-layout (Tidy) */}
 				{features.autoLayout !== false && (
-					<Tooltip title="Tidy layout">
-						<span>
-							<IconButton onClick={autoLayout} disabled={isLayouting || nodes.length === 0} size="small" sx={iconButtonSx}>
-								<TidyIcon color="currentColor" />
-							</IconButton>
-						</span>
-					</Tooltip>
+					<button title="Tidy layout" onClick={autoLayout} disabled={isLayouting || nodes.length === 0} style={iconButtonStyle}>
+						<TidyIcon color="currentColor" size={18} />
+					</button>
 				)}
 
 				{/* Zoom in / out */}
-				<Tooltip title="Zoom in">
-					<IconButton onClick={() => zoomIn()} size="small" sx={iconButtonSx}>
-						<ZoomInIcon color="currentColor" />
-					</IconButton>
-				</Tooltip>
-				<Tooltip title="Zoom out">
-					<IconButton onClick={() => zoomOut()} size="small" sx={iconButtonSx}>
-						<ZoomOutIcon color="currentColor" />
-					</IconButton>
-				</Tooltip>
+				<button title="Zoom in" onClick={() => zoomIn()} style={iconButtonStyle}>
+					<ZoomInIcon color="currentColor" size={18} />
+				</button>
+				<button title="Zoom out" onClick={() => zoomOut()} style={iconButtonStyle}>
+					<ZoomOutIcon color="currentColor" size={18} />
+				</button>
 
 				{/* Undo / Redo */}
 				{onUndo && (
-					<Tooltip title="Undo">
-						<IconButton onClick={onUndo} size="small" sx={iconButtonSx}>
-							<UndoIcon />
-						</IconButton>
-					</Tooltip>
+					<button title="Undo" onClick={onUndo} style={iconButtonStyle}>
+						<Undo2 size={16} />
+					</button>
 				)}
 				{onRedo && (
-					<Tooltip title="Redo">
-						<IconButton onClick={onRedo} size="small" sx={iconButtonSx}>
-							<RedoIcon />
-						</IconButton>
-					</Tooltip>
+					<button title="Redo" onClick={onRedo} style={iconButtonStyle}>
+						<Redo2 size={16} />
+					</button>
 				)}
 
 				{/* Navigation mode toggle */}
-				<Tooltip title={isPanMode ? 'Switch to lasso select' : 'Switch to pan'}>
-					<IconButton onClick={() => setNavigationMode(isPanMode ? NavigationMode.SELECT : NavigationMode.DRAG)} size="small" sx={iconButtonSx}>
-						{isPanMode ? <HighlightAlt /> : <OpenWith />}
-					</IconButton>
-				</Tooltip>
-
-				{/* Webhook quick access — uses selected source when multiple webhooks exist */}
-				<Tooltip title={activeEndpointInfo ? 'Open webhook endpoint info' : endpointEntries.length > 1 ? 'Select a webhook source on the canvas to open its endpoint info' : 'Run a webhook source to expose endpoint info'}>
-					<span>
-						<IconButton onClick={() => setIsWebhookModalOpen(true)} size="small" sx={iconButtonSx} disabled={!activeEndpointInfo}>
-							<WebhookIcon fontSize="small" />
-						</IconButton>
-					</span>
-				</Tooltip>
+				<button title={isPanMode ? 'Switch to lasso select' : 'Switch to pan'} onClick={() => setNavigationMode(isPanMode ? NavigationMode.SELECT : NavigationMode.DRAG)} style={iconButtonStyle}>
+					{isPanMode ? <BoxSelect size={16} /> : <Move size={16} />}
+				</button>
 			</FloatingToolbar>
 
 			<ReactFlow
@@ -383,19 +343,30 @@ export default function Canvas(): ReactElement {
 			{/* Node config panel — slides in from the right */}
 			{showConfigPanel && editingNode && <NodeConfigPanel node={editingNode as unknown as import('../types').INode} onClose={() => setEditingNodeId(undefined)} />}
 			{/* Configuration reminder after template instantiation */}
-			<Snackbar
-				open={configSnackbar !== null}
-				autoHideDuration={6000}
-				onClose={() => setConfigSnackbar(null)}
-				anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-				message={
-					<span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-						<Settings style={{ color: '#f44336', fontSize: 18 }} />
-						{configSnackbar}
-					</span>
-				}
-			/>
-			<EndpointInfoModal endpointInfo={activeEndpointInfo} isOpen={isWebhookModalOpen && !!activeEndpointInfo} onClose={() => setIsWebhookModalOpen(false)} onOpenLink={onOpenLink} displayName={activeEndpointNodeId} host={serverHost} />
+			{configSnackbar !== null && (
+				<div
+					style={{
+						position: 'fixed',
+						bottom: 62,
+						left: '50%',
+						transform: 'translateX(-50%)',
+						backgroundColor: 'var(--rr-bg-widget)',
+						border: '1px solid var(--rr-border)',
+						borderRadius: 8,
+						padding: '8px 16px',
+						boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+						display: 'flex',
+						alignItems: 'center',
+						gap: 8,
+						zIndex: 1400,
+						fontSize: 'var(--rr-font-size-widget)',
+						color: 'var(--rr-text-primary)',
+					}}
+				>
+					<Settings size={18} style={{ color: 'var(--rr-color-error)' }} />
+					{configSnackbar}
+				</div>
+			)}
 		</div>
 	);
 }

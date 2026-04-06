@@ -66,7 +66,7 @@ async def chat(request: Request):
         dist_path = Path(chat_root).resolve()
 
         # Verify the resolved path is within our allowed directory
-        if not str(file_path).startswith(str(dist_path)):
+        if not file_path.is_relative_to(dist_path):
             # Path traversal attempt detected - fallback to safe default
             file_path = dist_path / 'index.html'
     except Exception:

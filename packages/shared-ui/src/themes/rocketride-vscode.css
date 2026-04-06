@@ -5,14 +5,14 @@
  * variables so the UI automatically matches the user's editor theme
  * (light, dark, high contrast, etc.).
  *
- * This file is loaded IN ADDITION TO rocketride-web.css when the
+ * This file is loaded IN ADDITION TO rocketride-default.css when the
  * component is running inside a VS Code webview. The web defaults
  * act as fallbacks if a VS Code variable is not defined.
  *
  * VS Code injects --vscode-* variables into the webview DOM
  * automatically — no host-side changes are needed.
  *
- * See rocketride-web.css for the naming convention and full token docs.
+ * See rocketride-default.css for the naming convention and full token docs.
  */
 
 :root {
@@ -35,23 +35,23 @@
 	/* ================================================================== */
 
 	--rr-bg-default: var(--vscode-editor-background, #ffffff);
-	--rr-bg-paper: var(--vscode-editor-background);
-	--rr-bg-surface-alt: var(--vscode-editor-background);
+	--rr-bg-paper: var(--vscode-editor-background, #ffffff);
+	--rr-bg-surface-alt: var(--vscode-editor-background, #fafafa);
 
 	/* ================================================================== */
 	/* Title bar                                                           */
 	/* ================================================================== */
 
-	--rr-fg-titleBar-active: var(--vscode-titleBar-activeForeground);
-	--rr-fg-titleBar-inactive: var(--vscode-titleBar-inactiveForeground);
-	--rr-bg-titleBar-active: var(--vscode-titleBar-activeBackground);
-	--rr-bg-titleBar-inactive: var(--vscode-titleBar-inactiveBackground);
+	--rr-fg-titleBar-active: var(--vscode-titleBar-activeForeground, #1a1a1a);
+	--rr-fg-titleBar-inactive: var(--vscode-titleBar-inactiveForeground, #666666);
+	--rr-bg-titleBar-active: var(--vscode-titleBar-activeBackground, #e8e8e8);
+	--rr-bg-titleBar-inactive: var(--vscode-titleBar-inactiveBackground, #f0f0f0);
 
 	/* ================================================================== */
 	/* Widget                                                              */
 	/* ================================================================== */
 
-	--rr-bg-widget: var(--vscode-sideBar-background);
+	--rr-bg-widget: var(--vscode-sideBar-background, #f3f3f3);
 	--rr-fg-widget: var(--vscode-sideBar-foreground, var(--vscode-foreground));
 	--rr-bg-widget-header: var(--vscode-sideBarSectionHeader-background, rgba(0, 0, 0, 0.08));
 	--rr-bg-widget-hover: var(--vscode-list-hoverBackground, rgba(0, 0, 0, 0.04));
@@ -63,10 +63,10 @@
 	/* Text                                                                */
 	/* ================================================================== */
 
-	--rr-text-primary: var(--vscode-foreground);
-	--rr-text-secondary: var(--vscode-descriptionForeground);
-	--rr-text-disabled: var(--vscode-disabledForeground);
-	--rr-text-link: var(--vscode-textLink-foreground);
+	--rr-text-primary: var(--vscode-foreground, #1a1a1a);
+	--rr-text-secondary: var(--vscode-descriptionForeground, #666666);
+	--rr-text-disabled: var(--vscode-disabledForeground, #838383);
+	--rr-text-link: var(--vscode-textLink-foreground, #1976d2);
 	--rr-text-caption: var(--vscode-descriptionForeground, #7d7d7d);
 
 	/* ================================================================== */
@@ -94,8 +94,8 @@
 	/* Accent                                                              */
 	/* ================================================================== */
 
-	--rr-accent: var(--vscode-button-background);
-	--rr-accent-faded: var(--vscode-button-background);
+	--rr-accent: var(--vscode-button-background, #f7901f);
+	--rr-accent-faded: color-mix(in srgb, var(--vscode-button-background, #f7901f) 50%, transparent);
 
 	/* ================================================================== */
 	/* Buttons                                                             */
@@ -113,7 +113,7 @@
 	/* Inputs                                                              */
 	/* ================================================================== */
 
-	--rr-bg-input: var(--vscode-input-background, #3c3c3c);
+	--rr-bg-input: var(--vscode-input-background, #ffffff);
 
 	/* ================================================================== */
 	/* Lists                                                               */
@@ -141,7 +141,7 @@
 	/* Grey ramp                                                           */
 	/* ================================================================== */
 
-	--rr-grey-200: var(--vscode-input-background, #3c3c3c);
+	--rr-grey-200: var(--vscode-input-background, #d9d9d9);
 	--rr-grey-400: var(--vscode-input-border, #858585);
 	--rr-grey-500: var(--vscode-descriptionForeground, #8e8e8e);
 

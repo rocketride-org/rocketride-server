@@ -30,7 +30,7 @@ The actual task execution and management is delegated to the TaskServer.
 
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
-from ai.account.store import StorageError
+from rocketride import TASK_STATE
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -81,17 +81,14 @@ class TaskCommands(DAPConn):
         """
         # Map of store subcommand names to handler methods
         self._store_subcommand_handlers = {
-            'save_project': self._store_save_project,
-            'get_project': self._store_get_project,
-            'delete_project': self._store_delete_project,
-            'get_all_projects': self._store_get_all_projects,
-            'save_template': self._store_save_template,
-            'get_template': self._store_get_template,
-            'delete_template': self._store_delete_template,
-            'get_all_templates': self._store_get_all_templates,
-            'save_log': self._store_save_log,
-            'get_log': self._store_get_log,
-            'list_logs': self._store_list_logs,
+            'fs_open': self._store_fs_open,
+            'fs_read': self._store_fs_read,
+            'fs_write': self._store_fs_write,
+            'fs_close': self._store_fs_close,
+            'fs_delete': self._store_fs_delete,
+            'fs_list_dir': self._store_fs_list_dir,
+            'fs_mkdir': self._store_fs_mkdir,
+            'fs_stat': self._store_fs_stat,
         }
 
     async def on_execute(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -128,6 +125,7 @@ class TaskCommands(DAPConn):
                 request,
                 self,
                 wait_for_running=True,
+                client_id=self._account_info.clientid,
             )
 
             # Confirm successful task execution startup
@@ -247,13 +245,20 @@ class TaskCommands(DAPConn):
             Exception: If task does not exist
         """
         try:
-            # Get the argunents
+            # Verify permission
+            self.verify_permission('task.monitor')
+
+            # Get the arguments
             args = request.get('arguments', {})
             project_id = args.get('projectId', None)
             source = args.get('source', None)
 
             # Get the task control
             control = self._server.get_task_control_by_project(project_id, source)
+
+            # Verify the caller owns this task
+            if control.apikey != self._account_info.apikey:
+                raise PermissionError('Access denied: task belongs to a different account')
 
             # Return successful response with status data
             return self.build_response(
@@ -308,7 +313,7 @@ class TaskCommands(DAPConn):
                 name = pipeline_name or control.source
                 description = pipeline_desc or 'RocketRide DTC MCP Tool'
 
-                if status.state == 3:
+                if status.state == TASK_STATE.RUNNING.value:
                     tasks.append(
                         {
                             'name': name,
@@ -369,160 +374,84 @@ class TaskCommands(DAPConn):
             self.debug_message(f'Store operation failed: {str(e)}')
             raise
 
-    async def _store_save_project(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Save project subcommand handler."""
-        try:
-            # Save project using authenticated account (validation done in store)
-            result = await self._server.store.save_project(self._account_info, args.get('projectId'), args.get('pipeline'), args.get('expectedVersion'))
+    def _get_file_store(self):
+        """Get a FileStore scoped to the authenticated user."""
+        return self._server.store.get_file_store(self._account_info.clientid)
 
-            # Return success response
+    # =========================================================================
+    # Generic File Store Handlers
+    # =========================================================================
+
+    async def _store_fs_open(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Open a file handle for reading or writing."""
+        fs = self._get_file_store()
+        path = args.get('path')
+        mode = args.get('mode', 'r')
+
+        if mode == 'w':
+            handle_id = await fs.open_write(path, self._connection_id)
+            return self.build_response(request, body={'handle': handle_id})
+        else:
+            result = await fs.open_read(path, self._connection_id)
             return self.build_response(request, body=result)
 
-        except StorageError as e:
-            self.debug_message(f'Storage error saving project: {str(e)}')
-            raise
+    async def _store_fs_read(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Read data from an open read handle."""
+        fs = self._get_file_store()
+        handle = args.get('handle')
+        offset = args.get('offset', 0)
+        length = args.get('length', 4_194_304)
 
-    async def _store_get_project(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Get project subcommand handler."""
-        try:
-            # Get project using authenticated account (validation done in store)
-            result = await self._server.store.get_project(self._account_info, args.get('projectId'))
+        # Clamp client-supplied values
+        if not isinstance(offset, int) or offset < 0:
+            offset = 0
+        if not isinstance(length, int) or length <= 0:
+            length = 4_194_304
+        length = min(length, 4_194_304)
 
-            # Return success response
-            return self.build_response(request, body=result)
+        data = await fs.read_chunk(handle, offset, length, connection_id=self._connection_id)
+        response = self.build_response(request, body={'size': len(data)})
+        response['arguments'] = {'data': data}
+        return response
 
-        except StorageError as e:
-            self.debug_message(f'Storage error getting project: {str(e)}')
-            raise
+    async def _store_fs_write(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Write data to an open write handle."""
+        fs = self._get_file_store()
+        handle = args.get('handle')
+        data = args.get('data', b'')
+        if isinstance(data, str):
+            data = data.encode('utf-8')
+        written = await fs.write_chunk(handle, data, connection_id=self._connection_id)
+        return self.build_response(request, body={'bytesWritten': written})
 
-    async def _store_delete_project(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Delete project subcommand handler."""
-        try:
-            # Delete project using authenticated account (validation done in store)
-            result = await self._server.store.delete_project(self._account_info, args.get('projectId'), args.get('expectedVersion'))
+    async def _store_fs_close(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Close a file handle."""
+        fs = self._get_file_store()
+        handle = args.get('handle')
+        mode = args.get('mode', 'r')
 
-            # Return success response
-            return self.build_response(request, body=result)
+        if mode == 'w':
+            await fs.close_write(handle, connection_id=self._connection_id)
+        else:
+            await fs.close_read(handle, connection_id=self._connection_id)
+        return self.build_response(request)
 
-        except StorageError as e:
-            self.debug_message(f'Storage error deleting project: {str(e)}')
-            raise
+    async def _store_fs_delete(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Delete file from file store."""
+        await self._get_file_store().delete(args.get('path'))
+        return self.build_response(request)
 
-    async def _store_get_all_projects(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Get all projects subcommand handler."""
-        try:
-            # Get all projects for authenticated account (no parameters needed from args)
-            result = await self._server.store.get_all_projects(self._account_info)
+    async def _store_fs_list_dir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """List directory contents."""
+        result = await self._get_file_store().list_dir(args.get('path', ''))
+        return self.build_response(request, body=result)
 
-            # Return success response
-            return self.build_response(request, body=result)
+    async def _store_fs_mkdir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Create directory."""
+        await self._get_file_store().mkdir(args.get('path'))
+        return self.build_response(request)
 
-        except StorageError as e:
-            self.debug_message(f'Storage error listing projects: {str(e)}')
-            raise
-
-    async def _store_save_template(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Save template subcommand handler."""
-        try:
-            # Save template (system-wide, validation done in store)
-            result = await self._server.store.save_template(args.get('templateId'), args.get('pipeline'), args.get('expectedVersion'))
-
-            # Return success response
-            return self.build_response(request, body=result)
-
-        except StorageError as e:
-            self.debug_message(f'Storage error saving template: {str(e)}')
-            raise
-
-    async def _store_get_template(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Get template subcommand handler."""
-        try:
-            # Get template (validation done in store)
-            result = await self._server.store.get_template(args.get('templateId'))
-
-            # Return success response
-            return self.build_response(request, body=result)
-
-        except StorageError as e:
-            self.debug_message(f'Storage error getting template: {str(e)}')
-            raise
-
-    async def _store_delete_template(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Delete template subcommand handler."""
-        try:
-            # Delete template (validation done in store)
-            result = await self._server.store.delete_template(args.get('templateId'), args.get('expectedVersion'))
-
-            # Return success response
-            return self.build_response(request, body=result)
-
-        except StorageError as e:
-            self.debug_message(f'Storage error deleting template: {str(e)}')
-            raise
-
-    async def _store_get_all_templates(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Get all templates subcommand handler."""
-        try:
-            # Get all templates (system-wide, no parameters needed from args)
-            result = await self._server.store.get_all_templates()
-
-            # Return success response
-            return self.build_response(request, body=result)
-
-        except StorageError as e:
-            self.debug_message(f'Storage error listing templates: {str(e)}')
-            raise
-
-    async def _store_save_log(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Save log subcommand handler."""
-        try:
-            # Save log using authenticated account
-            result = await self._server.store.save_log(
-                self._account_info,
-                args.get('projectId'),
-                args.get('source'),
-                args.get('contents'),
-            )
-
-            # Return success response
-            return self.build_response(request, body=result)
-
-        except StorageError as e:
-            self.debug_message(f'Storage error saving log: {str(e)}')
-            raise
-
-    async def _store_get_log(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Get log subcommand handler."""
-        try:
-            # Get log using authenticated account
-            result = await self._server.store.get_log(
-                self._account_info,
-                args.get('projectId'),
-                args.get('source'),
-                args.get('startTime'),
-            )
-
-            # Return success response
-            return self.build_response(request, body=result)
-
-        except StorageError as e:
-            self.debug_message(f'Storage error getting log: {str(e)}')
-            raise
-
-    async def _store_list_logs(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """List logs subcommand handler."""
-        try:
-            # List logs using authenticated account
-            result = await self._server.store.list_logs(
-                self._account_info,
-                args.get('projectId'),
-                args.get('source'),
-                args.get('page'),
-            )
-
-            # Return success response
-            return self.build_response(request, body=result)
-
-        except StorageError as e:
-            self.debug_message(f'Storage error listing logs: {str(e)}')
-            raise
+    async def _store_fs_stat(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Get file/directory metadata."""
+        result = await self._get_file_store().stat(args.get('path'))
+        return self.build_response(request, body=result)

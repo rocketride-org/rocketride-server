@@ -15,10 +15,13 @@
  * control-flow from data-flow connections.
  */
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, useReactFlow, type EdgeProps } from '@xyflow/react';
-import { IconButton } from '@mui/material';
-import { DeleteForever } from '@mui/icons-material';
+import { Trash2 } from 'lucide-react';
+
+// =============================================================================
+// Styles
+// =============================================================================
 
 /** Pixel offset applied to bezier endpoints so the curve doesn't overlap the handle. */
 const HANDLE_OFFSET = 8;
@@ -28,17 +31,17 @@ const styles = {
 	button: {
 		backgroundColor: 'var(--rr-bg-surface)',
 		padding: '0.2rem',
-		border: '1px solid',
-		borderColor: 'var(--rr-border)',
-		'&:hover': {
-			backgroundColor: 'var(--rr-bg-surface)',
-			borderColor: 'var(--rr-accent)',
-		},
-		'& > svg': {
-			fontSize: '1rem',
-		},
-	},
+		border: '1px solid var(--rr-border)',
+		borderRadius: '50%',
+		cursor: 'pointer',
+		display: 'inline-flex',
+		alignItems: 'center',
+	} as React.CSSProperties,
 };
+
+// =============================================================================
+// Component
+// =============================================================================
 
 /**
  * Renders a custom bezier edge between two nodes.
@@ -88,9 +91,9 @@ export default function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourc
 						}}
 						className="nopan"
 					>
-						<IconButton sx={styles.button} onClick={onDelete}>
-							<DeleteForever />
-						</IconButton>
+						<button style={styles.button} onClick={onDelete}>
+							<Trash2 size={16} />
+						</button>
 					</div>
 				</EdgeLabelRenderer>
 			)}

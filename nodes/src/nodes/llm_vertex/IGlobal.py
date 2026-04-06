@@ -139,7 +139,7 @@ class IGlobal(IGlobalBase):
         self._chat = Chat(self.glb.logicalType, config, bag, self.glb.connConfig.get('parameters', {}))
 
     def endGlobal(self):
-        self.chat = None
+        self._chat = None
 
     def _read_key(self, key_formdata: str) -> str | None:
         """

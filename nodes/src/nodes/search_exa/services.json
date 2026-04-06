@@ -1,0 +1,176 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Exa Search",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "search_exa://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["search"],
+	//
+	// Optional:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual pyhsical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most node
+	//
+	"path": "nodes.search_exa",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "search",
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "exa.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["A direct Exa web search node.", "Accepts user questions and returns Exa's raw search JSON as the answer."],
+	//
+	// Optional:
+	//		Tile text shown in the node card UI
+	//
+	"tile": ["Type: ${parameters.search_exa.type}", "Results: ${parameters.search_exa.numResults}"],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": ["answers", "text"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [
+				{
+					"lane": "answers"
+				},
+				{
+					"lane": "text"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"model": "exa-search",
+				"modelTotalTokens": 16384,
+				"apikey": "",
+				"type": "auto",
+				"numResults": 5,
+				"includeHighlights": true,
+				"highlightChars": 600
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields defintions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"search_exa.default": {
+			"object": "default",
+			"properties": ["search_exa.type", "search_exa.numResults", "search_exa.includeHighlights", "search_exa.highlightChars"]
+		},
+		"search_exa.profile": {
+			"title": "Profile",
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["search_exa.default"]
+				}
+			]
+		},
+		"search_exa.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Exa API key",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"search_exa.type": {
+			"type": "string",
+			"title": "Search Type",
+			"default": "auto",
+			"enum": [
+				["auto", "Auto"],
+				["keyword", "Keyword"],
+				["neural", "Neural"]
+			]
+		},
+		"search_exa.numResults": {
+			"type": "integer",
+			"title": "Results",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 20
+		},
+		"search_exa.includeHighlights": {
+			"type": "boolean",
+			"title": "Include Highlights",
+			"default": true
+		},
+		"search_exa.highlightChars": {
+			"type": "integer",
+			"title": "Highlight Chars",
+			"default": 600,
+			"minimum": 100,
+			"maximum": 4000
+		}
+	},
+	//
+	// Optional:
+	//		Shape describes how the node config is grouped in the UI
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Exa Search",
+			"properties": ["search_exa.apikey", "search_exa.profile"]
+		}
+	]
+}

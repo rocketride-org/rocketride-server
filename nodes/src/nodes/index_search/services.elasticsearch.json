@@ -1,35 +1,20 @@
 {
 	"title": "Elasticsearch",
 	"protocol": "elasticsearch://",
-	"classType": [
-		"store"
-	],
+	"classType": ["store"],
 	"capabilities": [],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.index_search",
 	"prefix": "Elasticsearch Vector Store",
-	"description": [
-		"A vector database component for Elasticsearch, enabling efficient storage and ", 
-		"retrieval of vector embeddings. It supports similarity search, filtering, ",
-		"and management of vector data with high performance. Supports Elastic Cloud ",
-		"Serverless, Elastic Cloud Hosted, and self-managed Elasticsearch deployments."
-	],
+	"description": ["A vector database component for Elasticsearch, enabling efficient storage and ", "retrieval of vector embeddings. It supports similarity search, filtering, ", "and management of vector data with high performance. Supports Elastic Cloud ", "Serverless, Elastic Cloud Hosted, and self-managed Elasticsearch deployments."],
 	"icon": "elasticsearch.svg",
-	"documentation": "https://www.elastic.co/elasticsearch",
-	"tile": [
-		"Host/Port: ${parameters.elasticsearch.${profile}.host}:${parameters.elasticsearch.${profile}.port}",
-		"Index: ${parameters.elasticsearch.${profile}.index}"
-	],
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Host/Port: ${parameters.elasticsearch.${profile}.host}:${parameters.elasticsearch.${profile}.port}", "Index: ${parameters.elasticsearch.${profile}.index}"],
 	"lanes": {
 		"text": [],
 		"documents": [],
-		"questions": [
-			"text",
-			"documents",
-			"answers",
-			"questions"
-		]
+		"questions": ["text", "documents", "answers", "questions"]
 	},
 	"test": {
 		"profiles": ["self-managed"],
@@ -74,8 +59,8 @@
 						"notEmpty": true,
 						"contains": "Paris",
 						"property": [
-							{"path": "[0].score", "greaterThan": 0.5},
-							{"path": "[0].metadata.objectId", "equals": "test-doc-1"}
+							{ "path": "[0].score", "greaterThan": 0.5 },
+							{ "path": "[0].metadata.objectId", "equals": "test-doc-1" }
 						]
 					}
 				}
@@ -85,58 +70,36 @@
 	"input": [
 		{
 			"lane": "text",
-			"description": [
-				"Store text into the Elasticsearch index (index mode only)."
-			],
+			"description": ["Store text into the Elasticsearch index (index mode only)."],
 			"output": []
 		},
 		{
 			"lane": "documents",
-			"description": [
-				"Stores the documents into the vector database. The documents must be ",
-				"run through an embedding model prior to this step to compute the vectors. ",
-				"This node supports both storing documents and searching them - you can use ",
-				"the same Elasticsearch node for both upload and retrieve operations."
-			],
+			"description": ["Stores the documents into the vector database. The documents must be ", "run through an embedding model prior to this step to compute the vectors. ", "This node supports both storing documents and searching them - you can use ", "the same Elasticsearch node for both upload and retrieve operations."],
 			"output": []
 		},
 		{
 			"lane": "questions",
-			"description": [
-				"Searches the database for documents most similar to the given questions. ",
-				"This node supports both storing documents and searching them - you can use ",
-				"the same Elasticsearch node for both upload and retrieve operations."
-			],
+			"description": ["Searches the database for documents most similar to the given questions. ", "This node supports both storing documents and searching them - you can use ", "the same Elasticsearch node for both upload and retrieve operations."],
 			"output": [
 				{
 					"lane": "text",
-					"description": [
-						"Produces text that is most similar to the given question."
-					],
+					"description": ["Produces text that is most similar to the given question."],
 					"output": []
 				},
 				{
 					"lane": "documents",
-					"description": [
-						"Produces documents that are most similar to the given question."
-					],
+					"description": ["Produces documents that are most similar to the given question."],
 					"output": []
 				},
 				{
 					"lane": "answers",
-					"description": [
-						"Produces an answer with the documents that are most similar ",
-						"to the given question."
-					],
+					"description": ["Produces an answer with the documents that are most similar ", "to the given question."],
 					"output": []
 				},
 				{
 					"lane": "questions",
-					"description": [
-						"Updates the question with documents most similar to the ",
-						"question and sets up a filter so piping this to another store ",
-						"driver will limit its answers to the given subset of documents."
-					],
+					"description": ["Updates the question with documents most similar to the ", "question and sets up a filter so piping this to another store ", "driver will limit its answers to the given subset of documents."],
 					"output": []
 				}
 			]
@@ -229,16 +192,11 @@
 			"conditional": [
 				{
 					"value": false,
-					"properties": [
-						"elasticsearch.index_label",
-						"elasticsearch.search"
-					]
+					"properties": ["elasticsearch.index_label", "elasticsearch.search"]
 				},
 				{
 					"value": true,
-					"properties": [
-						"elasticsearch.vstore_label"
-					]
+					"properties": ["elasticsearch.vstore_label"]
 				}
 			]
 		},
@@ -258,34 +216,20 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": [
-						"elasticsearch.matchOperator",
-						"elasticsearch.search.highlight"
-					]
+					"properties": ["elasticsearch.matchOperator", "elasticsearch.search.highlight"]
 				}
 			]
 		},
 		"elasticsearch.matchOperator": {
 			"type": "string",
 			"title": "Match Operator",
-			"description": [
-				"Controls how multiple query terms are matched: ",
-				"'or' (default) matches documents containing ANY of the query terms, ",
-				"'and' matches documents containing ALL of the query terms, ",
-				"'exact' requires the exact phrase to appear in order (phrase matching)."
-			],
+			"description": ["Controls how multiple query terms are matched: ", "'or' (default) matches documents containing ANY of the query terms, ", "'and' matches documents containing ALL of the query terms, ", "'exact' requires the exact phrase to appear in order (phrase matching)."],
 			"default": "or",
-			"enum": [
-				"and",
-				"or",
-				"exact"
-			],
+			"enum": ["and", "or", "exact"],
 			"conditional": [
 				{
 					"value": "exact",
-					"properties": [
-						"elasticsearch.search.exact.slop"
-					]
+					"properties": ["elasticsearch.search.exact.slop"]
 				}
 			]
 		},
@@ -303,9 +247,7 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": [
-						"elasticsearch.search.highlight.fragment_size"
-					]
+					"properties": ["elasticsearch.search.highlight.fragment_size"]
 				}
 			]
 		},
@@ -317,62 +259,34 @@
 		},
 		"elasticsearch.self-managed": {
 			"object": "self-managed",
-			"properties": [
-				"vector.local.host",
-				"vector.local.port",
-				"vector.score",
-				"vector.index",
-				"elasticsearch.mode"
-			]
+			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.index", "elasticsearch.mode"]
 		},
 		"elasticsearch.cloud-hosted": {
 			"object": "cloud-hosted",
-			"properties": [
-				"vector.cloud.host",
-				"vector.cloud.port",
-				"vector.apikey",
-				"vector.score",
-				"vector.index",
-				"elasticsearch.mode"
-			]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.index", "elasticsearch.mode"]
 		},
 		"elasticsearch.cloud-serverless": {
 			"object": "cloud-serverless",
-			"properties": [
-				"vector.cloud.host",
-				"vector.cloud.port",
-				"vector.apikey",
-				"vector.score",
-				"vector.index",
-				"elasticsearch.mode"
-			]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.index", "elasticsearch.mode"]
 		},
 		"elasticsearch.profile": {
 			"title": "Deployment Type",
 			"description": "Connect to...",
 			"type": "string",
 			"default": "self-managed",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "self-managed",
-					"properties": [
-						"elasticsearch.self-managed"
-					]
+					"properties": ["elasticsearch.self-managed"]
 				},
 				{
 					"value": "cloud-hosted",
-					"properties": [
-						"elasticsearch.cloud-hosted"
-					]
+					"properties": ["elasticsearch.cloud-hosted"]
 				},
 				{
 					"value": "cloud-serverless",
-					"properties": [
-						"elasticsearch.cloud-serverless"
-					]
+					"properties": ["elasticsearch.cloud-serverless"]
 				}
 			]
 		},
@@ -383,50 +297,32 @@
 		},
 		"elasticsearch.elasticsearch": {
 			"object": "elasticsearch",
-			"properties": [
-				"elasticsearch.profile"
-			]
+			"properties": ["elasticsearch.profile"]
 		},
 		"elasticsearch.store": {
 			"object": "store",
 			"title": "Store",
-			"properties": [
-				"elasticsearch.provider",
-				"elasticsearch.elasticsearch"
-			]
+			"properties": ["elasticsearch.provider", "elasticsearch.elasticsearch"]
 		},
 		"elasticsearch.target.autopipe": {
 			"object": "parameters",
-			"properties": [
-				"remote",
-				"elasticsearch.store",
-				"all.embedding"
-			]
+			"properties": ["remote", "elasticsearch.store", "all.embedding"]
 		},
 		"elasticsearch.target.parameters": {
 			"object": "parameters",
-			"properties": [
-				"elasticsearch.target.autopipe"
-			]
+			"properties": ["elasticsearch.target.autopipe"]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "Elasticsearch Vector Store",
-			"properties": [
-				"elasticsearch.profile"
-			]
+			"properties": ["elasticsearch.profile"]
 		},
 		{
 			"section": "Transform",
 			"title": "Elasticsearch",
-			"properties": [
-				"type",
-				"elasticsearch.target.parameters",
-				"target.mode"
-			]
+			"properties": ["type", "elasticsearch.target.parameters", "target.mode"]
 		}
 	]
 }
-

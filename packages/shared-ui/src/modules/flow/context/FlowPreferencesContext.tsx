@@ -42,9 +42,9 @@ import { createContext, ReactElement, ReactNode, useCallback, useContext, useEff
 
 import { IProjectLayout, ICanvasPreferences } from '../types';
 
-// ============================================================================
+// =============================================================================
 // Constants
-// ============================================================================
+// =============================================================================
 
 /** Canvas interaction mode controlling how mouse drag behaves. */
 export enum NavigationMode {
@@ -66,9 +66,9 @@ export const DEFAULT_CANVAS_PREFERENCES: ICanvasPreferences = {
 	navigationMode: NavigationMode.DRAG,
 };
 
-// ============================================================================
+// =============================================================================
 // Context shape
-// ============================================================================
+// =============================================================================
 
 export interface IFlowPreferencesContext {
 	// --- Navigation mode ---------------------------------------------------
@@ -109,9 +109,9 @@ export interface IFlowPreferencesContext {
 
 const FlowPreferencesContext = createContext<IFlowPreferencesContext | null>(null);
 
-// ============================================================================
+// =============================================================================
 // Provider props
-// ============================================================================
+// =============================================================================
 
 export interface IFlowPreferencesProviderProps {
 	children: ReactNode;
@@ -126,9 +126,9 @@ export interface IFlowPreferencesProviderProps {
 	setPreference?: (key: string, value: unknown) => void;
 }
 
-// ============================================================================
+// =============================================================================
 // Provider
-// ============================================================================
+// =============================================================================
 
 /**
  * Provides canvas preference state to all descendants.
@@ -223,9 +223,9 @@ export function FlowPreferencesProvider({ children, projectId, getPreference: ho
 	return <FlowPreferencesContext.Provider value={value}>{children}</FlowPreferencesContext.Provider>;
 }
 
-// ============================================================================
+// =============================================================================
 // Hook
-// ============================================================================
+// =============================================================================
 
 /**
  * Returns the flow preferences context.

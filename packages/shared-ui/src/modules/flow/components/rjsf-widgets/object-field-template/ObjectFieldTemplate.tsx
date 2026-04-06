@@ -25,6 +25,10 @@ import Grid from '@mui/material/Grid2';
 import Box from '@mui/material/Box';
 import { FormContextType, ObjectFieldTemplateProps, RJSFSchema, StrictRJSFSchema, canExpand, descriptionId, getTemplate, getUiOptions, titleId } from '@rjsf/utils';
 
+// =============================================================================
+// Component
+// =============================================================================
+
 /**
  * Custom RJSF template for rendering JSON Schema object fields as a vertical
  * MUI Grid layout. Displays the object's title and description headers,

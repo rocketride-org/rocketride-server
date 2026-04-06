@@ -41,6 +41,7 @@ import { SidebarFilesProvider } from './providers/SidebarFilesProvider';
 import { PageEditorProvider } from './providers/PageEditorProvider';
 import { PageSettingsProvider } from './providers/PageSettingsProvider';
 import { PageStatusProvider } from './providers/PageStatusProvider';
+import { PageDashboardProvider } from './providers/PageDashboardProvider';
 import { PageDeployProvider } from './providers/PageDeployProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { PageWelcomeProvider } from './providers/PageWelcomeProvider';
@@ -58,6 +59,7 @@ let sidebarFiles: SidebarFilesProvider | undefined;
 let pageEditor: PageEditorProvider | undefined;
 let pageSettings: PageSettingsProvider | undefined;
 let pageStatus: PageStatusProvider | undefined;
+let _pageDashboard: PageDashboardProvider | undefined;
 let pageDeploy: PageDeployProvider | undefined;
 let barStatus: BarStatus | undefined;
 let pageWelcome: PageWelcomeProvider | undefined;
@@ -175,6 +177,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 				pageSettings = new PageSettingsProvider(context.extensionUri);
 				pageStatus = new PageStatusProvider(context);
+				_pageDashboard = new PageDashboardProvider(context);
 				pageDeploy = new PageDeployProvider(context);
 				pageWelcome = new PageWelcomeProvider(context, context.extensionUri);
 
@@ -367,6 +370,16 @@ export async function deactivate(): Promise<void> {
 			// Silently ignore cancellation errors during shutdown
 			if (!(error instanceof Error) || error.name !== 'Canceled') {
 				console.error('[ROCKETRIDE] Error closing status pages:', error);
+			}
+		}
+	}
+
+	if (_pageDashboard) {
+		try {
+			_pageDashboard.dispose();
+		} catch (error: unknown) {
+			if (!(error instanceof Error) || error.name !== 'Canceled') {
+				console.error('[ROCKETRIDE] Error disposing dashboard page:', error);
 			}
 		}
 	}

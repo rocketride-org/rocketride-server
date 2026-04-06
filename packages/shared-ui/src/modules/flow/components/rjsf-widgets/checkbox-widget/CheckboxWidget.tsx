@@ -29,6 +29,10 @@ import InfoIcon from '@mui/icons-material/Info';
 import Tooltip from '@mui/material/Tooltip';
 import { ariaDescribedByIds, descriptionId, labelValue, schemaRequiresTrueValue, FormContextType, RJSFSchema, StrictRJSFSchema, WidgetProps } from '@rjsf/utils';
 
+// =============================================================================
+// Component
+// =============================================================================
+
 /**
  * Custom RJSF checkbox widget that renders a MUI Checkbox with an optional
  * info tooltip for the field description. Handles required validation based

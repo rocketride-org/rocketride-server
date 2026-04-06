@@ -30,6 +30,7 @@ with different event subscription levels. It acts as an event distribution
 hub that respects access permissions and client preferences.
 """
 
+import time
 from typing import TYPE_CHECKING, Dict, Any, List
 from ai.common.dap import DAPConn, TransportBase
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
@@ -84,9 +85,21 @@ class MonitorCommands(DAPConn):
         # Format: "apikey:token" -> EVENT_TYPE mapping
         self._monitors: Dict[str, EVENT_TYPE] = {}
 
-    async def forward_event(
+    async def send_server_event(self, event_type: EVENT_TYPE, event: Dict[str, Any], apikey: str = None) -> None:
+        """Send a server-level event if this connection is subscribed via the '*' wildcard."""
+        if '*' not in self._monitors:
+            return
+        if not (event_type & self._monitors['*']):
+            return
+        # Tenant scoping: if the event carries an apikey, only deliver to matching accounts
+        if apikey is not None and hasattr(self, '_account_info') and self._account_info:
+            if self._account_info.apikey != apikey:
+                return
+        await self.send_event(event.get('event', 'unknown'), body=event.get('body'))
+
+    async def send_task_event(
         self,
-        type: EVENT_TYPE,
+        event_type: EVENT_TYPE,
         token: str,
         event: Dict[str, Any] = None,
     ) -> None:
@@ -112,16 +125,16 @@ class MonitorCommands(DAPConn):
 
         async def _send_event(pref: EVENT_TYPE) -> None:
             # If this is not being listened for, skip the forwarding
-            if not (type & pref):
+            if not (event_type & pref):
                 return
 
             # Extract event details for DAP-compliant forwarding
-            event_type = event.get('event', 'unknown')
+            evt_name = event.get('event', 'unknown')
             body = event.get('body', None)
 
             # Send the event to the subscribed client using DAP protocol
             await self.send_event(
-                event_type,
+                evt_name,
                 id=control.id,
                 body=body,
             )
@@ -131,7 +144,7 @@ class MonitorCommands(DAPConn):
 
         # Verify we are allowed to receive events for this task - for SSE events, it requires data
         # access, for all others, it's monitor access
-        if type == EVENT_TYPE.SSE:
+        if event_type == EVENT_TYPE.SSE:
             self.verify_permission('task.data')
         else:
             self.verify_permission('task.monitor')
@@ -143,29 +156,33 @@ class MonitorCommands(DAPConn):
         # Build the base project-scoped key
         project_key = f'p.{control.project_id}.{control.source}'
 
+        # Gather all matching subscription keys and merge their preferences
+        # so each subscriber receives the event at most once.
+        merged_preference = EVENT_TYPE(0)
+
         # Pipe-scoped check (most specific) — SSE events embed pipe_id in body
         pipe_id = (event or {}).get('body', {}).get('pipe_id')
         if pipe_id is not None:
             pipe_key = f'{project_key}.{pipe_id}'
             if pipe_key in self._monitors:
-                subscriber_preference = self._monitors[pipe_key]
-                await _send_event(subscriber_preference)
+                merged_preference |= self._monitors[pipe_key]
 
         # Project-scoped check (exact source match)
         if project_key in self._monitors:
-            subscriber_preference = self._monitors[project_key]
-            await _send_event(subscriber_preference)
+            merged_preference |= self._monitors[project_key]
 
         # Project-wildcard check (all sources within a project: p.{projectId}.*)
         project_wildcard_key = f'p.{control.project_id}.*'
         if project_wildcard_key != project_key and project_wildcard_key in self._monitors:
-            subscriber_preference = self._monitors[project_wildcard_key]
-            await _send_event(subscriber_preference)
+            merged_preference |= self._monitors[project_wildcard_key]
 
         # Global wildcard check (all tasks)
         if '*' in self._monitors:
-            subscriber_preference = self._monitors['*']
-            await _send_event(subscriber_preference)
+            merged_preference |= self._monitors['*']
+
+        # Send once with the merged preference
+        if merged_preference:
+            await _send_event(merged_preference)
 
         return
 
@@ -298,6 +315,10 @@ class MonitorCommands(DAPConn):
             # Resolve the token to a project key
             control = self._server.get_task_control(token)
 
+            # Verify the caller owns this task
+            if control.apikey != self._account_info.apikey:
+                raise PermissionError('Access denied: task belongs to a different account')
+
             # Use the project key so subscribe/unsubscribe by token or project_id/source use the same key
             event_key = f'p.{control.project_id}.{control.source}'
             event_id = control.id
@@ -313,9 +334,16 @@ class MonitorCommands(DAPConn):
                 # Get the task
                 control = self._server.get_task_control_by_project(project_id, source)
 
+                # Verify the caller owns this task
+                if control.apikey != self._account_info.apikey:
+                    raise PermissionError('Access denied: task belongs to a different account')
+
                 # The task is running, we can fill it in
                 event_id = control.id
                 filter_name = control.id
+
+            except PermissionError:
+                raise
 
             except Exception:
                 event_id = None
@@ -335,6 +363,23 @@ class MonitorCommands(DAPConn):
                 # Unsubscribe: remove from monitor registry
                 self._monitors.pop(event_key, None)
                 self.debug_message(f'Removed monitoring for "{filter_name}"')
+
+                await self._server.broadcast_server_event(
+                    EVENT_TYPE.DASHBOARD,
+                    {
+                        'event': 'apaevt_dashboard',
+                        'body': {
+                            'action': 'monitor_changed',
+                            'timestamp': time.time(),
+                            'connectionId': self.get_connection_id(),
+                            'clientName': self._client_info.get('name'),
+                            'clientVersion': self._client_info.get('version'),
+                            'key': filter_name,
+                            'change': 'unsubscribed',
+                        },
+                    },
+                    apikey=self._account_info.apikey,
+                )
             else:
                 # Get the current type so we know what to update
                 prev = self._monitors.get(event_key, EVENT_TYPE.NONE)
@@ -342,6 +387,23 @@ class MonitorCommands(DAPConn):
                 # Subscribe or update: add/modify registry entry
                 self._monitors[event_key] = type
                 self.debug_message(f'Set "{filter_name}" monitoring to {type}')
+
+                await self._server.broadcast_server_event(
+                    EVENT_TYPE.DASHBOARD,
+                    {
+                        'event': 'apaevt_dashboard',
+                        'body': {
+                            'action': 'monitor_changed',
+                            'timestamp': time.time(),
+                            'connectionId': self.get_connection_id(),
+                            'clientName': self._client_info.get('name'),
+                            'clientVersion': self._client_info.get('version'),
+                            'key': filter_name,
+                            'change': 'subscribed',
+                        },
+                    },
+                    apikey=self._account_info.apikey,
+                )
 
                 # Send updates for what was missed (or empty state if task not running)
                 await self._send_updates(control, prev, type, project_id=project_id, source=source)
@@ -409,14 +471,17 @@ class MonitorCommands(DAPConn):
         # Determine the desired event subscription level
         types = args.get('types', None)
 
-        # Handle both integer bitmask and string array formats
-        if types and isinstance(types, list):
-            # Client sent array of strings - convert to bitmask
+        # Handle string array, integer bitmask, and legacy listenType formats
+        if isinstance(types, list):
             bitmask_value = strings_to_bitmask(types)
-
+        elif isinstance(types, int):
+            bitmask_value = types
+        elif isinstance(types, str) and types.isdigit():
+            bitmask_value = int(types)
         else:
-            # Fallback to no events
-            bitmask_value = 0
+            # Fallback to legacy listenType or no events
+            listen_type = args.get('listenType', 0)
+            bitmask_value = int(listen_type) if isinstance(listen_type, (int, float)) else 0
 
         # Create EVENT_TYPE enum from the bitmask
         event_type = EVENT_TYPE(bitmask_value)

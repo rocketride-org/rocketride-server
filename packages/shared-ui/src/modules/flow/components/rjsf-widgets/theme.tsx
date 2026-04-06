@@ -49,6 +49,10 @@ import TextareaWidget from './textarea-widget/TextareaWidget';
 const ClassificationsWidgetStub = () => null;
 import FileWidget from './file-widget/FileWidget';
 
+// =============================================================================
+// Helpers
+// =============================================================================
+
 /**
  * RJSF theme configuration object that maps custom MUI-based templates and widgets
  * to the react-jsonschema-form framework. This defines the visual appearance and
@@ -115,6 +119,10 @@ export const translate = (stringToTranslate: TranslatableString, params?: string
 			return englishStringTranslator(stringToTranslate, params);
 	}
 };
+
+// =============================================================================
+// Component
+// =============================================================================
 
 /**
  * The themed RJSF Form component with all custom MUI templates and widgets applied.

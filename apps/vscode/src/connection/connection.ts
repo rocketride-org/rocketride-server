@@ -39,6 +39,8 @@ import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConnectionStatus, ConnectionState, GenericResponse } from '../shared/types';
 import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
+import { getIdeName } from '../shared/util/ide';
+import { MonitorManager } from './monitor-manager';
 
 export class ConnectionManager extends EventEmitter {
 	private static instance: ConnectionManager;
@@ -321,6 +323,8 @@ export class ConnectionManager extends EventEmitter {
 			auth,
 			uri,
 			module: 'CONN-EXT',
+			clientName: getIdeName(),
+			clientVersion: vscode.extensions.getExtension('rocketride.rocketride')?.packageJSON?.version,
 			onEvent: async (message: DAPMessage) => {
 				if (message.event === 'output') {
 					const body = message.body;
@@ -432,16 +436,12 @@ export class ConnectionManager extends EventEmitter {
 		this.logger.output(`${icons.success} Connected to RocketRide server`);
 		this.emit('connected');
 
-		// Register global monitors for task lifecycle, output, and SSE events
-		this.request(
-			'rrext_monitor',
-			{
-				types: ['task', 'output'],
-			},
-			'*'
-		).catch((err) => {
-			this.logger.error(`Failed to register global monitors: ${err}`);
-		});
+		// Replay all provider monitor subscriptions to the server after reconnect
+		MonitorManager.getInstance()
+			.resubscribeAll()
+			.catch((err) => {
+				this.logger.error(`Failed to restore monitor subscriptions: ${err}`);
+			});
 
 		// Fetch and cache services list during connection phase
 		this.refreshServices().catch((err) => {

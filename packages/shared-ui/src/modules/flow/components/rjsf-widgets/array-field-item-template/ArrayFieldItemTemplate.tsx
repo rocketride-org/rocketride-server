@@ -25,10 +25,62 @@ import { createContext, useContext, useMemo, CSSProperties } from 'react';
 import type { DraggableSyntheticListeners, UniqueIdentifier } from '@dnd-kit/core';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { styles } from './ArrayFieldItemTemplate.style';
 import { Box, IconButton } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { ArrayFieldTemplateItemType, FormContextType, RJSFSchema, StrictRJSFSchema } from '@rjsf/utils';
+
+// =============================================================================
+// Styles
+// =============================================================================
+
+const styles = {
+	root: {
+		display: 'flex',
+		flexGrow: 1,
+		alignItems: 'start',
+		my: '2px',
+		listStyle: 'none',
+		color: 'var(--rr-text-primary)',
+		fontWeight: 400,
+		fontSize: 'var(--rr-font-size, 13px)',
+		fontFamily: 'var(--rr-font-family, sans-serif)',
+		borderRadius: '3px',
+	},
+	dragHandle: {
+		display: 'flex',
+		width: '12px',
+		padding: '6px 4px',
+		mt: '2px',
+		alignItems: 'center',
+		justifyContent: 'center',
+		flex: '0 0 auto',
+		touchAction: 'none',
+		cursor: 'var(--cursor, pointer)',
+		borderRadius: '3px',
+		border: 'none',
+		outline: 'none',
+		appearance: 'none',
+		backgroundColor: 'transparent',
+		WebkitTapHighlightColor: 'transparent',
+		'&:hover': {
+			backgroundColor: 'var(--rr-bg-widget-hover, rgba(0, 0, 0, 0.05))',
+		},
+		'&:focus-visible': {
+			boxShadow: '0 0 0 2px var(--rr-border-focus)',
+		},
+		'& svg': {
+			flex: '0 0 auto',
+			margin: 'auto',
+			height: '100%',
+			overflow: 'visible',
+			fill: 'var(--rr-text-disabled, #919eab)',
+		},
+	},
+};
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /**
  * Context shape for the sortable item, providing drag-and-drop attributes,
@@ -42,6 +94,10 @@ interface Context {
 	ref(node: HTMLElement | null): void;
 }
 
+// =============================================================================
+// Helpers
+// =============================================================================
+
 /**
  * React context that passes drag-and-drop interaction data from the sortable
  * item wrapper down to the DragHandle component, decoupling the handle from
@@ -52,6 +108,10 @@ const SortableItemContext = createContext<Context>({
 	listeners: undefined,
 	ref() {},
 });
+
+// =============================================================================
+// Component
+// =============================================================================
 
 /**
  * Renders a six-dot grip icon that serves as the drag handle for reordering

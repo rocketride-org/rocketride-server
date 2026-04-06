@@ -1,0 +1,7 @@
+# Plugin GMI Cloud core
+openai
+langchain-openai
+
+# LangChain deps
+langchain-core
+langchain

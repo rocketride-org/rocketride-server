@@ -93,14 +93,6 @@ async def is_server_available() -> bool:
         return False
 
 
-@pytest.fixture(scope='session')
-def event_loop():
-    """Create event loop for async tests."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
 @pytest_asyncio.fixture(scope='session')
 async def server_available():
     """Check server availability once per session."""
@@ -136,9 +128,12 @@ async def client(server_available):
     await _client.connect()
     
     yield _client
-    
+
     if _client.is_connected():
-        await _client.disconnect()
+        try:
+            await asyncio.wait_for(_client.disconnect(), timeout=10.0)
+        except (asyncio.TimeoutError, Exception):
+            pass  # Best-effort cleanup — don't let teardown hang the suite
 
 
 @pytest.fixture

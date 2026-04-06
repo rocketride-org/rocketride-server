@@ -47,9 +47,9 @@ import { FlowPreferencesProvider } from './FlowPreferencesContext';
 import { FlowProjectProvider } from './FlowProjectContext';
 import { FlowGraphProvider } from './FlowGraphContext';
 
-// ============================================================================
+// =============================================================================
 // Props — aggregates all sub-provider props
-// ============================================================================
+// =============================================================================
 
 export interface IFlowProviderProps {
 	children: ReactNode;
@@ -107,9 +107,9 @@ export interface IFlowProviderProps {
 	isConnected?: boolean;
 }
 
-// ============================================================================
+// =============================================================================
 // Composite Provider
-// ============================================================================
+// =============================================================================
 
 /**
  * Wraps the canvas with all flow contexts in the correct nesting order.

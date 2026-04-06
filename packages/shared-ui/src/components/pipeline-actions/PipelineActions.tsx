@@ -17,8 +17,90 @@
  */
 
 import React, { ReactElement, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
 import EndpointInfoModal from './EndpointInfoModal';
-import { actionsStyles as styles } from './index.style';
+
+// =============================================================================
+// Styles
+// =============================================================================
+
+const btnSmBase: CSSProperties = {
+	display: 'inline-flex',
+	alignItems: 'center',
+	justifyContent: 'center',
+	height: 'var(--rr-btn-sm-height, 16px)',
+	padding: 'var(--rr-btn-sm-padding, 0 6px)',
+	borderRadius: 'var(--rr-btn-sm-radius, 3px)',
+	cursor: 'pointer',
+	fontSize: 'var(--rr-btn-sm-font-size, 9px)',
+	fontWeight: 500,
+	lineHeight: 1,
+	whiteSpace: 'nowrap',
+};
+
+const styles: Record<string, CSSProperties> = {
+	container: {
+		display: 'flex',
+		gap: '4px',
+		marginTop: '4px',
+		width: '100%',
+	},
+	endpointRow: {
+		marginTop: '4px',
+		display: 'flex',
+		alignItems: 'center',
+		gap: '6px',
+		width: '100%',
+		backgroundColor: 'var(--rr-bg-surface-alt, var(--rr-bg-paper))',
+		border: '1px solid var(--rr-border, #dcdcdc)',
+		borderRadius: '4px',
+		padding: '3px 6px',
+	},
+	endpointLabel: {
+		fontSize: '9px',
+		color: 'var(--rr-text-disabled, #666)',
+		flexShrink: 0,
+	},
+	endpointValue: {
+		flex: 1,
+		minWidth: 0,
+		fontSize: '9px',
+		fontFamily: 'monospace',
+		color: 'var(--rr-text-secondary, #666)',
+		whiteSpace: 'nowrap',
+		overflow: 'hidden',
+		textOverflow: 'ellipsis',
+	},
+	endpointCopyBtn: {
+		...btnSmBase,
+		height: '14px',
+		padding: '0 5px',
+		fontSize: '8px',
+		border: '1px solid var(--rr-border, #dcdcdc)',
+		backgroundColor: 'transparent',
+		color: 'var(--rr-text-secondary, #666)',
+		flexShrink: 0,
+	},
+	endpointCopyBtnSuccess: {
+		backgroundColor: 'var(--rr-accent, #007acc)',
+		borderColor: 'var(--rr-accent, #007acc)',
+		color: 'var(--rr-fg-button, #fff)',
+	},
+	primaryBtn: {
+		...btnSmBase,
+		flex: 1,
+		border: 'none',
+		backgroundColor: 'var(--rr-accent, #007acc)',
+		color: 'var(--rr-fg-button, #fff)',
+	},
+	secondaryBtn: {
+		...btnSmBase,
+		flex: 1,
+		border: '1px solid var(--rr-border, #dcdcdc)',
+		backgroundColor: 'var(--rr-bg-paper, #fff)',
+		color: 'var(--rr-text-secondary, #666)',
+	},
+};
 
 // =============================================================================
 // Types

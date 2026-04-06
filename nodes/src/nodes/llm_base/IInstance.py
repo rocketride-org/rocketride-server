@@ -21,8 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IInstanceBase
-from rocketlib.types import IInvokeLLM
+from rocketlib import IInstanceBase, invoke_function
 from ai.common.schema import Question, Answer
 
 from .resilience import CircuitBreakerOpenError, LLMResiliencePolicy
@@ -56,23 +55,21 @@ class IInstanceGenericLLM(IInstanceBase):
         return answer
 
     def writeQuestions(self, question: Question):
-        # Get the answer
         answer = self._question(question)
-
-        # Send off the answer
         self.instance.writeAnswers(answer)
 
-    def invoke(self, param: IInvokeLLM) -> Answer:
-        if not isinstance(param, IInvokeLLM):
-            raise Exception(f'Invoke param should be IInvokeLLM, but found {type(param)}')
-        match param.op:
-            case 'getContextLength':
-                return self.IGlobal._chat.getTotalTokens()
-            case 'getOutputLength':
-                return self.IGlobal._chat.getOutputTokens()
-            case 'getTokenCounter':
-                return self.IGlobal._chat.getTokens
-            case 'ask':
-                return self._question(param.question)
-            case _:
-                raise Exception(f'Invoke operation {param.op} is not defined')
+    @invoke_function
+    def getContextLength(self, _param):
+        return self.IGlobal._chat.getTotalTokens()
+
+    @invoke_function
+    def getOutputLength(self, _param):
+        return self.IGlobal._chat.getOutputTokens()
+
+    @invoke_function
+    def getTokenCounter(self, _param):
+        return self.IGlobal._chat.getTokens
+
+    @invoke_function
+    def ask(self, param):
+        return self._question(param.question)

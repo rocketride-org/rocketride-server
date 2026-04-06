@@ -51,7 +51,7 @@ export interface ConfigManagerInfo {
 	local: {
 		/** Engine version to download: 'latest', 'prerelease', or a specific tag */
 		engineVersion: string;
-		/** Enable full debug output (--trace=servicePython) */
+		/** Enable full debug output (--trace=debugOut) */
 		debugOutput: boolean;
 	};
 
@@ -467,7 +467,7 @@ export class ConfigManager {
 	}
 
 	/**
-	 * Returns the effective engine args as an array, injecting --trace=servicePython
+	 * Returns the effective engine args as an array, injecting --trace=debugOut
 	 * if debug output is enabled and the user hasn't specified their own --trace.
 	 *
 	 * Note: engineArgs is passed as a single string intentionally. The backend
@@ -486,7 +486,7 @@ export class ConfigManager {
 			result.push(argsStr.trim());
 		}
 		if (config.local.debugOutput && !hasTrace) {
-			result.push('--trace=servicePython');
+			result.push('--trace=debugOut');
 		}
 		return result;
 	}

@@ -45,6 +45,10 @@ import { useMemo, useState, useEffect } from 'react';
 import * as d3 from 'd3';
 import { ILaneObject } from '../../../../types';
 
+// =============================================================================
+// Types
+// =============================================================================
+
 interface IProps {
 	parentEl: HTMLElement;
 	inputConnected: boolean;
@@ -71,6 +75,10 @@ interface ILinesData {
 		y: number;
 	}[];
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 export default function InsideLines({ parentEl, inputConnected, inputLanes = [], outputLanes = [] }: IProps) {
 	const [lines, setLines] = useState<ILinesData[]>([]);

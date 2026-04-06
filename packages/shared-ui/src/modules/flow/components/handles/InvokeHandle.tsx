@@ -16,9 +16,16 @@
 
 import React, { CSSProperties, ReactElement, useMemo, useRef, useCallback } from 'react';
 import { HandleProps, Handle as RFHandle } from '@xyflow/react';
-import { Box, Typography } from '@mui/material';
 
-import { handleStyles } from './styles';
+// =============================================================================
+// Styles
+// =============================================================================
+
+const handleStyles: CSSProperties = { width: '18px', height: '18px', border: 'none', background: 'transparent' };
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /**
  * Props for the InvokeHandle component.
@@ -35,6 +42,10 @@ interface IInvokeHandleProps extends HandleProps {
 	/** Called when the handle is clicked (not dragged). */
 	onClick?: (event: React.MouseEvent) => void;
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 /**
  * Renders a diamond-shaped invoke handle on a canvas node.
@@ -85,9 +96,8 @@ export default function InvokeHandle({ isConnected, disabled, type, style, invok
 	return (
 		<div style={{ position: 'relative', margin: '0 20px' }}>
 			{invokeType && (
-				<Typography
-					variant="caption"
-					sx={{
+				<span
+					style={{
 						position: 'absolute',
 						bottom: '100%',
 						left: '50%',
@@ -103,7 +113,7 @@ export default function InvokeHandle({ isConnected, disabled, type, style, invok
 					}}
 				>
 					{invokeType === 'llm' ? 'LLM' : invokeType.charAt(0).toUpperCase() + invokeType.slice(1)}
-				</Typography>
+				</span>
 			)}
 			<RFHandle
 				{...props}
@@ -117,7 +127,7 @@ export default function InvokeHandle({ isConnected, disabled, type, style, invok
 					alignItems: 'center',
 				}}
 			>
-				<Box
+				<div
 					style={{
 						width: '8px',
 						height: '8px',
