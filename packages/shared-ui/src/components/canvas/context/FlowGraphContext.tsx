@@ -792,9 +792,28 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			const allEdges = getEdgesFromNodes(allNodes as unknown as INode[]);
 			loadCanvas(allNodes, allEdges);
 
+			// Notify host immediately with the new project state.
+			// loadCanvas sets isLoading=true which blocks onToolchainUpdated,
+			// so we build the project directly from allNodes instead.
+			if (onContentChanged) {
+				const components = getProjectComponents(allNodes as unknown as INode[]);
+				const { viewport } = toObject();
+				const layout = projectLayoutRef.current;
+				const project: IProject = {
+					...currentProjectRef.current,
+					components,
+					viewport,
+					isLocked: layout.isLocked,
+					snapToGrid: layout.snapToGrid,
+					snapGridSize: layout.snapGridSize,
+					version: PIPELINE_SCHEMA_VERSION,
+				};
+				onContentChanged(project);
+			}
+
 			return id;
 		},
-		[nodes, screenToFlowPosition, loadCanvas, getInitialFormDataValid, servicesJson]
+		[nodes, screenToFlowPosition, loadCanvas, getInitialFormDataValid, servicesJson, onContentChanged, toObject]
 	);
 
 	const updateNode = useCallback(
