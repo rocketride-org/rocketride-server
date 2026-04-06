@@ -33,6 +33,26 @@ from ai.common.models.base import get_model_server_address
 
 _CLEANUP_INTERVAL_SEC = 300  # run stale-file cleanup at most once every 5 minutes
 
+_CANONICAL_TTS_ENGINES = frozenset({'piper', 'kokoro', 'bark', 'bak', 'openai', 'elevenlabs'})
+
+
+def _normalize_engine_id(raw: Any) -> str:
+    """Map UI or profile-style engine strings to canonical backend names.
+
+    Preconfig uses short ids (``openai``, ``kokoro``). Some UIs or hand-edited
+    configs may send compound ids (e.g. ``kokoro-default``, ``openai-tts``);
+    we take a known prefix before the first ``-`` when the full string is not
+    already canonical.
+    """
+    s = str(raw or 'piper').lower().strip()
+    if s in _CANONICAL_TTS_ENGINES:
+        return s
+    if '-' in s:
+        prefix = s.split('-', 1)[0]
+        if prefix in _CANONICAL_TTS_ENGINES:
+            return prefix
+    return s
+
 
 class IGlobal(IGlobalBase):
     _config: Dict[str, Any]
@@ -108,7 +128,7 @@ class IGlobal(IGlobalBase):
             - ``piper_bin`` (str): Piper binary name.
         """
         cfg = self._get_config()
-        engine = str(cfg.get('engine') or 'piper').lower().strip()
+        engine = _normalize_engine_id(cfg.get('engine'))
 
         api_key = str(cfg.get('api_key') or '').strip()
         if not api_key:
@@ -202,7 +222,7 @@ class IGlobal(IGlobalBase):
             Exception: If ``engine='kokoro'`` but no ``kokoro_voice`` is set.
         """
         cfg = self._get_config()
-        engine = str(cfg.get('engine') or 'piper').lower().strip()
+        engine = _normalize_engine_id(cfg.get('engine'))
 
         if engine in ('openai', 'elevenlabs'):
             api_key = str(cfg.get('api_key') or '').strip()
@@ -229,7 +249,7 @@ class IGlobal(IGlobalBase):
         """
         if not cfg:
             return ('',)
-        e = str(cfg.get('engine') or '').lower().strip()
+        e = _normalize_engine_id(cfg.get('engine'))
         if e == 'piper':
             return ('piper', str(cfg.get('piper_voice') or '').strip(), bool(cfg.get('piper_use_model_server')))
         if e == 'kokoro':
