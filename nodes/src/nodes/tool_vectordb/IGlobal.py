@@ -25,16 +25,15 @@
 Vector DB tool node - global (shared) state.
 
 Reads the node configuration, resolves the configured vector DB backend
-(Pinecone, ChromaDB, or Qdrant), and creates a VectorDBDriver that
-exposes search/upsert/delete tools for agent invocation.
+(Pinecone, ChromaDB, or Qdrant), and stores the backend connection and
+config for IInstance tool methods.
 """
 
 from __future__ import annotations
 
 from ai.common.config import Config
+from ai.common.store import DocumentStoreBase
 from rocketlib import IGlobalBase, OPEN_MODE, warning
-
-from .vectordb_driver import VectorDBDriver
 
 # Supported backends and the store module paths they resolve to
 _BACKEND_MODULES = {
@@ -43,11 +42,16 @@ _BACKEND_MODULES = {
     'qdrant': 'nodes.qdrant.qdrant',
 }
 
+_DEFAULT_TOP_K = 10
+_MAX_TOP_K = 100
+
 
 class IGlobal(IGlobalBase):
     """Global state for tool_vectordb."""
 
-    driver: VectorDBDriver | None = None
+    store: DocumentStoreBase | None = None
+    default_top_k: int = _DEFAULT_TOP_K
+    score_threshold: float = 0.0
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -55,40 +59,17 @@ class IGlobal(IGlobalBase):
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        server_name = str(cfg.get('serverName') or 'vectordb').strip()
         backend = str(cfg.get('backend') or 'pinecone').strip().lower()
-        collection_description = str(cfg.get('collection_description') or '').strip()
-        enable_search = cfg.get('enableSearch', True)
-        enable_upsert = cfg.get('enableUpsert', False)
-        enable_delete = cfg.get('enableDelete', False)
-        default_top_k = int(cfg.get('topK', 10))
-        score_threshold = float(cfg.get('scoreThreshold', 0.0))
+        self.default_top_k = max(1, min(int(cfg.get('topK', _DEFAULT_TOP_K)), _MAX_TOP_K))
+        self.score_threshold = max(0.0, min(float(cfg.get('scoreThreshold', 0.0)), 1.0))
 
         if backend not in _BACKEND_MODULES:
             raise ValueError(f'tool_vectordb: unsupported backend {backend!r}. Supported: {", ".join(sorted(_BACKEND_MODULES))}')
 
         # Resolve the store from the backend vector DB node.
-        # Prefer backend connection config from the bag (populated by an
-        # upstream vector DB node) over the tool node's own connConfig.
         bag = self.IEndpoint.endpoint.bag
         conn_config = bag.get(f'{backend}_connConfig') or bag.get('vectordb_connConfig') or self.glb.connConfig
-        store = self._create_store(backend, conn_config, bag)
-
-        try:
-            self.driver = VectorDBDriver(
-                server_name=server_name,
-                backend=backend,
-                store=store,
-                collection_description=collection_description,
-                enable_search=enable_search,
-                enable_upsert=enable_upsert,
-                enable_delete=enable_delete,
-                default_top_k=default_top_k,
-                score_threshold=score_threshold,
-            )
-        except Exception as e:
-            warning(str(e))
-            raise
+        self.store = self._create_store(backend, conn_config, bag)
 
     @staticmethod
     def _create_store(backend: str, conn_config: dict, bag: dict):  # noqa: ANN205
@@ -113,4 +94,4 @@ class IGlobal(IGlobalBase):
             warning(str(e))
 
     def endGlobal(self) -> None:
-        self.driver = None
+        self.store = None
