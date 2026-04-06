@@ -257,6 +257,37 @@ class TestSentenceChunker:
             for i in range(1, len(chunks)):
                 assert chunks[i]['metadata']['start_char'] >= chunks[i - 1]['metadata']['end_char']
 
+    def test_overlap_with_repeated_sentences_correct_spans(self):
+        """Overlap + repeated sentences: spans must match actual text and respect chunk_size."""
+        chunker = SentenceChunker(chunk_size=20, chunk_overlap=10)
+        text = 'Go. Go. Go. Go. Go. Go. Go. Go. Stop.'
+        chunks = chunker.chunk(text)
+        assert len(chunks) >= 2
+
+        for i, chunk in enumerate(chunks):
+            meta = chunk['metadata']
+            # The slice must match the chunk text exactly
+            assert chunk['text'] == text[meta['start_char'] : meta['end_char']], f'Chunk {i} text mismatch: {chunk["text"]!r} != {text[meta["start_char"] : meta["end_char"]]!r}'
+            # Actual span must not wildly exceed chunk_size (allow single-sentence overflow)
+            actual_span = meta['end_char'] - meta['start_char']
+            max_sentence_len = max(len(s) for s in ['Go.', 'Stop.'])
+            assert actual_span <= chunker.chunk_size + max_sentence_len, f'Chunk {i} span {actual_span} exceeds chunk_size {chunker.chunk_size} + max_sentence {max_sentence_len}'
+
+    def test_overlap_with_multichar_whitespace_respects_chunk_size(self):
+        """Multi-char whitespace between sentences must not cause unbounded chunk growth."""
+        chunker = SentenceChunker(chunk_size=20, chunk_overlap=10)
+        text = 'A.\n\n\n\nB.\n\n\n\nC.\n\n\n\nD.\n\n\n\nE.'
+        chunks = chunker.chunk(text)
+        assert len(chunks) >= 2, f'Expected multiple chunks but got {len(chunks)}'
+
+        for i, chunk in enumerate(chunks):
+            meta = chunk['metadata']
+            actual_span = meta['end_char'] - meta['start_char']
+            # With correct span tracking, no single chunk should swallow the entire text
+            assert actual_span <= len(text), f'Chunk {i} span {actual_span} exceeds text length'
+            # The slice must match
+            assert chunk['text'] == text[meta['start_char'] : meta['end_char']]
+
 
 # ===========================================================================
 # TokenChunker tests

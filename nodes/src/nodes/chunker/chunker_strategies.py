@@ -193,7 +193,6 @@ class SentenceChunker(ChunkingStrategy):
         result = []
         chunk_index = 0
         current_sentences: list[str] = []
-        current_len = 0
         # Track where each sentence starts in the original text to handle repeated sentences
         sentence_positions: list[int] = []
         search_start = 0
@@ -205,15 +204,25 @@ class SentenceChunker(ChunkingStrategy):
             sentence_start_map.append(pos)
             search_start = pos + len(sentence)
 
+        def _span_len(positions: list[int], sents: list[str]) -> int:
+            """Compute the actual text span from first position to end of last sentence."""
+            if not positions:
+                return 0
+            return (positions[-1] + len(sents[-1])) - positions[0]
+
         for sent_idx, sentence in enumerate(sentences):
-            sentence_len = len(sentence)
+            next_pos = sentence_start_map[sent_idx]
+
+            # Compute what the span would be if we added this sentence
+            if current_sentences:
+                candidate_len = (next_pos + len(sentence)) - sentence_positions[0]
+            else:
+                candidate_len = len(sentence)
 
             # If adding this sentence exceeds chunk_size and we have content, finalize current
-            if current_sentences and current_len + (1 if current_len > 0 else 0) + sentence_len > self.chunk_size:
-                start_char = sentence_positions[0] if sentence_positions else 0
-                last_sent_pos = sentence_positions[-1] if sentence_positions else start_char
-                last_sent = current_sentences[-1] if current_sentences else ''
-                end_char = last_sent_pos + len(last_sent)
+            if current_sentences and candidate_len > self.chunk_size:
+                start_char = sentence_positions[0]
+                end_char = sentence_positions[-1] + len(current_sentences[-1])
                 chunk_text = text[start_char:end_char]
 
                 result.append(
@@ -228,41 +237,32 @@ class SentenceChunker(ChunkingStrategy):
                 )
                 chunk_index += 1
 
-                # Compute overlap: keep trailing sentences that fit within overlap
+                # Compute overlap: keep trailing sentences whose actual span fits within overlap
                 if self.chunk_overlap > 0:
                     overlap_sentences: list[str] = []
                     overlap_positions: list[int] = []
-                    overlap_len = 0
                     for i in range(len(current_sentences) - 1, -1, -1):
-                        s = current_sentences[i]
-                        candidate = len(s) + (1 if overlap_len > 0 else 0) + overlap_len
-                        if candidate <= self.chunk_overlap:
-                            overlap_sentences.insert(0, s)
-                            overlap_positions.insert(0, sentence_positions[i])
-                            overlap_len = candidate
+                        trial_positions = [sentence_positions[i]] + overlap_positions
+                        trial_sentences = [current_sentences[i]] + overlap_sentences
+                        if _span_len(trial_positions, trial_sentences) <= self.chunk_overlap:
+                            overlap_sentences = trial_sentences
+                            overlap_positions = trial_positions
                         else:
                             break
                     current_sentences = overlap_sentences
                     sentence_positions = overlap_positions
-                    current_len = overlap_len
                 else:
                     current_sentences = []
                     sentence_positions = []
-                    current_len = 0
 
             # Add the sentence
-            if current_len > 0:
-                current_len += 1  # space separator
-            current_len += sentence_len
             current_sentences.append(sentence)
-            sentence_positions.append(sentence_start_map[sent_idx])
+            sentence_positions.append(next_pos)
 
         # Emit the final chunk
         if current_sentences:
-            start_char = sentence_positions[0] if sentence_positions else 0
-            last_sent_pos = sentence_positions[-1] if sentence_positions else start_char
-            last_sent = current_sentences[-1] if current_sentences else ''
-            end_char = last_sent_pos + len(last_sent)
+            start_char = sentence_positions[0]
+            end_char = sentence_positions[-1] + len(current_sentences[-1])
             chunk_text = text[start_char:end_char]
 
             result.append(
