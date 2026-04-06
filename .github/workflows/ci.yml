@@ -214,3 +214,17 @@ jobs:
           fi
           echo "✅ All CI checks passed (or were correctly skipped)."
           echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}"
+
+  # ---------------------------------------------------------------------------
+  #  Discord — update PR embed with final check counts after CI completes.
+  # ---------------------------------------------------------------------------
+  discord-notify:
+    needs: [ci-ok]
+    if: always() && github.event_name == 'pull_request'
+    uses: ./.github/workflows/discord-pr.yml
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      checks: read
+    secrets: inherit
