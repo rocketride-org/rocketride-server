@@ -42,23 +42,3 @@ paths = ['''services.*\.json$''']
         '''testdata/''',
         '''test/fixtures/''',
     ]
-
-# Global allowlist — skip only lock files, generated output, and tooling config
-# NOTE: Directories like docs/, testdata/, test/fixtures/ are handled per-rule above
-# to avoid blanket-excluding paths that could hide real secrets
-[allowlist]
-paths = [
-    '''pnpm-lock\.yaml''',
-    '''package-lock\.json''',
-    '''\.gitleaks\.toml''',
-    '''node_modules/''',
-    '''\.venv/''',
-    '''vendor/''',
-]
-regexes = [
-    # Placeholder / example secret values — match only when the value itself is a known placeholder
-    # Requires the placeholder word to appear as the assigned value (after = or : or quotes)
-    '''(?i)(?:password|apikey|api_key|secret|token|auth)\s*[=:]\s*["']?(?:changeme|placeholder|example[-_]?(?:key|token|secret|password)?|dummy[-_]?(?:key|token|secret|password)?|fake[-_]?(?:key|token|secret|password)?|xxxx+|your[-_]?(?:key|token|secret|password|api[-_]?key))["']?''',
-    # GitHub Actions expression syntax (not real secrets)
-    '''\$\{\{.*\}\}''',
-]
