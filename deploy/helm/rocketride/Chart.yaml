@@ -9,6 +9,7 @@ keywords:
   - ml
   - pipeline
   - data-processing
+# For architecture details and SaaS vs community comparison, see deploy/helm/ARCHITECTURE.md
 home: https://github.com/rocketride-org/rocketride-server
 maintainers:
   - name: RocketRide Team

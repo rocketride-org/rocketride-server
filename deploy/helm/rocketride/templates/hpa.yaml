@@ -1,3 +1,10 @@
+{{/*
+WARNING: CPU/memory-based HPA is NOT suitable for GPU inference workloads.
+GPU utilization is not visible to the Kubernetes metrics server, so HPA will
+not scale based on actual GPU load. For GPU workloads, use KEDA with a
+ScaledObject that monitors queue depth or GPU utilization metrics.
+See deploy/helm/examples/keda-gpu-scaling.yaml for a working example.
+*/}}
 {{- if .Values.engine.autoscaling.enabled }}
 {{- if and (not .Values.engine.autoscaling.targetCPUUtilizationPercentage) (not .Values.engine.autoscaling.targetMemoryUtilizationPercentage) }}
 {{- fail "At least one of engine.autoscaling.targetCPUUtilizationPercentage or engine.autoscaling.targetMemoryUtilizationPercentage must be set when autoscaling is enabled" }}

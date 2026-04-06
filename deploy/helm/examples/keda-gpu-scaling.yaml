@@ -1,0 +1,51 @@
+# Example: KEDA ScaledObject for GPU-aware autoscaling
+#
+# WARNING: The built-in HPA (engine.autoscaling) uses CPU/memory metrics,
+# which do NOT reflect GPU utilization. For GPU inference workloads, disable
+# the built-in HPA and use KEDA instead.
+#
+# Prerequisites:
+#   1. Install KEDA: https://keda.sh/docs/deploy/
+#   2. Configure a Prometheus instance scraping DCGM/nvidia-smi metrics
+#   3. Apply this ScaledObject alongside your Helm release
+#
+# This file is NOT a Helm values file -- apply it directly with kubectl:
+#   kubectl apply -f deploy/helm/examples/keda-gpu-scaling.yaml
+#
+# Adjust the release name, namespace, and Prometheus address to match your setup.
+
+# Disable built-in HPA in your Helm values:
+# engine:
+#   autoscaling:
+#     enabled: false
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: rocketride-engine-gpu-scaler
+  namespace: rocketride
+spec:
+  scaleTargetRef:
+    name: rocketride-engine # Must match your Helm release deployment name
+  minReplicaCount: 1
+  maxReplicaCount: 8
+  pollingInterval: 15
+  cooldownPeriod: 300
+  triggers:
+    # Scale based on GPU utilization reported by DCGM exporter
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.monitoring.svc:9090
+        metricName: DCGM_FI_DEV_GPU_UTIL
+        query: |
+          avg(DCGM_FI_DEV_GPU_UTIL{pod=~"rocketride-engine-.*"})
+        threshold: '70'
+    # Alternative: scale based on pending request queue depth
+    # - type: prometheus
+    #   metadata:
+    #     serverAddress: http://prometheus.monitoring.svc:9090
+    #     metricName: rocketride_pending_requests
+    #     query: |
+    #       sum(rocketride_pending_requests{namespace="rocketride"})
+    #     threshold: "10"
