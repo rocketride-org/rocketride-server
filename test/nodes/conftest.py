@@ -42,6 +42,7 @@ if 'rocketlib' not in sys.modules:
     _mock_rocketlib = type(sys)('rocketlib')
     _mock_rocketlib.debug = lambda *a, **kw: None
     _mock_rocketlib.IInstanceBase = type('IInstanceBase', (), {})
+    _mock_rocketlib.invoke_function = lambda f: f  # identity decorator
     sys.modules['rocketlib'] = _mock_rocketlib
 
     _mock_rocketlib_types = type(sys)('rocketlib.types')
