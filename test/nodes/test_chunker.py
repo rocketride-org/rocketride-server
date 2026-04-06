@@ -255,7 +255,7 @@ class TestSentenceChunker:
         # Each chunk's start_char should be >= previous chunk's end_char (no overlap mode)
         if len(chunks) >= 2:
             for i in range(1, len(chunks)):
-                assert chunks[i]['metadata']['start_char'] >= chunks[i - 1]['metadata']['start_char']
+                assert chunks[i]['metadata']['start_char'] >= chunks[i - 1]['metadata']['end_char']
 
 
 # ===========================================================================
@@ -499,13 +499,29 @@ class TestChunkerLifecycle:
                 if 'chunker' in mod_name and 'test' not in mod_name:
                     del sys.modules[mod_name]
 
-            # Verify the strategy classes can be instantiated correctly
-            from nodes.src.nodes.chunker.chunker_strategies import RecursiveCharacterChunker as RC
+            from nodes.src.nodes.chunker.IGlobal import IGlobal
+            from nodes.src.nodes.chunker.chunker_strategies import SentenceChunker
 
-            strategy = RC(chunk_size=100, chunk_overlap=10)
-            assert strategy is not None
-            chunks = strategy.chunk('Hello world. This is a test.')
-            assert len(chunks) >= 1
+            iglobal = IGlobal.__new__(IGlobal)
+            iglobal.strategy = None
+
+            # Mock endpoint (run mode) and glb (connConfig with strategy params)
+            endpoint = MagicMock()
+            endpoint.openMode = 'run'
+            iglobal.IEndpoint = MagicMock()
+            iglobal.IEndpoint.endpoint = endpoint
+
+            glb = MagicMock()
+            glb.logicalType = 'chunker'
+            glb.connConfig = {'strategy': 'sentence', 'chunk_size': '500', 'chunk_overlap': '50'}
+            iglobal.glb = glb
+
+            iglobal.beginGlobal()
+
+            assert iglobal.strategy is not None
+            assert isinstance(iglobal.strategy, SentenceChunker)
+            assert iglobal.strategy.chunk_size == 500
+            assert iglobal.strategy.chunk_overlap == 50
         finally:
             self._restore_modules(saved, names)
 
