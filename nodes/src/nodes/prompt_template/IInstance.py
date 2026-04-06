@@ -45,9 +45,8 @@ class IInstance(IInstanceBase):
         config = self.IGlobal.config
         if config is None:
             config = {}
-        variables = dict(config.get('variables', {}))
-        if not isinstance(variables, dict):
-            variables = {}
+        raw_variables = config.get('variables', {})
+        variables = dict(raw_variables) if isinstance(raw_variables, dict) else {}
 
         # Add collected text as 'input' if available
         if self.collected_text:
@@ -56,14 +55,8 @@ class IInstance(IInstanceBase):
         return variables
 
     def writeQuestions(self, question: Question):
-        config = self.IGlobal.config or {}
-        template = config.get('template', '{{input}}')
-        context = self._get_template_context()
-
         for q in question.questions:
-            context['question'] = q.text
-            rendered = render(template, context)
-            self.question.addQuestion(rendered)
+            self.question.addQuestion(q.text)
 
     def writeText(self, text: str):
         self.collected_text.append(text)
@@ -74,9 +67,14 @@ class IInstance(IInstanceBase):
             template = config.get('template', '{{input}}')
             context = self._get_template_context()
 
-            # If we have questions, output them
+            # Render questions with full context now that all text has arrived
             if self.question.questions:
-                self.instance.writeQuestions(self.question)
+                rendered_question = Question()
+                for q in self.question.questions:
+                    context['question'] = q.text
+                    rendered = render(template, context)
+                    rendered_question.addQuestion(rendered)
+                self.instance.writeQuestions(rendered_question)
             # If we only have text input, render and output as text
             elif self.collected_text:
                 rendered = render(template, context)
