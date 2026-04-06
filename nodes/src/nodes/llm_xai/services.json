@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"llm"
-	],
+	"classType": ["llm"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"invoke"
-	],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,41 +47,27 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that integrates with xAI's Grok language models for intelligent text generation ",
-		"and analysis. Designed for advanced natural language understanding, it supports a wide range ",
-		"of use cases including question answering, summarization, and conversational AI. With a focus ",
-		"on reasoning and accuracy, this component provides access to cutting-edge capabilities from xAI, ",
-		"enabling rich, context-aware responses for enterprise and technical applications. Configuration ",
-		"options allow flexible deployment within secure and performance-optimized pipelines."
-	],
+	"description": ["A component that integrates with xAI's Grok language models for intelligent text generation ", "and analysis. Designed for advanced natural language understanding, it supports a wide range ", "of use cases including question answering, summarization, and conversational AI. With a focus ", "on reasoning and accuracy, this component provides access to cutting-edge capabilities from xAI, ", "enabling rich, context-aware responses for enterprise and technical applications. Configuration ", "options allow flexible deployment within secure and performance-optimized pipelines."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "xai.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/4oN1QmG",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": [
-		"Model: ${parameters.llm_xai.profile}"
-	],
+	"tile": ["Model: ${parameters.llm_xai.profile}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"questions": [
-			"answers"
-		]
+		"questions": ["answers"]
 	},
 	"input": [
 		{
@@ -157,7 +139,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
@@ -174,59 +156,39 @@
 		},
 		"xai.custom": {
 			"object": "custom",
-			"properties": [
-				"model",
-				"modelTotalTokens",
-				"llm.cloud.apikey"
-			]
+			"properties": ["model", "modelTotalTokens", "llm.cloud.apikey"]
 		},
 		"xai.grok-4-1-fast-reasoning": {
 			"object": "grok-4-1-fast-reasoning",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"xai.grok-4-1-fast-non-reasoning": {
 			"object": "grok-4-1-fast-non-reasoning",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"xai.grok-code-fast-1": {
 			"object": "grok-code-fast-1",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"xai.grok-4-fast-reasoning": {
 			"object": "grok-4-fast-reasoning",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"xai.grok-4-fast-non-reasoning": {
 			"object": "grok-4-fast-non-reasoning",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"xai.grok-4": {
 			"object": "grok-4",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"xai.grok-3-mini": {
 			"object": "grok-3-mini",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"xai.grok-3": {
 			"object": "grok-3",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"xai.profile": {
 			"title": "Model",
@@ -247,57 +209,39 @@
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": [
-						"xai.custom"
-					]
+					"properties": ["xai.custom"]
 				},
 				{
 					"value": "grok-4-1-fast-reasoning",
-					"properties": [
-						"xai.grok-4-1-fast-reasoning"
-					]
+					"properties": ["xai.grok-4-1-fast-reasoning"]
 				},
 				{
 					"value": "grok-4-1-fast-non-reasoning",
-					"properties": [
-						"xai.grok-4-1-fast-non-reasoning"
-					]
+					"properties": ["xai.grok-4-1-fast-non-reasoning"]
 				},
 				{
 					"value": "grok-code-fast-1",
-					"properties": [
-						"xai.grok-code-fast-1"
-					]
+					"properties": ["xai.grok-code-fast-1"]
 				},
 				{
 					"value": "grok-4-fast-reasoning",
-					"properties": [
-						"xai.grok-4-fast-reasoning"
-					]
+					"properties": ["xai.grok-4-fast-reasoning"]
 				},
 				{
 					"value": "grok-4-fast-non-reasoning",
-					"properties": [
-						"xai.grok-4-fast-non-reasoning"
-					]
+					"properties": ["xai.grok-4-fast-non-reasoning"]
 				},
 				{
 					"value": "grok-4",
-					"properties": [
-						"xai.grok-4"
-					]
+					"properties": ["xai.grok-4"]
 				},
 				{
 					"value": "grok-3-mini",
-					"properties": [
-						"xai.grok-3-mini"
-					]
+					"properties": ["xai.grok-3-mini"]
 				},
 				{
 					"value": "grok-3",
-					"properties": [
-						"xai.grok-3"
-					]
+					"properties": ["xai.grok-3"]
 				}
 			]
 		}
@@ -311,9 +255,7 @@
 		{
 			"section": "Pipe",
 			"title": "xAI",
-			"properties": [
-				"xai.profile"
-			]
+			"properties": ["xai.profile"]
 		}
 	],
 	"test": {

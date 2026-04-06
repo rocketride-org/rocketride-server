@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"store"
-	],
+	"classType": ["store"],
 	//
 	// Required:
 	//     Capabilities are flags that change the behavior of the underlying
@@ -24,13 +22,13 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//     The node is the actual pyhsical node to instantiate - if
+	//     The node is the actual physical node to instantiate - if
 	//     not specified, the protocol will be used
 	//
 	"node": "python",
@@ -49,32 +47,19 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A vector database component for MongoDB Atlas, enabling efficient storage and ",
-		"retrieval of vector embeddings using MongoDB's native vector search capabilities. ",
-		"It supports similarity search, filtering, and management of vector data with ",
-		"high performance and advanced matching capabilities using Atlas Vector Search.",
-		"</br></br>To access local services from AI Cloud, follow these steps: <a href=\"https://bit.ly/4maRLPL\" target=\"_blank\">Setting Up Ngrok to Local Services from RocketRide Data Toolchain for AI Cloud</a></br>",
-		"</br></br><a href=\"https://www.mongodb.com/products/platform/atlas-vector-search\" target=\"_blank\">MongoDB Atlas Vector Search</a>"
-	],
+	"description": ["A vector database component for MongoDB Atlas, enabling efficient storage and ", "retrieval of vector embeddings using MongoDB's native vector search capabilities. ", "It supports similarity search, filtering, and management of vector data with ", "high performance and advanced matching capabilities using Atlas Vector Search.", "</br></br><a href=\"https://www.mongodb.com/products/platform/atlas-vector-search\" target=\"_blank\">MongoDB Atlas Vector Search</a>"],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "mongodb.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/4kXAvvP",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": [
-		"Host/Port: ${parameters.atlas.host}:${parameters.atlas.port}",
-		"Collection: ${parameters.atlas.collection}"
-	],
+	"tile": ["Host/Port: ${parameters.atlas.host}:${parameters.atlas.port}", "Collection: ${parameters.atlas.collection}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -82,19 +67,12 @@
 	//
 	"lanes": {
 		"documents": [],
-		"questions": [
-			"documents",
-			"answers",
-			"questions"
-		]
+		"questions": ["documents", "answers", "questions"]
 	},
 	"input": [
 		{
 			"lane": "documents",
-			"description": [
-				"Stores the documents into the MongoDB Atlas vector database. The documents must be ",
-				"run through an embedding model prior to this step to compute the vectors."
-			],
+			"description": ["Stores the documents into the MongoDB Atlas vector database. The documents must be ", "run through an embedding model prior to this step to compute the vectors."],
 			"output": []
 		},
 		{
@@ -103,26 +81,17 @@
 			"output": [
 				{
 					"lane": "documents",
-					"description": [
-						"Produces documents that are most similar to the given question."
-					],
+					"description": ["Produces documents that are most similar to the given question."],
 					"output": []
 				},
 				{
 					"lane": "answers",
-					"description": [
-						"Produces an answer with the documents that are most similar ",
-						"to the given question."
-					],
+					"description": ["Produces an answer with the documents that are most similar ", "to the given question."],
 					"output": []
 				},
 				{
 					"lane": "questions",
-					"description": [
-						"Updates the question with documents most similar to the ",
-						"question and sets up a filter so piping this to another store ",
-						"driver will limit its answers to the given subset of documents."
-					],
+					"description": ["Updates the question with documents most similar to the ", "question and sets up a filter so piping this to another store ", "driver will limit its answers to the given subset of documents."],
 					"output": []
 				}
 			]
@@ -144,7 +113,7 @@
 	},
 	//
 	// Optional:
-	//     Local fields defintions - these define fields only for the
+	//     Local fields definitions - these define fields only for the
 	//     current service. You may specify them here, or directly
 	//     in the shape
 	//
@@ -163,23 +132,15 @@
 		"atlas.store": {
 			"object": "store",
 			"title": "Store",
-			"properties": [
-				"atlas.provider"
-			]
+			"properties": ["atlas.provider"]
 		},
 		"atlas.target.autopipe": {
 			"object": "parameters",
-			"properties": [
-				"remote",
-				"atlas.store",
-				"all.embedding"
-			]
+			"properties": ["remote", "atlas.store", "all.embedding"]
 		},
 		"atlas.target.parameters": {
 			"object": "parameters",
-			"properties": [
-				"atlas.target.autopipe"
-			]
+			"properties": ["atlas.target.autopipe"]
 		}
 	},
 	//
@@ -191,22 +152,12 @@
 		{
 			"section": "Pipe",
 			"title": "MongoDB Atlas Vector Store",
-			"properties": [
-				"vector.cloud.host",
-				"vector.apikey",
-				"vector.score",
-				"vector.database",
-				"vector.collection"
-			]
+			"properties": ["vector.cloud.host", "vector.apikey", "vector.score", "vector.database", "vector.collection"]
 		},
 		{
 			"section": "Transform",
 			"title": "MongoDB Atlas",
-			"properties": [
-				"type",
-				"atlas.target.parameters",
-				"target.mode"
-			]
+			"properties": ["type", "atlas.target.parameters", "target.mode"]
 		}
 	]
 }

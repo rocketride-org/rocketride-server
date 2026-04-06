@@ -8,6 +8,7 @@
 	"path": "nodes.tool_http_request",
 	"prefix": "http",
 	"icon": "http.svg",
+	"documentation": "https://docs.rocketride.org",
 	"description": ["Makes HTTP requests to any API endpoint — like curl for agents.", "The agent provides the full request (method, URL, headers, body, auth).", "The node enforces security guardrails: only whitelisted URLs and enabled HTTP methods are permitted."],
 	"tile": ["Tool: ${parameters.http_request.serverName}.http_request"],
 	"lanes": {},

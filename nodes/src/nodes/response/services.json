@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"infrastructure"
-	],
+	"classType": ["infrastructure"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"internal"
-	],
+	"capabilities": ["internal"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,28 +47,19 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that sends processed data back to the requesting client in JSON format. ",
-		"It handles the response phase of the HTTP request-response cycle by returning the results ",
-		"as a JSON object. This component ensures that data is transmitted efficiently and clearly to ",
-		"the client, providing a standardized format for the response."
-	],
+	"description": ["A component that sends processed data back to the requesting client in JSON format. ", "It handles the response phase of the HTTP request-response cycle by returning the results ", "as a JSON object. This component ensures that data is transmitted efficiently and clearly to ", "the client, providing a standardized format for the response."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "util-infrastructure.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/48YcXVc",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": [
-	],
+	"tile": [],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -138,12 +125,12 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
 	"fields": {
-		"laneId":{
+		"laneId": {
 			"type": "string",
 			"title": "Lane name",
 			"enum": [
@@ -157,7 +144,7 @@
 				["video", "Video"]
 			]
 		},
-		"laneName":{
+		"laneName": {
 			"type": "string",
 			"title": "Result key",
 			"minLength": 1,
@@ -169,17 +156,10 @@
 			"minItems": 0,
 			"items": {
 				"type": "object",
-				"properties": [
-					"laneId",
-					"laneName"
-				]
+				"properties": ["laneId", "laneName"]
 			},
 			"ui:options:inline": true,
-			"description": [
-				"Each lane maps pipeline data to a custom JSON key in the response. ",
-				"Select the data type (text, documents, answers, etc.) for Lane Name, ",
-				"and enter a custom JSON key name (1-32 characters) for Result Key."
-			]
+			"description": ["Each lane maps pipeline data to a custom JSON key in the response. ", "Select the data type (text, documents, answers, etc.) for Lane Name, ", "and enter a custom JSON key name (1-32 characters) for Result Key."]
 		}
 	},
 	//
@@ -191,9 +171,7 @@
 		{
 			"section": "Pipe",
 			"title": "Response",
-			"properties": [
-				"lanes"
-			]
+			"properties": ["lanes"]
 		}
 	]
 }

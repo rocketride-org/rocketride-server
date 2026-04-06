@@ -84,5 +84,6 @@
 			"properties": ["agent_description", "instructions"]
 		}
 	],
-	"icon": "deepagent.svg"
+	"icon": "deepagent.svg",
+	"documentation": "https://docs.rocketride.org"
 }

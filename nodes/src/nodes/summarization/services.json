@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"text"
-	],
+	"classType": ["text"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -24,13 +22,13 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -49,29 +47,19 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A processing component that analyzes document content to extract concise ",
-		"summaries, key points, and named entities. Designed to enhance understanding ",
-		"and downstream utility, it supports unstructured text and delivers structured ",
-		"insights for indexing, search, or display. Ideal for distilling key information ",
-		"from large volumes of content."
-	],
+	"description": ["A processing component that analyzes document content to extract concise ", "summaries, key points, and named entities. Designed to enhance understanding ", "and downstream utility, it supports unstructured text and delivers structured ", "insights for indexing, search, or display. Ideal for distilling key information ", "from large volumes of content."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "summaries.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/47gSVUI",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": [
-	],
+	"tile": [],
 	//
 	// Optional:
 	//		Defines the invoke connections that may/must be connected
@@ -89,10 +77,7 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"text": [
-			"text",
-			"documents"
-		]
+		"text": ["text", "documents"]
 	},
 	"input": [
 		{
@@ -123,7 +108,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
@@ -150,29 +135,17 @@
 		},
 		"summarization.default": {
 			"object": "default",
-			"properties": [
-				"summarization.numberOfSummaries",
-				"summarization.numberOfSummaryWords",
-				"summarization.numberOfKeyPointWords",
-				"summarization.numberOfEntities"
-			]
+			"properties": ["summarization.numberOfSummaries", "summarization.numberOfSummaryWords", "summarization.numberOfKeyPointWords", "summarization.numberOfEntities"]
 		},
 		"summarization.profile": {
 			"hidden": true,
 			"type": "string",
 			"default": "default",
-			"enum": [
-				[
-					"default",
-					"Default"
-				]
-			],
+			"enum": [["default", "Default"]],
 			"conditional": [
 				{
 					"value": "default",
-					"properties": [
-						"summarization.default"
-					]
+					"properties": ["summarization.default"]
 				}
 			]
 		}
@@ -186,9 +159,7 @@
 		{
 			"section": "Pipe",
 			"title": "Summarization",
-			"properties": [
-				"summarization.profile"
-			]
+			"properties": ["summarization.profile"]
 		}
 	]
 }
