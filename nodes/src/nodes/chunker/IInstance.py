@@ -48,9 +48,9 @@ class IInstance(IInstanceBase):
         """
         Chunk each incoming document and emit multiple documents (one per chunk).
 
-        Each emitted document gets metadata with chunk_index, parent_id, and
-        total_chunks so downstream nodes can reconstruct the original document
-        if needed.
+        Each emitted document gets metadata with chunkId, parentId, chunk_index,
+        start_char, end_char, and total_chunks so downstream nodes can
+        reconstruct the original document if needed.
         """
         if self.IGlobal.strategy is None:
             raise RuntimeError('Chunker strategy not initialized')
@@ -84,6 +84,13 @@ class IInstance(IInstanceBase):
                 # Update metadata (always non-None after the copy/create above)
                 chunk_doc.metadata.chunkId = self.chunkId
                 chunk_doc.metadata.parentId = parent_id
+
+                # Propagate strategy metadata (chunk_index, start_char, end_char)
+                strategy_meta = chunk_data.get('metadata', {})
+                chunk_doc.metadata.chunk_index = strategy_meta.get('chunk_index', 0)
+                chunk_doc.metadata.start_char = strategy_meta.get('start_char', 0)
+                chunk_doc.metadata.end_char = strategy_meta.get('end_char', 0)
+                chunk_doc.metadata.total_chunks = total_chunks
 
                 self.chunkId += 1
                 output_docs.append(chunk_doc)
