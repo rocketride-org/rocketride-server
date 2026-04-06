@@ -15,11 +15,6 @@ on:
       - converted_to_draft
       - closed
       - reopened
-  check_run:
-    types: [completed]
-  workflow_run:
-    workflows: ['CI', 'PR checks']
-    types: [completed]
   workflow_call:
 
 permissions:
@@ -29,7 +24,7 @@ permissions:
   checks: read
 
 concurrency:
-  group: discord-pr-${{ github.event.pull_request.number || github.event.check_run.pull_requests[0].number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
+  group: discord-pr-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -52,39 +47,11 @@ jobs:
           # ── Resolve PR number ────────────────────────────────────────────
           if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "pull_request_target" ]; then
             PR_NUMBER="${{ github.event.pull_request.number }}"
-          elif [ "$EVENT_NAME" = "check_run" ]; then
-            HEAD_SHA="${{ github.event.check_run.head_sha }}"
-
-            # Try payload first
-            PR_NUMBER=$(echo '${{ toJson(github.event.check_run.pull_requests) }}' \
-              | jq -r '.[0].number // empty')
-            echo "check_run: sha=$HEAD_SHA pr_from_payload=$PR_NUMBER"
-
-            # Fallback: search open PRs by head SHA directly
-            if [ -z "$PR_NUMBER" ]; then
-              PR_NUMBER=$(gh api "/repos/$REPO/pulls" \
-                -f state=open \
-                --jq ".[] | select(.head.sha == \"$HEAD_SHA\") | .number" \
-                2>/dev/null | head -1)
-              echo "check_run: pr_from_api=$PR_NUMBER"
-            fi
-
-            if [ -z "$PR_NUMBER" ]; then
-              echo "No open PR for $HEAD_SHA — skipping"
-              exit 0
-            fi
           else
-            HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
-            PR_NUMBER=$(echo '${{ toJson(github.event.workflow_run.pull_requests) }}' \
-              | jq -r '.[0].number // empty')
+            # workflow_call — inherits caller's event context
+            PR_NUMBER="${{ github.event.pull_request.number }}"
             if [ -z "$PR_NUMBER" ]; then
-              PR_NUMBER=$(gh api "/repos/$REPO/pulls" \
-                -f state=open \
-                --jq ".[] | select(.head.sha == \"$HEAD_SHA\") | .number" \
-                2>/dev/null | head -1)
-            fi
-            if [ -z "$PR_NUMBER" ]; then
-              echo "No open PR for $HEAD_SHA — skipping"
+              echo "Could not resolve PR number — skipping"
               exit 0
             fi
           fi
@@ -131,7 +98,7 @@ jobs:
                   elif .conclusion == "skipped" or .conclusion == "cancelled" then "skipped"
                   else "failure" end
                 )})
-              + [{name: "notify", state: "success"}, {name: "discord-notify", state: "success"}]')
+              ')
 
           COMMIT_STATUSES=$(gh api "repos/$REPO/commits/$HEAD_SHA/status" \
             --jq '[.statuses[] | {name: .context, state: (
@@ -228,8 +195,23 @@ jobs:
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
               "${DISCORD_WEBHOOK_URL}?wait=true")
-            DISCORD_MSG_ID=$(echo "$RESPONSE" | jq -r '.id')
-            gh api "/repos/$REPO/issues/$PR_NUMBER/comments" \
-              -X POST \
-              -f body="<!-- discord-msg-id:${DISCORD_MSG_ID} -->"
+            NEW_MSG_ID=$(echo "$RESPONSE" | jq -r '.id')
+
+            # ── Race guard: re-check for a comment created by a concurrent run ──
+            EXISTING=$(gh api "/repos/$REPO/issues/$PR_NUMBER/comments" \
+              --jq '[.[] | select(.user.login == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$")))] | first // empty' 2>/dev/null)
+
+            if [ -n "$EXISTING" ]; then
+              # Another run won the race — delete our duplicate message, use theirs
+              curl -sS -X DELETE "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$NEW_MSG_ID" || true
+              DISCORD_MSG_ID=$(echo "$EXISTING" | jq -r '.body' | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
+              # Patch the existing message with our payload
+              curl -sS -X PATCH -H "Content-Type: application/json" -d "$PAYLOAD" \
+                "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID" > /dev/null
+            else
+              DISCORD_MSG_ID="$NEW_MSG_ID"
+              gh api "/repos/$REPO/issues/$PR_NUMBER/comments" \
+                -X POST \
+                -f body="<!-- discord-msg-id:${DISCORD_MSG_ID} -->"
+            fi
           fi
