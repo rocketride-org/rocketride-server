@@ -106,6 +106,9 @@ def validate_model_name(model: Optional[str]) -> Optional[str]:
     if model is None:
         return None
 
+    if not isinstance(model, str):
+        raise ValueError(f'Model name must be a string, got {type(model).__name__}.')
+
     if not model.strip():
         raise ValueError('Model name was provided but is empty.')
 
@@ -130,10 +133,10 @@ def validate_max_tokens(output_tokens: int, total_tokens: int) -> int:
     Raises:
         ValueError: If output_tokens is not a positive integer.
     """
-    if not isinstance(output_tokens, int) or output_tokens < 1:
+    if not isinstance(output_tokens, int) or isinstance(output_tokens, bool) or output_tokens < 1:
         raise ValueError(f'Output tokens must be a positive integer, got {output_tokens!r}.')
 
-    if not isinstance(total_tokens, int) or total_tokens < 1:
+    if not isinstance(total_tokens, int) or isinstance(total_tokens, bool) or total_tokens < 1:
         raise ValueError(f'Total tokens must be a positive integer, got {total_tokens!r}.')
 
     if output_tokens > MAX_OUTPUT_TOKENS:
