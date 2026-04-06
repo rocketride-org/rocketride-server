@@ -86,6 +86,8 @@ class IInstance(IInstanceBase):
                 self._video_data += buffer
 
         elif action == AVI_ACTION.END:
+            video_data = self._video_data
+            self._video_data = None
             if self._video_data is not None and len(self._video_data) > 0:
                 self._process_video(bytes(self._video_data))
             elif self._video_data is None:
@@ -191,7 +193,7 @@ class IInstance(IInstanceBase):
                         isDeleted=False,
                     )
                     metadata.time_stamp = time_stamp
-                    metadata.frame_number = frames_extracted
+                    metadata.frame_number = current_frame_pos
 
                     # Create the document with the frame image and embedding.
                     doc = Doc(type='Image', page_content=frame_base64, metadata=metadata)

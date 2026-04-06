@@ -112,7 +112,7 @@
 			"type": "string",
 			"title": "Model name",
 			"minLength": 2,
-			"maxLength": 32,
+			"maxLength": 256,
 			"description": "Hugging Face model to use for frame embedding"
 		},
 		"embedding_video.custom": {
