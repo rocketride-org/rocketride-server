@@ -11,6 +11,7 @@ export type ThemeTokens = {
 	'--rr-palette-mode': string;
 	'--rr-bg-default': string;
 	'--rr-bg-paper': string;
+	'--rr-bg-surface': string;
 	'--rr-bg-surface-alt': string;
 	'--rr-fg-titleBar-active': string;
 	'--rr-fg-titleBar-inactive': string;

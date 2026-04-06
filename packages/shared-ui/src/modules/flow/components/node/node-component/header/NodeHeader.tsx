@@ -286,8 +286,8 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 							size={16}
 							style={{
 								...styles.editIcon,
-								// Red gear when form data is invalid
-								color: formDataValid === false ? 'var(--rr-color-error)' : undefined,
+								// Red gear when form data is invalid; otherwise let editIcon.color stand.
+								...(formDataValid === false ? { color: 'var(--rr-color-error)' } : {}),
 							}}
 						/>
 					</button>
