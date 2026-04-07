@@ -29,14 +29,14 @@ const HANDLE_OFFSET = 8;
 /** Styles for the delete button that appears on hover/selection. */
 const styles = {
 	button: {
-		backgroundColor: 'var(--rr-bg-surface)',
-		color: 'var(--rr-text-primary)',
+		backgroundColor: 'var(--rr-bg-paper)',
 		padding: '0.2rem',
 		border: '1px solid var(--rr-border)',
 		borderRadius: '50%',
 		cursor: 'pointer',
 		display: 'inline-flex',
 		alignItems: 'center',
+		color: 'var(--rr-text-secondary)',
 	} as React.CSSProperties,
 };
 

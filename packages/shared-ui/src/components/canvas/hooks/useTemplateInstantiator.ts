@@ -43,7 +43,8 @@ import { Node, useReactFlow, useUpdateNodeInternals } from '@xyflow/react';
 
 import { useFlowGraph } from '../context/FlowGraphContext';
 import { useFlowProject } from '../context/FlowProjectContext';
-import { generateNodeId, getEdgesFromNodes } from '../util/graph';
+import { generateNodeId, getEdgesFromNodes, getProjectComponents } from '../util/graph';
+import type { IProject } from '../types';
 import { resolveDefaultFormData } from '../util/helpers';
 import { validateFormData } from '../util/rjsf';
 import type { ITemplate } from '../templates/types';
@@ -56,8 +57,8 @@ import type { INodeData, INode } from '../types';
  *          of slot-name → chosen provider key.
  */
 export function useTemplateInstantiator() {
-	const { nodes, loadCanvas, onToolchainUpdated, isFlowReady } = useFlowGraph();
-	const { servicesJson } = useFlowProject();
+	const { nodes, loadCanvas, isFlowReady } = useFlowGraph();
+	const { servicesJson, onContentChanged, currentProject } = useFlowProject();
 	const { fitView } = useReactFlow();
 	const updateNodeInternals = useUpdateNodeInternals();
 
@@ -83,9 +84,16 @@ export function useTemplateInstantiator() {
 		updateNodeInternals(pendingIds);
 		setPendingIds([]);
 
-		onToolchainUpdated();
+		// Notify host directly — onContentUpdated is blocked by isLoadingRef
+		// which hasn't been cleared yet (parent effect runs after child)
+		if (onContentChanged) {
+			const components = getProjectComponents(nodes as unknown as INode[]);
+			const project: IProject = { ...currentProject, components };
+			delete (project as any).viewport;
+			onContentChanged(project);
+		}
 		fitView({ padding: 0.15, duration: 300 });
-	}, [isFlowReady, pendingIds, nodes, updateNodeInternals, onToolchainUpdated, fitView]);
+	}, [isFlowReady, pendingIds, nodes, updateNodeInternals, onContentChanged, currentProject, fitView]);
 
 	// -----------------------------------------------------------------
 	// instantiateTemplate — builds nodes with template positions

@@ -186,7 +186,7 @@ export interface IFlowGraphContext {
 	setEditingNodeId: (nodeId: string | undefined) => void;
 
 	/** Marks the project as dirty and notifies the host of content changes. */
-	onToolchainUpdated: () => void;
+	onContentUpdated: () => void;
 
 	// --- Quick-add popup ---------------------------------------------------
 
@@ -281,7 +281,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 	const [nodes, setNodes, onNodesChangeInternal] = useNodesState<FlowNode>([]);
 	const [edges, setEdges, onEdgesChangeInternal] = useEdgesState<Edge>([]);
-	const { screenToFlowPosition, toObject, getNode, setCenter, setViewport, fitView, getIntersectingNodes, deleteElements } = useReactFlow();
+	const { screenToFlowPosition, getNode, setCenter, setViewport, fitView, getIntersectingNodes, deleteElements } = useReactFlow();
 
 	// --- Refs --------------------------------------------------------------
 
@@ -321,7 +321,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	const currentProjectRef = useRef(currentProject);
 	currentProjectRef.current = currentProject;
 
-	/** Ref to the latest projectLayout so onToolchainUpdated reads current values without re-creating. */
+	/** Ref to the latest projectLayout so onContentUpdated reads current values without re-creating. */
 	const projectLayoutRef = useRef(projectLayout);
 	projectLayoutRef.current = projectLayout;
 
@@ -334,30 +334,30 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	 * Defers serialization by 50ms so React has committed the latest
 	 * nodes/edges before we snapshot the graph.
 	 */
-	const onToolchainUpdated = useCallback(() => {
+	const onContentUpdated = useCallback(() => {
 		patchToolchainState({ isUpdated: true, isSaved: false });
 
 		if (!onContentChanged || isLoadingRef.current) return;
 
 		setTimeout(() => {
-			const { viewport } = toObject();
 			const components = getProjectComponents(nodesRef.current as INode[]);
 			const nextVersion = (lastSentVersion.current ?? 0) + 1;
 			const layout = projectLayoutRef.current;
 			const project: IProject = {
 				...currentProjectRef.current,
 				components,
-				viewport,
 				isLocked: layout.isLocked,
 				snapToGrid: layout.snapToGrid,
 				snapGridSize: layout.snapGridSize,
 				version: PIPELINE_SCHEMA_VERSION,
 				docRevision: nextVersion,
 			};
+			// Remove viewport from content — it's a user preference, not document content
+			delete (project as any).viewport;
 			lastSentVersion.current = nextVersion;
 			onContentChanged(project);
 		}, 50);
-	}, [onContentChanged, patchToolchainState, toObject]);
+	}, [onContentChanged, patchToolchainState]);
 
 	// =====================================================================
 	// ReactFlow event handlers (guarded by isLocked)
@@ -376,11 +376,11 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 			// Only fire content change for structural modifications, not position/select
 			const structural = changes.some((c) => c.type === 'add' || c.type === 'remove');
-			if (structural) onToolchainUpdated();
+			if (structural) onContentUpdated();
 
 			onNodesChangeInternal(changes);
 		},
-		[isLocked, onNodesChangeInternal, onToolchainUpdated]
+		[isLocked, onNodesChangeInternal, onContentUpdated]
 	);
 
 	/**
@@ -470,9 +470,9 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				return sortNodesParentFirst(updated as FlowNode[]);
 			});
 
-			onToolchainUpdated();
+			onContentUpdated();
 		},
-		[setNodes, getIntersectingNodes, onToolchainUpdated]
+		[setNodes, getIntersectingNodes, onContentUpdated]
 	);
 
 	/**
@@ -585,9 +585,9 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				onEdgesChangeInternal(changes);
 			}
 
-			onToolchainUpdated();
+			onContentUpdated();
 		},
-		[isLocked, edges, setNodes, setEdges, onEdgesChangeInternal, onToolchainUpdated]
+		[isLocked, edges, setNodes, setEdges, onEdgesChangeInternal, onContentUpdated]
 	);
 
 	const onEdgeConnect = useCallback(
@@ -633,9 +633,9 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				return updatedNodes;
 			});
 
-			onToolchainUpdated();
+			onContentUpdated();
 		},
-		[isLocked, setNodes, setEdges, onToolchainUpdated]
+		[isLocked, setNodes, setEdges, onContentUpdated]
 	);
 
 	// =====================================================================
@@ -797,27 +797,26 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			loadCanvas(allNodes, allEdges);
 
 			// Notify host immediately with the new project state.
-			// loadCanvas sets isLoading=true which blocks onToolchainUpdated,
+			// loadCanvas sets isLoading=true which blocks onContentUpdated,
 			// so we build the project directly from allNodes instead.
 			if (onContentChanged) {
 				const components = getProjectComponents(allNodes as unknown as INode[]);
-				const { viewport } = toObject();
 				const layout = projectLayoutRef.current;
 				const project: IProject = {
 					...currentProjectRef.current,
 					components,
-					viewport,
 					isLocked: layout.isLocked,
 					snapToGrid: layout.snapToGrid,
 					snapGridSize: layout.snapGridSize,
 					version: PIPELINE_SCHEMA_VERSION,
 				};
+				delete (project as any).viewport;
 				onContentChanged(project);
 			}
 
 			return id;
 		},
-		[nodes, screenToFlowPosition, loadCanvas, getInitialFormDataValid, servicesJson, onContentChanged, toObject]
+		[nodes, screenToFlowPosition, loadCanvas, getInitialFormDataValid, servicesJson, onContentChanged]
 	);
 
 	const updateNode = useCallback(
@@ -938,7 +937,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				updateProjectLayout(layoutPatch);
 			}
 
-			// Queue viewport restoration — applied when isFlowReady transitions to true.
+			// Queue viewport restoration — from project.viewport (injected by host from viewState)
 			if (project.viewport) {
 				pendingViewportRef.current = project.viewport;
 			} else if (sortedNodes.length > 0) {
@@ -1025,7 +1024,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		focusOnNode,
 		editingNodeId,
 		setEditingNodeId,
-		onToolchainUpdated,
+		onContentUpdated,
 		loadData,
 		loadCanvas,
 		isFlowReady,
