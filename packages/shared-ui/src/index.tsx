@@ -29,6 +29,9 @@
 
 export { default as Canvas } from './modules/flow';
 export type { IFlowProps } from './modules/flow';
+
+export { default as ServerMonitor } from './modules/server';
+export type { IServerMonitorProps } from './modules/server';
 export type { IProject, IValidateResponse, IServiceCatalog } from './types/project';
 
 export { default as EndpointInfoModal } from './components/pipeline-actions/EndpointInfoModal';

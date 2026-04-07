@@ -22,7 +22,7 @@
 # =============================================================================
 
 from rocketlib import IGlobalBase, debug, OPEN_MODE
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from ai.common.config import Config
 
 
@@ -46,7 +46,9 @@ class IGlobal(IGlobalBase):
             debug('    Remote', filter['provider'])
 
         # Create a filter for the given provider
-        def getFilter(id: str, provider: str, config: Dict = {}):
+        def getFilter(id: str, provider: str, config: Optional[Dict] = None):
+            if config is None:
+                config = {}
             filter = {}
             filter['id'] = id
             filter['provider'] = provider
@@ -167,7 +169,6 @@ class IGlobal(IGlobalBase):
             if 'store' in autopipeConfig:
                 providerStore, configStore = Config.getMultiProviderConfig('store', autopipeConfig)
                 pushLocal(getFilter('vector_1', providerStore, configStore))
-
 
             pass
 

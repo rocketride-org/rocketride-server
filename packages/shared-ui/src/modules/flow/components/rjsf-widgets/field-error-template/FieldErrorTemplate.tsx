@@ -26,6 +26,10 @@ import FormHelperText from '@mui/material/FormHelperText';
 import List from '@mui/material/List';
 import { errorId, FieldErrorProps, FormContextType, RJSFSchema, StrictRJSFSchema } from '@rjsf/utils';
 
+// =============================================================================
+// Component
+// =============================================================================
+
 /**
  * Custom RJSF field-level error template that renders validation errors
  * as a compact MUI List of FormHelperText items beneath individual fields.

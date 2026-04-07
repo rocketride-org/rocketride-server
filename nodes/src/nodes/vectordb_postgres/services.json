@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"store"
-	],
+	"classType": ["store"],
 	//
 	// Required:
 	//     Capabilities are flags that change the behavior of the underlying
@@ -24,13 +22,13 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//     The node is the actual pyhsical node to instantiate - if
+	//     The node is the actual physical node to instantiate - if
 	//     not specified, the protocol will be used
 	//
 	"node": "python", //ai
@@ -49,34 +47,20 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that enhances PostgreSQL with vector similarity search ",
-		"capabilities through the pgvector extension. It allows for storing and querying of ",
-		"high-dimensional vectors directly within your existing PostgreSQL database. ",
-		"This component is ideal for building AI-powered applications that require semantic search, ",
-		"recommendation engines, and other similarity-based features without the need ",
-		"for a separate, specialized vector database."
-	],
+	"description": ["A component that enhances PostgreSQL with vector similarity search ", "capabilities through the pgvector extension. It allows for storing and querying of ", "high-dimensional vectors directly within your existing PostgreSQL database. ", "This component is ideal for building AI-powered applications that require semantic search, ", "recommendation engines, and other similarity-based features without the need ", "for a separate, specialized vector database."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "postgres.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/47Xooun",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": [
-		"Host/Port: ${parameters.postgres.${profile}.host}:${parameters.postgres.${profile}.port}",
-		"Database: ${parameters.postgres.${profile}.database}",
-		"Table: ${parameters.postgres.${profile}.collection}"
-	],
+	"tile": ["Host/Port: ${parameters.postgres.${profile}.host}:${parameters.postgres.${profile}.port}", "Database: ${parameters.postgres.${profile}.database}", "Table: ${parameters.postgres.${profile}.collection}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -84,11 +68,7 @@
 	//
 	"lanes": {
 		"documents": [],
-		"questions": [
-			"documents",
-			"answers",
-			"questions"
-		]
+		"questions": ["documents", "answers", "questions"]
 	},
 	//
 	// Test configuration for automated node testing
@@ -136,8 +116,8 @@
 						"notEmpty": true,
 						"contains": "Paris",
 						"property": [
-							{"path": "[0].score", "greaterThanOrEqual": 0.5},
-							{"path": "[0].metadata.objectId", "equals": "test-doc-1"}
+							{ "path": "[0].score", "greaterThanOrEqual": 0.5 },
+							{ "path": "[0].metadata.objectId", "equals": "test-doc-1" }
 						]
 					}
 				}
@@ -168,7 +148,7 @@
 	},
 	//
 	// Optional:
-	//     Local fields defintions - these define fields only for the
+	//     Local fields definitions - these define fields only for the
 	//     current service. You may specify them here, or directly
 	//     in the shape
 	//
@@ -213,24 +193,11 @@
 			"description": "The similarity metric to use for vector search",
 			"type": "string",
 			"default": "cosine",
-			"enum": [
-				"cosine",
-				"l2",
-				"inner_product"
-			]
+			"enum": ["cosine", "l2", "inner_product"]
 		},
 		"postgres.local": {
 			"object": "local",
-			"properties": [
-				"vector.local.host",
-				"vector.local.port",
-				"vector.local.user",
-				"vector.local.password",
-				"vector.local.database",
-				"vector.collection",
-				"vector.score",
-				"vector.similarity"
-			]
+			"properties": ["vector.local.host", "vector.local.port", "vector.local.user", "vector.local.password", "vector.local.database", "vector.collection", "vector.score", "vector.similarity"]
 		},
 		"postgres.profile": {
 			"hidden": true,
@@ -238,15 +205,11 @@
 			"description": "Connect to...",
 			"type": "string",
 			"default": "local",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "local",
-					"properties": [
-						"postgres.local"
-					]
+					"properties": ["postgres.local"]
 				}
 			]
 		},
@@ -257,33 +220,22 @@
 		},
 		"postgres.postgres": {
 			"object": "postgres",
-			"properties": [
-				"postgres.profile"
-			]
+			"properties": ["postgres.profile"]
 		},
 		"postgres.store": {
 			"object": "store",
 			"title": "Store",
-			"properties": [
-				"postgres.provider",
-				"postgres.postgres"
-			]
+			"properties": ["postgres.provider", "postgres.postgres"]
 		},
 		"postgres.target.autopipe": {
 			"object": "parameters",
 			"title": "Parameters",
-			"properties": [
-				"remote",
-				"postgres.store",
-				"all.embedding"
-			]
+			"properties": ["remote", "postgres.store", "all.embedding"]
 		},
 		"postgres.target.parameters": {
 			"object": "parameters",
 			"title": "Parameters",
-			"properties": [
-				"postgres.target.autopipe"
-			]
+			"properties": ["postgres.target.autopipe"]
 		}
 	},
 	//
@@ -295,17 +247,12 @@
 		{
 			"section": "Pipe",
 			"title": "PostgreSQL Vector Store",
-			"properties": [
-				"postgres.profile"
-			]
+			"properties": ["postgres.profile"]
 		},
 		{
 			"section": "Transform",
 			"title": "PostgreSQL",
-			"properties": [
-				"type",
-				"postgres.target.parameters"
-			]
+			"properties": ["type", "postgres.target.parameters"]
 		}
 	]
 }

@@ -34,9 +34,10 @@
 	"scripts": {
 		"prepare": "lefthook install --force"
 	},
+	"packageManager": "pnpm@10.33.0",
 	"engines": {
 		"node": ">=18.0.0",
-		"pnpm": ">=8.0.0"
+		"pnpm": ">=10.0.0"
 	},
 	"pnpm": {
 		"peerDependencyRules": {

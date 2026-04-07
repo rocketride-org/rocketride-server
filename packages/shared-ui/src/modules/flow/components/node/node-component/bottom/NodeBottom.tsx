@@ -34,10 +34,13 @@
  */
 
 import { ReactElement } from 'react';
-import { Box } from '@mui/material';
 import { Edge, Position } from '@xyflow/react';
 import { InvokeHandle } from '../../../handles';
 import ConditionalRender from '../../../ConditionalRender';
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /**
  * Props for the NodeBottom component.
@@ -53,11 +56,19 @@ interface INodeBottomProps {
 	bottomCapBg: string;
 }
 
+// =============================================================================
+// Styles
+// =============================================================================
+
 /** Style for the 4px rounded bottom corner cap. */
 const cornerCapBottom = {
 	height: '4px',
 	borderRadius: '0 0 4px 4px',
 };
+
+// =============================================================================
+// Component
+// =============================================================================
 
 /**
  * Renders the bottom corner cap and optional invoke source diamond handles.
@@ -69,12 +80,12 @@ export default function NodeBottom({ id, invokeSourceKeys, edges, bottomCapBg }:
 	return (
 		<>
 			{/* Bottom corner cap — color matches the last visible section */}
-			<Box sx={{ ...cornerCapBottom, backgroundColor: bottomCapBg }} />
+			<div style={{ ...cornerCapBottom, backgroundColor: bottomCapBg }} />
 
 			{/* Invoke source diamond handles — outside the node, labels inside each handle */}
 			<ConditionalRender condition={invokeSourceKeys.length > 0}>
-				<Box
-					sx={{
+				<div
+					style={{
 						position: 'absolute',
 						bottom: 0,
 						left: 0,
@@ -88,7 +99,7 @@ export default function NodeBottom({ id, invokeSourceKeys, edges, bottomCapBg }:
 					{invokeSourceKeys.map((key: string) => (
 						<InvokeHandle key={key} id={`invoke-source.${key}`} type="source" position={Position.Bottom} invokeType={key} isConnected={edges.some((edge: Edge) => edge.sourceHandle === `invoke-source.${key}` && edge.source === id)} />
 					))}
-				</Box>
+				</div>
 			</ConditionalRender>
 		</>
 	);

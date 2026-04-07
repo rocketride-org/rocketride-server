@@ -37,7 +37,9 @@ This design provides a single connection point while maintaining separation
 of concerns through specialized command handler classes.
 """
 
+import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
+from rocketride import EVENT_TYPE
 from ai.common.dap import DAPConn, TransportBase
 from .commands.cmd_task import TaskCommands
 from .commands.cmd_data import DataCommands
@@ -164,10 +166,26 @@ class TaskConn(
         self._account_info: Optional[AccountInfo] = None
         self._authenticated = False
 
-    async def on_receive(self, message: Dict[str, Any] = {}) -> None:
+        # Connection tracking for server dashboard
+        self._connected_at: float = time.time()
+        self._messages_in: int = 0
+        self._messages_out: int = 0
+        self._last_activity: float = time.time()
+        self._client_info: Dict[str, str] = {}
+
+    async def send(self, message: Dict[str, Any]) -> None:
+        self._messages_out += 1
+        self._last_activity = time.time()
+        await super().send(message)
+
+    async def on_receive(self, message: Optional[Dict[str, Any]] = None) -> None:
         """
         Intercept DAP dispatch: if not authenticated, only allow auth command; otherwise require auth first.
         """
+        if message is None:
+            message = {}
+        self._messages_in += 1
+        self._last_activity = time.time()
         if message.get('type') == 'request' and message.get('command') == 'auth':
             await super().on_receive(message)
             if not self._authenticated:
@@ -188,9 +206,45 @@ class TaskConn(
         credential = args.get('auth') or ''
         result = await self._server._server.authenticate_credential(credential)
         if isinstance(result, tuple):
+            await self._server.broadcast_server_event(
+                EVENT_TYPE.DASHBOARD,
+                {
+                    'event': 'apaevt_dashboard',
+                    'body': {
+                        'action': 'auth_failed',
+                        'timestamp': time.time(),
+                        'connectionId': self.get_connection_id(),
+                        'reason': result[1],
+                    },
+                },
+            )
             return self.build_error(request, result[1])
         self._account_info = result
         self._authenticated = True
+
+        # Capture optional client identification from auth arguments
+        if args.get('clientName'):
+            self._client_info['name'] = str(args['clientName'])
+        if args.get('clientVersion'):
+            self._client_info['version'] = str(args['clientVersion'])
+
+        # Notify dashboard subscribers that an authenticated connection has arrived
+        await self._server.broadcast_server_event(
+            EVENT_TYPE.DASHBOARD,
+            {
+                'event': 'apaevt_dashboard',
+                'body': {
+                    'action': 'connection_added',
+                    'timestamp': time.time(),
+                    'connectionId': self.get_connection_id(),
+                    'clientName': self._client_info.get('name'),
+                    'clientVersion': self._client_info.get('version'),
+                    'clientId': self._account_info.clientid if self._account_info else None,
+                },
+            },
+            apikey=self._account_info.apikey,
+        )
+
         return self.build_response(request, body={})
 
     def has_permission(self, perm: Union[list[str], str]) -> bool:
@@ -221,7 +275,7 @@ class TaskConn(
         # Nope, denied
         return False
 
-    def verify_permission(self, perm: str) -> bool:
+    def verify_permission(self, perm: str) -> None:
         """
         Check if the account has the specified permission.
 
@@ -268,14 +322,20 @@ class TaskConn(
         """
         if not self._account_info:
             raise PermissionError('Not authenticated')
-        # If we authenticated with a public key, we need to use that
+        # If we authenticated with a public key, we are locked to that task
         if self._account_info.auth.startswith('pk_'):
-            # Look it up
             control = self._server.get_task_control_by_public_key(self._account_info.auth)
             return control.token
 
-        # First, extract any specified token
+        # If we authenticated with a task token, we are locked to that task
+        if self._account_info.auth.startswith('tk_'):
+            return self._account_info.auth
+
+        # Extract token from top-level (injected by debug commands) or arguments
         token = request.get('token', None)
+        if token is None:
+            args = request.get('arguments') or {}
+            token = args.get('token', None)
 
         # Now, we are good... but we need to verify permissions
         if permissions:
@@ -307,8 +367,16 @@ class TaskConn(
         # Get the token
         token = self.get_task_token(request, permissions)
 
-        # Get the task
-        return self._server.get_task(token)
+        # Get the task control and verify ownership for API key auth
+        control = self._server.get_task_control(token)
+
+        # For API key auth, verify the task belongs to this account.
+        # pk_ and tk_ auth are already scoped to their task by get_task_token.
+        if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
+            if control.apikey != self._account_info.apikey:
+                raise PermissionError('Access denied: task belongs to a different account')
+
+        return control.task
 
     def get_connection_id(self) -> int:
         """

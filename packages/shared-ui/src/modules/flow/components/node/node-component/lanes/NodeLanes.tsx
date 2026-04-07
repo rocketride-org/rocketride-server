@@ -41,17 +41,44 @@
  */
 
 import { ReactElement, useCallback, useMemo, useState } from 'react';
-import { Box, Typography } from '@mui/material';
 import { Position } from '@xyflow/react';
 
 import { IServiceCatalog, IServiceLane, INodeData, INodeLayout } from '../../../../types';
 
-import styles from './index.style';
 import { LaneHandle } from '../../../handles';
 import { useFlow } from '../../../../hooks';
 import { sortOutputLanes, getOutputLaneDisplayValues, renameLanes } from '../../../../util/helpers';
 import ConditionalRender from '../../../ConditionalRender';
 import InsideLines from './InsideLines';
+
+// =============================================================================
+// Styles
+// =============================================================================
+
+const styles = {
+	lanes: { padding: '0.25rem 0', position: 'relative' as const, display: 'flex', backgroundColor: 'var(--rr-bg-paper)', borderTop: '1px solid var(--rr-border)' },
+	connections: { width: '100%', alignItems: 'center' as const },
+	connectionBox: { flex: 1 },
+	connectionType: { position: 'relative' as const, textTransform: 'capitalize' as const, display: 'flex' },
+	body: { fontSize: 'var(--rr-font-size-xs)', color: 'var(--rr-text-disabled)' },
+	label: {
+		letterSpacing: 0,
+		lineHeight: 1,
+		textAlign: 'left' as const,
+		overflow: 'hidden',
+		whiteSpace: 'normal' as const,
+		display: '-webkit-box',
+		WebkitLineClamp: 2,
+		WebkitBoxOrient: 'vertical' as const,
+		width: 'fit-content',
+		backgroundColor: 'var(--rr-bg-paper)',
+		padding: '0.3rem 0.6rem',
+	},
+};
+
+// =============================================================================
+// Types
+// =============================================================================
 
 interface IProps {
 	nodeId: string;
@@ -62,16 +89,24 @@ interface IProps {
 	isGroup?: boolean;
 }
 
+// =============================================================================
+// Helpers
+// =============================================================================
+
 const RedAsterisk = (
 	<span
 		style={{
-			color: '#d32f2f',
+			color: 'var(--rr-color-error)',
 			fontWeight: 800,
 		}}
 	>
 		*
 	</span>
 );
+
+// =============================================================================
+// Component
+// =============================================================================
 
 export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGroup }: IProps): ReactElement | null {
 	const { edges, servicesJson: _servicesJson, setQuickAddState } = useFlow();
@@ -150,10 +185,10 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 
 	return (
 		<>
-			<Box
+			<div
 				key={tile?.join(',')}
 				ref={boxRef}
-				sx={{
+				style={{
 					...styles.lanes,
 					...styles.connections,
 					height: '100%',
@@ -163,8 +198,8 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 					<InsideLines parentEl={boxEl!} inputConnected={anyInputConnected} inputLanes={inputLanesWithConnections} outputLanes={outputLanesWithConnections} />
 				</ConditionalRender>
 
-				<Box
-					sx={{
+				<div
+					style={{
 						...styles.connectionBox,
 						display: 'flex',
 						flexDirection: 'column',
@@ -181,10 +216,9 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 
 								return (
 									showInputLane && (
-										<Box sx={styles.connectionType} key={`input-${title}-${type}`}>
-											<Typography
-												component="span"
-												sx={{
+										<div style={styles.connectionType} key={`input-${title}-${type}`}>
+											<span
+												style={{
 													...styles.label,
 													...styles.body,
 												}}
@@ -207,17 +241,17 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 													}
 													color="var(--rr-border)"
 												/>
-											</Typography>
-										</Box>
+											</span>
+										</div>
 									)
 								);
 							})}
 						</>
 					</ConditionalRender>
-				</Box>
+				</div>
 
-				<Box
-					sx={{
+				<div
+					style={{
 						...styles.connectionBox,
 						display: 'flex',
 						flexDirection: 'column',
@@ -231,16 +265,15 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 								const { type, required, sourceId, label } = outputLane;
 
 								return (
-									<Box
+									<div
 										key={`output-${title}-${type}`}
-										sx={{
+										style={{
 											...styles.connectionType,
 											justifyContent: 'end',
 										}}
 									>
-										<Typography
-											component="span"
-											sx={{
+										<span
+											style={{
 												...styles.label,
 												...styles.body,
 											}}
@@ -264,14 +297,14 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 													})
 												}
 											/>
-										</Typography>
-									</Box>
+										</span>
+									</div>
 								);
 							})}
 						</>
 					</ConditionalRender>
-				</Box>
-			</Box>
+				</div>
+			</div>
 		</>
 	);
 }

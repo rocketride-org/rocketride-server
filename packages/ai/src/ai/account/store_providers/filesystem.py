@@ -3,7 +3,6 @@
 import aiofiles
 import aiofiles.os
 import asyncio
-import hashlib
 import os
 import sys
 from pathlib import Path
@@ -127,9 +126,9 @@ class FilesystemStore(IStore):
                 async with aiofiles.open(full_path, 'r', encoding='utf-8') as f:
                     content = await f.read()
 
-                # Calculate version
-                version = hashlib.sha256(content.encode('utf-8')).hexdigest()
-                return (content, version)
+                # Use modification time as version identifier
+                mtime = full_path.stat().st_mtime
+                return (content, str(mtime))
 
             finally:
                 # Release lock
@@ -166,31 +165,22 @@ class FilesystemStore(IStore):
                 await self._acquire_lock(lock_fd, shared=False)
 
                 # Now we have exclusive access - check version
-                if full_path.exists():
-                    # File exists - expected_version is REQUIRED for updates
-                    if expected_version is None:
-                        raise StorageError(f'Expected version is required when updating existing file: {filename}')
-
-                    # Read current content and verify version
-                    async with aiofiles.open(full_path, 'r', encoding='utf-8') as f:
-                        current_content = await f.read()
-                    current_version = hashlib.sha256(current_content.encode('utf-8')).hexdigest()
-
-                    if current_version != expected_version:
+                if full_path.exists() and expected_version is not None:
+                    # Verify modification time matches expected version
+                    current_mtime = str(full_path.stat().st_mtime)
+                    if current_mtime != expected_version:
                         raise VersionMismatchError(
                             filename=filename,
                             expected_version=expected_version,
-                            actual_version=current_version,
+                            actual_version=current_mtime,
                         )
 
                 # Write file while holding lock
                 async with aiofiles.open(full_path, 'w', encoding='utf-8') as f:
                     await f.write(data)
 
-                # Calculate new version
-                new_version = hashlib.sha256(data.encode('utf-8')).hexdigest()
-
-                return new_version
+                # Return new modification time as version
+                return str(full_path.stat().st_mtime)
 
             finally:
                 # Release lock and close file descriptor
@@ -229,21 +219,15 @@ class FilesystemStore(IStore):
                 if not full_path.exists():
                     raise StorageError(f'File not found: {filename}')
 
-                # expected_version is REQUIRED for delete operations
-                if expected_version is None:
-                    raise StorageError(f'Expected version is required when deleting file: {filename}')
-
-                # Verify version matches
-                async with aiofiles.open(full_path, 'r', encoding='utf-8') as f:
-                    current_content = await f.read()
-                current_version = hashlib.sha256(current_content.encode('utf-8')).hexdigest()
-
-                if current_version != expected_version:
-                    raise VersionMismatchError(
-                        filename=filename,
-                        expected_version=expected_version,
-                        actual_version=current_version,
-                    )
+                # If expected_version provided, verify modification time matches
+                if expected_version is not None:
+                    current_mtime = str(full_path.stat().st_mtime)
+                    if current_mtime != expected_version:
+                        raise VersionMismatchError(
+                            filename=filename,
+                            expected_version=expected_version,
+                            actual_version=current_mtime,
+                        )
 
                 # Delete file while holding lock
                 full_path.unlink()
@@ -264,6 +248,47 @@ class FilesystemStore(IStore):
             raise
         except Exception as e:
             raise StorageError(f'Failed to delete file {filename}: {e}') from e
+
+    async def get_modified_time(self, filename: str) -> float:
+        """Get the last modified time of a file as an epoch timestamp."""
+        info = await self.get_file_info(filename)
+        return info['modified']
+
+    async def get_file_info(self, filename: str) -> dict:
+        """Get file size and modification time in a single stat call."""
+        try:
+            full_path = self._get_full_path(filename)
+            if not full_path.exists():
+                raise StorageError(f'File not found: {filename}')
+            st = full_path.stat()
+            return {'size': st.st_size, 'modified': st.st_mtime}
+        except StorageError:
+            raise
+        except Exception as e:
+            raise StorageError(f'Failed to stat file {filename}: {e}') from e
+
+    async def write_bytes(self, filename: str, data: bytes) -> None:
+        """Write binary data to file."""
+        try:
+            full_path = self._get_full_path(filename)
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            async with aiofiles.open(full_path, 'wb') as f:
+                await f.write(data)
+        except Exception as e:
+            raise StorageError(f'Failed to write file {filename}: {e}') from e
+
+    async def read_bytes(self, filename: str) -> bytes:
+        """Read binary data from file."""
+        try:
+            full_path = self._get_full_path(filename)
+            if not full_path.exists():
+                raise StorageError(f'File not found: {filename}')
+            async with aiofiles.open(full_path, 'rb') as f:
+                return await f.read()
+        except StorageError:
+            raise
+        except Exception as e:
+            raise StorageError(f'Failed to read file {filename}: {e}') from e
 
     async def list_files(self, prefix: str = '') -> list:
         """List all files with given prefix."""
@@ -291,6 +316,68 @@ class FilesystemStore(IStore):
 
         except Exception as e:
             raise StorageError(f'Failed to list files with prefix {prefix}: {e}') from e
+
+    # =========================================================================
+    # Handle-Based I/O
+    # =========================================================================
+
+    async def open_write(self, filename: str) -> dict:
+        """Open a file for writing. Returns context with aiofiles handle."""
+        try:
+            full_path = self._get_full_path(filename)
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            f = await aiofiles.open(full_path, 'wb')
+            return {'context': {'file': f, 'path': full_path}}
+        except Exception as e:
+            raise StorageError(f'Failed to open file {filename} for writing: {e}') from e
+
+    async def write_chunk(self, filename: str, context, data: bytes) -> int:
+        """Write a chunk to the open file handle."""
+        try:
+            f = context['file']
+            await f.write(data)
+            return len(data)
+        except Exception as e:
+            raise StorageError(f'Failed to write chunk to {filename}: {e}') from e
+
+    async def close_write(self, filename: str, context) -> None:
+        """Close the file handle, committing the data."""
+        try:
+            f = context['file']
+            await f.close()
+        except Exception as e:
+            raise StorageError(f'Failed to close file {filename}: {e}') from e
+
+    async def open_read(self, filename: str) -> dict:
+        """Open a file for reading. Returns context with aiofiles handle and file size."""
+        try:
+            full_path = self._get_full_path(filename)
+            if not full_path.exists():
+                raise StorageError(f'File not found: {filename}')
+            size = full_path.stat().st_size
+            f = await aiofiles.open(full_path, 'rb')
+            return {'context': {'file': f, 'path': full_path}, 'size': size}
+        except StorageError:
+            raise
+        except Exception as e:
+            raise StorageError(f'Failed to open file {filename} for reading: {e}') from e
+
+    async def read_chunk(self, filename: str, context, offset: int, length: int = 4_194_304) -> bytes:
+        """Read a chunk from the open file handle at the given offset."""
+        try:
+            f = context['file']
+            await f.seek(offset)
+            return await f.read(length)
+        except Exception as e:
+            raise StorageError(f'Failed to read chunk from {filename}: {e}') from e
+
+    async def close_read(self, filename: str, context) -> None:
+        """Close the read file handle."""
+        try:
+            f = context['file']
+            await f.close()
+        except Exception as e:
+            raise StorageError(f'Failed to close file {filename}: {e}') from e
 
     # =========================================================================
     # Private Methods

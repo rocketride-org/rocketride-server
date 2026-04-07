@@ -13,7 +13,7 @@
 
 import { ReactElement, useMemo, useState, useEffect, useRef } from 'react';
 import { TextField, InputAdornment } from '@mui/material';
-import { Search } from '@mui/icons-material';
+import { Search } from 'lucide-react';
 
 import { useFlowGraph } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
@@ -144,6 +144,16 @@ const styles = {
 		borderRadius: '3px',
 		backgroundColor: 'var(--rr-border)',
 		color: 'var(--rr-fg-widget)',
+		marginLeft: '4px',
+		flexShrink: 0,
+		lineHeight: '14px',
+	},
+	experimentalBadge: {
+		fontSize: '9px',
+		padding: '1px 4px',
+		borderRadius: '3px',
+		backgroundColor: 'var(--rr-color-warning)',
+		color: 'var(--rr-fg-button)',
 		marginLeft: '4px',
 		flexShrink: 0,
 		lineHeight: '14px',
@@ -370,7 +380,7 @@ export default function QuickAddPopup(): ReactElement | null {
 						InputProps={{
 							startAdornment: (
 								<InputAdornment position="start">
-									<Search sx={{ fontSize: '14px', color: 'var(--rr-text-disabled)' }} />
+									<Search size={14} style={{ color: 'var(--rr-text-disabled)' }} />
 								</InputAdornment>
 							),
 							sx: {
@@ -412,6 +422,7 @@ export default function QuickAddPopup(): ReactElement | null {
 							})()}
 							<span style={styles.itemTitle}>{service.title ?? key}</span>
 							{Array.isArray(service.classType) && service.classType.includes('tool') && <span style={styles.badge}>Tool</span>}
+							{!!(service.capabilities && IServiceCapabilities.Experimental & service.capabilities) && <span style={styles.experimentalBadge}>Experimental</span>}
 						</div>
 					))}
 

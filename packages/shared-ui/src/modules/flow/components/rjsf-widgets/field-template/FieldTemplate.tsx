@@ -24,6 +24,10 @@
 import FormControl from '@mui/material/FormControl';
 import { FieldTemplateProps, FormContextType, RJSFSchema, StrictRJSFSchema, getTemplate, getUiOptions } from '@rjsf/utils';
 
+// =============================================================================
+// Component
+// =============================================================================
+
 /**
  * Custom RJSF field template that wraps each form field in a MUI FormControl
  * with error state handling and conditional visibility. Supports a custom

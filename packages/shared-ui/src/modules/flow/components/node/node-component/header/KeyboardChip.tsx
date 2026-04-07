@@ -29,7 +29,10 @@
  */
 
 import { ReactElement } from 'react';
-import { Typography, Chip } from '@mui/material';
+
+// =============================================================================
+// Types
+// =============================================================================
 
 interface IKeyboardChipProps {
 	/** The keyboard key label to display (e.g., "Ctrl", "S", "+", ","). */
@@ -38,35 +41,34 @@ interface IKeyboardChipProps {
 	shape?: 'round' | 'square';
 }
 
+// =============================================================================
+// Component
+// =============================================================================
+
 export default function KeyboardChip({ text, shape = 'round' }: IKeyboardChipProps): ReactElement {
 	// Separator characters render as plain text, not chips
 	if (text === '+') {
-		return (
-			<Typography variant="caption" sx={{ mr: 0.25 }}>
-				+
-			</Typography>
-		);
+		return <span style={{ marginRight: '2px', fontSize: '0.75rem' }}>+</span>;
 	}
 	if (text === ',') {
-		return (
-			<Typography variant="caption" sx={{ mr: 0.25 }}>
-				,
-			</Typography>
-		);
+		return <span style={{ marginRight: '2px', fontSize: '0.75rem' }}>,</span>;
 	}
 
 	return (
-		<Chip
-			label={text}
-			sx={{
+		<span
+			style={{
+				display: 'inline-flex',
+				alignItems: 'center',
 				height: '20px',
 				fontSize: '0.7rem',
 				backgroundColor: 'var(--rr-bg-surface-alt)',
 				color: 'var(--rr-text-primary)',
-				mr: 0.25,
-				...(shape === 'square' && { borderRadius: 0 }),
+				marginRight: '2px',
+				padding: '0 6px',
+				borderRadius: shape === 'square' ? 0 : '16px',
 			}}
-			size="small"
-		/>
+		>
+			{text}
+		</span>
 	);
 }

@@ -9,6 +9,7 @@
 	"prefix": "agent",
 	"description": ["Single-agent execution using CrewAI.", "Can be invoked as a tool (`<nodeId>.run_agent`) for hierarchical agent orchestration."],
 	"icon": "crewai.svg",
+	"documentation": "https://docs.rocketride.org",
 	"invoke": {
 		"llm": {
 			"description": "LLM used by the agent",

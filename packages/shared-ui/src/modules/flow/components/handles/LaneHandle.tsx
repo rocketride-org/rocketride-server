@@ -16,9 +16,16 @@
 
 import React, { CSSProperties, ReactElement, useMemo, useRef, useCallback } from 'react';
 import { HandleProps, Handle as RFHandle } from '@xyflow/react';
-import { Box } from '@mui/material';
 
-import { handleStyles } from './styles';
+// =============================================================================
+// Styles
+// =============================================================================
+
+const handleStyles: CSSProperties = { width: '18px', height: '18px', border: 'none', background: 'transparent' };
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /**
  * Props for the LaneHandle component, extending the base ReactFlow HandleProps.
@@ -35,6 +42,10 @@ interface IHandleProps extends HandleProps {
 	/** Called when the handle is clicked (not dragged). */
 	onClick?: (event: React.MouseEvent) => void;
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 /**
  * Renders a custom connection handle (port) on a ReactFlow node.
@@ -95,7 +106,7 @@ export default function LaneHandle({ isConnected, disabled, color = 'var(--rr-bo
 				alignItems: 'center',
 			}}
 		>
-			<Box
+			<div
 				style={{
 					width: '8px',
 					height: '8px',

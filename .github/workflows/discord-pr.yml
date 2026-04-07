@@ -1,0 +1,217 @@
+name: Discord PR Notification
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - labeled
+      - unlabeled
+      - assigned
+      - unassigned
+      - review_requested
+      - review_request_removed
+      - ready_for_review
+      - converted_to_draft
+      - closed
+      - reopened
+  workflow_call:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  checks: read
+
+concurrency:
+  group: discord-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_PR_WEBHOOK_URL }}
+      REPO: ${{ github.repository }}
+      EVENT_NAME: ${{ github.event_name }}
+    steps:
+      - name: Resolve PR, build embed, post or patch Discord
+        run: |
+          # ── Guard: bail if webhook is not configured ─────────────────────
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_PR_WEBHOOK_URL secret is not set — skipping"
+            exit 0
+          fi
+
+          # ── Resolve PR number ────────────────────────────────────────────
+          if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "pull_request_target" ]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          else
+            # workflow_call — inherits caller's event context
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            if [ -z "$PR_NUMBER" ]; then
+              echo "Could not resolve PR number — skipping"
+              exit 0
+            fi
+          fi
+
+          # ── Fetch current PR state (always fresh, not from stale event payload) ──
+          if ! PR=$(gh api "/repos/$REPO/pulls/$PR_NUMBER") || [ -z "$PR" ]; then
+            echo "Failed to fetch PR #$PR_NUMBER — skipping"
+            exit 0
+          fi
+
+          PR_TITLE=$(echo  "$PR" | jq -r '.title')
+          PR_URL=$(echo    "$PR" | jq -r '.html_url')
+          PR_AUTHOR=$(echo "$PR" | jq -r '.user.login')
+          PR_AVATAR=$(echo "$PR" | jq -r '.user.avatar_url')
+          HEAD_REF=$(echo  "$PR" | jq -r '.head.ref')
+          BASE_REF=$(echo  "$PR" | jq -r '.base.ref')
+          HEAD_SHA=$(echo  "$PR" | jq -r '.head.sha')
+          PR_STATE=$(echo  "$PR" | jq -r '.state')
+          PR_DRAFT=$(echo  "$PR" | jq -r '.draft')
+          PR_MERGED=$(echo "$PR" | jq -r '.merged')
+
+          LABELS=$(echo    "$PR" | jq -r '[.labels[].name]           | if length==0 then "None"       else join(", ") end')
+          ASSIGNEES=$(echo "$PR" | jq -r '[.assignees[].login]       | if length==0 then "Unassigned" else join(", ") end')
+          REVIEWERS=$(echo "$PR" | jq -r '[.requested_reviewers[].login] | if length==0 then "None"  else join(", ") end')
+
+          # ── Status + color ───────────────────────────────────────────────
+          if   [ "$PR_MERGED" = "true"  ]; then COLOR=7419530;  STATUS="🟣 Merged"
+          elif [ "$PR_STATE"  = "closed" ]; then COLOR=15158332; STATUS="🔴 Closed"
+          elif [ "$PR_DRAFT"  = "true"  ]; then COLOR=9807270;  STATUS="⚫ Draft"
+          else                                   COLOR=3066993;  STATUS="🟢 Open"
+          fi
+
+          # ── Fetch check runs + commit statuses for this commit ────────────
+          MATRIX_MARKER=$(printf '\044\173\173')
+          CHECK_RUNS=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" \
+            --paginate --jq '[.check_runs[]]' 2>/dev/null \
+            | jq -s --arg marker "$MATRIX_MARKER" 'add // []
+              | map(select((.name | contains($marker) | not) and (.name | test("^(notify|discord-notify|Discord PR Notification)") | not)))
+              | group_by(.name)
+              | map(sort_by(.started_at) | last)
+              | map({name: .name, state: (
+                  if .status != "completed" then "pending"
+                  elif .conclusion == "success" then "success"
+                  elif .conclusion == "skipped" or .conclusion == "cancelled" then "skipped"
+                  else "failure" end
+                )})
+              ')
+
+          COMMIT_STATUSES=$(gh api "repos/$REPO/commits/$HEAD_SHA/status" \
+            --jq '[.statuses[] | {name: .context, state: (
+                if .state == "success" then "success"
+                elif .state == "pending" then "pending"
+                elif .state == "failure" or .state == "error" then "failure"
+                else "skipped" end
+              )}]' 2>/dev/null || echo '[]')
+
+          ALL_CHECKS=$(echo "$CHECK_RUNS"$'\n'"$COMMIT_STATUSES" \
+            | jq -s 'add // [] | group_by(.name) | map(.[0])')
+
+          TOTAL=$(echo "$ALL_CHECKS" | jq 'length')
+
+          if [ "$TOTAL" = "0" ]; then
+            CHECKS_FIELD="⏳ Pending"
+          else
+            PASSING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="success")] | length')
+            FAILING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="failure")] | length')
+            PENDING=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="pending")] | length')
+            SKIPPED=$(echo "$ALL_CHECKS" | jq '[.[] | select(.state=="skipped")] | length')
+
+            CHECKS_FIELD=""
+            [ "$PASSING" -gt 0 ] && CHECKS_FIELD="✅ $PASSING passed"
+            [ "$FAILING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD:+$CHECKS_FIELD · }❌ $FAILING failed"
+            [ "$PENDING" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD:+$CHECKS_FIELD · }🔄 $PENDING running"
+            [ "$SKIPPED" -gt 0 ] && CHECKS_FIELD="${CHECKS_FIELD:+$CHECKS_FIELD · }⏭️ $SKIPPED skipped"
+            [ -z "$CHECKS_FIELD" ] && CHECKS_FIELD="⏳ Pending"
+          fi
+
+          # ── Build payload ────────────────────────────────────────────────
+          PAYLOAD=$(jq -n \
+            --arg  title     "#$PR_NUMBER $PR_TITLE" \
+            --arg  url       "$PR_URL" \
+            --arg  author    "$PR_AUTHOR" \
+            --arg  avatar    "$PR_AVATAR" \
+            --arg  branch    "$HEAD_REF → $BASE_REF" \
+            --arg  repo      "$REPO" \
+            --arg  status    "$STATUS" \
+            --arg  labels    "$LABELS" \
+            --arg  assignees "$ASSIGNEES" \
+            --arg  reviewers "$REVIEWERS" \
+            --arg  checks    "$CHECKS_FIELD" \
+            --argjson color  "$COLOR" \
+            '{embeds: [{
+              title: $title, url: $url, color: $color,
+              author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
+              fields: [
+                {name: "Status",    value: $status,    inline: true},
+                {name: "Branch",    value: $branch,    inline: true},
+                {name: "Repo",      value: $repo,      inline: true},
+                {name: "Labels",    value: $labels,    inline: true},
+                {name: "Assignees", value: $assignees, inline: true},
+                {name: "Reviewers", value: $reviewers, inline: true},
+                {name: "Checks",    value: $checks,    inline: false}
+              ]
+            }]}')
+
+          # ── Look up stored message ID ────────────────────────────────────
+          COMMENTS=$(gh api "/repos/$REPO/issues/$PR_NUMBER/comments" \
+            --jq '[.[] | {id: .id, body: .body, author: .user.login}]')
+
+          DISCORD_MSG_ID=$(echo "$COMMENTS" | \
+            jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$"))) | .body' | \
+            grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2 | head -1)
+
+          WEBHOOK_ID=$(echo    "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $(NF-1)}')
+          WEBHOOK_TOKEN=$(echo "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $NF}')
+
+          # ── Post or patch ────────────────────────────────────────────────
+          if [ -n "$DISCORD_MSG_ID" ]; then
+            PATCH_RESPONSE=$(curl -sS -w "\n%{http_code}" -X PATCH \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID")
+
+            PATCH_BODY=$(echo "$PATCH_RESPONSE" | head -n -1)
+            PATCH_STATUS=$(echo "$PATCH_RESPONSE" | tail -n 1)
+            echo "PATCH status: $PATCH_STATUS"
+
+            if [ "$PATCH_STATUS" = "404" ]; then
+              STALE_COMMENT_ID=$(echo "$COMMENTS" | \
+                jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$"))) | .id' | head -1)
+              gh api -X DELETE "/repos/$REPO/issues/comments/$STALE_COMMENT_ID"
+              DISCORD_MSG_ID=""
+            elif [ "$PATCH_STATUS" != "200" ]; then
+              echo "PATCH failed ($PATCH_STATUS): $PATCH_BODY"
+              exit 1
+            fi
+          fi
+
+          if [ -z "$DISCORD_MSG_ID" ]; then
+            RESPONSE=$(curl -sS -f \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "${DISCORD_WEBHOOK_URL}?wait=true")
+            NEW_MSG_ID=$(echo "$RESPONSE" | jq -r '.id')
+
+            # ── Race guard: re-check for a comment created by a concurrent run ──
+            EXISTING=$(gh api "/repos/$REPO/issues/$PR_NUMBER/comments" \
+              --jq '[.[] | select(.user.login == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$")))] | first // empty' 2>/dev/null)
+
+            if [ -n "$EXISTING" ]; then
+              # Another run won the race — delete our duplicate message, use theirs
+              curl -sS -X DELETE "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$NEW_MSG_ID" || true
+              DISCORD_MSG_ID=$(echo "$EXISTING" | jq -r '.body' | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
+              # Patch the existing message with our payload
+              curl -sS -X PATCH -H "Content-Type: application/json" -d "$PAYLOAD" \
+                "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID" > /dev/null
+            else
+              DISCORD_MSG_ID="$NEW_MSG_ID"
+              gh api "/repos/$REPO/issues/$PR_NUMBER/comments" \
+                -X POST \
+                -f body="<!-- discord-msg-id:${DISCORD_MSG_ID} -->"
+            fi
+          fi

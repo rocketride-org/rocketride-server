@@ -37,15 +37,15 @@ The RocketRide Client SDK enables you to:
 
 Quick Start:
     from rocketride import RocketRideClient, Question
-    
+
     # Connect and process data
     async with RocketRideClient(auth='your_api_key') as client:
         # Start a pipeline
         result = await client.use(filepath='pipeline.json')
-        
+
         # Send data for processing
         response = await client.send(result['token'], 'your data')
-        
+
         # Chat with AI
         question = Question()
         question.addQuestion('What are the key findings?')
@@ -54,9 +54,16 @@ Quick Start:
 For more information, see the documentation at https://docs.rocketride.ai
 """
 
-__version__ = '1.0.0'
+__version__ = ''
 __author__ = 'RocketRide, Inc.'
 __email__ = 'dev@rocketride.ai'
+
+try:
+    from importlib.metadata import version as _get_version
+
+    __version__ = _get_version('rocketride')
+except Exception:
+    pass
 
 # Import main classes for convenient access
 from .schema import (
@@ -79,6 +86,10 @@ from .types import (
     ConnectionInfo,
     DAPMessage,
     DisconnectCallback,
+    DASHBOARD_CONNECTION,
+    DASHBOARD_OVERVIEW,
+    DASHBOARD_RESPONSE,
+    DASHBOARD_TASK,
     EVENT_STATUS_UPDATE,
     EVENT_TASK,
     EVENT_TYPE,
@@ -129,6 +140,10 @@ __all__ = [
     'ConnectCallback',
     'ConnectErrorCallback',
     'ConnectionInfo',
+    'DASHBOARD_CONNECTION',
+    'DASHBOARD_OVERVIEW',
+    'DASHBOARD_RESPONSE',
+    'DASHBOARD_TASK',
     'DAPMessage',
     'DisconnectCallback',
     'Doc',

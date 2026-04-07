@@ -101,7 +101,7 @@ class DAPBase:
         _seq_counter (int): Counter for generating unique sequence numbers.
     """
 
-    def __init__(self, module: str = 'UNKOWN', **kwargs) -> None:
+    def __init__(self, module: str = 'UNKNOWN', **kwargs) -> None:
         """
         Initialize the DAP base class with configuration and module identification.
 

@@ -29,6 +29,10 @@ import { useTranslation } from 'react-i18next';
 import { useCallback, useMemo } from 'react';
 import { useFlowProject } from '../../../context/FlowProjectContext';
 
+// =============================================================================
+// Component
+// =============================================================================
+
 /**
  * RJSF widget button that initiates Slack OAuth2 authentication for the
  * current canvas node. Notifies the host of pending changes, then redirects

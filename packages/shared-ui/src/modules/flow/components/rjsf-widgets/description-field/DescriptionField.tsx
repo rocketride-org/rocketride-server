@@ -27,6 +27,10 @@ import { DescriptionFieldProps, FormContextType, RJSFSchema, StrictRJSFSchema } 
 
 import { sanitizeAndParseHtmlToReact } from '../../../util/helpers';
 
+// =============================================================================
+// Component
+// =============================================================================
+
 /**
  * Custom RJSF description field template that renders the schema's description
  * text below the field title. Supports HTML content by sanitizing and parsing

@@ -12,11 +12,14 @@
  */
 
 import React, { ReactElement } from 'react';
-import { Box } from '@mui/material';
 import { Edge, Position } from '@xyflow/react';
 import { InvokeHandle } from '../../../handles';
 import ConditionalRender from '../../../ConditionalRender';
 import { IQuickAddState } from '../../../../context/FlowGraphContext';
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /**
  * Props for the NodeTop component.
@@ -32,6 +35,10 @@ interface INodeTopProps {
 	setQuickAddState?: (state: IQuickAddState | null) => void;
 }
 
+// =============================================================================
+// Component
+// =============================================================================
+
 /**
  * Renders the top corner cap and an optional invoke target diamond.
  */
@@ -40,8 +47,8 @@ export default function NodeTop({ id, edges, isInvocable, setQuickAddState }: IN
 		<>
 			{/* Invoke target diamond — centered on the top edge */}
 			<ConditionalRender condition={isInvocable}>
-				<Box
-					sx={{
+				<div
+					style={{
 						position: 'absolute',
 						top: 0,
 						left: 0,
@@ -71,20 +78,11 @@ export default function NodeTop({ id, edges, isInvocable, setQuickAddState }: IN
 								: undefined
 						}
 					/>
-				</Box>
+				</div>
 			</ConditionalRender>
 
 			{/* Top corner cap — rounded top border, matches header background */}
-			<Box
-				sx={{
-					height: '8px',
-					backgroundColor: 'var(--rr-bg-titleBar-inactive)',
-					borderRadius: '4px 4px 0 0',
-					'.react-flow__node:hover &, .react-flow__node.selected &': {
-						backgroundColor: 'var(--rr-bg-titleBar-active)',
-					},
-				}}
-			/>
+			<div className="rr-corner-cap-top" />
 		</>
 	);
 }

@@ -18,6 +18,7 @@ from rocketlib import debug
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.util import parseJson
+from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
 
 
 class ChatBase:
@@ -27,6 +28,7 @@ class ChatBase:
     This class provides the foundation for AI chat implementations by handling:
     - Token counting and management
     - Configuration loading and validation
+    - Input validation and sanitization
     - Consistent interface for chat operations
     - Warning systems for token limits
 
@@ -61,17 +63,16 @@ class ChatBase:
 
         # Extract model configuration - these are the core settings that control
         # how the chat driver behaves with respect to token limits
-        self._model = config.get('model')  # Model identifier (e.g., 'gpt-4', 'claude-3')
+        self._model = validate_model_name(config.get('model'))
         self._modelTotalTokens = config.get('modelTotalTokens', 16384)  # Default to 16K if not specified
         self._modelOutputTokens = config.get('modelOutputTokens', 4096)  # Default to 4K if not specified
+
+        # Validate and clamp output tokens against known safe maximums
+        self._modelOutputTokens = validate_max_tokens(self._modelOutputTokens, self._modelTotalTokens)
 
         # We really can't work with a model that has a very small output window
         if self._modelOutputTokens < 1024:
             raise ValueError(f'Model output tokens ({self._modelOutputTokens}) must be at least 1024')
-
-        # If the output tokens exceed the total tokens, adjust accordingly
-        if self._modelOutputTokens > self._modelTotalTokens:
-            self._modelOutputTokens = self._modelTotalTokens
 
         # Log the configuration for debugging and monitoring purposes
         # This helps track which model and limits are being used in production
@@ -291,7 +292,7 @@ class ChatBase:
                       errors occur
         """
         from ai.constants import CONST_CHAT_MAX_RETRIES, CONST_CHAT_BASE_DELAY, CONST_CHAT_MAX_DELAY
-        
+
         max_network_retries = CONST_CHAT_MAX_RETRIES
         base_delay = CONST_CHAT_BASE_DELAY
         max_delay = CONST_CHAT_MAX_DELAY
@@ -353,6 +354,9 @@ class ChatBase:
             Exception: If network/API retries are exhausted or non-retryable
                       errors occur
         """
+        # Validate and sanitize the prompt before processing
+        prompt = validate_prompt(prompt, self._modelTotalTokens, self.getTokens)
+
         # Count tokens in the input prompt to check against limits
         # This is important for preventing API errors and ensuring quality responses
         prompt_tokens = self.getTokens(prompt)
@@ -415,7 +419,6 @@ class ChatBase:
         if question.expectJson:
             max_retries = 3
 
-
             for retry_count in range(max_retries):
                 try:
                     # Parse (and strip any markdown fences) — reuse the result below
@@ -439,7 +442,7 @@ class ChatBase:
                         error_msg = f'Failed to get valid JSON response after {max_retries + 1} attempts. Last response: {response[:200]}...'
                         debug(f'Error: {error_msg}')
                         raise ValueError(error_msg)
-                    
+
         else:
             # Create the answer and assign the text
             answer = Answer(expectJson=False)

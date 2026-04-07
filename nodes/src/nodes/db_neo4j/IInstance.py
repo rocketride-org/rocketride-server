@@ -1,24 +1,6 @@
 # =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
 # =============================================================================
 
 """
@@ -33,42 +15,152 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from rocketlib import IInstanceBase, error, warning
+from rocketlib import IInstanceBase, tool_function, error, warning
 from ai.common.schema import Answer, Question, QuestionType
 from ai.common.table import Table
-from ai.common.tools import ToolsBase
 from rocketlib.types import IInvokeLLM
 
 from .IGlobal import IGlobal
-from .neo4j_driver import Neo4JDriver
 from .utils import _is_cypher_safe, _parse_is_valid
 
 
 class IInstance(IInstanceBase):
     """Neo4J-specific instance state."""
 
-    # Narrow the type so IDE tooling resolves IGlobal attributes directly.
     IGlobal: IGlobal
 
-    _driver: Optional[ToolsBase] = None
-
     # ------------------------------------------------------------------
-    # Lifecycle
+    # Tool methods
     # ------------------------------------------------------------------
 
-    def beginInstance(self) -> None:
-        """Instantiate the Neo4J tool driver for this pipeline instance."""
-        self._driver = Neo4JDriver(instance=self)
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['question'],
+            'properties': {
+                'question': {'type': 'string', 'description': 'Natural-language description of the graph data you want to retrieve'},
+                'limit': {'type': 'integer', 'description': 'Maximum number of rows to return (default 250, max 25000).'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'rows': {'type': 'array', 'description': 'Result rows returned by the Cypher query.', 'items': {'type': 'object'}},
+                'cypher': {'type': 'string', 'description': 'The generated Cypher query that was executed.'},
+                'row_limit': {'type': 'integer', 'description': 'The row cap applied to this query.'},
+                'error': {'type': 'string', 'description': 'Error message if query generation or execution failed.'},
+                'answer': {'type': 'string', 'description': 'LLM text response when the question is not a graph query.'},
+            },
+        },
+        description=(
+            'Accepts a natural-language description of the graph data you want, '
+            'converts it to a safe Cypher MATCH query, executes it against the Neo4J '
+            'graph database, and returns the result rows. '
+            'No schema lookup or Cypher knowledge required — just describe what you need. '
+            'Results may be large — consider using peek or store.'
+        ),
+    )
+    def get_data(self, args):
+        """Translate natural language to Cypher and execute."""
+        if not isinstance(args, dict):
+            raise ValueError('Tool input must be a JSON object')
+        question = args.get('question')
+        if not question or not isinstance(question, str) or not question.strip():
+            raise ValueError('"question" is required and must be a non-empty string')
 
-    def endInstance(self) -> None:
-        """Clean up instance-level resources (driver is stateless; nothing to do)."""
-        pass
+        limit = _clamp_limit(args.get('limit'))
+        cypher_result = self.get_cypher({'question': question.strip(), 'limit': limit})
+        if not cypher_result.get('valid'):
+            return cypher_result
 
-    def invoke(self, param: Any) -> Any:
-        """Dispatch a tool invocation to the Neo4J driver."""
-        if self._driver is None:
-            raise RuntimeError('Neo4J driver not initialized')
-        return self._driver.handle_invoke(param)
+        cypher = cypher_result['cypher']
+        try:
+            rows = self.IGlobal._run_query(cypher)
+        except Exception as e:
+            return {'error': str(e), 'cypher': cypher, 'rows': []}
+        return {'rows': rows, 'cypher': cypher, 'row_limit': limit}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'label': {'type': 'string', 'description': 'Optional node label to filter schema to a single node type.'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'nodes': {'type': 'object', 'description': 'Map of node label to list of {property, type} objects.'},
+                'relationships': {'type': 'array', 'description': 'List of {type, start, end} relationship descriptors.'},
+                'database': {'type': 'string'},
+            },
+        },
+        description=('Returns the Neo4J graph schema: node labels with their properties and types, and relationship types with their start and end node labels. Do NOT call this preemptively — only use when get_data fails or returns unexpected results.'),
+    )
+    def get_schema(self, args):
+        """Return the cached graph schema."""
+        if args is not None and not isinstance(args, dict):
+            raise ValueError('Tool input must be a JSON object or empty')
+        if not args:
+            args = {}
+
+        schema = self.IGlobal.graph_schema
+        label_filter = args.get('label')
+
+        nodes = schema.get('nodes', {})
+        rels = schema.get('relationships', [])
+
+        if label_filter:
+            filtered = nodes.get(label_filter)
+            if filtered is None:
+                return {'error': f'Node label :{label_filter} not found'}
+            nodes = {label_filter: filtered}
+            rels = [r for r in rels if r.get('start') == label_filter or r.get('end') == label_filter]
+
+        return {
+            'database': self.IGlobal.database,
+            'nodes': {label: [{'property': p, 'type': t} for p, t in props] for label, props in nodes.items()},
+            'relationships': rels,
+        }
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['question'],
+            'properties': {
+                'question': {'type': 'string', 'description': 'Natural-language question to convert into a Cypher query'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'cypher': {'type': 'string', 'description': 'The generated Cypher MATCH statement.'},
+                'valid': {'type': 'boolean', 'description': 'Whether a valid, safe Cypher query was generated.'},
+                'error': {'type': 'string', 'description': 'Error message if the generated Cypher was unsafe.'},
+                'answer': {'type': 'string', 'description': 'LLM text response when the question is not a graph query.'},
+            },
+        },
+        description=('Accepts a natural-language description and returns the equivalent Cypher MATCH statement without executing it. Only use when the user explicitly asks to see the Cypher — for actual data retrieval, use get_data instead.'),
+    )
+    def get_cypher(self, args):
+        """Translate natural language to Cypher without executing."""
+        if not isinstance(args, dict):
+            raise ValueError('Tool input must be a JSON object')
+        question = args.get('question')
+        if not question or not isinstance(question, str) or not question.strip():
+            raise ValueError('"question" is required and must be a non-empty string')
+
+        limit = _clamp_limit(args.get('limit'))
+        result = self._buildCypherQuery(question.strip(), limit=limit)
+        is_valid = _parse_is_valid(result.get('isValid', False))
+        cypher = result.get('query', '')
+
+        if is_valid and cypher and _is_cypher_safe(cypher):
+            return {'cypher': cypher, 'valid': True}
+        elif is_valid and cypher:
+            return {'error': 'Generated query contains unsafe Cypher', 'cypher': cypher, 'valid': False}
+        else:
+            return {'answer': cypher, 'valid': False}
 
     # ------------------------------------------------------------------
     # Pipeline lane handlers
@@ -113,47 +205,12 @@ class IInstance(IInstanceBase):
         except Exception as e:
             error(f'Error handling question: {e}')
 
-    # def writeTable(self, markdown: str) -> None:
-    #     """Parse an incoming markdown table and insert rows as graph nodes."""
-    #     if not markdown or not markdown.strip():
-    #         debug('No table data provided.')
-    #         return
-    #
-    #     headers, items = Table.parse_markdown_table(markdown)
-    #
-    #     if not headers or not items:
-    #         warning(f'Could not parse markdown table. Raw data: {markdown[:200]}...')
-    #         return
-    #
-    #     rows = [dict(zip(headers, row)) for row in items]
-    #
-    #     try:
-    #         self._insertData(rows)
-    #     except Exception as e:
-    #         error(f'Error inserting table data: {e}')
-
-    # def writeAnswers(self, answer: Answer) -> None:
-    #     """Extract JSON rows from an Answer and insert them as graph nodes."""
-    #     items = answer.getJson()
-    #
-    #     if not items:
-    #         debug('No items to insert.')
-    #         return
-    #
-    #     try:
-    #         self._insertData(items)
-    #     except Exception as e:
-    #         error(f'Error in writeAnswers: {e}')
-
     # ------------------------------------------------------------------
     # Cypher query building
     # ------------------------------------------------------------------
 
     def _buildCypherQuery(self, question_text: str, *, limit: int = 250) -> Dict:
-        """Generate a Cypher query, validate with EXPLAIN, retry on failure.
-
-        Mirrors the retry logic in DatabaseInstanceBase._buildSQLQuery.
-        """
+        """Generate a Cypher query, validate with EXPLAIN, retry on failure."""
         previous_cypher: Optional[str] = None
         last_error: Optional[str] = None
         result: Dict = {}
@@ -226,40 +283,19 @@ class IInstance(IInstanceBase):
 
         question.expectJson = True
 
-        question.addInstruction(
-            'Cypher Query Generation Guidelines',
-            'Generate a Cypher query based only on the node labels and relationship types provided in context.',
-        )
-        question.addInstruction(
-            'LIMIT',
-            f'Limit the results to {limit} rows using LIMIT {limit} at the end of the query.',
-        )
-        question.addInstruction(
-            'Formatting',
-            'Do not wrap the Cypher query in markdown (e.g., no triple backticks) and abide by formatting in the provided examples.',
-        )
-        question.addInstruction(
-            'Commands',
-            'You are only permitted to use MATCH, OPTIONAL MATCH, WITH, WHERE, RETURN, ORDER BY, SKIP, and LIMIT. Avoid any write operations (CREATE, MERGE, DELETE, DETACH DELETE, SET, REMOVE, DROP).',
-        )
-        question.addInstruction(
-            'Ambiguity',
-            "If the user's question is ambiguous, make reasonable assumptions and attempt to craft a query. If you infer that the user's question is entirely unrelated to querying the graph, attempt to answer the question in a manner similar to the provided examples.",
-        )
+        question.addInstruction('Cypher Query Generation Guidelines', 'Generate a Cypher query based only on the node labels and relationship types provided in context.')
+        question.addInstruction('LIMIT', f'Limit the results to {limit} rows using LIMIT {limit} at the end of the query.')
+        question.addInstruction('Formatting', 'Do not wrap the Cypher query in markdown (e.g., no triple backticks) and abide by formatting in the provided examples.')
+        question.addInstruction('Commands', 'You are only permitted to use MATCH, OPTIONAL MATCH, WITH, WHERE, RETURN, ORDER BY, SKIP, and LIMIT. Avoid any write operations (CREATE, MERGE, DELETE, DETACH DELETE, SET, REMOVE, DROP).')
+        question.addInstruction('Ambiguity', "If the user's question is ambiguous, make reasonable assumptions and attempt to craft a query. If you infer that the user's question is entirely unrelated to querying the graph, attempt to answer the question in a manner similar to the provided examples.")
 
         question.addExample(
             "Who are Alice's colleagues?",
-            {
-                'isValid': 'true',
-                'query': (f"MATCH (alice:Person {{name: 'Alice'}})-[:WORKS_WITH]->(colleague:Person)\nRETURN colleague.name AS name, colleague.role AS role\nLIMIT {limit}"),
-            },
+            {'isValid': 'true', 'query': f"MATCH (alice:Person {{name: 'Alice'}})-[:WORKS_WITH]->(colleague:Person)\nRETURN colleague.name AS name, colleague.role AS role\nLIMIT {limit}"},
         )
         question.addExample(
             'When did the Visigoths sack Rome?',
-            {
-                'isValid': 'false',
-                'query': 'The Visigoths sacked Rome in 410 AD, under the leadership of their king, Alaric I.',
-            },
+            {'isValid': 'false', 'query': 'The Visigoths sacked Rome in 410 AD, under the leadership of their king, Alaric I.'},
         )
 
         if previous_cypher and error_message:
@@ -295,68 +331,10 @@ class IInstance(IInstanceBase):
 
         return Table.generate_markdown_table(data, headers)
 
-    # ------------------------------------------------------------------
-    # Data insertion
-    # ------------------------------------------------------------------
 
-    # def _insertData(self, items: List[Dict[str, Any]]) -> None:
-    #     """Insert a list of dicts as graph nodes with the configured label.
-    #
-    #     Uses MERGE on a synthetic ``_id`` property (MD5 of sorted key-value pairs)
-    #     so repeated runs are idempotent.  All other properties are set via SET.
-    #     """
-    #     if not items:
-    #         debug('No items to insert.')
-    #         return
-    #
-    #     label = self.IGlobal.label
-    #
-    #     inserted = 0
-    #     with self.IGlobal.driver.session(database=self.IGlobal.database) as session:
-    #         for item in items:
-    #             if not isinstance(item, dict):
-    #                 continue
-    #
-    #             # Serialise complex values so they can be stored as Neo4J properties.
-    #             props = {k: _prepare_property(v) for k, v in item.items() if v is not None}
-    #
-    #             if not props:
-    #                 continue
-    #
-    #             # Build a stable identity key from sorted property values so that
-    #             # MERGE is idempotent when the same row is inserted more than once.
-    #             import hashlib, json as _json
-    #             identity = hashlib.md5(
-    #                 _json.dumps(props, sort_keys=True, default=str).encode()
-    #             ).hexdigest()
-    #             props['_id'] = identity
-    #
-    #             cypher = (
-    #                 f'MERGE (n:{label} {{_id: $_id}}) '
-    #                 'SET n += $props'
-    #             )
-    #             try:
-    #                 session.run(cypher, {'_id': identity, 'props': props})
-    #                 inserted += 1
-    #             except Exception as e:
-    #                 error(f'Error inserting node: {e}')
-    #
-    #     debug(f'Inserted {inserted} node(s) with label :{label}.')
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-# def _prepare_property(value: Any) -> Any:
-#     """Convert a Python value to a Neo4J-storable property."""
-#     import json as _json
-#     if value is None:
-#         return None
-#     if isinstance(value, bool):
-#         return value
-#     if isinstance(value, (int, float, str)):
-#         return value
-#     if isinstance(value, (list, dict)):
-#         return _json.dumps(value)
-#     return str(value)
+def _clamp_limit(raw_limit) -> int:
+    """Clamp a user-supplied limit to [1, 25000]."""
+    try:
+        return max(1, min(int(raw_limit), 25000)) if raw_limit is not None else 250
+    except (ValueError, TypeError):
+        return 250

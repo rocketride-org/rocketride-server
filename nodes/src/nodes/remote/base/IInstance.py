@@ -190,13 +190,15 @@ class IInstance(IInstanceBase):
                     # Send the success signal to the remote pipeline
                     self._send('error', APERR().toDict())
 
-                except BaseException as e:
-                    # TODO: Improve local/remote error handling
-                    if (msg := str(e)) and 'RemoteException:' not in msg:
-                        # Send the error signal to the remote pipeline
-                        self._send('error', APERR(Ec.RemoteException, msg).toDict())
+                except Exception as e:
+                    # Determine whether this error originated from the remote side.
+                    # If so, propagate the original error code; otherwise wrap it as
+                    # a new RemoteException so the remote side sees what went wrong.
+                    if isinstance(e, APERR) and e.ec == Ec.RemoteException:
+                        self._send('error', e.toDict())
+                    else:
+                        self._send('error', APERR(Ec.RemoteException, str(e)).toDict())
 
-                    # Re-raise the exception
                     raise
 
     def callLocal(self, lane: str, data):

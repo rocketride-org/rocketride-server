@@ -102,10 +102,14 @@
 		"./modules/*": "./src/modules/*",
 		"./theme": "./src/theme.ts",
 		"./contexts/*": "./src/contexts/*",
+		"./themes": "./src/themes/index.ts",
+		"./themes/*": "./src/themes/*",
 		"./assets/*": "./src/assets/*",
 		"./constants": "./src/constants.ts",
 		"./constants/*": "./src/constants/*"
 	},
-	"dependencies": {}
+	"dependencies": {
+		"lucide-react": "^0.540.0"
+	}
 }
 

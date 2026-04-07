@@ -13,25 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"preprocessor"
-	],
+	"classType": ["preprocessor"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-	],
+	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -50,43 +47,27 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A preprocessing component that segments large bodies of text into intelligently sized ",
-		"chunks for downstream processing. It recursively splits content based on a hierarchy ",
-		"of separators—such as paragraphs, sentences, or words—preserving context while ensuring ",
-		"each chunk meets token or length constraints. This enables efficient handling of lengthy ",
-		"documents in workflows like embedding, retrieval, or LLM-based generation. Ideal for ",
-		"preparing content for language models where context length and coherence are critical."
-	],
+	"description": ["A preprocessing component that segments large bodies of text into intelligently sized ", "chunks for downstream processing. It recursively splits content based on a hierarchy ", "of separators—such as paragraphs, sentences, or words—preserving context while ensuring ", "each chunk meets token or length constraints. This enables efficient handling of lengthy ", "documents in workflows like embedding, retrieval, or LLM-based generation. Ideal for ", "preparing content for language models where context length and coherence are critical."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "preprocessor-text.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/4hGEzk3",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": [
-		"Mode: ${parameters.preprocessor_langchain.profile}"
-	],
+	"tile": ["Mode: ${parameters.preprocessor_langchain.profile}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"table": [
-			"documents"
-		],
-		"text": [
-			"documents"
-		]
+		"table": ["documents"],
+		"text": ["documents"]
 	},
 	//
 	//	Optional:
@@ -147,12 +128,12 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
 	"fields": {
-		// 
+		//
 		// String length
 		//
 		"langchain.splitter.strlen": {
@@ -170,27 +151,17 @@
 			"title": "Split by",
 			"default": "strlen",
 			"enum": [
-				[
-					"strlen",
-					"String length"
-				],
-				[
-					"tokens",
-					"Estimated tokens"
-				]
+				["strlen", "String length"],
+				["tokens", "Estimated tokens"]
 			],
 			"conditional": [
 				{
 					"value": "strlen",
-					"properties": [
-						"langchain.splitter.strlen"
-					]
+					"properties": ["langchain.splitter.strlen"]
 				},
 				{
 					"value": "tokens",
-					"properties": [
-						"langchain.splitter.tokens"
-					]
+					"properties": ["langchain.splitter.tokens"]
 				}
 			]
 		},
@@ -204,10 +175,7 @@
 		},
 		"langchain.splitter.default": {
 			"object": "default",
-			"properties": [
-				"langchain.splitter.default.splitter",
-				"langchain.splitter.mode"
-			]
+			"properties": ["langchain.splitter.default.splitter", "langchain.splitter.mode"]
 		},
 		//
 		// RecursiveCharacterTextSplitter
@@ -224,11 +192,7 @@
 		},
 		"langchain.splitter.recursive": {
 			"object": "recursive",
-			"properties": [
-				"langchain.splitter.recursive.splitter",
-				"langchain.splitter.recursive.separators",
-				"langchain.splitter.mode"
-			]
+			"properties": ["langchain.splitter.recursive.splitter", "langchain.splitter.recursive.separators", "langchain.splitter.mode"]
 		},
 		//
 		// CharacterTextSplitter
@@ -245,11 +209,7 @@
 		},
 		"langchain.splitter.character": {
 			"object": "character",
-			"properties": [
-				"langchain.splitter.character.splitter",
-				"langchain.splitter.character.separator",
-				"langchain.splitter.mode"
-			]
+			"properties": ["langchain.splitter.character.splitter", "langchain.splitter.character.separator", "langchain.splitter.mode"]
 		},
 		//
 		// MarkdownTextSplitter
@@ -261,10 +221,7 @@
 		},
 		"langchain.splitter.markdown": {
 			"object": "markdown",
-			"properties": [
-				"langchain.splitter.markdown.splitter",
-				"langchain.splitter.mode"
-			]
+			"properties": ["langchain.splitter.markdown.splitter", "langchain.splitter.mode"]
 		},
 		//
 		// LatexTextSplitter
@@ -276,10 +233,7 @@
 		},
 		"langchain.splitter.latex": {
 			"object": "latex",
-			"properties": [
-				"langchain.splitter.latex.splitter",
-				"langchain.splitter.mode"
-			]
+			"properties": ["langchain.splitter.latex.splitter", "langchain.splitter.mode"]
 		},
 		//
 		// NLTKTextSplitter
@@ -291,10 +245,7 @@
 		},
 		"langchain.splitter.nltk": {
 			"object": "nltk",
-			"properties": [
-				"langchain.splitter.nltk.splitter",
-				"langchain.splitter.mode"
-			]
+			"properties": ["langchain.splitter.nltk.splitter", "langchain.splitter.mode"]
 		},
 		//
 		// SpacyTextSplitter
@@ -309,67 +260,24 @@
 			"title": "Model",
 			"default": "en_core_web_sm",
 			"enum": [
-				[
-					"en_core_web_sm",
-					"English: Small, Basic NLP (POS tagging, NER, Parsing)"
-				],
-				[
-					"en_core_web_md",
-					"English: Medium, Includes word vectors"
-				],
-				[
-					"en_core_web_lg",
-					"English: Large, Larger word vectors"
-				],
-				[
-					"en_core_web_trf",
-					"English: Transformer, Best accuracy, slower, uses transformers"
-				],
-				[
-					"de_core_news_sm",
-					"German: Small, Basic NLP"
-				],
-				[
-					"de_core_news_md",
-					"German: Medium, Includes word vectors"
-				],
-				[
-					"de_core_news_lg",
-					"German: Large, Larger word vectors"
-				],
-				[
-					"fr_core_news_sm",
-					"French: Small, Basic NLP"
-				],
-				[
-					"fr_core_news_md",
-					"French: Medium, Includes word vectors"
-				],
-				[
-					"fr_core_news_lg",
-					"French: Large, Larger word vectors"
-				],
-				[
-					"es_core_news_sm",
-					"Spanish: Small, Basic NLP"
-				],
-				[
-					"es_core_news_md",
-					"Spanish: Medium, Includes word vectors"
-				],
-				[
-					"es_core_news_lg",
-					"Spanish: Large, Larger word vectors"
-				]
+				["en_core_web_sm", "English: Small, Basic NLP (POS tagging, NER, Parsing)"],
+				["en_core_web_md", "English: Medium, Includes word vectors"],
+				["en_core_web_lg", "English: Large, Larger word vectors"],
+				["en_core_web_trf", "English: Transformer, Best accuracy, slower, uses transformers"],
+				["de_core_news_sm", "German: Small, Basic NLP"],
+				["de_core_news_md", "German: Medium, Includes word vectors"],
+				["de_core_news_lg", "German: Large, Larger word vectors"],
+				["fr_core_news_sm", "French: Small, Basic NLP"],
+				["fr_core_news_md", "French: Medium, Includes word vectors"],
+				["fr_core_news_lg", "French: Large, Larger word vectors"],
+				["es_core_news_sm", "Spanish: Small, Basic NLP"],
+				["es_core_news_md", "Spanish: Medium, Includes word vectors"],
+				["es_core_news_lg", "Spanish: Large, Larger word vectors"]
 			]
 		},
 		"langchain.splitter.spacy": {
 			"object": "spacy",
-			"properties": [
-				"langchain.splitter.spacy.splitter",
-				"langchain.splitter.spacy.model",
-				"langchain.splitter.mode"
-			]
+			"properties": ["langchain.splitter.spacy.splitter", "langchain.splitter.spacy.model", "langchain.splitter.mode"]
 		},
 		//
 		// Custom
@@ -382,10 +290,7 @@
 		},
 		"langchain.splitter.custom": {
 			"object": "custom",
-			"properties": [
-				"langchain.splitter.custom.splitter",
-				"langchain.splitter.mode"
-			]
+			"properties": ["langchain.splitter.custom.splitter", "langchain.splitter.mode"]
 		},
 		//
 		// Selects the text splitter
@@ -395,87 +300,47 @@
 			"title": "Text splitter",
 			"default": "default",
 			"enum": [
-				[
-					"default",
-					"Default Text Splitter - General-purpose, best balance of structure & size"
-				],
-				[
-					"recursive",
-					"Recursive Character Text Splitter - General-purpose, best balance of structure & size"
-				],
-				[
-					"character",
-					"Character Text Splitter - Simple splitting with a fixed separator"
-				],
-				[
-					"markdown",
-					"Markdown Text Splitter - Parsing structured markdown files"
-				],
-				[
-					"latex",
-					"Latex Text Splitter - Splitting scientific documents"
-				],
-				[
-					"nltk",
-					"NLTK Text Splitter - Sentence-based splitting using NLTK"
-				],
-				[
-					"spacy",
-					"Spacy Text Splitter - More advanced NLP-based sentence splitting"
-				],
-				[
-					"custom",
-					"Custom splitter"
-				]
+				["default", "Default Text Splitter - General-purpose, best balance of structure & size"],
+				["recursive", "Recursive Character Text Splitter - General-purpose, best balance of structure & size"],
+				["character", "Character Text Splitter - Simple splitting with a fixed separator"],
+				["markdown", "Markdown Text Splitter - Parsing structured markdown files"],
+				["latex", "Latex Text Splitter - Splitting scientific documents"],
+				["nltk", "NLTK Text Splitter - Sentence-based splitting using NLTK"],
+				["spacy", "Spacy Text Splitter - More advanced NLP-based sentence splitting"],
+				["custom", "Custom splitter"]
 			],
 			"conditional": [
 				{
 					"value": "default",
-					"properties": [
-						"langchain.splitter.default"
-					]
+					"properties": ["langchain.splitter.default"]
 				},
 				{
 					"value": "recursive",
-					"properties": [
-						"langchain.splitter.recursive"
-					]
+					"properties": ["langchain.splitter.recursive"]
 				},
 				{
 					"value": "character",
-					"properties": [
-						"langchain.splitter.character"
-					]
+					"properties": ["langchain.splitter.character"]
 				},
 				{
 					"value": "markdown",
-					"properties": [
-						"langchain.splitter.markdown"
-					]
+					"properties": ["langchain.splitter.markdown"]
 				},
 				{
 					"value": "latex",
-					"properties": [
-						"langchain.splitter.latex"
-					]
+					"properties": ["langchain.splitter.latex"]
 				},
 				{
 					"value": "nltk",
-					"properties": [
-						"langchain.splitter.nltk"
-					]
+					"properties": ["langchain.splitter.nltk"]
 				},
 				{
 					"value": "spacy",
-					"properties": [
-						"langchain.splitter.spacy"
-					]
+					"properties": ["langchain.splitter.spacy"]
 				},
 				{
 					"value": "custom",
-					"properties": [
-						"langchain.splitter.custom"
-					]
+					"properties": ["langchain.splitter.custom"]
 				}
 			]
 		}
@@ -489,9 +354,7 @@
 		{
 			"section": "Pipe",
 			"title": "General Text",
-			"properties": [
-				"langchain.splitter.profile"
-			]
+			"properties": ["langchain.splitter.profile"]
 		}
 	],
 	"test": {

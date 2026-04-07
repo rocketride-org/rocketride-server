@@ -34,45 +34,28 @@
 		},
 		"remote.process.remote": {
 			"object": "remote",
-			"properties": [
-				"remote.remote.mode",
-				"remote.host",
-				"remote.port",
-				"remote.apikey"
-			]
+			"properties": ["remote.remote.mode", "remote.host", "remote.port", "remote.apikey"]
 		},
 		"remote.process.local": {
 			"object": "local",
-			"properties": [
-				"remote.local.mode"
-			]
+			"properties": ["remote.local.mode"]
 		},
 		"remote.profile": {
 			"title": "Processing Mode",
 			"type": "string",
 			"enum": [
-				[
-					"local",
-					"Process everything locally"
-				],
-				[
-					"remote",
-					"Process CPU/GPU heavy tasks remotely"
-				]
+				["local", "Process everything locally"],
+				["remote", "Process CPU/GPU heavy tasks remotely"]
 			],
 			"default": "local",
 			"conditional": [
 				{
 					"value": "remote",
-					"properties": [
-						"remote.process.remote"
-					]
+					"properties": ["remote.process.remote"]
 				},
 				{
 					"value": "local",
-					"properties": [
-						"remote.process.local"
-					]
+					"properties": ["remote.process.local"]
 				}
 			]
 		},
@@ -83,17 +66,12 @@
 		},
 		"remote.remote": {
 			"object": "remote",
-			"properties": [
-				"remote.profile"
-			]
+			"properties": ["remote.profile"]
 		},
 		"remote": {
 			"object": "remote",
 			"title": "Remote/Local Processing",
-			"properties": [
-				"remote.provider",
-				"remote.remote"
-			]
+			"properties": ["remote.provider", "remote.remote"]
 		}
 	}
 }

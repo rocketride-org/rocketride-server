@@ -79,6 +79,28 @@ jobs:
     secrets: inherit
 
   # ---------------------------------------------------------------------------
+  #  Build passthrough — when build is skipped (docs-only PRs), report success
+  #  under the same check names so branch protection required checks pass.
+  # ---------------------------------------------------------------------------
+  build-skip:
+    name: Build / ${{ matrix.label }}
+    needs: [init, changes]
+    if: >-
+      always() &&
+      needs.init.result == 'success' &&
+      github.event_name == 'pull_request' &&
+      needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - label: Ubuntu 22.04
+          - label: Windows Server 2022
+          - label: macOS (ARM64)
+    steps:
+      - run: echo "Build skipped — no code changes detected"
+
+  # ---------------------------------------------------------------------------
   #  CodeQL — scheduled + push only (not on PRs to avoid blocking releases)
   # ---------------------------------------------------------------------------
   codeql:
@@ -192,3 +214,17 @@ jobs:
           fi
           echo "✅ All CI checks passed (or were correctly skipped)."
           echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}"
+
+  # ---------------------------------------------------------------------------
+  #  Discord — update PR embed with final check counts after CI completes.
+  # ---------------------------------------------------------------------------
+  discord-notify:
+    needs: [ci-ok]
+    if: always() && github.event_name == 'pull_request'
+    uses: ./.github/workflows/discord-pr.yml
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      checks: read
+    secrets: inherit

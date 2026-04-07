@@ -41,16 +41,33 @@
  */
 
 import React, { ReactElement } from 'react';
-import { Box, IconButton, Tooltip, Typography } from '@mui/material';
-import { Settings } from '@mui/icons-material';
-import { red } from '@mui/material/colors';
+import { Tooltip } from '@mui/material';
+import { Settings } from 'lucide-react';
 
-import { styles as nodeStyles } from '../styles';
 import { Option } from '../../../../../../types/ui';
 import { sanitizeAndParseHtmlToReact } from '../../../../util/helpers';
 import ConditionalRender from '../../../ConditionalRender';
 import MoreMenu from './more-menu';
 import { useFlow, useNodeActionLabels, useCopy, usePaste } from '../../../../hooks';
+
+// =============================================================================
+// Styles
+// =============================================================================
+
+const nodeLabel = {
+	letterSpacing: 0,
+	lineHeight: 1,
+	textAlign: 'left' as const,
+	overflow: 'hidden',
+	whiteSpace: 'normal' as const,
+	display: '-webkit-box',
+	WebkitLineClamp: 2,
+	WebkitBoxOrient: 'vertical' as const,
+};
+
+// =============================================================================
+// Types
+// =============================================================================
 
 /**
  * Props for the NodeHeader component.
@@ -84,7 +101,13 @@ interface INodeHeaderProps {
 	warningCount?: number;
 	/** Callback when error/warning badge is clicked (opens status page). */
 	onBadgeClick?: () => void;
+	/** Whether this node's service is flagged as experimental. */
+	isExperimental?: boolean;
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 /**
  * Renders the node header bar with context-aware menu options.
@@ -92,7 +115,7 @@ interface INodeHeaderProps {
  * @param props - Node identity, metadata, and an optional click handler.
  * @returns The fully rendered header bar element.
  */
-export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title, description, documentation, formDataValid, parentId: _parentId, handleClick, classType, errorCount, warningCount, onBadgeClick }: INodeHeaderProps): ReactElement {
+export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title, description, documentation, formDataValid, parentId: _parentId, handleClick, classType, errorCount, warningCount, onBadgeClick, isExperimental }: INodeHeaderProps): ReactElement {
 	// ========================================================================
 	// FlowContext state and actions
 	// ========================================================================
@@ -166,38 +189,37 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 
 	// Title element — reused in both the tooltip and non-tooltip render paths
 	const titleElement = (
-		<Box>
-			<Typography sx={{ ...styles.title, ...nodeStyles.label }}>
+		<div>
+			<span style={{ ...styles.title, ...nodeLabel }}>
 				{displayTitle}
 				{errorCount != null && errorCount > 0 && (
-					<Box
-						component="span"
-						sx={styles.errorBadge}
+					<span
+						style={styles.errorBadge}
 						onClick={(e: React.MouseEvent) => {
 							e.stopPropagation();
 							onBadgeClick?.();
 						}}
 					>
 						{errorCount}
-					</Box>
+					</span>
 				)}
 				{warningCount != null && warningCount > 0 && (
-					<Box
-						component="span"
-						sx={styles.warningBadge}
+					<span
+						style={styles.warningBadge}
 						onClick={(e: React.MouseEvent) => {
 							e.stopPropagation();
 							onBadgeClick?.();
 						}}
 					>
 						{warningCount}
-					</Box>
+					</span>
 				)}
-			</Typography>
+			</span>
+			{isExperimental && <span style={styles.experimentalBadge}>EXPERIMENTAL</span>}
 			<ConditionalRender condition={subtitleText}>
-				<Typography sx={styles.subtitle}>{subtitleText}</Typography>
+				<span style={styles.subtitle}>{subtitleText}</span>
 			</ConditionalRender>
-		</Box>
+		</div>
 	);
 
 	// ========================================================================
@@ -205,10 +227,10 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 	// ========================================================================
 
 	return (
-		<Box sx={styles.header} onClick={handleClick ? () => handleClick() : undefined}>
+		<div className="rr-node-header" onClick={handleClick ? () => handleClick() : undefined}>
 			{/* Node icon */}
 			<ConditionalRender condition={icon}>
-				<Box sx={styles.boxImage}>
+				<div style={styles.boxImage}>
 					<img
 						style={{
 							...styles.nodeIcon,
@@ -218,31 +240,27 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 						width="auto"
 						src={icon}
 					/>
-				</Box>
+				</div>
 			</ConditionalRender>
 
 			{/* Title with optional tooltip showing the HTML description */}
-			<Box sx={styles.boxLabel}>
+			<div style={styles.boxLabel}>
 				<ConditionalRender condition={description && !toolchainState.isDragging} fallback={titleElement}>
 					<Tooltip
 						enterDelay={700}
 						arrow
 						placement="top"
 						title={
-							<Box
-								sx={{
+							<div
+								style={{
 									fontSize: 'var(--rr-font-size)',
 									fontFamily: 'var(--rr-font-family)',
 									fontWeight: 400,
-									p: '0.25rem',
-									'& a': {
-										color: 'var(--rr-text-link)',
-										textDecoration: 'underline',
-									},
+									padding: '0.25rem',
 								}}
 							>
 								{sanitizeAndParseHtmlToReact(description)}
-							</Box>
+							</div>
 						}
 						slotProps={{
 							tooltip: {
@@ -258,54 +276,35 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 						{titleElement}
 					</Tooltip>
 				</ConditionalRender>
-			</Box>
+			</div>
 
 			{/* Settings gear and overflow menu */}
-			<Box sx={styles.boxEdit}>
+			<div style={styles.boxEdit}>
 				<ConditionalRender condition={showEdit}>
-					<IconButton aria-label="Edit node" sx={styles.editButton} onClick={() => onEditNode()}>
+					<button aria-label="Edit node" style={{ ...styles.editButton, background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }} onClick={() => onEditNode()}>
 						<Settings
-							fontSize="small"
-							sx={{
+							size={16}
+							style={{
 								...styles.editIcon,
 								// Red gear when form data is invalid
-								fill: formDataValid === false ? red[500] : '',
+								color: formDataValid === false ? 'var(--rr-color-error)' : undefined,
 							}}
 						/>
-					</IconButton>
+					</button>
 				</ConditionalRender>
 				<ConditionalRender condition={options}>
 					<MoreMenu buttonSx={{ padding: 0 }} options={options!} isDisabled={false} />
 				</ConditionalRender>
-			</Box>
-		</Box>
+			</div>
+		</div>
 	);
 }
 
-// ============================================================================
-// Styles
-// ============================================================================
-
 /**
- * MUI sx-compatible style definitions for the NodeHeader component.
+ * Style definitions for the NodeHeader component.
+ * The root header uses the `.rr-node-header` CSS class for hover/selected states.
  */
 const styles = {
-	/** Root header container — full-width flex row. */
-	header: {
-		display: 'flex',
-		alignItems: 'center',
-		borderRadius: 0,
-		justifyContent: 'space-between',
-		padding: '0.15rem 0.25rem 0.4rem 0.6rem',
-		width: '100%',
-		backgroundColor: 'var(--rr-bg-titleBar-inactive)',
-		color: 'var(--rr-fg-titleBar-inactive)',
-		'.react-flow__node:hover &, .react-flow__node.selected &': {
-			backgroundColor: 'var(--rr-bg-titleBar-active)',
-			color: 'var(--rr-fg-titleBar-active)',
-		},
-	},
-
 	/** Node icon sizing and spacing. */
 	nodeIcon: {
 		width: 'auto',
@@ -318,55 +317,56 @@ const styles = {
 	title: {
 		fontWeight: 500,
 		fontSize: 'var(--rr-font-size-sm)',
-	},
+	} as React.CSSProperties,
 
 	/** Class type subtitle (e.g. "AGENT · TOOL"). */
 	subtitle: {
 		fontSize: '0.4rem',
 		color: 'var(--rr-text-secondary)',
 		lineHeight: 1.2,
-		textTransform: 'uppercase',
+		textTransform: 'uppercase' as const,
 		marginTop: '0.15rem',
-		textAlign: 'left',
-	},
+		textAlign: 'left' as const,
+		display: 'block',
+	} as React.CSSProperties,
 
 	/** Icon container. */
 	boxImage: {
 		display: 'flex',
-		alignItems: 'center',
+		alignItems: 'center' as const,
 		minWidth: '1rem',
-	},
+	} as React.CSSProperties,
 
 	/** Title/label container — takes up most of the header width. */
 	boxLabel: {
 		overflow: 'hidden',
 		flex: 4,
-	},
+	} as React.CSSProperties,
 
 	/** Edit button + menu container. */
 	boxEdit: {
 		display: 'flex',
-	},
+	} as React.CSSProperties,
 
 	/** Settings gear button. */
 	editButton: {
 		padding: 0,
-	},
+	} as React.CSSProperties,
 
 	/** Settings gear icon. */
 	editIcon: {
 		height: '1rem',
 		width: 'auto',
-		fill: 'var(--rr-text-secondary)',
-	},
+		color: 'var(--rr-text-secondary)',
+	} as React.CSSProperties,
 
 	/** Red error count badge next to the title. */
 	errorBadge: {
 		display: 'inline-flex',
-		alignItems: 'center',
+		alignItems: 'center' as const,
 		justifyContent: 'center',
 		backgroundColor: 'var(--rr-error, #f14c4c)',
-		color: '#fff',
+		color: 'var(--rr-fg-button)',
 		fontSize: '8px',
 		fontWeight: 600,
 		minWidth: '14px',
@@ -376,15 +376,15 @@ const styles = {
 		marginLeft: '4px',
 		lineHeight: 1,
 		cursor: 'pointer',
-		verticalAlign: 'middle',
-	},
+		verticalAlign: 'middle' as const,
+	} as React.CSSProperties,
 	/** Orange warning count badge next to the title. */
 	warningBadge: {
 		display: 'inline-flex',
-		alignItems: 'center',
+		alignItems: 'center' as const,
 		justifyContent: 'center',
 		backgroundColor: 'var(--rr-warning, #cca700)',
-		color: '#fff',
+		color: 'var(--rr-fg-button)',
 		fontSize: '8px',
 		fontWeight: 600,
 		minWidth: '14px',
@@ -394,6 +394,18 @@ const styles = {
 		marginLeft: '4px',
 		lineHeight: 1,
 		cursor: 'pointer',
-		verticalAlign: 'middle',
-	},
+		verticalAlign: 'middle' as const,
+	} as React.CSSProperties,
+
+	/** Yellow experimental badge below the title. */
+	experimentalBadge: {
+		display: 'inline-block',
+		fontSize: '8px',
+		fontWeight: 600,
+		padding: '1px 4px',
+		borderRadius: '3px',
+		backgroundColor: 'var(--rr-color-warning)',
+		color: 'var(--rr-fg-button)',
+		lineHeight: '14px',
+	} as React.CSSProperties,
 };

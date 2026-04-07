@@ -34,11 +34,15 @@ Primary responsibilities include:
 - Dynamically exposing running RocketRide pipeline tasks as callable MCP tools
 - Managing file upload and processing through RocketRide pipelines
 - Providing built-in convenience tools for common document processing operations
+- Exposing pipeline definitions, node schemas, and server status as MCP Resources
+- Offering reusable MCP Prompt templates for common pipeline operations
 
 Public modules:
 - server: Contains run_server() and main() entry points for the MCP stdio server
+- resources: MCP Resource handlers for pipelines, nodes, and server status
+- prompts: MCP Prompt templates for document analysis, data chat, and evaluation
 """
 
-from . import server
+from . import prompts, resources, server
 
-__all__ = ['server']
+__all__ = ['prompts', 'resources', 'server']

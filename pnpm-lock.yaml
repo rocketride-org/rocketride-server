@@ -491,6 +491,9 @@ importers:
       lodash:
         specifier: ~4.17.21
         version: 4.17.23
+      lucide-react:
+        specifier: ^0.540.0
+        version: 0.540.0(react@18.3.1)
       markdown-to-jsx:
         specifier: ~7.7.16
         version: 7.7.17(react@18.3.1)

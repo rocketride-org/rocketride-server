@@ -108,6 +108,7 @@ export enum IServiceCapabilities {
 	NoSaas = 1 << 13,
 	Focus = 1 << 14,
 	Deprecated = 1 << 15,
+	Experimental = 1 << 16,
 }
 
 // ============================================================================

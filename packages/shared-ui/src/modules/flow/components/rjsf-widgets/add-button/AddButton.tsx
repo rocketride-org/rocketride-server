@@ -25,6 +25,10 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import { FormContextType, IconButtonProps, RJSFSchema, StrictRJSFSchema, TranslatableString } from '@rjsf/utils';
 
+// =============================================================================
+// Component
+// =============================================================================
+
 /**
  * Custom RJSF "Add" button template rendered below array fields.
  * Displays a full-width outlined button that allows users to append a new item

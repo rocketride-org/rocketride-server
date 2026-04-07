@@ -43,9 +43,9 @@ import { createContext, ReactElement, ReactNode, useCallback, useContext, useMem
 
 import { IProject, IToolchainState, IFlowFeatures, IValidateResponse, IServiceCatalog, ITaskStatus, ITaskState, DEFAULT_TOOLCHAIN_STATE, DEFAULT_FLOW_FEATURES } from '../types';
 
-// ============================================================================
+// =============================================================================
 // Context shape
-// ============================================================================
+// =============================================================================
 
 export interface IFlowProjectContext {
 	// --- Project identity --------------------------------------------------
@@ -145,9 +145,9 @@ export interface IFlowProjectContext {
 
 const FlowProjectContext = createContext<IFlowProjectContext | null>(null);
 
-// ============================================================================
+// =============================================================================
 // Provider props
-// ============================================================================
+// =============================================================================
 
 export interface IFlowProjectProviderProps {
 	children: ReactNode;
@@ -189,9 +189,9 @@ export interface IFlowProjectProviderProps {
 	isConnected?: boolean;
 }
 
-// ============================================================================
+// =============================================================================
 // Provider
-// ============================================================================
+// =============================================================================
 
 /**
  * Provides project identity, lifecycle state, runtime data, and host
@@ -255,9 +255,9 @@ export function FlowProjectProvider({ children, project: currentProject, feature
 	return <FlowProjectContext.Provider value={value}>{children}</FlowProjectContext.Provider>;
 }
 
-// ============================================================================
+// =============================================================================
 // Hook
-// ============================================================================
+// =============================================================================
 
 /**
  * Returns the flow project context.

@@ -66,7 +66,7 @@ const isColorDark = (color: string): boolean => {
 /**
  * Builds an MUI theme by reading --rr-* CSS custom properties at call time.
  *
- * The CSS files (rocketride-web.css / rocketride-vscode.css) are the single
+ * The CSS files (rocketride-default.css / rocketride-vscode.css) and JSON themes are the single
  * source of truth for every colour, font, and size decision. This function
  * simply translates those tokens into the shape MUI expects.
  *

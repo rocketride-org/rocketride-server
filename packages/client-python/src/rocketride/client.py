@@ -40,7 +40,7 @@ Basic Usage:
 """
 
 import os
-from .core import DAPClient, TransportWebSocket, RocketRideException, CONST_DEFAULT_WEB_CLOUD
+from .core import DAPClient, RocketRideException, CONST_DEFAULT_WEB_CLOUD
 from .mixins.connection import ConnectionMixin
 from .mixins.execution import ExecutionMixin
 from .mixins.data import DataMixin
@@ -48,6 +48,8 @@ from .mixins.chat import ChatMixin
 from .mixins.events import EventMixin
 from .mixins.ping import PingMixin
 from .mixins.services import ServicesMixin
+from .mixins.dashboard import DashboardMixin
+from .mixins.store import StoreMixin
 
 client_id = 0
 
@@ -65,6 +67,8 @@ class RocketRideClient(
     EventMixin,
     PingMixin,
     ServicesMixin,
+    DashboardMixin,
+    StoreMixin,
     DAPClient,
 ):
     """
@@ -117,8 +121,8 @@ class RocketRideClient(
 
     def __init__(
         self,
-        uri: str = "",
-        auth: str = "",
+        uri: str = '',
+        auth: str = '',
         **kwargs,
     ):
         """
@@ -147,7 +151,7 @@ class RocketRideClient(
         if env is None:
             # Start with process environment so ROCKETRIDE_* vars work out of the box.
             self._env = dict(os.environ)
-            
+
             # Try to load .env file
             try:
                 env_path = os.path.join(os.getcwd(), '.env')
@@ -164,8 +168,7 @@ class RocketRideClient(
                                 key = key.strip()
                                 value = value.strip()
                                 # Remove quotes if present
-                                if (value.startswith('"') and value.endswith('"')) or \
-                                   (value.startswith("'") and value.endswith("'")):
+                                if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
                                     value = value[1:-1]
                                 # Preserve already-defined process env values.
                                 self._env.setdefault(key, value)
@@ -186,6 +189,7 @@ class RocketRideClient(
 
         # Normalize the URI into a fully-formed WebSocket address
         from .mixins.connection import ConnectionMixin
+
         self._uri = ConnectionMixin._get_websocket_uri(uri)
         self._apikey = auth
 
@@ -203,6 +207,12 @@ class RocketRideClient(
         # Create unique client identifier
         client_name = f'CLIENT-{client_id}'
         client_id += 1
+
+        # Client identification for auth handshake
+        from rocketride import __version__
+
+        self._client_display_name = kwargs.get('client_name', None) or 'Python SDK'
+        self._client_display_version = kwargs.get('client_version', None) or __version__
 
         # Initialize the underlying DAP client; transport is created in _internal_connect
         super().__init__(transport=None, module=kwargs.get('module', client_name), **kwargs)

@@ -46,6 +46,7 @@ import embeddingImageIcon from '../../../assets/nodes/embedding-image.svg';
 import embeddingOpenaiIcon from '../../../assets/nodes/embedding-openai.svg';
 import embeddingTextIcon from '../../../assets/nodes/embedding-text.svg';
 import elasticsearchIcon from '../../../assets/nodes/elasticsearch.svg';
+import exaIcon from '../../../assets/nodes/exa.svg';
 import fileSystemIcon from '../../../assets/nodes/file-system.svg';
 import firecrawlIcon from '../../../assets/nodes/firecrawl.svg';
 import frameGrabberIcon from '../../../assets/nodes/frame_grabber.svg';
@@ -105,6 +106,7 @@ import xaiIcon from '../../../assets/nodes/xai.svg';
 import accessibilityDescribeIcon from '../../../assets/nodes/accessibility-describe.svg';
 import deepagentIcon from '../../../assets/nodes/deepagent.svg';
 import twelvelabsIcon from '../../../assets/nodes/twelvelabs.svg';
+import blandAiIcon from '../../../assets/nodes/bland-ai.svg';
 
 /**
  * Static lookup table mapping icon names (without file extensions) to their
@@ -131,6 +133,7 @@ const iconMap: Record<string, string> = {
 	dictionary: dictionaryIcon,
 	dropper: dropperIcon,
 	elasticsearch: elasticsearchIcon,
+	exa: exaIcon,
 	'embedding-image': embeddingImageIcon,
 	'embedding-openai': embeddingOpenaiIcon,
 	'embedding-text': embeddingTextIcon,
@@ -192,6 +195,7 @@ const iconMap: Record<string, string> = {
 	'accessibility-describe': accessibilityDescribeIcon,
 	deepagent: deepagentIcon,
 	twelvelabs: twelvelabsIcon,
+	'bland-ai': blandAiIcon,
 };
 
 /**

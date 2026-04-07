@@ -33,7 +33,6 @@ import asyncio
 import sys
 import json
 import tempfile
-import aiofiles
 import time
 import socket
 import hashlib
@@ -195,6 +194,7 @@ class Task(DAPBase):
         launch_type: LAUNCH_TYPE = LAUNCH_TYPE.LAUNCH,
         provider: str = None,
         ttl: int = 900,
+        client_id: str = '',
         **kwargs,
     ) -> None:
         """
@@ -207,6 +207,7 @@ class Task(DAPBase):
             launch_args: Launch configuration parameters
             launch_type: Task creation mode (launch/attach)
             ttl: Time-to-live in seconds for idle tasks (default: 900 = 15 minutes; 0 = no timeout)
+            client_id: Account identifier for store access scoping
             **kwargs: Additional DAP configuration
         """
         # Store authentication
@@ -215,6 +216,7 @@ class Task(DAPBase):
         self.source = source
         self.token = token
         self.public_auth = public_auth
+        self.client_id = client_id
 
         # TTL management - count-up timer approach
         self._ttl = ttl  # Maximum idle time in seconds
@@ -239,6 +241,7 @@ class Task(DAPBase):
         # Execution configuration
         self._threads = launch_args.get('threads', CONST_DEFAULT_MAX_THREADS)
         self._pipelineTraceLevel = launch_args.get('pipelineTraceLevel', None)
+        self._task_name: Optional[str] = launch_args.get('name', None)
         self._engine_process: Optional[asyncio.subprocess.Process] = None
 
         # Status tracking
@@ -300,9 +303,17 @@ class Task(DAPBase):
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
 
+    # Only environment variables with this prefix are permitted to resolve in pipelines.
+    # All other env vars are blocked to prevent exfiltration of secrets via ${VAR} expansion.
+    ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
+
     def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
         """
         Replace ${KEY} placeholders in a pipeline dictionary with environment variable values.
+
+        Only environment variables whose names start with ALLOWED_ENV_PREFIX
+        are resolved. All other references are replaced with a redacted
+        placeholder to prevent secret exfiltration.
 
         Args:
             pipeline: Dictionary containing the pipeline configuration
@@ -313,10 +324,16 @@ class Task(DAPBase):
         # Convert dict to JSON string
         pipeline_str = json.dumps(pipeline)
 
-        # Replace ${VAR_NAME} with environment variable value
+        # Replace ${VAR_NAME} with environment variable value (if allowed)
         def replacer(match):
             env_var = match.group(1)
-            return os.environ.get(env_var, match.group(0))  # Keep original if not found
+            if env_var.startswith(self.ALLOWED_ENV_PREFIX):
+                # Check JSON injection vulnerability in env var resolution.
+                value = os.environ.get(env_var, match.group(0))
+                if value == match.group(0):
+                    return value  # placeholder not found
+                return json.dumps(value)[1:-1]  # escape but strip outer quotes
+            return '<REDACTED>'
 
         resolved_str = re.sub(r'\$\{([^}]+)\}', replacer, pipeline_str)
 
@@ -347,10 +364,10 @@ class Task(DAPBase):
             source_component['config'] = {}
         config = source_component['config']
 
-        if 'name' not in config:
-            self._status.name = self.source
-        else:
-            self._status.name = config['name']
+        # Build status name: {task_name | task_id}.{component_name | source_id}
+        task_label = self._task_name or self.id
+        component_label = source_component.get('name') or config.get('name') or self.source
+        self._status.name = f'{task_label}.{component_label}'
 
         if 'mode' not in config:
             config['mode'] = 'Source'
@@ -517,7 +534,7 @@ class Task(DAPBase):
                         raise RuntimeError(f'Subprocess exited with code {self._engine_process.returncode}')
                     transport = TransportWebSocket(uri)
                     name = f'DATA-{self.id}'
-                    client = DAPClient(module=name, transport=transport)
+                    client = Task.TaskData(parent_task=self, module=name, transport=transport)
                     await client.connect()
                     return client
 
@@ -546,6 +563,9 @@ class Task(DAPBase):
         Manages subprocess termination, resource cleanup, connection management,
         and final status updates.
         """
+        # Block new operations (e.g. data requests) during teardown
+        self._is_terminating = True
+
         # Update status to stopping
         self._status.status = 'Stopping'
         self._status.state = TASK_STATE.STOPPING.value
@@ -765,6 +785,7 @@ class Task(DAPBase):
                     'apaevt_task',
                     body={
                         'action': 'end',
+                        'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
                     },
@@ -774,6 +795,27 @@ class Task(DAPBase):
                     EVENT_TYPE.TASK,
                     task_message,
                 )
+
+                # Notify dashboard of task errors (non-zero exit)
+                if self._status.exitCode and self._status.exitCode != 0:
+                    try:
+                        task_apikey = self._server.get_task_control(self.token).apikey if self.token else None
+                    except Exception:
+                        task_apikey = None
+                    await self._server.broadcast_server_event(
+                        EVENT_TYPE.DASHBOARD,
+                        {
+                            'event': 'apaevt_dashboard',
+                            'body': {
+                                'action': 'task_error',
+                                'timestamp': time.time(),
+                                'taskId': self.id,
+                                'exitCode': self._status.exitCode,
+                                'exitMessage': self._status.exitMessage or None,
+                            },
+                        },
+                        apikey=task_apikey,
+                    )
 
         self.debug_message('Resource cleanup completed successfully')
 
@@ -866,8 +908,8 @@ class Task(DAPBase):
 
         else:
             # Route through server broadcast system
-            await self._server.broadcast_event(
-                type=type,
+            await self._server.broadcast_task_event(
+                event_type=type,
                 token=self.token,
                 event=message,
             )
@@ -1283,7 +1325,7 @@ class Task(DAPBase):
         self._status.rateSize = 0
         self._status.rateCount = 0
         self._status.serviceUp = False
-        self._status.exitCode = 0
+        self._status.exitCode = None
         self._status.exitMessage = ''
         self._status.endTime = 0.0
         self._status.pipeflow = TASK_STATUS_FLOW()
@@ -1495,7 +1537,10 @@ class Task(DAPBase):
 
             await self._send_status_update()
 
-            # Launch subprocess - explicitly pass environment to inherit ROCKETRIDE_MOCK for testing
+            # Launch subprocess - pass environment with account context for store access
+            subprocess_env = os.environ.copy()
+            subprocess_env['ROCKETRIDE_CLIENT_ID'] = self.client_id
+
             self._engine_process = await asyncio.create_subprocess_exec(
                 exec_path,
                 *child_args,
@@ -1504,7 +1549,7 @@ class Task(DAPBase):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 limit=CONST_SUBPROCESS_BUFFER_LIMIT,
-                env=os.environ.copy(),
+                env=subprocess_env,
             )
 
             # Initialize stdio interface
@@ -1547,6 +1592,7 @@ class Task(DAPBase):
                     'apaevt_task',
                     body={
                         'action': 'begin',
+                        'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
                     },
@@ -1562,6 +1608,7 @@ class Task(DAPBase):
                     'apaevt_task',
                     body={
                         'action': 'restart',
+                        'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
                     },
@@ -1593,18 +1640,19 @@ class Task(DAPBase):
                 # Get subprocess reference
                 engine = self._engine_process
 
-                # Mark as user-requested stop
+                # Mark as user-requested stop and block new operations
                 self._stop_requested = True
+                self._is_terminating = True
 
                 # Handle subprocess termination
-                if engine.returncode is None:
+                if engine is not None and engine.returncode is None:
                     self.debug_message('Initiating subprocess termination')
 
                     # Graceful shutdown with timeout
                     try:
                         # Phase 1: Graceful termination
                         self.debug_message('Sending termination signal to subprocess')
-                        self._engine_process.terminate()
+                        engine.terminate()
 
                         try:
                             await asyncio.wait_for(engine.wait(), timeout=CONST_CANCEL_WAIT_TIMEOUT_SECONDS)

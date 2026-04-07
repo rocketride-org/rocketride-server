@@ -13,19 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"database",
-		"tool"
-	],
+	"classType": ["database", "tool"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-      "noremote",
-      "invoke"
-	],
+	"capabilities": ["noremote", "invoke"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -53,18 +47,13 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": [
-		"A processing component that takes structured table data and inserts it ",
-		"into a PostgreSQL database. Designed for straightforward data ingestion, it ",
-		"supports field mapping and basic configuration of connection credentials ",
-		"and target tables. Ideal for storing processed results or structured outputs, ",
-		"this component ensures reliable insertion of records into relational storage."
-	],
+	"description": ["A processing component that takes structured table data and inserts it ", "into a PostgreSQL database. Designed for straightforward data ingestion, it ", "supports field mapping and basic configuration of connection credentials ", "and target tables. Ideal for storing processed results or structured outputs, ", "this component ensures reliable insertion of records into relational storage."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "postgres.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
 	// Optional:
 	//		Defines the invoke connections that may/must be connected
@@ -83,11 +72,7 @@
 	//
 	"lanes": {
 		"answers": [],
-		"questions": [
-			"table",
-			"text",
-			"answers"
-		]
+		"questions": ["table", "text", "answers"]
 	},
 	"input": [
 		{
@@ -98,13 +83,13 @@
 			"lane": "questions",
 			"output": [
 				{
-					"lane":"table"
+					"lane": "table"
 				},
 				{
-					"lane":"text"
+					"lane": "text"
 				},
 				{
-					"lane":"answers"
+					"lane": "answers"
 				}
 			]
 		}
@@ -186,32 +171,17 @@
 		},
 		"postgresdb.default": {
 			"object": "default",
-			"properties": [
-				"postgresdb.db_description",
-				"postgresdb.host",
-				"postgresdb.user",
-				"postgresdb.password",
-				"postgresdb.database",
-				"postgresdb.table",
-				"postgresdb.max_attempts"
-			]
+			"properties": ["postgresdb.db_description", "postgresdb.host", "postgresdb.user", "postgresdb.password", "postgresdb.database", "postgresdb.table", "postgresdb.max_attempts"]
 		},
 		"postgresdb.profile": {
 			"hidden": true,
 			"type": "string",
 			"default": "default",
-			"enum": [
-				[
-					"default",
-					"Default"
-				]
-			],
+			"enum": [["default", "Default"]],
 			"conditional": [
 				{
 					"value": "default",
-					"properties": [
-						"postgresdb.default"
-					]
+					"properties": ["postgresdb.default"]
 				}
 			]
 		}
@@ -225,9 +195,7 @@
 		{
 			"section": "Pipe",
 			"title": "PostgreSQL",
-			"properties": [
-				"postgresdb.profile"
-			]
+			"properties": ["postgresdb.profile"]
 		}
 	]
 }

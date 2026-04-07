@@ -53,6 +53,7 @@ Usage:
     await client.terminate(token)
 """
 
+import asyncio
 import json
 import re
 import copy
@@ -254,16 +255,23 @@ class ExecutionMixin(DAPClient):
 
         # Load pipeline configuration from file if needed
         if not pipeline:
-            with open(filepath, 'r', encoding='utf-8') as file:
-                # Prefer JSON5 for better developer experience (comments, trailing commas)
-                if json5:
-                    parsed = json5.load(file)
+
+            def _load_pipeline_config(path: str):
+                with open(path, 'r', encoding='utf-8') as file:
+                    parsed = json5.load(file) if json5 else json.load(file)
+                return parsed.get('pipeline', parsed) if isinstance(parsed, dict) else parsed
+
+            try:
+                if hasattr(asyncio, 'to_thread'):
+                    pipeline_config = await asyncio.to_thread(_load_pipeline_config, filepath)
                 else:
-                    parsed = json.load(file)
-                # .pipe files wrap the config in { "pipeline": { ... } } — unwrap if present
-                pipeline_config = parsed.get('pipeline', parsed) if isinstance(parsed, dict) else parsed
+                    loop = asyncio.get_running_loop()
+                    pipeline_config = await loop.run_in_executor(None, _load_pipeline_config, filepath)
+            except FileNotFoundError as err:
+                raise FileNotFoundError(f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration.") from err
         else:
-            pipeline_config = pipeline
+            # Keep behavior consistent with filepath-based loading
+            pipeline_config = pipeline.get('pipeline', pipeline) if isinstance(pipeline, dict) else pipeline
 
         # Create a deep copy to avoid modifying the original
         processed_config = copy.deepcopy(pipeline_config)
@@ -277,7 +285,6 @@ class ExecutionMixin(DAPClient):
 
         # Build execution request with all parameters
         arguments = {
-            'apikey': self._apikey,
             'pipeline': processed_config,  # Use processed config with variables substituted
             'args': args or [],  # Default to empty args list
         }

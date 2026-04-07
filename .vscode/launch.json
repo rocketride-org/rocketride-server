@@ -28,10 +28,7 @@
 			"subProcess": true,
 			"cwd": "${workspaceFolder}/dist/server",
 			"program": "${workspaceFolder}/dist/server/ai/eaas.py",
-			"args": [
-				"--trace=servicePython"
-				// "--trace=debugOut,debugProtocol,servicePython"
-			]
+			"args": ["--trace=debugOut"]
 		},
 		{
 			//--------------------------------------------------------------------------------------

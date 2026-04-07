@@ -13,6 +13,10 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 
 import './tab-panel.css';
 
+// =============================================================================
+// Types
+// =============================================================================
+
 export interface ITabPanelTab {
 	id: string;
 	label: string;
@@ -27,6 +31,10 @@ export interface ITabPanelProps {
 	/** Class for the panel below the tab bar (default: rr-tabpanel-content). */
 	contentClassName?: string;
 }
+
+// =============================================================================
+// Component
+// =============================================================================
 
 export function TabPanel({ tabs, activeTab, onTabChange, children, contentClassName = 'rr-tabpanel-content' }: ITabPanelProps): React.ReactElement {
 	const tabBarRef = useRef<HTMLDivElement>(null);

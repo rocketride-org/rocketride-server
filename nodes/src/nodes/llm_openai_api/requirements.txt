@@ -1,0 +1,8 @@
+# Plugin OpenAI-compatible API
+openai
+langchain-openai
+tiktoken
+
+# LangChain deps
+langchain-core
+langchain

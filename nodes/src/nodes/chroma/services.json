@@ -13,9 +13,7 @@
 	// Required:
 	//      Class type of the node - what it does
 	//
-	"classType": [
-		"store"
-	],
+	"classType": ["store"],
 	//
 	// Required:
 	//      Capabilities are flags that change the behavior of the underlying
@@ -24,7 +22,7 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
@@ -49,29 +47,19 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A vector database component for Chroma, enabling efficient storage and ", 
-		"retrieval of vector embeddings. It supports similarity search, filtering, ",
-		"and management of vector data with high performance."
-	],
+	"description": ["A vector database component for Chroma, enabling efficient storage and ", "retrieval of vector embeddings. It supports similarity search, filtering, ", "and management of vector data with high performance."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "chroma.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/4hGqkf2",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": [
-		"Host/Port: ${parameters.chroma.${profile}.host}:${parameters.chroma.${profile}.port}",
-		"Collection: ${parameters.chroma.${profile}.collection}"
-	],
+	"tile": ["Host/Port: ${parameters.chroma.${profile}.host}:${parameters.chroma.${profile}.port}", "Collection: ${parameters.chroma.${profile}.collection}"],
 	//
 	// Optional:
 	//      As a pipe component, define what this pipe component takes
@@ -79,11 +67,7 @@
 	//
 	"lanes": {
 		"documents": [],
-		"questions": [
-			"documents",
-			"answers",
-			"questions"
-		]
+		"questions": ["documents", "answers", "questions"]
 	},
 	//
 	// Test configuration for automated node testing
@@ -131,8 +115,8 @@
 						"notEmpty": true,
 						"contains": "Paris",
 						"property": [
-							{"path": "[0].score", "greaterThanOrEqual": 0.5},
-							{"path": "[0].metadata.objectId", "equals": "test-doc-1"}
+							{ "path": "[0].score", "greaterThanOrEqual": 0.5 },
+							{ "path": "[0].metadata.objectId", "equals": "test-doc-1" }
 						]
 					}
 				}
@@ -142,10 +126,7 @@
 	"input": [
 		{
 			"lane": "documents",
-			"description": [
-				"Stores the documents into the vector database. The documents must be ",
-				"run through an embedding model prior to this step to compute the vectors."
-			],
+			"description": ["Stores the documents into the vector database. The documents must be ", "run through an embedding model prior to this step to compute the vectors."],
 			"output": []
 		},
 		{
@@ -154,26 +135,17 @@
 			"output": [
 				{
 					"lane": "documents",
-					"description": [
-						"Produces documents that are most similar to the given question."
-					],
+					"description": ["Produces documents that are most similar to the given question."],
 					"output": []
 				},
 				{
 					"lane": "answers",
-					"description": [
-						"Produces an answer with the documents that are most similar ",
-						"to the given question."
-					],
+					"description": ["Produces an answer with the documents that are most similar ", "to the given question."],
 					"output": []
 				},
 				{
 					"lane": "questions",
-					"description": [
-						"Updates the question with documents most similar to the ",
-						"question and sets up a filter so piping this to another store ",
-						"driver will limit its answers to the given subset of documents."
-					],
+					"description": ["Updates the question with documents most similar to the ", "question and sets up a filter so piping this to another store ", "driver will limit its answers to the given subset of documents."],
 					"output": []
 				}
 			]
@@ -232,20 +204,11 @@
 		//
 		"chroma.cloud": {
 			"object": "cloud",
-			"properties": [
-				"vector.cloud.host",
-				"vector.cloud.port",
-				"vector.apikey",
-				"vector.collection"
-			]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.collection"]
 		},
 		"chroma.local": {
 			"object": "local",
-			"properties": [
-				"vector.local.host",
-				"vector.local.port",
-				"vector.collection"
-			]
+			"properties": ["vector.local.host", "vector.local.port", "vector.collection"]
 		},
 		//
 		// Profile selection for ChromaDB service
@@ -255,21 +218,15 @@
 			"description": "Connect to...",
 			"type": "string",
 			"default": "cloud",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "cloud",
-					"properties": [
-						"chroma.cloud"
-					]
+					"properties": ["chroma.cloud"]
 				},
 				{
 					"value": "local",
-					"properties": [
-						"chroma.local"
-					]
+					"properties": ["chroma.local"]
 				}
 			]
 		},
@@ -279,31 +236,20 @@
 		},
 		"chroma.chroma": {
 			"object": "chroma",
-			"properties": [
-				"chroma.profile"
-			]
+			"properties": ["chroma.profile"]
 		},
 		"chroma.store": {
 			"object": "store",
 			"title": "Store",
-			"properties": [
-				"chroma.provider",
-				"chroma.chroma"
-			]
+			"properties": ["chroma.provider", "chroma.chroma"]
 		},
 		"chroma.target.autopipe": {
 			"object": "parameters",
-			"properties": [
-				"remote",
-				"chroma.store",
-				"all.embedding"
-			]
+			"properties": ["remote", "chroma.store", "all.embedding"]
 		},
 		"chroma.target.parameters": {
 			"object": "parameters",
-			"properties": [
-				"chroma.target.autopipe"
-			]
+			"properties": ["chroma.target.autopipe"]
 		}
 	},
 	//
@@ -315,18 +261,12 @@
 		{
 			"section": "Pipe",
 			"title": "Chroma Vector Store",
-			"properties": [
-				"chroma.profile"
-			]
+			"properties": ["chroma.profile"]
 		},
 		{
 			"section": "Transform",
 			"title": "Chroma",
-			"properties": [
-				"type",
-				"chroma.target.parameters",
-				"target.mode"
-			]
+			"properties": ["type", "chroma.target.parameters", "target.mode"]
 		}
 	]
 }

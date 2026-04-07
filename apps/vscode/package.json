@@ -94,7 +94,7 @@
 				"rocketride.local.debugOutput": {
 					"type": "boolean",
 					"default": false,
-					"description": "Enable full debug output from the local engine (--trace=servicePython)"
+					"description": "Enable full debug output from the local engine (--trace=debugOut)"
 				},
 				"rocketride.engineArgs": {
 					"type": "string",
@@ -183,6 +183,12 @@
 				"command": "rocketride.provider.files.focus",
 				"title": "Pipelines",
 				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.page.dashboard.open",
+				"title": "Server Monitor",
+				"category": "RocketRide",
+				"icon": "$(dashboard)"
 			},
 			{
 				"command": "rocketride.sidebar.connection.connect",

@@ -59,6 +59,9 @@ from .filters import IInstanceBase
 from .filters import IServiceEndpoint
 from .filters import IServiceFilterPipe
 from .filters import ILoader
+from .filters import invoke_function
+from .filters import tool_function
+from .filters import ToolDescriptor
 from .types import AVI_ACTION
 from .types import ENDPOINT_MODE
 from .types import Entry
@@ -101,6 +104,7 @@ __all__ = [
     'IEndpointBase',
     'IGlobalBase',
     'IInstanceBase',
+    'invoke_function',
     'IServiceEndpoint',
     'IServiceFilterPipe',
     'IInvoke',
@@ -129,6 +133,8 @@ __all__ = [
     'SERVICE_MODE',
     'TAG',
     'TAG_ID',
+    'tool_function',
+    'ToolDescriptor',
     'validatePipeline',
     'warning',
 ]

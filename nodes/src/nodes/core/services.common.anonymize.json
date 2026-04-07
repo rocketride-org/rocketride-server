@@ -1,5 +1,5 @@
 {
-    "fields": {
+	"fields": {
 		"anonymizeChar": {
 			"title": "Anonymization Character",
 			"description": "Specify a character that will mask any sensitive data in the text.\n\nFor example, if you specify the characher \"*\", then the text \"SSN: 064 70 6733\" will become \"SSN: ***********\". If you specify the character \"?\" the text will become \"SSN: ???????????\".",
@@ -14,25 +14,22 @@
 			"type": "boolean",
 			"default": false
 		},
-        "anonymize": {
+		"anonymize": {
 			"hidden": true,
-            "title": "Anonymize Classified Information",
-            "description": "Enable it if you want to mask any sensitive data in the text. If you leave it disabled, the text will be output as it is.\n\nFor example, if you enable it, then the text \"SSN: 064 70 6733\" will become \"SSN: ***********\". If you disable it, the text will remain \"SSN: 064 70 6733\".",
-            "type": "boolean",
-            "default": false,
-            "conditional": [
-                {
-                    "value": true,
-                    "properties": [
-                        "anonymizeChar",
-                        "anonymizeAll"
-                    ]
-                },
-                {
-                    "value": false,
-                    "properties": []
-                }
-            ]
-        }
-    }
+			"title": "Anonymize Classified Information",
+			"description": "Enable it if you want to mask any sensitive data in the text. If you leave it disabled, the text will be output as it is.\n\nFor example, if you enable it, then the text \"SSN: 064 70 6733\" will become \"SSN: ***********\". If you disable it, the text will remain \"SSN: 064 70 6733\".",
+			"type": "boolean",
+			"default": false,
+			"conditional": [
+				{
+					"value": true,
+					"properties": ["anonymizeChar", "anonymizeAll"]
+				},
+				{
+					"value": false,
+					"properties": []
+				}
+			]
+		}
+	}
 }

@@ -36,7 +36,6 @@
  */
 
 import { ReactElement, useMemo } from 'react';
-import { Box, Typography } from '@mui/material';
 import { NodeResizer } from '@xyflow/react';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
@@ -44,19 +43,58 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
-import { styles } from './index.style';
 import { INodeData, INodeType } from '../../../types';
 import ConditionalRender from '../../ConditionalRender';
 import NodeHeader from '../node-component/header';
+
+// =============================================================================
+// Styles
+// =============================================================================
+
+const styles = {
+	/** Root container — fills the ReactFlow node wrapper, hides overflow. Hover reveal handled by .rr-annotation-root CSS class. */
+	root: {
+		position: 'relative' as const,
+		width: '100%',
+		height: '100%',
+		borderRadius: '5px',
+		border: 'none',
+		outline: 'none',
+		boxShadow: 'none',
+		overflow: 'hidden',
+		display: 'flex',
+		flexDirection: 'column' as const,
+	},
+
+	/** Header bar — absolutely positioned, invisible until parent hover (via CSS). */
+	header: {
+		position: 'absolute' as const,
+		top: 0,
+		left: 0,
+		right: 0,
+		zIndex: 1,
+		opacity: 0,
+		pointerEvents: 'none' as const,
+		transition: 'opacity 0.2s ease',
+		borderRadius: '5px 5px 0 0',
+	},
+
+	/** Placeholder text shown when the annotation has no content. */
+	placeholder: {
+		color: 'var(--rr-text-disabled)',
+		fontStyle: 'italic' as const,
+		fontSize: '0.7rem',
+	},
+};
 
 // =============================================================================
 // Constants
 // =============================================================================
 
 /** Default background color for annotation nodes (light yellow). */
-const DEFAULT_BG_COLOR = '#fff9c4';
+const DEFAULT_BG_COLOR = 'var(--rr-annotation-bg-default)';
 /** Default foreground/text color for annotation nodes. */
-const DEFAULT_FG_COLOR = '#000000';
+const DEFAULT_FG_COLOR = 'var(--rr-text-primary)';
 
 // =============================================================================
 // Markdown components
@@ -146,28 +184,28 @@ export default function NodeAnnotation({ id, data, type, parentId, selected }: I
 			{/* Resize handles — only visible when the node is selected */}
 			<NodeResizer minWidth={120} minHeight={80} isVisible={selected === true} lineStyle={{ borderWidth: 0, background: 'transparent' }} color="var(--rr-border)" />
 
-			<Box
-				sx={{
+			<div
+				style={{
 					...styles.root,
 					backgroundColor: bgColor,
 					color: fgColor,
 				}}
-				className="nowheel"
+				className="nowheel rr-annotation-root"
 			>
 				{/* Header — hidden until hover via CSS */}
-				<Box sx={{ ...styles.header, color: 'var(--rr-text-primary)' }} className="annotation-header">
+				<div style={{ ...styles.header, color: 'var(--rr-text-primary)' }} className="annotation-header">
 					<NodeHeader id={id} title={title} nodeType={type as INodeType} parentId={parentId} />
-				</Box>
+				</div>
 
 				{/* Content area — rendered markdown */}
-				<Box sx={styles.contentArea}>
-					<ConditionalRender condition={content} fallback={<Typography sx={styles.placeholder}>Double-click gear to add content...</Typography>}>
+				<div className="rr-annotation-content">
+					<ConditionalRender condition={content} fallback={<span style={styles.placeholder}>Double-click gear to add content...</span>}>
 						<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
 							{content}
 						</ReactMarkdown>
 					</ConditionalRender>
-				</Box>
-			</Box>
+				</div>
+			</div>
 		</>
 	);
 }
