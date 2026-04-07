@@ -216,6 +216,7 @@ const THEME_DYNAMIC_ICONS: ReadonlySet<string> = new Set([
 	'embedding-text',
 	// LLMs
 	'anthropic',
+	'bland-ai',
 	'gmi_cloud',
 	'ollama',
 	'openai',
