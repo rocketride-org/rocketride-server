@@ -290,39 +290,17 @@ export class PageWelcomeProvider {
 				return;
 			}
 
-			const testArgs: Record<string, unknown> = {
-				clientID: 'vscode-welcome-test',
-				clientName: 'VS Code Welcome Test',
-				adapterID: 'rocketride',
-				pathFormat: 'path',
-				linesStartAt1: true,
-				columnsStartAt1: true,
-				supportsVariableType: true,
-				supportsVariablePaging: true,
-				supportsRunInTerminalRequest: true,
-			};
-
-			let response;
 			try {
-				response = await testClient.dapRequest('initialize', testArgs, '', 5000);
-			} catch (requestError) {
+				await testClient.ping();
+			} catch (pingError) {
 				await testClient.disconnect();
-				const errorMessage = requestError instanceof Error ? requestError.message : String(requestError);
+				const errorMessage = pingError instanceof Error ? pingError.message : String(pingError);
 				this.showMessage('error', `Server connected but failed to respond: ${errorMessage}`);
 				return;
 			}
 
 			await testClient.disconnect();
-
-			if (!response) {
-				this.showMessage('error', 'Server connected but returned no response.');
-			} else if (response.success === false) {
-				this.showMessage('error', `Server rejected the request: ${response.message || 'Unknown error'}`);
-			} else if (response.type === 'response' && response.command === 'initialize') {
-				this.showMessage('success', `Connection successful! ${parsedUrl.host} is responding correctly.`);
-			} else {
-				this.showMessage('warning', 'Server responded with an unexpected format. Connection may still work.');
-			}
+			this.showMessage('success', `Connection successful! ${parsedUrl.host} is responding correctly.`);
 		} catch (error) {
 			if (testClient)
 				testClient.disconnect().catch(() => {

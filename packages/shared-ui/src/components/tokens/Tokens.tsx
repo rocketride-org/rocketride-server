@@ -4,32 +4,59 @@
 // =============================================================================
 
 /**
- * Tokens — Displays token consumption metrics for AI/ML tasks.
+ * Tokens — Displays aggregated token consumption across all pipeline sources.
  *
- * Shows breakdown by resource type (CPU Usage, CPU Memory, GPU Memory) with
- * progress bars and a total count.
+ * Shows a total summary and per-source breakdown with progress bars.
+ * When no data is available, shows an empty state prompt.
  *
- * Migrated from the VS Code extension's TokenSection component.
  * Plain React + inline styles using --rr-* theme tokens. No MUI.
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
-// STYLES (component-specific only)
+// STYLES
 // =============================================================================
 
 const styles: Record<string, CSSProperties> = {
-	totalDisplay: {
-		fontSize: 12,
-		fontWeight: 400,
-		color: 'var(--rr-text-secondary)',
+	empty: {
+		color: 'var(--rr-text-disabled)',
+		textAlign: 'center',
+		padding: 32,
 	},
-	totalValue: {
+	summary: {
+		display: 'grid',
+		gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+		gap: 12,
+		marginBottom: 24,
+	},
+	card: {
+		padding: '12px 16px',
+		borderRadius: 6,
+		border: '1px solid var(--rr-border)',
+		backgroundColor: 'var(--rr-bg-widget)',
+	},
+	cardLabel: {
+		fontSize: 11,
+		color: 'var(--rr-text-secondary)',
+		marginBottom: 4,
+	},
+	cardValue: {
+		fontSize: 20,
 		fontWeight: 600,
 		color: 'var(--rr-brand)',
+		...commonStyles.fontMono,
+	},
+	sourceSection: {
+		marginBottom: 20,
+	},
+	sourceName: {
+		fontSize: 'var(--rr-font-size-widget)',
+		fontWeight: 600,
+		color: 'var(--rr-text-primary)',
+		marginBottom: 8,
 	},
 	bars: {
 		display: 'flex',
@@ -80,62 +107,121 @@ export interface TokenData {
 	total?: number;
 }
 
+interface TaskStatus {
+	tokens?: TokenData;
+	[key: string]: unknown;
+}
+
+interface SourceInfo {
+	id: string;
+	name: string;
+}
+
 export interface TokensProps {
-	taskStatus:
-		| {
-				tokens?: TokenData;
-		  }
-		| undefined;
+	statusMap: Record<string, TaskStatus>;
+	sources: SourceInfo[];
+}
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+function sumTokens(entries: TokenData[]): TokenData {
+	const result: TokenData = { cpu_utilization: 0, cpu_memory: 0, gpu_memory: 0, total: 0 };
+	for (const t of entries) {
+		if (t.cpu_utilization !== undefined) result.cpu_utilization! += t.cpu_utilization;
+		if (t.cpu_memory !== undefined) result.cpu_memory! += t.cpu_memory;
+		if (t.gpu_memory !== undefined) result.gpu_memory! += t.gpu_memory;
+		if (t.total !== undefined) result.total! += t.total;
+	}
+	return result;
+}
+
+function fmt(v: number | undefined): string {
+	return v !== undefined ? v.toFixed(1) : '—';
 }
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-export const Tokens: React.FC<TokensProps> = ({ taskStatus }) => {
-	if (!taskStatus?.tokens) {
-		return null;
+function TokenBar({ label, value, max }: { label: string; value: number | undefined; max: number }) {
+	if (value === undefined) return null;
+	const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
+	return (
+		<div style={styles.barRow}>
+			<div style={styles.barLabel}>{label}</div>
+			<div style={styles.barContainer}>
+				<div style={{ ...styles.barFill, width: `${pct}%` }} />
+			</div>
+			<div style={styles.barValue}>{fmt(value)}</div>
+		</div>
+	);
+}
+
+export const Tokens: React.FC<TokensProps> = ({ statusMap, sources }) => {
+	// Collect all token entries from all sources
+	const { allTokens, aggregated, hasData } = useMemo(() => {
+		const entries: { name: string; tokens: TokenData }[] = [];
+		for (const src of sources) {
+			const ts = statusMap[src.id];
+			if (ts?.tokens) {
+				entries.push({ name: src.name, tokens: ts.tokens });
+			}
+		}
+		return {
+			allTokens: entries,
+			aggregated: sumTokens(entries.map((e) => e.tokens)),
+			hasData: entries.length > 0,
+		};
+	}, [statusMap, sources]);
+
+	if (!hasData) {
+		return (
+			<div style={styles.empty}>
+				<div style={{ marginBottom: 8, fontSize: 24, color: 'var(--rr-text-disabled)' }}>&#9677;</div>
+				<div>No token data available</div>
+				<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', marginTop: 4 }}>Run a pipeline to see token consumption</div>
+			</div>
+		);
 	}
 
-	const { tokens } = taskStatus;
-
-	const barEntries: { label: string; value: number | undefined }[] = [
-		{ label: 'CPU Usage Tokens', value: tokens.cpu_utilization },
-		{ label: 'CPU Memory Tokens', value: tokens.cpu_memory },
-		{ label: 'GPU Memory Tokens', value: tokens.gpu_memory },
-	];
+	const maxTotal = aggregated.total || 1;
 
 	return (
-		<section style={commonStyles.section}>
-			<header style={commonStyles.sectionHeader}>
-				<span style={commonStyles.sectionHeaderLabel}>Tokens</span>
-				{tokens.total !== undefined && (
-					<div style={styles.totalDisplay}>
-						Total: <span style={styles.totalValue}>{tokens.total.toFixed(1)}</span>
-					</div>
-				)}
-			</header>
-
-			<div style={styles.bars}>
-				{barEntries.map(
-					({ label, value }) =>
-						value !== undefined && (
-							<div key={label} style={styles.barRow}>
-								<div style={styles.barLabel}>{label}</div>
-								<div style={styles.barContainer}>
-									<div
-										style={{
-											...styles.barFill,
-											width: `${Math.min((value / (tokens.total || 1)) * 100, 100)}%`,
-										}}
-									/>
-								</div>
-								<div style={styles.barValue}>{value.toFixed(1)}</div>
-							</div>
-						)
-				)}
+		<>
+			{/* Aggregated summary cards */}
+			<div style={styles.summary}>
+				<div style={styles.card}>
+					<div style={styles.cardLabel}>Total Tokens</div>
+					<div style={styles.cardValue}>{fmt(aggregated.total)}</div>
+				</div>
+				<div style={styles.card}>
+					<div style={styles.cardLabel}>CPU Usage</div>
+					<div style={styles.cardValue}>{fmt(aggregated.cpu_utilization)}</div>
+				</div>
+				<div style={styles.card}>
+					<div style={styles.cardLabel}>CPU Memory</div>
+					<div style={styles.cardValue}>{fmt(aggregated.cpu_memory)}</div>
+				</div>
+				<div style={styles.card}>
+					<div style={styles.cardLabel}>GPU Memory</div>
+					<div style={styles.cardValue}>{fmt(aggregated.gpu_memory)}</div>
+				</div>
 			</div>
-		</section>
+
+			{/* Per-source breakdown */}
+			{allTokens.map(({ name, tokens }) => (
+				<div key={name} style={styles.sourceSection}>
+					{allTokens.length > 1 && <div style={styles.sourceName}>{name}</div>}
+					<div style={styles.bars}>
+						<TokenBar label="CPU Usage" value={tokens.cpu_utilization} max={maxTotal} />
+						<TokenBar label="CPU Memory" value={tokens.cpu_memory} max={maxTotal} />
+						<TokenBar label="GPU Memory" value={tokens.gpu_memory} max={maxTotal} />
+					</div>
+				</div>
+			))}
+		</>
 	);
 };
 

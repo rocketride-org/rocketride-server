@@ -42,8 +42,7 @@ import { getLogger } from '../shared/util/output';
 import { PipelineFileParser, ParsedPipelineFile, ParsedSourceComponent, ServiceClassInfo } from '../shared/util/pipelineParser';
 import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
-import { MonitorManager } from '../connection/monitor-manager';
-import { GenericEvent, GenericResponse } from '../shared/types';
+import { GenericEvent } from '../shared/types';
 
 /** Parsed location from structured error format (ErrorType*`message`*filepath:linenumber) */
 export interface ParsedErrWarnLine {
@@ -189,22 +188,18 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 					const pipelineText = Buffer.from(fileContent).toString('utf8');
 					const pipelineJson = JSON.parse(pipelineText);
 
-					// Substitute .env settings
-					const pipelineTransformed = ConfigManager.getInstance().substituteEnvVariables(pipelineJson);
-
 					// Get project and source identifiers
 					const context = this.resolveKnownPipelineCommandContext(item, resourceUri);
-					const projectId = context?.parsedPipeline?.projectId;
 					const sourceId = context?.componentId ?? '';
 
-					// Use DAP command to execute pipeline without debugging
+					const client = this.connectionManager.getClient();
+					if (!client) throw new Error('Not connected to server');
 					const pipeName = resourceUri ? path.basename(resourceUri.fsPath).replace(/\.pipe(?:\.json)?$/, '') : undefined;
-					await this.connectionManager.request('execute', {
-						projectId: projectId,
+					await client.use({
+						pipeline: pipelineJson,
 						source: sourceId,
-						pipeline: pipelineTransformed,
 						args: ConfigManager.getInstance().getEffectiveEngineArgs(),
-						...(pipeName ? { name: pipeName } : {}),
+						name: pipeName,
 					});
 				} catch (error) {
 					vscode.window.showErrorMessage(`Failed to run pipeline: ${error}`);
@@ -235,14 +230,16 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 				}
 
 				try {
-					const response = (await this.connectionManager.request('rrext_get_token', {
-						projectId: projectId,
-						source: sourceId,
-					})) as GenericResponse | undefined;
+					const client = this.connectionManager.getClient();
+					if (!client) throw new Error('Not connected to server');
 
-					const token = response?.body?.token as string | undefined;
+					const token = await client.getTaskToken({ projectId, source: sourceId });
+					if (!token) {
+						vscode.window.showErrorMessage('No running task found to stop');
+						return;
+					}
 
-					await this.connectionManager.request('terminate', {}, token);
+					await client.terminate(token);
 				} catch (error: unknown) {
 					this.logger.error(`Unable to stop pipeline: ${error}`);
 					vscode.window.showErrorMessage(`Failed to stop pipeline: ${error}`);
@@ -350,17 +347,18 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			this.handleEvent(e);
 		});
 
-		// Subscribe to task lifecycle and output events (once — MonitorManager
-		// handles reconnection replay, so no need to re-add on each connect)
-		MonitorManager.getInstance()
-			.addMonitor({ token: '*' }, ['task', 'output'])
-			.catch((err) => {
+		// Subscribe to task lifecycle and output events (once — the SDK
+		// handles reconnection replay via _resubscribeAllMonitors)
+		const client = this.connectionManager.getClient();
+		if (client) {
+			client.addMonitor({ token: '*' }, ['task', 'output']).catch((err) => {
 				this.logger.error(`Failed to subscribe to task events: ${err}`);
 			});
+		}
 
 		// Listen for connected events
 		const connectedEventListener = this.connectionManager.addListener('connected', (_e) => {
-			// Subscriptions are restored by MonitorManager.resubscribeAll() in connection.ts
+			// Subscriptions are restored by client._resubscribeAllMonitors() on reconnect
 		});
 
 		// Listen for disconnected events
@@ -696,30 +694,18 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 		// Convert to json
 		const pipelineJson = JSON.parse(pipelineText);
 
-		// Substitute and .env settings
-		const pipelineTransformed = ConfigManager.getInstance().substituteEnvVariables(pipelineJson);
-
-		// Use DAP command to execute pipeline without debugging
 		try {
-			// We need the token to attach...
-			const response = (await this.connectionManager.request('rrext_get_token', {
-				projectId: projectId,
-				source: sourceId,
-			})) as GenericResponse | undefined;
+			const client = this.connectionManager.getClient();
+			if (!client) throw new Error('Not connected to server');
 
-			// Get the token of the task
-			const token = response?.body?.token as string | undefined;
+			const token = await client.getTaskToken({ projectId: projectId!, source: sourceId! });
 
-			await this.connectionManager.request(
-				'restart',
-				{
-					token: token,
-					projectId: projectId,
-					source: sourceId,
-					pipeline: pipelineTransformed,
-				},
-				'*'
-			);
+			await client.restart({
+				token,
+				projectId: projectId!,
+				source: sourceId!,
+				pipeline: pipelineJson,
+			});
 		} catch (error: unknown) {
 			this.logger.error(`Unable to execute pipeline: ${error}`);
 			vscode.window.showErrorMessage(String(error));
@@ -1190,11 +1176,12 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 	 */
 	dispose(): void {
 		// Balance the wildcard monitor added in setupEventListeners
-		void MonitorManager.getInstance()
-			.removeMonitor({ token: '*' }, ['task', 'output'])
-			.catch((error) => {
+		const client = this.connectionManager.getClient();
+		if (client) {
+			void client.removeMonitor({ token: '*' }, ['task', 'output']).catch((error) => {
 				this.logger.error(`Failed to unsubscribe from task events: ${error}`);
 			});
+		}
 
 		this.disposables.forEach((disposable) => disposable.dispose());
 		this.disposables = [];

@@ -88,30 +88,50 @@ const ServerMonitor: React.FC<IServerMonitorProps> = ({ data, events, isConnecte
 		[data, events.length]
 	);
 
-	const refreshBtn = onRefresh && (
-		<button style={commonStyles.buttonSecondary} onClick={onRefresh}>
-			Refresh
-		</button>
-	);
-
 	const panels = useMemo<Record<string, ITabPanelPanel>>(() => {
 		if (!data) {
 			const loading = {
 				content: (
-					<div style={styles.disconnected}>
-						<div style={commonStyles.textMuted}>Loading dashboard data...</div>
+					<div style={commonStyles.tabContent}>
+						<div style={styles.disconnected}>
+							<div style={commonStyles.textMuted}>Loading dashboard data...</div>
+						</div>
 					</div>
 				),
 			};
 			return { overview: loading, connections: loading, tasks: loading, activity: loading };
 		}
 		return {
-			overview: { content: <OverviewTab data={data} />, actions: refreshBtn },
-			connections: { content: <ConnectionsTab connections={data.connections} />, actions: refreshBtn },
-			tasks: { content: <TasksTab tasks={data.tasks} />, actions: refreshBtn },
-			activity: { content: <ActivityTab events={events} />, actions: refreshBtn },
+			overview: {
+				content: (
+					<div style={commonStyles.tabContent}>
+						<OverviewTab data={data} />
+					</div>
+				),
+			},
+			connections: {
+				content: (
+					<div style={commonStyles.tabContent}>
+						<ConnectionsTab connections={data.connections} />
+					</div>
+				),
+			},
+			tasks: {
+				content: (
+					<div style={commonStyles.tabContent}>
+						<TasksTab tasks={data.tasks} />
+					</div>
+				),
+			},
+			activity: {
+				content: (
+					<div style={commonStyles.tabContent}>
+						<ActivityTab events={events} />
+					</div>
+				),
+			},
 		};
-	}, [data, events, refreshBtn]);
+	}, [data, events]);
 
 	// Disconnected state
 	if (!isConnected) {

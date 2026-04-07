@@ -37,10 +37,9 @@ import { EngineManager } from './engine-manager';
 import { CloudManager } from './cloud-manager';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
-import { ConnectionStatus, ConnectionState, GenericResponse } from '../shared/types';
+import { ConnectionStatus, ConnectionState } from '../shared/types';
 import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
 import { getIdeName } from '../shared/util/ide';
-import { MonitorManager } from './monitor-manager';
 
 export class ConnectionManager extends EventEmitter {
 	private static instance: ConnectionManager;
@@ -102,6 +101,12 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	private setupConfigurationListener(): void {
+		this.disposables.push(
+			this.configManager.onEnvVarsChanged((env) => {
+				this.client?.setEnv(env);
+			})
+		);
+
 		const disposable = this.configManager.onConfigurationChanged((_config) => {
 			// Don't process configuration changes during disposal
 			if (this.isDisposing) {
@@ -322,6 +327,7 @@ export class ConnectionManager extends EventEmitter {
 		const client = new RocketRideClient({
 			auth,
 			uri,
+			env: this.configManager.getEnv(),
 			module: 'CONN-EXT',
 			clientName: getIdeName(),
 			clientVersion: vscode.extensions.getExtension('rocketride.rocketride')?.packageJSON?.version,
@@ -436,12 +442,8 @@ export class ConnectionManager extends EventEmitter {
 		this.logger.output(`${icons.success} Connected to RocketRide server`);
 		this.emit('connected');
 
-		// Replay all provider monitor subscriptions to the server after reconnect
-		MonitorManager.getInstance()
-			.resubscribeAll()
-			.catch((err) => {
-				this.logger.error(`Failed to restore monitor subscriptions: ${err}`);
-			});
+		// Monitor subscriptions are automatically replayed by the SDK client
+		// via _resubscribeAllMonitors() in its onConnected handler.
 
 		// Fetch and cache services list during connection phase
 		this.refreshServices().catch((err) => {
@@ -570,21 +572,6 @@ export class ConnectionManager extends EventEmitter {
 		return { ...this.connectionStatus };
 	}
 
-	public async request(command: string, args?: Record<string, unknown>, token?: string): Promise<GenericResponse | undefined> {
-		if (!this.client || !this.client.isConnected()) {
-			return undefined;
-		}
-		try {
-			this.logger.output(`${icons.send} ${command} ${JSON.stringify(args ?? {})}`);
-			const response = await this.client.dapRequest(command, args, token);
-			this.logger.output(`${icons.receive} ${command} ${JSON.stringify(response ?? {})}`);
-			return response as unknown as GenericResponse;
-		} catch (err) {
-			this.logger.output(`${icons.error} ${command} failed: ${err}`);
-			return undefined;
-		}
-	}
-
 	/**
 	 * Returns the cached services list for the pipeline editor.
 	 * Use this when opening a page editor so the UI can show immediately.
@@ -626,16 +613,8 @@ export class ConnectionManager extends EventEmitter {
 
 		this.servicesRefreshPromise = (async () => {
 			try {
-				const response = await this.client!.dapRequest('rrext_services', {});
-				if (response?.success === false) {
-					const msg = response?.message ?? 'Failed to load services';
-					this.cachedServices = null;
-					this.cachedServicesError = msg;
-					this.emit('servicesUpdated', { services: {}, servicesError: msg });
-					return;
-				}
-				const body = response?.body;
-				const services = typeof body === 'object' && body !== null && 'services' in body ? (body.services as Record<string, unknown>) : {};
+				const body = await this.client!.getServices();
+				const services: Record<string, unknown> = body.services ?? {};
 				this.cachedServices = services;
 				this.cachedServicesError = null;
 				this.emit('servicesUpdated', { services, servicesError: undefined });
