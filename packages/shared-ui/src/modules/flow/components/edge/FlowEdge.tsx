@@ -30,6 +30,7 @@ const HANDLE_OFFSET = 8;
 const styles = {
 	button: {
 		backgroundColor: 'var(--rr-bg-surface)',
+		color: 'var(--rr-text-primary)',
 		padding: '0.2rem',
 		border: '1px solid var(--rr-border)',
 		borderRadius: '50%',
