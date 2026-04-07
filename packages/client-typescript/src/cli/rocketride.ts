@@ -815,12 +815,33 @@ export class RocketRideCLI {
 	}
 
 	private setupSignalHandlers(): void {
-		// TODO: Enable proper signal handling
-		// const signalHandler = () => {
-		// 	this.cancel();
-		// };
-		// process.on('SIGINT', signalHandler);
-		// process.on('SIGTERM', signalHandler);
+		const FORCE_EXIT_TIMEOUT_MS = 5000;
+
+		const signalHandler = async (signal: string) => {
+			if (this.cancelled) {
+				// Second signal: force exit immediately
+				process.exit(128 + (signal === 'SIGINT' ? 2 : 15));
+			}
+
+			this.cancel();
+
+			// Force exit if cleanup hangs
+			const forceExitTimer = setTimeout(() => {
+				console.error(`\nCleanup timed out after ${FORCE_EXIT_TIMEOUT_MS}ms, forcing exit`);
+				process.exit(128 + (signal === 'SIGINT' ? 2 : 15));
+			}, FORCE_EXIT_TIMEOUT_MS);
+
+			try {
+				await this.cleanupClient();
+			} catch {
+				// Ignore cleanup errors during signal handling
+			}
+
+			process.exit(128 + (signal === 'SIGINT' ? 2 : 15));
+		};
+
+		process.on('SIGINT', () => signalHandler('SIGINT'));
+		process.on('SIGTERM', () => signalHandler('SIGTERM'));
 	}
 
 	private createProgram(): Command {
@@ -1188,16 +1209,20 @@ export class RocketRideCLI {
 		}
 	}
 
+	private _cleanupPromise?: Promise<void>;
+
 	private async cleanupClient(): Promise<void> {
-		if (this.client) {
-			try {
-				await this.client.disconnect();
-			} catch {
-				// Ignore cleanup errors
-			} finally {
-				this.client = undefined;
-			}
+		if (this._cleanupPromise) {
+			return this._cleanupPromise;
 		}
+		const client = this.client;
+		if (!client) {
+			return;
+		}
+		this.client = undefined;
+		this._cleanupPromise = client.disconnect().catch(() => {});
+		await this._cleanupPromise;
+		this._cleanupPromise = undefined;
 	}
 
 	private loadPipelineConfig(pipelineFile: string): PipelineConfig {
