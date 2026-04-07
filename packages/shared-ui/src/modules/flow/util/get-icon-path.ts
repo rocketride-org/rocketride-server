@@ -108,6 +108,7 @@ import accessibilityDescribeIcon from '../../../assets/nodes/accessibility-descr
 import deepagentIcon from '../../../assets/nodes/deepagent.svg';
 import twelvelabsIcon from '../../../assets/nodes/twelvelabs.svg';
 import blandAiIcon from '../../../assets/nodes/bland-ai.svg';
+import githubIcon from '../../../assets/nodes/github.svg';
 
 /**
  * Static lookup table mapping icon names (without file extensions) to their
@@ -198,6 +199,7 @@ const iconMap: Record<string, string> = {
 	deepagent: deepagentIcon,
 	twelvelabs: twelvelabsIcon,
 	'bland-ai': blandAiIcon,
+	github: githubIcon,
 };
 
 /**
@@ -226,6 +228,7 @@ const THEME_DYNAMIC_ICONS: ReadonlySet<string> = new Set([
 	'http',
 	'mcp',
 	'memory',
+	'github',
 	// Agents
 	'langchain',
 	// Database
