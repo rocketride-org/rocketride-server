@@ -188,7 +188,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	const persistedAuthTokens = useRef<IAuthTokensRef>({});
 
 	// --- Context ------------------------------------------------------------
-	const { updateNode, onToolchainUpdated } = useFlowGraph();
+	const { updateNode, onContentUpdated } = useFlowGraph();
 	const { servicesJson, handleValidatePipeline, currentProject: _currentProject, googlePickerDeveloperKey, googlePickerClientId } = useFlowProject();
 	const { getPreference, setPreference } = useFlowPreferences();
 
@@ -257,7 +257,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		// If OAuth tokens are in the URL, persist to node and save immediately
 		const hasOAuthTokens = window.location.search.includes('tokens=');
 		if (hasOAuthTokens) {
-			persistOAuthTokensAndSave(node.id, enrichedConfig, updateNode, onToolchainUpdated).catch((err) => console.error('Error persisting OAuth tokens:', err));
+			persistOAuthTokensAndSave(node.id, enrichedConfig, updateNode, onContentUpdated).catch((err) => console.error('Error persisting OAuth tokens:', err));
 		} else if (enrichedConfig !== config) {
 			// OAuth helpers enriched the data — update node
 			updateNode(node.id, { config: enrichedConfig });
@@ -316,9 +316,9 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 			});
 		}
 		setIsDirty(false);
-		onToolchainUpdated();
+		onContentUpdated();
 		onClose();
-	}, [node.id, node.data.config, name, isAnnotation, annotationContent, bgColor, fgColor, updateNode, onToolchainUpdated, onClose]);
+	}, [node.id, node.data.config, name, isAnnotation, annotationContent, bgColor, fgColor, updateNode, onContentUpdated, onClose]);
 
 	// --- Save: full form with server validation ----------------------------
 	const onSubmit = useCallback(
@@ -372,7 +372,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 				// Success
 				setIsDirty(false);
 				clearSecureParamsFromUrl();
-				onToolchainUpdated();
+				onContentUpdated();
 				onClose();
 			} catch (e: unknown) {
 				setValidationError(e instanceof Error ? e.message : String(e));
@@ -380,7 +380,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 				setIsSubmitting(false);
 			}
 		},
-		[node.id, node.data.config, name, updateNode, handleValidatePipeline, clearSecureParamsFromUrl, onToolchainUpdated, onClose]
+		[node.id, node.data.config, name, updateNode, handleValidatePipeline, clearSecureParamsFromUrl, onContentUpdated, onClose]
 	);
 
 	// --- Resize logic -------------------------------------------------------

@@ -80,9 +80,9 @@ interface UseAutoLayoutReturn {
  * @param nodes    - Current canvas nodes.
  * @param edges    - Current canvas edges.
  * @param setNodes - ReactFlow node setter.
- * @param onToolchainUpdated - Callback to mark the project as dirty.
+ * @param onContentUpdated - Callback to mark the project as dirty.
  */
-export function useAutoLayout(nodes: FlowNode[], edges: Edge[], setNodes: React.Dispatch<React.SetStateAction<FlowNode[]>>, onToolchainUpdated: () => void): UseAutoLayoutReturn {
+export function useAutoLayout(nodes: FlowNode[], edges: Edge[], setNodes: React.Dispatch<React.SetStateAction<FlowNode[]>>, onContentUpdated: () => void): UseAutoLayoutReturn {
 	const [isLayouting, setIsLayouting] = useState(false);
 	const { fitView } = useReactFlow();
 
@@ -199,7 +199,7 @@ export function useAutoLayout(nodes: FlowNode[], edges: Edge[], setNodes: React.
 				})
 			);
 
-			onToolchainUpdated();
+			onContentUpdated();
 
 			// Fit the viewport to the new layout after React commits
 			requestAnimationFrame(() => {
@@ -208,7 +208,7 @@ export function useAutoLayout(nodes: FlowNode[], edges: Edge[], setNodes: React.
 		} finally {
 			setIsLayouting(false);
 		}
-	}, [nodes, edges, setNodes, onToolchainUpdated, fitView]);
+	}, [nodes, edges, setNodes, onContentUpdated, fitView]);
 
 	return { autoLayout, isLayouting };
 }

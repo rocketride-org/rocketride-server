@@ -74,18 +74,30 @@ export type TraceIncoming = { type: 'trace:event'; event: TraceEvent };
 
 export type TraceOutgoing = { type: 'trace:clear' };
 
-/** View state — per-view UI state (mode, flowViewMode). */
+/** View state — per-view UI state (mode, flowViewMode, viewport). */
 export interface ViewState {
 	mode: ProjectViewMode;
 	flowViewMode?: 'pipeline' | 'component';
+	viewport?: { x: number; y: number; zoom: number };
 }
 
 // =============================================================================
 // MESSAGE PROTOCOL — COMPOSED
 // =============================================================================
 
+/** Combined load message — sets all state atomically for a document switch. */
+export interface ProjectLoadMessage {
+	type: 'project:load';
+	project: any;
+	viewState: ViewState;
+	prefs: Record<string, unknown>;
+	services: Record<string, any>;
+	isConnected: boolean;
+	statuses?: Record<string, TaskStatus>;
+}
+
 /** All messages the host can send to ProjectView. */
-export type ProjectViewIncoming = CanvasIncoming | StatusIncoming | TraceIncoming | { type: 'project:connectionState'; isConnected: boolean } | { type: 'project:initialState'; state: ViewState } | { type: 'project:initialPrefs'; prefs: Record<string, unknown> } | { type: 'project:themeChange'; tokens: Record<string, string> };
+export type ProjectViewIncoming = CanvasIncoming | StatusIncoming | TraceIncoming | ProjectLoadMessage | { type: 'project:connectionState'; isConnected: boolean } | { type: 'project:initialState'; state: ViewState } | { type: 'project:initialPrefs'; prefs: Record<string, unknown> } | { type: 'project:themeChange'; tokens: Record<string, string> };
 
 /** All messages ProjectView can send to the host. */
 export type ProjectViewOutgoing = CanvasOutgoing | StatusOutgoing | TraceOutgoing | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:requestSave' };

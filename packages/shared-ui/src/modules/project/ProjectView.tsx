@@ -117,8 +117,21 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	useImperativeHandle(ref, () => ({
 		handleMessage(msg: ProjectViewIncoming) {
-			console.log('[ProjectView] RECV:', msg.type);
 			switch (msg.type) {
+				case 'project:load':
+					// Atomic load — sets all state in one React batch
+					setProject(msg.project);
+					setServicesJson(msg.services);
+					setIsConnected(msg.isConnected);
+					setStatusMap(msg.statuses ?? {});
+					setViewState({
+						mode: msg.viewState?.mode ?? 'design',
+						flowViewMode: msg.viewState?.flowViewMode ?? 'pipeline',
+						viewport: msg.viewState?.viewport,
+					});
+					setPrefs(msg.prefs ?? {});
+					setTraceEvents([]);
+					break;
 				case 'canvas:update':
 					setProject(msg.project);
 					break;
@@ -147,13 +160,13 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 					setViewState({
 						mode: msg.state?.mode ?? 'design',
 						flowViewMode: msg.state?.flowViewMode ?? 'pipeline',
+						viewport: msg.state?.viewport,
 					});
 					break;
 				case 'project:initialPrefs':
 					setPrefs(msg.prefs ?? {});
 					break;
 				case 'project:themeChange':
-					// Handled by CSS in VSCode; rocket-ui applies via applyTheme before rendering
 					break;
 			}
 		},
@@ -301,13 +314,18 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	// --- Wait for viewState before building any UI --------------------------
 
-	console.log('[ProjectView] RENDER mode=%s project=%s', viewState?.mode ?? 'null', project ? 'yes' : 'null');
-
 	if (!viewState || !prefs) return null;
+
+	// Inject saved viewport from viewState into the project for Canvas to restore
+	const projectForCanvas = project && viewState.viewport ? { ...project, viewport: viewState.viewport } : project;
+
+	const handleViewportChange = (viewport: { x: number; y: number; zoom: number }) => {
+		updateViewState({ viewport });
+	};
 
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} />}</div>,
+			content: <div style={styles.canvasPadding}>{projectForCanvas && <Canvas oauth2RootUrl="" project={projectForCanvas} servicesJson={servicesJson} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} />}</div>,
 		},
 		status: {
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} onPipelineAction={handlePipelineAction} />) : <div style={styles.empty}>No source components found</div>}</div>,

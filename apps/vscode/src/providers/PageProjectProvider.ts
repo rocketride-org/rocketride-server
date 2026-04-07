@@ -29,6 +29,7 @@ import { PipelineFileParser } from '../shared/util/pipelineParser';
 // =============================================================================
 
 const PREFS_KEY = 'rocketride.prefs';
+const LAYOUTS_KEY = 'rocketride.layouts';
 
 // =============================================================================
 // TYPES
@@ -315,35 +316,35 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 			switch (data.type) {
 				case 'ready': {
 					editorState.isReady = true;
-					console.log('[PageProjectProvider] READY received');
 
-					// Send viewState FIRST (VS Code always starts on Design)
-					console.log('[PageProjectProvider] SEND: project:initialState');
-					webview.postMessage({ type: 'project:initialState', state: { mode: 'design' } });
-
-					// Send global prefs
-					const storedPrefs = this.context.workspaceState.get<Record<string, unknown>>(PREFS_KEY) ?? {};
-					console.log('[PageProjectProvider] SEND: project:initialPrefs');
-					webview.postMessage({ type: 'project:initialPrefs', prefs: storedPrefs });
-
-					// Send cached services
-					const cached = this.connectionManager.getCachedServices();
-					console.log('[PageProjectProvider] SEND: canvas:services');
-					webview.postMessage({ type: 'canvas:services', services: cached.services });
-
-					// Send connection state
-					console.log('[PageProjectProvider] SEND: project:connectionState');
-					webview.postMessage({ type: 'project:connectionState', isConnected: this.connectionManager.isConnected() });
-
-					// Send cached status updates
-					for (const [_source, taskStatus] of Object.entries(editorState.cachedStatuses)) {
-						console.log(`[PageProjectProvider] SEND: status:update (${_source})`);
-						webview.postMessage({ type: 'status:update', taskStatus });
+					// Build project from document
+					const text = document.getText();
+					const parsed = PipelineFileParser.parseContent(text, document.uri.fsPath);
+					let project: Record<string, unknown> | undefined;
+					if (parsed.isValid) {
+						try {
+							project = JSON.parse(this.enrichComponentNames(text));
+						} catch {
+							/* invalid JSON */
+						}
 					}
 
-					// Send document content LAST — this triggers the first render
-					console.log('[PageProjectProvider] SEND: canvas:update');
-					this.sendCanvasUpdate(webview, document);
+					// Load layout defaults + prefs
+					const layouts = this.context.workspaceState.get<Record<string, Record<string, unknown>>>(LAYOUTS_KEY) ?? {};
+					const layout = layouts[document.uri.toString()] ?? {};
+					const storedPrefs = this.context.workspaceState.get<Record<string, unknown>>(PREFS_KEY) ?? {};
+					const cached = this.connectionManager.getCachedServices();
+
+					// Send everything in one message
+					webview.postMessage({
+						type: 'project:load',
+						project,
+						viewState: { mode: 'design', ...layout },
+						prefs: storedPrefs,
+						services: cached.services,
+						isConnected: this.connectionManager.isConnected(),
+						statuses: editorState.cachedStatuses,
+					});
 
 					// Kick off background services refresh
 					this.connectionManager.refreshServices().catch((err) => {
@@ -423,8 +424,17 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 					break;
 
 				// View state change — not persisted in VS Code
-				case 'project:viewStateChange':
+				case 'project:viewStateChange': {
+					// Update layouts (per-document defaults for future opens)
+					if (data.viewState) {
+						const allLayouts = this.context.workspaceState.get<Record<string, unknown>>(LAYOUTS_KEY) ?? {};
+						allLayouts[document.uri.toString()] = data.viewState;
+						this.context.workspaceState.update(LAYOUTS_KEY, allLayouts).then(undefined, (err: unknown) => {
+							this.logger.error(`Failed to persist layout: ${err}`);
+						});
+					}
 					break;
+				}
 
 				// Prefs change — persist globally
 				case 'project:prefsChange': {
@@ -529,6 +539,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 		if (normalizedNew === normalizedCurrent) {
 			return { changed: false, applied: false };
 		}
+
 		const edit = new vscode.WorkspaceEdit();
 		const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(currentText.length));
 		edit.replace(document.uri, fullRange, normalizedNew);

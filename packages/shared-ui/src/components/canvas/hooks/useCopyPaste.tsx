@@ -105,7 +105,7 @@ export function useCopy() {
  * @returns A memoized callback that pastes clipboard contents.
  */
 export function usePaste() {
-	const { nodes, setNodes, setEdges, onToolchainUpdated } = useFlow();
+	const { nodes, setNodes, setEdges, onContentUpdated } = useFlow();
 
 	const paste = useCallback(() => {
 		if (!clipboardRef.current) return;
@@ -154,8 +154,8 @@ export function usePaste() {
 		// Deselect existing, append pasted (pre-selected)
 		setNodes((current) => [...current.map((n) => ({ ...n, selected: false })), ...newNodes]);
 		setEdges((current: Edge[]) => [...current, ...newEdges]);
-		onToolchainUpdated();
-	}, [nodes, setNodes, setEdges, onToolchainUpdated]);
+		onContentUpdated();
+	}, [nodes, setNodes, setEdges, onContentUpdated]);
 
 	return paste;
 }

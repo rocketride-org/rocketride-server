@@ -310,10 +310,6 @@ export const getComponentFromNode = (node: INode): IProjectComponent => {
 		config: data.config ?? {},
 		ui: {
 			position: { x: node.position.x, y: node.position.y },
-			measured: {
-				width: node.measured?.width ?? 150,
-				height: node.measured?.height ?? 36,
-			},
 			nodeType: (node.type as INodeType) ?? INodeType.Default,
 			formDataValid: data.formDataValid !== false,
 			parentId: node.parentId,

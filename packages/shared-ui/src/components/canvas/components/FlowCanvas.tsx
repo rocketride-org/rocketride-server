@@ -112,7 +112,7 @@ const DEFAULT_ZOOM = 0.75;
  */
 export default function Canvas(): ReactElement {
 	// --- Graph state from context ------------------------------------------
-	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onToolchainUpdated, isFlowReady } = useFlowGraph();
+	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onContentUpdated, isFlowReady } = useFlowGraph();
 
 	// --- Preferences from context ------------------------------------------
 	const { navigationMode, setNavigationMode, isLocked, toggleLock, projectLayout, getPreference, setPreference } = useFlowPreferences();
@@ -126,11 +126,11 @@ export default function Canvas(): ReactElement {
 		[setPreference]
 	);
 
-	const { features, onUndo, onRedo } = useFlowProject();
+	const { features, onUndo, onRedo, onViewportChange } = useFlowProject();
 	const { fitView, zoomIn, zoomOut } = useReactFlow();
 
 	// --- Auto-layout -------------------------------------------------------
-	const { autoLayout, isLayouting } = useAutoLayout(nodes, edges, setNodes, onToolchainUpdated);
+	const { autoLayout, isLayouting } = useAutoLayout(nodes, edges, setNodes, onContentUpdated);
 
 	// --- Template instantiation (must live here, not in the dialog) ---------
 	const { instantiateTemplate: rawInstantiateTemplate, requestFitView } = useTemplateInstantiator();
@@ -293,7 +293,7 @@ export default function Canvas(): ReactElement {
 				onDragOver={onDragOver}
 				onDrop={onDrop}
 				onNodeDragStop={onNodeDragStop}
-				onMoveEnd={() => onToolchainUpdated()}
+				onMoveEnd={(_event, viewport) => onViewportChange?.(viewport)}
 				/* Navigation mode: pan on drag vs lasso-select on drag */
 				selectionMode={SelectionMode.Partial}
 				panOnScroll={!isPanMode}

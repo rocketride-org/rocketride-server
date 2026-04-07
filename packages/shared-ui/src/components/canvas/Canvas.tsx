@@ -88,6 +88,9 @@ export interface IFlowProps {
 	/** Called when pipeline content changes (dirty tracking). */
 	onContentChanged?: (project: IProject) => void;
 
+	/** Called when viewport changes (pan/zoom) — persisted per-view, not in document. */
+	onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void;
+
 	/** Host-provided undo callback. */
 	onUndo?: () => void;
 
@@ -114,7 +117,7 @@ export interface IFlowProps {
 // Component
 // =============================================================================
 
-export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected }: IFlowProps) {
+export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected }: IFlowProps) {
 	// --- Build inventory from service catalog --------------------------------
 	const inventory = buildInventory(servicesJson);
 
@@ -139,9 +142,7 @@ export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuse
 	// Rebuild MUI theme from --rr-* CSS custom properties
 	const currentTheme = useMemo(() => getMuiTheme(), [themeVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
-	// Sync --icon-filter on <body> whenever the theme changes.
-	// Kept as a side effect here (not inside getMuiTheme) so the theme
-	// function stays pure and safe to call from useMemo.
+	// Sync --icon-filter on <body> whenever the theme changes
 	useEffect(() => {
 		const iconFilter = currentTheme.palette.mode === 'dark' ? 'brightness(0) invert(1)' : 'none';
 		document.body.style.setProperty('--icon-filter', iconFilter);
@@ -174,6 +175,7 @@ export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuse
 					getPreference={getPreference}
 					setPreference={setPreference}
 					onContentChanged={onContentChanged}
+					onViewportChange={onViewportChange}
 					onUndo={onUndo}
 					onRedo={onRedo}
 					onRunPipeline={onRunPipeline}

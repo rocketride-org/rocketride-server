@@ -107,6 +107,9 @@ export interface IFlowProjectContext {
 	/** Notifies the host that the project content has changed (for dirty tracking). */
 	onContentChanged?: (project: IProject) => void;
 
+	/** Notifies the host that the viewport has changed (persisted per-view). */
+	onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void;
+
 	/** Host-provided undo callback. */
 	onUndo?: () => void;
 
@@ -174,6 +177,7 @@ export interface IFlowProjectProviderProps {
 	// --- Host callbacks ----------------------------------------------------
 	handleValidatePipeline?: (pipeline: IProject) => Promise<IValidateResponse>;
 	onContentChanged?: (project: IProject) => void;
+	onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void;
 	onUndo?: () => void;
 	onRedo?: () => void;
 	oauth2RootUrl: string;
@@ -200,7 +204,7 @@ export interface IFlowProjectProviderProps {
  * The host application passes props that are tunneled through this context
  * so deeply nested components can access them without prop drilling.
  */
-export function FlowProjectProvider({ children, project: currentProject, features = DEFAULT_FLOW_FEATURES, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected }: IFlowProjectProviderProps): ReactElement {
+export function FlowProjectProvider({ children, project: currentProject, features = DEFAULT_FLOW_FEATURES, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected }: IFlowProjectProviderProps): ReactElement {
 	// --- Toolchain state ---------------------------------------------------
 
 	const [toolchainState, setToolchainState] = useState<IToolchainState>(DEFAULT_TOOLCHAIN_STATE);
@@ -239,6 +243,7 @@ export function FlowProjectProvider({ children, project: currentProject, feature
 		inventoryConnectorTitleMap,
 		handleValidatePipeline,
 		onContentChanged,
+		onViewportChange,
 		onUndo,
 		onRedo,
 		oauth2RootUrl,
