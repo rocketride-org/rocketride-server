@@ -13,13 +13,17 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": ["guard"],
+	"classType": [
+		"guard"
+	],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [],
+	"capabilities": [
+		"experimental"
+	],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -47,7 +51,14 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A comprehensive input/output guardrails filter for AI safety. ", "Checks questions before they reach the LLM (prompt injection, topic restriction, ", "input length) and checks answers after the LLM responds (hallucination detection, ", "content safety, PII leak detection, format compliance).</br>", "</br>", "<b>Policy modes</b>: block (reject violations), warn (log and continue), log (silent logging)."],
+	"description": [
+		"A comprehensive input/output guardrails filter for AI safety. ",
+		"Checks questions before they reach the LLM (prompt injection, topic restriction, ",
+		"input length) and checks answers after the LLM responds (hallucination detection, ",
+		"content safety, PII leak detection, format compliance).</br>",
+		"</br>",
+		"<b>Policy modes</b>: block (reject violations), warn (log and continue), log (silent logging)."
+	],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -64,9 +75,15 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"questions": ["questions"],
-		"answers": ["answers"],
-		"documents": ["documents"]
+		"questions": [
+			"questions"
+		],
+		"answers": [
+			"answers"
+		],
+		"documents": [
+			"documents"
+		]
 	},
 	"input": [
 		{
@@ -107,11 +124,17 @@
 	//	Test configuration for automated node testing
 	//
 	"test": {
-		"profiles": ["basic"],
+		"profiles": [
+			"basic"
+		],
 		"cases": [
 			{
 				"questions": {
-					"questions": [{ "text": "What is the weather today?" }]
+					"questions": [
+						{
+							"text": "What is the weather today?"
+						}
+					]
 				},
 				"expect": {
 					"questions": {
@@ -183,9 +206,18 @@
 			"description": "How to handle violations: block (reject), warn (log + continue), log (silent)",
 			"default": "warn",
 			"enum": [
-				["block", "Block — Reject on violation"],
-				["warn", "Warn — Log and continue"],
-				["log", "Log — Silent logging only"]
+				[
+					"block",
+					"Block — Reject on violation"
+				],
+				[
+					"warn",
+					"Warn — Log and continue"
+				],
+				[
+					"log",
+					"Log — Silent logging only"
+				]
 			]
 		},
 		"enable_prompt_injection": {
@@ -230,11 +262,26 @@
 			"description": "Validate that output matches this format (empty = no check)",
 			"default": "",
 			"enum": [
-				["", "None — No format check"],
-				["json", "JSON"],
-				["markdown", "Markdown"],
-				["bullet_list", "Bullet list"],
-				["numbered_list", "Numbered list"]
+				[
+					"",
+					"None — No format check"
+				],
+				[
+					"json",
+					"JSON"
+				],
+				[
+					"markdown",
+					"Markdown"
+				],
+				[
+					"bullet_list",
+					"Bullet list"
+				],
+				[
+					"numbered_list",
+					"Numbered list"
+				]
 			]
 		},
 		"blocked_topics": {
@@ -255,34 +302,59 @@
 		},
 		"guardrails.custom": {
 			"object": "custom",
-			"properties": ["policy_mode", "enable_prompt_injection", "enable_content_safety", "enable_pii_detection", "enable_hallucination_check", "max_input_length", "max_tokens_estimate", "expected_format", "blocked_topics", "allowed_topics"]
+			"properties": [
+				"policy_mode",
+				"enable_prompt_injection",
+				"enable_content_safety",
+				"enable_pii_detection",
+				"enable_hallucination_check",
+				"max_input_length",
+				"max_tokens_estimate",
+				"expected_format",
+				"blocked_topics",
+				"allowed_topics"
+			]
 		},
 		"guardrails.basic": {
 			"object": "basic",
-			"properties": ["policy_mode"]
+			"properties": [
+				"policy_mode"
+			]
 		},
 		"guardrails.strict": {
 			"object": "strict",
-			"properties": ["policy_mode", "max_tokens_estimate", "expected_format"]
+			"properties": [
+				"policy_mode",
+				"max_tokens_estimate",
+				"expected_format"
+			]
 		},
 		"guardrails.profile": {
 			"title": "Profile",
 			"description": "Guardrails profile",
 			"type": "string",
 			"default": "basic",
-			"enum": ["*>preconfig.profiles.*.title"],
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
 			"conditional": [
 				{
 					"value": "basic",
-					"properties": ["guardrails.basic"]
+					"properties": [
+						"guardrails.basic"
+					]
 				},
 				{
 					"value": "strict",
-					"properties": ["guardrails.strict"]
+					"properties": [
+						"guardrails.strict"
+					]
 				},
 				{
 					"value": "custom",
-					"properties": ["guardrails.custom"]
+					"properties": [
+						"guardrails.custom"
+					]
 				}
 			]
 		}
@@ -296,7 +368,9 @@
 		{
 			"section": "Pipe",
 			"title": "Guardrails",
-			"properties": ["guardrails.profile"]
+			"properties": [
+				"guardrails.profile"
+			]
 		}
 	]
 }
