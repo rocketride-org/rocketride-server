@@ -1,7 +1,7 @@
 {
 	"title": "CrewAI",
 	"protocol": "agent_crewai://",
-	"classType": ["agent", "tool"],
+	"classType": ["agent", "tool", "crewai"],
 	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
@@ -34,7 +34,13 @@
 		"profiles": {
 			"default": {
 				"agent_description": "",
-				"instructions": []
+				"instructions": [],
+				"advanced_mode": false,
+				"role": "Assistant",
+				"task_description": "",
+				"goal": "",
+				"backstory": "",
+				"expected_output": ""
 			}
 		}
 	},
@@ -58,20 +64,71 @@
 				"format": "textarea"
 			}
 		},
-		"agent_crewai.default": { "object": "default", "properties": ["agent_description", "instructions"] },
-		"agent_crewai.profile": {
-			"title": "Profile",
+		"advanced_mode": {
+			"type": "boolean",
+			"title": "Advanced Mode",
+			"description": "Expose CrewAI Agent and Task configuration directly.",
+			"default": false,
+			"enum": [
+				[false, "Off"],
+				[true, "On"]
+			],
+			"conditional": [
+				{
+					"value": true,
+					"properties": ["agent_crewai.agent_config_header", "role", "goal", "backstory", "agent_crewai.task_config_header", "task_description", "expected_output"]
+				}
+			]
+		},
+		"agent_crewai.agent_config_header": {
+			"type": "null",
+			"title": "Agent Config",
+			"default": null
+		},
+		"role": {
 			"type": "string",
-			"default": "default",
-			"enum": [["default", "Default"]],
-			"conditional": [{ "value": "default", "properties": ["agent_crewai.default"] }]
+			"title": "Role",
+			"description": "Agent role name (e.g. 'Financial Analyst'). Maps to CrewAI Agent(role=...)."
+		},
+		"goal": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Goal",
+			"description": "What this agent is trying to achieve. Maps to CrewAI Agent(goal=...)."
+		},
+		"backstory": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Backstory",
+			"description": "Background context for this agent's persona. Maps to CrewAI Agent(backstory=...)."
+		},
+		"agent_crewai.task_config_header": {
+			"type": "null",
+			"title": "Task Config",
+			"default": null
+		},
+		"task_description": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Task",
+			"description": "What this agent should do. If blank, the incoming question is used. Maps to CrewAI Task(description=...)."
+		},
+		"expected_output": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Expected Output",
+			"description": "Description of the expected output format. Maps to CrewAI Task(expected_output=...)."
+		},
+		"agent_crewai.default": {
+			"object": "default",
+			"properties": ["agent_description", "instructions", "advanced_mode"]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "CrewAI",
-			"properties": ["agent_description", "instructions"]
+			"properties": ["agent_crewai.default"]
 		}
 	]
 }
