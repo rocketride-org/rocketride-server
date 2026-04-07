@@ -14,7 +14,7 @@
  * pane per source (sorted A→Z by name).
  */
 
-import React, { useState, useCallback, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, CSSProperties } from 'react';
+import React, { useState, useCallback, useRef, useMemo, useImperativeHandle, forwardRef, CSSProperties } from 'react';
 
 // Theme CSS — defines --rr-* tokens in the iframe/webview context
 import '../../themes/rocketride-default.css';
@@ -31,7 +31,7 @@ import Trace from '../../components/trace/Trace';
 import Errors from '../../components/errors/Errors';
 import { commonStyles } from '../../themes/styles';
 import { ITaskState } from '../../types/project';
-import type { IProjectViewProps, ProjectViewRef, ProjectViewMode, ProjectViewIncoming, ProjectViewOutgoing, TaskStatus, TraceEvent } from './types';
+import type { IProjectViewProps, ProjectViewRef, ProjectViewMode, ViewState, ProjectViewIncoming, ProjectViewOutgoing, TaskStatus, TraceEvent } from './types';
 
 // =============================================================================
 // STYLES
@@ -80,12 +80,6 @@ const styles = {
 // TYPES
 // =============================================================================
 
-interface ProjectViewState {
-	mode: ProjectViewMode;
-	flowViewMode?: 'pipeline' | 'component';
-	preferences?: Record<string, unknown>;
-}
-
 interface SourceInfo {
 	id: string;
 	name: string;
@@ -113,7 +107,8 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	const [isConnected, setIsConnected] = useState(false);
 	const [statusMap, setStatusMap] = useState<Record<string, TaskStatus>>({});
 	const [traceEvents, setTraceEvents] = useState<TraceEvent[]>([]);
-	const [initialState, setInitialState] = useState<Record<string, unknown> | undefined>(undefined);
+	const [viewState, setViewState] = useState<ViewState | null>(null);
+	const [prefs, setPrefs] = useState<Record<string, unknown> | null>(null);
 
 	// Pending validate requests
 	const pendingValidates = useRef<Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>>(new Map());
@@ -122,6 +117,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	useImperativeHandle(ref, () => ({
 		handleMessage(msg: ProjectViewIncoming) {
+			console.log('[ProjectView] RECV:', msg.type);
 			switch (msg.type) {
 				case 'canvas:update':
 					setProject(msg.project);
@@ -148,7 +144,13 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 					setIsConnected(msg.isConnected);
 					break;
 				case 'project:initialState':
-					setInitialState(msg.state);
+					setViewState({
+						mode: msg.state?.mode ?? 'design',
+						flowViewMode: msg.state?.flowViewMode ?? 'pipeline',
+					});
+					break;
+				case 'project:initialPrefs':
+					setPrefs(msg.prefs ?? {});
 					break;
 				case 'project:themeChange':
 					// Handled by CSS in VSCode; rocket-ui applies via applyTheme before rendering
@@ -181,51 +183,31 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 			.sort((a, b) => a.name.localeCompare(b.name));
 	}, [project]);
 
-	// --- View state -----------------------------------------------------------
-
-	const [mode, setMode] = useState<ProjectViewMode>('design');
-	const [flowViewMode, setFlowViewMode] = useState<'pipeline' | 'component'>('pipeline');
-
-	// --- Canvas preferences (toolbar position, etc.) — persisted in workspace state
-	const prefsRef = useRef<Record<string, unknown>>({});
-	const [prefsVersion, setPrefsVersion] = useState(0);
-
-	const getPreference = useCallback((key: string) => prefsRef.current[key], []);
-	const setPreference = useCallback((key: string, value: unknown) => {
-		prefsRef.current = { ...prefsRef.current, [key]: value };
-		setPrefsVersion((v) => v + 1);
-	}, []);
-
-	// Restore view state when initialState arrives (it comes via postMessage after mount)
-	const restoredRef = useRef(false);
-	useEffect(() => {
-		if (!initialState || restoredRef.current) return;
-		restoredRef.current = true;
-		const saved = initialState as ProjectViewState;
-		if (saved.mode) setMode(saved.mode);
-		if (saved.flowViewMode) setFlowViewMode(saved.flowViewMode);
-		if (saved.preferences) {
-			prefsRef.current = saved.preferences;
-			setPrefsVersion((v) => v + 1);
-		}
-	}, [initialState]);
-
-	const { rows: traceRows, clearTrace } = useTraceState(traceEvents);
-	const activeStatus = useMemo(() => pickActiveStatus(statusMap), [statusMap]);
-
-	// --- Persist view state --------------------------------------------------
+	// --- View state + preferences (separate concerns) -----------------------
 
 	const onMessageRef = useRef(onMessage);
 	onMessageRef.current = onMessage;
 
-	const skipFirstPersist = useRef(true);
-	useEffect(() => {
-		if (skipFirstPersist.current) {
-			skipFirstPersist.current = false;
-			return;
-		}
-		onMessageRef.current?.({ type: 'project:stateChange', state: { mode, flowViewMode, preferences: prefsRef.current } });
-	}, [mode, flowViewMode, prefsVersion]);
+	const updateViewState = useCallback((patch: Partial<ViewState>) => {
+		setViewState((prev) => {
+			if (!prev) return prev;
+			const next = { ...prev, ...patch };
+			onMessageRef.current?.({ type: 'project:viewStateChange', viewState: next });
+			return next;
+		});
+	}, []);
+
+	const getPreference = useCallback((key: string) => prefs?.[key], [prefs]);
+	const setPreference = useCallback((key: string, value: unknown) => {
+		setPrefs((prev) => {
+			const next = { ...prev, [key]: value };
+			onMessageRef.current?.({ type: 'project:prefsChange', prefs: next });
+			return next;
+		});
+	}, []);
+
+	const { rows: traceRows, clearTrace } = useTraceState(traceEvents);
+	const activeStatus = useMemo(() => pickActiveStatus(statusMap), [statusMap]);
 
 	// --- Validate callback for Canvas ----------------------------------------
 
@@ -249,9 +231,12 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	// --- Mode switch ---------------------------------------------------------
 
-	const handleModeChange = useCallback((id: string) => {
-		setMode(id as ProjectViewMode);
-	}, []);
+	const handleModeChange = useCallback(
+		(id: string) => {
+			updateViewState({ mode: id as ProjectViewMode });
+		},
+		[updateViewState]
+	);
 
 	// --- Canvas callbacks ----------------------------------------------------
 
@@ -314,6 +299,12 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 		[send]
 	);
 
+	// --- Wait for viewState before building any UI --------------------------
+
+	console.log('[ProjectView] RENDER mode=%s project=%s', viewState?.mode ?? 'null', project ? 'yes' : 'null');
+
+	if (!viewState || !prefs) return null;
+
 	const panels = {
 		design: {
 			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} />}</div>,
@@ -322,12 +313,16 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} onPipelineAction={handlePipelineAction} />) : <div style={styles.empty}>No source components found</div>}</div>,
 		},
 		tokens: {
-			content: <div style={commonStyles.tabContent}>{activeStatus?.tokens ? <Tokens taskStatus={activeStatus} /> : <div style={styles.empty}>No token data available</div>}</div>,
+			content: (
+				<div style={commonStyles.tabContent}>
+					<Tokens statusMap={statusMap} sources={sources} />
+				</div>
+			),
 		},
 		flow: {
 			content: (
 				<div style={commonStyles.tabContent}>
-					<Flow taskStatus={activeStatus} viewMode={flowViewMode} onViewModeChange={setFlowViewMode} />
+					<Flow taskStatus={activeStatus} viewMode={viewState.flowViewMode ?? 'pipeline'} onViewModeChange={(vm) => updateViewState({ flowViewMode: vm })} />
 				</div>
 			),
 		},
@@ -363,7 +358,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	return (
 		<div style={styles.container}>
-			<TabPanel tabs={tabs} activeTab={mode} onTabChange={handleModeChange} panels={panels} />
+			<TabPanel tabs={tabs} activeTab={viewState.mode} onTabChange={handleModeChange} panels={panels} />
 		</div>
 	);
 });

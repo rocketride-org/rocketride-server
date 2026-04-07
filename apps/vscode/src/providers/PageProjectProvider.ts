@@ -16,10 +16,10 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { TaskStatus, GenericEvent, GenericResponse, ConnectionState } from '../shared/types';
+import { TaskStatus, GenericEvent, ConnectionState } from '../shared/types';
 import { ConnectionManager } from '../connection/connection';
-import { MonitorManager } from '../connection/monitor-manager';
 import { ConfigManager } from '../config';
+import type { PipelineConfig } from 'rocketride';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { PipelineFileParser } from '../shared/util/pipelineParser';
@@ -28,7 +28,7 @@ import { PipelineFileParser } from '../shared/util/pipelineParser';
 // CONSTANTS
 // =============================================================================
 
-const CANVAS_PREFERENCES_KEY = 'canvasPreferences';
+const PREFS_KEY = 'rocketride.prefs';
 
 // =============================================================================
 // TYPES
@@ -198,7 +198,9 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 		}
 
 		try {
-			await MonitorManager.getInstance().addMonitor({ projectId: editorState.projectId, source: '*' }, ['summary', 'flow']);
+			const client = this.connectionManager.getClient();
+			if (!client) throw new Error('No client available');
+			await client.addMonitor({ projectId: editorState.projectId, source: '*' }, ['summary', 'flow']);
 			editorState.isMonitoring = true;
 		} catch (error) {
 			this.logger.error(`Starting monitoring for project ${editorState.projectId}: ${error}`);
@@ -211,7 +213,8 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 		if (!editorState || !editorState.projectId) return;
 
 		try {
-			await MonitorManager.getInstance().removeMonitor({ projectId: editorState.projectId, source: '*' }, ['summary', 'flow']);
+			const client = this.connectionManager.getClient();
+			if (client) await client.removeMonitor({ projectId: editorState.projectId, source: '*' }, ['summary', 'flow']);
 		} catch (error) {
 			this.logger.error(`Stopping monitoring for project ${editorState.projectId}: ${error}`);
 		}
@@ -312,38 +315,40 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 			switch (data.type) {
 				case 'ready': {
 					editorState.isReady = true;
+					console.log('[PageProjectProvider] READY received');
 
-					// Send initial document content
-					this.sendCanvasUpdate(webview, document);
+					// Send viewState FIRST (VS Code always starts on Design)
+					console.log('[PageProjectProvider] SEND: project:initialState');
+					webview.postMessage({ type: 'project:initialState', state: { mode: 'design' } });
+
+					// Send global prefs
+					const storedPrefs = this.context.workspaceState.get<Record<string, unknown>>(PREFS_KEY) ?? {};
+					console.log('[PageProjectProvider] SEND: project:initialPrefs');
+					webview.postMessage({ type: 'project:initialPrefs', prefs: storedPrefs });
 
 					// Send cached services
 					const cached = this.connectionManager.getCachedServices();
-					webview.postMessage({
-						type: 'canvas:services',
-						services: cached.services,
-					});
+					console.log('[PageProjectProvider] SEND: canvas:services');
+					webview.postMessage({ type: 'canvas:services', services: cached.services });
 
-					// Kick off background refresh
+					// Send connection state
+					console.log('[PageProjectProvider] SEND: project:connectionState');
+					webview.postMessage({ type: 'project:connectionState', isConnected: this.connectionManager.isConnected() });
+
+					// Send cached status updates
+					for (const [_source, taskStatus] of Object.entries(editorState.cachedStatuses)) {
+						console.log(`[PageProjectProvider] SEND: status:update (${_source})`);
+						webview.postMessage({ type: 'status:update', taskStatus });
+					}
+
+					// Send document content LAST — this triggers the first render
+					console.log('[PageProjectProvider] SEND: canvas:update');
+					this.sendCanvasUpdate(webview, document);
+
+					// Kick off background services refresh
 					this.connectionManager.refreshServices().catch((err) => {
 						this.logger.error(`Background services refresh failed: ${err}`);
 					});
-
-					// Send persisted view state (includes canvas preferences)
-					const storedPrefs = this.context.workspaceState.get<Record<string, unknown>>(CANVAS_PREFERENCES_KEY) ?? {};
-					if (Object.keys(storedPrefs).length > 0) {
-						webview.postMessage({ type: 'project:initialState', state: storedPrefs });
-					}
-
-					// Send all cached status updates
-					for (const [_source, taskStatus] of Object.entries(editorState.cachedStatuses)) {
-						webview.postMessage({
-							type: 'status:update',
-							taskStatus,
-						});
-					}
-
-					// Send initial connection state
-					webview.postMessage({ type: 'project:connectionState', isConnected: this.connectionManager.isConnected() });
 
 					// Start monitoring
 					if (!editorState.isMonitoring) {
@@ -367,11 +372,10 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 
 				case 'canvas:validate': {
 					this.logger.output(`${icons.pipeline} Validating pipeline...`);
-					const pipeline = ConfigManager.getInstance().substituteEnvVariables(data.pipeline);
 					try {
 						const client = this.connectionManager.getClient();
 						if (!client) throw new Error('Not connected to server');
-						const result = await client.validate({ pipeline });
+						const result = await client.validate({ pipeline: data.pipeline });
 						this.logger.output(`${icons.success} Pipeline validation passed`);
 						webview.postMessage({ type: 'canvas:validateResponse', requestId: data.requestId, result });
 					} catch (error) {
@@ -418,11 +422,15 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 					// No-op on host side
 					break;
 
-				// Project state
-				case 'project:stateChange': {
-					if (data.state) {
-						this.context.workspaceState.update(CANVAS_PREFERENCES_KEY, data.state).then(undefined, (err: unknown) => {
-							this.logger.error(`Failed to persist view state: ${err}`);
+				// View state change — not persisted in VS Code
+				case 'project:viewStateChange':
+					break;
+
+				// Prefs change — persist globally
+				case 'project:prefsChange': {
+					if (data.prefs) {
+						this.context.workspaceState.update(PREFS_KEY, data.prefs).then(undefined, (err: unknown) => {
+							this.logger.error(`Failed to persist prefs: ${err}`);
 						});
 					}
 					break;
@@ -447,9 +455,6 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 			this.editorStates.delete(document.uri.toString());
 			changeDocumentSubscription.dispose();
 		});
-
-		// Send initial content
-		this.sendCanvasUpdate(webview, document);
 
 		// Start monitoring immediately if connected
 		if (this.connectionManager.isConnected()) {
@@ -558,20 +563,19 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 	// PIPELINE EXECUTION
 	// =========================================================================
 
-	private async runPipeline(document: { pipeline: Record<string, unknown> }, name?: string): Promise<void> {
+	private async runPipeline(document: { pipeline: PipelineConfig }, name?: string): Promise<void> {
 		try {
-			const project = document.pipeline;
-			const projectTransformed = ConfigManager.getInstance().substituteEnvVariables(project);
-			const projectId = project.project_id;
-			const source = project.source;
+			const client = this.connectionManager.getClient();
+			if (!client) throw new Error('Not connected to server');
 
-			await this.connectionManager.request('execute', {
-				projectId,
-				source,
-				pipeline: projectTransformed,
+			const project = document.pipeline;
+
+			await client.use({
+				pipeline: project,
+				source: project.source,
 				pipelineTraceLevel: 'full',
 				args: ConfigManager.getInstance().getEffectiveEngineArgs(),
-				...(name ? { name } : {}),
+				name,
 			});
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -581,6 +585,9 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 
 	private async stopPipeline(componentId: string, document: vscode.TextDocument): Promise<void> {
 		try {
+			const client = this.connectionManager.getClient();
+			if (!client) throw new Error('Not connected to server');
+
 			const parsed = JSON.parse(document.getText());
 			const projectId = parsed.project_id;
 
@@ -590,12 +597,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 				return;
 			}
 
-			const response = (await this.connectionManager.request('rrext_get_token', {
-				projectId,
-				source: componentId,
-			})) as GenericResponse | undefined;
-
-			const token = response?.body?.token;
+			const token = await client.getTaskToken({ projectId, source: componentId });
 
 			if (!token) {
 				this.logger.error('[PageProjectProvider] No token found for running task');
@@ -603,7 +605,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 				return;
 			}
 
-			await this.connectionManager.request('terminate', {}, token);
+			await client.terminate(token);
 		} catch (error: unknown) {
 			this.logger.error(`[PageProjectProvider] Unable to stop pipeline: ${error}`);
 			const message = error instanceof Error ? error.message : String(error);

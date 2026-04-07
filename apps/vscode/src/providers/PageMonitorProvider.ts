@@ -7,7 +7,7 @@
  * Monitor Page Provider for Server Monitor
  *
  * Creates and manages a webview panel showing the <ServerMonitor /> component.
- * Handles DAP communication (rrext_dashboard polling + apaevt_dashboard events)
+ * Handles SDK communication (getDashboard polling + apaevt_dashboard events)
  * and bridges data to the React webview via postMessage.
  */
 
@@ -16,10 +16,9 @@ import * as crypto from 'crypto';
 import { readFileSync } from 'fs';
 import { getLogger } from '../shared/util/output';
 import { ConnectionManager } from '../connection/connection';
-import { MonitorManager } from '../connection/monitor-manager';
 import { ConnectionStatus, ConnectionState, GenericEvent } from '../shared/types';
 import type { PageMonitorIncomingMessage } from '../shared/types/pageMonitor';
-import type { DashboardResponse, DashboardEvent } from 'rocketride';
+import type { DashboardEvent } from 'rocketride';
 
 const POLL_INTERVAL_MS = 5_000;
 
@@ -113,24 +112,17 @@ export class PageMonitorProvider {
 
 		this.fetchInProgress = true;
 		try {
-			const response = await this.connectionManager.request('rrext_dashboard', {});
-			if (!response) {
-				this.logger.error(`[PageMonitorProvider] No response from rrext_dashboard`);
+			const client = this.connectionManager.getClient();
+			if (!client) {
+				this.logger.error(`[PageMonitorProvider] No client available for dashboard`);
 				return;
 			}
-			if (!response.success) {
-				this.logger.error(`[PageMonitorProvider] rrext_dashboard failed: ${response.message}`);
-				return;
-			}
-			if (response.body) {
-				// response.body is GenericBody (Record<string, any>) — upcast to the
-				// concrete dashboard shape returned by rrext_dashboard.
-				const msg: PageMonitorIncomingMessage = {
-					type: 'dashboardData',
-					data: response.body as DashboardResponse,
-				};
-				await this.panel.webview.postMessage(msg);
-			}
+			const dashboard = await client.getDashboard();
+			const msg: PageMonitorIncomingMessage = {
+				type: 'dashboardData',
+				data: dashboard,
+			};
+			await this.panel.webview.postMessage(msg);
 		} catch (error) {
 			this.logger.error(`[PageMonitorProvider] Failed to fetch dashboard: ${error}`);
 		} finally {
@@ -147,8 +139,9 @@ export class PageMonitorProvider {
 	private async subscribeDashboardEvents(): Promise<void> {
 		if (this.hasWildcardMonitor) return;
 		try {
-			// Subscribe via MonitorManager (reference-counted, safe for shared connection)
-			await MonitorManager.getInstance().addMonitor({ token: '*' }, ['task', 'summary', 'dashboard']);
+			const client = this.connectionManager.getClient();
+			if (!client) return;
+			await client.addMonitor({ token: '*' }, ['task', 'summary', 'dashboard']);
 			this.hasWildcardMonitor = true;
 		} catch (error) {
 			this.logger.error(`[PageMonitorProvider] Failed to subscribe dashboard events: ${error}`);
@@ -158,7 +151,8 @@ export class PageMonitorProvider {
 	private async unsubscribeDashboardEvents(): Promise<void> {
 		if (!this.hasWildcardMonitor) return;
 		try {
-			await MonitorManager.getInstance().removeMonitor({ token: '*' }, ['task', 'summary', 'dashboard']);
+			const client = this.connectionManager.getClient();
+			if (client) await client.removeMonitor({ token: '*' }, ['task', 'summary', 'dashboard']);
 		} catch {
 			// Best-effort; connection may already be gone
 		}

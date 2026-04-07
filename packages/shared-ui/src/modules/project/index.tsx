@@ -8,4 +8,4 @@
  */
 
 export { default as ProjectView } from './ProjectView';
-export type { IProjectViewProps, ProjectViewRef, IViewProps, ProjectViewMode, TaskStatus, TraceEvent, TraceRow, ProjectViewIncoming, ProjectViewOutgoing, CanvasIncoming, CanvasOutgoing, StatusIncoming, StatusOutgoing, TraceIncoming, TraceOutgoing } from './types';
+export type { IProjectViewProps, ProjectViewRef, IViewProps, ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow, ProjectViewIncoming, ProjectViewOutgoing, CanvasIncoming, CanvasOutgoing, StatusIncoming, StatusOutgoing, TraceIncoming, TraceOutgoing } from './types';

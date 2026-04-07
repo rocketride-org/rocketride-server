@@ -413,6 +413,20 @@ class ConnectionMixin(DAPClient):
         # We're done; clear so future disconnects (e.g. drop) can trigger reconnect if persist
         self._manual_disconnect = False
 
+    def set_env(self, env: Dict[str, str]) -> None:
+        """
+        Update the environment variables used for pipeline substitution.
+
+        The env dictionary is used by :meth:`use` and :meth:`validate` to
+        replace ``${ROCKETRIDE_*}`` placeholders in pipeline configurations.
+        Call this whenever the user's ``.env`` settings change so subsequent
+        pipeline executions pick up the new values without reconnecting.
+
+        Args:
+            env: Dictionary of environment variable names to values.
+        """
+        self._env = dict(env)
+
     async def request(self, request: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
         """
         Send a request to the RocketRide server.

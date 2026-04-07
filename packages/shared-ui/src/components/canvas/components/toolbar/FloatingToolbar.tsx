@@ -87,7 +87,9 @@ export default function FloatingToolbar({ children, position = DEFAULT_POSITION,
 		const parent = toolbarRef.current?.parentElement;
 		if (!parent) return;
 
-		const observer = new ResizeObserver(() => {
+		const observer = new ResizeObserver((entries) => {
+			const entry = entries[0];
+			if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
 			setResizeTick((t) => t + 1);
 		});
 		observer.observe(parent);
@@ -100,12 +102,14 @@ export default function FloatingToolbar({ children, position = DEFAULT_POSITION,
 	 * Converts the stored anchor position to clamped pixel coordinates.
 	 * Ensures the toolbar is fully visible regardless of viewport size.
 	 */
-	const getRenderedPosition = useCallback((): { left: number; top: number } => {
+	const getRenderedPosition = useCallback((): { left: number; top: number } | null => {
 		const parent = toolbarRef.current?.parentElement;
 		const toolbar = toolbarRef.current;
-		if (!parent || !toolbar) return { left: 0, top: 0 };
+		if (!parent || !toolbar) return null;
 
 		const parentRect = parent.getBoundingClientRect();
+		if (parentRect.width === 0 || parentRect.height === 0) return null;
+
 		const toolbarWidth = toolbar.offsetWidth;
 		const toolbarHeight = toolbar.offsetHeight;
 
@@ -271,8 +275,9 @@ export default function FloatingToolbar({ children, position = DEFAULT_POSITION,
 			className="nopan nodrag rr-floating-toolbar"
 			style={{
 				position: 'absolute',
-				left: `${rendered.left}px`,
-				top: `${rendered.top}px`,
+				left: rendered ? `${rendered.left}px` : 0,
+				top: rendered ? `${rendered.top}px` : 0,
+				visibility: rendered ? 'visible' : 'hidden',
 				zIndex: 20,
 				userSelect: isDragging ? 'none' : 'auto',
 			}}

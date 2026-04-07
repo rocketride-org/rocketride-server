@@ -446,3 +446,26 @@ class ExecutionMixin(DAPClient):
 
         # Return status information
         return response.get('body', {})
+
+    async def get_task_token(self, project_id: str, source: str) -> str | None:
+        """
+        Resolve a running task's token from its project ID and source component.
+
+        The token is required for operations like terminate and restart.
+        Returns None if no task is currently running for the given project/source.
+
+        Args:
+            project_id: The project identifier.
+            source: The source component identifier.
+
+        Returns:
+            The task token string, or None if no running task was found.
+        """
+        response = await self.dap_request(
+            'rrext_get_token',
+            {
+                'projectId': project_id,
+                'source': source,
+            },
+        )
+        return response.get('body', {}).get('token')
