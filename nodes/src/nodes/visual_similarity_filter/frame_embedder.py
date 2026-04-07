@@ -86,6 +86,9 @@ class FrameEmbedder:
         inputs = self._processor(images=image, return_tensors='pt')
         with torch.no_grad():
             features = self._model.get_image_features(**inputs)
+        # Newer transformers versions return BaseModelOutputWithPooling instead of a tensor
+        if hasattr(features, 'pooler_output'):
+            features = features.pooler_output
         emb = features.squeeze().cpu().numpy()
         norm = float(numpy_norm(emb))
         return emb / norm if norm > 0 else emb
