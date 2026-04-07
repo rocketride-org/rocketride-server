@@ -77,3 +77,4 @@ include = ["rocketride*"]
 
 [tool.setuptools.package-data]
 rocketride = ["py.typed"]
+

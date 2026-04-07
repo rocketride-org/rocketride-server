@@ -47,3 +47,4 @@ include = ["rocketride_mcp*"]
 
 [tool.setuptools.package-data]
 rocketride_mcp = ["pipelines/*.json"]
+
