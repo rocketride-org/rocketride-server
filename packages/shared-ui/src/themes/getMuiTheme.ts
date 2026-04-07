@@ -114,7 +114,6 @@ export function getMuiTheme(): Theme {
 	const fontWeightButton = parseInt(rr('--rr-font-weight-button', '600'), 10) || 600;
 
 	const paperBorder = rr('--rr-border-paper', '2px solid #eee');
-	const iconFilter = rr('--rr-icon-filter', 'none');
 
 	const scrollbarThumb = rr('--rr-bg-scrollbar-thumb', 'rgba(121,121,121,0.4)');
 
@@ -123,10 +122,24 @@ export function getMuiTheme(): Theme {
 
 	// --- Derived values -----------------------------------------------------
 
-	// Determine palette mode from the declared token, falling back to
-	// luminance-based detection from the background colour.
+	// Determine palette mode.
+	//
+	// Priority order:
+	//   1. VS Code's body attribute (data-vscode-theme-kind) — most reliable
+	//      signal when running inside a webview.
+	//   2. Explicit --rr-palette-mode CSS token (set by the web defaults).
+	//   3. Luminance-based detection from the effective background colour.
+	//
+	// The web CSS (rocketride-web.css) declares --rr-palette-mode: light, which
+	// is never overridden by the VS Code CSS because the theme kind is dynamic.
+	// Reading the body attribute bypasses that static declaration.
+	const vscodeThemeKind = typeof document !== 'undefined' ? document.body.getAttribute('data-vscode-theme-kind') || '' : '';
+	const isVsCodeDark = vscodeThemeKind === 'vscode-dark' || vscodeThemeKind === 'vscode-high-contrast';
+
 	const declaredMode = rr('--rr-palette-mode', '');
-	const isDark = declaredMode === 'dark' || (declaredMode !== 'light' && isColorDark(bgDefault));
+	const vscodeEditorBg = typeof document !== 'undefined' ? getComputedStyle(document.body).getPropertyValue('--vscode-editor-background').trim() : '';
+	const effectiveBg = vscodeEditorBg || bgDefault;
+	const isDark = isVsCodeDark || declaredMode === 'dark' || (declaredMode !== 'light' && isColorDark(effectiveBg));
 
 	// Body-level font size in px (used for htmlFontSize and component sizing)
 	const bodyFontSizePx = fontSizeBody !== 'inherit' ? parseFloat(fontSizeBody) || 16 : 16;
@@ -168,9 +181,6 @@ export function getMuiTheme(): Theme {
 		components: {
 			MuiCssBaseline: {
 				styleOverrides: {
-					':root': {
-						'--icon-filter': iconFilter,
-					},
 					'@global': {
 						'.add-node-list-scroll': {
 							scrollbarWidth: 'thin' as const,

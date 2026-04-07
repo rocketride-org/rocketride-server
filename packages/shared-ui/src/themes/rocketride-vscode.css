@@ -26,9 +26,7 @@
 	/* Palette mode                                                        */
 	/* ================================================================== */
 
-	/* --rr-palette-mode and --rr-icon-filter are NOT overridden here
-	   because they depend on the active VS Code theme (light vs dark).
-	   getMuiTheme() computes them at runtime from --rr-bg-default. */
+	/* --rr-palette-mode is computed at runtime by getMuiTheme(). */
 
 	/* ================================================================== */
 	/* Backgrounds                                                         */
@@ -36,6 +34,7 @@
 
 	--rr-bg-default: var(--vscode-editor-background, #ffffff);
 	--rr-bg-paper: var(--vscode-editor-background, #ffffff);
+	--rr-bg-surface: var(--vscode-editor-background);
 	--rr-bg-surface-alt: var(--vscode-editor-background, #fafafa);
 
 	/* ================================================================== */
@@ -166,4 +165,25 @@
 
 	--rr-font-weight-h5: 700;
 	--rr-font-weight-button: 400;
+}
+
+/* ======================================================================
+ * Dark / High-Contrast theme overrides
+ *
+ * VS Code sets data-vscode-theme-kind on <body> to one of:
+ *   vscode-light | vscode-dark | vscode-high-contrast | vscode-high-contrast-light
+ *
+ * We use this to set --icon-filter in pure CSS — no JS required.
+ * This is the most reliable approach because it works even before
+ * getMuiTheme() runs and survives theme switches without a re-render.
+ * ====================================================================== */
+
+body[data-vscode-theme-kind='vscode-dark'],
+body[data-vscode-theme-kind='vscode-high-contrast'] {
+	--icon-filter: brightness(0) invert(1);
+}
+
+body[data-vscode-theme-kind='vscode-light'],
+body[data-vscode-theme-kind='vscode-high-contrast-light'] {
+	--icon-filter: none;
 }

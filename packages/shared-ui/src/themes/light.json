@@ -3,6 +3,7 @@
 	"--rr-palette-mode": "light",
 	"--rr-bg-default": "#ffffff",
 	"--rr-bg-paper": "#ffffff",
+	"--rr-bg-surface": "#ffffff",
 	"--rr-bg-surface-alt": "#fafafa",
 	"--rr-fg-titleBar-active": "#1a1a1a",
 	"--rr-fg-titleBar-inactive": "#666666",

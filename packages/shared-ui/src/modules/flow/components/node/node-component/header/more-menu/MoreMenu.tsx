@@ -75,7 +75,7 @@ export default function MoreMenu({ options, isDisabled, buttonSx }: IMoreMenuPro
 	return (
 		<>
 			<button aria-label="More options" onMouseDown={(event) => event.stopPropagation()} onClick={handleMenuClick} disabled={isDisabled} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'inline-flex', alignItems: 'center', ...(typeof buttonSx === 'object' && !Array.isArray(buttonSx) ? (buttonSx as React.CSSProperties) : {}) }}>
-				<MoreVertical size={18} />
+				<MoreVertical size={18} style={{ color: 'var(--rr-text-secondary)' }} />
 			</button>
 
 			<Menu

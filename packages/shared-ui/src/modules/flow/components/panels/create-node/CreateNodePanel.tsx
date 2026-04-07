@@ -439,7 +439,7 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 												(e.currentTarget as HTMLElement).style.backgroundColor = '';
 											}}
 										>
-											{service.icon && <img src={service.icon} alt="" style={styles.itemIcon} />}
+											{service.icon && <img src={service.icon} alt="" style={{ ...styles.itemIcon, filter: service.icon?.includes('#td') ? 'var(--icon-filter)' : undefined }} />}
 											<span style={styles.itemTitle}>{service.title ?? key}</span>
 											{Array.isArray(service.classType) && service.classType.includes('tool') && <span style={styles.badge}>Tool</span>}
 											{!!(service.capabilities && IServiceCapabilities.Experimental & service.capabilities) && <span style={styles.experimentalBadge}>Experimental</span>}

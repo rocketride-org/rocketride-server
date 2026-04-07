@@ -210,6 +210,7 @@ const THEME_DYNAMIC_ICONS: ReadonlySet<string> = new Set([
 	'webhook',
 	// Embeddings
 	'embedding-image',
+	'embedding-openai',
 	'embedding-text',
 	// LLMs
 	'anthropic',
@@ -243,6 +244,7 @@ const THEME_DYNAMIC_ICONS: ReadonlySet<string> = new Set([
 	'summaries',
 	'classification',
 	// Audio
+	'audio-player',
 	'audio-transcribe',
 	// Data
 	'hash',
@@ -252,6 +254,8 @@ const THEME_DYNAMIC_ICONS: ReadonlySet<string> = new Set([
 	// Infrastructure
 	'util-infrastructure',
 	'text-output',
+	// Accessibility
+	'accessibility-describe',
 ]);
 
 /**
