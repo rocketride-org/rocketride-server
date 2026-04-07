@@ -76,7 +76,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
         with:
-          version: 10
+          version: 10.33.0
       - name: Set up vcpkg
         run: ${{ matrix.builder_cmd }} vcpkg:submodule-build
       - name: Set up vcpkg nuget / Linux/macOS
