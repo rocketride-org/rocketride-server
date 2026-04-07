@@ -1,0 +1,212 @@
+{
+	"title": "OpenClaw Client",
+	"protocol": "openclaw_client://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.openclaw_client",
+	"prefix": "openclaw",
+	"description": ["Connects to an OpenClaw gateway and exposes its tools for agent tool-calling.", "Optionally bridges messaging channels (WhatsApp, Telegram, Slack, etc.) into pipelines."],
+	"tile": ["Gateway: ${parameters.openclaw_client.serverName}", "URL: ${parameters.openclaw_client.httpUrl}"],
+	"lanes": {},
+	"preconfig": {
+		"default": "local",
+		"profiles": {
+			"local": {
+				"title": "Local Gateway (default port)",
+				"serverName": "openclaw",
+				"gatewayUrl": "ws://127.0.0.1:18789",
+				"httpUrl": "http://127.0.0.1:18789",
+				"toolProfile": "full"
+			},
+			"remote": {
+				"title": "Remote Gateway",
+				"serverName": "openclaw",
+				"gatewayUrl": "",
+				"httpUrl": "",
+				"toolProfile": "full"
+			},
+			"messaging_only": {
+				"title": "Messaging Bridge Only",
+				"serverName": "openclaw",
+				"gatewayUrl": "ws://127.0.0.1:18789",
+				"httpUrl": "http://127.0.0.1:18789",
+				"toolProfile": "messaging",
+				"enableMessageBridge": true
+			}
+		}
+	},
+	"fields": {
+		"openclaw_client.serverName": {
+			"type": "string",
+			"title": "Server name",
+			"description": "Namespace prefix for tools: <serverName>.<toolName> (example: openclaw.web_search)",
+			"default": "openclaw"
+		},
+		"openclaw_client.gatewayUrl": {
+			"type": "string",
+			"title": "Gateway WebSocket URL",
+			"description": "OpenClaw gateway WebSocket address. Example: ws://127.0.0.1:18789",
+			"default": "ws://127.0.0.1:18789"
+		},
+		"openclaw_client.httpUrl": {
+			"type": "string",
+			"title": "Gateway HTTP URL",
+			"description": "OpenClaw gateway HTTP address for tool invocation. Example: http://127.0.0.1:18789",
+			"default": "http://127.0.0.1:18789"
+		},
+		"openclaw_client.token": {
+			"type": "string",
+			"title": "API Token",
+			"description": "Gateway bearer token (OPENCLAW_GATEWAY_TOKEN)",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+
+		"openclaw_client.groupWeb": {
+			"type": "boolean",
+			"title": "Web (web_search only — web_fetch denied by default to avoid overlap with Firecrawl)",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"openclaw_client.groupFs": {
+			"type": "boolean",
+			"title": "File System — blocked by gateway HTTP deny list by default",
+			"description": "Tools: read, write, edit, apply_patch. NOTE: These are blocked by OpenClaw's gateway HTTP deny list by default. Requires gateway config change to enable.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"openclaw_client.groupRuntime": {
+			"type": "boolean",
+			"title": "Runtime — blocked by gateway HTTP deny list by default",
+			"description": "Tools: exec, process. NOTE: These are blocked by OpenClaw's gateway HTTP deny list by default. Requires gateway config change to enable.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"openclaw_client.groupUi": {
+			"type": "boolean",
+			"title": "Browser (Chromium automation)",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"openclaw_client.groupMessaging": {
+			"type": "boolean",
+			"title": "Messaging (send to channels)",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"openclaw_client.groupMemory": {
+			"type": "boolean",
+			"title": "Memory (persistent storage)",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"openclaw_client.groupAutomation": {
+			"type": "boolean",
+			"title": "Automation (cron, gateway)",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"openclaw_client.groupSessions": {
+			"type": "boolean",
+			"title": "Sessions (agent sessions)",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"openclaw_client.groupNodes": {
+			"type": "boolean",
+			"title": "Nodes (device discovery)",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"openclaw_client.groupSkills": {
+			"type": "boolean",
+			"title": "Skills (GitHub, Notion, Slack, etc.)",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+
+		"openclaw_client.toolDenyList": {
+			"type": "string",
+			"title": "Tool Deny List",
+			"description": "Comma-separated tool names to exclude. Defaults exclude tools that overlap with built-in RocketRide nodes (Firecrawl web scraping, file I/O). Remove entries to re-enable.",
+			"default": "web_fetch,firecrawl_scrape,firecrawl_search",
+			"format": "textarea"
+		},
+
+		"openclaw_client.enableMessageBridge": {
+			"type": "boolean",
+			"title": "Enable Message Bridge",
+			"description": "Listen for incoming messages from OpenClaw channels and feed them into the pipeline",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			],
+			"conditional": [
+				{
+					"value": true,
+					"properties": ["openclaw_client.bridgeConfig"]
+				}
+			]
+		},
+		"openclaw_client.sessionKey": {
+			"type": "string",
+			"title": "Session Key",
+			"description": "OpenClaw session to monitor for incoming messages",
+			"default": "agent:main:main"
+		},
+		"openclaw_client.channelFilter": {
+			"type": "string",
+			"title": "Channel Filter",
+			"description": "Only bridge messages from these channels (comma-separated, empty = all). Example: whatsapp,telegram",
+			"default": ""
+		},
+		"openclaw_client.bridgeConfig": {
+			"object": "bridgeConfig",
+			"title": "Bridge Settings",
+			"properties": ["openclaw_client.sessionKey", "openclaw_client.channelFilter"]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "OpenClaw Client",
+			"properties": ["openclaw_client.serverName", "openclaw_client.gatewayUrl", "openclaw_client.httpUrl", "openclaw_client.token", "openclaw_client.groupWeb", "openclaw_client.groupFs", "openclaw_client.groupRuntime", "openclaw_client.groupUi", "openclaw_client.groupMessaging", "openclaw_client.groupMemory", "openclaw_client.groupAutomation", "openclaw_client.groupSessions", "openclaw_client.groupNodes", "openclaw_client.groupSkills", "openclaw_client.toolDenyList", "openclaw_client.enableMessageBridge"]
+		}
+	]
+}
