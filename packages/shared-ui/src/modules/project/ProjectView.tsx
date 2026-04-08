@@ -186,10 +186,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	const sources: SourceInfo[] = useMemo(() => {
 		const components = project?.components as Array<{ provider: string; name?: string; id?: string; config?: Record<string, any> }> | undefined;
 		if (!components) return [];
-		console.log(
-			'[ProjectView] components:',
-			components.map((c) => ({ id: c.id, provider: c.provider, mode: c.config?.mode, configKeys: c.config ? Object.keys(c.config) : [] }))
-		);
+
 		return components
 			.filter((c) => c.config?.mode === 'Source')
 			.map((c) => ({ id: c.id || c.name || c.provider, name: c.name || c.id || c.provider }))

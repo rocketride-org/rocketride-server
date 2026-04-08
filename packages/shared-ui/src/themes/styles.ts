@@ -153,10 +153,12 @@ const splitHeader: CSSProperties = {
 /** Tab content area — standard padding and scroll for all tab panels.
  *  Top padding clears the overlay tab bar (15px padding + 34px pill + 15px gap = 64px + 15px). */
 const tabContent: CSSProperties = {
-	padding: '79px 15px 0',
+	padding: '79px 30px 0',
 	overflow: 'auto',
 	flex: 1,
 	minHeight: 0,
+	maxWidth: 800,
+	margin: '0 auto',
 };
 
 /** @deprecated Use tabContent instead. */
