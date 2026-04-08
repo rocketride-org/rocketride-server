@@ -46,7 +46,7 @@ class IGlobal(IGlobalBase):
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        self.apikey = str((cfg.get('apikey') or '')).strip()
+        self.apikey = str(cfg.get('apikey') or '').strip()
 
         if not self.apikey:
             raise Exception('tool_v0: apikey is required')
@@ -54,7 +54,7 @@ class IGlobal(IGlobalBase):
     def validateConfig(self) -> None:
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = str((cfg.get('apikey') or '')).strip()
+            apikey = str(cfg.get('apikey') or '').strip()
             if not apikey:
                 warning('apikey is required')
         except Exception as e:
