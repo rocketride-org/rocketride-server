@@ -113,7 +113,13 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 			if (!isDragOverRef.current) return;
 
 			const dt = new DataTransfer();
-			event.data.files.forEach((f: { buffer: ArrayBuffer; name: string; type: string; lastModified: number }) => dt.items.add(new File([f.buffer], f.name, { type: f.type, lastModified: f.lastModified })));
+			event.data.files.forEach((f: { buffer: ArrayBuffer; name: string; type: string; lastModified: number }) => {
+				try {
+					dt.items.add(new File([f.buffer], f.name, { type: f.type, lastModified: f.lastModified }));
+				} catch (err) {
+					console.warn('[DropperContainer] Skipping malformed bridged file entry:', f.name, err);
+				}
+			});
 			addFiles(dt.files);
 		};
 
