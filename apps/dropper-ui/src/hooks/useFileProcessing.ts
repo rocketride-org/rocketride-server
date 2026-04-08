@@ -189,6 +189,14 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 				const enrichedResults = uploadResults.map((r) => {
 					const videoEntry = videoChunksRef.current.get(r.filepath);
 					if (!videoEntry || !r.result) return r;
+					// Validate all chunks are present and non-empty before assembly.
+					// chunks is a sparse array built by index; missing slots would stringify
+					// as "undefined" in join(''), silently corrupting the atob call.
+					const allPresent = videoEntry.chunks.length > 0 && videoEntry.chunks.every((c) => typeof c === 'string' && c.length > 0);
+					if (!allPresent) {
+						console.error('[useFileProcessing] Incomplete video chunks for', r.filepath, '— skipping assembly');
+						return r;
+					}
 					const binary = atob(videoEntry.chunks.join(''));
 					const bytes = new Uint8Array(binary.length);
 					for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
