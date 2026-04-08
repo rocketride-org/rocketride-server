@@ -81,8 +81,36 @@ class IInstance(IInstanceBase):
             self.preventDefault()
 
     # ------------------------------------------------------------------
+    # Control-plane invoke (called by clip_buffer)
+    # ------------------------------------------------------------------
+
+    def invoke(self, frame_bytes: bytes) -> bool:
+        matched, _ = self._score_frame(frame_bytes)
+        return matched
+
+    # ------------------------------------------------------------------
     # Per-frame similarity + ring buffer forwarding
     # ------------------------------------------------------------------
+
+    def _score_frame(self, image_bytes: bytes) -> tuple:
+        """Embed image_bytes and score against the reference.
+
+        Returns (matched: bool, similarity: float).
+        First call sets the reference and returns (True, 1.0).
+        """
+        import numpy as np
+
+        with self.IGlobal.device_lock:
+            if self.IGlobal.reference_embedding is None:
+                self.IGlobal.reference_embedding = self.IGlobal.embedder.embed(image_bytes)
+                return True, 1.0
+            frame_emb = self.IGlobal.embedder.embed(image_bytes)
+
+        try:
+            similarity = float(np.dot(self.IGlobal.reference_embedding, frame_emb))
+        except Exception:
+            return False, 0.0
+        return similarity >= self.IGlobal.embedder.similarity_threshold, similarity
 
     def _on_frame_complete(self, image_bytes: bytes, mime: str):
         idx = self._frame_idx
@@ -90,27 +118,8 @@ class IInstance(IInstanceBase):
         self._total += 1
         timestamp = idx / self._fps if self._fps > 0 else float(idx)
 
-        # First frame ever: capture as reference and forward unconditionally.
-        if self.IGlobal.reference_embedding is None:
-            with self.IGlobal.device_lock:
-                if self.IGlobal.reference_embedding is None:  # double-checked under lock
-                    self.IGlobal.reference_embedding = self.IGlobal.embedder.embed(image_bytes)
-            self._matched += 1
-            self._match_rows.append([idx, self._fmt_time(timestamp), '1.000'])
-            self._forward_frame(image_bytes, mime)
-            return
-
-        # Subsequent frames: score against the reference.
-        try:
-            import numpy as np
-
-            with self.IGlobal.device_lock:
-                frame_emb = self.IGlobal.embedder.embed(image_bytes)
-            similarity = float(np.dot(self.IGlobal.reference_embedding, frame_emb))
-        except Exception:
-            similarity = 0.0
-
-        if similarity >= self.IGlobal.embedder.similarity_threshold:
+        matched, similarity = self._score_frame(image_bytes)
+        if matched:
             self._matched += 1
             self._match_rows.append([idx, self._fmt_time(timestamp), f'{similarity:.3f}'])
             self._forward_frame(image_bytes, mime)
