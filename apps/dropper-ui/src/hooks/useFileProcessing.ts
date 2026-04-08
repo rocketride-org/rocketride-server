@@ -13,6 +13,14 @@ import { subscribeToClient } from './clientSingleton';
 /** Maximum accumulated base64 video data per file before rejecting further chunks (~96 MB raw video). */
 const MAX_VIDEO_BASE64_BYTES = 134_217_728; // 128 MB base64
 
+function isVideoChunkSSEData(data: Record<string, unknown>): data is VideoChunkSSEData {
+	return typeof data.filename === 'string' && typeof data.chunk_index === 'number' && typeof data.total_chunks === 'number' && typeof data.data === 'string' && typeof data.mime_type === 'string';
+}
+
+function isVideoCompleteSSEData(data: Record<string, unknown>): data is VideoCompleteSSEData {
+	return typeof data.filename === 'string';
+}
+
 /**
  * useFileProcessing - React hook for managing file upload and processing workflow
  *
@@ -89,7 +97,7 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 	const [remainingFiles, setRemainingFiles] = useState<number>(0);
 
 	/** Accumulates base64 video chunks per filename as they stream in via SSE */
-	const videoChunksRef = useRef<Map<string, { chunks: string[]; mimeType: string; totalBytes: number; oversized?: boolean }>>(new Map());
+	const videoChunksRef = useRef<Map<string, { chunks: string[]; mimeType: string; totalBytes: number; totalChunks?: number; oversized?: boolean }>>(new Map());
 
 	/** Tracks active Blob URLs created from SSE video chunks so they can be revoked */
 	const videoBlobUrlsRef = useRef<Map<string, string>>(new Map());
@@ -193,10 +201,11 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 						const videoEntry = videoChunksRef.current.get(r.filepath);
 						// Skip oversized files (already in 'error' state) and files with no video entry
 						if (!videoEntry || !r.result || videoEntry.oversized) return r;
-						// Validate all chunks are present and non-empty before assembly.
-						// chunks is a sparse array built by index; missing slots would stringify
-						// as "undefined" in join(''), silently corrupting the atob call.
-						const allPresent = videoEntry.chunks.length > 0 && videoEntry.chunks.every((c) => typeof c === 'string' && c.length > 0);
+						// Validate all chunks are present using totalChunks from the SSE data.
+						// .every() skips sparse-array holes, so we explicitly iterate 0..totalChunks-1
+						// to catch any missing index.
+						const { totalChunks } = videoEntry;
+						const allPresent = typeof totalChunks === 'number' && totalChunks > 0 && Array.from({ length: totalChunks }).every((_, i) => typeof videoEntry.chunks[i] === 'string' && videoEntry.chunks[i].length > 0);
 						if (!allPresent) {
 							console.error('[useFileProcessing] Incomplete video chunks for', r.filepath, '— skipping assembly');
 							return r;
@@ -266,23 +275,30 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 				// onSSE receives video chunks streamed during processing and assembles them
 				await client.sendFiles(filesWithMimeTypes, authToken, async (type, data) => {
 					if (type === 'video_chunk') {
-						const chunk = data as unknown as VideoChunkSSEData;
-						const entry = videoChunksRef.current.get(chunk.filename) ?? { chunks: [], mimeType: chunk.mime_type, totalBytes: 0 };
-						const incoming = chunk.data.length;
-						if (entry.totalBytes + incoming > MAX_VIDEO_BASE64_BYTES) {
-							// Mark as terminally oversized, free the partial buffer, stop accumulating
-							videoChunksRef.current.set(chunk.filename, { chunks: [], mimeType: entry.mimeType, totalBytes: entry.totalBytes, oversized: true });
-							setUploadedFiles((prev) => prev.map((f) => (f.file.name === chunk.filename ? { ...f, status: 'error' as const, error: 'Video too large to display in browser (limit: ~96 MB).' } : f)));
+						if (!isVideoChunkSSEData(data)) {
+							console.warn('[useFileProcessing] Malformed video_chunk SSE payload:', data);
 							return;
 						}
-						entry.chunks[chunk.chunk_index] = chunk.data;
+						const entry = videoChunksRef.current.get(data.filename) ?? { chunks: [], mimeType: data.mime_type, totalBytes: 0 };
+						const incoming = data.data.length;
+						if (entry.totalBytes + incoming > MAX_VIDEO_BASE64_BYTES) {
+							// Mark as terminally oversized, free the partial buffer, stop accumulating
+							videoChunksRef.current.set(data.filename, { chunks: [], mimeType: entry.mimeType, totalBytes: entry.totalBytes, oversized: true });
+							setUploadedFiles((prev) => prev.map((f) => (f.file.name === data.filename ? { ...f, status: 'error' as const, error: 'Video too large to display in browser (limit: ~96 MB).' } : f)));
+							return;
+						}
+						entry.chunks[data.chunk_index] = data.data;
 						entry.totalBytes += incoming;
-						videoChunksRef.current.set(chunk.filename, entry);
+						entry.totalChunks = data.total_chunks;
+						videoChunksRef.current.set(data.filename, entry);
 					} else if (type === 'video_complete') {
-						const complete = data as unknown as VideoCompleteSSEData;
+						if (!isVideoCompleteSSEData(data)) {
+							console.warn('[useFileProcessing] Malformed video_complete SSE payload:', data);
+							return;
+						}
 						// Ensure the entry exists even if chunks arrived out of order
-						if (!videoChunksRef.current.has(complete.filename)) {
-							videoChunksRef.current.set(complete.filename, { chunks: [], mimeType: 'video/mp4', totalBytes: 0 });
+						if (!videoChunksRef.current.has(data.filename)) {
+							videoChunksRef.current.set(data.filename, { chunks: [], mimeType: 'video/mp4', totalBytes: 0 });
 						}
 					}
 				});
