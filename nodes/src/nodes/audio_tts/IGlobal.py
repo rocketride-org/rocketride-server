@@ -44,14 +44,14 @@ def _normalize_engine_id(raw: Any) -> str:
     we take a known prefix before the first ``-`` when the full string is not
     already canonical.
     """
-    s = str(raw or 'piper').lower().strip()
+    s = str(raw or '').lower().strip() or 'piper'
     if s in _CANONICAL_TTS_ENGINES:
         return s
     if '-' in s:
         prefix = s.split('-', 1)[0]
         if prefix in _CANONICAL_TTS_ENGINES:
             return prefix
-    return s
+    raise ValueError(f'Unrecognized TTS engine "{s}". Expected one of: {", ".join(sorted(_CANONICAL_TTS_ENGINES))}')
 
 
 class IGlobal(IGlobalBase):
@@ -168,9 +168,14 @@ class IGlobal(IGlobalBase):
         """Install pip dependencies and create the TTSEngine when the pipeline starts.
 
         Skipped in ``CONFIG`` open mode (UI validation pass).
+        Calls ``validateConfig`` first so cloud API key errors surface
+        immediately in the node panel instead of at first synthesis.
         """
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
+
+        # Fail fast: surface config errors before installing dependencies.
+        self.validateConfig()
 
         from depends import depends  # type: ignore
 
@@ -226,6 +231,9 @@ class IGlobal(IGlobalBase):
 
         if engine in ('openai', 'elevenlabs'):
             api_key = str(cfg.get('api_key') or '').strip()
+            if not api_key:
+                env_var = 'OPENAI_API_KEY' if engine == 'openai' else 'ELEVENLABS_API_KEY'
+                api_key = os.environ.get(env_var, '').strip()
             if not api_key:
                 env_hint = 'OPENAI_API_KEY' if engine == 'openai' else 'ELEVENLABS_API_KEY'
                 raise Exception(f'Engine "{engine}" requires api_key in node config or {env_hint} in the environment')

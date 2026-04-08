@@ -355,7 +355,6 @@
 	//		Test configuration for automated node testing
 	//
 	"test": {
-		"requires": ["ROCKETRIDE_TTS_TEST_ENABLED"],
 		"profiles": ["kokoro", "bark"],
 		"outputs": ["audio"],
 		"cases": [

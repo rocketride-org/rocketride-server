@@ -167,7 +167,7 @@ class TTSEngine:
 
         For WAV output the samples are written directly to ``out_path``.
         For MP3 output an intermediate WAV is created in the system temp
-        directory, transcoded via ``_transcode_wav_to_mp3``, then deleted
+        directory, transcoded via ``wav_to_mp3_lameenc``, then deleted
         in a ``finally`` block regardless of success or failure.
 
         Args:
@@ -342,7 +342,7 @@ class TTSEngine:
                 try:
                     with open(wav_path, 'wb') as f:
                         f.write(wav_bytes)
-                    self._transcode_wav_to_mp3(wav_path, out_path)
+                    wav_to_mp3_lameenc(wav_path, out_path)
                 finally:
                     try:
                         os.remove(wav_path)
@@ -479,7 +479,7 @@ class TTSEngine:
                 try:
                     with open(wav_path, 'wb') as f:
                         f.write(wav_bytes)
-                    self._transcode_wav_to_mp3(wav_path, out_path)
+                    wav_to_mp3_lameenc(wav_path, out_path)
                 finally:
                     try:
                         os.remove(wav_path)
