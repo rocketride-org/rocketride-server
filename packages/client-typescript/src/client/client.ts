@@ -1052,7 +1052,8 @@ export class RocketRideClient extends DAPClient {
 			objinfo?: Record<string, unknown>;
 			mimetype?: string;
 		}>,
-		token: string
+		token: string,
+		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>
 	): Promise<UPLOAD_RESULT[]> {
 		const results: UPLOAD_RESULT[] = new Array(files.length);
 
@@ -1099,7 +1100,7 @@ export class RocketRideClient extends DAPClient {
 
 			try {
 				// Step 1: Create and open pipe (waits for server to allocate)
-				pipe = await this.pipe(token, this._objinfoWithSize({ name: file.name, ...objinfo }, fileSize), finalMimetype);
+				pipe = await this.pipe(token, this._objinfoWithSize({ name: file.name, ...objinfo }, fileSize), finalMimetype, undefined, onSSE);
 				await pipe.open();
 
 				// Step 2: Send status update AFTER we have the pipe
@@ -1146,6 +1147,15 @@ export class RocketRideClient extends DAPClient {
 				result = await pipe.close();
 			} catch (err) {
 				error = err instanceof Error ? err.message : String(err);
+			} finally {
+				// Best-effort pipe cleanup — prevents server-side resource leak on write errors
+				if (pipe?.isOpened) {
+					try {
+						await pipe.close();
+					} catch {
+						// Ignore — don't mask the original error
+					}
+				}
 			}
 
 			// Send final status

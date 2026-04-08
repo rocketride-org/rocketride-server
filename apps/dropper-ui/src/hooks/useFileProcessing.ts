@@ -10,6 +10,9 @@ import { UploadedFile, ProcessedResults } from '../types/dropper.types';
 import { parseDropperResults, generateFileId } from '../utils/dropperUtils';
 import { subscribeToClient } from './clientSingleton';
 
+/** Maximum accumulated base64 video data per file before rejecting further chunks (~96 MB raw video). */
+const MAX_VIDEO_BASE64_BYTES = 134_217_728; // 128 MB base64
+
 /**
  * useFileProcessing - React hook for managing file upload and processing workflow
  *
@@ -86,7 +89,7 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 	const [remainingFiles, setRemainingFiles] = useState<number>(0);
 
 	/** Accumulates base64 video chunks per filename as they stream in via SSE */
-	const videoChunksRef = useRef<Map<string, { chunks: string[]; mimeType: string }>>(new Map());
+	const videoChunksRef = useRef<Map<string, { chunks: string[]; mimeType: string; totalBytes: number }>>(new Map());
 
 	/** Tracks active Blob URLs created from SSE video chunks so they can be revoked */
 	const videoBlobUrlsRef = useRef<Map<string, string>>(new Map());
@@ -246,14 +249,21 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 				await client.sendFiles(filesWithMimeTypes, authToken, async (type, data) => {
 					if (type === 'video_chunk') {
 						const chunk = data as unknown as VideoChunkSSEData;
-						const entry = videoChunksRef.current.get(chunk.filename) ?? { chunks: [], mimeType: chunk.mime_type };
+						const entry = videoChunksRef.current.get(chunk.filename) ?? { chunks: [], mimeType: chunk.mime_type, totalBytes: 0 };
+						const incoming = chunk.data.length;
+						if (entry.totalBytes + incoming > MAX_VIDEO_BASE64_BYTES) {
+							// Chunk would exceed memory limit — mark file as errored and stop accumulating
+							setUploadedFiles((prev) => prev.map((f) => (f.file.name === chunk.filename ? { ...f, status: 'error' as const, error: 'Video too large to display in browser (limit: ~96 MB).' } : f)));
+							return;
+						}
 						entry.chunks[chunk.chunk_index] = chunk.data;
+						entry.totalBytes += incoming;
 						videoChunksRef.current.set(chunk.filename, entry);
 					} else if (type === 'video_complete') {
 						const complete = data as unknown as VideoCompleteSSEData;
 						// Ensure the entry exists even if chunks arrived out of order
 						if (!videoChunksRef.current.has(complete.filename)) {
-							videoChunksRef.current.set(complete.filename, { chunks: [], mimeType: 'video/mp4' });
+							videoChunksRef.current.set(complete.filename, { chunks: [], mimeType: 'video/mp4', totalBytes: 0 });
 						}
 					}
 				});
