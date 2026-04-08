@@ -275,7 +275,7 @@ export interface IFlowGraphProviderProps {
  */
 export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactElement {
 	const { isLocked, projectLayout, updateProjectLayout } = useFlowPreferences();
-	const { currentProject, servicesJson, onContentChanged, patchToolchainState } = useFlowProject();
+	const { currentProject, initialViewport, servicesJson, onContentChanged, patchToolchainState } = useFlowProject();
 
 	// --- ReactFlow hooks ---------------------------------------------------
 
@@ -937,9 +937,9 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				updateProjectLayout(layoutPatch);
 			}
 
-			// Queue viewport restoration — from project.viewport (injected by host from viewState)
-			if (project.viewport) {
-				pendingViewportRef.current = project.viewport;
+			// Queue viewport restoration — from initialViewport prop (passed separately by host)
+			if (initialViewport) {
+				pendingViewportRef.current = initialViewport;
 			} else if (sortedNodes.length > 0) {
 				pendingViewportRef.current = 'fitView';
 			} else {
