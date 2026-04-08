@@ -89,6 +89,13 @@ class MemoryBackend(ABC):
     def replace_history(self, session_id: str, entries: List[Dict[str, Any]]) -> None:
         """Replace all history entries for a session with the given list."""
 
+    def increment(self, session_id: str, key: str, amount: int = 1) -> Dict[str, Any]:
+        """Atomically increment a numeric value. Default uses get+put; backends may override."""
+        result = self.get(session_id, key)
+        current = result.get('value', 0) if result.get('ok') else 0
+        new_value = current + amount
+        return self.put(session_id, key, new_value)
+
     def close(self) -> None:
         """Release any resources held by the backend. No-op by default."""
 
@@ -248,6 +255,24 @@ class InMemoryBackend(MemoryBackend):
             entries = history[-limit:] if limit > 0 else history
             return {'ok': True, 'session_id': session_id, 'entries': copy.deepcopy(entries)}
 
+    def increment(self, session_id: str, key: str, amount: int = 1) -> Dict[str, Any]:
+        _validate_session_id(session_id)
+        _validate_key(key)
+        with self._lock:
+            if self._expire_if_needed(session_id) or session_id not in self._sessions:
+                return {'ok': False, 'error': f'Session {session_id!r} not found'}
+            current = self._sessions[session_id].get(key, 0)
+            new_value = current + amount
+            self._sessions[session_id][key] = new_value
+            self._history[session_id].append(
+                {
+                    'op': 'put',
+                    'key': key,
+                    'timestamp': time.time(),
+                }
+            )
+            return {'ok': True, 'session_id': session_id, 'key': key, 'value': new_value}
+
     def replace_history(self, session_id: str, entries: List[Dict[str, Any]]) -> None:
         with self._lock:
             if session_id in self._history:
@@ -375,14 +400,12 @@ class RedisBackend(MemoryBackend):
                 return {'ok': False, 'error': f'Session {session_id!r} not found'}
             # Gather all data keys
             members = self._client.smembers(self._keys_key(session_id))
-            keys_to_delete = [self._data_key(session_id, m) for m in members]
-            keys_to_delete.extend(
-                [
-                    self._keys_key(session_id),
-                    self._history_key(session_id),
-                    self._meta_key(session_id),
-                ]
-            )
+            keys_to_delete = [
+                *[self._data_key(session_id, m) for m in members],
+                self._keys_key(session_id),
+                self._history_key(session_id),
+                self._meta_key(session_id),
+            ]
             pipe = self._client.pipeline()
             for k in keys_to_delete:
                 pipe.delete(k)
@@ -501,6 +524,31 @@ class RedisBackend(MemoryBackend):
             entries = [json.loads(e) for e in raw_entries]
             return {'ok': True, 'session_id': session_id, 'entries': entries}
 
+    def increment(self, session_id: str, key: str, amount: int = 1) -> Dict[str, Any]:
+        _validate_session_id(session_id)
+        _validate_key(key)
+        with self._lock:
+            if not self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
+                return {'ok': False, 'error': f'Session {session_id!r} not found'}
+            remaining_ms = self._client.pttl(self._meta_key(session_id))
+            if remaining_ms == -2:
+                self._client.srem(_REDIS_SESSIONS_KEY, session_id)
+                return {'ok': False, 'error': f'Session {session_id!r} has expired'}
+            # Use native Redis INCRBY for atomic increment
+            data_key = self._data_key(session_id, key)
+            new_value = self._client.incrby(data_key, amount)
+            self._client.sadd(self._keys_key(session_id), key)
+            self._client.rpush(
+                self._history_key(session_id),
+                json.dumps({'op': 'put', 'key': key, 'timestamp': time.time()}),
+            )
+            # Align TTL with session metadata
+            if remaining_ms and remaining_ms > 0:
+                self._client.pexpire(data_key, remaining_ms)
+                self._client.pexpire(self._keys_key(session_id), remaining_ms)
+                self._client.pexpire(self._history_key(session_id), remaining_ms)
+            return {'ok': True, 'session_id': session_id, 'key': key, 'value': new_value}
+
     def replace_history(self, session_id: str, entries: List[Dict[str, Any]]) -> None:
         with self._lock:
             history_key = self._history_key(session_id)
@@ -600,6 +648,12 @@ class PersistentMemoryStore:
 
     def get(self, session_id: str, key: str) -> Dict[str, Any]:
         return self._backend.get(session_id, key)
+
+    def increment(self, session_id: str, key: str, amount: int = 1) -> Dict[str, Any]:
+        result = self._backend.increment(session_id, key, amount)
+        if result.get('ok') and self.auto_summarize:
+            self.summarize_if_needed(session_id, self.max_history)
+        return result
 
     def list_keys(self, session_id: str) -> Dict[str, Any]:
         return self._backend.list_keys(session_id)
