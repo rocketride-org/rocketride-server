@@ -13,12 +13,15 @@ import { subscribeToClient } from './clientSingleton';
 /** Maximum accumulated base64 video data per file before rejecting further chunks (~96 MB raw video). */
 const MAX_VIDEO_BASE64_BYTES = 134_217_728; // 128 MB base64
 
-function isVideoChunkSSEData(data: Record<string, unknown>): data is VideoChunkSSEData {
-	return typeof data.filename === 'string' && typeof data.chunk_index === 'number' && typeof data.total_chunks === 'number' && typeof data.data === 'string' && typeof data.mime_type === 'string';
+function isVideoChunkSSEData(data: unknown): data is VideoChunkSSEData {
+	if (typeof data !== 'object' || data === null) return false;
+	const d = data as Record<string, unknown>;
+	return typeof d.filename === 'string' && typeof d.chunk_index === 'number' && typeof d.total_chunks === 'number' && typeof d.data === 'string' && typeof d.mime_type === 'string';
 }
 
-function isVideoCompleteSSEData(data: Record<string, unknown>): data is VideoCompleteSSEData {
-	return typeof data.filename === 'string';
+function isVideoCompleteSSEData(data: unknown): data is VideoCompleteSSEData {
+	if (typeof data !== 'object' || data === null) return false;
+	return typeof (data as Record<string, unknown>).filename === 'string';
 }
 
 /**
