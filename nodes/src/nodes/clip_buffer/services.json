@@ -1,0 +1,102 @@
+{
+	"title": "Clip Buffer",
+	"protocol": "clip_buffer://",
+	"classType": ["image"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.clip_buffer",
+	"prefix": "clip_buffer",
+	"description": ["Buffers video frames and detects matching clips using a Visual Similarity Filter. ", "Polls the filter sparsely every scan_interval seconds. On a match, captures ", "buffer_seconds of pre-match context and collects forward until a scene change, ", "then flushes the full clip downstream."],
+	"icon": "frame_grabber.svg",
+	"lanes": {
+		"image": ["image", "table"],
+		"documents": []
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "Image frames from frame_grabber.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Frames belonging to matched clips."
+				},
+				{
+					"lane": "table",
+					"description": "Clip index and timestamp for each flushed frame."
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Per-frame scene change metadata from frame_grabber (consumed, not forwarded).",
+			"output": []
+		}
+	],
+	"invoke": {
+		"visual_similarity": {
+			"description": "Visual similarity filter used to detect frames matching the reference.",
+			"min": 1,
+			"max": 1
+		}
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default",
+				"scan_interval": 5.0,
+				"buffer_seconds": 5.0,
+				"scene_threshold": 0.25
+			}
+		}
+	},
+	"fields": {
+		"clip_buffer.scan_interval": {
+			"type": "number",
+			"title": "Scan interval (seconds)",
+			"description": "How often to invoke the visual similarity filter. Lower = more checks, slower.",
+			"default": 5.0,
+			"minimum": 0.1
+		},
+		"clip_buffer.buffer_seconds": {
+			"type": "number",
+			"title": "Pre-match buffer (seconds)",
+			"description": "How many seconds of frames to retain before a match is confirmed.",
+			"default": 5.0,
+			"minimum": 0.0
+		},
+		"clip_buffer.scene_threshold": {
+			"type": "number",
+			"title": "Scene change threshold",
+			"description": "scene_change_score value at which a clip is considered complete.",
+			"default": 0.25,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"clip_buffer.default": {
+			"object": "default",
+			"properties": ["clip_buffer.scan_interval", "clip_buffer.buffer_seconds", "clip_buffer.scene_threshold"]
+		},
+		"clip_buffer.profile": {
+			"title": "Configuration",
+			"type": "string",
+			"default": "default",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["clip_buffer.default"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Clip Buffer",
+			"properties": ["clip_buffer.profile"]
+		}
+	]
+}
