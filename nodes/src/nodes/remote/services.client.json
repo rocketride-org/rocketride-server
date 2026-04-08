@@ -13,17 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"infrastructure"
-	],
+	"classType": ["infrastructure"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"nosaas"
-	],
+	"capabilities": ["nosaas"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -32,7 +28,7 @@
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,23 +47,14 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A transport component that forwards data to a remote machine or ",
-		"processing node. It enables distributed pipeline architectures by ",
-		"offloading computation or specialized tasks to external systems. Configurable ",
-		"with network endpoints, authentication, and serialization settings, ",
-		"it supports scalable and modular deployment across environments."
-	],
+	"description": ["A transport component that forwards data to a remote machine or ", "processing node. It enables distributed pipeline architectures by ", "offloading computation or specialized tasks to external systems. Configurable ", "with network endpoints, authentication, and serialization settings, ", "it supports scalable and modular deployment across environments."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "remote.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/4l0udeR",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -92,13 +79,13 @@
 				"mode": "remote",
 				"host": "localhost",
 				"port": 5565,
-				"apikey": ""
+				"apikey": "xxx"
 			}
 		}
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
@@ -112,9 +99,7 @@
 		{
 			"section": "Pipe",
 			"title": "Remote",
-			"properties": [
-				"remote"
-			]
+			"properties": ["remote"]
 		}
 	]
 }
