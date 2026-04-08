@@ -207,6 +207,11 @@ from rerank_cohere.rerank_client import RerankClient, RerankError, RerankAuthent
 from rerank_cohere.IGlobal import IGlobal  # noqa: E402
 from rerank_cohere.IInstance import IInstance  # noqa: E402
 
+# Keep a reference to the IGlobal *module* (not the class) so patch.object
+# can target the module-level ``Config`` name that the class shadows in
+# ``rerank_cohere.__init__``.
+_iglobal_module = sys.modules['rerank_cohere.IGlobal']
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -456,7 +461,7 @@ class TestIGlobal:
         mock_cohere_client = _make_cohere_client_mock(mock_response)
 
         # Mock Config.getNodeConfig to return our test config
-        with patch('rerank_cohere.IGlobal.Config') as mock_config_cls:
+        with patch.object(_iglobal_module, 'Config') as mock_config_cls:
             mock_config_cls.getNodeConfig.return_value = {
                 'model': 'rerank-v3.5',
                 'top_n': 5,
@@ -481,7 +486,7 @@ class TestIGlobal:
         iglobal = self._make_iglobal()
         _mock_rocketlib.warning.reset_mock()
 
-        with patch('rerank_cohere.IGlobal.Config') as mock_config_cls:
+        with patch.object(_iglobal_module, 'Config') as mock_config_cls:
             mock_config_cls.getNodeConfig.return_value = {'apikey': '', 'model': 'rerank-v3.5'}
             iglobal.validateConfig()
 
@@ -492,7 +497,7 @@ class TestIGlobal:
         iglobal = self._make_iglobal()
         _mock_rocketlib.warning.reset_mock()
 
-        with patch('rerank_cohere.IGlobal.Config') as mock_config_cls:
+        with patch.object(_iglobal_module, 'Config') as mock_config_cls:
             mock_config_cls.getNodeConfig.return_value = {'apikey': 'test-key', 'model': '  '}
             iglobal.validateConfig()
 
