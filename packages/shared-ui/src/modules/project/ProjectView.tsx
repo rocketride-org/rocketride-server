@@ -31,6 +31,7 @@ import Trace from '../../components/trace/Trace';
 import Errors from '../../components/errors/Errors';
 import { commonStyles } from '../../themes/styles';
 import { ITaskState } from '../../types/project';
+import PipelineActions from '../../components/pipeline-actions/PipelineActions';
 import type { IProjectViewProps, ProjectViewRef, ProjectViewMode, ViewState, ProjectViewIncoming, ProjectViewOutgoing, TaskStatus, TraceEvent } from './types';
 
 // =============================================================================
@@ -322,7 +323,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{projectForCanvas && <Canvas oauth2RootUrl="" project={projectForCanvas} servicesJson={servicesJson} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} />}</div>,
+			content: <div style={styles.canvasPadding}>{projectForCanvas && <Canvas oauth2RootUrl="" project={projectForCanvas} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} />}</div>,
 		},
 		status: {
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} onPipelineAction={handlePipelineAction} />) : <div style={styles.empty}>No source components found</div>}</div>,
@@ -393,7 +394,7 @@ const SourceStatusPane: React.FC<{
 
 	return (
 		<div style={styles.sourcePane}>
-			<StatusHeader name={source.name} taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)} />
+			<StatusHeader name={source.name} taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)} extraActions={<PipelineActions notes={taskStatus?.notes} />} />
 			<div style={styles.sourceBody}>
 				<Status taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} />
 			</div>
