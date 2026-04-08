@@ -251,11 +251,21 @@ class RocketRideClient(
             # reachable before using it — fall back to auto-spawn if not.
             env_uri = self._env.get('ROCKETRIDE_URI', '')
             if self._uri and env_uri:
-                if not await self._runtime_manager._is_runtime_healthy_uri(env_uri):
+                import asyncio
+
+                # Retry up to 3 times to handle transient failures
+                healthy = False
+                for _attempt in range(3):
+                    if await self._runtime_manager._is_runtime_healthy_uri(env_uri):
+                        healthy = True
+                        break
+                    await asyncio.sleep(1)
+
+                if not healthy:
                     import logging
 
                     logging.getLogger('rocketride').warning(
-                        'ROCKETRIDE_URI (%s) is unreachable',
+                        'ROCKETRIDE_URI (%s) is unreachable after 3 attempts',
                         env_uri,
                     )
                     self._uri = ''

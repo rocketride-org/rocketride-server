@@ -69,6 +69,7 @@ async def resolve_compatible_version(
         async with session.get(
             _GITHUB_API,
             headers={'Accept': 'application/vnd.github+json'},
+            params={'per_page': 100},
         ) as resp:
             if resp.status != 200:
                 raise RuntimeNotFoundError(f'Failed to query GitHub releases (HTTP {resp.status})')
@@ -110,6 +111,7 @@ async def resolve_docker_tag(version_spec: str) -> str:
             async with session.get(
                 _GITHUB_API,
                 headers={'Accept': 'application/vnd.github+json'},
+                params={'per_page': 100},
             ) as resp:
                 if resp.status != 200:
                     raise RuntimeNotFoundError(f'Failed to query GitHub releases (HTTP {resp.status})')

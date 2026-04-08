@@ -202,7 +202,7 @@ async def wait_healthy(
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=2)) as resp:
-                    if resp.status < 500:
+                    if resp.status == 200:
                         if not on_status:
                             _flush_log()
                         return

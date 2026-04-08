@@ -328,15 +328,29 @@ async def _cmd_start(args) -> int:
                 print('Use "rocketride runtime install" to create one first.')
                 return 1
         elif not instance_id:
-            instance_id = await db.next_id()
+            # No ID and no version — try to find any installed instance to start
+            all_instances = await db.get_all()
+            if all_instances:
+                instance_id = all_instances[0]['id']
+            else:
+                print('No runtime instances found.')
+                print('Use "rocketride runtime install" to create one first.')
+                return 1
 
-        # If an ID was explicitly provided, it must already exist in the DB
+        # The ID must already exist in the DB
         existing = None
         if instance_id:
             existing = await db.get(instance_id)
             if not existing:
                 print(f'No instance found with id: {instance_id}')
                 print('Use "rocketride runtime install" to create a new instance first.')
+                return 1
+
+            # Refuse to start if already running
+            from ...core.runtime.state import _is_pid_alive
+
+            if existing['pid'] and _is_pid_alive(existing['pid']):
+                print(f'Instance {instance_id} is already running (PID {existing["pid"]}, port {existing["port"]})')
                 return 1
 
             # Docker instances use Docker SDK for start

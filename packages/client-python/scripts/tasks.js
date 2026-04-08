@@ -58,7 +58,7 @@ const README_DEST = path.join(BUILD_DIR, 'README.md');
 
 function makeCopyReadmeAction() {
 	return {
-		run: async (ctx, task) => {
+		run: async (_ctx, task) => {
 			await copyFile(README_SRC, README_DEST);
 			task.output = 'Copied README into build dir';
 		},
@@ -67,7 +67,7 @@ function makeCopyReadmeAction() {
 
 function makeSyncClientPythonAction() {
 	return {
-		run: async (ctx, task) => {
+		run: async (_ctx, task) => {
 			task.output = 'Scanning for changes...';
 			const stats = await syncDir(SRC_DIR, SERVER_CLIENTS_DIR, { package: true });
 			task.output = formatSyncStats(stats);
@@ -77,7 +77,7 @@ function makeSyncClientPythonAction() {
 
 function makeWheelSourceAction() {
 	return {
-		run: async (ctx, task) => {
+		run: async (_ctx, task) => {
 			task.output = 'Scanning for changes...';
 			const stats = await syncDir(PACKAGE_DIR, BUILD_DIR, { ignore: IGNORE });
 			task.output = formatSyncStats(stats);
@@ -90,14 +90,29 @@ const SRC_HASH_KEY = 'client-python.srcHash';
 
 function makeWheelBuildAction() {
 	return {
-		run: async (ctx, task) => {
-			// Check if source changed
+		run: async (_ctx, task) => {
+			// Check if source changed — include pyproject.toml and README alongside src/
 			const { changed, hash } = await hasSourceChanged(SRC_DIR, SRC_HASH_KEY);
 			const outputExists = await exists(DIST_DIR);
 
 			if (!changed && outputExists) {
-				task.output = 'No changes detected';
-				return;
+				// Also check if pyproject.toml or README changed (not covered by SRC_DIR hash)
+				const fsp = require('fs').promises;
+				const crypto = require('crypto');
+				const extraFiles = [path.join(PACKAGE_DIR, 'pyproject.toml'), README_SRC];
+				let extraHash = '';
+				for (const f of extraFiles) {
+					if (await exists(f)) {
+						const buf = await fsp.readFile(f);
+						extraHash += crypto.createHash('md5').update(buf).digest('hex');
+					}
+				}
+				const { getState } = require('../../../scripts/lib');
+				const savedExtraHash = await getState(SRC_HASH_KEY + '.extra');
+				if (extraHash === savedExtraHash) {
+					task.output = 'No changes detected';
+					return;
+				}
 			}
 
 			// engine.exe uses an isolated environment - cwd must be dist/server
@@ -106,13 +121,31 @@ function makeWheelBuildAction() {
 
 			// Save hash after successful build
 			await saveSourceHash(SRC_HASH_KEY, hash);
+			await setState(
+				SRC_HASH_KEY + '.extra',
+				(() => {
+					const crypto = require('crypto');
+					const fsp = require('fs').promises;
+					const extraFiles = [path.join(PACKAGE_DIR, 'pyproject.toml'), README_SRC];
+					let h = '';
+					// Synchronous-safe: we already read these above if needed
+					for (const f of extraFiles) {
+						try {
+							h += crypto.createHash('md5').update(require('fs').readFileSync(f)).digest('hex');
+						} catch (_e) {
+							/* missing file */
+						}
+					}
+					return h;
+				})()
+			);
 		},
 	};
 }
 
 function makeCopyToServerStaticAction() {
 	return {
-		run: async (ctx, task) => {
+		run: async (_ctx, task) => {
 			const stats = await syncDir(DIST_DIR, SERVER_STATIC_DIR, { pattern: ['*.whl', '*.tar.gz'], package: true });
 			task.output = formatSyncStats(stats);
 		},
@@ -135,7 +168,7 @@ function makeStartTestServerAction(options = {}) {
 					ctx.port = parseInt(u.port || '5565', 10);
 					task.output = `Using existing server at ${envUri}`;
 					return { port: ctx.port, server: null, serverUri: envUri };
-				} catch (e) {
+				} catch (_e) {
 					// Not a valid URL, fall through and start server
 				}
 			}

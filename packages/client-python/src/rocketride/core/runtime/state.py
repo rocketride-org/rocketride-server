@@ -59,9 +59,17 @@ def _is_pid_alive(pid: int) -> bool:
     else:
         try:
             os.kill(pid, 0)
-            return True
         except OSError:
             return False
+        # Check for zombie processes on Linux
+        try:
+            with open(f'/proc/{pid}/status') as f:
+                for line in f:
+                    if line.startswith('State:'):
+                        return 'Z' not in line
+        except OSError:
+            pass  # /proc not available (macOS) — fall through
+        return True
 
 
 def _get_process_memory(pid: int) -> Optional[int]:

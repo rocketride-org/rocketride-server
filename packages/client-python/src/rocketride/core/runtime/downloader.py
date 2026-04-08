@@ -76,7 +76,7 @@ async def download_runtime(
 
         if asset.endswith('.tar.gz'):
             with tarfile.open(tmp_path, 'r:gz') as tar:
-                tar.extractall(path=str(dest))
+                tar.extractall(path=str(dest), filter='data')
         elif asset.endswith('.zip'):
             with zipfile.ZipFile(tmp_path, 'r') as zf:
                 zf.extractall(path=str(dest))

@@ -139,7 +139,7 @@ class RuntimeManager:
                     uri,
                     timeout=aiohttp.ClientTimeout(total=2),
                 ) as resp:
-                    return resp.status < 500
+                    return resp.status == 200
         except (aiohttp.ClientError, OSError):
             return False
 

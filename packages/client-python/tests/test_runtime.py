@@ -1339,7 +1339,7 @@ class TestManagerAutoSpawn:
             assert result is False
 
     @pytest.mark.asyncio
-    async def test_is_runtime_healthy_returns_true_on_4xx(self):
+    async def test_is_runtime_healthy_returns_false_on_4xx(self):
         mock_resp = AsyncMock()
         mock_resp.status = 404
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
@@ -1357,7 +1357,7 @@ class TestManagerAutoSpawn:
 
         with patch.dict('sys.modules', {'aiohttp': mock_aiohttp}):
             result = await RuntimeManager._is_runtime_healthy(5565)
-            assert result is True
+            assert result is False
 
 
 # ── CLI install ───────────────────────────────────────────────
