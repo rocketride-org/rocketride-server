@@ -26,11 +26,11 @@ import Canvas from '../../components/canvas';
 import Status from '../../components/status/Status';
 import { StatusHeader } from '../../components/status/StatusHeader';
 import { SourceTokensContent } from '../../components/tokens/Tokens';
-import Flow from '../../components/flow/Flow';
+import { SourceFlowContent } from '../../components/flow/Flow';
 import Trace from '../../components/trace/Trace';
 import Errors from '../../components/errors/Errors';
 import { commonStyles } from '../../themes/styles';
-import { ITaskState } from '../../types/project';
+
 import PipelineActions from '../../components/pipeline-actions/PipelineActions';
 import type { IProjectViewProps, ProjectViewRef, ProjectViewMode, ViewState, ProjectViewIncoming, ProjectViewOutgoing, TaskStatus, TraceEvent } from './types';
 
@@ -89,12 +89,6 @@ interface SourceInfo {
 // =============================================================================
 // HELPERS
 // =============================================================================
-
-function pickActiveStatus(statusMap: Record<string, TaskStatus>): TaskStatus | null {
-	const entries = Object.values(statusMap);
-	if (entries.length === 0) return null;
-	return entries.find((ts) => ts.state === ITaskState.RUNNING || ts.state === ITaskState.INITIALIZING) ?? entries[0];
-}
 
 // =============================================================================
 // COMPONENT
@@ -220,7 +214,6 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	}, []);
 
 	const { rows: traceRows, clearTrace } = useTraceState(traceEvents);
-	const activeStatus = useMemo(() => pickActiveStatus(statusMap), [statusMap]);
 
 	// --- Validate callback for Canvas ----------------------------------------
 
@@ -343,11 +336,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTokensPane key={src.id} source={src} taskStatus={statusMap[src.id]} />) : <div style={styles.empty}>No source components found</div>}</div>,
 		},
 		flow: {
-			content: (
-				<div style={commonStyles.tabContent}>
-					<Flow taskStatus={activeStatus} viewMode={viewState.flowViewMode ?? 'pipeline'} onViewModeChange={(vm) => updateViewState({ flowViewMode: vm })} />
-				</div>
-			),
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceFlowPane key={src.id} source={src} taskStatus={statusMap[src.id]} viewMode={viewState.flowViewMode ?? 'pipeline'} onViewModeChange={(vm) => updateViewState({ flowViewMode: vm })} />) : <div style={styles.empty}>No source components found</div>}</div>,
 		},
 		trace: {
 			content: (
@@ -427,6 +416,36 @@ const SourceTokensPane: React.FC<{
 			</div>
 			<div style={styles.sourceBody}>
 				<SourceTokensContent tokens={taskStatus?.tokens} />
+			</div>
+		</div>
+	);
+};
+
+// =============================================================================
+// SOURCE FLOW PANE
+// =============================================================================
+
+const SourceFlowPane: React.FC<{
+	source: SourceInfo;
+	taskStatus: TaskStatus | undefined;
+	viewMode: 'pipeline' | 'component';
+	onViewModeChange: (mode: 'pipeline' | 'component') => void;
+}> = ({ source, taskStatus, viewMode, onViewModeChange }) => {
+	return (
+		<div style={styles.sourcePane}>
+			<div style={{ padding: '8px 12px', borderBottom: '1px solid var(--rr-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+				<span style={styles.sourceName}>{source.name}</span>
+				<div style={commonStyles.toggleGroup}>
+					<button style={commonStyles.toggleButton(viewMode === 'pipeline')} onClick={() => onViewModeChange('pipeline')}>
+						Pipeline View
+					</button>
+					<button style={commonStyles.toggleButton(viewMode === 'component')} onClick={() => onViewModeChange('component')}>
+						Component View
+					</button>
+				</div>
+			</div>
+			<div style={styles.sourceBody}>
+				<SourceFlowContent taskStatus={taskStatus ?? null} viewMode={viewMode} />
 			</div>
 		</div>
 	);

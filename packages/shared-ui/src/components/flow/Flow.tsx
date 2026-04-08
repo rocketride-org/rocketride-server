@@ -77,9 +77,102 @@ interface FlowProps {
 	onViewModeChange: (mode: 'pipeline' | 'component') => void;
 }
 
+export interface SourceFlowContentProps {
+	taskStatus: TaskStatus | null | undefined;
+	viewMode: 'pipeline' | 'component';
+}
+
 // =============================================================================
 // Component
 // =============================================================================
+
+/**
+ * SourceFlowContent — Renders pipeline/component flow for a single source.
+ * Used by SourceFlowPane in ProjectView (mirrors SourceTokensContent pattern).
+ */
+export const SourceFlowContent: React.FC<SourceFlowContentProps> = ({ taskStatus, viewMode }) => {
+	const getPipelines = (): Pipeline[] => {
+		if (!taskStatus?.pipeflow?.byPipe) return [];
+		return Object.entries(taskStatus.pipeflow.byPipe).map(([id, stages]) => ({
+			id: parseInt(id),
+			stages,
+		}));
+	};
+
+	const getComponentData = () => {
+		if (!taskStatus?.pipeflow?.byPipe) return {};
+		const data: Record<string, { count: number; objectNames: string[] }> = {};
+		Object.entries(taskStatus.pipeflow.byPipe).forEach(([_, pipeline]) => {
+			const filename = pipeline[0];
+			const components = pipeline.slice(1);
+			components.forEach((component) => {
+				if (!data[component]) data[component] = { count: 0, objectNames: [] };
+				data[component].count += 1;
+				data[component].objectNames.push(filename);
+			});
+		});
+		return data;
+	};
+
+	const pipelines = getPipelines();
+	const componentData = getComponentData();
+	const activePipelines = pipelines.filter((p) => p.stages && p.stages.length > 0);
+
+	return (
+		<div style={styles.content}>
+			{viewMode === 'pipeline' ? (
+				activePipelines.length > 0 ? (
+					activePipelines.map((pipeline) => (
+						<div key={pipeline.id} style={styles.pipeline}>
+							<div style={styles.pipelineHeader}>
+								Pipeline <span style={styles.pipelineId}>{pipeline.id}</span>
+							</div>
+							<div style={styles.stages}>
+								{pipeline.stages.length > 0 ? (
+									pipeline.stages.map((stage, i) => {
+										const isLast = i === pipeline.stages.length - 1;
+										return (
+											<React.Fragment key={i}>
+												<span style={styles.stage(isLast)}>{stage}</span>
+												{!isLast && <span style={styles.flowArrow}>&#8594;</span>}
+											</React.Fragment>
+										);
+									})
+								) : (
+									<div style={styles.emptyStages}>No active stages</div>
+								)}
+							</div>
+						</div>
+					))
+				) : (
+					<div style={commonStyles.empty}>No active pipelines</div>
+				)
+			) : Object.keys(componentData).length > 0 ? (
+				Object.entries(componentData).map(([name, data]) => (
+					<div key={name} style={styles.pipeline}>
+						<div style={styles.pipelineHeader}>
+							Component <span style={styles.pipelineId}>{name}</span>
+							<span style={styles.componentCount(data.count > 0)}>{data.count} active</span>
+						</div>
+						<div style={styles.stages}>
+							{data.objectNames.length > 0 ? (
+								data.objectNames.map((obj, i) => (
+									<span key={`${obj}-${i}`} style={styles.stage(true)}>
+										{obj}
+									</span>
+								))
+							) : (
+								<div style={styles.emptyStages}>Not currently active in any pipeline</div>
+							)}
+						</div>
+					</div>
+				))
+			) : (
+				<div style={commonStyles.empty}>No active components</div>
+			)}
+		</div>
+	);
+};
 
 const Flow: React.FC<FlowProps> = ({ taskStatus, viewMode, onViewModeChange }) => {
 	const getPipelines = (): Pipeline[] => {
