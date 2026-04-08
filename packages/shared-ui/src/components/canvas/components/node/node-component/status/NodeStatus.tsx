@@ -27,6 +27,15 @@ import { commonStyles } from '../../../../../../themes/styles';
 // Helpers
 // =============================================================================
 
+/** Parse structured error "ErrorType*`message`*filepath:line" into display parts. */
+const parseError = (raw: string): { type: string; message: string } => {
+	const parts = raw.split('*');
+	if (parts.length >= 2) {
+		return { type: parts[0].trim(), message: parts[1].replace(/^`|`$/g, '').trim() };
+	}
+	return { type: '', message: raw };
+};
+
 const formatElapsedTime = (seconds: number): string => {
 	const totalSeconds = Math.floor(seconds);
 	if (totalSeconds < 60) return `${totalSeconds}s`;
@@ -153,6 +162,7 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 			const elapsedFinal = taskStatus.endTime > 0 && taskStatus.startTime > 0 ? Math.max(0, taskStatus.endTime - taskStatus.startTime) : elapsed;
 
 			if (isStartupError) {
+				const parsed = firstError ? parseError(firstError) : null;
 				return (
 					<div style={styles.footer}>
 						<div style={styles.sourceFooterMain}>
@@ -161,7 +171,12 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 							</span>
 							{statusLink}
 						</div>
-						{firstError && <span style={styles.errorMessage}>{firstError}</span>}
+						{parsed && (
+							<span style={styles.errorMessage}>
+								{parsed.type && <span style={{ fontWeight: 600 }}>{parsed.type}: </span>}
+								{parsed.message}
+							</span>
+						)}
 						<div style={styles.accentBarError} />
 					</div>
 				);
@@ -261,9 +276,10 @@ const styles = {
 		fontSize: '9px',
 		color: 'var(--rr-error)',
 		marginTop: '3px',
-		...commonStyles.textEllipsis,
 		opacity: 0.85,
 		display: 'block',
+		wordBreak: 'break-word',
+		lineHeight: 1.4,
 	} as React.CSSProperties,
 
 	// Accent bars (thin 2px bar at bottom of completed status)
