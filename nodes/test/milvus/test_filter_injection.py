@@ -9,6 +9,22 @@ filter expressions, preventing filter injection attacks.
 import sys
 import os
 import unittest
+from unittest.mock import MagicMock
+
+# Mock heavy dependencies before importing milvus so the real pymilvus/pandas/numpy
+# are never loaded during test collection.
+for _name, _mock in {
+    'depends': MagicMock(),
+    'numpy': MagicMock(),
+    'engLib': MagicMock(),
+    'pymilvus': MagicMock(),
+    'ai': MagicMock(),
+    'ai.common': MagicMock(),
+    'ai.common.schema': MagicMock(),
+    'ai.common.store': MagicMock(),
+    'ai.common.config': MagicMock(),
+}.items():
+    sys.modules.setdefault(_name, _mock)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'nodes', 'milvus'))
 
