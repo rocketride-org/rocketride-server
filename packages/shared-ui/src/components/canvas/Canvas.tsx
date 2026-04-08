@@ -111,13 +111,16 @@ export interface IFlowProps {
 
 	/** Whether the host is connected to the server. Controls run/stop button availability. */
 	isConnected?: boolean;
+
+	/** Saved viewport to restore on load — passed separately, not in the project. */
+	initialViewport?: { x: number; y: number; zoom: number };
 }
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected }: IFlowProps) {
+export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, initialViewport }: IFlowProps) {
 	// --- Build inventory from service catalog --------------------------------
 	const inventory = buildInventory(servicesJson);
 
@@ -183,6 +186,7 @@ export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuse
 					onOpenStatus={onOpenStatus}
 					serverHost={serverHost}
 					isConnected={isConnected}
+					initialViewport={initialViewport}
 					features={{
 						addNode: true,
 						addAnnotation: true,

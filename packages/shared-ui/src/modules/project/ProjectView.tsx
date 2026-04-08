@@ -255,8 +255,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	);
 
 	const handleRunPipeline = useCallback(
-		(source: string, updatedProject: any) => {
-			send({ type: 'canvas:contentChanged', project: updatedProject });
+		(source: string, _project: any) => {
 			send({ type: 'status:pipelineAction', action: 'run', source });
 		},
 		[send]
@@ -318,16 +317,13 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	if (!viewState || !prefs) return null;
 
-	// Inject saved viewport from viewState into the project for Canvas to restore
-	const projectForCanvas = project && viewState.viewport ? { ...project, viewport: viewState.viewport } : project;
-
 	const handleViewportChange = (viewport: { x: number; y: number; zoom: number }) => {
 		updateViewState({ viewport });
 	};
 
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{projectForCanvas && <Canvas oauth2RootUrl="" project={projectForCanvas} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} />}</div>,
+			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} />}</div>,
 		},
 		status: {
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} onPipelineAction={handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={styles.empty}>No source components found</div>}</div>,

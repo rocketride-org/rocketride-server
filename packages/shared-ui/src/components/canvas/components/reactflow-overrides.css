@@ -233,8 +233,8 @@
 		background-color 0.2s ease;
 }
 .rr-run-button-wrapper:hover {
-	left: calc(-5.5rem - 1px);
-	width: 5.5rem;
+	left: calc(-3.5rem - 1px);
+	width: 3.5rem;
 	background-color: var(--rr-accent, #007acc);
 }
 .rr-run-button-wrapper:hover .run-btn-label {

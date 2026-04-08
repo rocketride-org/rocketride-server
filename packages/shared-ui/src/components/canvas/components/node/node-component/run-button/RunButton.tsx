@@ -47,15 +47,6 @@ const styles = {
 		width: '1rem',
 		height: '1rem',
 	} as React.CSSProperties,
-	label: {
-		opacity: 0,
-		transition: 'opacity 0.3s ease, width 0.3s ease',
-		pointerEvents: 'none' as const,
-		whiteSpace: 'nowrap' as const,
-		fontSize: '0.65rem',
-		width: '0',
-		overflow: 'hidden',
-	} as React.CSSProperties,
 };
 
 // =============================================================================
@@ -63,9 +54,7 @@ const styles = {
 // =============================================================================
 
 export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
-	const [isPending, setIsPending] = useState(false);
 	const [isStopping, setIsStopping] = useState(false);
-	const isProcessingClick = useRef(false);
 
 	const { currentProject, taskStatuses, onRunPipeline, onStopPipeline, isConnected } = useFlowProject();
 	const { nodes } = useFlowGraph();
@@ -83,61 +72,43 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 	const handleRun = useCallback(
 		(e?: React.MouseEvent) => {
 			e?.stopPropagation();
-			if (isPending || isProcessingClick.current || isRunning || !onRunPipeline) return;
+			if (isRunning || !onRunPipeline) return;
 
-			isProcessingClick.current = true;
-			setIsPending(true);
-
-			// Serialize the current graph into an IProject for the host
 			const components = getProjectComponents(nodes as INode[]);
 			const project: IProject = {
 				...currentProject,
 				components,
 				version: PIPELINE_SCHEMA_VERSION,
-				source: nodeId,
 			};
 
 			onRunPipeline(nodeId, project);
 		},
-		[isPending, isRunning, onRunPipeline, nodeId, nodes, currentProject]
+		[isRunning, onRunPipeline, nodeId, nodes, currentProject]
 	);
 
 	const handleStop = useCallback(
 		(e?: React.MouseEvent) => {
 			e?.stopPropagation();
-			if (isPending || isStopping || isProcessingClick.current || !onStopPipeline) return;
+			if (isStopping || !onStopPipeline) return;
 
-			isProcessingClick.current = true;
 			setIsStopping(true);
 			onStopPipeline(nodeId);
 		},
-		[isPending, isStopping, onStopPipeline, nodeId]
+		[isStopping, onStopPipeline, nodeId]
 	);
 
-	// ── Clear pending on state transitions ─────────────────────────────────
+	// ── Clear stopping on state transitions ────────────────────────────────
 	const prevIsRunning = useRef(isRunning);
 	useEffect(() => {
 		if (prevIsRunning.current !== isRunning) {
-			if (isPending) {
-				setIsPending(false);
-				isProcessingClick.current = false;
-			}
 			if (isStopping) {
 				setIsStopping(false);
-				isProcessingClick.current = false;
 			}
 		}
 		prevIsRunning.current = isRunning;
-	}, [isRunning, isPending, isStopping]);
-
-	useEffect(() => {
-		if (!isPending && !isStopping) {
-			isProcessingClick.current = false;
-		}
-	}, [isPending, isStopping]);
+	}, [isRunning, isStopping]);
 
 	// ── Render ─────────────────────────────────────────────────────────────
-	// Hide the button entirely when not connected — can't run or stop without a server
 	if (!isConnected) {
 		return <></>;
 	}
@@ -155,9 +126,6 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 					<span style={styles.button}>
 						<RefreshCw size={16} style={{ ...styles.icon, color: 'var(--rr-warning)' }} className="rotate" />
 					</span>
-					<span style={styles.label} className="run-btn-label">
-						Stopping...
-					</span>
 				</div>
 			);
 		}
@@ -174,9 +142,6 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 				<span style={styles.button}>
 					<Square size={12} style={{ ...styles.icon, color: 'var(--rr-error)', fill: 'transparent', strokeWidth: 2.5 }} />
 				</span>
-				<span style={styles.label} className="run-btn-label">
-					Stop
-				</span>
 			</div>
 		);
 	}
@@ -190,9 +155,8 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 				e.preventDefault();
 			}}
 		>
-			<span style={styles.button}>{isPending ? <RefreshCw size={16} style={{ ...styles.icon, color: 'var(--rr-warning)' }} className="rotate" /> : <Play size={16} style={{ ...styles.icon, color: 'var(--rr-accent)' }} />}</span>
-			<span style={styles.label} className="run-btn-label">
-				Run Pipeline
+			<span style={styles.button}>
+				<Play size={16} style={{ ...styles.icon, color: 'var(--rr-accent)' }} />
 			</span>
 		</div>
 	);
