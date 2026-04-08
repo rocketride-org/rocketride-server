@@ -1,0 +1,121 @@
+name: Actions storage cleanup
+run-name: Cleanup ${{ github.event_name == 'workflow_dispatch' && '(manual)' || '(scheduled)' }}
+
+# Why this workflow exists:
+#   GitHub Actions storage (artifacts + caches) is org-wide and counts against
+#   the included quota for the rocketride-org account. This monorepo's nightly
+#   build matrix uploads ~30 platform/client artifact bundles per run, which
+#   accumulates well beyond the 0.5 GB free tier even with retention_days: 3.
+#
+#   Storage usage is averaged over the billing cycle, so deleting old artifacts
+#   doesn't retroactively reduce the bill — but it lowers the rate of growth and
+#   prevents the next cycle from starting in the red. This job runs daily.
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # Daily 06:00 UTC, 4h after the nightly build
+  workflow_dispatch:
+    inputs:
+      artifact_max_age_days:
+        description: Delete artifacts older than this many days
+        required: false
+        type: string
+        default: '2'
+      cache_max_age_days:
+        description: Delete caches older than this many days
+        required: false
+        type: string
+        default: '7'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: storage-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Delete old artifacts and caches
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Delete old artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAX_AGE_DAYS: ${{ inputs.artifact_max_age_days || '2' }}
+        run: |
+          set -euo pipefail
+          CUTOFF=$(date -u -d "${MAX_AGE_DAYS} days ago" +%s)
+          echo "Deleting artifacts created before $(date -u -d @${CUTOFF} -Iseconds)"
+
+          DELETED=0
+          BYTES=0
+          while read -r id created size name; do
+            CREATED_EPOCH=$(date -u -d "${created}" +%s)
+            if [ "${CREATED_EPOCH}" -lt "${CUTOFF}" ]; then
+              if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}" >/dev/null 2>&1; then
+                DELETED=$((DELETED + 1))
+                BYTES=$((BYTES + size))
+                echo "  deleted #${id} (${name}, ${size} bytes, ${created})"
+              else
+                echo "  failed to delete #${id}" >&2
+              fi
+            fi
+          done < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts" \
+                    --jq '.artifacts[] | "\(.id) \(.created_at) \(.size_in_bytes) \(.name)"')
+
+          MB=$((BYTES / 1024 / 1024))
+          echo "Artifact cleanup complete: ${DELETED} artifacts, ${MB} MiB freed"
+          echo "## Artifacts cleaned" >> $GITHUB_STEP_SUMMARY
+          echo "- Deleted: ${DELETED}" >> $GITHUB_STEP_SUMMARY
+          echo "- Freed: ${MB} MiB" >> $GITHUB_STEP_SUMMARY
+
+      - name: Delete old caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAX_AGE_DAYS: ${{ inputs.cache_max_age_days || '7' }}
+        run: |
+          set -euo pipefail
+          CUTOFF=$(date -u -d "${MAX_AGE_DAYS} days ago" +%s)
+          echo "Deleting caches last accessed before $(date -u -d @${CUTOFF} -Iseconds)"
+
+          DELETED=0
+          BYTES=0
+          while read -r id last_used size key; do
+            ACCESSED_EPOCH=$(date -u -d "${last_used}" +%s)
+            if [ "${ACCESSED_EPOCH}" -lt "${CUTOFF}" ]; then
+              if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${id}" >/dev/null 2>&1; then
+                DELETED=$((DELETED + 1))
+                BYTES=$((BYTES + size))
+                echo "  deleted cache #${id} (${key}, ${size} bytes, accessed ${last_used})"
+              else
+                echo "  failed to delete cache #${id}" >&2
+              fi
+            fi
+          done < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches" \
+                    --jq '.actions_caches[] | "\(.id) \(.last_accessed_at) \(.size_in_bytes) \(.key)"')
+
+          MB=$((BYTES / 1024 / 1024))
+          echo "Cache cleanup complete: ${DELETED} caches, ${MB} MiB freed"
+          echo "## Caches cleaned" >> $GITHUB_STEP_SUMMARY
+          echo "- Deleted: ${DELETED}" >> $GITHUB_STEP_SUMMARY
+          echo "- Freed: ${MB} MiB" >> $GITHUB_STEP_SUMMARY
+
+      - name: Report current usage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ARTIFACT_COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts" --jq '.total_count')
+          CACHE_INFO=$(gh api "repos/${GITHUB_REPOSITORY}/actions/cache/usage")
+          CACHE_COUNT=$(echo "${CACHE_INFO}" | jq -r '.active_caches_count')
+          CACHE_BYTES=$(echo "${CACHE_INFO}" | jq -r '.active_caches_size_in_bytes')
+          CACHE_MB=$((CACHE_BYTES / 1024 / 1024))
+
+          echo "## Current storage" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifacts remaining: ${ARTIFACT_COUNT}" >> $GITHUB_STEP_SUMMARY
+          echo "- Active caches: ${CACHE_COUNT} (${CACHE_MB} MiB)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Note: cache usage counter recalculates every 6–12h, so values here may lag actual deletions._" >> $GITHUB_STEP_SUMMARY
