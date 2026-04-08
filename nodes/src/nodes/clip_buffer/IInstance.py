@@ -55,6 +55,7 @@ class IInstance(IInstanceBase):
         self._image_buf = bytearray()
         self._image_mime = 'image/png'
         self._clip_idx: int = 0
+        self._reference_set: bool = False
 
     def close(self):
         # Flush any in-progress clip if the video ends mid-match
@@ -98,6 +99,12 @@ class IInstance(IInstanceBase):
     def _on_frame(self, frame_bytes: bytes, mime: str):
         timestamp = self._pending_timestamp
         scene_change_score = self._pending_scene_change_score
+
+        # 0. First frame: send to VSF to establish the reference image
+        if not self._reference_set:
+            self._reference_set = True
+            self._invoke_vsf(frame_bytes)
+            self._last_scan = timestamp  # treat as just scanned so next poll is scan_interval away
 
         # 1. Append to rolling pre-buffer; evict entries older than buffer_seconds
         self._buffer.append((timestamp, frame_bytes, mime))
