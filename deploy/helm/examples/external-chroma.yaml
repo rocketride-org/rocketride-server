@@ -1,0 +1,25 @@
+# Example: Connecting RocketRide to an external ChromaDB instance
+#
+# Use this with: helm install rocketride deploy/helm/rocketride -f deploy/helm/examples/external-chroma.yaml
+#
+# Options for running ChromaDB:
+#   - Chroma Cloud (managed): https://www.trychroma.com/
+#   - Self-hosted ChromaDB via the official Docker image
+#   - Chroma Helm chart: https://github.com/amikos-tech/chromadb-chart
+#
+# Prerequisites:
+#   1. Deploy or provision a ChromaDB instance
+#   2. Ensure network connectivity from the Kubernetes cluster
+#
+engine:
+  env:
+    CHROMA_HOST: 'your-chroma-host.example.com'
+    CHROMA_PORT: '8000'
+
+  # If ChromaDB requires authentication, store the token in a secret:
+  #
+  #   kubectl create secret generic rocketride-chroma \
+  #     --from-literal=CHROMA_AUTH_TOKEN='your-token-here'
+  #
+  # Then uncomment:
+  # existingSecret: 'rocketride-chroma'

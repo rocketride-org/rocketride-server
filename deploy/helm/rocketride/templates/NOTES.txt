@@ -1,0 +1,44 @@
+RocketRide has been deployed successfully!
+
+{{- if .Values.ingress.enabled }}
+
+Access the engine via your ingress:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+
+{{- else if contains "NodePort" .Values.engine.service.type }}
+
+Get the application URL by running:
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "rocketride.fullname" . }}-engine)
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}')
+  [ -z "$NODE_IP" ] && export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+  echo http://$NODE_IP:$NODE_PORT
+
+{{- else if contains "LoadBalancer" .Values.engine.service.type }}
+
+Get the application URL by running:
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+  kubectl get --namespace {{ .Release.Namespace }} svc {{ include "rocketride.fullname" . }}-engine -w
+
+{{- else if contains "ClusterIP" .Values.engine.service.type }}
+
+Access the engine via port-forward:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "rocketride.fullname" . }}-engine {{ .Values.engine.service.port }}:{{ .Values.engine.service.port }}
+  echo "Visit http://127.0.0.1:{{ .Values.engine.service.port }}/ping to verify"
+
+{{- end }}
+
+Components deployed:
+{{- if .Values.engine.autoscaling.enabled }}
+  - Engine: autoscaling enabled (min {{ .Values.engine.autoscaling.minReplicas }}, max {{ .Values.engine.autoscaling.maxReplicas }})
+{{- else }}
+  - Engine: {{ .Values.engine.replicaCount }} replica(s)
+{{- end }}
+
+NOTE: This chart does not bundle databases or vector stores.
+  Configure external services via engine.env and engine.secrets.
+  See deploy/helm/examples/ for configuration examples.
+
+Verify the deployment:
+  helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }}

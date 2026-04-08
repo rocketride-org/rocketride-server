@@ -1,0 +1,92 @@
+{{/*
+Expand the name of the chart.
+*/}}
+{{- define "rocketride.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Create a default fully qualified app name.
+We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
+If release name contains chart name it will be used as a full name.
+*/}}
+{{- define "rocketride.fullname" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- if contains $name .Release.Name }}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+Create chart name and version as used by the chart label.
+*/}}
+{{- define "rocketride.chart" -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Common labels
+*/}}
+{{- define "rocketride.labels" -}}
+helm.sh/chart: {{ include "rocketride.chart" . }}
+{{ include "rocketride.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+Selector labels
+*/}}
+{{- define "rocketride.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "rocketride.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{/*
+Create the name of the service account to use
+*/}}
+{{- define "rocketride.serviceAccountName" -}}
+{{- if .Values.engine.serviceAccount.create }}
+{{- default (include "rocketride.fullname" .) .Values.engine.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.engine.serviceAccount.name }}
+{{- end }}
+{{- end }}
+
+{{/*
+Return the secret name for engine credentials
+*/}}
+{{- define "rocketride.secretName" -}}
+{{- if .Values.engine.existingSecret }}
+{{- .Values.engine.existingSecret }}
+{{- else }}
+{{- include "rocketride.fullname" . }}
+{{- end }}
+{{- end }}
+
+{{/*
+Validate that engine secrets are configured.
+Users must provide credentials via engine.existingSecret or engine.secrets.
+This prevents deploying with missing API keys.
+*/}}
+{{- define "rocketride.validateSecrets" -}}
+{{- if and (not .Values.engine.existingSecret) (not .Values.engine.secrets) }}
+{{- fail "Engine secrets must be configured. Set engine.secrets with your API keys or provide engine.existingSecret referencing a pre-created Kubernetes Secret." }}
+{{- end }}
+{{- end }}
+
+{{/*
+Return the engine image reference
+*/}}
+{{- define "rocketride.engine.image" -}}
+{{- $tag := default .Chart.AppVersion .Values.engine.image.tag }}
+{{- printf "%s:%s" .Values.engine.image.repository $tag }}
+{{- end }}

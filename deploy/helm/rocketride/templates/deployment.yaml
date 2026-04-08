@@ -1,0 +1,110 @@
+{{- include "rocketride.validateSecrets" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rocketride.fullname" . }}-engine
+  labels:
+    {{- include "rocketride.labels" . | nindent 4 }}
+    app.kubernetes.io/component: engine
+spec:
+  {{- if not .Values.engine.autoscaling.enabled }}
+  replicas: {{ .Values.engine.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "rocketride.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: engine
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.engine.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "rocketride.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: engine
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "rocketride.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.engine.podSecurityContext | nindent 8 }}
+      containers:
+        - name: engine
+          image: {{ include "rocketride.engine.image" . }}
+          imagePullPolicy: {{ .Values.engine.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.engine.service.targetPort }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "rocketride.fullname" . }}-config
+            {{- if or .Values.engine.secrets .Values.engine.existingSecret }}
+            - secretRef:
+                name: {{ include "rocketride.secretName" . }}
+            {{- end }}
+          readinessProbe:
+            {{- toYaml .Values.engine.readinessProbe | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.engine.livenessProbe | nindent 12 }}
+          startupProbe:
+            {{- toYaml .Values.engine.startupProbe | nindent 12 }}
+          resources:
+            {{- if .Values.engine.gpu.enabled }}
+            limits:
+              nvidia.com/gpu: {{ .Values.engine.gpu.count | quote }}
+              {{- with .Values.engine.resources.limits }}
+              {{- toYaml . | nindent 14 }}
+              {{- end }}
+            {{- if .Values.engine.resources.requests }}
+            requests:
+              {{- toYaml .Values.engine.resources.requests | nindent 14 }}
+            {{- end }}
+            {{- else }}
+            {{- toYaml .Values.engine.resources | nindent 12 }}
+            {{- end }}
+          securityContext:
+            {{- toYaml .Values.engine.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.engine.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- with .Values.engine.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- if or .Values.engine.nodeSelector (and .Values.engine.gpu.enabled .Values.engine.gpu.nodeSelector) }}
+      nodeSelector:
+        {{- with .Values.engine.nodeSelector }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.engine.gpu.enabled }}
+        {{- with .Values.engine.gpu.nodeSelector }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.engine.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or .Values.engine.tolerations (and .Values.engine.gpu.enabled .Values.engine.gpu.tolerations) }}
+      tolerations:
+        {{- with .Values.engine.tolerations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.engine.gpu.enabled }}
+        {{- with .Values.engine.gpu.tolerations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- end }}
+      {{- end }}

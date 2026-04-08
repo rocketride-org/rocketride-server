@@ -1,0 +1,70 @@
+# Test value overrides for CI validation
+# Usage: helm template test deploy/helm/rocketride -f deploy/helm/rocketride/tests/values_test.yaml
+
+engine:
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/rocketride-org/rocketride-engine
+    tag: '3.1.2-test'
+    pullPolicy: Always
+
+  serviceAccount:
+    create: true
+    name: 'rocketride-test-sa'
+    annotations:
+      eks.amazonaws.com/role-arn: 'arn:aws:iam::123456789012:role/rocketride-test'
+
+  service:
+    type: ClusterIP
+    port: 5565
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: 85
+
+  env:
+    LOG_LEVEL: 'debug'
+    WORKER_THREADS: '2'
+
+  existingSecret: ''
+
+  secrets:
+    OPENAI_API_KEY: 'sk-test-key-not-real'
+    ANTHROPIC_API_KEY: 'sk-ant-test-key-not-real'
+
+  podAnnotations:
+    prometheus.io/scrape: 'true'
+    prometheus.io/port: '5565'
+
+  nodeSelector:
+    kubernetes.io/arch: amd64
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+    nginx.ingress.kubernetes.io/proxy-body-size: '50m'
+  hosts:
+    - host: rocketride-test.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: rocketride-test-tls
+      hosts:
+        - rocketride-test.example.com
+# External service configuration example (no bundled databases)
+# engine.env and engine.secrets are used to connect to external services

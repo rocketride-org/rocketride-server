@@ -1,0 +1,215 @@
+# -- Global configuration
+global:
+  # -- List of image pull secrets for private registries
+  imagePullSecrets: []
+  # -- Override default storage class for all PVCs
+  storageClass: ''
+
+# -- Engine (core RocketRide data processing server)
+engine:
+  # -- Number of engine replicas (ignored if autoscaling.enabled is true)
+  replicaCount: 2
+
+  image:
+    # -- Engine container image repository
+    repository: ghcr.io/rocketride-org/rocketride-engine
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+    # -- Engine image tag (defaults to Chart appVersion)
+    tag: ''
+
+  # -- Service account configuration for the engine pods
+  serviceAccount:
+    # -- Create a dedicated service account
+    create: true
+    # -- Service account name (auto-generated if empty)
+    name: ''
+    # -- Annotations for the service account (e.g. IAM role bindings)
+    annotations: {}
+
+  service:
+    # -- Kubernetes service type
+    type: ClusterIP
+    # -- Service port for the engine API
+    port: 5565
+    # -- Target port on the container
+    targetPort: 5565
+
+  # -- Resource requests and limits for engine pods
+  # For GPU workloads, add nvidia.com/gpu to limits and set appropriate
+  # nodeSelector/tolerations below. Example:
+  #   limits:
+  #     nvidia.com/gpu: "1"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: '2'
+      memory: 2Gi
+
+  # -- Readiness probe configuration
+  readinessProbe:
+    httpGet:
+      path: /ping
+      port: 5565
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+
+  # -- Liveness probe configuration
+  livenessProbe:
+    httpGet:
+      path: /ping
+      port: 5565
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+
+  # -- Startup probe configuration (allows longer initial startup)
+  startupProbe:
+    httpGet:
+      path: /ping
+      port: 5565
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 30
+
+  # -- Horizontal Pod Autoscaler configuration
+  # NOTE: CPU/memory-based HPA may not be suitable for GPU inference workloads.
+  # For GPU workloads, consider using KEDA ScaledObject with queue depth or
+  # GPU utilization metrics instead.
+  autoscaling:
+    # -- Enable HPA for the engine deployment
+    enabled: false
+    # -- Minimum number of replicas
+    minReplicas: 2
+    # -- Maximum number of replicas
+    maxReplicas: 10
+    # -- Target CPU utilization percentage
+    targetCPUUtilizationPercentage: 70
+    # -- Target memory utilization percentage
+    targetMemoryUtilizationPercentage: 80
+
+  # -- Extra environment variables for engine pods (key-value pairs added to ConfigMap)
+  env:
+    # -- Log level (debug, info, warn, error)
+    LOG_LEVEL: 'info'
+    # -- Number of worker threads
+    WORKER_THREADS: '4'
+
+  # -- Name of an existing Secret to use instead of creating one
+  # If set, the chart will not create a Secret resource
+  existingSecret: ''
+
+  # -- Secret values (only used when existingSecret is empty)
+  # These will be base64-encoded and stored in a Kubernetes Secret
+  secrets:
+    {}
+    # OPENAI_API_KEY: ""
+    # ANTHROPIC_API_KEY: ""
+    # HUGGINGFACE_TOKEN: ""
+
+  # -- Additional volume mounts for the engine container
+  volumeMounts: []
+
+  # -- Additional volumes for the engine pod
+  volumes: []
+
+  # -- Node selector for engine pods
+  # For GPU workloads, set e.g.:
+  #   accelerator: nvidia-gpu
+  nodeSelector: {}
+
+  # -- Tolerations for engine pods
+  # For GPU nodes, add e.g.:
+  #   - key: nvidia.com/gpu
+  #     operator: Exists
+  #     effect: NoSchedule
+  tolerations: []
+
+  # -- Affinity rules for engine pods
+  affinity: {}
+
+  # -- GPU configuration for engine pods
+  # When enabled, adds nvidia.com/gpu resource limits plus GPU-specific
+  # nodeSelector and tolerations. For autoscaling GPU workloads, disable
+  # the built-in HPA and use KEDA instead (see deploy/helm/examples/keda-gpu-scaling.yaml).
+  gpu:
+    # -- Enable GPU resource requests
+    enabled: false
+    # -- Number of GPUs to request per pod
+    count: '1'
+    # -- Additional node selector labels for GPU nodes
+    # Example: { "accelerator": "nvidia-a100" }
+    nodeSelector: {}
+    # -- Additional tolerations for GPU nodes
+    # Example:
+    #   - key: nvidia.com/gpu
+    #     operator: Exists
+    #     effect: NoSchedule
+    tolerations: []
+
+  # -- Pod-level annotations
+  podAnnotations: {}
+
+  # -- Pod-level security context
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+
+  # -- Container-level security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+# -- Ingress configuration
+ingress:
+  # -- Enable ingress resource
+  enabled: false
+  # -- Ingress class name (e.g. nginx, traefik)
+  className: ''
+  # -- Ingress annotations
+  annotations:
+    {}
+    # kubernetes.io/tls-acme: "true"
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  # -- Ingress host rules
+  hosts:
+    - host: rocketride.local
+      paths:
+        - path: /
+          pathType: Prefix
+  # -- TLS configuration
+  tls: []
+  #  - secretName: rocketride-tls
+  #    hosts:
+  #      - rocketride.local
+# -- External services
+# This chart does NOT bundle databases or vector stores. Use managed services
+# (e.g. AWS RDS, Cloud SQL, Aiven) or deploy them separately.
+# See deploy/helm/examples/ for configuration examples.
+#
+# To connect to external PostgreSQL, set environment variables via engine.env:
+#   POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_DB
+# and store POSTGRES_PASSWORD in engine.secrets or engine.existingSecret.
+#
+# To connect to external ChromaDB, set CHROMA_HOST and CHROMA_PORT via engine.env.
+#
+# For Milvus, add the official Milvus Helm chart as a subchart dependency:
+#   dependencies:
+#     - name: milvus
+#       version: "4.x.x"
+#       repository: https://zilliztech.github.io/milvus-helm
+#       condition: milvus.enabled
