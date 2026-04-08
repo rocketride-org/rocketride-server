@@ -1,8 +1,8 @@
 {
 	"title": "Visual Similarity Filter",
 	"protocol": "visual_similarity_filter://",
-	"classType": ["image"],
-	"capabilities": [],
+	"classType": ["visual_similarity"],
+	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.visual_similarity_filter",
