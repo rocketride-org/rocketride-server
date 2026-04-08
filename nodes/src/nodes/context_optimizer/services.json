@@ -47,15 +47,7 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": [
-		"A transformation component that manages LLM context window budgets. ",
-		"It counts tokens, allocates budgets across system prompt, query, documents, ",
-		"and conversation history, then truncates or summarizes content to fit within ",
-		"model-specific token limits.</br>",
-		"</br>",
-		"Supports GPT, Claude, and Gemini model families with configurable budget ",
-		"percentages and priority-based allocation."
-	],
+	"description": ["A transformation component that manages LLM context window budgets. ", "It counts tokens, allocates budgets across system prompt, query, documents, ", "and conversation history, then truncates or summarizes content to fit within ", "model-specific token limits.</br>", "</br>", "Supports GPT, Claude, and Gemini model families with configurable budget ", "percentages and priority-based allocation."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -90,7 +82,7 @@
 		"cases": [
 			{
 				"questions": {
-					"questions": [{"text": "What is the capital of France?"}]
+					"questions": [{ "text": "What is the capital of France?" }]
 				},
 				"expect": {
 					"questions": {
@@ -109,7 +101,7 @@
 		"default": "auto",
 		"profiles": {
 			"auto": {
-				"title": "Auto - Use configured default model",
+				"title": "Auto - Use default model limits",
 				"model_name": "gpt-5",
 				"max_context_tokens": 0,
 				"system_prompt_budget_pct": 10,
@@ -181,24 +173,11 @@
 		},
 		"context_optimizer.auto": {
 			"object": "auto",
-			"properties": [
-				"context_optimizer.model_name",
-				"context_optimizer.system_prompt_budget_pct",
-				"context_optimizer.query_budget_pct",
-				"context_optimizer.document_budget_pct",
-				"context_optimizer.history_budget_pct"
-			]
+			"properties": ["context_optimizer.model_name", "context_optimizer.system_prompt_budget_pct", "context_optimizer.query_budget_pct", "context_optimizer.document_budget_pct", "context_optimizer.history_budget_pct"]
 		},
 		"context_optimizer.manual": {
 			"object": "manual",
-			"properties": [
-				"context_optimizer.model_name",
-				"context_optimizer.max_context_tokens",
-				"context_optimizer.system_prompt_budget_pct",
-				"context_optimizer.query_budget_pct",
-				"context_optimizer.document_budget_pct",
-				"context_optimizer.history_budget_pct"
-			]
+			"properties": ["context_optimizer.model_name", "context_optimizer.max_context_tokens", "context_optimizer.system_prompt_budget_pct", "context_optimizer.query_budget_pct", "context_optimizer.document_budget_pct", "context_optimizer.history_budget_pct"]
 		},
 		"context_optimizer.profile": {
 			"title": "Mode",
