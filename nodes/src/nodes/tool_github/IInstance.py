@@ -878,7 +878,7 @@ class IInstance(IInstanceBase):
         return {'id': data.get('id'), 'email': data.get('email'), 'role': data.get('role'), 'created_at': data.get('created_at')}
 
     # =======================================================================
-    # SEARCH & DISCOVERY  (bonus — not in n8n, essential for agent research)
+    # SEARCH & DISCOVERY
     # =======================================================================
 
     @tool_function(
