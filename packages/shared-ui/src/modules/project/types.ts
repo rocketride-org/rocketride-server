@@ -94,13 +94,15 @@ export interface ProjectLoadMessage {
 	services: Record<string, any>;
 	isConnected: boolean;
 	statuses?: Record<string, TaskStatus>;
+	/** Server host URL for {host} placeholder replacement in endpoint URLs. */
+	serverHost?: string;
 }
 
 /** All messages the host can send to ProjectView. */
 export type ProjectViewIncoming = CanvasIncoming | StatusIncoming | TraceIncoming | ProjectLoadMessage | { type: 'project:connectionState'; isConnected: boolean } | { type: 'project:initialState'; state: ViewState } | { type: 'project:initialPrefs'; prefs: Record<string, unknown> } | { type: 'project:themeChange'; tokens: Record<string, string> };
 
 /** All messages ProjectView can send to the host. */
-export type ProjectViewOutgoing = CanvasOutgoing | StatusOutgoing | TraceOutgoing | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:requestSave' };
+export type ProjectViewOutgoing = CanvasOutgoing | StatusOutgoing | TraceOutgoing | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:requestSave' } | { type: 'project:openLink'; url: string; displayName?: string };
 
 // =============================================================================
 // VIEW TYPES

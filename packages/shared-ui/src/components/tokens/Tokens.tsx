@@ -159,6 +159,64 @@ function TokenBar({ label, value, max }: { label: string; value: number | undefi
 	);
 }
 
+// =============================================================================
+// SINGLE-SOURCE CONTENT
+// =============================================================================
+
+export interface SourceTokensContentProps {
+	tokens: TokenData | undefined;
+}
+
+/**
+ * SourceTokensContent — Renders token cards + bars for a single source.
+ * Used by SourceTokensPane in ProjectView (mirrors SourceStatusPane pattern).
+ */
+export const SourceTokensContent: React.FC<SourceTokensContentProps> = ({ tokens }) => {
+	if (!tokens) {
+		return (
+			<div style={styles.empty}>
+				<div style={{ marginBottom: 8, fontSize: 24, color: 'var(--rr-text-disabled)' }}>&#9677;</div>
+				<div>No token data available</div>
+				<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', marginTop: 4 }}>Run a pipeline to see token consumption</div>
+			</div>
+		);
+	}
+
+	const maxTotal = tokens.total || 1;
+
+	return (
+		<>
+			<div style={styles.summary}>
+				<div style={styles.card}>
+					<div style={styles.cardLabel}>Total Tokens</div>
+					<div style={styles.cardValue}>{fmt(tokens.total)}</div>
+				</div>
+				<div style={styles.card}>
+					<div style={styles.cardLabel}>CPU Usage</div>
+					<div style={styles.cardValue}>{fmt(tokens.cpu_utilization)}</div>
+				</div>
+				<div style={styles.card}>
+					<div style={styles.cardLabel}>CPU Memory</div>
+					<div style={styles.cardValue}>{fmt(tokens.cpu_memory)}</div>
+				</div>
+				<div style={styles.card}>
+					<div style={styles.cardLabel}>GPU Memory</div>
+					<div style={styles.cardValue}>{fmt(tokens.gpu_memory)}</div>
+				</div>
+			</div>
+			<div style={styles.bars}>
+				<TokenBar label="CPU Usage" value={tokens.cpu_utilization} max={maxTotal} />
+				<TokenBar label="CPU Memory" value={tokens.cpu_memory} max={maxTotal} />
+				<TokenBar label="GPU Memory" value={tokens.gpu_memory} max={maxTotal} />
+			</div>
+		</>
+	);
+};
+
+// =============================================================================
+// MULTI-SOURCE (LEGACY)
+// =============================================================================
+
 export const Tokens: React.FC<TokensProps> = ({ statusMap, sources }) => {
 	// Collect all token entries from all sources
 	const { allTokens, aggregated, hasData } = useMemo(() => {

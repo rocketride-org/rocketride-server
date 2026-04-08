@@ -25,7 +25,7 @@ import { useElapsedTimer } from './hooks/useElapsedTimer';
 import Canvas from '../../components/canvas';
 import Status from '../../components/status/Status';
 import { StatusHeader } from '../../components/status/StatusHeader';
-import Tokens from '../../components/tokens/Tokens';
+import { SourceTokensContent } from '../../components/tokens/Tokens';
 import Flow from '../../components/flow/Flow';
 import Trace from '../../components/trace/Trace';
 import Errors from '../../components/errors/Errors';
@@ -110,6 +110,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	const [traceEvents, setTraceEvents] = useState<TraceEvent[]>([]);
 	const [viewState, setViewState] = useState<ViewState | null>(null);
 	const [prefs, setPrefs] = useState<Record<string, unknown> | null>(null);
+	const [serverHost, setServerHost] = useState<string>('');
 
 	// Pending validate requests
 	const pendingValidates = useRef<Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>>(new Map());
@@ -132,6 +133,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 					});
 					setPrefs(msg.prefs ?? {});
 					setTraceEvents([]);
+					if (msg.serverHost) setServerHost(msg.serverHost);
 					break;
 				case 'canvas:update':
 					setProject(msg.project);
@@ -274,6 +276,15 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 		[send]
 	);
 
+	// --- Open link -----------------------------------------------------------
+
+	const handleOpenLink = useCallback(
+		(url: string, displayName?: string) => {
+			send({ type: 'project:openLink', url, displayName });
+		},
+		[send]
+	);
+
 	// --- Trace clear ---------------------------------------------------------
 
 	const handleTraceClear = useCallback(() => {
@@ -323,17 +334,13 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{projectForCanvas && <Canvas oauth2RootUrl="" project={projectForCanvas} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} />}</div>,
+			content: <div style={styles.canvasPadding}>{projectForCanvas && <Canvas oauth2RootUrl="" project={projectForCanvas} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} />}</div>,
 		},
 		status: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} onPipelineAction={handlePipelineAction} />) : <div style={styles.empty}>No source components found</div>}</div>,
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} onPipelineAction={handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={styles.empty}>No source components found</div>}</div>,
 		},
 		tokens: {
-			content: (
-				<div style={commonStyles.tabContent}>
-					<Tokens statusMap={statusMap} sources={sources} />
-				</div>
-			),
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTokensPane key={src.id} source={src} taskStatus={statusMap[src.id]} />) : <div style={styles.empty}>No source components found</div>}</div>,
 		},
 		flow: {
 			content: (
@@ -389,14 +396,37 @@ const SourceStatusPane: React.FC<{
 	source: SourceInfo;
 	taskStatus: TaskStatus | undefined;
 	onPipelineAction: (action: 'run' | 'stop' | 'restart', source?: string) => void;
-}> = ({ source, taskStatus, onPipelineAction }) => {
+	onOpenLink?: (url: string, displayName?: string) => void;
+	serverHost?: string;
+}> = ({ source, taskStatus, onPipelineAction, onOpenLink, serverHost }) => {
 	const currentElapsed = useElapsedTimer(taskStatus ?? null);
 
 	return (
 		<div style={styles.sourcePane}>
-			<StatusHeader name={source.name} taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)} extraActions={<PipelineActions notes={taskStatus?.notes} />} />
+			<StatusHeader name={source.name} taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)} extraActions={<PipelineActions notes={taskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />} />
 			<div style={styles.sourceBody}>
 				<Status taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} />
+			</div>
+		</div>
+	);
+};
+
+// =============================================================================
+// SOURCE TOKENS PANE
+// =============================================================================
+
+const SourceTokensPane: React.FC<{
+	source: SourceInfo;
+	taskStatus: TaskStatus | undefined;
+}> = ({ source, taskStatus }) => {
+	return (
+		<div style={styles.sourcePane}>
+			{/* Source name only when multiple sources exist */}
+			<div style={{ padding: '8px 12px', borderBottom: '1px solid var(--rr-border)' }}>
+				<span style={styles.sourceName}>{source.name}</span>
+			</div>
+			<div style={styles.sourceBody}>
+				<SourceTokensContent tokens={taskStatus?.tokens} />
 			</div>
 		</div>
 	);
