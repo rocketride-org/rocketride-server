@@ -230,6 +230,7 @@ const THEME_DYNAMIC_ICONS: ReadonlySet<string> = new Set([
 	'langchain',
 	// Database
 	'mysql',
+	'neo4j',
 	// Image processing
 	'frame_grabber',
 	'image_cleanup',
