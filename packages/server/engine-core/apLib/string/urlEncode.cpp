@@ -35,7 +35,7 @@ namespace ap::string {
 ///		String to URL encode
 ///	@param[in]	encodeSlash
 ///		Whether or not to encode slash symbol ('/'). By standard, slash symbol
-///should be encoded.
+/// should be encoded.
 ///     If full SMB filepath is encoded, it shouldn't be the done.
 ///     Default value is false.
 ///	@returns

@@ -34,7 +34,7 @@ TEST_CASE("perms::rights") {
 
     // Build a sorted set of all possible right objects
     std::set<Rights> rights;
-    for (auto& string : rightStrings) {
+    for (auto &string : rightStrings) {
         rights.insert(_fs<Rights>(string));
     }
 
@@ -94,7 +94,7 @@ TEST_CASE("perms::permissionSet") {
                       {"A", _fs<Rights>("+rw")}});
         auto psl = psb.build();
         REQUIRE(psl.size() == 1);
-        auto& ps = *psl.begin();
+        auto &ps = *psl.begin();
         REQUIRE(ps.perms.size() == 1);
     }
 }

@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ai.common.schema import Question
 from ai.common.tools import ToolsBase
+from rocketlib import ToolDescriptor
 
 from .host import AgentHostServices
 from .utils import normalize_invocation_payload
@@ -41,22 +42,15 @@ class _AgentAsToolProvider(ToolsBase):
     """
     `ToolsBase` implementation that routes tool calls into `agent.run_agent(...)`.
 
-    The tool name is namespaced by the pipeline component id so it remains unique
-    per connected agent node.
+    Emits a bare tool name; `AgentHostServices.Tools` handles node-id
+    namespacing so each agent instance is unique in the tool catalog.
     """
 
     def __init__(self, *, agent: Any, pSelf: Any):
         self._agent = agent
         self._pSelf = pSelf
-        self._full_name = f'{self.unique_agent_tool_name()}.{getattr(self._agent, "_AGENT_TOOL_NAME", "run_agent")}'
+        self._full_name = getattr(self._agent, '_AGENT_TOOL_NAME', 'run_agent')
         self._tools_available: Optional[List[Tuple[str, str]]] = None
-
-    def unique_agent_tool_name(self) -> str:
-        """Return the unique tool namespace for this agent node instance."""
-        inst = self._pSelf.instance
-        pipe_type = inst.pipeType
-        pipe_id = pipe_type.get('id') if isinstance(pipe_type, dict) else pipe_type.id
-        return str(pipe_id)
 
     def _connected_tools_available(self) -> List[Tuple[str, str]]:
         """
@@ -68,8 +62,8 @@ class _AgentAsToolProvider(ToolsBase):
         if self._tools_available is not None:
             return self._tools_available
         try:
-            host = AgentHostServices(self._pSelf.instance.invoke)
-            tools = self._agent._discover_tools(host=host)
+            host = AgentHostServices(self._pSelf)
+            tools = self._agent.discover_tools(host=host)
             tools_available = []
             for t in tools:
                 name = t.get('name', '')
@@ -112,10 +106,12 @@ class _AgentAsToolProvider(ToolsBase):
         if not query.strip():
             raise ValueError('agent tool: input.query must be a non-empty string')
 
-    def _tool_query(self) -> List[ToolsBase.ToolDescriptor]:
+    def _tool_query(self) -> List[ToolDescriptor]:
         """Return the single tool descriptor that exposes this agent."""
         tools_available = self._connected_tools_available()
-        desc = 'Invoke this agent as a tool. Input: {query: string, context?: object}. Output: {content, meta, stack}.'
+        agent_description = getattr(self._agent, '_agent_description', '') or ''
+        base = 'Invoke this agent as a tool. Input: {query: string, context?: object}. Output: {content, meta, stack}.'
+        desc = f'This agent: {agent_description} {base}' if agent_description else base
         if tools_available:
             parts = [f'{n}: {d}' if d else n for n, d in tools_available]
             desc = f'{desc} Tools available to this agent: {"; ".join(parts)}.'
@@ -125,7 +121,7 @@ class _AgentAsToolProvider(ToolsBase):
         descriptor = {
             'name': self._full_name,
             'description': desc,
-            'input_schema': {
+            'inputSchema': {
                 'type': 'object',
                 'properties': {
                     'query': {'type': 'string', 'description': 'Query string for the agent (required)'},
@@ -133,7 +129,7 @@ class _AgentAsToolProvider(ToolsBase):
                 },
                 'required': ['query'],
             },
-            'output_schema': {
+            'outputSchema': {
                 'type': 'object',
                 'description': 'Agent answer JSON payload',
                 'properties': {
@@ -154,7 +150,7 @@ class _AgentAsToolProvider(ToolsBase):
                     'stack': {'type': 'array', 'items': {'type': 'object'}, 'description': 'Run trace stack'},
                 },
                 'required': ['content', 'meta', 'stack'],
-            }
+            },
         }
         return [descriptor]
 

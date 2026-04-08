@@ -28,7 +28,7 @@ namespace ap::string::icu {
 struct MultibyteNoCaseCollator {
     using is_transparent = std::true_type;
 
-    MultibyteNoCaseCollator(const Locale& local = {"en", "US"}) noexcept {
+    MultibyteNoCaseCollator(const Locale &local = {"en", "US"}) noexcept {
         UErrorCode ec = U_ZERO_ERROR;
         m_collator.reset(Collator::createInstance(local, ec));
         ASSERTD_MSG(!U_FAILURE(ec), "Failed to allocate icu collator", ec);
@@ -36,12 +36,12 @@ struct MultibyteNoCaseCollator {
             icu::Collator::PRIMARY | icu::Collator::SECONDARY));
     }
 
-    bool operator()(const TextView& lhs, const TextView& rhs) const noexcept {
+    bool operator()(const TextView &lhs, const TextView &rhs) const noexcept {
         return compare(lhs, rhs);
     }
 
     template <typename L, typename R>
-    bool compare(const L& lhs, const R& rhs) const noexcept {
+    bool compare(const L &lhs, const R &rhs) const noexcept {
         UErrorCode ec = U_ZERO_ERROR;
         auto res =
             m_collator->compareUTF8({lhs.data(), _nc<int32_t>(lhs.size())},

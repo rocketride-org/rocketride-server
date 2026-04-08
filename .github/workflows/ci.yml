@@ -7,13 +7,13 @@ concurrency:
 
 on:
   push:
-    branches: [develop, main, 'release/**']
+    branches: [develop, stage, main, 'release/**']
   pull_request:
-    branches: [develop, main, 'release/**']
+    branches: [develop, stage, main, 'release/**']
   merge_group:
     types: [checks_requested]
   schedule:
-    - cron: '17 4 * * 1'  # Weekly Monday 4:17 UTC
+    - cron: '17 4 * * 1' # Weekly Monday 4:17 UTC
   workflow_dispatch:
 
 permissions:
@@ -23,98 +23,93 @@ env:
   GH_TOKEN: ${{ github.token }}
   VCPKG_NUGET_USER: ${{ github.repository_owner }}
   NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+  VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,readwrite
 
 # ---------------------------------------------------------------------------
 #  Build
 # ---------------------------------------------------------------------------
 jobs:
-  build:
-    name: Build / ${{ matrix.label }}
-    if: github.event_name != 'schedule'
-    timeout-minutes: 90
-    runs-on: ${{ matrix.runner }}
+  init:
+    name: Initialize
+    uses: ./.github/workflows/_init.yaml
+
+  # Skip build entirely for docs-only PRs (no code changed).
+  # For all code changes, builder handles engine download-vs-compile
+  # internally via hash comparison with nightly builds.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     permissions:
-      actions: read
-      checks: read
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'packages/**'
+              - 'nodes/**'
+              - 'apps/**'
+              - 'scripts/**'
+              - 'builder'
+              - 'builder.cmd'
+              - '.github/workflows/**'
+
+  build:
+    name: Build
+    needs: [init, changes]
+    if: >-
+      always() &&
+      needs.init.result == 'success' &&
+      github.event_name != 'schedule' &&
+      (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
+    uses: ./.github/workflows/_build.yaml
+    permissions:
       contents: read
       packages: write
-      pull-requests: write
-      repository-projects: read
-      security-events: read
-      statuses: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: ubuntu
-            label: Ubuntu 22.04
-            runner: ubuntu-22.04
-            builder_cmd: ./builder
-            vcpkg_cmd: ./build/vcpkg/vcpkg
-          - platform: windows
-            label: Windows Server 2022
-            runner: windows-2022
-            builder_cmd: ./builder.cmd
-            vcpkg_cmd: ./build/vcpkg/vcpkg.exe
-          - platform: macos
-            label: macOS (ARM64)
-            runner: macos-14
-            builder_cmd: ./builder
-            vcpkg_cmd: ./build/vcpkg/vcpkg
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: recursive
-      - name: Set up pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
-        with:
-          version: 10
-      - name: Set up vcpkg
-        run: ${{ matrix.builder_cmd }} vcpkg:submodule-build
-      - name: Set up vcpkg nuget / Linux/macOS
-        if: matrix.platform != 'windows'
-        run: |
-          NUGET_EXE=$(${{ matrix.vcpkg_cmd }} fetch nuget | tail -n1)
-          mono $NUGET_EXE sources add \
-            -Source "${{ env.NUGET_FEED_URL }}" \
-            -StorePasswordInClearText \
-            -Name GitHubPackages \
-            -UserName "${{ env.VCPKG_NUGET_USER }}" \
-            -Password "${{ secrets.GITHUB_TOKEN }}" || true
-          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
-            -Source "${{ env.NUGET_FEED_URL }}"
-      - name: Set up vcpkg nuget / Windows
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          $NUGET_EXE = $(${{ matrix.vcpkg_cmd }} fetch nuget | Select-Object -Last 1)
-          & $NUGET_EXE sources add `
-            -Source "${{ env.NUGET_FEED_URL }}" `
-            -StorePasswordInClearText `
-            -Name GitHubPackages `
-            -UserName "${{ env.VCPKG_NUGET_USER }}" `
-            -Password "${{ secrets.GITHUB_TOKEN }}"
-          & $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" `
-            -Source "${{ env.NUGET_FEED_URL }}"
-
-      - name: Build
-        run: ${{ matrix.builder_cmd }} build --verbose --autoinstall
-
-      - name: Test
-        run: ${{ matrix.builder_cmd }} test --verbose
+    with:
+      full_version: ${{ needs.init.outputs.full_server_version }}
+      build_hash: ${{ needs.init.outputs.build_hash }}
+      build_stamp: ${{ needs.init.outputs.build_stamp }}
+    secrets: inherit
 
   # ---------------------------------------------------------------------------
-  #  CodeQL
+  #  Build passthrough — when build is skipped (docs-only PRs), report success
+  #  under the same check names so branch protection required checks pass.
+  # ---------------------------------------------------------------------------
+  build-skip:
+    name: Build / ${{ matrix.label }}
+    needs: [init, changes]
+    if: >-
+      always() &&
+      needs.init.result == 'success' &&
+      github.event_name == 'pull_request' &&
+      needs.changes.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - label: Ubuntu 22.04
+          - label: Windows Server 2022
+          - label: macOS (ARM64)
+    steps:
+      - run: echo "Build skipped — no code changes detected"
+
+  # ---------------------------------------------------------------------------
+  #  CodeQL — scheduled + push only (not on PRs to avoid blocking releases)
   # ---------------------------------------------------------------------------
   codeql:
     name: CodeQL / ${{ matrix.language }}
+    if: github.event_name == 'schedule' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      actions: read
       contents: read
-      packages: write
       security-events: write
     strategy:
       fail-fast: false
@@ -138,85 +133,24 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
         with:
-          category: "/language:${{ matrix.language }}"
+          category: '/language:${{ matrix.language }}'
 
   codeql-cpp:
     name: CodeQL / cpp
     if: github.event_name == 'schedule'
-    runs-on: ubuntu-22.04
-    timeout-minutes: 90
-    continue-on-error: true
+    needs: init
+    uses: ./.github/workflows/_build.yaml
     permissions:
-      actions: read
       contents: read
       packages: write
       security-events: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          submodules: recursive
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
-        with:
-          version: 10
-
-      - name: Bootstrap vcpkg
-        run: ./builder vcpkg:build
-
-      - name: Configure vcpkg NuGet cache
-        run: |
-          NUGET_EXE=$(./build/vcpkg/vcpkg fetch nuget | tail -n1)
-          mono $NUGET_EXE sources add \
-            -Source "${{ env.NUGET_FEED_URL }}" \
-            -StorePasswordInClearText \
-            -Name GitHubPackages \
-            -UserName "${{ env.VCPKG_NUGET_USER }}" \
-            -Password "${{ secrets.GITHUB_TOKEN }}" || true
-          mono $NUGET_EXE setapikey "${{ secrets.GITHUB_TOKEN }}" \
-            -Source "${{ env.NUGET_FEED_URL }}"
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
-        with:
-          languages: cpp
-          build-mode: manual
-          queries: security-and-quality
-
-      - name: Skip prebuilt download
-        run: |
-          mkdir -p build
-          echo '{"server":{"compiledVersion":"codeql"}}' > build/state.json
-
-      - name: Build C++
-        run: ./builder server:build --verbose --autoinstall
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3
-        with:
-          category: "/language:cpp"
-
-  # ---------------------------------------------------------------------------
-  #  Dependency review
-  # ---------------------------------------------------------------------------
-  dependency-review:
-    name: Dependency review
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Dependency Review
-        uses: actions/dependency-review-action@05fe4576374b728f0c523d6a13d64c25081e0803 # v4
-        with:
-          fail-on-severity: high
-          deny-licenses: AGPL-3.0-only, AGPL-3.0-or-later
-          comment-summary-in-pr: always
+    with:
+      codeql: true
+      full_version: ${{ needs.init.outputs.full_server_version }}
+      build_hash: ${{ needs.init.outputs.build_hash }}
+      build_stamp: ${{ needs.init.outputs.build_stamp }}
+      nodownload: true
+    secrets: inherit
 
   # ---------------------------------------------------------------------------
   #  Container scan
@@ -260,3 +194,37 @@ jobs:
         with:
           sarif_file: 'trivy-${{ matrix.dockerfile }}.sarif'
           category: 'trivy-${{ matrix.dockerfile }}'
+
+  # ---------------------------------------------------------------------------
+  #  Gatekeeper — the ONLY job to mark as "Required" in branch protection.
+  #  Aggregates all CI results so skipped builds don't block PRs.
+  # ---------------------------------------------------------------------------
+  ci-ok:
+    name: CI OK
+    needs: [init, changes, build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify results
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "❌ One or more CI jobs failed or were cancelled."
+            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}"
+            exit 1
+          fi
+          echo "✅ All CI checks passed (or were correctly skipped)."
+          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}"
+
+  # ---------------------------------------------------------------------------
+  #  Discord — update PR embed with final check counts after CI completes.
+  # ---------------------------------------------------------------------------
+  discord-notify:
+    needs: [ci-ok]
+    if: always() && github.event_name == 'pull_request'
+    uses: ./.github/workflows/discord-pr.yml
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      checks: read
+    secrets: inherit

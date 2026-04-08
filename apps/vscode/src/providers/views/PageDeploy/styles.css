@@ -1,9 +1,8 @@
- * ============================================================================= */
-
 .deploy-app {
 	padding: 24px;
 	max-width: 1200px;
 	margin: 0 auto;
+	background-color: var(--vscode-editor-background);
 }
 
 .deploy-panels {
@@ -158,4 +157,202 @@ body.vscode-high-contrast .logo-dark {
 
 .deploy-panel-copy-secondary:hover {
 	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+/* ============================================================================ */
+/* SERVICE STATUS & CONTROLS                                                     */
+/* ============================================================================ */
+
+.service-status {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-top: 8px;
+	font-size: 13px;
+}
+
+.service-status-row {
+	display: flex;
+	gap: 8px;
+	align-items: baseline;
+}
+
+.service-status-label {
+	color: var(--vscode-descriptionForeground);
+	min-width: 65px;
+}
+
+.service-status-indicator.running {
+	color: #4caf50;
+	font-weight: 600;
+}
+
+.service-status-indicator.starting,
+.service-status-indicator.stopping {
+	color: #ff9800;
+	font-weight: 600;
+}
+
+.service-status-indicator.stopped {
+	color: var(--vscode-descriptionForeground);
+}
+
+.service-status-indicator.not-installed {
+	color: var(--vscode-descriptionForeground);
+	font-style: italic;
+}
+
+.service-status-indicator.no-docker {
+	color: var(--vscode-descriptionForeground);
+	font-style: italic;
+}
+
+.docker-unavailable {
+	font-style: italic;
+	margin-top: 4px;
+}
+
+.service-status-path {
+	font-family: var(--vscode-editor-font-family);
+	font-size: 12px;
+	opacity: 0.8;
+}
+
+.service-version-select {
+	padding: 6px 10px;
+	font-size: 13px;
+	border: 1px solid var(--vscode-input-border);
+	background-color: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border-radius: 4px;
+}
+
+/* ============================================================================ */
+/* SPLIT BUTTON                                                                  */
+/* ============================================================================ */
+
+.split-button {
+	position: relative;
+	display: inline-flex;
+}
+
+.split-button-main {
+	padding: 8px 14px;
+	font-size: 13px;
+	border: none;
+	border-radius: 4px 0 0 4px;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.split-button-arrow {
+	padding: 8px 8px;
+	font-size: 10px;
+	border: none;
+	border-radius: 0 4px 4px 0;
+	cursor: pointer;
+	border-left: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.split-button-main.deploy-panel-btn-primary,
+.split-button-arrow.deploy-panel-btn-primary {
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+}
+
+.split-button-main.deploy-panel-btn-primary:hover,
+.split-button-arrow.deploy-panel-btn-primary:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+.split-button-main:disabled,
+.split-button-arrow:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.split-button-dropdown {
+	position: absolute;
+	top: 100%;
+	left: 0;
+	right: 0;
+	min-width: 180px;
+	margin-top: 2px;
+	background: var(--vscode-dropdown-background, var(--vscode-input-background));
+	border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border));
+	border-radius: 4px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+	z-index: 100;
+	max-height: 200px;
+	overflow-y: auto;
+}
+
+.split-button-option {
+	/* Reset browser button defaults */
+	appearance: none;
+	background: none;
+	border: none;
+	width: 100%;
+	text-align: left;
+	/* Layout */
+	display: block;
+	padding: 6px 12px;
+	font-size: 13px;
+	cursor: pointer;
+	color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
+}
+
+.split-button-option:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.split-button-option.selected {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+}
+
+.service-progress {
+	font-size: 11px;
+	font-family: var(--vscode-editor-font-family);
+	color: var(--vscode-descriptionForeground);
+	margin-top: 4px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 100%;
+}
+
+.service-error {
+	font-size: 12px;
+	color: var(--vscode-errorForeground);
+	margin-top: 4px;
+}
+
+.sudo-prompt {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 4px;
+}
+
+.sudo-prompt-label {
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.sudo-prompt-row {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+}
+
+.sudo-prompt-input {
+	flex: 1;
+	padding: 5px 8px;
+	font-size: 13px;
+	border: 1px solid var(--vscode-input-border);
+	background-color: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border-radius: 4px;
+	min-width: 0;
 }

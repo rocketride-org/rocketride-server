@@ -33,8 +33,8 @@ namespace engine::perms {
 ///    Error
 //-------------------------------------------------------------------------
 ErrorOr<Text> outputPermission(
-    const Variant<CRef<PermissionSet>, CRef<GroupRecord>, CRef<UserRecord>>&
-        arg) noexcept;
+    const Variant<CRef<PermissionSet>, CRef<GroupRecord>, CRef<UserRecord>>
+        &arg) noexcept;
 
 #if ROCKETRIDE_PLAT_WIN
 //-------------------------------------------------------------------------
@@ -46,6 +46,6 @@ ErrorOr<Text> outputPermission(
 ///     Path to a file
 /// @returns
 ///     Error or PermissionSet
-ErrorOr<PermissionSet> getPermissions(Text& osPath) noexcept;
+ErrorOr<PermissionSet> getPermissions(Text &osPath) noexcept;
 #endif
 }  // namespace engine::perms

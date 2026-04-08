@@ -1,0 +1,85 @@
+/**
+ * Tab bar aligned with VS Code status page tab styling (PageStatus/styles.css),
+ * using RocketRide --rr-* tokens so it works in web + VS Code webview.
+ */
+
+.rr-tab-bar {
+	position: relative;
+	display: flex;
+	flex-wrap: nowrap;
+	width: 100%;
+	max-width: 100%;
+	min-width: 0;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: thin;
+	border-bottom: none;
+	background: none;
+	padding: 0 4px;
+	gap: 0;
+	-webkit-overflow-scrolling: touch;
+}
+
+.rr-tab-bar::-webkit-scrollbar {
+	height: 6px;
+}
+
+.rr-tab-bar::-webkit-scrollbar-thumb {
+	background: var(--rr-border, rgba(128, 128, 128, 0.45));
+	border-radius: 3px;
+}
+
+.rr-tab-item {
+	position: relative;
+	flex: 0 0 auto;
+	background: none;
+	border: none;
+	padding: 10px 14px;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	color: var(--rr-text-secondary, var(--vscode-descriptionForeground, #888));
+	cursor: pointer;
+	transition: color 0.25s ease;
+	white-space: nowrap;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-family: var(--rr-font-family-widget, var(--vscode-font-family, inherit));
+}
+
+.rr-tab-item:hover {
+	color: var(--rr-text-primary, var(--vscode-foreground, inherit));
+	background: var(--rr-bg-widget-hover, var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.04)));
+}
+
+.rr-tab-item--active {
+	color: var(--rr-border-focus, var(--vscode-focusBorder, #0078d4));
+}
+
+.rr-tab-indicator {
+	position: absolute;
+	bottom: 0;
+	height: 2px;
+	background: var(--rr-border-focus, var(--vscode-focusBorder, #0078d4));
+	transition:
+		left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+		width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+	border-radius: 1px 1px 0 0;
+}
+
+.rr-tab-badge {
+	background: none;
+	font-size: 14px;
+	line-height: 1;
+	letter-spacing: 0;
+	text-transform: none;
+	margin-left: -4px;
+}
+
+/* Panel below tabs — compact for modals (no Page Status outer margins). */
+.rr-tabpanel-content {
+	padding: 0;
+	margin-top: 8px;
+}

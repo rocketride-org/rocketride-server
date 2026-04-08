@@ -17,9 +17,7 @@
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
-	"capabilities": [
-		"internal"
-	],
+	"capabilities": ["internal"],
 	//
 	// Optional:
 	//		Supported actions - if not specified, no actions are supported
@@ -37,13 +35,11 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"source": [
-			"tags"
-		]
+		"source": ["tags"]
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	"fields": {
@@ -66,22 +62,12 @@
 		{
 			"section": "Source",
 			"title": "Null Source",
-			"properties": [
-				"type",
-				"name",
-				"actions",
-				"source.mode",
-				"null.source.parameters"
-			]
+			"properties": ["type", "actions", "source.mode", "null.source.parameters"]
 		},
 		{
 			"section": "Target",
 			"title": "Null Target",
-			"properties": [
-				"type",
-				"target.mode",
-				"null.target.parameters"
-			]
+			"properties": ["type", "target.mode", "null.target.parameters"]
 		}
 	]
 }

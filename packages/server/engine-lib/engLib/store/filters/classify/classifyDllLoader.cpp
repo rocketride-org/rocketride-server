@@ -39,9 +39,9 @@ namespace engine::store::filter::classifyLoader {
  * This function is called by the classification DLL to log messages.
  * The DLL passes ap::Lvl values (cast to int), so we just cast back and log.
  */
-static void CLASSIFY_CALL logCallback(int level, const char* message,
-                                      const char* file, int line,
-                                      const char* func, void* /*user_data*/
+static void CLASSIFY_CALL logCallback(int level, const char *message,
+                                      const char *file, int line,
+                                      const char *func, void * /*user_data*/
 ) {
     auto lvl = static_cast<Lvl>(level);
     auto loc = Location{file ? file : "", line, func ? func : ""};
@@ -75,7 +75,7 @@ Error ClassifyDllLoader::init() noexcept {
         // dynamicBind<FnType> returns ErrorOr<FnType*> (pointer to function)
         // We need the function type (not pointer type), so use the underlying
         // signature
-        using ClassifyGetApiFunc = const ClassifyApi* CLASSIFY_CALL(void);
+        using ClassifyGetApiFunc = const ClassifyApi *CLASSIFY_CALL(void);
 
         // Save and restore CWD around dynamicBind - the changeDir=true
         // parameter changes CWD but doesn't restore it, which can break Java
@@ -141,7 +141,7 @@ Error ClassifyDllLoader::init() noexcept {
             "Classification DLL loaded successfully. Version:", m_api->version);
         return {};
 
-    } catch (const Error& e) {
+    } catch (const Error &e) {
         // dynamicBind throws on failure - convert to error return
         LOG(Always, "CRITICAL: Failed to load classification DLL:", m_dllPath,
             e);
@@ -152,7 +152,7 @@ Error ClassifyDllLoader::init() noexcept {
 Text ClassifyDllLoader::getLastError() const noexcept {
     if (!m_api || !m_api->get_last_error) return "DLL not loaded";
 
-    const char* error = m_api->get_last_error();
+    const char *error = m_api->get_last_error();
     return error ? Text{error} : Text{};
 }
 

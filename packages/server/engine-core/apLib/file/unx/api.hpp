@@ -25,7 +25,7 @@
 
 namespace ap::file {
 // Deletes a file
-inline Error remove(const Path& path) noexcept {
+inline Error remove(const Path &path) noexcept {
     ErrorCode ec;
     if (path.isUnc()) {
         return smb::client().remove(path);
@@ -36,7 +36,7 @@ inline Error remove(const Path& path) noexcept {
     return {};
 }
 
-inline ErrorOr<StatInfo> stat(const Path& path, bool) noexcept {
+inline ErrorOr<StatInfo> stat(const Path &path, bool) noexcept {
     if (path.isUnc()) {
         auto platInfoOr = smb::client().stat(path);
         if (platInfoOr.hasCcode()) return platInfoOr.ccode();
@@ -58,7 +58,7 @@ inline ErrorOr<StatInfo> stat(const Path& path, bool) noexcept {
 }
 
 // Checks if a file exists
-inline bool exists(const Path& path) noexcept {
+inline bool exists(const Path &path) noexcept {
     return path.isUnc() ? smb::client().stat(path).hasValue()
                         : access(path.plat().c_str(), F_OK) == 0;
 }
@@ -69,7 +69,7 @@ inline ErrorOr<std::vector<Path>> loadRoots() noexcept {
 
 template <typename Api>
 inline ErrorOr<typename Api::Type> hashLocalFile(
-    const file::Path& path, Opt<Ref<StatInfo>> info = {}) noexcept {
+    const file::Path &path, Opt<Ref<StatInfo>> info = {}) noexcept {
     ASSERT(!path.isUnc());
     FileStream stream;
     if (auto ccode = stream.open(path, Mode::READ)) return ccode;
@@ -108,7 +108,7 @@ inline ErrorOr<typename Api::Type> hashLocalFile(
 
 template <typename Api>
 inline ErrorOr<typename Api::Type> hashSmbFile(
-    const file::Path& path, Opt<Ref<StatInfo>> info = {}) noexcept {
+    const file::Path &path, Opt<Ref<StatInfo>> info = {}) noexcept {
     ASSERT(path.isUnc());
     stream::Stream<stream::SmbFile> stream;
     if (auto ccode = stream.open(path, Mode::READ)) return ccode;
@@ -126,13 +126,13 @@ inline ErrorOr<typename Api::Type> hashSmbFile(
 
 // Hash a file
 template <typename Api>
-inline ErrorOr<typename Api::Type> hash(const file::Path& path,
+inline ErrorOr<typename Api::Type> hash(const file::Path &path,
                                         Opt<Ref<StatInfo>> info) noexcept {
     return path.isUnc() ? hashSmbFile<Api>(path, info)
                         : hashLocalFile<Api>(path, info);
 }
 
-inline Path realpath(const Path& path) noexcept {
+inline Path realpath(const Path &path) noexcept {
     Array<char, PATH_MAX> resolved;
     if (::realpath(path.plat(), &resolved.front())) {
         file::Path resolvedPath = &resolved.front();
@@ -145,7 +145,7 @@ inline Path realpath(const Path& path) noexcept {
 // given a FsType, if possible, determine if the file system is by default
 // removable
 Opt<bool> isRemovable(FsType type) noexcept;
-Opt<bool> isRemovable(const std::vector<FsType>& types) noexcept;
+Opt<bool> isRemovable(const std::vector<FsType> &types) noexcept;
 ap::file::FsType toFsType(TextView str) noexcept;
 std::vector<FsType> toFsTypeArray(TextView str) noexcept;
 

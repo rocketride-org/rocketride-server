@@ -130,12 +130,39 @@ public:
             py::dict d = obj.attr("dict")();
             return dictToJson(d);
         }
-        // Any callable (function, method, builtin, partial, etc.) — not serializable
+        // Any callable (function, method, builtin, partial, etc.) — not
+        // serializable
         if (PyCallable_Check(obj.ptr())) {
             json::Value value{"<method>"};
             return value;
         }
-        
+
+        // Numeric-like objects (e.g. Decimal) — try int first, then float
+        if (PyNumber_Check(obj.ptr())) {
+            // Try integer conversion first
+            py::object intVal = py::reinterpret_steal<py::object>(
+                PyNumber_Long(obj.ptr()));
+            if (intVal.ptr() != nullptr) {
+                json::Value value{py::cast<int64_t>(intVal)};
+                return value;
+            }
+            PyErr_Clear();
+            // Fall back to float
+            py::object floatVal = py::reinterpret_steal<py::object>(
+                PyNumber_Float(obj.ptr()));
+            if (floatVal.ptr() != nullptr) {
+                json::Value value{py::cast<double>(floatVal)};
+                return value;
+            }
+            PyErr_Clear();
+        }
+
+        // Objects with __str__ (e.g. datetime, bytes, UUID) — serialize as string
+        if (py::hasattr(obj, "__str__")) {
+            json::Value value{py::str(obj).cast<std::string>()};
+            return value;
+        }
+
         throw std::runtime_error(
             "dictToJson not implemented for this type of object: " +
             py::repr(obj).cast<std::string>());

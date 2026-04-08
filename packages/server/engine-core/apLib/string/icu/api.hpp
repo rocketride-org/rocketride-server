@@ -28,8 +28,8 @@ namespace ap::string::icu {
 // Convert from icu::UnicodeString to Text
 template <typename TraitsT = Case<Utf8Chr>,
           typename AllocT = std::allocator<Utf8Chr>>
-inline Str<Utf8Chr, TraitsT, AllocT> toUtf8(const UnicodeString& source,
-                                            const AllocT& alloc = {}) noexcept {
+inline Str<Utf8Chr, TraitsT, AllocT> toUtf8(const UnicodeString &source,
+                                            const AllocT &alloc = {}) noexcept {
     TextSink sink(alloc);
     source.toUTF8(sink);
     return _mv(sink.extract());
@@ -39,9 +39,9 @@ inline Str<Utf8Chr, TraitsT, AllocT> toUtf8(const UnicodeString& source,
 template <typename TraitsT = Case<Utf16Chr>,
           typename AllocT = std::allocator<Utf16Chr>>
 inline Str<Utf16Chr, TraitsT, AllocT> toUtf16(
-    const UnicodeString& source, const AllocT& alloc = {}) noexcept {
+    const UnicodeString &source, const AllocT &alloc = {}) noexcept {
     return Str<Utf16Chr, TraitsT, AllocT>(
-        _reCast<const Utf16Chr*>(source.getBuffer()), source.length(), alloc);
+        _reCast<const Utf16Chr *>(source.getBuffer()), source.length(), alloc);
 }
 
 }  // namespace ap::string::icu

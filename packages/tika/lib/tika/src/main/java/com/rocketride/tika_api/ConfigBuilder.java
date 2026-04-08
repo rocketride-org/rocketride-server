@@ -412,6 +412,9 @@ public class ConfigBuilder {
 		// Get a builder factory with name space awareness so DOM level 2/3
 		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
 		dbf.setNamespaceAware(true);
+		dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+		dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+		dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
 
 		// Get document buildrer
 		DocumentBuilder db = dbf.newDocumentBuilder();

@@ -25,7 +25,7 @@
 
 namespace ap::file {
 // Deletes a file
-inline Error remove(const Path& path) noexcept {
+inline Error remove(const Path &path) noexcept {
     const auto osPath = path.plat();
 
     if (file::isFile(path)) {
@@ -39,7 +39,7 @@ inline Error remove(const Path& path) noexcept {
 }
 
 // Load stat info for a file
-inline ErrorOr<StatInfo> statByHandle(const Path& path) noexcept {
+inline ErrorOr<StatInfo> statByHandle(const Path &path) noexcept {
     // Use our lowest level api to access a file, same one used
     // in the stream wrapper object
     stream::File file;
@@ -64,7 +64,7 @@ inline ErrorOr<StatInfo> statByHandle(const Path& path) noexcept {
 }
 
 // Load stat info for a file
-inline ErrorOr<StatInfo> stat(const Path& path, bool full) noexcept {
+inline ErrorOr<StatInfo> stat(const Path &path, bool full) noexcept {
     // If full stats are requested do a by handle stat
     if (full) return statByHandle(path);
 
@@ -84,7 +84,7 @@ inline ErrorOr<StatInfo> stat(const Path& path, bool full) noexcept {
 }
 
 // Checks if a file exists
-inline bool exists(const Path& path) noexcept {
+inline bool exists(const Path &path) noexcept {
     const auto osPath = path.plat();
 
     // Get the attributes
@@ -108,7 +108,7 @@ inline ErrorOr<std::vector<Path>> loadRoots() noexcept {
 
 // Hash a file
 template <typename Api>
-inline ErrorOr<typename Api::Type> hash(const file::Path& path,
+inline ErrorOr<typename Api::Type> hash(const file::Path &path,
                                         Opt<Ref<StatInfo>> info) noexcept {
     // Record the current access time and restore after signing
     Opt<time::SystemStamp> atime;
@@ -157,7 +157,7 @@ inline ErrorOr<std::vector<Path>> volumes() noexcept {
 }
 
 // Normalizes the case of a path
-inline ErrorOr<Path> normalizePathCase(const Path& source) noexcept {
+inline ErrorOr<Path> normalizePathCase(const Path &source) noexcept {
     // Validate path type and determine root of path
     size_t subPathStartsAt = {};
     if (source.isUnc())
@@ -171,7 +171,7 @@ inline ErrorOr<Path> normalizePathCase(const Path& source) noexcept {
     // To normalize cases we scan the parents for their children
     auto normalizedPath = source.subpth(0, subPathStartsAt);
 
-    for (auto& comp : source.subpth(subPathStartsAt)) {
+    for (auto &comp : source.subpth(subPathStartsAt)) {
         // Scan and find the target
         FileScanner scan(normalizedPath / comp);
         if (auto ccode = scan.open()) return ccode;
@@ -184,7 +184,7 @@ inline ErrorOr<Path> normalizePathCase(const Path& source) noexcept {
 }
 
 // Gets the mount point for a path, for example c:/test.txt => c:/
-inline ErrorOr<Path> getVolumePathName(const Path& source) noexcept {
+inline ErrorOr<Path> getVolumePathName(const Path &source) noexcept {
     Array<WCHAR, MAX_PATH + 1> name;
     if (!::GetVolumePathNameW(source.plat(), &name.front(),
                               _cast<DWORD>(name.size())))
@@ -195,7 +195,7 @@ inline ErrorOr<Path> getVolumePathName(const Path& source) noexcept {
 
 // Get the volume path of a mount point, for example c:/ => //?/Volume{GUID}/
 inline ErrorOr<Path> getVolumeNameFromPath(
-    const Path& source, Opt<Ref<Path>> mountPoint = {}) noexcept {
+    const Path &source, Opt<Ref<Path>> mountPoint = {}) noexcept {
     // First resolve the mount point from the path
     auto mountPointPath = getVolumePathName(source);
     if (!mountPointPath) return mountPointPath.ccode();
@@ -267,7 +267,7 @@ inline uint32_t getDriveMap() noexcept {
     return driveMap;
 }
 
-inline ErrorOr<uint64_t> getDiskClusterSize(const Path& path) noexcept {
+inline ErrorOr<uint64_t> getDiskClusterSize(const Path &path) noexcept {
     // Make sure we're either dealing with the drive letter of an absolute path
     // or a UNC path of the form "\\host\share"
     if (path.type() == PathType::ABSOLUTE) {
@@ -306,7 +306,7 @@ inline ErrorOr<uint64_t> getDiskClusterSize(const Path& path) noexcept {
 
 // Get actual size of sparse, compressed, and offline files (also works for
 // ordinary files)
-inline ErrorOr<uint64_t> getCompressedFileSize(const Path& path) noexcept {
+inline ErrorOr<uint64_t> getCompressedFileSize(const Path &path) noexcept {
     DWORD compressedSizeHigh = {};
     const DWORD compressedSizeLow =
         ::GetCompressedFileSizeW(path.plat(), &compressedSizeHigh);
@@ -318,7 +318,7 @@ inline ErrorOr<uint64_t> getCompressedFileSize(const Path& path) noexcept {
 
 // Get on-disk size of file i.e. the actual file size aligned to the disk sector
 // size
-inline ErrorOr<uint64_t> getSizeOnDisk(const Path& path, uint64_t size,
+inline ErrorOr<uint64_t> getSizeOnDisk(const Path &path, uint64_t size,
                                        uint32_t attributes) {
     if (attributes & FILE_ATTRIBUTE_DIRECTORY)
         return APERR(Ec::InvalidParam, "Can't calculate on-disk directory size",
@@ -351,6 +351,6 @@ inline ErrorOr<uint64_t> getSizeOnDisk(const Path& path, uint64_t size,
            (*diskClusterSize);
 }
 
-inline Path realpath(const Path& path) noexcept { return path; }
+inline Path realpath(const Path &path) noexcept { return path; }
 
 }  // namespace ap::file

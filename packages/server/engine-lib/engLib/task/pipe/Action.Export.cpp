@@ -40,7 +40,7 @@ Error Task::beginTask() noexcept {
 /// @param[in] entry
 ///		The entry to copy
 //-----------------------------------------------------------------
-Error Task::processItem(Entry& entry) noexcept {
+Error Task::processItem(Entry &entry) noexcept {
     // Copy it
     if (auto ccode = Parent::processItem(entry)) return ccode;
 

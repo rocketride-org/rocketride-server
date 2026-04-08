@@ -90,8 +90,8 @@ TEST_CASE("string::unicode::utfSubstr") {
     UtfChars substrLengths;
 
     // Validate substring against expected
-    auto validateSubstr = [&](TextView string, UtfCharsEx& offsets,
-                              UtfChars& lengths) {
+    auto validateSubstr = [&](TextView string, UtfCharsEx &offsets,
+                              UtfChars &lengths) {
         REQUIRE(string == expectedSubstr);
         REQUIRE(offsets == expectedSubstrOffsets);
         REQUIRE(lengths == expectedSubstrLengths);
@@ -125,8 +125,8 @@ TEST_CASE("string::unicode::utfSubstr") {
                    substrOffsets, substrLengths);
 
     // Validate range of whole string
-    auto validateText = [&](TextView string, UtfCharsEx& offsets,
-                            UtfChars& lengths) {
+    auto validateText = [&](TextView string, UtfCharsEx &offsets,
+                            UtfChars &lengths) {
         REQUIRE(string == text);
         REQUIRE(offsets == UtfCharsEx());
         REQUIRE(lengths == expectedTextLengths);
@@ -153,8 +153,8 @@ TEST_CASE("string::unicode::utfSubstr") {
     // Validate left
     const auto expectedLeft =
         _tr<Text>(utf16Text.substr(0, expectedSubstrOffsets.utf16Chars));
-    auto validateLeft = [&](TextView string, UtfCharsEx& offsets,
-                            UtfChars& lengths) {
+    auto validateLeft = [&](TextView string, UtfCharsEx &offsets,
+                            UtfChars &lengths) {
         REQUIRE(string == expectedLeft);
         REQUIRE(offsets == UtfCharsEx());
         REQUIRE(lengths == expectedSubstrOffsets);
@@ -176,8 +176,8 @@ TEST_CASE("string::unicode::utfSubstr") {
     const auto expectedRight = _tr<Text>(utf16Text.substr(
         expectedRightOffsets.utf16Chars + expectedRightLengths.utf16Chars -
         expectedRightLengths.utf16Chars));
-    auto valdateRight = [&](TextView string, UtfCharsEx& offsets,
-                            UtfChars& lengths) {
+    auto valdateRight = [&](TextView string, UtfCharsEx &offsets,
+                            UtfChars &lengths) {
         REQUIRE(string == expectedRight);
         REQUIRE(offsets == expectedRightOffsets);
         REQUIRE(lengths == expectedRightLengths);

@@ -45,7 +45,7 @@ public:
     ///		The defaults jars to load. These should be the common
     ///		jars that all java code uses
     ///----------------------------------------------------------------
-    Jvm(const std::vector<file::Path>& jarPaths,
+    Jvm(const std::vector<file::Path> &jarPaths,
         TextView javaDebug = ""_tv) noexcept(false) {
         // Get out temp directory
         auto tempDir = config::paths().cache;
@@ -121,21 +121,21 @@ public:
 
         std::vector<JavaVMOption> options;
         // Convenience function because options are char* instead of const char*
-        auto addOption = [&](const char* option, void* extra = nullptr) {
-            options.push_back({const_cast<char*>(option), extra});
+        auto addOption = [&](const char *option, void *extra = nullptr) {
+            options.push_back({const_cast<char *>(option), extra});
         };
 
-        for (auto& option : optionStrings) {
+        for (auto &option : optionStrings) {
             addOption(option);
         }
 
         // Add hooks for JNI's vfprintf, abort, and exit
         // Clang won't allow the lambdas to be converted to e.g. decltype(&exit)
         // because of exit's [[noreturn]] attribute, so typedef the C functions
-        using jvmVfprintf = int (*)(FILE*, const char*, va_list);
+        using jvmVfprintf = int (*)(FILE *, const char *, va_list);
         addOption("vfprintf",
-                  _reCast<void*>(_cast<jvmVfprintf>(
-                      [](FILE* fp, const char* format, va_list args) noexcept {
+                  _reCast<void *>(_cast<jvmVfprintf>(
+                      [](FILE *fp, const char *format, va_list args) noexcept {
                           char buffer[1_kb] = {'\0'};
                           auto retval =
                               vsnprintf(buffer, sizeof(buffer), format, args);
@@ -144,7 +144,7 @@ public:
                       })));
 
         using jvmAbort = void (*)(void);
-        addOption("abort", _reCast<void*>(_cast<jvmAbort>([]() noexcept {
+        addOption("abort", _reCast<void *>(_cast<jvmAbort>([]() noexcept {
                       const auto reason = string::format(
                           "JNI called abort on thread {}", async::threadId());
                       java::onJvmCrash(reason);
@@ -153,7 +153,7 @@ public:
 
         using jvmExit = void (*)(int);
         addOption("exit",
-                  _reCast<void*>(_cast<jvmExit>([](int status) noexcept {
+                  _reCast<void *>(_cast<jvmExit>([](int status) noexcept {
                       const auto reason = string::format(
                           "JNI called exit with status {} on thread {}", status,
                           async::threadId());
@@ -174,7 +174,7 @@ public:
         // Under Visual Studio, this stops the debugger when running, but under
         // VS Code, it continues on without stopping.
         if (auto result =
-                ::JNI_CreateJavaVM(&m_jvm, _reCast<void**>(&m_env), &vm_args);
+                ::JNI_CreateJavaVM(&m_jvm, _reCast<void **>(&m_env), &vm_args);
             result != JNI_OK)
             APERRT_THROW(Ec::Java, "Failed to initialize JVM",
                          renderJniError(result));
@@ -201,11 +201,11 @@ public:
         try {
             // Invoke any configured deinit callbacks
             LOGT("Invoking deinit callbacks");
-            for (auto& callback : m_deinitCallbacks) {
+            for (auto &callback : m_deinitCallbacks) {
                 try {
                     auto jni = getInterface();
                     callback(jni);
-                } catch (const Error& e) {
+                } catch (const Error &e) {
                     LOG(Always,
                         "Caught exception while invoking JVM deinit callback",
                         e);
@@ -215,7 +215,7 @@ public:
             LOGT("Destroying JVM");
             m_jvm->DestroyJavaVM();
             LOGT("JVM destroyed");
-        } catch (const std::exception& e) {
+        } catch (const std::exception &e) {
             LOG(Always, "Caught exception while destroying JVM", e);
         }
     }
@@ -225,7 +225,7 @@ public:
     ///		Initializes the calling thread to be able to call jni
     ///		functions
     ///----------------------------------------------------------------
-    JNIEnv* initThread(bool detachable = false) noexcept(false) {
+    JNIEnv *initThread(bool detachable = false) noexcept(false) {
         LOGT("Initializing thread, detachable:", detachable);
 
         // If the calling thread is also the thread that initialized the JVM
@@ -236,19 +236,19 @@ public:
         }
 
         LOGT("Attaching thread to JVM");
-        JNIEnv* env = nullptr;
+        JNIEnv *env = nullptr;
 
         // Depending on how the caller is using this context, attach as a daemon
         // thread or normal thread
         if (detachable) {
             if (auto result =
-                    m_jvm->AttachCurrentThread(_reCast<void**>(&env), nullptr);
+                    m_jvm->AttachCurrentThread(_reCast<void **>(&env), nullptr);
                 result != JNI_OK)
                 APERRT_THROW(Ec::Java, "Failed to attach thread to JVM",
                              renderJniError(result));
         } else {
             if (auto result = m_jvm->AttachCurrentThreadAsDaemon(
-                    _reCast<void**>(&env), nullptr);
+                    _reCast<void **>(&env), nullptr);
                 result != JNI_OK)
                 APERRT_THROW(Ec::Java, "Failed to attach thread to JVM",
                              renderJniError(result));
@@ -282,7 +282,7 @@ public:
     ///		The method information to register
     ///----------------------------------------------------------------
     void registerNativeCallback(jclass clazz,
-                                const JNINativeMethod& method) noexcept(false) {
+                                const JNINativeMethod &method) noexcept(false) {
         if (auto result = m_env->RegisterNatives(clazz, &method, 1);
             result != JNI_OK)
             APERRT_THROW(Ec::Java, "Failed to register native callback",
@@ -298,8 +298,8 @@ public:
     ///	@param[in]	method
     ///		The method information to register
     ///----------------------------------------------------------------
-    void registerNativeCallback(const char* className,
-                                const JNINativeMethod& method) noexcept(false) {
+    void registerNativeCallback(const char *className,
+                                const JNINativeMethod &method) noexcept(false) {
         auto clazz = m_env->FindClass(className);
         if (!clazz) APERRT_THROW(Ec::Java, "Java class not found", className);
         registerNativeCallback(clazz, method);
@@ -315,8 +315,8 @@ public:
     ///	@param[in]	functionCount
     ///		The number of methods to register
     ///----------------------------------------------------------------
-    void registerNativeCallbacks(const char* className,
-                                 const JNINativeMethod* functionTable,
+    void registerNativeCallbacks(const char *className,
+                                 const JNINativeMethod *functionTable,
                                  size_t functionCount) noexcept(false) {
         auto clazz = m_env->FindClass(className);
         if (!clazz) APERRT_THROW(Ec::Java, "Java class not found", className);
@@ -346,7 +346,7 @@ public:
     ///	@param[in]	callback
     ///		The callback to call
     ///----------------------------------------------------------------
-    typedef std::function<void(Jni&)> DeinitCallback;
+    typedef std::function<void(Jni &)> DeinitCallback;
     void addDeinitCallback(DeinitCallback callback) noexcept {
         m_deinitCallbacks.emplace_back(_mv(callback));
     }
@@ -356,13 +356,13 @@ protected:
     /// @details
     ///		The ptr to the loaded jvm
     ///----------------------------------------------------------------
-    JavaVM* m_jvm = nullptr;
+    JavaVM *m_jvm = nullptr;
 
     //-----------------------------------------------------------------
     /// @details
     ///		The ptr to the initialize env
     ///----------------------------------------------------------------
-    JNIEnv* m_env = nullptr;
+    JNIEnv *m_env = nullptr;
 
     //-----------------------------------------------------------------
     /// @details

@@ -1,0 +1,80 @@
+{
+	"title": "OpenAI-Compatible API",
+	"protocol": "llm_openai_api://",
+	"classType": ["llm"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.llm_openai_api",
+	"prefix": "llm",
+	"description": ["A component that connects to any OpenAI-compatible API endpoint for language model ", "inference. Supports custom base URLs for providers like Featherless, Together, Groq, ", "Ollama, LM Studio, and any other OpenAI SDK-compatible service. Configure with your ", "provider's base URL, API key, and model name."],
+	"icon": "openai.svg",
+	"tile": ["Model: ${parameters.llm_openai_api.model}"],
+	"lanes": {
+		"questions": ["answers"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [
+				{
+					"lane": "answers"
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "custom",
+		"profiles": {
+			"custom": {
+				"model": "",
+				"base_url": "",
+				"modelTotalTokens": 32768,
+				"apikey": ""
+			}
+		}
+	},
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Model name (e.g. zai-org/GLM-5, meta-llama/Llama-3-70b)"
+		},
+		"base_url": {
+			"type": "string",
+			"title": "Base URL",
+			"description": "API base URL (e.g. https://api.featherless.ai/v1)"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total Tokens"
+		},
+		"openai_api.custom": {
+			"object": "custom",
+			"properties": ["model", "base_url", "modelTotalTokens", "llm.cloud.apikey"]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "OpenAI-Compatible API",
+			"properties": ["openai_api.custom"]
+		}
+	],
+	"test": {
+		"profiles": ["custom"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
+}

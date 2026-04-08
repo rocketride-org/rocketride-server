@@ -169,9 +169,11 @@ class Store(DocumentStoreBase):
         if docFilter.objectIds is not None:
             filter_dict['meta.objectId'] = {'$in': docFilter.objectIds}
 
-        # If we are not going after deleted docs, add a condition
-        if docFilter.isDeleted is not None:
-            filter_dict['meta.isDeleted'] = docFilter.isDeleted
+        # Match other document stores (Qdrant, Postgres, Elasticsearch): default
+        # queries must not return soft-deleted rows. When isDeleted is True, omit this
+        # clause so callers can include deleted documents in the result set.
+        if docFilter.isDeleted is None or not docFilter.isDeleted:
+            filter_dict['meta.isDeleted'] = False
 
         # If we are going after specific chunks
         if docFilter.chunkIds is not None:
@@ -316,18 +318,18 @@ class Store(DocumentStoreBase):
             return {}
 
         # Build match stage filter
-        match_filter = {'metadata.chunkId': 0}
+        match_filter = {'meta.chunkId': 0}
 
         if parent is not None:
-            match_filter['metadata.parent'] = parent
+            match_filter['meta.parent'] = parent
 
         # Use aggregation pipeline
         pipeline = [
             {'$match': match_filter},
             {
                 '$group': {
-                    '_id': '$metadata.parent',
-                    'objectId': {'$first': '$metadata.objectId'},  # Get any objectId for this parent
+                    '_id': '$meta.parent',
+                    'objectId': {'$first': '$meta.objectId'},
                 }
             },
             {'$skip': offset},
@@ -335,7 +337,8 @@ class Store(DocumentStoreBase):
         ]
 
         # Execute aggregation
-        results = self.collection.aggregate(pipeline)
+        collection = self.database.get_collection(self.collection_name)
+        results = collection.aggregate(pipeline)
 
         # Build paths dictionary
         paths: Dict[str, str] = {}

@@ -28,15 +28,15 @@ static int g_moveCount;
 struct MoveCheck {
     MoveCheck() = default;
 
-    decltype(auto) operator=(MoveCheck&& mc) {
+    decltype(auto) operator=(MoveCheck &&mc) {
         REQUIRE(&mc != this);
         g_moveCount++;
         return *this;
     }
 
-    MoveCheck(MoveCheck&& mc) { operator=(_mv(mc)); }
+    MoveCheck(MoveCheck &&mc) { operator=(_mv(mc)); }
 
-    MoveCheck(const MoveCheck&) = default;
+    MoveCheck(const MoveCheck &) = default;
 };
 
 TEST_CASE("ErrorOr") {

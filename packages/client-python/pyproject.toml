@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rocketride"
-version = "1.0.2"
+version = "1.0.6"
 description = "RocketRide Pipeline Python Client SDK"
 readme = "README.md"
 authors = [
@@ -20,11 +20,10 @@ classifiers = [
     "Topic :: System :: Networking",
     "Topic :: Internet :: WWW/HTTP",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
     "Typing :: Typed",
 ]
@@ -42,11 +41,18 @@ dependencies = [
     "websockets>=11.0.0",
     "aiofiles>=23.0.0",
     "pydantic>=2.0.0",
+    "packaging>=21.0",
+    "aiohttp>=3.8.0",
+    "aiosqlite>=0.19.0",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = "MIT"
 
 [project.optional-dependencies]
+docker = [
+    "docker>=7.0.0",
+]
+
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -70,6 +76,9 @@ Repository = "https://github.com/rocketride-ai/rocketride-server.git"
 
 [project.scripts]
 rocketride = "rocketride.cli.main:main"
+
+[tool.rocketride]
+runtime-compatible = ">=3.0.0,<4.0.0"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,5 +1,6 @@
 """Azure Blob Storage implementation."""
 
+import asyncio
 import json
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -73,7 +74,7 @@ class AzureBlobStore(IStore):
                 container=self._container,
                 blob=blob_name,
             )
-            blob_client.upload_blob(data.encode('utf-8'), overwrite=True)
+            await asyncio.to_thread(blob_client.upload_blob, data.encode('utf-8'), overwrite=True)
 
         except (ConnectionError, TimeoutError):
             # Let these bubble up for retry
@@ -101,8 +102,7 @@ class AzureBlobStore(IStore):
                 container=self._container,
                 blob=blob_name,
             )
-            download_stream = blob_client.download_blob()
-            data = download_stream.readall()
+            data = await asyncio.to_thread(lambda: blob_client.download_blob().readall())
             return data.decode('utf-8')
 
         except (ConnectionError, TimeoutError):
@@ -133,12 +133,11 @@ class AzureBlobStore(IStore):
                 container=self._container,
                 blob=blob_name,
             )
-            download_stream = blob_client.download_blob()
-            data = download_stream.readall()
+            data = await asyncio.to_thread(lambda: blob_client.download_blob().readall())
             content = data.decode('utf-8')
 
             # Get properties to retrieve ETag
-            properties = blob_client.get_blob_properties()
+            properties = await asyncio.to_thread(blob_client.get_blob_properties)
             etag = properties.etag.strip('"')
 
             return (content, etag)
@@ -174,7 +173,7 @@ class AzureBlobStore(IStore):
             # Check if blob exists - expected_version is REQUIRED for updates
             file_exists = False
             try:
-                file_exists = blob_client.exists()
+                file_exists = await asyncio.to_thread(blob_client.exists)
             except Exception:
                 # If we can't check existence, continue (will fail later if needed)
                 pass
@@ -190,10 +189,10 @@ class AzureBlobStore(IStore):
                 upload_kwargs['etag'] = expected_version
                 upload_kwargs['match_condition'] = 'IfMatch'
 
-            blob_client.upload_blob(**upload_kwargs)
+            await asyncio.to_thread(lambda: blob_client.upload_blob(**upload_kwargs))
 
             # Get new ETag
-            properties = blob_client.get_blob_properties()
+            properties = await asyncio.to_thread(blob_client.get_blob_properties)
             new_etag = properties.etag.strip('"')
             return new_etag
 
@@ -230,7 +229,7 @@ class AzureBlobStore(IStore):
 
             # Check if blob exists and get current ETag if needed
             try:
-                properties = blob_client.get_blob_properties()
+                properties = await asyncio.to_thread(blob_client.get_blob_properties)
                 current_etag = properties.etag.strip('"')
 
                 # expected_version is REQUIRED for delete operations
@@ -256,7 +255,7 @@ class AzureBlobStore(IStore):
                 delete_kwargs['etag'] = expected_version
                 delete_kwargs['match_condition'] = 'IfMatch'
 
-            blob_client.delete_blob(**delete_kwargs)
+            await asyncio.to_thread(lambda: blob_client.delete_blob(**delete_kwargs))
 
         except (ConnectionError, TimeoutError):
             raise
@@ -287,7 +286,7 @@ class AzureBlobStore(IStore):
             blob_prefix = self._get_blob_name(prefix) if prefix else self._prefix
 
             files = []
-            blob_list = container_client.list_blobs(name_starts_with=blob_prefix)
+            blob_list = await asyncio.to_thread(container_client.list_blobs, name_starts_with=blob_prefix)
 
             for blob in blob_list:
                 blob_name = blob.name
@@ -306,6 +305,137 @@ class AzureBlobStore(IStore):
             raise
         except Exception as e:
             raise StorageError(f'Failed to list files with prefix {prefix} from Azure: {e}') from e
+
+    # =========================================================================
+    # Handle-Based I/O
+    # =========================================================================
+
+    # Azure recommended block size (4 MB)
+    _AZURE_BLOCK_SIZE = 4 * 1024 * 1024
+
+    async def open_write(self, filename: str) -> dict:
+        """Prepare a staged block upload session."""
+        blob_name = self._get_blob_name(filename)
+        return {
+            'context': {
+                'blob_name': blob_name,
+                'block_ids': [],
+                'block_counter': 0,
+                'buffer': bytearray(),
+            },
+        }
+
+    async def write_chunk(self, filename: str, context, data: bytes) -> int:
+        """Buffer data and stage blocks when buffer reaches 4 MB."""
+        try:
+            context['buffer'].extend(data)
+            written = len(data)
+
+            while len(context['buffer']) >= self._AZURE_BLOCK_SIZE:
+                chunk = bytes(context['buffer'][: self._AZURE_BLOCK_SIZE])
+                await self._stage_block(context, chunk)
+                # Only discard from buffer after successful staging
+                del context['buffer'][: self._AZURE_BLOCK_SIZE]
+
+            return written
+        except Exception as e:
+            raise StorageError(f'Failed to write chunk to {filename}: {e}') from e
+
+    async def close_write(self, filename: str, context) -> None:
+        """Commit staged blocks or do a simple upload for small files."""
+        try:
+            client = self._get_client()
+            blob_client = client.get_blob_client(
+                container=self._container,
+                blob=context['blob_name'],
+            )
+            remaining = bytes(context['buffer'])
+
+            if not context['block_ids']:
+                # Small file — no blocks were staged, simple upload
+                await asyncio.to_thread(blob_client.upload_blob, remaining, overwrite=True)
+            else:
+                # Flush remaining buffer as the final block
+                if remaining:
+                    await self._stage_block(context, remaining)
+
+                await asyncio.to_thread(blob_client.commit_block_list, context['block_ids'])
+
+            # Only clear buffer after successful commit
+            context['buffer'].clear()
+
+        except Exception as e:
+            raise StorageError(f'Failed to finalize upload for {filename}: {e}') from e
+
+    async def open_read(self, filename: str) -> dict:
+        """Get blob properties for ranged reads."""
+        try:
+            client = self._get_client()
+            blob_name = self._get_blob_name(filename)
+            blob_client = client.get_blob_client(
+                container=self._container,
+                blob=blob_name,
+            )
+            properties = await asyncio.to_thread(blob_client.get_blob_properties)
+            size = properties.size
+            return {'context': {'blob_name': blob_name}, 'size': size}
+        except Exception as e:
+            if 'BlobNotFound' in str(e) or 'ResourceNotFound' in str(e):
+                raise StorageError(f'File not found: {filename}')
+            raise StorageError(f'Failed to open {filename} for reading: {e}') from e
+
+    async def read_chunk(self, filename: str, context, offset: int, length: int = 4_194_304) -> bytes:
+        """Read a range of bytes from Azure Blob."""
+        try:
+            client = self._get_client()
+            blob_client = client.get_blob_client(
+                container=self._container,
+                blob=context['blob_name'],
+            )
+            data = await asyncio.to_thread(lambda: blob_client.download_blob(offset=offset, length=length).readall())
+            return data
+        except Exception as e:
+            error_str = str(e)
+            if 'InvalidRange' in error_str or '416' in error_str:
+                return b''
+            raise StorageError(f'Failed to read chunk from {filename}: {e}') from e
+
+    async def close_read(self, filename: str, context) -> None:
+        """No-op — Azure reads are stateless."""
+        pass
+
+    async def get_file_info(self, filename: str) -> dict:
+        """Get file size and modification time via get_blob_properties."""
+        try:
+            client = self._get_client()
+            blob_name = self._get_blob_name(filename)
+            blob_client = client.get_blob_client(
+                container=self._container,
+                blob=blob_name,
+            )
+            properties = await asyncio.to_thread(blob_client.get_blob_properties)
+            return {
+                'size': properties.size,
+                'modified': properties.last_modified.timestamp(),
+            }
+        except Exception as e:
+            if 'BlobNotFound' in str(e) or 'ResourceNotFound' in str(e):
+                raise StorageError(f'File not found: {filename}')
+            raise StorageError(f'Failed to get file info for {filename}: {e}') from e
+
+    async def _stage_block(self, context: dict, data: bytes) -> None:
+        """Stage a single block and record its ID."""
+        import base64
+
+        client = self._get_client()
+        blob_client = client.get_blob_client(
+            container=self._container,
+            blob=context['blob_name'],
+        )
+        block_id = base64.b64encode(f'block-{context["block_counter"]:06d}'.encode()).decode()
+        await asyncio.to_thread(blob_client.stage_block, block_id=block_id, data=data)
+        context['block_ids'].append(block_id)
+        context['block_counter'] += 1
 
     # =========================================================================
     # Private Methods
@@ -340,7 +470,13 @@ class AzureBlobStore(IStore):
 
     def _get_blob_name(self, path: str) -> str:
         """Convert relative path to blob name."""
+        import posixpath
+
         path = path.replace('\\', '/')
         if self._prefix:
-            return f'{self._prefix}/{path}'
-        return path
+            full_name = posixpath.normpath(f'{self._prefix}/{path}')
+            # Ensure the resolved name stays within the prefix
+            if not full_name.startswith(self._prefix + '/') and full_name != self._prefix:
+                raise StorageError(f'Path traversal detected: {path}')
+            return full_name
+        return posixpath.normpath(path)

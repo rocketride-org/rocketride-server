@@ -21,29 +21,36 @@
 // SOFTWARE.
 // =============================================================================
 
+#include <pybind11/embed.h>
+
 #include "test.h"
 
-namespace engine::python::test {
-const ::PyConfig &config() noexcept;
-}  // namespace engine::python::test
+namespace py = pybind11;
 
 TEST_CASE("python::config") {
-    // Get initialized python config
-    const auto &config = python::test::config();
-
-    // Check each of the python config paths is either the root or the nested
-    // path
     auto rootDir = application::execDir();
-    REQUIRE(rootDir == file::Path(config.home));
-    REQUIRE(rootDir == file::Path(config.base_exec_prefix));
-    REQUIRE(rootDir.isParentOf(file::Path(config.base_executable)));
-    REQUIRE(rootDir == file::Path(config.base_prefix));
-    REQUIRE(rootDir == file::Path(config.exec_prefix));
-    REQUIRE(rootDir.isParentOf(file::Path(config.executable)));
-    for (::Py_ssize_t i = 0; i < config.module_search_paths.length; ++i)
-        REQUIRE(rootDir.isParentOf(
-            file::Path(config.module_search_paths.items[i])));
-    REQUIRE(rootDir == file::Path(config.prefix));
+    auto packagesDir = application::projectDir() ? application::projectDir() / "packages" : "";
+    auto nodesDir = application::projectDir() ? application::projectDir() / "nodes" : "";
+
+    const auto python = localfcn()->Error {
+        py::module_ sys = py::module_::import("sys");
+        REQUIRE(rootDir == file::Path(sys.attr("prefix").cast<std::string>()));
+        REQUIRE(rootDir == file::Path(sys.attr("exec_prefix").cast<std::string>()));
+        REQUIRE(rootDir.isParentOf(file::Path(sys.attr("executable").cast<std::string>())));
+        REQUIRE(rootDir == file::Path(sys.attr("base_prefix").cast<std::string>()));
+        REQUIRE(rootDir == file::Path(sys.attr("base_exec_prefix").cast<std::string>()));
+        REQUIRE(rootDir.isParentOf(file::Path(sys.attr("_base_executable").cast<std::string>())));
+        py::list path_list = sys.attr("path");
+        for (auto path_item : path_list) {
+            auto pathItem = file::Path(py::str(path_item).cast<std::string>());
+            REQUIRE((rootDir.isParentOf(pathItem)
+                    || (packagesDir && packagesDir.isParentOf(pathItem))
+                    || (nodesDir && nodesDir.isParentOf(pathItem))));
+        }
+        return {};
+    };
+
+    REQUIRE_NO_ERROR(callPython(python));
 }
 
 TEST_CASE("python::webhook") {

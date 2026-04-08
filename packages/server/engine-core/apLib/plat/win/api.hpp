@@ -50,7 +50,7 @@ inline uint32_t gpuSize() noexcept {
     CComPtr<IWbemLocator> wbemLocator;
     if (FAILED(::CoCreateInstance(CLSID_WbemLocator, nullptr,
                                   CLSCTX_INPROC_SERVER, IID_IWbemLocator,
-                                  reinterpret_cast<void**>(&wbemLocator)))) {
+                                  reinterpret_cast<void **>(&wbemLocator)))) {
         ::CoUninitialize();
         return 0;  // Unable to create WbemLocator
     }
@@ -114,13 +114,13 @@ inline uint32_t gpuSize() noexcept {
     return gpuMemoryMB;  // Return 0 if no non-Intel GPU was found
 }
 
-inline const SYSTEM_INFO& systemInfo() noexcept {
+inline const SYSTEM_INFO &systemInfo() noexcept {
     static SYSTEM_INFO info = {};
     if (!info.dwAllocationGranularity) ::GetSystemInfo(&info);
     return info;
 }
 
-inline ErrorOr<uint32_t> fileVersion(const file::Path& path) noexcept {
+inline ErrorOr<uint32_t> fileVersion(const file::Path &path) noexcept {
     DWORD versionInfoSize = ::GetFileVersionInfoSizeW(path.plat(), nullptr);
     if (versionInfoSize == 0)
         return APERR(::GetLastError(), "Unable to get file version info size",
@@ -136,7 +136,7 @@ inline ErrorOr<uint32_t> fileVersion(const file::Path& path) noexcept {
     if (!::VerQueryValueW(versionInfo, L"\\", &buffer, &bufferLength))
         return APERR(::GetLastError(), "VerQueryValue in getFileVersion", path);
 
-    return _reCast<VS_FIXEDFILEINFO*>(buffer)->dwProductVersionMS;
+    return _reCast<VS_FIXEDFILEINFO *>(buffer)->dwProductVersionMS;
 }
 
 inline TextView architecture() noexcept {
@@ -195,7 +195,7 @@ inline ErrorOr<DiskUtilization> diskUtilization(
     CComPtr<IWbemLocator> wbemLocator;
     if (auto hr = ::CoCreateInstance(CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER,
                                      IID_IWbemLocator,
-                                     _reCast<LPVOID*>(&wbemLocator));
+                                     _reCast<LPVOID *>(&wbemLocator));
         FAILED(hr))
         return APERR(hr, "CoCreateInstance(CLSID_WbemLocator)");
 
@@ -290,7 +290,7 @@ inline ErrorOr<int> plat::systemDiskUtilization(bool forceRefresh) noexcept {
         return du.ccode();
 }
 
-inline ErrorOr<DiskUsage> diskUsage(const file::Path& path) noexcept {
+inline ErrorOr<DiskUsage> diskUsage(const file::Path &path) noexcept {
     ULARGE_INTEGER sizeIgnore, sizeFree, sizeTotal;
     if (!::GetDiskFreeSpaceExW(path.plat(), &sizeFree, &sizeTotal, &sizeIgnore))
         return APERR(::GetLastError(), "GetDiskFreeSpaceEx failed", path);
@@ -303,12 +303,12 @@ inline ErrorOr<DiskUsage> diskUsage(const file::Path& path) noexcept {
                      .utilization = utilization};
 }
 
-inline ErrorOr<int> diskUtilization(const file::Path& path,
+inline ErrorOr<int> diskUtilization(const file::Path &path,
                                     bool forceRefresh) noexcept {
     auto du = diskUtilization(forceRefresh);
     if (!du) return du.ccode();
 
-    for (auto& [drive, utilization] : du->diskUtilization) {
+    for (auto &[drive, utilization] : du->diskUtilization) {
         if (drive.isParentOf(path)) return utilization;
     }
 
@@ -316,9 +316,9 @@ inline ErrorOr<int> diskUtilization(const file::Path& path,
 }
 
 template <typename MethodT>
-inline ErrorOr<MethodT*> dynamicBind(const file::Path& libPath,
-                                     const char* methodName,
-                                     bool changeDir = false) noexcept {
+inline ErrorOr<MethodT *> dynamicBind(const file::Path &libPath,
+                                      const char *methodName,
+                                      bool changeDir = false) noexcept {
     if (changeDir) {
         if (!SetCurrentDirectory(libPath.parent().plat()))
             return APERR(::GetLastError(), "Failed to change working dir",
@@ -328,7 +328,7 @@ inline ErrorOr<MethodT*> dynamicBind(const file::Path& libPath,
     auto hLib = ::LoadLibraryW(libPath.plat());
     if (!hLib) return APERR(::GetLastError(), "Failed to load", libPath);
 
-    auto method = _reCast<MethodT*>(::GetProcAddress(hLib, methodName));
+    auto method = _reCast<MethodT *>(::GetProcAddress(hLib, methodName));
     if (!method)
         return APERR(::GetLastError(), "Failed to bind method", libPath,
                      methodName);
@@ -436,14 +436,14 @@ inline ErrorOr<HandleType> duplicateHandle(HANDLE handle,
 }
 
 inline ErrorOr<wil::unique_hfile> duplicateStreamHandle(
-    const file::FileStream& stream) noexcept {
+    const file::FileStream &stream) noexcept {
     if (!stream) return APERR(Ec::InvalidParam);
 
     return duplicateHandle<wil::unique_hfile>(stream.platHandle());
 }
 
-inline Error setFileAccessTime(const file::Path& path,
-                               const FILETIME& atime) noexcept {
+inline Error setFileAccessTime(const file::Path &path,
+                               const FILETIME &atime) noexcept {
     // Open the file with FILE_WRITE_ATTRIBUTES so we can set its atime
     wil::unique_hfile hFile(::CreateFileW(path.plat(), FILE_WRITE_ATTRIBUTES,
                                           FILE_SHARE_READ, nullptr,
@@ -458,7 +458,7 @@ inline Error setFileAccessTime(const file::Path& path,
     return {};
 }
 
-inline ErrorOr<IShellLinkPtr> loadShortcut(const file::Path& path) noexcept {
+inline ErrorOr<IShellLinkPtr> loadShortcut(const file::Path &path) noexcept {
     if (auto ccode = plat::ComInit::init()) return ccode;
 
     IShellLinkPtr link;
@@ -474,12 +474,12 @@ inline ErrorOr<IShellLinkPtr> loadShortcut(const file::Path& path) noexcept {
     return link;
 }
 
-inline bool isShortcut(const file::Path& path) noexcept {
+inline bool isShortcut(const file::Path &path) noexcept {
     if (auto res = loadShortcut(path)) return true;
     return false;
 }
 
-inline ErrorOr<file::Path> getShortcutTarget(const file::Path& path) noexcept {
+inline ErrorOr<file::Path> getShortcutTarget(const file::Path &path) noexcept {
     // Load shortcut file
     auto shortcut = loadShortcut(path);
     if (!shortcut) return shortcut.ccode();
@@ -498,8 +498,8 @@ inline ErrorOr<file::Path> getShortcutTarget(const file::Path& path) noexcept {
     return Text{&target[0]};
 }
 
-inline Error createShortcut(const file::Path& path,
-                            const file::Path& target) noexcept {
+inline Error createShortcut(const file::Path &path,
+                            const file::Path &target) noexcept {
     if (auto ccode = plat::ComInit::init()) return ccode;
 
     // Create link object
@@ -508,20 +508,20 @@ inline Error createShortcut(const file::Path& path,
         return APERR(hr);
 
     // Set target path
-    if (auto hr = link->SetPath(_cast<const Utf16Chr*>(target)); FAILED(hr))
+    if (auto hr = link->SetPath(_cast<const Utf16Chr *>(target)); FAILED(hr))
         return APERR(hr);
 
     // Save shortcut file
     IPersistFilePtr pf = link;
     if (!pf) return APERR(E_NOINTERFACE);
 
-    if (auto hr = pf->Save(_cast<const Utf16Chr*>(path), TRUE); FAILED(hr))
+    if (auto hr = pf->Save(_cast<const Utf16Chr *>(path), TRUE); FAILED(hr))
         return APERR(hr);
 
     return {};
 }
 
-inline ErrorOr<file::Path> getModulePath(const Text& moduleName) noexcept {
+inline ErrorOr<file::Path> getModulePath(const Text &moduleName) noexcept {
     // Don't free the module handle
     auto hModule = ::GetModuleHandleW(moduleName);
     if (!hModule)

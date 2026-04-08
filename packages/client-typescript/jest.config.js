@@ -50,8 +50,15 @@ module.exports = {
 	testTimeout: 120000, // 120 seconds for integration tests (CI runners can be slow)
 	verbose: true,
 
+	// Force Jest to exit after all tests complete even if there are still
+	// open handles (e.g. WebSocket connections that failed to close).
+	// This prevents the test runner from hanging indefinitely.
+	forceExit: true,
+
 	// Module name mapping for cleaner imports
+	// Resolve ESM-style relative .js imports to TypeScript source files during tests
 	moduleNameMapper: {
+		'^(\\.\\.?/.*)\\.js$': '$1',
 		'^@/(.*)$': '<rootDir>/src/$1',
 	}
 };

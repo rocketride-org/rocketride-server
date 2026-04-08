@@ -35,7 +35,7 @@ protected:
 
 public:
     _const auto LogLevel = Lvl::Tls;
-    _const char* const PreferredCiphers{
+    _const char *const PreferredCiphers{
         "TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256"};
 
     struct Options {
@@ -54,7 +54,7 @@ public:
     ~TlsConnection() noexcept { close(); }
 
     // open a TLs socket
-    Error connect(const Text& address, uint16_t port,
+    Error connect(const Text &address, uint16_t port,
                   const Options opts = {}) const noexcept {
         LOGT("TLS connecting to: {}:{}", address, port);
 
@@ -176,7 +176,7 @@ public:
 
         // Step 1: verify a server certificate was presented during negotiation
         // https://www.openssl.org/docs/ssl/m_sslget_peer_certificate.html
-        X509* cert = SSL_get_peer_certificate(m_ssl);
+        X509 *cert = SSL_get_peer_certificate(m_ssl);
         auto guardUtf8 = util::Scope{[&]() noexcept {
             if (cert) X509_free(cert);
         }};
@@ -267,14 +267,14 @@ protected:
 
         ~Initializer() noexcept {}
 
-        X509_STORE* loadStore() const noexcept { return m_ca.loadStore(); }
+        X509_STORE *loadStore() const noexcept { return m_ca.loadStore(); }
 
     private:
         TlsCa m_ca;
     };
 
     struct ErrorCategory : std::error_category {
-        const char* name() const noexcept override { return "tls"; }
+        const char *name() const noexcept override { return "tls"; }
         std::string message(int code) const override {
             char buffer[256]{};
             ERR_error_string_n(_cast<unsigned long>(code), buffer,
@@ -284,13 +284,13 @@ protected:
     };
 
     static int verifyCallback(int preverify,
-                              X509_STORE_CTX* x509_ctx) noexcept {
+                              X509_STORE_CTX *x509_ctx) noexcept {
         int depth = X509_STORE_CTX_get_error_depth(x509_ctx);
         int err = X509_STORE_CTX_get_error(x509_ctx);
 
-        X509* cert = X509_STORE_CTX_get_current_cert(x509_ctx);
-        X509_NAME* iname = cert ? X509_get_issuer_name(cert) : nullptr;
-        X509_NAME* sname = cert ? X509_get_subject_name(cert) : nullptr;
+        X509 *cert = X509_STORE_CTX_get_current_cert(x509_ctx);
+        X509_NAME *iname = cert ? X509_get_issuer_name(cert) : nullptr;
+        X509_NAME *sname = cert ? X509_get_subject_name(cert) : nullptr;
 
         LOG(Tls, "TLS verify callback: depth={}, pre-verify={}", depth,
             preverify);
@@ -333,16 +333,16 @@ protected:
         return preverify;
     }
 
-    static void logCnName(const char* label, X509_NAME* const name) noexcept {
+    static void logCnName(const char *label, X509_NAME *const name) noexcept {
         bool success{};
-        unsigned char* utf8{};
+        unsigned char *utf8{};
         auto guardUtf8 = util::Scope{[&]() noexcept {
             if (utf8) OPENSSL_free(utf8);
         }};
         auto guardOutput = util::Scope{[&]() noexcept {
             if (success) {
                 LOG(Tls, "TLS {} is {}", label,
-                    _ts(_reCast<const char*>(utf8)));
+                    _ts(_reCast<const char *>(utf8)));
                 return;
             }
             LOG(Tls, "TLS {} is not available", label);
@@ -353,10 +353,10 @@ protected:
         int idx{X509_NAME_get_index_by_NID(name, NID_commonName, -1)};
         if (!(idx > -1)) return;
 
-        X509_NAME_ENTRY* entry = X509_NAME_get_entry(name, idx);
+        X509_NAME_ENTRY *entry = X509_NAME_get_entry(name, idx);
         if (!entry) return;
 
-        ASN1_STRING* data = X509_NAME_ENTRY_get_data(entry);
+        ASN1_STRING *data = X509_NAME_ENTRY_get_data(entry);
         if (!data) return;
 
         int length = ASN1_STRING_to_UTF8(&utf8, data);
@@ -365,7 +365,7 @@ protected:
         success = true;
     }
 
-    static void logSanName(const char* label, X509* const cert) {
+    static void logSanName(const char *label, X509 *const cert) {
         bool success{};
 
         auto guardOutputFailure = util::Scope{[&]() noexcept {
@@ -375,7 +375,7 @@ protected:
 
         if (!cert) return;
 
-        auto names = static_cast<GENERAL_NAMES*>(
+        auto names = static_cast<GENERAL_NAMES *>(
             X509_get_ext_d2i(cert, NID_subject_alt_name, 0, 0));
         auto guardNames = util::Scope{[&]() noexcept {
             if (names) GENERAL_NAMES_free(names);
@@ -387,12 +387,12 @@ protected:
         if (!count) return;
 
         for (int i = 0; i < count; ++i) {
-            unsigned char* utf8{};
+            unsigned char *utf8{};
             auto guardUtf8 = util::Scope{[&]() noexcept {
                 if (utf8) OPENSSL_free(utf8);
             }};
 
-            GENERAL_NAME* entry = sk_GENERAL_NAME_value(names, i);
+            GENERAL_NAME *entry = sk_GENERAL_NAME_value(names, i);
             if (!entry) continue;
 
             if (GEN_DNS != entry->type) {
@@ -404,7 +404,7 @@ protected:
             if (!utf8) continue;
 
             auto len2 =
-                _cast<decltype(len1)>(strlen(_reCast<const char*>(utf8)));
+                _cast<decltype(len1)>(strlen(_reCast<const char *>(utf8)));
             if (len1 != len2) {
                 LOG(Tls,
                     "strlen(...) and ASN1_STRING size do not match (embedded "
@@ -417,12 +417,12 @@ protected:
             // we skip the candidate and move on to the next.
             // Another policy would be to fail since it probably
             // indicates the client is under attack.
-            LOG(Tls, "Tls {} is {}", label, _reCast<const char*>(utf8));
+            LOG(Tls, "Tls {} is {}", label, _reCast<const char *>(utf8));
             success = true;
         }
     }
 
-    static Error fromLastError(const char* const label) noexcept {
+    static Error fromLastError(const char *const label) noexcept {
         return toError(ERR_get_error(), label);
     }
 
@@ -431,7 +431,7 @@ protected:
             return std::error_code{_cast<int>(err),
                                    ErrorCategorySingleton::get()};
         };
-        const char* const str = ERR_reason_error_string(err);
+        const char *const str = ERR_reason_error_string(err);
         if (str)
             return APERR(makeError(err), "TLS failure in", label, "with", str);
         return APERR(makeError(err), "TLS failure in", label, "with error code",
@@ -439,12 +439,12 @@ protected:
     }
 
 protected:
-    const Initializer& m_initalizer;
+    const Initializer &m_initalizer;
 
-    mutable const SSL_METHOD* m_method{};
-    mutable SSL_CTX* m_ctx{};
-    mutable BIO* m_bio{};
-    mutable SSL* m_ssl{};
+    mutable const SSL_METHOD *m_method{};
+    mutable SSL_CTX *m_ctx{};
+    mutable BIO *m_bio{};
+    mutable SSL *m_ssl{};
 };
 
 }  // namespace engine::net

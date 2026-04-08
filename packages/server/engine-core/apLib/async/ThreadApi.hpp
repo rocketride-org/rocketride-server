@@ -125,13 +125,14 @@ private:
         return util::Guard{[&]() noexcept { ThreadApi::threadExit(); }};
     }
 
-	// Every thread has a thread context, the context holds the thread
-	// name, and its cancellation flag. Thread context live within thread
-	// objects. 3rd party threads will get their own context implicitly
-	// instantiated if needed.
-	// Defined in api.cpp to avoid duplicate thread-local init routines when
-	// the header is included in multiple TUs (e.g. classify wrapper + engLib).
-	static thread_local Variant<std::monostate, ThreadCtx *, ThreadCtx> m_thisCtx;
+    // Every thread has a thread context, the context holds the thread
+    // name, and its cancellation flag. Thread context live within thread
+    // objects. 3rd party threads will get their own context implicitly
+    // instantiated if needed.
+    // Defined in api.cpp to avoid duplicate thread-local init routines when
+    // the header is included in multiple TUs (e.g. classify wrapper + engLib).
+    static thread_local Variant<std::monostate, ThreadCtx *, ThreadCtx>
+        m_thisCtx;
 };
 
 }  // namespace ap::async

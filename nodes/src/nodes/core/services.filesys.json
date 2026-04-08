@@ -13,30 +13,19 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"source"
-	],
+	"classType": ["source"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"filesystem",
-		"noremote",
-		"security",
-		"nosaas"
-],
+	"capabilities": ["filesystem", "noremote", "security", "nosaas"],
 	//
 	// Optional:
 	//		Supported actions - if not specified, no actions are supported
 	//		engine
 	//
-	"actions": [
-		"export",
-		"delete",
-		"download"
-	],
+	"actions": ["export", "delete", "download"],
 	//
 	// Required:
 	//		The prefix map when added/removed when convertting URLs <=> paths
@@ -45,32 +34,21 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A source component that reads data from the local file system. It ",
-		"enables ingestion of files and documents stored in directories for ",
-		"further processing within the pipeline. Configurable with path settings ",
-		"and file filters, the component supports flexible access to unstructured ",
-		"data across various formats."
-	],
+	"description": ["A source component that reads data from the local file system. It ", "enables ingestion of files and documents stored in directories for ", "further processing within the pipeline. Configurable with path settings ", "and file filters, the component supports flexible access to unstructured ", "data across various formats."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "file-system.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/411y8Rq",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"_source": [
-			"tags"
-		]
+		"_source": ["tags"]
 	},
 	"input": [
 		{
@@ -85,7 +63,7 @@
 	],
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	"fields": {
@@ -113,11 +91,7 @@
 		"filesys.source.parameters": {
 			"section": "parameters",
 			"title": "Parameters",
-			"properties": [
-				"excludeExternalDrives",
-				"excludeEnableGlobal",
-				"excludeSymlinks"
-			]
+			"properties": ["excludeExternalDrives", "excludeEnableGlobal", "excludeSymlinks"]
 		},
 		"Pipe.include": {
 			"description": "Example Path: /Users/usr/Documents/product-images/*"
@@ -127,11 +101,7 @@
 		},
 		"Pipe.filesys.source.parameters": {
 			"section": "parameters",
-			"properties": [
-				"excludeExternalDrives",
-				"excludeEnableGlobal",
-				"excludeSymlinks"
-			]
+			"properties": ["excludeExternalDrives", "excludeEnableGlobal", "excludeSymlinks"]
 		}
 	},
 	//
@@ -142,28 +112,12 @@
 		{
 			"section": "Source",
 			"title": "File System",
-			"properties": [
-				"type",
-				"name",
-				"actions",
-				"source.mode",
-				"filesys.source.parameters",
-				"include",
-				"exclude",
-				"estimation"
-			]
+			"properties": ["type", "actions", "source.mode", "filesys.source.parameters", "include", "exclude", "estimation"]
 		},
 		{
 			"section": "Pipe",
 			"title": "File System",
-			"properties": [
-				"type",
-				"actions",
-				"source.mode",
-				"Pipe.filesys.source.parameters",
-				"Pipe.include",
-				"Pipe.exclude"
-			]
+			"properties": ["type", "actions", "source.mode", "Pipe.filesys.source.parameters", "Pipe.include", "Pipe.exclude"]
 		}
 	]
 }

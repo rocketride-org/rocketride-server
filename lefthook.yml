@@ -1,0 +1,18 @@
+pre-commit:
+  parallel: true
+  commands:
+    gitleaks:
+      tags: security
+      run: gitleaks protect --verbose --staged --config .gitleaks.toml || true
+    eslint:
+      glob: '*.{js,ts,jsx,tsx,mjs,cjs}'
+      run: npx eslint {staged_files}
+    prettier:
+      glob: '*.{js,ts,jsx,tsx,mjs,cjs,json,css,scss,html,md,yaml,yml}'
+      run: npx prettier --check {staged_files}
+    ruff-check:
+      glob: '*.py'
+      run: ruff check {staged_files}
+    ruff-format:
+      glob: '*.py'
+      run: ruff format --check {staged_files}

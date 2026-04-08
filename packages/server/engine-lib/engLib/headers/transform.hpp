@@ -25,8 +25,8 @@
 
 namespace engine {
 
-inline void __transform(const file::StatInfo& fsInfo,
-                        ComponentInfo& info) noexcept {
+inline void __transform(const file::StatInfo &fsInfo,
+                        ComponentInfo &info) noexcept {
     info.modifyTime = fsInfo.modifyTime;
     info.accessTime = fsInfo.accessTime;
     info.changeTime = fsInfo.changeTime;
@@ -36,14 +36,14 @@ inline void __transform(const file::StatInfo& fsInfo,
 }
 
 // Convert fs info to and from service info
-inline auto __transform(const file::StatInfo& fs, StatInfo& prov) noexcept {
+inline auto __transform(const file::StatInfo &fs, StatInfo &prov) noexcept {
     prov.internal = _tj(fs);
     prov.isDir = fs.isDir;
     prov.size = fs.size;
     prov.id = _tso(Format::HEX, fs.volumeId, ":", fs.inode);
 }
 
-inline auto __transform(const StatInfo& prov, file::StatInfo& fs) noexcept {
+inline auto __transform(const StatInfo &prov, file::StatInfo &fs) noexcept {
     fs = _fj<file::StatInfo>(prov.internal);
 }
 

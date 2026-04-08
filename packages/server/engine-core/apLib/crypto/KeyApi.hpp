@@ -26,7 +26,7 @@
 namespace ap::crypto {
 
 // Generate random key
-inline ErrorOr<Key> generateKey(const Cipher& cipher) noexcept {
+inline ErrorOr<Key> generateKey(const Cipher &cipher) noexcept {
     auto keyData = randomBytes(cipher.keyLength());
     if (!keyData) return keyData.ccode();
 
@@ -57,7 +57,7 @@ _const size_t MinimumKeyDerivationIterations = 4096;
 
 // Derive key from password using PBKDF2; see
 // https://datatracker.ietf.org/doc/html/rfc2898
-inline ErrorOr<Key> deriveKeyFromPassword(const Cipher& cipher,
+inline ErrorOr<Key> deriveKeyFromPassword(const Cipher &cipher,
                                           TextView password, InputData salt,
                                           size_t iterations) noexcept {
     auto keyData = impl::deriveKeyDataFromPassword(password, salt, iterations,
@@ -70,7 +70,7 @@ inline ErrorOr<Key> deriveKeyFromPassword(const Cipher& cipher,
 // Hide the internal API's used for unit testing
 namespace impl {
 // Smart pointer wrapper for EVP_PKEY_CTX
-using EvpPKeyCtxPtr = std::unique_ptr<EVP_PKEY_CTX, void (*)(EVP_PKEY_CTX*)>;
+using EvpPKeyCtxPtr = std::unique_ptr<EVP_PKEY_CTX, void (*)(EVP_PKEY_CTX *)>;
 
 // Initialize the EVP public key context and set the hash and HKDF mode
 // Although we're using the public key API to invoke HKDF, there's nothing
@@ -82,7 +82,7 @@ inline ErrorOr<EvpPKeyCtxPtr> initPKeyCtx(int mode) noexcept {
                       lastError());
 
     auto ctx = EvpPKeyCtxPtr(evpCtx,
-                             [](EVP_PKEY_CTX* ctx) { EVP_PKEY_CTX_free(ctx); });
+                             [](EVP_PKEY_CTX *ctx) { EVP_PKEY_CTX_free(ctx); });
     OPENSSL_CHECK(EVP_PKEY_derive_init(ctx.get()));
     OPENSSL_CHECK(EVP_PKEY_CTX_hkdf_mode(ctx.get(), mode));
     OPENSSL_CHECK(EVP_PKEY_CTX_set_hkdf_md(ctx.get(), EVP_sha256()));
@@ -121,7 +121,7 @@ inline ErrorOr<Buffer> deriveKeyDataFromKey(int mode, InputData key,
 
 // Derive key from key using HKDF; see
 // https://datatracker.ietf.org/doc/html/rfc5869
-inline ErrorOr<Key> deriveKeyFromKey(const Key& key, InputData info,
+inline ErrorOr<Key> deriveKeyFromKey(const Key &key, InputData info,
                                      InputData salt = {}) noexcept {
     // Configure HKDF to expand only since the input is already sufficiently
     // random See https://en.wikipedia.org/wiki/HKDF

@@ -40,6 +40,7 @@ from typing import Any, Dict
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.validation import validate_prompt
 from langchain_openai import ChatOpenAI
 
 
@@ -76,6 +77,7 @@ class Chat(ChatBase):
             temperature=0,
             timeout=timeout,
             max_retries=0,  # We handle retries ourselves
+            max_tokens=self._modelOutputTokens,
         )
 
         # Store in bag for pipeline access
@@ -178,14 +180,14 @@ class Chat(ChatBase):
 
     def chat(self, question: Question) -> Answer:
         """Process a question and return an answer with retry logic."""
-        # Get retry configuration for this model
+        prompt = validate_prompt(question.getPrompt(), self._modelTotalTokens, self.getTokens)
         max_retries, base_delay = self._getRetryConfig(self._model)
         last_error = None
 
         for attempt in range(max_retries + 1):  # +1 for initial attempt
             try:
                 # Ask the model
-                results = self._llm.invoke(question.getPrompt())
+                results = self._llm.invoke(prompt)
 
                 # Create and return the answer
                 answer = Answer(expectJson=question.expectJson)

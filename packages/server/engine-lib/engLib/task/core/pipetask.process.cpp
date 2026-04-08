@@ -253,7 +253,7 @@ Error IPipeTask<LvlT>::processItems() noexcept {
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
 ErrorOr<size_t> IPipeTask<LvlT>::processItems(
-    std::vector<Entry>& items) noexcept {
+    std::vector<Entry> &items) noexcept {
     // Default implementation doesn't support bulk processing
     return APERRT(Ec::NotSupported, "Bulk processing not implemented");
 }
@@ -322,7 +322,7 @@ Error IPipeTask<LvlT>::waitForComplete() noexcept {
 ///		Error
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
-Error IPipeTask<LvlT>::queueItem(Entry& item) noexcept {
+Error IPipeTask<LvlT>::queueItem(Entry &item) noexcept {
     // If we have a terminal error, don't queue anything
     if (m_terminalError) return m_terminalError;
 
@@ -344,7 +344,7 @@ Error IPipeTask<LvlT>::queueItem(Entry& item) noexcept {
 ///		Error
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
-Error IPipeTask<LvlT>::processInput(TextView line_, Url& parent) noexcept {
+Error IPipeTask<LvlT>::processInput(TextView line_, Url &parent) noexcept {
     Text line = line_;
 
     // Check if the overall job is cancelled
@@ -511,7 +511,7 @@ Error IPipeTask<LvlT>::enumInput() noexcept {
 ///		Error
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
-Error IPipeTask<LvlT>::buildHeader(PipeTaskHeader& hdr) noexcept {
+Error IPipeTask<LvlT>::buildHeader(PipeTaskHeader &hdr) noexcept {
     // Set the default
     hdr = {.schema = PipeTaskSchema::JSONPIPE, .type = Parent::type()};
     return {};
@@ -526,7 +526,7 @@ Error IPipeTask<LvlT>::buildHeader(PipeTaskHeader& hdr) noexcept {
 ///		Error
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
-Error IPipeTask<LvlT>::processHeader(const PipeTaskHeader& hdr) noexcept {
+Error IPipeTask<LvlT>::processHeader(const PipeTaskHeader &hdr) noexcept {
     // Check if cancelled
     if (auto ccode = async::cancelled(_location)) return ccode;
 
@@ -553,7 +553,7 @@ Error IPipeTask<LvlT>::processHeader(const PipeTaskHeader& hdr) noexcept {
 //-----------------------------------------------------------------
 template <log::Lvl LvlT>
 ErrorOr<Entry> IPipeTask<LvlT>::processLine(TextView opType, TextView line,
-                                            const Url& currentParent) noexcept {
+                                            const Url &currentParent) noexcept {
     // Check to make sure we have a parent path
     if (!currentParent)
         return APERRT(Ec::InvalidState, "No current directory set");
@@ -591,7 +591,7 @@ ErrorOr<Entry> IPipeTask<LvlT>::processLine(TextView opType, TextView line,
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
 ErrorOr<Entry> IPipeTask<LvlT>::processLine(TextView line,
-                                            const Url& currentParent) noexcept {
+                                            const Url &currentParent) noexcept {
     // Default to json, no verification of type - this should be overridden
     // to with the type passed
     return processLine(""_tv, line, currentParent);
@@ -611,8 +611,8 @@ ErrorOr<Entry> IPipeTask<LvlT>::processLine(TextView line,
 ///		Error
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
-Error IPipeTask<LvlT>::processItem(Entry& entry,
-                                   ServicePipe& sourcePipe) noexcept {
+Error IPipeTask<LvlT>::processItem(Entry &entry,
+                                   ServicePipe &sourcePipe) noexcept {
     Error ccode;
 
     // Start/stop the counters
@@ -703,7 +703,7 @@ Error IPipeTask<LvlT>::processItem(Entry& entry,
 ///		Error
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
-Error IPipeTask<LvlT>::processItem(Entry& entry) noexcept {
+Error IPipeTask<LvlT>::processItem(Entry &entry) noexcept {
     // Allocate/release the source pipe
     ErrorOr<ServicePipe> sourcePipe;
     util::Guard sourcePipeGuard{
@@ -820,7 +820,7 @@ Error IPipeTask<LvlT>::endTask() noexcept {
 ///     The error code to handle
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
-void IPipeTask<LvlT>::handleTerminalError(const Error& ccode) noexcept {
+void IPipeTask<LvlT>::handleTerminalError(const Error &ccode) noexcept {
     // Save it
     m_terminalError = ccode;
 

@@ -38,15 +38,15 @@ Error IFilterGlobal::beginFilterGlobal() noexcept {
         return err;
     }
 
-    auto* api = classifyLoader::classifyApi();
+    auto *api = classifyLoader::classifyApi();
     if (!api) {
         return APERRT(Ec::InvalidState, "Classification API not available");
     }
 
     // Read configuration flags from task config
-    const json::Value& taskConfig = endpoint->config.taskConfig;
+    const json::Value &taskConfig = endpoint->config.taskConfig;
     if (taskConfig.isMember("classify")) {
-        const json::Value& classifyConfig = taskConfig["classify"];
+        const json::Value &classifyConfig = taskConfig["classify"];
         if (classifyConfig.isMember("wantsContext"))
             m_wantsContext = classifyConfig["wantsContext"].asBool();
         if (classifyConfig.isMember("wantsText"))
@@ -99,8 +99,8 @@ Error IFilterGlobal::endFilterGlobal() noexcept {
 // IFilterInstance Implementation
 // =============================================================================
 
-IFilterInstance::IFilterInstance(const FactoryArgs& args) noexcept
-    : Parent(args), m_global(static_cast<IFilterGlobal&>(*args.global)) {}
+IFilterInstance::IFilterInstance(const FactoryArgs &args) noexcept
+    : Parent(args), m_global(static_cast<IFilterGlobal &>(*args.global)) {}
 
 IFilterInstance::~IFilterInstance() { resetSession(); }
 
@@ -116,17 +116,21 @@ Error IFilterInstance::resetSession() noexcept {
 }
 
 Text IFilterInstance::getSessionError() const noexcept {
-    auto* api = m_global.api();
+    auto *api = m_global.api();
     if (!api || !m_session) return "Session or API not available";
 
-    const char* error = api->session_get_last_error(m_session);
+    const char *error = api->session_get_last_error(m_session);
     return error ? Text{error} : Text{};
 }
 
 Error IFilterInstance::beginFilterInstance() noexcept {
     LOGT("beginFilterInstance");
 
-    auto* api = m_global.api();
+    // Call our parent first
+    if (auto err = Parent::beginFilterInstance())
+            return err;
+
+    auto *api = m_global.api();
     if (!api) {
         return APERRT(Ec::InvalidState, "Classification API not available");
     }
@@ -153,13 +157,13 @@ Error IFilterInstance::beginFilterInstance() noexcept {
     return {};
 }
 
-Error IFilterInstance::open(Entry& object) noexcept {
+Error IFilterInstance::open(Entry &object) noexcept {
     LOGT("open:", object.path());
 
     // Call parent to set currentEntry
     if (auto err = Parent::open(object)) return err;
 
-    auto* api = m_global.api();
+    auto *api = m_global.api();
     if (!api || !m_session) {
         return APERRT(Ec::InvalidState, "Session not initialized");
     }
@@ -178,8 +182,12 @@ Error IFilterInstance::open(Entry& object) noexcept {
     return {};
 }
 
-Error IFilterInstance::writeText(const Utf16View& text) noexcept {
-    auto* api = m_global.api();
+Error IFilterInstance::writeText(const Utf16View &text) noexcept {
+    // Call the parent
+    if (auto err = Parent::writeText(text))
+        return err;
+
+    auto *api = m_global.api();
     if (!api || !m_session) {
         return APERRT(Ec::InvalidState, "Session not initialized");
     }
@@ -227,7 +235,7 @@ Error IFilterInstance::writeText(const Utf16View& text) noexcept {
     return {};
 }
 
-Error IFilterInstance::writeTable(const Utf16View& text) noexcept {
+Error IFilterInstance::writeTable(const Utf16View &text) noexcept {
     // Tables are treated like regular text
     return writeText(text);
 }
@@ -235,7 +243,7 @@ Error IFilterInstance::writeTable(const Utf16View& text) noexcept {
 Error IFilterInstance::closing() noexcept {
     LOGT("closing");
 
-    auto* api = m_global.api();
+    auto *api = m_global.api();
     if (!api || !m_session) {
         return APERRT(Ec::InvalidState, "Session not initialized");
     }
@@ -279,11 +287,15 @@ Error IFilterInstance::closing() noexcept {
              getSessionError());
     }
 
-    return {};
+    // Call the parent and done
+    return Parent::closing();
 }
 
 Error IFilterInstance::endFilterInstance() noexcept {
     LOGT("endFilterInstance");
+    // Call our parent first
+    if (auto err = Parent::endFilterInstance())
+        return err;
     return resetSession();
 }
 

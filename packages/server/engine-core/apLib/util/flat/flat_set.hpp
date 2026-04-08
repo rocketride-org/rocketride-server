@@ -15,8 +15,8 @@ template <typename D, typename Key, typename Container, typename Compare,
 class flat_set_base : public flat_container_base<D, Key, Container, Compare> {
 #include "impl/container_traits.hpp"
     using B = flat_container_base<D, Key, Container, Compare>;
-    D const* self() const { return static_cast<D const*>(this); }
-    D* self() { return static_cast<D*>(this); }
+    D const *self() const { return static_cast<D const *>(this); }
+    D *self() { return static_cast<D *>(this); }
 
 public:
     using value_compare = Compare;
@@ -27,11 +27,11 @@ public:
 
     // Modifiers
 
-    std::pair<iterator, bool> insert(value_type const& value) {
+    std::pair<iterator, bool> insert(value_type const &value) {
         return insert_(value);
     }
 
-    std::pair<iterator, bool> insert(value_type&& value) {
+    std::pair<iterator, bool> insert(value_type &&value) {
         return insert_(std::move(value));
     }
 
@@ -44,7 +44,7 @@ public:
         self()->container.erase(it, self()->container.end());
     }
 
-    size_type erase(key_type const& key) {
+    size_type erase(key_type const &key) {
         const_iterator it = self()->find(key);
         if (it == self()->end()) return 0;
         self()->container.erase(it.underlying);
@@ -53,13 +53,13 @@ public:
 
     // Lookup
 
-    size_type count(key_type const& key) const {
+    size_type count(key_type const &key) const {
         return self()->find(key) != self()->end();
     }
 
 private:
     template <typename V>
-    std::pair<iterator, bool> insert_(V&& value) {
+    std::pair<iterator, bool> insert_(V &&value) {
         iterator it = self()->lower_bound(value);
         if (it == self()->end() || self()->value_comp()(value, *it)) {
             it =
@@ -76,8 +76,8 @@ class flat_set_base<D, Key, Container, Compare,
     : public flat_set_base<D, Key, Container, Compare, int> {
 #include "impl/container_traits.hpp"
     using B = flat_set_base<D, Key, Container, Compare, int>;
-    D const* self() const { return static_cast<D const*>(this); }
-    D* self() { return static_cast<D*>(this); }
+    D const *self() const { return static_cast<D const *>(this); }
+    D *self() { return static_cast<D *>(this); }
 
 public:
     using B::count;
@@ -85,7 +85,7 @@ public:
     // Lookup
 
     template <typename K>
-    size_type count(K const& key) const {
+    size_type count(K const &key) const {
         return self()->find(key) != self()->end();
     }
 };
@@ -107,13 +107,13 @@ template <typename T, typename Compare = std::less<void>>
 using vector_set = flat_set<std::vector<T>, Compare>;
 
 template <typename Container, typename Compare>
-inline bool operator==(const flat_set<Container, Compare>& lhs,
-                       const flat_set<Container, Compare>& rhs) {
+inline bool operator==(const flat_set<Container, Compare> &lhs,
+                       const flat_set<Container, Compare> &rhs) {
     return lhs.container == rhs.container;
 }
 template <typename Container, typename Compare>
-inline bool operator!=(const flat_set<Container, Compare>& lhs,
-                       const flat_set<Container, Compare>& rhs) {
+inline bool operator!=(const flat_set<Container, Compare> &lhs,
+                       const flat_set<Container, Compare> &rhs) {
     return lhs.container != rhs.container;
 }
 

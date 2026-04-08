@@ -28,7 +28,7 @@ namespace ap::string {
 // Direct conversion to Text apis (the check version has to be included later
 // due to ErrorOr result)
 template <typename... Args>
-inline ErrorOr<Text> toStringCheck(Args&&... args) noexcept {
+inline ErrorOr<Text> toStringCheck(Args &&...args) noexcept {
     Text result;
     if (auto ccode = toStringEx<Text>(result, 0, std::forward<Args>(args)...))
         return ccode;

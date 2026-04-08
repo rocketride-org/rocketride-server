@@ -163,7 +163,24 @@ select_linux_triplet() {
         export CXX=clang++-${CLANG_VERSION}
     fi
     
-    TRIPLET_FILE="packages/server/engine-core/cmake/triplets/$TRIPLET_NAME"
+    # On Linux with update-alternatives: register our clang as default cc/c++ if different
+    CC_PATH=$(command -v "$CC" 2>/dev/null)
+    CXX_PATH=$(command -v "$CXX" 2>/dev/null)
+    CC_LINK=$(readlink -f "$(command -v cc 2>/dev/null)" 2>/dev/null || true)
+    CXX_LINK=$(readlink -f "$(command -v c++ 2>/dev/null)" 2>/dev/null || true)
+    CC_RESOLVED=""
+    CXX_RESOLVED=""
+    [ -n "$CC_PATH" ] && CC_RESOLVED=$(readlink -f "$CC_PATH" 2>/dev/null)
+    [ -n "$CXX_PATH" ] && CXX_RESOLVED=$(readlink -f "$CXX_PATH" 2>/dev/null)
+    if [ -n "$CC_RESOLVED" ] && [ -n "$CXX_RESOLVED" ]; then
+        if [ "$CC_RESOLVED" != "$CC_LINK" ] || [ "$CXX_RESOLVED" != "$CXX_LINK" ]; then
+            COMMANDS+=("    # Set default cc/c++ to $CC and $CXX")
+            COMMANDS+=("    sudo update-alternatives --install /usr/bin/cc cc $CC_PATH 100")
+            COMMANDS+=("    sudo update-alternatives --install /usr/bin/c++ c++ $CXX_PATH 100")
+        fi
+    fi
+
+    TRIPLET_FILE="packages/server/cmake/triplets/$TRIPLET_NAME"
 }
 
 select_macos_triplet() {
@@ -189,7 +206,7 @@ select_macos_triplet() {
     export CC=clang
     export CXX=clang++
     
-    TRIPLET_FILE="packages/server/engine-core/cmake/triplets/$TRIPLET_NAME"
+    TRIPLET_FILE="packages/server/cmake/triplets/$TRIPLET_NAME"
 }
 
 # =============================================================================
@@ -331,6 +348,16 @@ check_linux_dependencies() {
                     echo "✓ gnupg: gpg available"
                 fi
                 ;;
+            ca-certificates)
+                # update-ca-certificates may be root-only on PATH while the package is installed (#370)
+                if dpkg -l ca-certificates 2>/dev/null | grep -q "^ii" || command_exists update-ca-certificates; then
+                    echo "✓ ca-certificates"
+                else
+                    echo "✗ ca-certificates: package not installed and update-ca-certificates not on PATH"
+                    COMMANDS+=("    # Install package ca-certificates")
+                    COMMANDS+=("    sudo apt install -y ca-certificates")
+                fi
+                ;;
             libncurses-dev)
                 # Ubuntu 24.04+ uses libncurses-dev, older systems use libncurses5-dev/libncursesw5-dev
                 if ! dpkg -l "libncurses-dev" 2>/dev/null | grep -q "^ii" && \
@@ -357,7 +384,6 @@ check_linux_dependencies() {
                     ninja-build) cmd_name="ninja" ;;
                     libtool) cmd_name="libtoolize" ;;
                     dos2unix) cmd_name="dos2unix" ;;
-                    ca-certificates) cmd_name="update-ca-certificates" ;;
                     python3-pip) cmd_name="pip3" ;;
                     python3-venv) cmd_name="python3" ;;
                     autoconf-archive | lsb-release)

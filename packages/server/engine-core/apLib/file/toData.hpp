@@ -26,8 +26,8 @@
 namespace ap::file {
 
 template <typename ChrT, typename AllocT, typename Out>
-inline void __toData(const FilePath<ChrT, AllocT>& path,
-                     Out& out) noexcept(false) {
+inline void __toData(const FilePath<ChrT, AllocT> &path,
+                     Out &out) noexcept(false) {
     // If its invalid we don't want to pack it
     if (!path.valid())
         APERR_THROW(Ec::PackInvalid, "Attempt to pack invalid path", path);
@@ -37,8 +37,8 @@ inline void __toData(const FilePath<ChrT, AllocT>& path,
 }
 
 template <typename ChrT, typename AllocT, typename In>
-inline void __fromData(FilePath<ChrT, AllocT>& path,
-                       const In& in) noexcept(false) {
+inline void __fromData(FilePath<ChrT, AllocT> &path,
+                       const In &in) noexcept(false) {
     // Already have overloads for strings, read it in as a Text
     Text gen;
     *_fda(in, gen);

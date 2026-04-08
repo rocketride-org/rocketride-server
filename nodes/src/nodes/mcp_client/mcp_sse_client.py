@@ -144,7 +144,7 @@ class McpSseClient:
     # MCP operations
     # ------------------------------------------------------------------
     def list_tools(self) -> List[McpToolDef]:
-        result = self._request('tools/list', {'cursor': None})
+        result = self._request('tools/list', {})
         if not isinstance(result, dict):
             raise McpProtocolError(f'tools/list result expected object, got {type(result)}')
         tools = result.get('tools', [])
@@ -309,7 +309,16 @@ class McpSseClient:
         if event == 'endpoint':
             # The server provides a relative URL; resolve against the SSE origin.
             base = self._origin(self._sse_endpoint)
-            self._endpoint_url = urllib.parse.urljoin(base, data)
+            resolved = urllib.parse.urljoin(base, data)
+            # Validate the resolved URL stays on the same origin to prevent
+            # auth-token theft via malicious absolute-URL redirects.
+            if self._origin(resolved) != base:
+                raise McpProtocolError(
+                    f'MCP endpoint redirect rejected: '
+                    f'resolved origin {self._origin(resolved)!r} '
+                    f'does not match SSE origin {base!r}'
+                )
+            self._endpoint_url = resolved
             return
 
         if event != 'message':
@@ -336,5 +345,11 @@ class McpSseClient:
             p2 = urllib.parse.urlparse('http://' + url)
             scheme = p2.scheme
             netloc = p2.netloc
+        # Normalize default ports so that e.g. https://host and https://host:443
+        # are treated as the same origin.
+        if scheme == 'https' and netloc.endswith(':443'):
+            netloc = netloc[:-4]
+        elif scheme == 'http' and netloc.endswith(':80'):
+            netloc = netloc[:-3]
         return f'{scheme}://{netloc}'
 

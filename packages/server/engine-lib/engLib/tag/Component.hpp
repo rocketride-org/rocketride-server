@@ -47,7 +47,7 @@ struct Component {
                            // data equals the deflated size then the block grew
                            // when we tried to compress it, and we just used the
                            // uncompressed block instead
-                uint32_t  // deflated size
+                uint32_t   // deflated size
                 >;
 
     // Marker for end of the component itself

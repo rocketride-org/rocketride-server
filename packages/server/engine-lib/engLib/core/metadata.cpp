@@ -162,7 +162,7 @@ auto Metadata::end() const noexcept { return m_properties.end(); }
 ///	@param[in] cmp
 ///		The property to compare to
 //-------------------------------------------------------------------------
-bool Metadata::operator==(const Metadata& cmp) const noexcept {
+bool Metadata::operator==(const Metadata &cmp) const noexcept {
     return m_properties == cmp.m_properties;
 }
 
@@ -172,7 +172,7 @@ bool Metadata::operator==(const Metadata& cmp) const noexcept {
 ///	@param[in] cmp
 ///		The property to compare to
 //-------------------------------------------------------------------------
-bool Metadata::operator!=(const Metadata& cmp) const noexcept {
+bool Metadata::operator!=(const Metadata &cmp) const noexcept {
     return m_properties != cmp.m_properties;
 }
 

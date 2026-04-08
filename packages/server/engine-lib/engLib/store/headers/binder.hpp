@@ -93,7 +93,8 @@ public:
     static Error callMethods(
         Binder *pThis, const std::string &methodName,
         std::function<Error(IServiceFilterInstance *)> fcn,
-        const json::Value &traceData = {}) noexcept;
+        std::function<void(PIPELINE_TRACE_LEVEL, json::Value &)>
+            serializeTrace) noexcept;
 
     //-----------------------------------------------------------------
     ///	@details

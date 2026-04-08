@@ -27,14 +27,14 @@ namespace engine::index::search {
 
 // Check if any words exist in the document, words are looked up case
 // insensitive
-inline bool anyExist(QueryCtx& ctx, const WordIdSet& wordIds) noexcept {
+inline bool anyExist(QueryCtx &ctx, const WordIdSet &wordIds) noexcept {
     if (ctx.docWordIdList().empty()) return false;
 
     if (wordIds.empty()) return false;
 
     // Now see if any the words are there
     bool matches = false;
-    for (auto& wordId : wordIds) {
+    for (auto &wordId : wordIds) {
         // Loop will execute once at most unless context is requested
         for (auto it = _findIf(ctx.docWordIdList().begin(),
                                ctx.docWordIdList().end(), wordId);
@@ -54,12 +54,12 @@ inline bool anyExist(QueryCtx& ctx, const WordIdSet& wordIds) noexcept {
 
 // Check if all words exist in the document, words are looked up case
 // insensitive
-inline bool allExist(QueryCtx& ctx,
-                     const WordVariationList& variations) noexcept {
+inline bool allExist(QueryCtx &ctx,
+                     const WordVariationList &variations) noexcept {
     if (ctx.docWordIdList().empty()) return false;
 
     // Empty set or any word missing variations; done
-    if (variations.empty() || _anyOf(variations, [](const WordIdList& wordIds) {
+    if (variations.empty() || _anyOf(variations, [](const WordIdList &wordIds) {
             return wordIds.empty();
         }))
         return false;
@@ -71,10 +71,10 @@ inline bool allExist(QueryCtx& ctx,
     if (keepContext) matchIndexes.reserve(variations.size());
 
     // Check if at least one case variation of each word exists in the document
-    for (auto& wordIds : variations) {
+    for (auto &wordIds : variations) {
         // Search the document for each word ID
         bool found = false;
-        for (auto& wordId : wordIds) {
+        for (auto &wordId : wordIds) {
             for (auto it = _findIf(ctx.docWordIdList().begin(),
                                    ctx.docWordIdList().end(), wordId);
                  it != ctx.docWordIdList().end();
@@ -96,7 +96,7 @@ inline bool allExist(QueryCtx& ctx,
     }
 
     // Found all of them; add context if requested
-    for (auto& matchIndex : matchIndexes) {
+    for (auto &matchIndex : matchIndexes) {
         if (!ctx.addContext(matchIndex, 1)) break;
     }
 
@@ -105,12 +105,12 @@ inline bool allExist(QueryCtx& ctx,
 
 // Lookup a series of tokens, all have to be in series for this to match, case
 // insensitive
-inline bool phraseExists(QueryCtx& ctx,
-                         const WordVariationList& phrase) noexcept {
+inline bool phraseExists(QueryCtx &ctx,
+                         const WordVariationList &phrase) noexcept {
     if (ctx.docWordIdList().empty()) return false;
 
     // Empty phrase or any word missing variations; done
-    if (phrase.empty() || _anyOf(phrase, [](const WordIdList& wordIds) {
+    if (phrase.empty() || _anyOf(phrase, [](const WordIdList &wordIds) {
             return wordIds.empty();
         }))
         return false;
@@ -162,7 +162,7 @@ inline bool phraseExists(QueryCtx& ctx,
     return matches;
 }
 
-inline bool sequenceExists(QueryCtx& ctx, const WordIdList& sequence) noexcept {
+inline bool sequenceExists(QueryCtx &ctx, const WordIdList &sequence) noexcept {
     if (ctx.docWordIdList().empty()) return false;
 
     // Empty sequence never matches
@@ -188,12 +188,12 @@ inline bool sequenceExists(QueryCtx& ctx, const WordIdList& sequence) noexcept {
     return matches;
 }
 
-inline bool existsNear(QueryCtx& ctx,
-                       const WordVariationList& variations) noexcept {
+inline bool existsNear(QueryCtx &ctx,
+                       const WordVariationList &variations) noexcept {
     if (ctx.docWordIdList().empty()) return false;
 
     // Empty set or any word missing variations; done
-    if (variations.empty() || _anyOf(variations, [](const WordIdList& wordIds) {
+    if (variations.empty() || _anyOf(variations, [](const WordIdList &wordIds) {
             return wordIds.empty();
         }))
         return false;
@@ -210,7 +210,7 @@ inline bool existsNear(QueryCtx& ctx,
 
     // Search docWordIdList for variations of word W, starting from offset I and
     // searching +/- NearWordLimit
-    auto findNearbyWord = [&](const WordIdList& wordVariations, auto docPos) {
+    auto findNearbyWord = [&](const WordIdList &wordVariations, auto docPos) {
         // Search backwards from the match, ignoring symbols and whitespace
         if (docPos != ctx.docWordIdList().begin()) {
             size_t variationsSearched = 0;
@@ -290,7 +290,7 @@ inline bool existsNear(QueryCtx& ctx,
     return matches;
 }
 
-inline bool matchesGlob(QueryCtx& ctx, const globber::Glob& glob) noexcept {
+inline bool matchesGlob(QueryCtx &ctx, const globber::Glob &glob) noexcept {
     if (ctx.docWordIdList().empty()) return false;
 
     bool matches = false;
@@ -310,8 +310,8 @@ inline bool matchesGlob(QueryCtx& ctx, const globber::Glob& glob) noexcept {
     return matches;
 }
 
-inline bool matchesRegularExpression(QueryCtx& ctx,
-                                     const std::regex& regex) noexcept {
+inline bool matchesRegularExpression(QueryCtx &ctx,
+                                     const std::regex &regex) noexcept {
     if (ctx.docWordIdList().empty()) return false;
 
     bool matches = false;
@@ -332,10 +332,10 @@ inline bool matchesRegularExpression(QueryCtx& ctx,
 // word, for case-insensitive lookup
 template <typename ContainerT>
 inline Opt<WordVariationList> lookupWordVariations(
-    const WordDbRead& db, const ContainerT& words) noexcept {
+    const WordDbRead &db, const ContainerT &words) noexcept {
     WordVariationList variations;
     variations.reserve(words.size());
-    for (auto& word : words) {
+    for (auto &word : words) {
         if (auto wordIds = db.lookupWordIds(word); !wordIds.empty())
             variations.emplace_back(_mv(wordIds));
         // No variation of the word was found; done
@@ -346,18 +346,18 @@ inline Opt<WordVariationList> lookupWordVariations(
     return variations;
 }
 
-inline WordIdSet lookupWordIds(const WordDbRead& db,
-                               const std::vector<Text>& words) noexcept {
+inline WordIdSet lookupWordIds(const WordDbRead &db,
+                               const std::vector<Text> &words) noexcept {
     WordIdSet wordIds;
-    for (auto& word : words) _addTo(wordIds, db.lookupWordIds(word));
+    for (auto &word : words) _addTo(wordIds, db.lookupWordIds(word));
     return wordIds;
 }
 
-inline Opt<WordIdList> lookupSequence(const WordDbRead& db,
-                                      const std::vector<Text>& words) noexcept {
+inline Opt<WordIdList> lookupSequence(const WordDbRead &db,
+                                      const std::vector<Text> &words) noexcept {
     WordIdList sequence;
     sequence.reserve(words.size());
-    for (auto& word : words) {
+    for (auto &word : words) {
         auto wordId = db.lookupWordId(word);
         if (!wordId) return NullOpt;
         sequence.push_back(wordId);

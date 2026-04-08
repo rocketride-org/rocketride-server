@@ -31,7 +31,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { RocketRideClient, DAPMessage } from 'rocketride';
+import { RocketRideClient, DAPMessage, ConnectionException } from 'rocketride';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConfigManager } from '../config';
@@ -104,16 +104,16 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 					body: {}
 				});
 			},
-			onConnectError: async (errorMessage: string) => {
-				this.logger.output(`${icons.error} ${errorMessage}`);
+			onConnectError: async (error: ConnectionException) => {
+				this.logger.output(`${icons.error} ${error.message}`);
 
 				this.emitEvent({
 					type: 'event',
 					event: 'output',
 					body: {
 						category: 'stderr',
-						output: `Connection error: ${errorMessage}\n`
-					}
+						output: `Connection error: ${error.message}\n`,
+					},
 				});
 
 				this.emitEvent({
@@ -259,7 +259,7 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 		try {
 			if (this.isLaunchRequest(message)) {
 				message.arguments.pipeline = this.pipeline;
-				message.arguments.args = this.configManager.getConfig().engineArgs;
+				message.arguments.args = this.configManager.getEffectiveEngineArgs();
 
 			} else if (this.isAttachRequest(message)) {
 				this.token = message.arguments?.token;

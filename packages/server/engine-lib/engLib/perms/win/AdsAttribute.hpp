@@ -32,14 +32,14 @@ public:
 
     // For now, wrap a single ADSI object attribute, and retrieve the attribute
     // in the constructor
-    Attribute(IDirectoryObject& object, const wchar_t* name) noexcept(false)
+    Attribute(IDirectoryObject &object, const wchar_t *name) noexcept(false)
         : m_name{name} {
-        ADS_ATTR_INFO* attributes;
+        ADS_ATTR_INFO *attributes;
         DWORD attributeCount;
         // TODO: Support fetching ranges of attribute values; see
         // http://systemmanager.ru/adam-sdk.en/ad/example_code_for_ranging_with_idirectoryobject.htm
         if (HRESULT hr = object.GetObjectAttributes(
-                _constCast<wchar_t**>(&name), 1, &attributes, &attributeCount);
+                _constCast<wchar_t **>(&name), 1, &attributes, &attributeCount);
             FAILED(hr))
             APERRT_THROW(hr);
 
@@ -56,7 +56,7 @@ public:
                          "unexpected number of attributes",
                          name, attributeCount);
 
-        auto& attribute = attributes[0];
+        auto &attribute = attributes[0];
         if (attribute.dwADsType != AdsiValueType)
             APERRT_THROW(Ec::Unexpected,
                          "IDirectoryObject::GetObjectAttributes returned an "
@@ -75,8 +75,8 @@ public:
         if (m_attributes) ::FreeADsMem(m_attributes);
     }
 
-    Attribute(const Attribute&) = delete;
-    Attribute(Attribute&&) = default;
+    Attribute(const Attribute &) = delete;
+    Attribute(Attribute &&) = default;
 
     Utf16View name() const noexcept { return m_name; }
 
@@ -88,14 +88,14 @@ protected:
         return m_attributes[0].dwNumValues;
     }
 
-    const ADSVALUE* values() const noexcept {
+    const ADSVALUE *values() const noexcept {
         if (empty()) return nullptr;
         return m_attributes[0].pADsValues;
     }
 
 protected:
     Utf16View m_name;
-    ADS_ATTR_INFO* m_attributes = nullptr;
+    ADS_ATTR_INFO *m_attributes = nullptr;
 };
 
 template <ADSTYPE AdsiValueType>
@@ -103,8 +103,8 @@ class SingleValueAttribute abstract : public Attribute<AdsiValueType> {
 public:
     using Parent = Attribute<AdsiValueType>;
 
-    SingleValueAttribute(IDirectoryObject& object,
-                         const wchar_t* name) noexcept(false)
+    SingleValueAttribute(IDirectoryObject &object,
+                         const wchar_t *name) noexcept(false)
         : Parent{object, name} {
         if (Parent::size() > 1)
             APERRT_THROW(Ec::Unexpected,
@@ -114,7 +114,7 @@ public:
     };
 
 protected:
-    const ADSVALUE& value() const noexcept {
+    const ADSVALUE &value() const noexcept {
         ASSERT(Parent::size());
         return Parent::values()[0];
     }
@@ -124,7 +124,7 @@ class OctetString : public SingleValueAttribute<ADSTYPE_OCTET_STRING> {
 public:
     using Parent = SingleValueAttribute<ADSTYPE_OCTET_STRING>;
 
-    OctetString(IDirectoryObject& object, const wchar_t* name) noexcept(false)
+    OctetString(IDirectoryObject &object, const wchar_t *name) noexcept(false)
         : Parent{object, name} {
         if (!empty() && (!value().lpValue || !value().dwLength))
             APERRT_THROW(Ec::Unexpected,
@@ -134,8 +134,8 @@ public:
     };
 
     virtual ~OctetString() = default;
-    OctetString(const OctetString&) = delete;
-    OctetString(OctetString&&) = default;
+    OctetString(const OctetString &) = delete;
+    OctetString(OctetString &&) = default;
 
     ADS_OCTET_STRING value() const noexcept {
         if (Parent::empty()) return {};
@@ -148,7 +148,7 @@ public:
     using Parent = OctetString;
     using Parent::LogLevel;
 
-    Sid(IDirectoryObject& object) noexcept(false)
+    Sid(IDirectoryObject &object) noexcept(false)
         : OctetString{object, L"objectSid"} {
         if (empty())
             APERRT_THROW(Ec::Unexpected,
@@ -156,8 +156,8 @@ public:
     }
 
     virtual ~Sid() = default;
-    Sid(const Sid&) = delete;
-    Sid(Sid&&) = default;
+    Sid(const Sid &) = delete;
+    Sid(Sid &&) = default;
 
     perms::Sid sid() const noexcept(false) {
         return perms::Sid::fromPtr(value().lpValue, value().dwLength);
@@ -170,7 +170,7 @@ class DnString : public SingleValueAttribute<ADSTYPE_DN_STRING> {
 public:
     using Parent = SingleValueAttribute<ADSTYPE_DN_STRING>;
 
-    DnString(IDirectoryObject& object, const wchar_t* name) noexcept(false)
+    DnString(IDirectoryObject &object, const wchar_t *name) noexcept(false)
         : Parent{object, name} {
         if (!empty()) {
             m_value = Parent::value().DNString;
@@ -183,8 +183,8 @@ public:
     };
 
     virtual ~DnString() = default;
-    DnString(const DnString&) = delete;
-    DnString(DnString&&) = default;
+    DnString(const DnString &) = delete;
+    DnString(DnString &&) = default;
 
     Utf16View value() const noexcept { return m_value; }
 
@@ -196,7 +196,7 @@ protected:
 
 class Dn : public DnString {
 public:
-    Dn(IDirectoryObject& object) noexcept(false)
+    Dn(IDirectoryObject &object) noexcept(false)
         : DnString{object, L"distinguishedName"} {
         if (empty())
             APERRT_THROW(Ec::Unexpected,
@@ -205,27 +205,27 @@ public:
     }
 
     virtual ~Dn() = default;
-    Dn(const Dn&) = delete;
-    Dn(Dn&&) = default;
+    Dn(const Dn &) = delete;
+    Dn(Dn &&) = default;
 };
 
 class SidHistory : public Attribute<ADSTYPE_OCTET_STRING> {
 public:
     using Parent = Attribute<ADSTYPE_OCTET_STRING>;
 
-    SidHistory(IDirectoryObject& object) noexcept(false)
+    SidHistory(IDirectoryObject &object) noexcept(false)
         : Parent{object, L"sIDHistory"} {}
 
     virtual ~SidHistory() = default;
-    SidHistory(const SidHistory&) = delete;
-    SidHistory(SidHistory&&) = default;
+    SidHistory(const SidHistory &) = delete;
+    SidHistory(SidHistory &&) = default;
 
     // Expose the protected size() method
     using Parent::size;
 
     perms::Sid value(size_t index) const noexcept(false) {
         ASSERT(index < size());
-        auto& value = Parent::values()[index].OctetString;
+        auto &value = Parent::values()[index].OctetString;
         if (!value.lpValue || !value.dwLength)
             APERRT_THROW(Ec::Unexpected,
                          "IDirectoryObject::GetObjectAttributes returned an "
@@ -240,12 +240,12 @@ class DnStringArray : public Attribute<ADSTYPE_DN_STRING> {
 public:
     using Parent = Attribute<ADSTYPE_DN_STRING>;
 
-    DnStringArray(IDirectoryObject& object, const wchar_t* name) noexcept(false)
+    DnStringArray(IDirectoryObject &object, const wchar_t *name) noexcept(false)
         : Parent(object, name) {}
 
     virtual ~DnStringArray() = default;
-    DnStringArray(const DnStringArray&) = delete;
-    DnStringArray(DnStringArray&&) = default;
+    DnStringArray(const DnStringArray &) = delete;
+    DnStringArray(DnStringArray &&) = default;
 
     // Expose the protected size() method
     using Parent::size;

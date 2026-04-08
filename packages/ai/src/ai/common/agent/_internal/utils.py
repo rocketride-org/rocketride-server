@@ -3,7 +3,6 @@ Internal helpers for agent framework drivers.
 
 This module contains small, framework-agnostic utilities used by `AgentBase` and
 the agent-as-tool adapter:
-- Question preparation (node instructions) and prompt extraction
 - run id / timestamp helpers
 - tool invocation payload normalization across frameworks
 - transcript and text extraction helpers for host LLM responses
@@ -15,50 +14,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
-
-def extract_prompt(question: Any) -> str:
-    """
-    Extract the full prompt text from a Question-like object.
-
-    Prefer `Question.getPrompt()` when available so conversation history and
-    other structured fields (instructions/examples/context) are preserved.
-    """
-    get_prompt = getattr(question, 'getPrompt', None)
-    if callable(get_prompt):
-        try:
-            text = safe_str(get_prompt()).strip()
-            if text:
-                return text
-        except Exception:
-            pass
-    if hasattr(question, 'questions') and getattr(question, 'questions', None):
-        first = question.questions[0]
-        if hasattr(first, 'text'):
-            text = (first.text or '').strip()
-            if text:
-                return text
-    text = str(question).strip()
-    if not text:
-        raise ValueError('No prompt provided in Question.questions[0].text')
-    return text
-
-
-def apply_node_instructions(question: Any, pSelf: Any) -> None:
-    """
-    Add node config instructions to the question so they flow through getPrompt().
-
-    Supports both pipeline and agent-as-tool invocation paths. Instructions are
-    read from pSelf.IGlobal.instructions (list of strings).
-    """
-    instructions = getattr(getattr(pSelf, 'IGlobal', None), 'instructions', None)
-    if not isinstance(instructions, list):
-        return
-    add_inst = getattr(question, 'addInstruction', None)
-    if not callable(add_inst):
-        return
-    for inst in instructions:
-        if isinstance(inst, str) and inst.strip():
-            add_inst('Instruction', inst.strip())
 
 
 def new_run_id() -> str:

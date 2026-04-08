@@ -107,6 +107,23 @@ def monitorOther(*args) -> None:
 globals()['monitorOther'] = engLib.monitorOther  # noqa
 
 
+def monitorSSE(pipe_id: int, type: str, data: dict = None) -> None:
+    """
+    Send a real-time SSE event to the UI for the current pipe.
+
+    Args:
+        pipe_id: The current pipe's ID (self.instance.pipeId)
+        type:    Event type string (e.g. 'thinking', 'acting', 'confirm')
+        data:    Optional dict payload to include in the event (passed as-is from kwargs)
+    """
+    import json
+
+    payload = {'pipe_id': pipe_id, 'type': type}
+    if data:
+        payload['data'] = data
+    engLib.monitorOther('SSE', json.dumps(payload, separators=(',', ':')))
+
+
 class Lvl(Enum):
     """
     Engine logging levels.
@@ -114,7 +131,6 @@ class Lvl(Enum):
 
     Python = engLib.Lvl.Python
     Remoting = engLib.Lvl.Remoting
-    ServicePython = engLib.Lvl.ServicePython
     DebugOut = engLib.Lvl.DebugOut
     DebugProtocol = engLib.Lvl.DebugProtocol
 
@@ -146,7 +162,7 @@ globals()['isLevelEnabled'] = engLib.isLevelEnabled
 
 def debug(*args) -> None:
     """
-    Messages shown if the --trace=ServicePython is specified.
+    Output debug messages. Shown when the appropriate trace level is enabled.
     """
     ...
 

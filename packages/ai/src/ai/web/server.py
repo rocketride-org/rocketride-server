@@ -17,6 +17,7 @@ from rocketride import CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 from ai.constants import CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_HOST, CONST_WEB_WS_MAX_SIZE
 from ai.web import exception, error, Result
 from ai.account import Account, AccountInfo, Reporter
+from ai.modules import ALL as ALLOWED_MODULES
 from .middleware import AuthMiddleware
 from .endpoints import use, ping, version, shutdown, status
 from .denied import (
@@ -47,6 +48,7 @@ logo = r"""
                     All rights reserved
     """
 
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     # Call the startup method
@@ -61,7 +63,7 @@ class WebServer:
     Manage and run a FastAPI web server with exception handling, SSL support, and event loop management.
     """
 
-    def __init__(self, config: Dict[str, Any] = {}, **kwargs):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, **kwargs):
         """
         Initialize the WebServer instance with the FastAPI app and configuration.
 
@@ -132,17 +134,29 @@ class WebServer:
         # Declare the port
         self._port = None
 
-        # Add CORS middleware to allow unrestricted API access
+        # Configure CORS origins and credentials
+        cors_origins_env = os.environ.get('ROCKETRIDE_CORS_ORIGINS', '')
+        if cors_origins_env:
+            cors_origins = [o.strip() for o in cors_origins_env.split(',') if o.strip()]
+        else:
+            cors_origins = []
+
+        if cors_origins:
+            allow_credentials = True
+        else:
+            cors_origins = ['*']
+            allow_credentials = False
+
         self.app.add_middleware(
             CORSMiddleware,
-            allow_origins=['*'],  # Allows all origins (not recommended for production)
-            allow_credentials=True,  # Allows cookies and authentication credentials
-            allow_methods=['*'],  # Allows all HTTP methods (GET, POST, PUT, etc.)
-            allow_headers=['*'],  # Allows all HTTP headers
+            allow_origins=cors_origins,
+            allow_credentials=allow_credentials,
+            allow_methods=['*'],
+            allow_headers=['*'],
         )
 
         # Store the server configuration
-        self.config = config
+        self.config = config if config is not None else {}
 
         # Register a global exception handler for catching unexpected errors
         self.app.exception_handler(Exception)(self._general_exception_handler)
@@ -200,11 +214,20 @@ class WebServer:
         # Decode the URL-encoded path
         decoded_path = urllib.parse.unquote(path)
 
+        # Resolve the real path (resolves symlinks AND '..' components)
+        resolved_path = os.path.realpath(decoded_path)
+
+        # Paths must be absolute — relative paths are ambiguous
+        if not os.path.isabs(resolved_path):
+            raise ValueError(f'File path must be absolute: {path}')
+
+        # Reject paths that still contain traversal sequences after resolution
+        if '..' in resolved_path.split(os.sep):
+            raise ValueError(f'Path traversal detected in: {path}')
+
         # Return the valid file path if it exists
-        if os.path.exists(decoded_path):
-            return decoded_path
-        elif os.path.exists(path):
-            return path
+        if os.path.exists(resolved_path):
+            return resolved_path
         else:
             raise FileNotFoundError(f'File {path} not found')
 
@@ -309,9 +332,7 @@ class WebServer:
         if self._user_shutdown is not None:
             await self._user_shutdown()
 
-    async def _authenticate_credential_inner(
-        self, authorization: str
-    ) -> Union[AccountInfo, Tuple[int, str]]:
+    async def _authenticate_credential_inner(self, authorization: str) -> Union[AccountInfo, Tuple[int, str]]:
         """
         Authenticate a normalized credential string (chain + account fallback).
         Returns AccountInfo on success, (error_code, error_message) on failure.
@@ -688,7 +709,7 @@ class WebServer:
             self._private_paths.append(path)
             self._compiled_private_paths = None
 
-    def use(self, moduleName: str, config: Dict[str, Any] = {}):
+    def use(self, moduleName: str, config: Optional[Dict[str, Any]] = None):
         """
         Dynamically loads a service module and enables its API endpoints.
 
@@ -710,6 +731,12 @@ class WebServer:
         # Clean it up
         moduleName = moduleName.lower().strip()
 
+        # Validate against allowlist to prevent arbitrary module injection.
+        # Without this check, an attacker could load arbitrary Python modules
+        # via importlib.import_module(), leading to remote code execution.
+        if moduleName not in ALLOWED_MODULES:
+            raise ValueError(f'Module {moduleName!r} is not allowed. Permitted modules: {", ".join(sorted(ALLOWED_MODULES))}')
+
         # If it is already loaded, return success
         if moduleName in self.app.state.modules:
             return
@@ -718,7 +745,7 @@ class WebServer:
         moduleHandle = importlib.import_module(f'ai.modules.{moduleName}')
 
         # Init the module and register the module's endpoints with the server
-        moduleHandle.initModule(self, config)
+        moduleHandle.initModule(self, config if config is not None else {})
 
         # Add it to the module handle
         self.app.state.modules[moduleName] = moduleHandle

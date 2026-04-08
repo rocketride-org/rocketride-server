@@ -51,7 +51,7 @@ class IGlobal(IGlobalBase):
 
         try:
             # Import Mistral SDK after dependencies are loaded
-            from mistralai import Mistral
+            from mistralai.client import Mistral
 
             try:
                 from mistralai.exceptions import MistralException  # type: ignore
@@ -149,7 +149,7 @@ class IGlobal(IGlobalBase):
 
     def endGlobal(self):
         """Clean up the global instance when the node shuts down."""
-        self.chat = None
+        self._chat = None
 
     def _format_error(self, status_or_code, etype, emsg, fallback: str) -> str:
         parts: list[str] = []

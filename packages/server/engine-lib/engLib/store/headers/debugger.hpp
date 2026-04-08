@@ -44,7 +44,7 @@ struct Breakpoint {
           lane(std::move(lane_)) {}
 
     // Equality operator compares only from_id, to_id, and lane (not enabled)
-    bool operator==(const Breakpoint& other) const {
+    bool operator==(const Breakpoint &other) const {
         return from_id == other.from_id && to_id == other.to_id &&
                lane == other.lane;
     }
@@ -142,8 +142,8 @@ public:
      * @param pInstance Pointer to the service instance being entered.
      * @param trace Optional JSON trace data to append to the monitor message.
      */
-    void debugEnter(IServiceFilterInstance* pInstance,
-                    const json::Value& trace = {}) noexcept;
+    void debugEnter(IServiceFilterInstance *pInstance,
+                    const json::Value &trace = {}) noexcept;
 
     /**
      * @brief Called when a service instance is exited.
@@ -154,8 +154,8 @@ public:
      * @param pInstance Pointer to the service instance being exited.
      * @param trace Optional JSON trace data to append to the monitor message.
      */
-    void debugLeave(IServiceFilterInstance* pInstance,
-                    const json::Value& trace = {}) noexcept;
+    void debugLeave(IServiceFilterInstance *pInstance,
+                    const json::Value &trace = {}) noexcept;
 
     /**
      * @brief Called when a logical "break" is triggered between two service
@@ -167,8 +167,8 @@ public:
      * @param pTo Target service instance.
      * @param methodName Name of the method being executed during the break.
      */
-    void debugBreak(IServiceFilterInstance* pFrom, IServiceFilterInstance* pTo,
-                    const std::string& methodName) noexcept;
+    void debugBreak(IServiceFilterInstance *pFrom, IServiceFilterInstance *pTo,
+                    const std::string &methodName) noexcept;
 
     /**
      * @brief Called when an error is encountered in a service-to-service call.
@@ -180,8 +180,8 @@ public:
      * @param methodName Name of the method where the error occurred.
      * @param ccode Error object containing the failure code or message.
      */
-    void debugError(IServiceFilterInstance* pFrom, IServiceFilterInstance* pTo,
-                    const std::string& methodName, Error& ccode) noexcept;
+    void debugError(IServiceFilterInstance *pFrom, IServiceFilterInstance *pTo,
+                    const std::string &methodName, Error &ccode) noexcept;
 
     //---------------------------------------------------------------------
     // Task-level debugger commands (typically called from Python)
@@ -212,22 +212,22 @@ public:
     void taskStepIn() noexcept;
 
     // Replace the current set of breakpoints with the given vector
-    void taskBreakpointSet(const std::vector<Breakpoint>& breakpoints) noexcept;
+    void taskBreakpointSet(const std::vector<Breakpoint> &breakpoints) noexcept;
 
     // Add a new breakpoint if it doesn't already exist
-    void taskBreakpointAdd(const std::string& from_id, std::string to_id,
+    void taskBreakpointAdd(const std::string &from_id, std::string to_id,
                            std::string lane) noexcept;
 
     // Remove a breakpoint matching the given identifiers
-    void taskBreakpointRemove(const std::string& from_id, std::string to_id,
+    void taskBreakpointRemove(const std::string &from_id, std::string to_id,
                               std::string lane) noexcept;
 
     // Enable a specific breakpoint
-    void taskBreakpointEnable(const std::string& from_id, std::string to_id,
+    void taskBreakpointEnable(const std::string &from_id, std::string to_id,
                               std::string lane) noexcept;
 
     // Disable a specific breakpoint
-    void taskBreakpointDisable(const std::string& from_id, std::string to_id,
+    void taskBreakpointDisable(const std::string &from_id, std::string to_id,
                                std::string lane) noexcept;
 
     // Return a copy of the current breakpoint list
@@ -239,8 +239,8 @@ private:
     //---------------------------------------------------------------------
 
     // Output a breakpoint to the log
-    void _outputBreakpoint(const std::string& msg,
-                           const Breakpoint& bp) noexcept;
+    void _outputBreakpoint(const std::string &msg,
+                           const Breakpoint &bp) noexcept;
 
     /// Tracks the recursion level of nested debugEnter/debugLeave calls.
     int m_recurseLevel = 0;
@@ -268,8 +268,8 @@ public:
     // Static debugger management
     //---------------------------------------------------------------------
     static void registerDebugger(ServiceEndpointWeak endpoint);
-    static void deregisterDebugger(const std::string& taskId);
-    static Debugger* getDebugger(const std::string& taskId);
+    static void deregisterDebugger(const std::string &taskId);
+    static Debugger *getDebugger(const std::string &taskId);
     static std::vector<std::string> listDebuggers();
 
 private:

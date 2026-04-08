@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "OpenAI",
+	"title": "OpenAI (Embedding)",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"embedding"
-	],
+	"classType": ["embedding"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -24,13 +22,13 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -49,36 +47,22 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that transforms text into numerical vector representations using advanced embedding ",
-		"models. It converts input text—ranging from individual words to entire documents—into high-dimensional ",
-		"vectors that capture semantic meaning and relationships. These embeddings enable efficient similarity ",
-		"searches, clustering, and other advanced natural language processing tasks. The text embedder is highly ",
-		"configurable, supporting various pre-trained models and fine-tuning options, ensuring flexibility for ",
-		"different use cases across domains."
-	],
+	"description": ["A component that transforms text into numerical vector representations using advanced embedding ", "models. It converts input text—ranging from individual words to entire documents—into high-dimensional ", "vectors that capture semantic meaning and relationships. These embeddings enable efficient similarity ", "searches, clustering, and other advanced natural language processing tasks. The text embedder is highly ", "configurable, supporting various pre-trained models and fine-tuning options, ensuring flexibility for ", "different use cases across domains."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "openai.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/4oN1FYy",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"documents": [
-			"documents"
-		],
-		"questions": [
-			"questions"
-		]
+		"documents": ["documents"],
+		"questions": ["questions"]
 	},
 	"input": [
 		{
@@ -122,7 +106,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
@@ -134,48 +118,34 @@
 		},
 		"openai_embed.text-embedding-3-small": {
 			"object": "text-embedding-3-small",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"openai_embed.text-embedding-3-large": {
 			"object": "text-embedding-3-large",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"openai_embed.text-embedding-ada-002": {
 			"object": "text-embedding-ada-002",
-			"properties": [
-				"llm.cloud.apikey"
-			]
+			"properties": ["llm.cloud.apikey"]
 		},
 		"openai_embed.profile": {
 			"title": "Model",
 			"description": "OpenAI embedding model",
 			"type": "string",
 			"default": "text-embedding-3-small",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "text-embedding-3-small",
-					"properties": [
-						"openai_embed.text-embedding-3-small"
-					]
+					"properties": ["openai_embed.text-embedding-3-small"]
 				},
 				{
 					"value": "text-embedding-3-large",
-					"properties": [
-						"openai_embed.text-embedding-3-large"
-					]
+					"properties": ["openai_embed.text-embedding-3-large"]
 				},
 				{
 					"value": "text-embedding-ada-002",
-					"properties": [
-						"openai_embed.text-embedding-ada-002"
-					]
+					"properties": ["openai_embed.text-embedding-ada-002"]
 				}
 			]
 		}
@@ -189,9 +159,7 @@
 		{
 			"section": "Pipe",
 			"title": "OpenAI",
-			"properties": [
-				"openai_embed.profile"
-			]
+			"properties": ["openai_embed.profile"]
 		}
 	]
 }

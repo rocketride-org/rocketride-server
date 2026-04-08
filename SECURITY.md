@@ -6,9 +6,8 @@ We release security patches for the following versions:
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 3.x.x   | :white_check_mark: |
-| 2.x.x   | :x:                |
-| 1.x.x   | :x:                |
+| 3.1.x   | :white_check_mark: |
+| < 3.1   | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -61,4 +60,3 @@ RocketRide Engine includes several security features:
 - **Audit Logging**: Comprehensive activity logging
 
 Thank you for helping keep RocketRide Engine secure!
-

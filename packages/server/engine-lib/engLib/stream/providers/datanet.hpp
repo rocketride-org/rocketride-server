@@ -63,7 +63,7 @@ static url::UrlConfig urlConfig{
      /// @param[out] toPath
      ///	    Receives the path
      //------------------------------------------------------------
-     .toPath = [](const Url& fromUrl, file::Path& toPath) -> Error {
+     .toPath = [](const Url &fromUrl, file::Path &toPath) -> Error {
          // Validate it
          if (auto ccode = urlConfig.validate(fromUrl)) return ccode;
 
@@ -84,7 +84,7 @@ static url::UrlConfig urlConfig{
      /// @param[in]	url
      ///	    Url to convert
      //------------------------------------------------------------
-     .validate = [](const Url& url) -> Error {
+     .validate = [](const Url &url) -> Error {
          // Get the path
          const auto path = url.fullpath();
 
@@ -123,13 +123,13 @@ public:
     //-----------------------------------------------------------------
     // Constructor/destructor
     //-----------------------------------------------------------------
-    DataNet(const FactoryArgs& args) noexcept {}
+    DataNet(const FactoryArgs &args) noexcept {}
     virtual ~DataNet() {}
 
     //---------------------------------------------------------------------
     // Public API
     //---------------------------------------------------------------------
-    Error open(const Url& url, stream::Mode mode) override {
+    Error open(const Url &url, stream::Mode mode) override {
         // Calculate the mode string expected by the app
         const auto remoteMode =
             (stream::isWriteMode(mode) && stream::isCreateMode(mode)) ? "w+"
@@ -252,7 +252,7 @@ public:
     uint64_t offset() noexcept override { return m_offset; }
 
 private:
-    ErrorOr<ConnPtr> makeConnection(const Url& url) const noexcept(false) {
+    ErrorOr<ConnPtr> makeConnection(const Url &url) const noexcept(false) {
         net::TlsConnection::Options tlsOptions;
 
         // Get the secure flag to determine if we are running secure or not

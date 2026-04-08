@@ -37,6 +37,9 @@ from .ocr import TrOCR, TrOCRLoader
 from .transformers import SentenceTransformer, SentenceTransformerLoader
 from .transformers import pipeline, AutoModel, AutoTokenizer, TransformersLoader
 
+# Vision (CLIP / ViT) image embedding
+from .vision import VisionLoader, CLIPModel, ViTModel
+
 __all__ = [
     # Base
     'BaseLoader',
@@ -62,4 +65,8 @@ __all__ = [
     'AutoModel',
     'AutoTokenizer',
     'TransformersLoader',
+    # Vision
+    'VisionLoader',
+    'CLIPModel',
+    'ViTModel',
 ]

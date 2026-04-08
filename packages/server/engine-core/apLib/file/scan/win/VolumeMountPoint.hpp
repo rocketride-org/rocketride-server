@@ -80,7 +80,7 @@ public:
         return {};
     }
 
-    Error read(StrType& name) noexcept {
+    Error read(StrType &name) noexcept {
         if (!m_next) {
             if (!m_names) return APERRT(Ec::End, "End of scan");
         } else {
@@ -105,7 +105,7 @@ public:
     }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         buff << "VolumeMountPointScanner";
     }
 

@@ -71,7 +71,7 @@ Error IPythonInstanceBase::writeVideo(
 
     // If it is not implemented, push it down
     if (!(m_pyMethods & PythonMethod::WriteVideo))
-        return Parent::writeAudio(action, mimeType, streamData);
+        return Parent::writeVideo(action, mimeType, streamData);
 
     // Define the Python lambda that needs to be called
     auto python = localfcn()->Error {

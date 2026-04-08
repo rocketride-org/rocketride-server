@@ -42,26 +42,26 @@ public:
     using Pages = std::vector<Page>;
 
 public:
-    LazyWordDBPaginatedVectorDataSupplier(Pages&& pages, StreamPtr stream,
+    LazyWordDBPaginatedVectorDataSupplier(Pages &&pages, StreamPtr stream,
                                           async::MutexLockSharedPtr mutex)
         : m_pages{_mv(pages)}, m_stream{_mv(stream)}, m_mutex{_mv(mutex)} {
         calculateInternals();
     };
 
-    LazyWordDBPaginatedVectorDataSupplier(const Pages& pages, StreamPtr stream,
+    LazyWordDBPaginatedVectorDataSupplier(const Pages &pages, StreamPtr stream,
                                           async::MutexLockSharedPtr mutex)
         : m_pages{pages}, m_stream{_mv(stream)}, m_mutex{_mv(mutex)} {
         calculateInternals();
     };
 
     LazyWordDBPaginatedVectorDataSupplier(
-        const LazyWordDBPaginatedVectorDataSupplier&) = default;
+        const LazyWordDBPaginatedVectorDataSupplier &) = default;
     LazyWordDBPaginatedVectorDataSupplier(
-        LazyWordDBPaginatedVectorDataSupplier&&) = default;
-    LazyWordDBPaginatedVectorDataSupplier& operator=(
-        const LazyWordDBPaginatedVectorDataSupplier&) = default;
-    LazyWordDBPaginatedVectorDataSupplier& operator=(
-        LazyWordDBPaginatedVectorDataSupplier&&) = default;
+        LazyWordDBPaginatedVectorDataSupplier &&) = default;
+    LazyWordDBPaginatedVectorDataSupplier &operator=(
+        const LazyWordDBPaginatedVectorDataSupplier &) = default;
+    LazyWordDBPaginatedVectorDataSupplier &operator=(
+        LazyWordDBPaginatedVectorDataSupplier &&) = default;
 
 public:
     virtual bool empty() const noexcept override { return m_size == 0; }
@@ -79,21 +79,21 @@ public:
      * or no Does nothing if specific page is already loaded.
      */
     virtual bool loadPage(size_t pageSize, size_t pageNumber,
-                          Type* data) override {
+                          Type *data) override {
         if (pageNumber < m_pages.size()) {
-            auto& [offset, compressedSize, uncompressedSize] =
+            auto &[offset, compressedSize, uncompressedSize] =
                 m_pages[pageNumber];
 
             // Looks like capturing stucture bindings is ill-formed, so we
             // can work around it by using a ref initializer
             // https://burnicki.pl/en/2021/04/19/capture-structured-bindings.html
             auto readFromStream = [&stream = m_stream, &offset = offset,
-                                   &mutex = m_mutex](Type* buffer,
+                                   &mutex = m_mutex](Type *buffer,
                                                      size_t size) {
                 // create data view to fill the buffer either with compressed or
                 // uncompressed ids
                 auto outView =
-                    OutputData{_reCast<uint8_t*>(buffer), size * sizeof(Type)};
+                    OutputData{_reCast<uint8_t *>(buffer), size * sizeof(Type)};
 
                 auto guard = mutex->lock();
 
@@ -135,7 +135,7 @@ private:
         // compressed size from all the pages
         m_size = std::accumulate(
             m_pages.begin(), m_pages.end(), static_cast<size_t>(0),
-            [&](size_t result, const Page& p) -> size_t {
+            [&](size_t result, const Page &p) -> size_t {
                 maxCompressedSize =
                     std::max(maxCompressedSize, p.compressedSize);
                 return result + p.uncompressedSize;

@@ -26,7 +26,7 @@
 namespace ap::crypto {
 
 // Decrypts a buffer (allocated)
-inline ErrorOr<Buffer> decrypt(InputData ciphertext, const Key& key,
+inline ErrorOr<Buffer> decrypt(InputData ciphertext, const Key &key,
                                InputData iv) noexcept {
     if (!ciphertext) return Buffer();
 
@@ -38,7 +38,7 @@ inline ErrorOr<Buffer> decrypt(InputData ciphertext, const Key& key,
 }
 
 // Decrypts a buffer (pre-allocated)
-inline ErrorOr<OutputData> decrypt(InputData in, OutputData out, const Key& key,
+inline ErrorOr<OutputData> decrypt(InputData in, OutputData out, const Key &key,
                                    InputData iv) noexcept {
     if (!in) return OutputData();
 
@@ -49,7 +49,7 @@ inline ErrorOr<OutputData> decrypt(InputData in, OutputData out, const Key& key,
 }
 
 // Encrypts a buffer (allocated)
-inline ErrorOr<Buffer> encrypt(InputData plaintext, const Key& key,
+inline ErrorOr<Buffer> encrypt(InputData plaintext, const Key &key,
                                InputData iv) noexcept {
     if (!plaintext) return Buffer();
 
@@ -60,7 +60,7 @@ inline ErrorOr<Buffer> encrypt(InputData plaintext, const Key& key,
 }
 
 // Encrypts a buffer (pre-allocated)
-inline ErrorOr<OutputData> encrypt(InputData in, OutputData out, const Key& key,
+inline ErrorOr<OutputData> encrypt(InputData in, OutputData out, const Key &key,
                                    InputData iv) noexcept {
     if (!in) return OutputData();
 
@@ -72,7 +72,7 @@ inline ErrorOr<OutputData> encrypt(InputData in, OutputData out, const Key& key,
 
 // Extract embedded key ID and IV and decrypt following data
 inline ErrorOr<Buffer> extractAndDecrypt(
-    InputData ciphertext, const Key& key,
+    InputData ciphertext, const Key &key,
     InputData expectedEmbeddedKeyId) noexcept {
     if (!ciphertext) return Buffer();
 
@@ -99,7 +99,7 @@ inline ErrorOr<Buffer> extractAndDecrypt(
 }
 
 // Embed key ID and IV in buffer and encrypt data after
-inline ErrorOr<Buffer> embedAndEncrypt(InputData plaintext, const Key& key,
+inline ErrorOr<Buffer> embedAndEncrypt(InputData plaintext, const Key &key,
                                        InputData embeddedKeyId) noexcept {
     if (!plaintext) return Buffer();
 

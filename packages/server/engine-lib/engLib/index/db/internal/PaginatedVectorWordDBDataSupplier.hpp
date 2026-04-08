@@ -34,24 +34,24 @@ public:
     //  - pointer to data buffer
     //  - size of compressed data
     //  - size of uncompressed data
-    using Page = std::tuple<const Type*, size_t, size_t>;
+    using Page = std::tuple<const Type *, size_t, size_t>;
     using Pages = std::vector<Page>;
 
 public:
-    PaginatedVectorWordDBDataSupplier(const Pages& pages) : m_pages{pages} {
+    PaginatedVectorWordDBDataSupplier(const Pages &pages) : m_pages{pages} {
         calculateInternals();
     };
-    PaginatedVectorWordDBDataSupplier(Pages&& pages) : m_pages{_mv(pages)} {
+    PaginatedVectorWordDBDataSupplier(Pages &&pages) : m_pages{_mv(pages)} {
         calculateInternals();
     };
     PaginatedVectorWordDBDataSupplier(
-        const PaginatedVectorWordDBDataSupplier&) = default;
-    PaginatedVectorWordDBDataSupplier(PaginatedVectorWordDBDataSupplier&&) =
+        const PaginatedVectorWordDBDataSupplier &) = default;
+    PaginatedVectorWordDBDataSupplier(PaginatedVectorWordDBDataSupplier &&) =
         default;
-    PaginatedVectorWordDBDataSupplier& operator=(
-        const PaginatedVectorWordDBDataSupplier&) = default;
-    PaginatedVectorWordDBDataSupplier& operator=(
-        PaginatedVectorWordDBDataSupplier&&) = default;
+    PaginatedVectorWordDBDataSupplier &operator=(
+        const PaginatedVectorWordDBDataSupplier &) = default;
+    PaginatedVectorWordDBDataSupplier &operator=(
+        PaginatedVectorWordDBDataSupplier &&) = default;
 
 public:
     virtual bool empty() const noexcept override { return m_size == 0; }
@@ -68,9 +68,9 @@ public:
      * or no Does nothing if specific page is already loaded.
      */
     virtual bool loadPage(size_t pageSize, size_t pageNumber,
-                          Type* data) override {
+                          Type *data) override {
         if (pageNumber < m_pages.size()) {
-            Type* buffer = _constCast<Type*>(std::get<0>(m_pages[pageNumber]));
+            Type *buffer = _constCast<Type *>(std::get<0>(m_pages[pageNumber]));
             size_t compressedSize = std::get<1>(m_pages[pageNumber]);
             size_t uncompressedSize = std::get<2>(m_pages[pageNumber]);
 
@@ -100,7 +100,7 @@ private:
     void calculateInternals() {
         m_size = std::accumulate(m_pages.begin(), m_pages.end(),
                                  static_cast<size_t>(0),
-                                 [&](size_t result, Page& p) -> size_t {
+                                 [&](size_t result, Page &p) -> size_t {
                                      return result + std::get<2>(p);
                                  });
     }

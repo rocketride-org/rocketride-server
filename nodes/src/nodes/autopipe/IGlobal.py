@@ -22,7 +22,7 @@
 # =============================================================================
 
 from rocketlib import IGlobalBase, debug, OPEN_MODE
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from ai.common.config import Config
 
 
@@ -46,7 +46,9 @@ class IGlobal(IGlobalBase):
             debug('    Remote', filter['provider'])
 
         # Create a filter for the given provider
-        def getFilter(id: str, provider: str, config: Dict = {}):
+        def getFilter(id: str, provider: str, config: Optional[Dict] = None):
+            if config is None:
+                config = {}
             filter = {}
             filter['id'] = id
             filter['provider'] = provider
@@ -149,9 +151,24 @@ class IGlobal(IGlobalBase):
             if isSet('ocr'):
                 pushLocal(getFilter('ocr_1', 'ocr'))
 
-            # If indexer is enbabled
+            # If indexer is enabled
             if isSet('index') and not isTransform:
                 pushLocal(getFilter('indexer_1', 'indexer'))
+
+            # If autopipe has a preprocessor, push it to chunk the text
+            if 'preprocessor' in autopipeConfig:
+                providerPreprocessor, configPreprocessor = Config.getMultiProviderConfig('preprocessor', autopipeConfig)
+                pushLocal(getFilter('preprocessor_1', providerPreprocessor, configPreprocessor))
+
+            # If autopipe has an embedding, push it to vectorize the chunks
+            if 'embedding' in autopipeConfig:
+                providerEmbedding, configEmbedding = Config.getMultiProviderConfig('embedding', autopipeConfig)
+                pushLocal(getFilter('embedding_1', providerEmbedding, configEmbedding))
+
+            # If autopipe has a store, push it to save to the vector db
+            if 'store' in autopipeConfig:
+                providerStore, configStore = Config.getMultiProviderConfig('store', autopipeConfig)
+                pushLocal(getFilter('vector_1', providerStore, configStore))
 
             pass
 

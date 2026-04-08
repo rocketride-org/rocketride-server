@@ -73,8 +73,8 @@ Error IPipeTask<LvlT>::openOutput() noexcept {
 ///		Error
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
-Error IPipeTask<LvlT>::wrapError(const Entry& entry,
-                                 const Error& error) noexcept {
+Error IPipeTask<LvlT>::wrapError(const Entry &entry,
+                                 const Error &error) noexcept {
     // Wrap the error so we can guarantee the path is included. If we have it,
     // keep the original error location
     Text wrappedErrorMessage = error.message();
@@ -129,7 +129,7 @@ Error IPipeTask<LvlT>::closeOutput() noexcept {
 ///		Error
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
-Error IPipeTask<LvlT>::writeText(const Text& text) noexcept {
+Error IPipeTask<LvlT>::writeText(const Text &text) noexcept {
     // If we do not have an output channel, ignore this
     if (!m_output) return {};
 
@@ -156,8 +156,8 @@ Error IPipeTask<LvlT>::writeText(const Text& text) noexcept {
 ///		Error
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
-Error IPipeTask<LvlT>::writeWarning(const Entry& entry,
-                                    const Error& ccode) noexcept {
+Error IPipeTask<LvlT>::writeWarning(const Entry &entry,
+                                    const Error &ccode) noexcept {
     // Get the wrapped error
     auto wrapped = wrapError(entry, ccode);
 
@@ -182,8 +182,8 @@ Error IPipeTask<LvlT>::writeWarning(const Entry& entry,
 ///		Error
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
-Error IPipeTask<LvlT>::writeError(const Entry& entry,
-                                  const Error& error) noexcept {
+Error IPipeTask<LvlT>::writeError(const Entry &entry,
+                                  const Error &error) noexcept {
     // Create a line on the stack
     StackTextArena arena;
     StackText line{arena};
@@ -193,7 +193,7 @@ Error IPipeTask<LvlT>::writeError(const Entry& entry,
 
     // Report the error to the monitor and log it
     LOGT(wrappedError);
-    if (auto& monitor = config::monitor()) monitor->warning(_mv(wrappedError));
+    if (auto &monitor = config::monitor()) monitor->warning(_mv(wrappedError));
 
     // Fill in the error
     json::Value errorInfo;
@@ -219,7 +219,7 @@ Error IPipeTask<LvlT>::writeError(const Entry& entry,
 ///		Error
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
-Error IPipeTask<LvlT>::writeResult(const Text& text) noexcept {
+Error IPipeTask<LvlT>::writeResult(const Text &text) noexcept {
     // Write the line
     return writeText(text);
 }
@@ -232,7 +232,7 @@ Error IPipeTask<LvlT>::writeResult(const Text& text) noexcept {
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
 Error IPipeTask<LvlT>::writeResult(const TextChr resultType,
-                                   const json::Value& value) noexcept {
+                                   const json::Value &value) noexcept {
     // Create a line on the stack
     StackTextArena arena;
     StackText line{arena};
@@ -255,7 +255,7 @@ Error IPipeTask<LvlT>::writeResult(const TextChr resultType,
 //-------------------------------------------------------------------------
 template <log::Lvl LvlT>
 Error IPipeTask<LvlT>::writeResult(const TextChr resultType,
-                                   const Entry& entry) noexcept {
+                                   const Entry &entry) noexcept {
     // Build the result
     json::Value result = _mv(_tj(entry));
 

@@ -29,7 +29,7 @@ enum { cUidNobody = 65534, cGidNoGroup = 65534 };
 
 inline Text renderUid(uid_t uid) noexcept { return _fmt("U:{}", uid); }
 
-inline Text renderUid(const struct passwd& user) noexcept {
+inline Text renderUid(const struct passwd &user) noexcept {
     return renderUid(user.pw_uid);
 }
 
@@ -47,7 +47,7 @@ inline ErrorOr<uid_t> parseUid(TextView string) noexcept {
 
 inline Text renderGid(gid_t gid) noexcept { return _fmt("G:{}", gid); }
 
-inline Text renderGid(const struct group& group) noexcept {
+inline Text renderGid(const struct group &group) noexcept {
     return renderGid(group.gr_gid);
 }
 
@@ -87,7 +87,7 @@ inline auto lockPasswordDatabase() noexcept {
 inline ErrorOr<Text> getUsername(uid_t uid) noexcept {
     struct passwd user;
     char buffer[1_kb];
-    struct passwd* ignore;
+    struct passwd *ignore;
     auto lock = lockPasswordDatabase();
     if (auto error = getpwuid_r(uid, &user, buffer, sizeof(buffer), &ignore))
         return APERRL(Permissions, Ec::NotFound, "Unable to resolve user", uid,
@@ -98,13 +98,13 @@ inline ErrorOr<Text> getUsername(uid_t uid) noexcept {
 }
 
 template <typename Callback>
-ErrorOr<Text> expandGroup(gid_t gid, Callback&& callback) noexcept {
+ErrorOr<Text> expandGroup(gid_t gid, Callback &&callback) noexcept {
     LOG(Permissions, "Expanding group: {}", gid);
     struct group group;
     size_t groupBufferLength = 4_kb;
     memory::Data<char> groupBuffer(groupBufferLength);
     groupBuffer.resize(groupBufferLength);
-    struct group* ignore;
+    struct group *ignore;
     auto lock = lockPasswordDatabase();
     while (auto error = getgrgid_r(gid, &group, groupBuffer, groupBufferLength,
                                    &ignore)) {
@@ -123,7 +123,7 @@ ErrorOr<Text> expandGroup(gid_t gid, Callback&& callback) noexcept {
     char memberBuffer[1_kb];
     for (size_t i = {}; group.gr_mem[i]; ++i) {
         struct passwd member;
-        struct passwd* ignore;
+        struct passwd *ignore;
         if (auto error = getpwnam_r(group.gr_mem[i], &member, memberBuffer,
                                     sizeof(memberBuffer), &ignore)) {
             LOG(Permissions, "Group member not found", group.gr_name,

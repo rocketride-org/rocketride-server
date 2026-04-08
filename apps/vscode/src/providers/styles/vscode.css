@@ -1,4 +1,4 @@
- * =============================================================================
+/* =============================================================================
  * MIT License
  * Copyright (c) 2026 Aparavi Software AG
  *
@@ -46,34 +46,13 @@
 /* ============================================================================ */
 
 body {
-	padding: 0 !important;
+	padding: 0;
 	margin: 0;
 	font-family: var(--vscode-font-family);
 	font-size: var(--vscode-font-size);
 	color: var(--vscode-foreground);
 	background-color: var(--vscode-editor-background);
 	line-height: 1.5;
-}
-
-/* ============================================================================ */
-/* VIEW-SPECIFIC BODY PADDING */
-/* ============================================================================ */
-
-/* Settings view gets more padding for a comfortable reading experience */
-body.settings {
-	padding: 24px;
-	background-color: var(--vscode-editor-background);
-}
-
-/* Sidebar status view (Status page) uses minimal padding to maximize space */
-body.sidebar-status {
-	padding: 6px;
-	background-color: var(--vscode-sideBar-background);
-}
-
-/* Default padding for other views (Connection, Editor) */
-body:not(.settings):not(.sidebar-status) {
-	padding: 12px;
 }
 
 /* ============================================================================ */
@@ -89,6 +68,14 @@ textarea {
 	color: var(--vscode-input-foreground);
 	border-radius: 4px;
 	font-size: 13px;
+}
+
+input::placeholder,
+textarea::placeholder {
+	font-size: 0.75rem;
+	font-style: italic;
+	font-weight: 300;
+	opacity: 0.5;
 }
 
 input:focus,

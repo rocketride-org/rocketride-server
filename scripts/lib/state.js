@@ -9,9 +9,9 @@
  */
 const path = require('path');
 const { readJsonSafe, writeJson, mkdir } = require('./fs');
+const { BUILD_ROOT } = require('./paths');
 
-const BUILD_DIR = path.join(__dirname, '../../build');
-const STATE_FILE = path.join(BUILD_DIR, 'state.json');
+const STATE_FILE = path.join(BUILD_ROOT, 'state.json');
 
 // ============================================================================
 // In-Memory Cache
@@ -40,7 +40,7 @@ async function ensureLoaded() {
  */
 async function persistState(state) {
     stateCache = state;
-    await mkdir(BUILD_DIR);
+    await mkdir(BUILD_ROOT);
     await writeJson(STATE_FILE, state);
 }
 
@@ -72,14 +72,14 @@ async function withLock(name, fn) {
     if (!locks.has(name)) {
         locks.set(name, { promise: Promise.resolve(), waiters: 0 });
     }
-    
+
     const lock = locks.get(name);
     lock.waiters++;
-    
+
     const current = lock.promise;
     let release;
     lock.promise = new Promise(resolve => release = resolve);
-    
+
     await current;  // Wait for previous holder
     try {
         return await fn();
@@ -128,7 +128,7 @@ async function saveState(state) {
 async function getState(key) {
     return withLock('state', async () => {
         const state = await ensureLoaded();
-        const parts = key.split('.');
+        const parts = Array.isArray(key) ? key : key.split('.');
         let value = state;
         for (const part of parts) {
             if (value === undefined || value === null) return undefined;
@@ -177,7 +177,7 @@ function deleteKeyAndPrune(state, parts) {
 async function setState(key, value) {
     return withLock('state', async () => {
         const state = await ensureLoaded();
-        const parts = key.split('.');
+        const parts = Array.isArray(key) ? key : key.split('.');
         if (value === null) {
             deleteKeyAndPrune(state, parts);
         } else {
@@ -204,7 +204,7 @@ async function setState(key, value) {
 async function updateState(updates) {
     return withLock('state', async () => {
         const state = await ensureLoaded();
-        
+
         for (const [key, value] of Object.entries(updates)) {
             const parts = key.split('.');
             if (value === null) {
@@ -221,7 +221,7 @@ async function updateState(updates) {
                 obj[parts[parts.length - 1]] = value;
             }
         }
-        
+
         await persistState(state);
     });
 }
@@ -242,7 +242,7 @@ async function clearState() {
 module.exports = {
     // Mutex
     withLock,
-    
+
     // Async state operations (mutex-protected, cached)
     loadState,
     saveState,
@@ -250,11 +250,11 @@ module.exports = {
     setState,
     updateState,
     clearState,
-    
+
     // Cache control
     invalidateCache,
-    
+
     // Paths (for reference)
     STATE_FILE,
-    BUILD_DIR
+    BUILD_ROOT
 };

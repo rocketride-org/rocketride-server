@@ -73,11 +73,13 @@ class FileLock:
     """Simple cross-platform file lock using exclusive file access."""
 
     def __init__(self, lock_path: str, poll_interval: float = 1.0):
+        """Initialize the file lock with path and polling interval."""
         self.lock_path = lock_path
         self.poll_interval = poll_interval
         self._file = None
 
     def __enter__(self):
+        """Acquire the file lock, blocking until it is available."""
         os.makedirs(os.path.dirname(self.lock_path), exist_ok=True)
 
         while True:
@@ -96,6 +98,7 @@ class FileLock:
                 time.sleep(self.poll_interval)
 
     def __exit__(self, *args):
+        """Release the file lock."""
         if self._file:
             self._file.close()
             self._file = None
@@ -114,6 +117,7 @@ def _get_executable_dir() -> str:
 def _get_cache_dir() -> str:
     """Get the cache directory path."""
     return os.path.join(_get_executable_dir(), 'cache')
+
 
 
 def _run(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
@@ -199,47 +203,26 @@ def _ensure_pip():
             if _pip_available():
                 return
             raise RuntimeError(f'Failed to bootstrap pip: {result.stderr}')
-    except Exception as e:
+    except Exception:
         # Check if pip got installed despite exception
         if _pip_available():
             return
         raise
 
 
-def _get_uv_executable() -> Optional[str]:
-    """
-    Find the uv executable.
-
-    First tries uv.find_uv_bin() which knows where pip installed it.
-    Falls back to manual search in Scripts/bin directory.
-    """
-    # Try using uv module's own finder first
-    try:
-        import uv
-
-        path = uv.find_uv_bin()
-        if os.path.isfile(path):
-            return str(path)
-    except (ImportError, Exception):
-        pass
-
-    # Fallback: look in Scripts/bin relative to engine
-    exe_dir = _get_executable_dir()
-
+def _uv_rel_path() -> str:
+    """Relative path to uv from the engine executable directory."""
     if os.name == 'nt':
-        uv_path = os.path.join(exe_dir, 'Scripts', 'uv.exe')
-    else:
-        uv_path = os.path.join(exe_dir, 'bin', 'uv')
-
-    if os.path.isfile(uv_path):
-        return uv_path
-
-    return None
+        return '.\\Scripts\\uv.exe'
+    return './bin/uv'
 
 
 def _uv_available() -> bool:
     """Check if uv executable exists."""
-    return _get_uv_executable() is not None
+    exe_dir = _get_executable_dir()
+    if os.name == 'nt':
+        return os.path.isfile(os.path.join(exe_dir, 'Scripts', 'uv.exe'))
+    return os.path.isfile(os.path.join(exe_dir, 'bin', 'uv'))
 
 
 def _wheel_available() -> bool:
@@ -438,23 +421,30 @@ def _combine_requirements(file_paths: list[str], output_path: str):
             out.write('\n')
 
 
-def _compile_constraints(combined_path: str, constraints_path: str):
+def _compile_constraints(constraints_path: str):
     """Use uv pip compile to generate constraints file."""
-    uv_exe = _get_uv_executable()
-    if not uv_exe:
+    if not _uv_available():
         raise RuntimeError('uv executable not found')
 
+    exe_dir = _get_executable_dir()
     monitorStatus('Compiling constraints...')
-    
-    result = subprocess.run([
-        uv_exe, 'pip', 'compile',
-        combined_path,
-        '--output-file', constraints_path,
-        '--python', sys.executable,  # Explicitly specify Python version to avoid mismatch
-        '--index-strategy', 'unsafe-best-match',  # Check all indexes for best version
+
+    args = [
+        _uv_rel_path(),
+        'pip',
+        'compile',
+        './cache/combined.txt',
+        '--output-file',
+        './cache/constraints.txt',
+        '--python',
+        sys.executable,  # Explicitly specify Python version to avoid mismatch
+        '--index-strategy',
+        'unsafe-best-match',  # Check all indexes for best version
         '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
         '--emit-index-url',  # Preserve --extra-index-url etc. so install/dry-run can find packages (e.g. torch+cu128)
-    ], capture_output=True, text=True, check=False, stdin=subprocess.PIPE, encoding='utf-8', errors='replace')
+    ]
+    debug(f'Compile: {args}')
+    result = subprocess.run(args, capture_output=True, text=True, check=False, stdin=subprocess.PIPE, encoding='utf-8', errors='replace', cwd=exe_dir)
 
     if result.returncode != 0:
         error(f'Failed to compile constraints: {result.stderr}')
@@ -498,7 +488,7 @@ def ensure_constraints() -> str:
     _combine_requirements(req_files, combined_path)
 
     # Compile with uv
-    _compile_constraints(combined_path, constraints_path)
+    _compile_constraints(constraints_path)
 
     # Save new hash
     _save_hash(hash_file, current_hash)
@@ -645,12 +635,12 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
     Returns empty list if all requirements are already satisfied.
     Raises RuntimeError if dependency resolution fails.
     """
-    uv_exe = _get_uv_executable()
-    if not uv_exe:
+    if not _uv_available():
         raise RuntimeError('uv executable not found')
 
+    exe_dir = _get_executable_dir()
     args = [
-        uv_exe,
+        _uv_rel_path(),
         'pip',
         'install',
         '--python',
@@ -666,10 +656,10 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
 
     # Only add constraints if the file exists and has content
     if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-        args.extend(['-c', constraints_path])
+        args.extend(['-c', './cache/constraints.txt'])
 
-    debug(f'Dry-run: {" ".join(args)}')
-    result = subprocess.run(args, capture_output=True, text=True, check=False, stdin=subprocess.PIPE)
+    debug(f'Dry-run: {args}')
+    result = subprocess.run(args, capture_output=True, text=True, check=False, stdin=subprocess.PIPE, cwd=exe_dir)
 
     # Check if dry-run failed (e.g., dependency resolution error)
     if result.returncode != 0:
@@ -730,9 +720,9 @@ def _install_requirements(requirements_path: str, constraints_path: str):
     debug(f'cwd: {os.getcwd()}')
 
     # Build uv command
-    uv_exe = _get_uv_executable()
+    exe_dir = _get_executable_dir()
     uv_args = [
-        uv_exe,
+        _uv_rel_path(),
         'pip',
         'install',
         '-r',
@@ -744,11 +734,13 @@ def _install_requirements(requirements_path: str, constraints_path: str):
         '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
     ]
     if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-        uv_args.extend(['-c', constraints_path])
+        uv_args.extend(['-c', './cache/constraints.txt'])
 
     # Run uv and stream output
+    debug(f'Install: {uv_args}')
     proc = subprocess.Popen(
         uv_args,
+        cwd=exe_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -803,10 +795,10 @@ def depends(requirements: Optional[str] = None):
         requirements = os.path.abspath(requirements)
         debug(f'  Path: {requirements}')
         if not os.path.exists(requirements):
-            debug(f'  File not found, skipping')
+            debug('  File not found, skipping')
             return
         if requirements in _processed:
-            debug(f'  Already processed, skipping')
+            debug('  Already processed, skipping')
             return
 
     cache_dir = _get_cache_dir()
@@ -838,7 +830,7 @@ def depends(requirements: Optional[str] = None):
 
 def main():
     """
-    Main entry point for command-line mode.
+    Run the main command-line entry point.
 
     Usage: engine depends.py [uv pip arguments]
 
@@ -858,12 +850,13 @@ def main():
 
         # Pass through to uv pip
         if len(sys.argv) > 1:
-            uv_exe = _get_uv_executable()
-            if not uv_exe:
+            if not _uv_available():
                 sys.exit(1)
 
+            exe_dir = _get_executable_dir()
+
             # Build uv args
-            uv_args = [uv_exe, 'pip'] + sys.argv[1:] + ['--python', sys.executable]
+            uv_args = [_uv_rel_path(), 'pip'] + sys.argv[1:] + ['--python', sys.executable]
 
             # --index-strategy is only valid for install, compile, sync commands
             is_install_cmd = sys.argv[1] in ('install', 'compile', 'sync')
@@ -874,10 +867,10 @@ def main():
             constraints_path = os.path.join(cache_dir, 'constraints.txt')
             if sys.argv[1] in ('install', 'sync'):
                 if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-                    uv_args.extend(['-c', constraints_path])
+                    uv_args.extend(['-c', './cache/constraints.txt'])
 
             # Run uv
-            result = subprocess.run(uv_args)
+            result = subprocess.run(uv_args, cwd=exe_dir)
             sys.exit(result.returncode)
 
 

@@ -74,13 +74,13 @@ class TaskRunner {
             throw new Error(`Unknown action '${actionName}'`);
         }
         
-        const actionObj = typeof actionDef.action === 'function' 
-            ? actionDef.action() 
+        const actionObj = typeof actionDef.action === 'function'
+            ? actionDef.action(this.options)
             : actionDef.action;
-        
+
         // Compound action with steps
         if (actionObj.steps && Array.isArray(actionObj.steps)) {
-            const childTasks = buildTaskTree(actionObj.steps, new Set(), actionName);
+            const childTasks = buildTaskTree(actionObj.steps, new Set(), actionName, this.options);
             
             return {
                 title: actionObj.description || actionName,

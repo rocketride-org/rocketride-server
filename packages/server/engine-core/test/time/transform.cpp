@@ -34,7 +34,7 @@ TEST_CASE("timespec conversions") {
         REQUIRE(_tr<Duration>(ts) == duration);
     }
 
-    auto requireEquals = [](const timespec& lh, const timespec& rh) {
+    auto requireEquals = [](const timespec &lh, const timespec &rh) {
         REQUIRE(lh.tv_sec == rh.tv_sec);
         REQUIRE(lh.tv_nsec == rh.tv_nsec);
     };
@@ -69,7 +69,7 @@ TEST_CASE("timeval conversions") {
         REQUIRE(_tr<Duration>(tv) == duration);
     }
 
-    auto requireEquals = [](const timeval& lh, const timeval& rh) {
+    auto requireEquals = [](const timeval &lh, const timeval &rh) {
         REQUIRE(lh.tv_sec == rh.tv_sec);
         REQUIRE(lh.tv_usec == rh.tv_usec);
     };

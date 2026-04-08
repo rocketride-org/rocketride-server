@@ -56,6 +56,22 @@ file::Path execPath(bool stripExec) noexcept {
     return cmdline().execPath(stripExec);
 }
 
+// Returns the project root if we're running from a dev build,
+// otherwise returns an empty path
+const file::Path &projectDir() noexcept {
+    static auto s_projectDir = [&]()->file::Path {
+        auto execDir = execPath(true);
+        if (execDir.count() < 2
+                || execDir[execDir.count() - 2] != "dist"
+                || execDir[execDir.count() - 1] != "server")
+            return {};
+
+        auto projectDir = (execDir / ".." / "..").resolve();
+        return projectDir;
+    }();
+    return s_projectDir;
+}
+
 // Returns the global build hash set at compilation time, this hash is
 // the git revision in the engine repo
 

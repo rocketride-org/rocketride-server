@@ -29,7 +29,7 @@ namespace engine::java {
 class Crasher final {
 private:
     struct CrasherMethods {
-        CrasherMethods(const java::Jni& jni) noexcept(false) {
+        CrasherMethods(const java::Jni &jni) noexcept(false) {
             m_class = jni.getClass("com/rocketride/Crasher");
             m_crashMethod = jni.getStaticMethodId(m_class, "crash", "()V");
         }
@@ -38,7 +38,7 @@ private:
         jmethodID m_crashMethod;
     };
 
-    static auto& methods(const java::Jni& jni) noexcept(false) {
+    static auto &methods(const java::Jni &jni) noexcept(false) {
         static CrasherMethods methods(jni);
         return methods;
     }
@@ -48,8 +48,8 @@ public:
     Crasher() = delete;
 
     // Forces the JVM to crash
-    static void crash(const java::Jni& jni) noexcept(false) {
-        auto& methodIds = methods(jni);
+    static void crash(const java::Jni &jni) noexcept(false) {
+        auto &methodIds = methods(jni);
         jni.invokeStaticMethod(methodIds.m_class, methodIds.m_crashMethod);
     }
 };

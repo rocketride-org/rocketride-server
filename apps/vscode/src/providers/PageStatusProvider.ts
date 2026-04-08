@@ -23,7 +23,7 @@
 
 /**
  * Status Page Provider for Pipeline Status Monitoring
- * 
+ *
  * Provides a comprehensive status dashboard for pipeline and task monitoring
  * using a webview-based interface including:
  * - Real-time pipeline execution status
@@ -32,7 +32,7 @@
  * - Host parameter support for dynamic URL generation
  * - External link opening through VS Code integration
  * - Live connection management with DAP command forwarding
- * 
+ *
  * Listens to Debug Adapter Protocol (DAP) events and connection state changes
  * to provide comprehensive pipeline monitoring capabilities.
  */
@@ -43,6 +43,7 @@ import { TaskStatus, GenericEvent, GenericResponse } from '../shared/types';
 import { getLogger } from '../shared/util/output';
 import { ConfigManager } from '../config';
 import { ConnectionManager } from '../connection/connection';
+import { MonitorManager } from '../connection/monitor-manager';
 import { ConnectionStatus, ConnectionState } from '../shared/types';
 import type { PageStatusIncomingMessage, PageStatusOutgoingMessage } from '../shared/types/pageStatus';
 import { getPipelineFilesTreeProvider } from '../extension';
@@ -67,13 +68,13 @@ export class PageStatusProvider {
 	private webviewPanels: Map<string, ViewMonitoringState> = new Map();
 	private taskStatusData: Map<string, TaskStatus | undefined> = new Map();
 	private disposables: vscode.Disposable[] = [];
-	private logger = getLogger();               // Handles output logging to VS Code channels
+	private logger = getLogger(); // Handles output logging to VS Code channels
 
 	private connectionManager = ConnectionManager.getInstance();
 
 	/**
 	 * Creates a new PageStatusProvider
-	 * 
+	 *
 	 * @param context VS Code extension context for command registration
 	 */
 	constructor(private context: vscode.ExtensionContext) {
@@ -109,12 +110,12 @@ export class PageStatusProvider {
 				} catch (error) {
 					this.logger.error(`Closing all status pages: ${error}`);
 				}
-			})
+			}),
 		];
 
 		// Store disposables and add to context subscriptions
 		this.disposables.push(...commands);
-		commands.forEach(command => this.context.subscriptions.push(command));
+		commands.forEach((command) => this.context.subscriptions.push(command));
 	}
 
 	/**
@@ -124,7 +125,7 @@ export class PageStatusProvider {
 		// Listen for connection state changes and broadcast to all webviews
 		const connectionStateListener = this.connectionManager.on('connectionStateChanged', (connectionStatus: ConnectionStatus) => {
 			// Handle this asynchronously to avoid blocking the event
-			this.handleConnectionStateChange(connectionStatus).catch(error => {
+			this.handleConnectionStateChange(connectionStatus).catch((error) => {
 				this.logger.error(`Handle connectionStateChange: ${error}`);
 			});
 		});
@@ -144,7 +145,7 @@ export class PageStatusProvider {
 
 	/**
 	 * Handles connection state changes asynchronously
-	 * 
+	 *
 	 * @param connectionStatus The new connection status
 	 */
 	private async handleConnectionStateChange(connectionStatus: ConnectionStatus): Promise<void> {
@@ -167,7 +168,7 @@ export class PageStatusProvider {
 		// Let everyone know about our new connection state
 		const message: PageStatusIncomingMessage = {
 			type: 'connectionState',
-			state: connectionStatus.state
+			state: connectionStatus.state,
 		};
 
 		// Broadcast to all webviews
@@ -187,7 +188,7 @@ export class PageStatusProvider {
 
 	/**
 	 * Handles events and routes them to the appropriate webviews
-	 * 
+	 *
 	 * @param event The DAP event received from the connection manager
 	 */
 	private handleEvent(event: GenericEvent): void {
@@ -207,7 +208,7 @@ export class PageStatusProvider {
 				const taskStatus = event.body as TaskStatus | undefined;
 				if (taskStatus) {
 					// Handle async update without blocking the event handler
-					this.updateStatus(projectId, sourceId, taskStatus).catch(error => {
+					this.updateStatus(projectId, sourceId, taskStatus).catch((error) => {
 						this.logger.error(`Updating status for ${projectId}.${sourceId}: ${error}`);
 					});
 				}
@@ -224,16 +225,13 @@ export class PageStatusProvider {
 					pipelineId: body.id ?? 0,
 					op: body.op || 'enter',
 					pipes: body.pipes || [],
-					trace: body.trace || {}
+					trace: body.trace || {},
 				};
 
 				// Broadcast to all webviews
 				for (const viewState of this.webviewPanels.values()) {
 					if (!viewState.isDisposed) {
-						viewState.panel.webview.postMessage(traceMessage).then(
-							undefined,
-							(error: unknown) => this.logger.error(`Posting trace event: ${error}`)
-						);
+						viewState.panel.webview.postMessage(traceMessage).then(undefined, (error: unknown) => this.logger.error(`Posting trace event: ${error}`));
 					}
 				}
 				break;
@@ -243,7 +241,7 @@ export class PageStatusProvider {
 
 	/**
 	 * Starts monitoring for a specific view
-	 * 
+	 *
 	 * @param projectId Project identifier
 	 * @param sourceId Source identifier
 	 */
@@ -257,12 +255,8 @@ export class PageStatusProvider {
 		}
 
 		try {
-			// Send DAP command to start monitoring
-			await this.connectionManager.request('rrext_monitor', {
-				projectId: projectId,
-				source: sourceId,
-				types: ['summary', 'flow']
-			});
+			// Subscribe via MonitorManager (reference-counted, safe for shared connection)
+			await MonitorManager.getInstance().addMonitor({ projectId, source: sourceId }, ['summary', 'flow']);
 
 			// Mark as monitoring
 			viewState.isMonitoring = true;
@@ -281,11 +275,7 @@ export class PageStatusProvider {
 	 * @param options.clearStatus If true (default), clear cached status so the UI shows Offline.
 	 *        Pass false when stopping due to connection loss so the last known status stays visible.
 	 */
-	private async stopMonitoring(
-		projectId: string,
-		sourceId: string,
-		options: { clearStatus?: boolean } = {}
-	): Promise<void> {
+	private async stopMonitoring(projectId: string, sourceId: string, options: { clearStatus?: boolean } = {}): Promise<void> {
 		const { clearStatus = true } = options;
 		const key = `${projectId}.${sourceId}`;
 		const viewState = this.webviewPanels.get(key);
@@ -301,18 +291,11 @@ export class PageStatusProvider {
 			this.clearStatus(projectId, sourceId);
 		}
 
-		// If we are connected...
-		if (this.connectionManager.isConnected()) {
-			try {
-				// Send DAP command to stop monitoring
-				await this.connectionManager.request('rrext_monitor', {
-					projectId: projectId,
-					source: sourceId,
-				});
-			} catch (error) {
-				// Output the error
-				this.logger.error(`Stopping monitoring for ${projectId}.${sourceId}: ${error}`);
-			}
+		// Unsubscribe via MonitorManager (reference-counted)
+		try {
+			await MonitorManager.getInstance().removeMonitor({ projectId, source: sourceId }, ['summary', 'flow']);
+		} catch (error) {
+			this.logger.error(`Stopping monitoring for ${projectId}.${sourceId}: ${error}`);
 		}
 
 		// Mark as not monitoring
@@ -353,16 +336,11 @@ export class PageStatusProvider {
 
 	/**
 	 * Shows the status page webview panel for a specific pipeline
-	 * 
+	 *
 	 * @param projectId Unique identifier for the project
 	 * @param sourceId Source identifier
 	 */
-	public async show(
-		displayName: string,
-		fileUri: vscode.Uri,
-		projectId: string,
-		sourceId: string,
-	): Promise<void> {
+	public async show(displayName: string, fileUri: vscode.Uri, projectId: string, sourceId: string): Promise<void> {
 		const key = `${projectId}.${sourceId}`;
 
 		// If panel already exists for this pipeline, just reveal it
@@ -373,19 +351,15 @@ export class PageStatusProvider {
 		}
 
 		// Create a meaningful title for the panel
-		const fileName = path.basename(fileUri.fsPath);
+		const isUnknownTask = fileUri.scheme === 'rocketride';
+		const panelTitle = isUnknownTask ? `${displayName} (${projectId.substring(0, 8)}…)` : `${displayName} (${path.basename(fileUri.fsPath)})`;
 
 		// Create new webview panel
-		const panel = vscode.window.createWebviewPanel(
-			'rocketride.pageStatus',
-			`${displayName} (${fileName})`,
-			vscode.ViewColumn.One,
-			{
-				enableScripts: true,
-				retainContextWhenHidden: true,
-				localResourceRoots: [this.context.extensionUri]
-			}
-		);
+		const panel = vscode.window.createWebviewPanel('rocketride.pageStatus', panelTitle, vscode.ViewColumn.One, {
+			enableScripts: true,
+			retainContextWhenHidden: true,
+			localResourceRoots: [this.context.extensionUri],
+		});
 
 		// Create view state
 		const viewState: ViewMonitoringState = {
@@ -395,7 +369,7 @@ export class PageStatusProvider {
 			projectId: projectId,
 			sourceId: sourceId,
 			isMonitoring: false,
-			isDisposed: false
+			isDisposed: false,
 		};
 
 		// Store the view state
@@ -407,7 +381,7 @@ export class PageStatusProvider {
 		// Handle webview disposal
 		panel.onDidDispose(() => {
 			// Handle cleanup asynchronously to avoid blocking disposal
-			this.handlePanelDisposal(projectId, sourceId).catch(error => {
+			this.handlePanelDisposal(projectId, sourceId).catch((error) => {
 				this.logger.error(`Disposing panel for ${projectId}.${sourceId}: ${error}`);
 			});
 		});
@@ -415,7 +389,7 @@ export class PageStatusProvider {
 		// Handle messages from webview
 		panel.webview.onDidReceiveMessage((message) => {
 			// Handle messages asynchronously to avoid blocking the UI
-			this.handleWebviewMessage(message, viewState).catch(error => {
+			this.handleWebviewMessage(message, viewState).catch((error) => {
 				this.logger.error(`Handling webview message for ${viewState.projectId}.${viewState.sourceId}: ${error}`);
 			});
 		});
@@ -432,7 +406,7 @@ export class PageStatusProvider {
 
 	/**
 	 * Handles panel disposal cleanup asynchronously
-	 * 
+	 *
 	 * @param projectId Project identifier
 	 * @param sourceId Source identifier
 	 */
@@ -459,7 +433,7 @@ export class PageStatusProvider {
 
 	/**
 	 * Updates the webview with current status data for a specific pipeline
-	 * 
+	 *
 	 * @param projectId Unique identifier for the project
 	 * @param sourceId Source identifier
 	 */
@@ -470,7 +444,6 @@ export class PageStatusProvider {
 			return;
 		}
 
-
 		try {
 			const taskStatus = this.taskStatusData.get(key);
 			const connectionStatus = this.connectionManager.getConnectionStatus();
@@ -480,7 +453,7 @@ export class PageStatusProvider {
 				type: 'update',
 				taskStatus: taskStatus,
 				host: host,
-				state: connectionStatus.state
+				state: connectionStatus.state,
 			};
 
 			await viewState.panel.webview.postMessage(updateMessage);
@@ -492,15 +465,12 @@ export class PageStatusProvider {
 
 	/**
 	 * Updates the status page with new task status data for a specific pipeline
-	 * 
+	 *
 	 * @param projectId Unique identifier for the project
 	 * @param sourceId Source identifier
 	 * @param taskStatus The new task status data or undefined to clear it
 	 */
-	public async updateStatus(
-		projectId: string,
-		sourceId: string,
-		taskStatus?: TaskStatus): Promise<void> {
+	public async updateStatus(projectId: string, sourceId: string, taskStatus?: TaskStatus): Promise<void> {
 		const key = `${projectId}.${sourceId}`;
 
 		// Update the status data - may be undefined if no status
@@ -543,13 +513,13 @@ export class PageStatusProvider {
 
 	/**
 	 * Clears the current status data for a specific pipeline
-	 * 
+	 *
 	 * @param projectId Unique identifier for the project
 	 * @param sourceId Source identifier
 	 */
 	public clearStatus(projectId: string, sourceId: string): void {
 		// Handle async update without making this method async
-		this.updateStatus(projectId, sourceId).catch(error => {
+		this.updateStatus(projectId, sourceId).catch((error) => {
 			this.logger.error(`Clearing status for ${projectId}.${sourceId}: ${error}`);
 		});
 	}
@@ -573,14 +543,13 @@ export class PageStatusProvider {
 	 */
 	public closeAll(): void {
 		for (const viewState of this.webviewPanels.values()) {
-			if (!viewState.isDisposed)
-				viewState.panel.dispose();
+			if (!viewState.isDisposed) viewState.panel.dispose();
 		}
 	}
 
 	/**
 	 * Checks if a status page is currently visible for a specific pipeline
-	 * 
+	 *
 	 * @param projectId Unique identifier for the project
 	 * @param sourceId Unique identifier for the source
 	 */
@@ -588,8 +557,7 @@ export class PageStatusProvider {
 		const key = `${projectId}.${sourceId}`;
 		const viewState = this.webviewPanels.get(key);
 
-		if (!viewState || viewState.isDisposed)
-			return false;
+		if (!viewState || viewState.isDisposed) return false;
 
 		return viewState.panel.visible;
 	}
@@ -622,15 +590,10 @@ export class PageStatusProvider {
 			}
 
 			// Create the web panel
-			const panel = vscode.window.createWebviewPanel(
-				'externalContent',
-				viewState.displayName,
-				vscode.ViewColumn.One,
-				{
-					enableScripts: true,
-					retainContextWhenHidden: true
-				}
-			);
+			const panel = vscode.window.createWebviewPanel('externalContent', viewState.displayName, vscode.ViewColumn.One, {
+				enableScripts: true,
+				retainContextWhenHidden: true,
+			});
 
 			// Get the .env settings
 			const env: Record<string, string | boolean> = ConfigManager.getInstance().getEnv();
@@ -655,7 +618,54 @@ export class PageStatusProvider {
 							const vscode = acquireVsCodeApi();
 							const iframe = document.getElementById('app-iframe');
 							const envVars = ${JSON.stringify(env)};
-							
+							let iframeOrigin = '*';
+							try { iframeOrigin = new URL(iframe.src).origin; } catch(e) {}
+
+							// macOS fix: Finder drag events don't reach cross-origin iframes
+							// in Electron webviews, so we bridge them to the iframe via postMessage.
+							['dragenter', 'dragover'].forEach(eventName => {
+								document.addEventListener(eventName, (e) => {
+									e.preventDefault();
+									e.stopPropagation();
+									try { iframe.contentWindow.postMessage({ type: 'dragHover', x: e.clientX, y: e.clientY }, iframeOrigin); } catch(err) {}
+								});
+							});
+							document.addEventListener('dragleave', (e) => {
+								if (e.relatedTarget === null) {
+									try { iframe.contentWindow.postMessage({ type: 'dragLeave' }, iframeOrigin); } catch(err) {}
+								}
+							});
+
+							document.addEventListener('drop', async (e) => {
+								e.preventDefault();
+								e.stopPropagation();
+								const files = e.dataTransfer && e.dataTransfer.files;
+								if (!files || files.length === 0) return;
+
+								const fileDataArray = [];
+								for (let i = 0; i < files.length; i++) {
+									const file = files[i];
+									const buffer = await file.arrayBuffer();
+									fileDataArray.push({
+										name: file.name,
+										type: file.type || 'application/octet-stream',
+										size: file.size,
+										lastModified: file.lastModified,
+										buffer: buffer
+									});
+								}
+
+								try {
+									iframe.contentWindow.postMessage({
+										type: 'bridgedFileDrop',
+										files: fileDataArray
+									}, iframeOrigin, fileDataArray.map(f => f.buffer));
+									iframe.contentWindow.postMessage({ type: 'dragLeave' }, iframeOrigin);
+								} catch (err) {
+									console.error('[Parent] Error bridging file drop to iframe:', err);
+								}
+							});
+
 							// Extract VSCode theme colors
 							function getVSCodeThemeColors() {
 								const style = getComputedStyle(document.body);
@@ -700,7 +710,7 @@ export class PageStatusProvider {
 										type: 'vscodeData',
 										env: envVars,
 										theme: colors
-									}, '*');
+									}, iframeOrigin);
 								} catch (error) {
 									console.error('[Parent] Error sending data to iframe:', error);
 								}
@@ -715,6 +725,12 @@ export class PageStatusProvider {
 									}
 									if (event.data.type === 'requestPaste') {
 										vscode.postMessage({ type: 'requestPaste' });
+									}
+									if (event.data.type === 'copyText' && event.data.text) {
+										vscode.postMessage({ type: 'copyText', text: event.data.text });
+									}
+									if (event.data.type === 'requestFileDialog') {
+										vscode.postMessage({ type: 'requestFileDialog' });
 									}
 								}
 							});
@@ -731,7 +747,13 @@ export class PageStatusProvider {
 									iframe.contentWindow.postMessage({
 										type: 'paste',
 										text: msg.text
-									}, '*');
+									}, iframeOrigin);
+								}
+								if (msg.type === 'nativeFilesSelected' && iframe.contentWindow) {
+									iframe.contentWindow.postMessage({
+										type: 'nativeFilesSelected',
+										files: msg.files
+									}, iframeOrigin);
 								}
 							});
 						})();
@@ -741,11 +763,40 @@ export class PageStatusProvider {
 			`;
 
 			// Handle messages from the webview
-			const messageDisposable = panel.webview.onDidReceiveMessage(async (msg: { type: string }) => {
+			const messageDisposable = panel.webview.onDidReceiveMessage(async (msg: { type: string; text?: string }) => {
 				if (msg.type === 'requestPaste') {
 					const text = await vscode.env.clipboard.readText();
 					if (text) {
 						panel.webview.postMessage({ type: 'pasteContent', text });
+					}
+				}
+				if (msg.type === 'copyText' && msg.text) {
+					await vscode.env.clipboard.writeText(msg.text);
+				}
+				if (msg.type === 'requestFileDialog') {
+					const uris = await vscode.window.showOpenDialog({
+						canSelectMany: true,
+						canSelectFiles: true,
+						canSelectFolders: false,
+						title: 'Select files to upload',
+					});
+					if (uris && uris.length > 0) {
+						const path = await import('path');
+						const fileDataArray: { name: string; type: string; size: number; lastModified: number; buffer: number[] }[] = [];
+						for (const uri of uris) {
+							const bytes = await vscode.workspace.fs.readFile(uri);
+							fileDataArray.push({
+								name: path.basename(uri.fsPath),
+								type: 'application/octet-stream',
+								size: bytes.length,
+								lastModified: Date.now(),
+								buffer: Array.from(bytes),
+							});
+						}
+						panel.webview.postMessage({
+							type: 'nativeFilesSelected',
+							files: fileDataArray,
+						});
 					}
 				}
 			});
@@ -753,7 +804,7 @@ export class PageStatusProvider {
 			// Listen for theme changes in VSCode
 			const themeChangeDisposable = vscode.window.onDidChangeActiveColorTheme(() => {
 				panel.webview.postMessage({
-					type: 'themeChanged'
+					type: 'themeChanged',
 				});
 			});
 
@@ -765,7 +816,7 @@ export class PageStatusProvider {
 	}
 	/**
 	 * Handles messages received from the webview
-	 * 
+	 *
 	 * @param message The message from the webview
 	 * @param projectId The project ID for the webview that sent the message
 	 * @param sourceId The source ID for the webview that sent the message
@@ -800,7 +851,7 @@ export class PageStatusProvider {
 
 	/**
 	 * Handles pipeline action commands (attach, debug, stop, execute)
-	 * 
+	 *
 	 * @param action The action to perform
 	 * @param projectId The project ID
 	 * @param sourceId The source ID
@@ -812,18 +863,16 @@ export class PageStatusProvider {
 					// Use DAP command to stop the running pipeline process
 					try {
 						// We need the token to attach...
-						const response = await this.connectionManager.request('rrext_get_token', {
+						const response = (await this.connectionManager.request('rrext_get_token', {
 							projectId: viewState.projectId,
-							source: viewState.sourceId
-						}) as GenericResponse | undefined;
+							source: viewState.sourceId,
+						})) as GenericResponse | undefined;
 
 						// Get the token of the task
 						const token = response?.body?.token as string | undefined;
 
 						// Send the terminate command
-						await this.connectionManager.request(
-							'terminate', {
-						}, token);
+						await this.connectionManager.request('terminate', {}, token);
 					} catch (error: unknown) {
 						this.logger.error(`Unable to execute pipeline: ${error}`);
 						vscode.window.showErrorMessage(String(error));
@@ -851,8 +900,9 @@ export class PageStatusProvider {
 							projectId: viewState.projectId,
 							source: viewState.sourceId,
 							pipeline: pipelineTransformed,
+							name: viewState.displayName,
 							...(tracing ? { pipelineTraceLevel: 'full' } : {}),
-							args: ConfigManager.getInstance().getConfig().engineArgs
+							args: ConfigManager.getInstance().getEffectiveEngineArgs(),
 						});
 					} catch (error: unknown) {
 						this.logger.error(`Unable to execute pipeline: ${error}`);
@@ -877,20 +927,24 @@ export class PageStatusProvider {
 					// Use DAP command to execute pipeline without debugging
 					try {
 						// We need the token to attach...
-						const response = await this.connectionManager.request('rrext_get_token', {
+						const response = (await this.connectionManager.request('rrext_get_token', {
 							projectId: viewState.projectId,
-							source: viewState.sourceId
-						}) as GenericResponse | undefined;
+							source: viewState.sourceId,
+						})) as GenericResponse | undefined;
 
 						// Get the token of the task
 						const token = response?.body?.token as string | undefined;
 
-						await this.connectionManager.request('restart', {
-							token: token,
-							projectId: viewState.projectId,
-							source: viewState.sourceId,
-							pipeline: pipelineTransformed
-						}, '*');
+						await this.connectionManager.request(
+							'restart',
+							{
+								token: token,
+								projectId: viewState.projectId,
+								source: viewState.sourceId,
+								pipeline: pipelineTransformed,
+							},
+							'*'
+						);
 					} catch (error: unknown) {
 						this.logger.error(`Unable to execute pipeline: ${error}`);
 						vscode.window.showErrorMessage(String(error));
@@ -919,21 +973,14 @@ export class PageStatusProvider {
 			let htmlContent = require('fs').readFileSync(htmlPath.fsPath, 'utf8');
 
 			// Replace template placeholders
-			htmlContent = htmlContent
-				.replace(/\{\{nonce\}\}/g, nonce)
-				.replace(/\{\{cspSource\}\}/g, webview.cspSource);
+			htmlContent = htmlContent.replace(/\{\{nonce\}\}/g, nonce).replace(/\{\{cspSource\}\}/g, webview.cspSource);
 
 			// Convert resource URLs to webview URIs
-			return htmlContent.replace(
-				/(?:src|href)="(\/static\/[^"]+)"/g,
-				(match: string, relativePath: string): string => {
-					const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
-					const resourceUri = webview.asWebviewUri(
-						vscode.Uri.joinPath(this.context.extensionUri, 'webview', cleanPath)
-					);
-					return match.replace(relativePath, resourceUri.toString());
-				}
-			);
+			return htmlContent.replace(/(?:src|href)="(\/static\/[^"]+)"/g, (match: string, relativePath: string): string => {
+				const cleanPath = relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+				const resourceUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'webview', cleanPath));
+				return match.replace(relativePath, resourceUri.toString());
+			});
 		} catch (error) {
 			this.logger.error(`Loading status page HTML: ${error}`);
 			return this.getErrorHtml(error, htmlPath.fsPath);
@@ -984,10 +1031,10 @@ export class PageStatusProvider {
 		this.closeAll();
 
 		// Wait a bit for panels to dispose cleanly
-		await new Promise(resolve => setTimeout(resolve, 100));
+		await new Promise((resolve) => setTimeout(resolve, 100));
 
 		// Dispose of all event listeners
-		this.disposables.forEach(disposable => {
+		this.disposables.forEach((disposable) => {
 			try {
 				disposable.dispose();
 			} catch (error) {

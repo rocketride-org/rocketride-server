@@ -25,6 +25,8 @@ interface DropZoneProps {
 	onDrop: (e: React.DragEvent) => void;
 	/** Whether the drop zone is disabled (e.g., during connection) */
 	disabled?: boolean;
+	/** Optional callback to open VS Code's native file dialog (fallback for Cursor/macOS) */
+	onBrowse?: (() => void) | undefined;
 }
 
 /**
@@ -76,7 +78,8 @@ export const DropZone: React.FC<DropZoneProps> = ({
 	onDragOver,
 	onDragLeave,
 	onDrop,
-	disabled = false
+	disabled = false,
+	onBrowse
 }) => {
 	// Reference to hidden file input element
 	const fileInputRef = useRef<HTMLInputElement>(null);
@@ -84,7 +87,7 @@ export const DropZone: React.FC<DropZoneProps> = ({
 	/**
 	 * Handles file input change event when files are selected via dialog
 	 * Validates that files exist before invoking callback
-	 * 
+	 *
 	 * @param e - Change event from file input element
 	 */
 	const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -154,8 +157,17 @@ export const DropZone: React.FC<DropZoneProps> = ({
 					// Default/drag-over state: Show upload icon and instructions
 					<>
 						<Upload className="w-8 h-8 text-gray-400" />
-						<h4>{isDragOver ? 'Drop files here' : 'Drop files or click'}</h4>
+						<h4>{isDragOver ? 'Drop files here' : (onBrowse ? 'Drop files, click, or browse' : 'Drop files or click')}</h4>
 						<p>Documents, images, etc.</p>
+						{onBrowse && (
+							<button
+								type="button"
+								className="browse-files-btn"
+								onClick={(e) => { e.stopPropagation(); onBrowse(); }}
+							>
+								Browse files
+							</button>
+						)}
 					</>
 				)}
 			</div>

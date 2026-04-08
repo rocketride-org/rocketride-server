@@ -41,7 +41,7 @@ static application::Opt OutputArgs{"--args"};
 ///	@param[in]	value
 ///		Complete json task configuration
 //-------------------------------------------------------------------------
-Error executeTask(const file::Path& path, json::Value& value) noexcept {
+Error executeTask(const file::Path &path, json::Value &value) noexcept {
     // Expand any macros
     value.expandTree(config::vars());
 
@@ -90,7 +90,7 @@ Error executeTask(const file::Path& path, json::Value& value) noexcept {
     if (config::nodeId(false)) config::vars().add("NodeId", config::nodeId());
 
     // Exeute it
-    auto executeJob = [&](const auto& jobObj) -> Error {
+    auto executeJob = [&](const auto &jobObj) -> Error {
         // Construct the job
         auto job = Factory::make<engine::task::ITask>(_location, path, jobObj);
 
@@ -122,7 +122,7 @@ Error executeTask(const file::Path& path, json::Value& value) noexcept {
         if (jobs->empty())
             return APERRL(Job, Ec::InvalidParam, "No jobs specified");
 
-        for (auto&& jobObj : *jobs) {
+        for (auto &&jobObj : *jobs) {
             if (auto ccode = executeJob(jobObj)) return ccode;
         }
         return {};
@@ -156,7 +156,7 @@ Error executeTaskString(TextView config) noexcept {
 ///	@param[in]	path
 ///		Path to *.task file execute
 //-------------------------------------------------------------------------
-Error executeTaskManifestFile(const file::Path& path) noexcept {
+Error executeTaskManifestFile(const file::Path &path) noexcept {
     // Load it, parse it
     auto contents = file::fetchString(path);
     if (!contents)
@@ -200,7 +200,7 @@ Error executeTaskManifestFile(const file::Path& path) noexcept {
 ///	@param[in]	path
 ///		Path to *.json file execute
 //-------------------------------------------------------------------------
-Error executeTaskConfigFile(const file::Path& path) noexcept {
+Error executeTaskConfigFile(const file::Path &path) noexcept {
     // Load it, parse it
     auto contents = file::fetchString(path);
     if (!contents)
@@ -231,7 +231,7 @@ Error executeTaskConfigFile(const file::Path& path) noexcept {
 ///	@param[in]	path
 ///		Path to *.json file execute
 //-------------------------------------------------------------------------
-Error executeArgument(file::Path& path) noexcept {
+Error executeArgument(file::Path &path) noexcept {
     // Resolve any /../ or /./ in the name
     // path = path.resolve();
 
@@ -240,7 +240,7 @@ Error executeArgument(file::Path& path) noexcept {
     std::vector<file::Path> cmdFiles;
 
     // Add all the files we find to the cmdfiles list
-    const std::function<Error(file::Path&, Text wildcard)> scanFiles =
+    const std::function<Error(file::Path &, Text wildcard)> scanFiles =
         localfcn(file::Path & parentPath, Text wildcard)->Error {
         // Get the search mask
         Path scanPath = parentPath / wildcard;
@@ -327,7 +327,7 @@ Error executeArgument(file::Path& path) noexcept {
     // Sorts the given paths - this way we can run the, in a deterministic
     // sequence
     std::sort(cmdFiles.begin(), cmdFiles.end(),
-              [&](const file::Path& lhs, const file::Path& rhs) {
+              [&](const file::Path &lhs, const file::Path &rhs) {
                   return lhs < rhs;
               });
 
@@ -423,7 +423,7 @@ Error Main() noexcept {
     Error ccode;
 
     // Get the command line
-    auto& cmds = application::cmdline();
+    auto &cmds = application::cmdline();
 
     // If we need to output the arguments
     if (OutputArgs) {

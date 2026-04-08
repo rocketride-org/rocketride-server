@@ -1,6 +1,6 @@
 //
-// Common field defintions for google cloud - these will be merged into the 
-// service defintion as required by the service
+// Common field definitions for google cloud - these will be merged into the
+// service definition as required by the service
 //
 {
 	"fields": {
@@ -9,29 +9,16 @@
 			"title": "Authentication Type",
 			"default": "service",
 			"readonly": true,
-			"enum": [
-				"service",
-				"user"
-			],
-			"enumNames": [
-				"Service",
-				"User"
-			],
+			"enum": ["service", "user"],
+			"enumNames": ["Service", "User"],
 			"conditional": [
 				{
 					"value": "service",
-					"properties": [
-						"google.customerId",
-						"google.adminEmail",
-						"google.serviceKey"
-					]
+					"properties": ["google.customerId", "google.adminEmail", "google.serviceKey"]
 				},
 				{
 					"value": "user",
-					"properties": [
-						"google.oAuthButton",
-						"google.userToken"
-					]
+					"properties": ["google.oAuthButton", "google.userToken"]
 				}
 			]
 		},

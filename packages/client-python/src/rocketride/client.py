@@ -40,7 +40,7 @@ Basic Usage:
 """
 
 import os
-from .core import DAPClient, TransportWebSocket, RocketRideException, CONST_DEFAULT_WEB_CLOUD
+from .core import DAPClient, RocketRideException
 from .mixins.connection import ConnectionMixin
 from .mixins.execution import ExecutionMixin
 from .mixins.data import DataMixin
@@ -48,6 +48,8 @@ from .mixins.chat import ChatMixin
 from .mixins.events import EventMixin
 from .mixins.ping import PingMixin
 from .mixins.services import ServicesMixin
+from .mixins.dashboard import DashboardMixin
+from .mixins.store import StoreMixin
 
 client_id = 0
 
@@ -65,6 +67,8 @@ class RocketRideClient(
     EventMixin,
     PingMixin,
     ServicesMixin,
+    DashboardMixin,
+    StoreMixin,
     DAPClient,
 ):
     """
@@ -117,8 +121,8 @@ class RocketRideClient(
 
     def __init__(
         self,
-        uri: str = "",
-        auth: str = "",
+        uri: str = '',
+        auth: str = '',
         **kwargs,
     ):
         """
@@ -145,9 +149,9 @@ class RocketRideClient(
         # Get or load environment variables
         env = kwargs.get('env', None)
         if env is None:
-            # If not provided, load from .env file only
-            self._env = {}
-            
+            # Start with process environment so ROCKETRIDE_* vars work out of the box.
+            self._env = dict(os.environ)
+
             # Try to load .env file
             try:
                 env_path = os.path.join(os.getcwd(), '.env')
@@ -164,10 +168,10 @@ class RocketRideClient(
                                 key = key.strip()
                                 value = value.strip()
                                 # Remove quotes if present
-                                if (value.startswith('"') and value.endswith('"')) or \
-                                   (value.startswith("'") and value.endswith("'")):
+                                if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
                                     value = value[1:-1]
-                                self._env[key] = value
+                                # Preserve already-defined process env values.
+                                self._env.setdefault(key, value)
             except Exception:
                 # File doesn't exist or can't be read - that's okay
                 pass
@@ -175,17 +179,35 @@ class RocketRideClient(
             # Use the provided env dictionary
             self._env = dict(env)
 
-        # If we didn't get the URI, look at the env. If not there,
-        # use the default
+        # Runtime auto-spawn: when no explicit URI is provided, we prepare a
+        # RuntimeManager so __aenter__ can auto-spawn if needed.  If
+        # ROCKETRIDE_URI is set we'll try it first, but fall back to
+        # auto-spawn if it's unreachable.
+        self._runtime_manager = None  # type: Optional['RuntimeManager']
+        self._runtime_we_started = False
+
         if not uri:
-            uri = self._env.get('ROCKETRIDE_URI', CONST_DEFAULT_WEB_CLOUD)
+            env_uri = self._env.get('ROCKETRIDE_URI', '')
+            if env_uri:
+                uri = env_uri
+            # Always prepare auto-spawn as a fallback
+            from .core.runtime.manager import RuntimeManager
+
+            self._runtime_manager = RuntimeManager()
+            if not uri:
+                uri = ''  # Will be set during connect()
 
         if not auth:
             auth = self._env.get('ROCKETRIDE_APIKEY', None)
 
         # Normalize the URI into a fully-formed WebSocket address
+        # (skip if runtime manager will provide the URI later)
         from .mixins.connection import ConnectionMixin
-        self._uri = ConnectionMixin._get_websocket_uri(uri)
+
+        if uri:
+            self._uri = ConnectionMixin._get_websocket_uri(uri)
+        else:
+            self._uri = ''
         self._apikey = auth
 
         # Initialize chat question counter
@@ -203,6 +225,12 @@ class RocketRideClient(
         client_name = f'CLIENT-{client_id}'
         client_id += 1
 
+        # Client identification for auth handshake
+        from rocketride import __version__
+
+        self._client_display_name = kwargs.get('client_name', None) or 'Python SDK'
+        self._client_display_version = kwargs.get('client_version', None) or __version__
+
         # Initialize the underlying DAP client; transport is created in _internal_connect
         super().__init__(transport=None, module=kwargs.get('module', client_name), **kwargs)
 
@@ -211,14 +239,44 @@ class RocketRideClient(
         """
         Enter async context manager - automatically connects to server.
 
+        When no URI was provided, this will auto-spawn a local runtime
+        instance before connecting.  If ROCKETRIDE_URI was set but is
+        unreachable, falls back to auto-spawn transparently.
+
         Returns:
             self: The connected client instance
         """
+        if self._runtime_manager:
+            # If a URI is already set (from ROCKETRIDE_URI env), verify it's
+            # reachable before using it — fall back to auto-spawn if not.
+            env_uri = self._env.get('ROCKETRIDE_URI', '')
+            if self._uri and env_uri:
+                if not await self._runtime_manager._is_runtime_healthy_uri(env_uri):
+                    import logging
+
+                    logging.getLogger('rocketride').warning(
+                        'ROCKETRIDE_URI (%s) is unreachable',
+                        env_uri,
+                    )
+                    self._uri = ''
+
+            # No reachable URI — auto-spawn
+            if not self._uri:
+                uri, we_started = await self._runtime_manager.ensure_running()
+                self._runtime_we_started = we_started
+                from .mixins.connection import ConnectionMixin
+
+                self._uri = ConnectionMixin._get_websocket_uri(uri)
         await self.connect()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """
         Exit async context manager - automatically disconnects from server.
+
+        Tears down the auto-spawned runtime if we started it.
         """
         await self.disconnect()
+        if self._runtime_manager and self._runtime_we_started:
+            await self._runtime_manager.teardown()
+            self._runtime_we_started = False

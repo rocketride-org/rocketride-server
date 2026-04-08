@@ -36,6 +36,7 @@ bool elevated() noexcept;
 
 file::Path execPath(bool stripExec = false) noexcept;
 inline auto execDir() noexcept { return execPath(true); }
+const file::Path &projectDir() noexcept;
 
 TextView buildHash() noexcept;
 TextView buildStamp() noexcept;

@@ -2,7 +2,7 @@
 	"name": "rocketride",
 	"displayName": "RocketRide",
 	"description": "RocketRide extension for Visual Studio Code",
-	"version": "1.0.0",
+	"version": "1.0.6",
 	"publisher": "rocketride",
 	"repository": {
 		"type": "git",
@@ -29,19 +29,9 @@
 		"Other"
 	],
 	"activationEvents": [
-		"onStartupFinished",
-		"onDebugResolve:rocketride",
-		"onDebug:rocketride",
-		"onLanguage:pipeline",
-		"onDebugInitialConfigurations",
-		"onDebugDynamicConfigurations"
+		"onStartupFinished"
 	],
 	"contributes": {
-		"breakpoints": [
-			{
-				"language": "pipeline"
-			}
-		],
 		"customEditors": [
 			{
 				"viewType": "rocketride.PageEditor",
@@ -101,13 +91,15 @@
 					"default": "latest",
 					"description": "Engine version to download. 'latest' for newest stable, 'prerelease' for newest prerelease, or a specific tag like 'server-v3.1.1'."
 				},
+				"rocketride.local.debugOutput": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable full debug output from the local engine (--trace=debugOut)"
+				},
 				"rocketride.engineArgs": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					},
-					"default": [],
-					"description": "Additional arguments passed to the engine subprocess (applies to all connection modes)"
+					"type": "string",
+					"default": "",
+					"description": "Additional arguments passed to the engine subprocess"
 				},
 				"rocketride.autoConnect": {
 					"type": "boolean",
@@ -134,6 +126,41 @@
 					"default": "https://oauth2.rocketride.ai",
 					"description": "Root OAuth2 URL for the refresh path (lambda) passed to the services OAuth2 endpoint. No UI to change it.",
 					"format": "uri"
+				},
+				"rocketride.integrations.autoAgentIntegration": {
+					"type": "boolean",
+					"default": true,
+					"description": "Automatically detect and install RocketRide documentation for coding agents (Copilot, Claude Code, Cursor, Windsurf) on startup"
+				},
+				"rocketride.integrations.copilot": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable RocketRide integration with GitHub Copilot"
+				},
+				"rocketride.integrations.claudeCode": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable RocketRide integration with Claude Code"
+				},
+				"rocketride.integrations.cursor": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable RocketRide integration with Cursor"
+				},
+				"rocketride.integrations.windsurf": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable RocketRide integration with Windsurf"
+				},
+				"rocketride.integrations.claudeMd": {
+					"type": "boolean",
+					"default": false,
+					"description": "Install RocketRide instructions to CLAUDE.md at the repo root (generic agent support)"
+				},
+				"rocketride.integrations.agentsMd": {
+					"type": "boolean",
+					"default": false,
+					"description": "Install RocketRide instructions to AGENTS.md at the repo root (generic agent support)"
 				}
 			}
 		},
@@ -147,6 +174,22 @@
 			]
 		},
 		"commands": [
+			{
+				"command": "rocketride.provider.connection.focus",
+				"title": "Connections",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.provider.files.focus",
+				"title": "Pipelines",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.page.dashboard.open",
+				"title": "Server Monitor",
+				"category": "RocketRide",
+				"icon": "$(dashboard)"
+			},
 			{
 				"command": "rocketride.sidebar.connection.connect",
 				"title": "Connect to Server",
@@ -167,7 +210,7 @@
 			},
 			{
 				"command": "rocketride.page.settings.open",
-				"title": "Open RocketRide Settings",
+				"title": "Settings",
 				"category": "RocketRide",
 				"icon": "$(settings-gear)"
 			},
@@ -245,17 +288,60 @@
 			},
 			{
 				"command": "rocketride.page.deploy.open",
-				"title": "Open Deploy",
+				"title": "Deploy",
 				"category": "RocketRide",
-				"icon": { "dark": "./rocketride-light-icon.png", "light": "./rocketride-dark-icon.png" }
+				"icon": {
+					"dark": "./rocketride-light-icon.png",
+					"light": "./rocketride-dark-icon.png"
+				}
 			},
 			{
 				"command": "rocketride.page.welcome.open",
 				"title": "Welcome",
 				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.agents.install",
+				"title": "Install Agent Documentation",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.agents.uninstall",
+				"title": "Remove Agent Documentation",
+				"category": "RocketRide"
 			}
 		],
 		"menus": {
+			"commandPalette": [
+				{
+					"command": "rocketride.sidebar.files.openStatus",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.files.openFile",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.files.runPipeline",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.files.stopPipeline",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.openPipelineAsText",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.status.open",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.settings.setupCredentials",
+					"when": "false"
+				}
+			],
 			"view/title": [
 				{
 					"command": "rocketride.sidebar.files.refresh",
@@ -281,114 +367,15 @@
 				}
 			]
 		},
-		"debuggers": [
-			{
-				"type": "rocketride",
-				"label": "RocketRide Debugger",
-				"languages": [
-					"pipeline"
-				],
-				"initialConfigurations": [
-					{
-						"type": "rocketride",
-						"request": "launch",
-						"name": "Launch RocketRide Pipeline",
-						"file": "${file}",
-						"source": ""
-					}
-				],
-				"configurationSnippets": [
-					{
-						"label": "RocketRide: Launch",
-						"description": "Launch a RocketRide pipeline file",
-						"body": {
-							"type": "rocketride",
-							"request": "launch",
-							"name": "Launch RocketRide",
-							"file": "${1:${file\\}}"
-						}
-					},
-					{
-						"label": "RocketRide: Attach",
-						"description": "Attach to a running RocketRide pipeline instance",
-						"body": {
-							"type": "rocketride",
-							"request": "attach",
-							"name": "Attach to RocketRide",
-							"token": "${1:session-token}"
-						}
-					}
-				],
-				"configurationAttributes": {
-					"launch": {
-						"required": [],
-						"properties": {
-							"token": {
-								"type": "string",
-								"description": "Token to use for this pipeline"
-							},
-							"file": {
-								"type": "string",
-								"description": "Path to the pipeline file",
-								"default": "${file}"
-							},
-							"source": {
-								"type": "string",
-								"description": "Source component within pipeline to start",
-								"default": ""
-							},
-							"args": {
-								"type": "array",
-								"items": {
-									"type": "string"
-								},
-								"description": "Command-line arguments"
-							},
-							"justMyCode": {
-								"type": "boolean",
-								"description": "Debug only user-written code, skipping system code",
-								"default": true
-							},
-							"threads": {
-								"type": "number",
-								"description": "Number of threads to use (1-64)",
-								"default": 1,
-								"minimum": 1,
-								"maximum": 64
-							}
-						}
-					},
-					"attach": {
-						"required": [
-							"token"
-						],
-						"properties": {
-							"token": {
-								"type": "string",
-								"description": "Token for attaching to existing pipeline"
-							},
-							"source": {
-								"type": "string",
-								"description": "Source component within pipeline to start",
-								"default": ""
-							},
-							"justMyCode": {
-								"type": "boolean",
-								"description": "Debug only user-written code, skipping system code",
-								"default": true
-							}
-						}
-					}
-				}
-			}
-		],
 		"views": {
 			"rocketride": [
 				{
 					"type": "webview",
 					"id": "rocketride.provider.connection",
 					"name": "Connection Manager"
-				},
+				}
+			],
+			"explorer": [
 				{
 					"type": "tree",
 					"id": "rocketride.provider.files",
@@ -415,8 +402,10 @@
 		"@rsbuild/plugin-type-check": "^1.2.3",
 		"@types/adm-zip": "^0.5.5",
 		"@types/chart.js": "^2.9.41",
+		"@types/dockerode": "^4.0.1",
 		"@types/mocha": "^10.0.10",
 		"@types/node": "20.x",
+		"@types/proper-lockfile": "^4.1.4",
 		"@types/react": "^18.0.0",
 		"@types/react-dom": "^18.0.0",
 		"@types/vscode": "^1.99.0",
@@ -432,13 +421,16 @@
 	},
 	"dependencies": {
 		"@octokit/rest": "^22.0.1",
-		"rocketride": "workspace:*",
 		"adm-zip": "^0.5.16",
 		"chart.js": "^4.4.0",
+		"dockerode": "^4.0.9",
+		"proper-lockfile": "^4.1.2",
+		"rocketride": "workspace:*",
 		"shared": "workspace:*",
 		"tar": "^7.5.8"
 	},
 	"files": [
+		"README.md",
 		"rocketride-dark-icon.png",
 		"rocketride-light-icon.png",
 		"rocketride.js",

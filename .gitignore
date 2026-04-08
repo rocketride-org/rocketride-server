@@ -25,6 +25,11 @@ out/
 .cursor/
 
 # -----------------------------------------------------------------------------
+# Git hooks (local overrides)
+# -----------------------------------------------------------------------------
+lefthook-local.yml
+
+# -----------------------------------------------------------------------------
 # Working and build directories
 # -----------------------------------------------------------------------------
 artifacts/
@@ -203,11 +208,18 @@ user.json
 # Build version info (generated)
 version.json
 
-# TypeScript client README (copied from docs/ by build; npm pack requires it here)
+# Package READMEs (copied from docs/ by build; packaging requires them here)
 packages/client-typescript/README.md
+packages/client-python/README.md
+packages/client-mcp/README.md
+apps/vscode/README.md
 
 downloads/jdk-17.zip
 downloads/jre-17.zip
 downloads/jdk-17.tar.gz
 downloads/jre-17.tar.gz
 downloads/maven-3.9.6.tar.gz
+
+# One of the python modules keeps installing this
+include/python3.12/greenlet/greenlet.h
+.rocketride/

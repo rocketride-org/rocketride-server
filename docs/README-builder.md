@@ -207,11 +207,11 @@ To add a new package to the build system:
 ```javascript
 // packages/my-package/scripts/tasks.js
 const path = require('path');
-const { syncDir, formatSyncStats, PROJECT_ROOT } = require('../../../scripts/lib');
+const { syncDir, formatSyncStats, PROJECT_ROOT, DIST_ROOT } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src');
-const DIST_DIR = path.join(PROJECT_ROOT, 'dist', 'my-package');
+const DIST_DIR = path.join(DIST_ROOT, 'my-package');
 
 module.exports = {
     name: 'my-package',
@@ -940,9 +940,9 @@ const {
     removeFile,       // async (path) => void
     removeDirs,       // async (paths[]) => void
 
-    // Sync directories
-    syncDir,          // async (src, dest, opts) => stats
-    overlayDir,       // async (src, dest, opts) => stats
+    // Sync
+    syncDir,          // async (src, dest, opts, stats) => stats
+    syncFile,         // async (src, dest, opts, stats) => stats
     formatSyncStats,  // (stats) => string
 } = require('../../../scripts/lib');
 ```
@@ -1062,10 +1062,10 @@ run: async (ctx, task) => {
 ### Path constants
 
 ```javascript
-const { PROJECT_ROOT, BUILD_DIR } = require('../../../scripts/lib');
+const { PROJECT_ROOT, BUILD_ROOT } = require('../../../scripts/lib');
 
 // PROJECT_ROOT: Root of the monorepo
-// BUILD_DIR: {PROJECT_ROOT}/build
+// BUILD_ROOT: {PROJECT_ROOT}/build by default, can be overlayed
 ```
 
 ---
@@ -1083,14 +1083,14 @@ const {
     syncDir, formatSyncStats, removeDirs, removeMatching,
     execCommand, exists, mkdir,
     hasSourceChanged, saveSourceHash,
-    PROJECT_ROOT, parallel, bracket
+    PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, parallel, bracket
 } = require('../../../scripts/lib');
 
 // Paths
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src');
-const DIST_DIR = path.join(PROJECT_ROOT, 'dist', 'my-package');
-const BUILD_DIR = path.join(PROJECT_ROOT, 'build', 'my-package');
+const DIST_DIR = path.join(DIST_ROOT, 'my-package');
+const BUILD_DIR = path.join(BUILD_ROOT, 'my-package');
 
 // State key for incremental builds
 const SRC_HASH_KEY = 'my-package.srcHash';
@@ -1681,7 +1681,7 @@ Teardowns run in reverse order: server-b stops, then server-a stops -- even if t
 
 ```javascript
 // [BAD] Another module guessing your paths
-const NODES_DIST = path.join(PROJECT_ROOT, 'dist', 'nodes');  // Might be wrong!
+const NODES_DIST = path.join(DIST_ROOT, 'nodes');
 
 // [GOOD] Import from the source of truth
 const { DIST_DIR: NODES_DIST } = require('../nodes/scripts/tasks');

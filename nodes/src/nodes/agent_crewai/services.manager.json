@@ -1,0 +1,92 @@
+{
+	"title": "CrewAI Manager",
+	"protocol": "agent_crewai_manager://",
+	"classType": ["agent", "tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.agent_crewai",
+	"prefix": "agent",
+	"description": ["Multi-agent manager using CrewAI hierarchical process.", "Fans out to connected CrewAI sub-agent nodes, assembles a Crew, and synthesizes their outputs.", "Can be invoked as a tool (`<nodeId>.run_agent`) for nested orchestration."],
+	"icon": "crewai.svg",
+	"invoke": {
+		"llm": {
+			"description": "LLM used by the manager manager agent",
+			"min": 1
+		},
+		"crewai": {
+			"description": "Connected CrewAI sub-agent nodes",
+			"min": 1
+		}
+	},
+	"lanes": {
+		"questions": ["answers"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [{ "lane": "answers" }]
+		}
+	],
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"instructions": [],
+				"advanced_mode": false,
+				"goal": "",
+				"backstory": ""
+			}
+		}
+	},
+	"fields": {
+		"instructions": {
+			"type": "array",
+			"title": "Instructions",
+			"description": "Additional instructions to guide the manager's delegation strategy.",
+			"items": {
+				"type": "string",
+				"format": "textarea"
+			}
+		},
+		"advanced_mode": {
+			"type": "boolean",
+			"title": "Advanced Mode",
+			"description": "Expose CrewAI manager Agent configuration directly.",
+			"default": false,
+			"enum": [
+				[false, "Off"],
+				[true, "On"]
+			],
+			"conditional": [
+				{
+					"value": true,
+					"properties": ["goal", "backstory"]
+				}
+			]
+		},
+		"goal": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Manager Goal",
+			"description": "What the manager manager is trying to achieve. Maps to CrewAI Agent(goal=...)."
+		},
+		"backstory": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Manager Backstory",
+			"description": "Background context for the manager's persona. Maps to CrewAI Agent(backstory=...)."
+		},
+		"agent_crewai_manager.default": {
+			"object": "default",
+			"properties": ["instructions", "advanced_mode"]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "CrewAI Manager",
+			"properties": ["agent_crewai_manager.default"]
+		}
+	]
+}

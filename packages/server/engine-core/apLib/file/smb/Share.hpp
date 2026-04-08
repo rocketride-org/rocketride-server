@@ -66,16 +66,16 @@ struct Share {
     operator file::Path() const noexcept { return path(); }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         buff << path();
     }
 
-    bool operator==(const Share& other) const noexcept {
+    bool operator==(const Share &other) const noexcept {
         return server == other.server && originalName == other.originalName &&
                username == other.username && password == other.password;
     }
 
-    bool operator!=(const Share& other) const noexcept {
+    bool operator!=(const Share &other) const noexcept {
         return !operator==(other);
     }
 };

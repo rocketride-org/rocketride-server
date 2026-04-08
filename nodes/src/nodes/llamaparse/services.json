@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"data"
-	],
+	"classType": ["data"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"gpu"
-	],
+	"capabilities": ["gpu"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,36 +47,27 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A document parsing component that uses LlamaParse to extract text and structured data ",
-		"from various document formats including PDFs, images, Word documents, Excel spreadsheets, ",
-		"and other formats. It provides high-quality text extraction with support for tables, ",
-		"layout preservation, and markdown output formatting."
-	],
+	"description": ["A document parsing component that uses LlamaParse to extract text and structured data ", "from various document formats including PDFs, images, Word documents, Excel spreadsheets, ", "and other formats. It provides high-quality text extraction with support for tables, ", "layout preservation, and markdown output formatting."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "llamaindex_icon.svg",
+	"documentation": "https://docs.rocketride.org",
 
-	"documentation": "https://bit.ly/3Jcs3vZ",
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": [
-	],
+	"tile": [],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"tags": [
-			"text",
-			"table"
-		]
+		"tags": ["text", "table"]
 	},
 	"input": [
 		{
@@ -103,12 +90,11 @@
 	"preconfig": {
 		"default": "default",
 		"profiles": {
-			"default": {
-			}
+			"default": {}
 		}
 	},
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
@@ -119,29 +105,17 @@
 			"description": "Check to use advanced JSON configuration instead of simple options.",
 			"default": false,
 			"enum": [
-				[
-					true,
-					"Yes"
-				],
-				[
-					false,
-					"No"
-				]
+				[true, "Yes"],
+				[false, "No"]
 			],
 			"conditional": [
 				{
 					"value": true,
-					"properties": [
-						"llamaparse.advanced_config"
-					]
+					"properties": ["llamaparse.advanced_config"]
 				},
 				{
 					"value": false,
-					"properties": [
-						"llamaparse.parse_mode",
-						"llamaparse.use_system_prompt_append",
-						"llamaparse.spreadsheet_extract_sub_tables"
-					]
+					"properties": ["llamaparse.parse_mode", "llamaparse.use_system_prompt_append", "llamaparse.spreadsheet_extract_sub_tables"]
 				}
 			]
 		},
@@ -160,43 +134,24 @@
 			"description": "The parse mode to use for chosing complexity of the parse",
 			"default": "parse_page_with_lvm",
 			"enum": [
-				[
-					"cost_effective (LLM)",
-					"Cost-effective - Text-heavy documents"
-				],
-				[
-					"agentic",
-					"Agentic - Documents with diagrams and images"
-				],
-				[
-					"agentic_plus",
-					"Agentic Plus - Complex layouts and multi-page tables"
-				],
-				
-			
-				[
-					"parse_page_with_lvm",
-					"Parse with LVM (Legacy)"
-				]
+				["cost_effective (LLM)", "Cost-effective - Text-heavy documents"],
+				["agentic", "Agentic - Documents with diagrams and images"],
+				["agentic_plus", "Agentic Plus - Complex layouts and multi-page tables"],
+
+				["parse_page_with_lvm", "Parse with LVM (Legacy)"]
 			],
 			"conditional": [
 				{
 					"value": "parse_page_with_lvm",
-					"properties": [
-						"llamaparse.lvm_model"
-					]
+					"properties": ["llamaparse.lvm_model"]
 				},
 				{
 					"value": "agentic",
-					"properties": [
-						"llamaparse.lvm_model"
-					]
+					"properties": ["llamaparse.lvm_model"]
 				},
 				{
 					"value": "agentic_plus",
-					"properties": [
-						"llamaparse.lvm_model"
-					]
+					"properties": ["llamaparse.lvm_model"]
 				}
 			]
 		},
@@ -206,22 +161,10 @@
 			"description": "The LVM model to use for parsing when LVM or agentic modes are selected.",
 			"default": "anthropic-sonnet-4.0",
 			"enum": [
-				[
-					"anthropic-sonnet-4.0",
-					"Anthropic Sonnet 4.0"
-				],
-				[
-					"anthropic-sonnet-3.5",
-					"Anthropic Sonnet 3.5"
-				],
-				[
-					"gpt-4o",
-					"GPT-4o"
-				],
-				[
-					"gpt-4o-mini",
-					"GPT-4o Mini"
-				]
+				["anthropic-sonnet-4.0", "Anthropic Sonnet 4.0"],
+				["anthropic-sonnet-3.5", "Anthropic Sonnet 3.5"],
+				["gpt-4o", "GPT-4o"],
+				["gpt-4o-mini", "GPT-4o Mini"]
 			]
 		},
 
@@ -231,21 +174,13 @@
 			"description": "Check to add custom instructions to the system prompt for LlamaParse.",
 			"default": false,
 			"enum": [
-				[
-					true,
-					"Yes"
-				],
-				[
-					false,
-					"No"
-				]
+				[true, "Yes"],
+				[false, "No"]
 			],
 			"conditional": [
 				{
 					"value": true,
-					"properties": [
-						"llamaparse.system_prompt_append"
-					]
+					"properties": ["llamaparse.system_prompt_append"]
 				}
 			]
 		},
@@ -255,21 +190,15 @@
 			"description": "Additional instructions to append to the system prompt for LlamaParse.",
 			"format": "textarea"
 		},
-		
+
 		"llamaparse.spreadsheet_extract_sub_tables": {
 			"type": "boolean",
 			"title": "Extract Sub Tables",
 			"description": "Extract sub-tables from spreadsheets for better table parsing.",
 			"default": false,
 			"enum": [
-				[
-					true,
-					"Yes"
-				],
-				[
-					false,
-					"No"
-				]
+				[true, "Yes"],
+				[false, "No"]
 			]
 		},
 		"llamaparse.advanced_config": {
@@ -287,10 +216,7 @@
 		},
 		"llamaparse.default": {
 			"object": "default",
-			"properties": [
-				"llamaparse.api_key",
-				"llamaparse.use_advanced_config"
-			]
+			"properties": ["llamaparse.api_key", "llamaparse.use_advanced_config"]
 		}
 	},
 	//
@@ -302,9 +228,7 @@
 		{
 			"section": "Pipe",
 			"title": "LlamaParse",
-			"properties": [
-				"llamaparse.default"
-			]
+			"properties": ["llamaparse.default"]
 		}
 	]
-} 
+}

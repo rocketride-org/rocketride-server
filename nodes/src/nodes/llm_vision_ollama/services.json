@@ -1,0 +1,315 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Ollama Vision",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "image_vision_ollama://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["image"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.llm_vision_ollama",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "image_vision_ollama",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["A component that connects to locally-hosted open-source vision models through Ollama ", "for image analysis, description, and visual understanding tasks. Supports Llama 3.2 Vision, ", "LLaVA, Moondream, MiniCPM-V, and other multimodal models. Runs entirely on-premise with no ", "external API keys required — ideal for privacy-sensitive applications."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "ollama.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": ["Model: ${parameters.image_vision_ollama.profile}"],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"image": ["text"],
+		"documents": ["documents"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "Image to analyze with a local Ollama vision model",
+			"output": [
+				{
+					"lane": "text",
+					"description": "Text analysis of the image content"
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Image documents to analyze with a local Ollama vision model",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Text analysis of each image document with original metadata (frame number, timestamp) preserved"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "llama3_2-vision-11b",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"custom": {
+				"title": "Custom",
+				"model": "",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 16385
+			},
+			"llama3_2-vision-11b": {
+				"title": "Llama 3.2 Vision 11B",
+				"model": "llama3.2-vision:11b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"llama3_2-vision-90b": {
+				"title": "Llama 3.2 Vision 90B",
+				"model": "llama3.2-vision:90b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"llava-7b": {
+				"title": "LLaVA 7B",
+				"model": "llava:7b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 32768
+			},
+			"llava-13b": {
+				"title": "LLaVA 13B",
+				"model": "llava:13b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 4096
+			},
+			"llava-34b": {
+				"title": "LLaVA 34B",
+				"model": "llava:34b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 4096
+			},
+			"moondream": {
+				"title": "Moondream 2",
+				"model": "moondream",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 2048
+			},
+			"minicpm-v": {
+				"title": "MiniCPM-V",
+				"model": "minicpm-v",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 8192
+			},
+			"qwen2_5vl-3b": {
+				"title": "Qwen 2.5 VL 3B",
+				"model": "qwen2.5vl:3b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			},
+			"qwen2_5vl-7b": {
+				"title": "Qwen 2.5 VL 7B",
+				"model": "qwen2.5vl:7b",
+				"serverbase": "http://localhost:11434/v1",
+				"modelTotalTokens": 128000
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Ollama vision model name"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total Tokens"
+		},
+		"vision.systemPrompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "System Instructions",
+			"description": "Define the model's role and behavior for image analysis"
+		},
+		"vision.prompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Analysis Prompt",
+			"description": "Describe what you want to analyze or extract from the image"
+		},
+		"image_vision_ollama.custom": {
+			"object": "custom",
+			"properties": ["model", "modelTotalTokens", "llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_ollama.llama3_2-vision-11b": {
+			"object": "llama3_2-vision-11b",
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_ollama.llama3_2-vision-90b": {
+			"object": "llama3_2-vision-90b",
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_ollama.llava-7b": {
+			"object": "llava-7b",
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_ollama.llava-13b": {
+			"object": "llava-13b",
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_ollama.llava-34b": {
+			"object": "llava-34b",
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_ollama.moondream": {
+			"object": "moondream",
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_ollama.minicpm-v": {
+			"object": "minicpm-v",
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_ollama.qwen2_5vl-3b": {
+			"object": "qwen2_5vl-3b",
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_ollama.qwen2_5vl-7b": {
+			"object": "qwen2_5vl-7b",
+			"properties": ["llm.local.serverbase", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_ollama.profile": {
+			"title": "Vision Model",
+			"description": "Select the Ollama vision model to use",
+			"type": "string",
+			"default": "llama3_2-vision-11b",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": ["image_vision_ollama.custom"]
+				},
+				{
+					"value": "llama3_2-vision-11b",
+					"properties": ["image_vision_ollama.llama3_2-vision-11b"]
+				},
+				{
+					"value": "llama3_2-vision-90b",
+					"properties": ["image_vision_ollama.llama3_2-vision-90b"]
+				},
+				{
+					"value": "llava-7b",
+					"properties": ["image_vision_ollama.llava-7b"]
+				},
+				{
+					"value": "llava-13b",
+					"properties": ["image_vision_ollama.llava-13b"]
+				},
+				{
+					"value": "llava-34b",
+					"properties": ["image_vision_ollama.llava-34b"]
+				},
+				{
+					"value": "moondream",
+					"properties": ["image_vision_ollama.moondream"]
+				},
+				{
+					"value": "minicpm-v",
+					"properties": ["image_vision_ollama.minicpm-v"]
+				},
+				{
+					"value": "qwen2_5vl-3b",
+					"properties": ["image_vision_ollama.qwen2_5vl-3b"]
+				},
+				{
+					"value": "qwen2_5vl-7b",
+					"properties": ["image_vision_ollama.qwen2_5vl-7b"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Ollama Vision",
+			"properties": ["image_vision_ollama.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["llama3_2-vision-11b"],
+		"outputs": ["text"],
+		"timeout": 30,
+		"cases": [
+			{
+				"name": "Vision node returns mock response for image input",
+				"image": "images/ocr_test_text.png",
+				"expect": {
+					"text": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
+}

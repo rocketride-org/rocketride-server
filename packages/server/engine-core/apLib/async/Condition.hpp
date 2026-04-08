@@ -131,11 +131,11 @@ private:
         if constexpr (TracksOwnerId<LockType>{})
             ASSERT_MSG(
                 guard.mutex() && guard.mutex()->ownerId() == threadId(),
-                "Attempting to notify without hoilding the lock is racy");
+                "Attempting to notify without holding the lock is racy");
         else
             ASSERT_MSG(
                 guard.mutex(),
-                "Attempting to notify without hoilding the lock is racy");
+                "Attempting to notify without holding the lock is racy");
     }
 
     // Contextual cancellation of this condition

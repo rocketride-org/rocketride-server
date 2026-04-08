@@ -25,7 +25,7 @@
 
 class TestInputAdapter {
 public:
-    TestInputAdapter(const TestInputAdapter&, file::Path path,
+    TestInputAdapter(const TestInputAdapter &, file::Path path,
                      size_t size) noexcept
         : m_path(_mv(path)), m_size(size) {}
 
@@ -48,7 +48,7 @@ public:
     uint64_t size() const noexcept { return m_size; }
 
     template <typename Buffer>
-    void __toString(Buffer& buff) const noexcept {
+    void __toString(Buffer &buff) const noexcept {
         buff << m_path;
     }
 

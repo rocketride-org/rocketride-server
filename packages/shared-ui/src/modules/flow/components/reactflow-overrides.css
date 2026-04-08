@@ -1,0 +1,286 @@
+/**
+ * ReactFlow theme integration using --rr-* design tokens.
+ *
+ * All three visual states (idle / hover / selected) are expressed as
+ * box-shadow rings so that only ever ONE visual indicator is on screen.
+ * Box-shadow replaces itself on state change, so the states are
+ * mutually exclusive — no double-border problem.
+ */
+
+.react-flow {
+	--xy-node-border: none;
+	--xy-node-boxshadow-hover: var(--rr-shadow-hover);
+	--xy-node-boxshadow-selected: var(--rr-shadow-selected);
+
+	/* Edge stroke colour — visible on both light and dark backgrounds */
+	--xy-edge-stroke: var(--rr-text-disabled, #b1b1b7);
+	--xy-edge-stroke-selected: var(--rr-accent, #0078d4);
+}
+
+/* Suppress native focus ring — our box-shadow is the indicator */
+.react-flow__node {
+	outline: none !important;
+}
+
+/* Layout overrides — idle state gets a ring that looks like a border */
+.react-flow__node-default,
+.react-flow__node-input,
+.react-flow__node-output {
+	box-shadow: var(--rr-shadow-idle);
+	border-radius: 4px !important;
+	background-color: var(--rr-bg-paper) !important;
+	padding: 0 !important;
+}
+
+/* Annotation nodes: no decoration */
+.react-flow__node-annotation {
+	border: none !important;
+	box-shadow: none !important;
+	background-color: transparent !important;
+	outline: none !important;
+}
+
+/* Group nodes: same border ring as default nodes */
+.react-flow__node-group {
+	box-shadow: var(--rr-shadow-idle);
+	border-radius: 4px !important;
+	background-color: transparent !important;
+	padding: 0 !important;
+}
+
+/* Strip any border that MUI might add to direct children inside a node */
+.react-flow__node > div {
+	border: none !important;
+}
+
+/* Idle handles: crosshair to indicate "you can start a connection here" */
+.react-flow__handle.connectionindicator {
+	cursor: crosshair;
+}
+
+/* During active drag, invalid targets inherit parent cursor (grab hand) */
+.react-flow__handle.connectingto:not(.valid) {
+	cursor: inherit;
+}
+
+/* Only show crosshair when hovering a valid drop target during active drag */
+.react-flow__handle.connectingto.valid {
+	cursor: crosshair;
+}
+
+/* Ensure edge delete buttons render above edge lines */
+.react-flow__edgelabel-renderer {
+	z-index: 10;
+}
+
+/* ── Node cap / header background colour transitions ────────────────── */
+
+/* Top corner cap — inactive → active on hover / selected */
+.rr-corner-cap-top {
+	height: 8px;
+	border-radius: 4px 4px 0 0;
+	background-color: var(--rr-bg-titleBar-inactive);
+}
+.react-flow__node:hover .rr-corner-cap-top,
+.react-flow__node.selected .rr-corner-cap-top {
+	background-color: var(--rr-bg-titleBar-active);
+}
+
+/* Bottom corner cap — variant that matches the header titlebar */
+.rr-corner-cap-bottom-header {
+	height: 4px;
+	border-radius: 0 0 4px 4px;
+	background-color: var(--rr-bg-titleBar-inactive);
+}
+.react-flow__node:hover .rr-corner-cap-bottom-header,
+.react-flow__node.selected .rr-corner-cap-bottom-header {
+	background-color: var(--rr-bg-titleBar-active);
+}
+
+/* Node header row — inactive → active on hover / selected */
+.rr-node-header {
+	display: flex;
+	align-items: center;
+	border-radius: 0;
+	justify-content: space-between;
+	padding: 0.15rem 0.25rem 0.4rem 0.6rem;
+	width: 100%;
+	background-color: var(--rr-bg-titleBar-inactive);
+	color: var(--rr-fg-titleBar-inactive);
+}
+.react-flow__node:hover .rr-node-header,
+.react-flow__node.selected .rr-node-header {
+	background-color: var(--rr-bg-titleBar-active);
+	color: var(--rr-fg-titleBar-active);
+}
+
+/* Annotation root — reveals header on hover */
+.rr-annotation-root:hover .annotation-header {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+/* ── Annotation content area — markdown styles at canvas scale ──────── */
+.rr-annotation-content {
+	flex: 1;
+	overflow-y: auto;
+	padding: 0.5rem;
+	font-size: 0.75rem;
+	line-height: 1.5;
+}
+.rr-annotation-content h1 {
+	font-size: 1rem;
+	font-weight: 600;
+	margin: 0.25rem 0;
+}
+.rr-annotation-content h2 {
+	font-size: 0.9rem;
+	font-weight: 600;
+	margin: 0.25rem 0;
+}
+.rr-annotation-content h3 {
+	font-size: 0.8rem;
+	font-weight: 600;
+	margin: 0.2rem 0;
+}
+.rr-annotation-content p {
+	margin: 0.25rem 0;
+	font-size: 0.75rem;
+}
+.rr-annotation-content ul,
+.rr-annotation-content ol {
+	padding-left: 1.25rem;
+	margin: 0.25rem 0;
+	font-size: 0.75rem;
+}
+.rr-annotation-content li {
+	margin: 0.1rem 0;
+}
+.rr-annotation-content blockquote {
+	border-left: 3px solid var(--rr-text-disabled);
+	padding-left: 0.5rem;
+	margin: 0.25rem 0;
+	font-style: italic;
+	color: var(--rr-text-secondary);
+}
+.rr-annotation-content code {
+	font-size: 0.7rem;
+	font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+	background-color: var(--rr-bg-surface-alt);
+	padding: 0.1rem 0.2rem;
+	border-radius: 3px;
+}
+.rr-annotation-content pre {
+	margin: 0.25rem 0;
+	border-radius: 4px;
+	overflow-x: auto;
+}
+.rr-annotation-content pre code {
+	background-color: transparent;
+	padding: 0;
+}
+.rr-annotation-content a {
+	color: var(--rr-text-link);
+	text-decoration: none;
+}
+.rr-annotation-content a:hover {
+	text-decoration: underline;
+}
+.rr-annotation-content table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.7rem;
+	margin: 0.25rem 0;
+}
+.rr-annotation-content th,
+.rr-annotation-content td {
+	padding: 0.2rem 0.4rem;
+	text-align: left;
+	border-bottom: 1px solid var(--rr-border);
+}
+.rr-annotation-content th {
+	font-weight: 600;
+}
+.rr-annotation-content img {
+	max-width: 100%;
+	height: auto;
+}
+
+/* ── Run button wrapper — slide-out hover states ────────────────────── */
+.rr-run-button-wrapper {
+	z-index: -1;
+	position: absolute;
+	background-color: var(--rr-bg-paper);
+	left: calc(-2rem - 1px);
+	top: 0.75rem;
+	margin: auto;
+	width: 2rem;
+	height: 1.75rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	border-radius: 1rem 0 0 1rem;
+	box-shadow:
+		0px 2px 1px -1px rgba(0, 0, 0, 0.15),
+		0px 1px 1px 0px rgba(0, 0, 0, 0.1),
+		0px 1px 3px 0px rgba(0, 0, 0, 0.08);
+	border: none;
+	outline: 1px solid var(--rr-border);
+	transition:
+		left 0.3s ease,
+		width 0.3s ease,
+		background-color 0.2s ease;
+}
+.rr-run-button-wrapper:hover {
+	left: calc(-5.5rem - 1px);
+	width: 5.5rem;
+	background-color: var(--rr-accent, #007acc);
+}
+.rr-run-button-wrapper:hover .run-btn-label {
+	opacity: 1;
+	color: #fff;
+	width: auto;
+}
+.rr-run-button-wrapper:hover svg {
+	fill: #fff;
+}
+.rr-run-button-wrapper.stop-button:hover {
+	left: calc(-3.5rem - 1px);
+	width: 3.5rem;
+	background-color: var(--rr-color-error);
+}
+.rr-run-button-wrapper.stopping-button {
+	cursor: default;
+	pointer-events: none;
+	opacity: 0.7;
+	left: calc(-5rem - 1px);
+	width: 5rem;
+}
+.rr-run-button-wrapper.stopping-button .run-btn-label {
+	opacity: 1;
+	width: auto;
+}
+
+/* ── Indeterminate progress bar animation ─────────────────────────── */
+/* Toolbar icon button sizing — constrain SVG icons to 18px.
+   !important needed because custom icon SVGs have hardcoded width/height attributes. */
+.rr-floating-toolbar button svg {
+	width: 18px !important;
+	height: 18px !important;
+}
+
+@keyframes rr-indeterminate {
+	0% {
+		transform: translateX(-100%);
+		width: 50%;
+	}
+	50% {
+		transform: translateX(50%);
+		width: 50%;
+	}
+	100% {
+		transform: translateX(200%);
+		width: 50%;
+	}
+}

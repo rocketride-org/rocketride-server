@@ -21,12 +21,55 @@
 # SOFTWARE.
 # =============================================================================
 
+import re
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from ibm_watsonx_ai import Credentials
 from ibm_watsonx_ai.foundation_models import ModelInference
 from ibm_watsonx_ai.foundation_models.schema import TextChatParameters
+
+
+# Known IBM Cloud regions for Watson services
+_VALID_LOCATIONS = frozenset(
+    {
+        'us-south',
+        'us-east',
+        'eu-gb',
+        'eu-de',
+        'eu-es',
+        'jp-tok',
+        'jp-osa',
+        'au-syd',
+        'ca-tor',
+        'br-sao',
+    }
+)
+
+_LOCATION_RE = re.compile(r'^[a-z0-9]([a-z0-9-]*[a-z0-9])?$')
+
+
+def _validate_location(location):
+    """Validate an IBM Cloud location string and return the service URL.
+
+    Args:
+        location: The location/region string to validate.
+
+    Returns:
+        str: The full Watson ML service URL for the given location.
+
+    Raises:
+        ValueError: If the location is empty/None, contains the UI
+            placeholder text, fails the format regex, or is not in the
+            known IBM Cloud region allowlist.
+    """
+    if not location or 'Select Location' in location:
+        raise ValueError('Please select a location.')
+    if not _LOCATION_RE.match(location):
+        raise ValueError(f'Invalid location format: {location!r}')
+    if location not in _VALID_LOCATIONS:
+        raise ValueError(f'Unknown IBM Cloud location: {location!r}. Valid locations: {", ".join(sorted(_VALID_LOCATIONS))}')
+    return f'https://{location}.ml.cloud.ibm.com'
 
 
 class Chat(ChatBase):
@@ -59,9 +102,7 @@ class Chat(ChatBase):
         config = Config.getNodeConfig(provider, connConfig)
 
         location = config.get('location')
-        if 'Select Location' in location:
-            raise ValueError('Please select a location.')
-        url = f'https://{location}.ml.cloud.ibm.com'
+        url = _validate_location(location)
 
         api_key = config.get('apikey')
         if not api_key:
@@ -97,9 +138,6 @@ class Chat(ChatBase):
         Returns:
             str: The generated text response from the model
         """
-        if not prompt:
-            raise ValueError('Prompt is empty.')
-
         messages = [{'role': 'user', 'content': prompt}]
 
         response = self._llm.chat(messages=messages)

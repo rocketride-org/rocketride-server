@@ -45,7 +45,7 @@ public:
     // interface
     virtual bool empty() const noexcept = 0;
     virtual size_t size() const noexcept = 0;
-    virtual bool loadPage(size_t pageSize, size_t pageNumber, Type* data) = 0;
+    virtual bool loadPage(size_t pageSize, size_t pageNumber, Type *data) = 0;
 };
 
 /**
@@ -61,8 +61,8 @@ template <typename Type, typename Allocator = std::allocator<Type>>
 class PaginatedVector {
 public:
     using value_type = Type;
-    using reference = value_type&;
-    using const_reference = const value_type&;
+    using reference = value_type &;
+    using const_reference = const value_type &;
     using vector_type = typename std::vector<Type, Allocator>;
     using size_type = typename vector_type::size_type;
 
@@ -73,18 +73,18 @@ public:
     class iterator
         : public std::iterator<std::random_access_iterator_tag, Type, size_t> {
     public:
-        explicit iterator(const PaginatedVector<Type, Allocator>* owner,
+        explicit iterator(const PaginatedVector<Type, Allocator> *owner,
                           size_t offset)
             : m_owner(owner), m_offset(offset) {}
-        iterator(const iterator& rhs) = default;
-        iterator(iterator&& rhs) = default;
-        iterator& operator=(const iterator& rhs) = default;
-        iterator& operator=(iterator&& rhs) = default;
+        iterator(const iterator &rhs) = default;
+        iterator(iterator &&rhs) = default;
+        iterator &operator=(const iterator &rhs) = default;
+        iterator &operator=(iterator &&rhs) = default;
 
         // dereference
         value_type operator*() const { return m_owner->operator[](m_offset); }
         // increment
-        iterator& operator++() {
+        iterator &operator++() {
             ++m_offset;
             return *this;
         }
@@ -94,7 +94,7 @@ public:
             return it;
         }
         // decrement
-        iterator& operator--() {
+        iterator &operator--() {
             --m_offset;
             return *this;
         }
@@ -119,27 +119,27 @@ public:
         iterator operator-(size_t delta) const {
             return iterator(m_owner, m_offset - delta);
         }
-        ptrdiff_t operator-(const iterator& it2) const {
+        ptrdiff_t operator-(const iterator &it2) const {
             return this->m_offset - it2.m_offset;
         }
 
         // logical operators
         // logical operators doesn't take into consideration owner
-        bool operator==(const iterator& r) const {
+        bool operator==(const iterator &r) const {
             return m_offset == r.m_offset;
         }
-        bool operator!=(const iterator& r) const {
+        bool operator!=(const iterator &r) const {
             return m_offset != r.m_offset;
         }
-        bool operator<(const iterator& r) const {
+        bool operator<(const iterator &r) const {
             return m_offset < r.m_offset;
         }
-        bool operator<=(const iterator& r) const {
+        bool operator<=(const iterator &r) const {
             return m_offset <= r.m_offset;
         }
 
     private:
-        const PaginatedVector<Type, Allocator>* m_owner;
+        const PaginatedVector<Type, Allocator> *m_owner;
         size_t m_offset;
     };
     /**
@@ -148,13 +148,13 @@ public:
     class reverse_iterator
         : public std::iterator<std::random_access_iterator_tag, Type, size_t> {
     public:
-        explicit reverse_iterator(const PaginatedVector<Type, Allocator>* owner,
+        explicit reverse_iterator(const PaginatedVector<Type, Allocator> *owner,
                                   size_t offset)
             : m_owner(owner), m_offset(offset) {}
-        reverse_iterator(const reverse_iterator& rhs) = default;
-        reverse_iterator(reverse_iterator&& rhs) = default;
-        reverse_iterator& operator=(const reverse_iterator& rhs) = default;
-        reverse_iterator& operator=(reverse_iterator&& rhs) = default;
+        reverse_iterator(const reverse_iterator &rhs) = default;
+        reverse_iterator(reverse_iterator &&rhs) = default;
+        reverse_iterator &operator=(const reverse_iterator &rhs) = default;
+        reverse_iterator &operator=(reverse_iterator &&rhs) = default;
 
         // link with forward iterator
         iterator base() const { return iterator(m_owner, m_offset); }
@@ -163,7 +163,7 @@ public:
             return m_owner->operator[](m_offset - 1);
         }
         // increment
-        reverse_iterator& operator++() {
+        reverse_iterator &operator++() {
             --m_offset;
             return *this;
         }
@@ -173,7 +173,7 @@ public:
             return it;
         }
         // decrement
-        reverse_iterator& operator--() {
+        reverse_iterator &operator--() {
             ++m_offset;
             return *this;
         }
@@ -198,27 +198,27 @@ public:
         reverse_iterator operator+(size_t delta) const {
             return reverse_iterator(m_owner, m_offset - delta);
         }
-        ptrdiff_t operator-(const reverse_iterator& it2) const {
+        ptrdiff_t operator-(const reverse_iterator &it2) const {
             return it2.m_offset - this->m_offset;
         }
 
         // logical operators
         // logical operators doesn't take into consideration owner
-        bool operator==(const reverse_iterator& r) const {
+        bool operator==(const reverse_iterator &r) const {
             return m_offset == r.m_offset;
         }
-        bool operator!=(const reverse_iterator& r) const {
+        bool operator!=(const reverse_iterator &r) const {
             return m_offset != r.m_offset;
         }
-        bool operator<(const reverse_iterator& r) const {
+        bool operator<(const reverse_iterator &r) const {
             return m_offset > r.m_offset;
         }
-        bool operator<=(const reverse_iterator& r) const {
+        bool operator<=(const reverse_iterator &r) const {
             return m_offset >= r.m_offset;
         }
 
     private:
-        const PaginatedVector<Type, Allocator>* m_owner;
+        const PaginatedVector<Type, Allocator> *m_owner;
         size_t m_offset;
     };
 
@@ -242,10 +242,10 @@ public:
                                      m_vector.data()))
             ++m_loadPageCount;
     }
-    PaginatedVector(const PaginatedVector<Type, Allocator>&) = default;
-    PaginatedVector(PaginatedVector<Type, Allocator>&&) = default;
-    PaginatedVector& operator=(PaginatedVector<Type, Allocator>&) = default;
-    PaginatedVector& operator=(PaginatedVector<Type, Allocator>&&) = default;
+    PaginatedVector(const PaginatedVector<Type, Allocator> &) = default;
+    PaginatedVector(PaginatedVector<Type, Allocator> &&) = default;
+    PaginatedVector &operator=(PaginatedVector<Type, Allocator> &) = default;
+    PaginatedVector &operator=(PaginatedVector<Type, Allocator> &&) = default;
 
 public:
     /**

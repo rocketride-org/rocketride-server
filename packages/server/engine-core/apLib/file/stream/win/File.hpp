@@ -33,7 +33,7 @@ public:
     // at a given offset with a given length
     struct MappedCtx {
         Mode mode = Mode::NONE;
-        void* data = nullptr;
+        void *data = nullptr;
         uint64_t position = {};
         uint64_t size = {};
     };
@@ -44,20 +44,20 @@ public:
     File() = default;
 
     template <typename ChrT, typename TraitsT, typename AllocT>
-    File(const string::Str<ChrT, TraitsT, AllocT>& path,
+    File(const string::Str<ChrT, TraitsT, AllocT> &path,
          Mode mode) noexcept(false) {
         *open(path, mode);
     }
 
     ~File() noexcept { close(); }
 
-    File(const File&) = delete;
+    File(const File &) = delete;
 
-    File(File&& file) noexcept { move(_mv(file)); }
+    File(File &&file) noexcept { move(_mv(file)); }
 
-    File& operator=(const File&) = delete;
+    File &operator=(const File &) = delete;
 
-    File& operator=(File&& file) noexcept { return move(_mv(file)); }
+    File &operator=(File &&file) noexcept { return move(_mv(file)); }
 
     Error close(bool flush = false) noexcept {
         if (flush && m_hFile) {
@@ -82,7 +82,7 @@ public:
     }
 
     template <typename ChrT, typename TraitsT, typename AllocT>
-    Error open(const string::Str<ChrT, TraitsT, AllocT>& path,
+    Error open(const string::Str<ChrT, TraitsT, AllocT> &path,
                Mode mode) noexcept {
         close();
 
@@ -147,7 +147,7 @@ public:
 
         // Cheating, but there are no const reads of files in Win32-- reading
         // always changes the file pointer
-        if (auto ccode = _constCast<File*>(this)->setOffset(offset))
+        if (auto ccode = _constCast<File *>(this)->setOffset(offset))
             return ccode;
 
         return read(data);
@@ -319,7 +319,7 @@ public:
     }
 
 private:
-    File& move(File&& file) noexcept {
+    File &move(File &&file) noexcept {
         if (this == &file) return *this;
 
         close();

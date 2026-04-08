@@ -30,7 +30,7 @@ struct CompiledOp : Op {
 public:
     _const auto LogLevel = Lvl::Search;
 
-    CompiledOp(const WordDbRead& db, Op&& op) noexcept(false) : Op(_mv(op)) {
+    CompiledOp(const WordDbRead &db, Op &&op) noexcept(false) : Op(_mv(op)) {
         // Validate word count
         switch (opCode) {
             case OpCode::In: {
@@ -84,7 +84,7 @@ public:
                         words);
 
                 // Compile the pattern
-                auto& pattern = words[0];
+                auto &pattern = words[0];
                 switch (opCode) {
                     case OpCode::Glob:
                         glob = *compileGlob(pattern);
@@ -124,8 +124,8 @@ public:
     }
 
     ~CompiledOp() = default;
-    CompiledOp(const CompiledOp&) = default;
-    CompiledOp(CompiledOp&&) = default;
+    CompiledOp(const CompiledOp &) = default;
+    CompiledOp(CompiledOp &&) = default;
 
     // In, Near, Phrase
     WordVariationList wordVariations;
@@ -150,10 +150,10 @@ using CompiledOps = std::vector<CompiledOp>;
 
 // Visit an operator and its children and apply callback
 template <typename Callback>
-inline void visit(CompiledOps& ops, size_t currentOpIndex,
-                  Callback&& callback) noexcept {
+inline void visit(CompiledOps &ops, size_t currentOpIndex,
+                  Callback &&callback) noexcept {
     ASSERT(currentOpIndex < ops.size());
-    auto& op = ops[currentOpIndex];
+    auto &op = ops[currentOpIndex];
 
     // Apply callback to current operator
     callback(op);
@@ -167,17 +167,17 @@ inline void visit(CompiledOps& ops, size_t currentOpIndex,
     }
 }
 
-inline CompiledOps compileOps(const WordDbRead& db, Ops&& ops) noexcept(false) {
+inline CompiledOps compileOps(const WordDbRead &db, Ops &&ops) noexcept(false) {
     CompiledOps compiledOps;
     compiledOps.reserve(ops.size());
     size_t resultStackDepth = {};
 
-    for (auto& op : ops) {
+    for (auto &op : ops) {
         // If it's LOAD or DONE, drop it
         if (isIgnoredOpCode(op.opCode)) continue;
 
         // Verify all terms are NFKC-normalized
-        for (auto& word : op.words) {
+        for (auto &word : op.words) {
             if (!string::icu::isNormalized(word))
                 APERRL_THROW(Search, Ec::InvalidParam,
                              "Search term is not normalized", word, op);
@@ -207,7 +207,7 @@ inline CompiledOps compileOps(const WordDbRead& db, Ops&& ops) noexcept(false) {
         // have context
         if (compiledOps.back().opCode == OpCode::Not) {
             visit(compiledOps, compiledOps.size() - 1,
-                  [](CompiledOp& op) noexcept {
+                  [](CompiledOp &op) noexcept {
                       // Invert contextDisabled to cover the case of double Not
                       op.contextDisabled = !op.contextDisabled;
                   });

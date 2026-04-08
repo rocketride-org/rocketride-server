@@ -1,6 +1,6 @@
 {
 	"name": "@rocketride/chat-ui",
-	"version": "2.0.0",
+	"version": "2.0.1",
 	"description": "RocketRide AI Chat Interface",
 	"private": true,
 	"copylist": {
@@ -14,6 +14,8 @@
 		"react-dom": "^18.2.0",
 		"react-markdown": "^10.1.0",
 		"react-syntax-highlighter": "^15.6.6",
+		"chart.js": "^4.4.0",
+		"react-chartjs-2": "^5.2.0",
 		"recharts": "^2.8.0",
 		"rehype-raw": "^7.0.0",
 		"remark-gfm": "^4.0.1",

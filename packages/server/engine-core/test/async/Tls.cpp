@@ -35,7 +35,7 @@ struct MyObj {
     auto getStuff() const noexcept { return 5; }
 };
 
-static MyObj& myObj() noexcept {
+static MyObj &myObj() noexcept {
     _thread_local Tls<MyObj> obj(_location);
     return *obj;
 }

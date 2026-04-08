@@ -30,14 +30,15 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ai.common.agent import AgentBase
 from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
-from ai.common.tools import ToolsBase
+from rocketlib import ToolDescriptor
 
 
 class LangChainDriver(AgentBase):
     FRAMEWORK = 'langchain'
 
-    def __init__(self) -> None:
+    def __init__(self, iGlobal: Any) -> None:
         """Initialize the LangChain driver."""
+        super().__init__(iGlobal)
 
     # ------------------------------------------------------------------
     # Bindings
@@ -66,7 +67,7 @@ class LangChainDriver(AgentBase):
             def _identifying_params(self) -> Dict[str, Any]:
                 return {'framework': 'rocketride', 'adapter': 'tool_calling_json'}
 
-            def bind_tools(self, tools: Any, **kwargs: Any) -> "RocketRideToolCallingChatModel":
+            def bind_tools(self, tools: object, **_kwargs: Any) -> RocketRideToolCallingChatModel:
                 try:
                     self._bound_tools = _normalize_bound_tools(tools)
                 except Exception:
@@ -95,7 +96,7 @@ class LangChainDriver(AgentBase):
         self,
         *,
         host: AgentHost,
-        tool_descriptors: List[ToolsBase.ToolDescriptor],
+        tool_descriptors: List[ToolDescriptor],
         invoke_tool: Callable[..., Any],
         log_tool_call: Callable[..., None],
         ctx: Dict[str, Any],
@@ -148,7 +149,7 @@ class LangChainDriver(AgentBase):
             try:
                 return create_model(
                     '_DynToolInput',
-                    __config__=ConfigDict(extra='allow'),
+                    __config__=ConfigDict(extra='ignore'),
                     **field_defs,
                 )
             except Exception:
@@ -185,7 +186,7 @@ class LangChainDriver(AgentBase):
             if not isinstance(name, str) or not name.strip():
                 continue
             desc = td.get('description') if isinstance(td.get('description'), str) else f'Invoke host tool: {name}'
-            input_schema = td.get('input_schema')
+            input_schema = td.get('inputSchema')
             if isinstance(input_schema, dict):
                 try:
                     schema_text = json.dumps(input_schema, ensure_ascii=False)
@@ -209,11 +210,45 @@ class LangChainDriver(AgentBase):
     def _run(self, *, agent_input: AgentInput, host: AgentHost, ctx: Dict[str, Any]) -> AgentRunResult:
         from langchain.agents import create_agent
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+        from langchain_core.callbacks import BaseCallbackHandler
 
-        tool_descriptors = self._discover_tools(host=host)
+        class _SSECallbackHandler(BaseCallbackHandler):
+            def __init__(self, send_sse: Callable[..., Any]) -> None:
+                super().__init__()
+                self._send_sse = send_sse
+
+            def on_tool_start(self, serialized: Any, input_str: Any, **kwargs: Any) -> None:
+                tool_name = (serialized or {}).get('name', '') or 'tool'
+                self._send_sse('thinking', message=f'Calling {tool_name}...', tool=tool_name, input=input_str)
+
+            def on_tool_end(self, output: Any, **kwargs: Any) -> None:
+                self._send_sse('thinking', message='Tool complete')
+
+            def on_tool_error(self, error: Any, **kwargs: Any) -> None:
+                self._send_sse('thinking', message=f'Tool error: {_safe_str(error)}')
+
+            def on_agent_action(self, action: Any, **kwargs: Any) -> None:
+                self._send_sse('thinking', message='Agent thinking...')
+
+            def on_agent_finish(self, finish: Any, **kwargs: Any) -> None:
+                self._send_sse('thinking', message='Agent done')
+
+            def on_llm_start(self, serialized: Any, prompts: Any, **kwargs: Any) -> None:
+                self._send_sse('thinking', message='LLM call started')
+
+            def on_chat_model_start(self, serialized: Any, messages: Any, **kwargs: Any) -> None:
+                self._send_sse('thinking', message='LLM call started')
+
+            def on_llm_end(self, response: Any, **kwargs: Any) -> None:
+                self._send_sse('thinking', message='LLM call completed')
+
+            def on_llm_error(self, error: Any, **kwargs: Any) -> None:
+                self._send_sse('thinking', message=f'LLM error: {_safe_str(error)}')
+
+        tool_descriptors = self.discover_tools(host=host)
 
         def _call_llm(messages: Any, stop_words: Any = None) -> str:
-            return self._call_host_llm(
+            return self.call_host_llm(
                 host=host,
                 messages=messages,
                 question_role='You are a helpful assistant.',
@@ -221,7 +256,7 @@ class LangChainDriver(AgentBase):
             )
 
         def _invoke_tool(tool_name: str, input: Any = None, kwargs: Optional[Dict[str, Any]] = None) -> Any:  # noqa: A002
-            return self._invoke_host_tool(host=host, tool_name=tool_name, input=input, kwargs=kwargs)
+            return self.invoke_host_tool(host=host, tool_name=tool_name, input=input, kwargs=kwargs)
 
         llm = self._bind_framework_llm(host=host, call_llm=_call_llm, ctx=ctx)
         tools_for_agent = self._bind_framework_tools(
@@ -238,11 +273,15 @@ class LangChainDriver(AgentBase):
         ]
         system_message = SystemMessage(content='\n'.join(system_parts).strip())
 
+        self.sendSSE('thinking', message='Starting LangChain agent...')
         stage = 'create_agent'
         try:
             agent = create_agent(model=llm, tools=tools_for_agent, system_prompt=system_message, debug=False)
             stage = 'invoke'
-            state = agent.invoke({'messages': [HumanMessage(content=_safe_str(agent_input.prompt or ''))]})
+            state = agent.invoke(
+                {'messages': [HumanMessage(content=_safe_str(agent_input.question.getPrompt() or ''))]},
+                config={'callbacks': [_SSECallbackHandler(self.sendSSE)]},
+            )
         except Exception as e:
             raise RuntimeError('LangChain agent {} failed: {}: {}'.format(stage, type(e).__name__, _safe_str(e))) from e
 
@@ -409,4 +448,3 @@ def _safe_str(v: Any) -> str:
         return '' if v is None else str(v)
     except Exception:
         return ''
-

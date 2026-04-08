@@ -35,11 +35,11 @@ namespace engine::task::searchBatch {
 /// @param[in]	ops
 ///		The compiled ops
 //-------------------------------------------------------------------------
-Error Task::search(const engine::index::search::CompiledOps& ops) noexcept {
+Error Task::search(const engine::index::search::CompiledOps &ops) noexcept {
     auto start = time::now();
 
     async::work::Group tasks;
-    for (auto& docId : m_docs) {
+    for (auto &docId : m_docs) {
         if (async::cancelled()) return async::cancelled(_location);
 
         // Stop if we know we've already exceeded the requested count

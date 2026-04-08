@@ -28,8 +28,8 @@ namespace ap::string {
 namespace {
 
 template <typename BufferType, typename... Args>
-inline auto pack(BufferType& buffer, FormatOptions opts,
-                 Args&&... args) noexcept
+inline auto pack(BufferType &buffer, FormatOptions opts,
+                 Args &&...args) noexcept
     -> traits::IfPackAdapter<BufferType, Error> {
     Error ccode;
 
@@ -38,7 +38,7 @@ inline auto pack(BufferType& buffer, FormatOptions opts,
         ccode = {Ec::ResultBufferTooSmall, _location,
                  "Non resizeable empty buffer passed to toString"};
     } else {
-        auto formatArg = [&](size_t index, const auto& arg) noexcept {
+        auto formatArg = [&](size_t index, const auto &arg) noexcept {
             // Render it to our result
             if ((index || opts.lead()) && opts.delimiter()) {
                 // Don't append the delimiter if the last character is
@@ -82,8 +82,8 @@ inline auto pack(BufferType& buffer, FormatOptions opts,
 }
 
 template <typename BufferType, typename... Args>
-inline auto pack(BufferType& _buffer, FormatOptions opts,
-                 Args&&... args) noexcept
+inline auto pack(BufferType &_buffer, FormatOptions opts,
+                 Args &&...args) noexcept
     -> traits::IfNotPackAdapter<BufferType, Error> {
     // Wrap the callers data buffer into an adapter
     auto startPos = CurOrBegPos;
@@ -99,8 +99,8 @@ inline auto pack(BufferType& _buffer, FormatOptions opts,
 // dispatches its arguments to the string pack api that converts
 // each type to a string.
 template <typename BufferType, typename... Args>
-inline Error toStringEx(BufferType& buffer, FormatOptions opts,
-                        Args&&... args) noexcept {
+inline Error toStringEx(BufferType &buffer, FormatOptions opts,
+                        Args &&...args) noexcept {
     return pack(buffer, opts, std::forward<Args>(args)...);
 }
 

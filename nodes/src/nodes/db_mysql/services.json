@@ -13,26 +13,22 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"database"
-	],
+	"classType": ["database", "tool"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-      "noremote"
-	],
+	"capabilities": ["noremote", "invoke"],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,23 +47,14 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A processing component that takes structured table data and inserts it ",
-		"into a MySQL database. Designed for straightforward data ingestion, it ",
-		"supports field mapping and basic configuration of connection credentials ",
-		"and target tables. Ideal for storing processed results or structured outputs, ",
-		"this component ensures reliable insertion of records into relational storage."
-	],
+	"description": ["A processing component that takes structured table data and inserts it ", "into a MySQL database. Designed for straightforward data ingestion, it ", "supports field mapping and basic configuration of connection credentials ", "and target tables. Ideal for storing processed results or structured outputs, ", "this component ensures reliable insertion of records into relational storage."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "mysql.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/4oODEAp",
 	//
 	// Optional:
 	//		Defines the invoke connections that may/must be connected
@@ -86,11 +73,7 @@
 	//
 	"lanes": {
 		"answers": [],
-		"questions": [
-			"table",
-			"text",
-			"answers"
-		]
+		"questions": ["table", "text", "answers"]
 	},
 	"input": [
 		{
@@ -101,13 +84,13 @@
 			"lane": "questions",
 			"output": [
 				{
-					"lane":"table"
+					"lane": "table"
 				},
 				{
-					"lane":"text"
+					"lane": "text"
 				},
 				{
-					"lane":"answers"
+					"lane": "answers"
 				}
 			]
 		}
@@ -130,7 +113,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
@@ -170,32 +153,36 @@
 			"default": "table",
 			"description": "Name of table"
 		},
+		"mysql.db_description": {
+			"type": "string",
+			"title": "Database description",
+			"default": "",
+			"description": "What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"mysql.max_attempts": {
+			"type": "integer",
+			"title": "Max validation attempts",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 20,
+			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL"
+		},
 		"mysql.default": {
 			"object": "default",
-			"properties": [
-				"mysql.host",
-				"mysql.user",
-				"mysql.password",
-				"mysql.database",
-				"mysql.table"
-			]
+			"properties": ["mysql.db_description", "mysql.host", "mysql.user", "mysql.password", "mysql.database", "mysql.table", "mysql.max_attempts"]
 		},
 		"mysql.profile": {
 			"hidden": true,
 			"type": "string",
 			"default": "default",
-			"enum": [
-				[
-					"default",
-					"Default"
-				]
-			],
+			"enum": [["default", "Default"]],
 			"conditional": [
 				{
 					"value": "default",
-					"properties": [
-						"mysql.default"
-					]
+					"properties": ["mysql.default"]
 				}
 			]
 		}
@@ -209,9 +196,7 @@
 		{
 			"section": "Pipe",
 			"title": "MySQL",
-			"properties": [
-				"mysql.profile"
-			]
+			"properties": ["mysql.profile"]
 		}
 	]
 }

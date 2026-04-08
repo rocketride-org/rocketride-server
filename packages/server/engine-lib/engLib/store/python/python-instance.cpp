@@ -73,7 +73,7 @@ IPythonInstanceBase::IPythonInstanceBase(const FactoryArgs &args) noexcept
             // If it isn't in the base class then someone forgot to update
             // the defintion in rocketride python interface
             if (!py::hasattr(pyBaseClass, pyMethodName)) {
-                LOG(ServicePython, "Method", pyMethodName,
+                LOG(DebugOut, "Method", pyMethodName,
                     "was not found in IInstanceBase. Update rocketlib "
                     "interface module.");
                 m_pyMethods |= pyMethod;

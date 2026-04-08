@@ -21,6 +21,9 @@
 - [ ] Wiki updated (if applicable)
 - [ ] Breaking changes documented (if applicable)
 
-## Related Issues
+## Linked Issue
 
-<!-- Link related issues: Fixes #123, Closes #456, Related to #789 -->
+<!-- REQUIRED: Every PR must be linked to an issue. Use one of: -->
+<!-- Fixes #123 / Closes #123 / Resolves #123 -->
+
+Fixes #

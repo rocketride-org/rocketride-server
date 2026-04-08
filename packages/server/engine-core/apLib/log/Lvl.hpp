@@ -53,8 +53,7 @@ APUTIL_DEFINE_ENUM(
     JobResidentProcess,
 
     // engLib
-    Azure,
-    Classify,
+    Azure, Classify,
     ClassifyContext,    // Classification evaluation contexts
     ClassifyDetails,    // Classify logging
     ClassifyDoc,        // Classified document text
@@ -87,7 +86,7 @@ APUTIL_DEFINE_ENUM(
     ServiceIndexer, ServiceInput, ServiceLogger, ServiceNative, ServiceNull,
     ServiceObjectStore, ServiceAzureBlob, ServiceObjectStoreDetails,
     ServiceOutput, ServiceParser, ServicePermissions, ServicePipe,
-    ServicePython, ServiceScan, ServiceTee, ServiceTokenize, ServiceZip,
+    ServiceScan, ServiceTee, ServiceTokenize, ServiceZip,
     ServiceSharepoint, ServiceOutlook,
 
     ScanContainers, ScanObjects,

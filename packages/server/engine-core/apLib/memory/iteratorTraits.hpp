@@ -29,8 +29,8 @@ template <typename DataType>
 struct iterator_traits<::ap::memory::DataView<DataType>> {
     typedef ptrdiff_t difference_type;
     typedef DataType value_type;
-    typedef DataType& reference;
-    typedef DataType* pointer;
+    typedef DataType &reference;
+    typedef DataType *pointer;
     typedef random_access_iterator_tag iterator_category;
 };
 
@@ -38,8 +38,8 @@ template <typename DataType, typename AllocatorType>
 struct iterator_traits<::ap::memory::Data<DataType, AllocatorType>> {
     typedef ptrdiff_t difference_type;
     typedef DataType value_type;
-    typedef DataType& reference;
-    typedef DataType* pointer;
+    typedef DataType &reference;
+    typedef DataType *pointer;
     typedef random_access_iterator_tag iterator_category;
 };
 

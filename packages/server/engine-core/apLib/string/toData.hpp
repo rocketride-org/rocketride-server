@@ -26,34 +26,34 @@
 namespace ap::string {
 
 template <typename ChrT, typename TraitsT, typename AllocT, typename In>
-inline void __fromData(Str<ChrT, TraitsT, AllocT>& str,
-                       const In& in) noexcept(false) {
+inline void __fromData(Str<ChrT, TraitsT, AllocT> &str,
+                       const In &in) noexcept(false) {
     auto byteSize = _fd<memory::PackHdr>(in)->size;
 
     // Strings are always encoded in utf8 when packed
     if constexpr (sizeof(ChrT) == sizeof(Utf8Chr)) {
         str.resize(byteSize);
-        in.read({_reCast<uint8_t*>(str.data()), byteSize});
+        in.read({_reCast<uint8_t *>(str.data()), byteSize});
     } else {
         // Gotta convert it, do it on the stack
         StackTextArena arena;
         StackText utf8Str{arena};
         utf8Str.resize(byteSize);
 
-        in.read({_reCast<uint8_t*>(utf8Str.data()), byteSize});
+        in.read({_reCast<uint8_t *>(utf8Str.data()), byteSize});
 
         __transform(utf8Str, str);
     }
 }
 
 template <typename ChrT, typename TraitsT, typename AllocT, typename Out>
-inline void __toData(const Str<ChrT, TraitsT, AllocT>& str,
-                     Out& out) noexcept(false) {
+inline void __toData(const Str<ChrT, TraitsT, AllocT> &str,
+                     Out &out) noexcept(false) {
     // Strings are always encoded in utf8 when packed
     if constexpr (sizeof(ChrT) == sizeof(Utf8Chr)) {
         auto byteSize = str.size();
         out.write(viewCast(memory::PackHdr(byteSize)));
-        out.write({_reCast<const uint8_t*>(str.data()), byteSize});
+        out.write({_reCast<const uint8_t *>(str.data()), byteSize});
     } else {
         // Gotta convert it, do it on the stack
         StackTextArena arena;

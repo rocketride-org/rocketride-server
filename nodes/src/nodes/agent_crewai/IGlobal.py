@@ -24,48 +24,19 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List
+from typing import Any
 
 from rocketlib import IGlobalBase, IJson, OPEN_MODE
-from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
-    instructions: List[str] = []
     process: Any = None
     agent: Any = None
-
-    _MAX_INSTRUCTION_LEN = 1000
-
-    @staticmethod
-    def normalize_and_validate_instructions(cfg: Dict[str, Any]) -> List[str]:
-        """
-        Normalize and validate the CrewAI node config instructions.
-
-        Expects an array of instruction strings. Each instruction should be a couple
-        of sentences (max 1000 chars).
-        """
-        cfg = IJson.toDict(cfg)
-        if not isinstance(cfg, dict):
-            raise ValueError('Config must be an object')
-
-        raw = cfg.get('instructions')
-        if not isinstance(raw, list):
-            return []
-
-        result: List[str] = []
-        for item in raw:
-            if not isinstance(item, str):
-                continue
-            s = item.strip()
-            if not s:
-                continue
-            if len(s) > IGlobal._MAX_INSTRUCTION_LEN:
-                raise ValueError(
-                    f'Instruction too long (max {IGlobal._MAX_INSTRUCTION_LEN} chars): {s[:50]}...'
-                )
-            result.append(s)
-        return result
+    role: str = 'Assistant'
+    task_description: str = ''
+    goal: str = ''
+    backstory: str = ''
+    expected_output: str = ''
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -77,35 +48,31 @@ class IGlobal(IGlobalBase):
         depends(requirements)
 
         from crewai import Process
+
         self.process = Process.sequential
 
-        # Resolve preconfig profile and validate once globally.
         conn_config = IJson.toDict(self.glb.connConfig) if self.glb.connConfig else {}
-        conn_config = conn_config if isinstance(conn_config, dict) else {}
-        config = Config.getNodeConfig(self.glb.logicalType, conn_config)
-        self.instructions = self.normalize_and_validate_instructions(config)
 
-        # Build driver instance (framework-specific logic lives in crewai.py).
-        from .crewai import CrewDriver
+        self.goal = str(conn_config.get('goal') or '').strip()
+        self.backstory = str(conn_config.get('backstory') or '').strip()
 
-        self.agent = CrewDriver(process=self.process)
+        if self.glb.logicalType == 'agent_crewai_manager':
+            from .crewai import ManagerDriver
 
-    def validateConfig(self):
-        """
-        Validate CrewAI config.
-        """
-        raw_conn = getattr(getattr(self, 'glb', None), 'connConfig', None)
-        conn_config = IJson.toDict(raw_conn) if raw_conn else {}
-        conn_config = conn_config if isinstance(conn_config, dict) else {}
-        try:
-            effective = Config.getNodeConfig(self.glb.logicalType, conn_config)
-        except Exception:
-            effective = {}
+            self.agent = ManagerDriver(self)
+        else:
+            self.role = str(conn_config.get('role') or 'Assistant').strip() or 'Assistant'
+            self.task_description = str(conn_config.get('task_description') or '').strip()
+            self.expected_output = str(conn_config.get('expected_output') or '').strip()
+            from .crewai import CrewDriver
 
-        self.normalize_and_validate_instructions(effective)
-        return None
+            self.agent = CrewDriver(self, process=self.process, role=self.role, task_description=self.task_description, goal=self.goal, backstory=self.backstory, expected_output=self.expected_output)
 
     def endGlobal(self) -> None:
         self.agent = None
         self.process = None
-        self.instructions = []
+        self.role = 'Assistant'
+        self.task_description = ''
+        self.goal = ''
+        self.backstory = ''
+        self.expected_output = ''

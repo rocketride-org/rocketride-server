@@ -41,7 +41,8 @@ from typing import Any, Dict, Tuple
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from mistralai import Mistral
+from ai.common.validation import validate_prompt
+from mistralai.client import Mistral
 
 
 class Chat(ChatBase):
@@ -237,14 +238,14 @@ class Chat(ChatBase):
 
     def chat(self, question: Question) -> Answer:
         """Send a chat message to Mistral AI and get the response."""
-        # Get retry configuration for this model
+        prompt = validate_prompt(question.getPrompt(), self._modelTotalTokens, self.getTokens)
         max_retries, base_delay = self._getRetryConfig(self._model)
         last_error = None
 
         for attempt in range(max_retries + 1):
             try:
                 # Create the chat message
-                messages = [{'role': 'user', 'content': question.getPrompt()}]
+                messages = [{'role': 'user', 'content': prompt}]
 
                 # Make the API call
                 chat_response = self._client.chat.complete(

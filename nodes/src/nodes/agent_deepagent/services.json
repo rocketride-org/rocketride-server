@@ -1,0 +1,89 @@
+{
+	"title": "Deep Agent",
+	"protocol": "agent_deepagent://",
+	"classType": ["agent", "tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.agent_deepagent",
+	"prefix": "agent",
+	"description": ["Single-agent execution using LangChain DeepAgents.", "Adds strategic planning, persistent state, and long-context management on top of LangChain.", "Can be invoked as a tool (`<nodeId>.run_agent`) for hierarchical agent orchestration."],
+	"invoke": {
+		"llm": {
+			"description": "LLM used by the agent",
+			"min": 1
+		},
+		"tool": {
+			"description": "Tools available to the agent (via control-plane invoke)",
+			"min": 0
+		}
+	},
+	"lanes": {
+		"questions": ["answers"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [
+				{
+					"lane": "answers"
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"agent_description": "",
+				"instructions": []
+			}
+		}
+	},
+	"fields": {
+		"agent_description": {
+			"type": "string",
+			"title": "Agent description",
+			"default": "",
+			"optional": true,
+			"description": "What does this agent do? Describe its purpose and capabilities \u2014 this helps parent agents select and invoke it correctly.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"instructions": {
+			"type": "array",
+			"title": "Instructions",
+			"description": "Additional instructions to guide the agent.",
+			"items": {
+				"type": "string",
+				"format": "textarea"
+			}
+		},
+		"agent_deepagent.default": {
+			"object": "default",
+			"properties": ["agent_description", "instructions"]
+		},
+		"agent_deepagent.profile": {
+			"title": "Profile",
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["agent_deepagent.default"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Deep Agent",
+			"properties": ["agent_description", "instructions"]
+		}
+	],
+	"icon": "deepagent.svg",
+	"documentation": "https://docs.rocketride.org"
+}

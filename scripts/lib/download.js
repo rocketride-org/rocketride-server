@@ -12,7 +12,6 @@ const path = require('path');
 const https = require('https');
 const AdmZip = require('adm-zip');
 const tar = require('tar');
-const { execCommand } = require('./exec');
 const { exists, rm, mkdir, unlink, isFile, isDirectory, createWriteStream, writeFile, readJson } = require('./fs');
 const { getState, setState } = require('./state');
 
@@ -24,6 +23,8 @@ const DOWNLOADS_DIR = path.join(PROJECT_ROOT, 'downloads');
 let VERSION = '0.0.0';
 let REPO = 'rocketride-org/rocketride-server';
 let packageJsonLoaded = false;
+
+const TODAY = new Date().toISOString().slice(0, 10).replace(/-/g, '.'); // yyyy.MM.dd
 
 async function loadPackageJson() {
     if (!packageJsonLoaded) {
@@ -48,51 +49,62 @@ async function loadPackageJson() {
  */
 async function downloadFile(url, filename, task) {
     const destPath = path.join(DOWNLOADS_DIR, filename);
-    // Escape dots in filename to prevent state key path issues (e.g., "maven-3.9.6.tar.gz" → "maven-3_9_6_tar_gz")
-    const safeFilename = filename.replace(/\./g, '_');
-    const stateKey = `downloads.${safeFilename}`;
-    
+    const stateKey = ['downloads', url];
+
     // Check if already downloaded (atomic read)
-    if (await getState(stateKey) === true && await exists(destPath)) {
+    if (await getState(stateKey) && await exists(destPath)) {
         return destPath;
     }
-    
+
     // Ensure downloads directory exists
     await mkdir(DOWNLOADS_DIR);
-    
+
     // Download the file
     await _download(url, destPath, task);
-    
+
     // Mark as downloaded (atomic write)
-    await setState(stateKey, true);
-    
+    await setState(stateKey, { name: filename, date: TODAY });
+
     return destPath;
 }
 
 async function downloadGitHubFile(releaseTag, filename, task) {
     const { repo } = await loadPackageJson();
+    const fileUrl = `https://github.com/${repo}/releases/download/${releaseTag}/${filename}`;
+
+    const downloadName = `${releaseTag}_${filename}`;
+    const filePath = path.join(DOWNLOADS_DIR, downloadName);
+    const stateKey = ['downloads', fileUrl];
 
     try {
-        await execCommand('gh', [
-            'release', 'download', releaseTag,
-            '--repo', repo,
-            '--pattern', filename,
-            '--dir', DOWNLOADS_DIR,
-            '--clobber'
-        ], { task, silent: true});
-        return path.join(DOWNLOADS_DIR, filename);
-    } catch (err) {
-        task.output = `GitHub CLI download failed ${releaseTag}/${filename}: ${err.message.trim().replace(/\n/g, ' ')}`;
-    }
+        const fileState = await getState(stateKey);
 
-    const fileurl = `https://github.com/${repo}/releases/download/${releaseTag}/${filename}`;
-    try {
-        return await downloadFile(fileurl, filename, task);
-    } catch (err) {
-        task.output = `GitHub API download failed ${fileurl}: ${err.message.trim().replace(/\n/g, ' ')}`;
-    }
+        // File not found today, so skip it
+        if (fileState && fileState.notFound && fileState.date === TODAY) {
+            return null;
+        }
 
-    return null;
+        // Download the new file or re-download the prerelease if it is out of date
+        if (!await exists(filePath) || (releaseTag.endsWith('-prerelease') && fileState?.date !== TODAY)) {
+            // Ensure downloads directory exists
+            await mkdir(DOWNLOADS_DIR);
+
+            // Download the file
+            await _download(fileUrl, filePath, task);
+
+            await setState(stateKey, { name: downloadName, date: TODAY });
+        }
+
+        return filePath;
+
+    } catch (err) {
+        if (err.message && err.message.includes('HTTP 404')) {
+            // Let’s just note for today that the file cannot be found
+            await setState(stateKey, { notFound: true, date: TODAY });
+            return null;
+        }
+        throw err;
+    }
 }
 
 /**

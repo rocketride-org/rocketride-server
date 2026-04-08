@@ -19,40 +19,37 @@
 			"request": "launch",
 			"console": "integratedTerminal",
 			"windows": {
-				"python": "${workspaceFolder}/dist/server/engine.exe",
+				"python": "${workspaceFolder}/dist/server/engine.exe"
 			},
 			"linux": {
-				"python": "${workspaceFolder}/dist/server/engine",
+				"python": "${workspaceFolder}/dist/server/engine"
 			},
 			"justMyCode": false,
 			"subProcess": true,
+			"cwd": "${workspaceFolder}/dist/server",
 			"program": "${workspaceFolder}/dist/server/ai/eaas.py",
-			"args": [
-				// "--trace=debugOut,debugProtocol,servicePython"
-			]
+			"args": ["--trace=debugOut"]
 		},
 		{
-		//--------------------------------------------------------------------------------------
-		// CLI - python debug
-		//
-		//	Debug the python cli client
-		//--------------------------------------------------------------------------------------
-		"name": "Python - CLI",
+			//--------------------------------------------------------------------------------------
+			// CLI - python debug
+			//
+			//	Debug the python cli client
+			//--------------------------------------------------------------------------------------
+			"name": "Python - CLI",
 			"type": "debugpy",
 			"request": "launch",
 			"console": "externalTerminal",
 			"windows": {
-				"python": "${workspaceFolder}/dist/server/engine.exe",
+				"python": "${workspaceFolder}/dist/server/engine.exe"
 			},
 			"linux": {
-				"python": "${workspaceFolder}/dist/server/engine",
+				"python": "${workspaceFolder}/dist/server/engine"
 			},
 			"justMyCode": true,
 			"subProcess": false,
 			"program": "${workspaceFolder}/packages/client-python/src/rocketride/cli",
-			"args": [
-				"-m"
-			],
+			"args": ["-m"],
 			"env": {
 				"ROCKETRIDE_URI": "http://localhost:5565",
 				"ROCKETRIDE_APIKEY": "MYAPIKEY",
@@ -63,7 +60,7 @@
 		// Debug C++ code
 		//
 		// NOTE: These templates are setup for Windows debugging. To
-		// use Linux debugging, change the types in all launch 
+		// use Linux debugging, change the types in all launch
 		// configurations from "cppvsdbg" to "cppdbg"
 		//-----------------------------------------------------------
 		{
@@ -99,12 +96,8 @@
 			"name": "VSCode Extension (with build)",
 			"type": "extensionHost",
 			"request": "launch",
-			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}/build/vscode"
-			],
-			"outFiles": [
-				"${workspaceFolder}/build/vscode/**/*.js"
-			],
+			"args": ["--extensionDevelopmentPath=${workspaceFolder}/build/vscode"],
+			"outFiles": ["${workspaceFolder}/build/vscode/**/*.js"],
 			"debugWebviews": true,
 			"preLaunchTask": "build all"
 		},
@@ -112,12 +105,8 @@
 			"name": "VSCode Extension (no build)",
 			"type": "extensionHost",
 			"request": "launch",
-			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}/build/vscode"
-			],
-			"outFiles": [
-				"${workspaceFolder}/build/vscode/**/*.js"
-			],
+			"args": ["--extensionDevelopmentPath=${workspaceFolder}/build/vscode"],
+			"outFiles": ["${workspaceFolder}/build/vscode/**/*.js"],
 			"debugWebviews": true
 		}
 	]

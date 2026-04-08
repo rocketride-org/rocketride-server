@@ -29,7 +29,7 @@ namespace ap::json {
 // convert it to another type, it also bootstraps the vars subsystem
 // and will expand all macros within the object tree
 template <typename T, typename... Args>
-inline ErrorOr<T> parse(TextView jsonString, Args&&... args) noexcept {
+inline ErrorOr<T> parse(TextView jsonString, Args &&...args) noexcept {
     json::Value j;
     if (auto ccode = j.parse(jsonString)) return ccode;
 

@@ -1,5 +1,5 @@
 //
-// Common field defintions - these will be merged into the service defintion
+// Common field definitions - these will be merged into the service definition
 // as required by the service
 //
 {
@@ -7,14 +7,6 @@
 		//
 		// Basic fields
 		//
-		"name": {
-			"type": "string",
-			"title": "Data Catalog Name",
-			"minLength": 2,
-			"maxLength": 32,
-			"description": "Use a unique name to identify this data set inside of RocketRide.",
-			"readonly": true
-		},
 		"storePath": {
 			"type": "string",
 			"title": "Store path",
@@ -38,7 +30,7 @@
 			"type": "object"
 		},
 		"source.mode": {
-			"hidden":true,
+			"hidden": true,
 			"type": "string",
 			"default": "Source"
 		},
@@ -48,12 +40,12 @@
 			"default": "Target"
 		},
 		"hideForm": {
-			"hidden":true,
+			"hidden": true,
 			"type": "boolean",
 			"default": true
 		},
 		//
-		// These are the defintions for the estimation subsection
+		// These are the definitions for the estimation subsection
 		//
 		"estimation.accessCost": {
 			"title": "Access cost",
@@ -90,12 +82,7 @@
 		"estimation": {
 			"section": "estimation",
 			"title": "Cost estimations",
-			"properties": [
-				"estimation.accessDelay",
-				"estimation.accessRate",
-				"estimation.storeCost",
-				"estimation.accessCost"
-			]
+			"properties": ["estimation.accessDelay", "estimation.accessRate", "estimation.storeCost", "estimation.accessCost"]
 		},
 		//
 		// Include - subform to add/remove paths/enable*
@@ -133,15 +120,11 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": [
-						"include.index",
-						"include.vectorize"
-					]
+					"properties": ["include.index", "include.vectorize"]
 				},
 				{
 					"value": false,
-					"properties": [
-					]
+					"properties": []
 				}
 			]
 		},
@@ -156,15 +139,11 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": [
-						"include.classify",
-						"include.ocr"
-					]
+					"properties": ["include.classify", "include.ocr"]
 				},
 				{
 					"value": false,
-					"properties": [
-					]
+					"properties": []
 				}
 			]
 		},
@@ -188,15 +167,11 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": [
-						"include.classify",
-						"include.ocr"
-					]
+					"properties": ["include.classify", "include.ocr"]
 				},
 				{
 					"value": false,
-					"properties": [
-					]
+					"properties": []
 				}
 			]
 		},
@@ -206,11 +181,7 @@
 			"minItems": 1,
 			"items": {
 				"type": "object",
-				"properties": [
-					"include.path",
-					"include.permissions",
-					"include.signing"
-				]
+				"properties": ["include.path", "include.permissions", "include.signing"]
 			}
 		},
 		//
@@ -226,7 +197,7 @@
 			"optional": true,
 			"items": {
 				"type": "object",
-				"properties": [ "exclude.path" ]
+				"properties": ["exclude.path"]
 			}
 		},
 		//
@@ -262,9 +233,7 @@
 			"minItems": 1,
 			"items": {
 				"type": "object",
-				"properties": [
-					"DTC.include.path"
-				]
+				"properties": ["DTC.include.path"]
 			}
 		},
 		//
@@ -280,7 +249,7 @@
 			"optional": true,
 			"items": {
 				"type": "object",
-				"properties": [ "DTC.exclude.path" ]
+				"properties": ["DTC.exclude.path"]
 			}
 		},
 		//
@@ -316,9 +285,7 @@
 			"minItems": 1,
 			"items": {
 				"type": "object",
-				"properties": [
-					"Pipe.include.path"
-				]
+				"properties": ["Pipe.include.path"]
 			}
 		},
 		//
@@ -334,7 +301,7 @@
 			"optional": true,
 			"items": {
 				"type": "object",
-				"properties": [ "Pipe.exclude.path" ]
+				"properties": ["Pipe.exclude.path"]
 			}
 		}
 	}

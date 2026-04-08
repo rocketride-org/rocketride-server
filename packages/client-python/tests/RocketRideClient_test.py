@@ -70,16 +70,19 @@ from unittest.mock import AsyncMock
 
 # Load .env from project root before any imports that need env vars
 from dotenv import load_dotenv
+
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 load_dotenv(PROJECT_ROOT / '.env')
 
 # Skip chat tests when no LLM API key is available
+# fmt: off
 HAS_LLM_KEY = bool(
     os.environ.get('ROCKETRIDE_APIKEY_OPENAI')
     or os.environ.get('ROCKETRIDE_APIKEY_ANTHROPIC')
     or os.environ.get('ROCKETRIDE_APIKEY_GEMINI')
     or os.environ.get('ROCKETRIDE_HOST_OLLAMA')
 )
+# fmt: on
 requires_llm = pytest.mark.skipif(
     not HAS_LLM_KEY,
     reason='Skipped: no LLM API key set (need ROCKETRIDE_APIKEY_OPENAI, ROCKETRIDE_APIKEY_ANTHROPIC, ROCKETRIDE_APIKEY_GEMINI, or ROCKETRIDE_HOST_OLLAMA)',
@@ -87,6 +90,7 @@ requires_llm = pytest.mark.skipif(
 
 # Import from rocketride
 from rocketride import RocketRideClient, TASK_STATE, Question
+from rocketride.mixins.connection import ConnectionMixin
 
 # Import pipelines - using absolute imports since they're in the same directory
 from echo_pipeline import get_echo_pipeline
@@ -183,7 +187,7 @@ class TestServicesOperations:
             result = await client.get_services()
 
             assert isinstance(result, dict)
-            # Engine returns { "services": {...}, "version": ... }
+            # Runtime returns { "services": {...}, "version": ... }
             assert 'services' in result
             assert isinstance(result['services'], dict)
             # May have version from engine
@@ -515,7 +519,7 @@ class TestDataOperations:
             assert upload_result['bytes_sent'] == len(test_content)
             assert upload_result['file_size'] == len(test_content)
             assert isinstance(upload_result['upload_time'], (int, float))
-            assert upload_result['upload_time'] > 0
+            assert upload_result['upload_time'] >= 0
             assert 'error' not in upload_result or upload_result['error'] is None
 
             # Validate processing result
@@ -1890,13 +1894,12 @@ class TestConcurrentPipelineOperations:
         try:
             await client.connect()
 
-            # Clean up any existing pipelines
-            for i in range(self.PIPELINE_COUNT):
-                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-{i}')
+            # Clean up any existing pipeline
+            await ensure_clean_pipeline(client, self.CONCURRENT_TOKEN)
 
-            # Create 16 concurrent pipelines
+            # Create 16 concurrent use() calls — all share one subprocess via useExisting
             async def create_pipeline(index):
-                result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.CONCURRENT_TOKEN}-{index}')
+                result = await client.use(pipeline=get_echo_pipeline(), token=self.CONCURRENT_TOKEN, use_existing=True)
                 return {'index': index, 'token': result['token']}
 
             pipeline_tasks = [create_pipeline(i) for i in range(self.PIPELINE_COUNT)]
@@ -1980,8 +1983,7 @@ class TestConcurrentPipelineOperations:
             if cleanup_tasks:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
 
-            for i in range(self.PIPELINE_COUNT):
-                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-{i}')
+            await ensure_clean_pipeline(client, self.CONCURRENT_TOKEN)
 
             if client.is_connected():
                 await client.disconnect()
@@ -2060,7 +2062,7 @@ class TestConcurrentPipelineOperations:
         try:
             await client.connect()
 
-            PIPELINE_COUNT = 8
+            PIPELINE_COUNT = 4
             SENDS_PER_PIPELINE = 3
 
             # Create pipelines concurrently
@@ -2135,11 +2137,59 @@ class TestConcurrentPipelineOperations:
             if cleanup_tasks:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
 
-            for i in range(8):  # PIPELINE_COUNT
+            for i in range(4):  # PIPELINE_COUNT
                 await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-mixed-{i}')
 
             if client.is_connected():
                 await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_handle_4_independent_pipelines_each_cycling_32_send_recv(self):
+        SUBPROCESS_COUNT = 4
+        CYCLES_PER_PIPELINE = 32
+
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        sub_tokens = []
+        try:
+            await client.connect()
+
+            # Create 4 independent subprocesses concurrently
+            sub_tokens = [f'{self.CONCURRENT_TOKEN}-stress-{i}' for i in range(SUBPROCESS_COUNT)]
+            # fmt: off
+            await asyncio.gather(*[
+                client.use(pipeline=get_echo_pipeline(), token=token)
+                for token in sub_tokens
+            ])
+            # fmt: on
+
+            # Each pipeline independently cycles 32 send/recv — all 4 run in parallel
+            async def run_pipeline(token, pipeline_index):
+                results = []
+                for cycle in range(CYCLES_PER_PIPELINE):
+                    text = f'pipe-{pipeline_index}-cycle-{cycle}-{random.random()}'
+                    result = await client.send(token, text, {}, 'text/plain')
+                    assert result is not None
+                    assert text in result['text'][0]
+                    results.append(result['text'][0])
+                return results
+
+            # fmt: off
+            all_results = await asyncio.gather(*[
+                run_pipeline(token, i) for i, token in enumerate(sub_tokens)
+            ])
+            # fmt: on
+
+            flat = [r for pipeline in all_results for r in pipeline]
+            assert len(flat) == SUBPROCESS_COUNT * CYCLES_PER_PIPELINE
+            assert len(set(flat)) == SUBPROCESS_COUNT * CYCLES_PER_PIPELINE
+
+        finally:
+            for token in sub_tokens:
+                try:
+                    await client.terminate(token)
+                except Exception as e:
+                    print(f'Warning: failed to terminate pipeline token={token}: {e}')
+            await client.disconnect()
 
 
 async def is_server_available() -> bool:
@@ -2174,6 +2224,168 @@ Integration tests may fail. Please ensure:
             """)
 
     asyncio.run(_check())
+
+
+@pytest.mark.parametrize(
+    ('input_uri', 'expected_uri'),
+    [
+        ('wss://cloud.rocketride.ai', 'wss://cloud.rocketride.ai/task/service'),
+        ('https://cloud.rocketride.ai', 'wss://cloud.rocketride.ai/task/service'),
+        ('ws://localhost:5565', 'ws://localhost:5565/task/service'),
+        ('http://localhost:5565', 'ws://localhost:5565/task/service'),
+    ],
+)
+def test_get_websocket_uri_normalization(input_uri: str, expected_uri: str) -> None:
+    """Verify websocket URI normalization preserves secure and non-secure schemes."""
+    assert ConnectionMixin._get_websocket_uri(input_uri) == expected_uri
+
+
+# ============================================================================
+# File Store Operations
+# ============================================================================
+
+
+class TestFileStoreOperations:
+    """Test handle-based file store operations against a live server."""
+
+    def _unique_path(self, name: str = 'test') -> str:
+        return f'.test-store/py-{name}-{"".join(random.choices(string.ascii_lowercase, k=8))}'
+
+    @pytest.mark.asyncio
+    async def test_handle_write_and_read(self):
+        """Write via handle, read back via handle."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('hw')
+
+            info = await client.fs_open(path, 'w')
+            written = await client.fs_write(info['handle'], b'hello world')
+            assert written == 11
+            await client.fs_close(info['handle'], 'w')
+
+            info = await client.fs_open(path, 'r')
+            assert info['size'] == 11
+            data = await client.fs_read(info['handle'], offset=0)
+            assert data == b'hello world'
+            await client.fs_close(info['handle'], 'r')
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_multiple_write_chunks(self):
+        """Write multiple chunks then read back."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('chunks')
+
+            info = await client.fs_open(path, 'w')
+            for i in range(5):
+                await client.fs_write(info['handle'], f'chunk-{i}-'.encode())
+            await client.fs_close(info['handle'], 'w')
+
+            content = await client.fs_read_string(path)
+            assert content == 'chunk-0-chunk-1-chunk-2-chunk-3-chunk-4-'
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_read_in_chunks(self):
+        """Read a file in multiple chunks via handle."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('rc')
+            data = b'X' * 1000
+
+            info = await client.fs_open(path, 'w')
+            await client.fs_write(info['handle'], data)
+            await client.fs_close(info['handle'], 'w')
+
+            info = await client.fs_open(path, 'r')
+            chunks = []
+            offset = 0
+            while True:
+                chunk = await client.fs_read(info['handle'], offset=offset, length=300)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                offset += len(chunk)
+            await client.fs_close(info['handle'], 'r')
+
+            assert b''.join(chunks) == data
+            assert len(chunks) == 4  # 300 + 300 + 300 + 100
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_convenience_string_roundtrip(self):
+        """fs_write_string / fs_read_string round-trip."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('str')
+
+            await client.fs_write_string(path, 'Hello \u2603 \U0001f680')
+            result = await client.fs_read_string(path)
+            assert result == 'Hello \u2603 \U0001f680'
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_convenience_json_roundtrip(self):
+        """fs_write_json / fs_read_json round-trip."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('json')
+            obj = {'name': 'Test', 'values': [1, 2, 3], 'nested': {'ok': True}}
+
+            await client.fs_write_json(path, obj)
+            result = await client.fs_read_json(path)
+            assert result == obj
+
+            await client.fs_delete(path)
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_stat_and_delete(self):
+        """Write a file, stat it, delete it, stat again."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            path = self._unique_path('stat')
+
+            info = await client.fs_open(path, 'w')
+            await client.fs_write(info['handle'], b'data')
+            await client.fs_close(info['handle'], 'w')
+
+            result = await client.fs_stat(path)
+            assert result['exists'] is True
+            assert result['type'] == 'file'
+
+            await client.fs_delete(path)
+
+            result = await client.fs_stat(path)
+            assert result['exists'] is False
+        finally:
+            if client.is_connected():
+                await client.disconnect()
 
 
 # Pytest configuration

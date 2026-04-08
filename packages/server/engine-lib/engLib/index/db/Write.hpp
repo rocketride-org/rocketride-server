@@ -346,9 +346,9 @@ public:
     ///		This method returns pointer to requested entry in a given segment
     ///		or nullptr if requested entry is out of bound for current segment.
     ///		In the first place it looks if requested entry is loaded already
-    ///from 		the file and resides in the memory within our large buffer. If it is
-    ///		not there it loads new chunk of current segment from file into
-    ///buffer.
+    /// from 		the file and resides in the memory within our large buffer.
+    /// If it is 		not there it loads new chunk of current segment from
+    /// file into buffer.
     ///	@param[in]	segmentId
     ///		Id of the segment we are looking into
     ///	@param[in]	virtualEntry
@@ -399,16 +399,16 @@ public:
         // Update the window on where we are at
         m_segmentsControlTable[segmentId].chunkOffset = virtualEntry;
 
-        // Since we read virtaulEntry into element[0], return it�s address
+        // Since we read virtualEntry into element[0], return its address
         return m_invertedIndexSegment.data() + segmentId * m_chunkEntries;
     }
 
     //-----------------------------------------------------------------
     /// @details
     ///		This method prepares our large buffer for merge sort phase as well
-    ///as 		initializes some valuable variables for further usage. 		It computes how
-    ///much entries from each segment we can read into buffer, 		reads this chunk
-    ///from each segment and puts these chunks into buffer.
+    /// as 		initializes some valuable variables for further usage. 		It
+    /// computes how much entries from each segment we can read into buffer,
+    /// reads this chunk from each segment and puts these chunks into buffer.
     ///	@returns
     ///		Error
     //-----------------------------------------------------------------
@@ -464,9 +464,9 @@ public:
     ///		This method returns pointer to requested entry in a given segment
     ///		or nullptr if requested entry is out of bound for current segment.
     ///		In the first place it looks if requested entry is loaded already
-    ///from 		the file and resides in the memory within our large buffer. If it is
-    ///		not there it loads new chunk of current segment from file into
-    ///buffer.
+    /// from 		the file and resides in the memory within our large buffer.
+    /// If it is 		not there it loads new chunk of current segment from
+    /// file into buffer.
     ///	@param[in]	segmentId
     ///		Id of the segment we are looking into
     ///	@param[in]	virtualEntry
@@ -534,14 +534,14 @@ public:
     //-----------------------------------------------------------------
     /// @details
     ///		This method compresses and writes into word index file list of
-    ///compressed 		or uncompressed document ids for particular word id.
+    /// compressed 		or uncompressed document ids for particular word id.
     ///	@param[in]	wordId
     ///		Id of the word we are processing
     ///	@param[in]	docIds
     ///		Vector of document ids where this word id presented (inverted index)
     ///	@param[in]	baseOffset
     ///		Reference to a variable holding offset where we start writing doc
-    ///ids 		in word index file
+    /// ids 		in word index file
     ///	@param[in]	offsets
     ///		Reference to offsets table to update it
     ///	@param[in]	wordDocIdSetIndex
@@ -861,7 +861,7 @@ public:
         const auto start = time::now();
 
         auto writeEntry =
-            [&](auto& info, auto& cnt, Opt<Function<Error()>> write = {},
+            [&](auto &info, auto &cnt, Opt<Function<Error()>> write = {},
                 Opt<Function<size_t()>> size = {}) noexcept -> Error {
             // Begin by aligning up to a page boundary
             if (auto ccode = m_stream->tryWriteAlign()) return ccode;
@@ -884,13 +884,13 @@ public:
             } else {
                 if constexpr (traits::IsVectorV<decltype(cnt)>) {
                     if (auto ccode = m_stream->tryWrite(
-                            {_reCast<const uint8_t*>(cnt.data()),
+                            {_reCast<const uint8_t *>(cnt.data()),
                              cnt.size() * valueTypeSize}))
                         return ccode;
                 } else {
-                    for (auto& e : cnt) {
+                    for (auto &e : cnt) {
                         if (auto ccode = m_stream->tryWrite(
-                                {_reCast<const uint8_t*>(&e), valueTypeSize}))
+                                {_reCast<const uint8_t *>(&e), valueTypeSize}))
                             return ccode;
                     }
                 }
@@ -901,7 +901,7 @@ public:
         };
 
         tag::WordIndex hdr;
-        auto& offsets = hdr.offsets;
+        auto &offsets = hdr.offsets;
 
         //
         // DocWordIdLists
@@ -964,7 +964,7 @@ public:
                 copyBuffer.resize(i);
                 auto docIdsSize = i;
 #else
-            for (auto& [wordId, docIds] : *m_wordDocIdSetIndex) {
+            for (auto &[wordId, docIds] : *m_wordDocIdSetIndex) {
                 auto docIdsSize = docIds.size();
 #endif
 
@@ -1059,7 +1059,7 @@ public:
                      writeEntry(
                          offsets.docIdIndex, *m_docIdIndex,
                          [this]() noexcept -> Error {
-                             for (auto& [docId, hashRef] : *m_docIdIndex) {
+                             for (auto &[docId, hashRef] : *m_docIdIndex) {
                                  auto entry = makePair(docId, hashRef.get());
                                  if (auto ccode = m_stream->tryWrite(
                                          memory::viewCast(entry)))
@@ -1100,7 +1100,7 @@ public:
         m_wordCount = m_wordNoCaseIndex->size();
 
         // now put all values from m_wordNoCaseIndex into m_wordIdIndex
-        for (auto& [proxyWord, wordId] : *m_wordNoCaseIndex) {
+        for (auto &[proxyWord, wordId] : *m_wordNoCaseIndex) {
             m_wordIdIndex->try_emplace(wordId, proxyWord);
         }
 
@@ -1165,7 +1165,7 @@ public:
     //			be saved in a self describing chunks format, false otherwise
     //	@param[in]
     //		isFirstChunk - true means saving first chunk of chunked doc
-    //structure
+    // structure
     //	@param[in]
     //		isLastChunk - true means saving last chunk of chunked doc structure
     //---------------------------------------------------------------------
@@ -1322,13 +1322,13 @@ public:
     Error commit(const DocHash &hash, WordIdList &wordIds,
                  engine::store::VirtualBuffer &vbuf,
                  bool docStructChunked) noexcept {
-        // if doc structure is chunked check its size
-        if (docStructChunked) {
-            if (!vbuf.size()) return {};
-        } else {  // otherwise doc structure is fully presented in wordIds so
-                  // check its size
-            // If we have no words, then no need to add it
-            if (!wordIds.size()) return {};
+        if ((docStructChunked && !vbuf.size()) ||
+            (!docStructChunked && !wordIds.size())) {
+            // Register the document hash even with no words so that
+            // lookupDocId will find it during renderObject (e.g. images)
+            addDocHashFirst(hash);
+            ++m_docCount;
+            return {};
         }
 
         // Allocate this document id
@@ -1652,8 +1652,8 @@ private:
     /// @details
     ///		Buffer that will automatically create temp file on disk
     ///		as we write segments of inverted index into it. While committing the
-    ///document 		we write segments into it. When closing word db file we read
-    ///from it.
+    /// document 		we write segments into it. When closing word db file we
+    /// read from it.
     //-----------------------------------------------------------------
     engine::store::VirtualBuffer m_segmentsFile{config::paths().cache};
 
@@ -1666,7 +1666,7 @@ private:
     //-----------------------------------------------------------------
     /// @details
     ///		The number of entries from each segment we can put into the buffer
-    ///at once
+    /// at once
     //-----------------------------------------------------------------
     size_t m_chunkEntries = 0;
 

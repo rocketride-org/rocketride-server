@@ -31,25 +31,25 @@ struct CountSize {
         return _cast<bool>(size) || _cast<bool>(count);
     }
 
-    decltype(auto) operator+=(const CountSize& other) noexcept {
+    decltype(auto) operator+=(const CountSize &other) noexcept {
         if (this == &other) return *this;
         size += other.size;
         count += other.count;
         return *this;
     }
 
-    decltype(auto) operator=(const CountSize& other) noexcept {
+    decltype(auto) operator=(const CountSize &other) noexcept {
         if (this == &other) return *this;
         count = other.count;
         size = other.size;
         return *this;
     }
 
-    bool operator<(const CountSize& other) const noexcept {
+    bool operator<(const CountSize &other) const noexcept {
         return count < other.count || size < other.size;
     }
 
-    bool operator<=(const CountSize& other) const noexcept {
+    bool operator<=(const CountSize &other) const noexcept {
         return count <= other.count || size <= other.size;
     }
 
@@ -59,7 +59,7 @@ struct CountSize {
     }
 
     template <typename Buffer>
-    auto __toString(Buffer& buff) const noexcept {
+    auto __toString(Buffer &buff) const noexcept {
         return _tsb(buff, count, "[", size, "]");
     }
 

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { JsonTree } from './JsonTree';
 
 // ============================================================================
 // TYPES
@@ -11,7 +12,8 @@ export interface TraceRow {
 	lane: string;
 	filterName: string;
 	depth: number;
-	data?: Record<string, unknown>;
+	entryData?: Record<string, unknown>;
+	exitData?: Record<string, unknown>;
 	result?: string;
 	error?: string;
 	timestamp: number;
@@ -144,10 +146,7 @@ function findNodeById(nodes: TraceTreeNode[], id: number): TraceTreeNode | null 
 // HELPER: Collect all visible nodes from a tree (respecting collapsed state)
 // ============================================================================
 
-function collectVisibleNodes(
-	nodes: TraceTreeNode[],
-	expandedNodes: Set<number>
-): TraceTreeNode[] {
+function collectVisibleNodes(nodes: TraceTreeNode[], expandedNodes: Set<number>): TraceTreeNode[] {
 	const result: TraceTreeNode[] = [];
 	for (const node of nodes) {
 		result.push(node);
@@ -164,14 +163,9 @@ function collectVisibleNodes(
 
 const BATCH_SIZE = 10;
 
-type RenderItem =
-	| { type: 'node'; node: TraceTreeNode }
-	| { type: 'more'; remaining: number; groupKey: string; depth: number };
+type RenderItem = { type: 'node'; node: TraceTreeNode } | { type: 'more'; remaining: number; groupKey: string; depth: number };
 
-function buildRenderItems(
-	nodes: TraceTreeNode[],
-	moreRevealed: Map<string, number>
-): RenderItem[] {
+function buildRenderItems(nodes: TraceTreeNode[], moreRevealed: Map<string, number>): RenderItem[] {
 	const items: RenderItem[] = [];
 	let i = 0;
 
@@ -187,13 +181,7 @@ function buildRenderItems(
 
 		// Find consecutive run of identical leaf nodes (same filterName + lane + depth)
 		let runEnd = i + 1;
-		while (
-			runEnd < nodes.length &&
-			nodes[runEnd].children.length === 0 &&
-			nodes[runEnd].row.filterName === node.row.filterName &&
-			nodes[runEnd].row.lane === node.row.lane &&
-			nodes[runEnd].row.depth === node.row.depth
-		) {
+		while (runEnd < nodes.length && nodes[runEnd].children.length === 0 && nodes[runEnd].row.filterName === node.row.filterName && nodes[runEnd].row.lane === node.row.lane && nodes[runEnd].row.depth === node.row.depth) {
 			runEnd++;
 		}
 
@@ -218,7 +206,7 @@ function buildRenderItems(
 					type: 'more',
 					remaining,
 					groupKey,
-					depth: node.row.depth
+					depth: node.row.depth,
 				});
 			}
 		}
@@ -292,35 +280,31 @@ const TraceObjectRow: React.FC<{
 	onExpandAll: () => void;
 	onCollapseAll: () => void;
 }> = ({ group, expanded, onToggle, onExpandAll, onCollapseAll }) => {
-	const timeDisplay = group.hasError
-		? <span className="trace-col-time trace-time-error">ERROR</span>
-		: <span className="trace-col-time">{formatElapsed(group.totalElapsed)}</span>;
+	const timeDisplay = group.hasError ? <span className="trace-col-time trace-time-error">ERROR</span> : <span className="trace-col-time">{formatElapsed(group.totalElapsed)}</span>;
 
 	const handleClick = (e: React.MouseEvent) => {
 		if (e.shiftKey) {
-			expanded ? onCollapseAll() : onExpandAll();
+			if (expanded) {
+				onCollapseAll();
+			} else {
+				onExpandAll();
+			}
 		} else {
 			onToggle();
 		}
 	};
 
-	const chevronTitle = expanded
-		? 'Click to collapse (Shift-Click to collapse all)'
-		: 'Click to expand (Shift-Click to expand all)';
+	const chevronTitle = expanded ? 'Click to collapse (Shift-Click to collapse all)' : 'Click to expand (Shift-Click to expand all)';
 
-	const rowClass = [
-		'trace-row',
-		'trace-object-row',
-		group.inFlight ? 'trace-in-flight' : '',
-	].filter(Boolean).join(' ');
+	const rowClass = ['trace-row', 'trace-object-row', group.inFlight ? 'trace-in-flight' : ''].filter(Boolean).join(' ');
 
 	return (
 		<div className={rowClass} onClick={handleClick}>
-			<span className="trace-chev" title={chevronTitle}>{expanded ? '\u25BC' : '\u25B6'}</span>
-			<span className="trace-name trace-name-file">{group.objectName}</span>
-			<span className="trace-col-lane">
-				{group.inFlight && <span className="trace-in-flight-badge">processing</span>}
+			<span className="trace-chev" title={chevronTitle}>
+				{expanded ? '\u25BC' : '\u25B6'}
 			</span>
+			<span className="trace-name trace-name-file">{group.objectName}</span>
+			<span className="trace-col-lane">{group.inFlight && <span className="trace-in-flight-badge">processing</span>}</span>
 			{timeDisplay}
 		</div>
 	);
@@ -345,11 +329,7 @@ const TraceNodeRow: React.FC<{
 	const elapsed = getRowElapsed(row);
 	const indent = row.depth * 20 + 28;
 
-	const className = [
-		'trace-row',
-		selected ? 'selected' : '',
-		isError ? 'error' : '',
-	].filter(Boolean).join(' ');
+	const className = ['trace-row', selected ? 'selected' : '', isError ? 'error' : ''].filter(Boolean).join(' ');
 
 	const handleClick = () => {
 		onSelect();
@@ -359,40 +339,31 @@ const TraceNodeRow: React.FC<{
 		if (hasChildren) {
 			e.stopPropagation();
 			if (e.shiftKey) {
-				expanded ? onCollapseAll() : onExpandAll();
+				if (expanded) {
+					onCollapseAll();
+				} else {
+					onExpandAll();
+				}
 			} else {
 				onToggleExpand();
 			}
 		}
 	};
 
-	const chevronTitle = hasChildren
-		? (expanded
-			? 'Click to collapse (Shift-Click to collapse all)'
-			: 'Click to expand (Shift-Click to expand all)')
-		: undefined;
+	const chevronTitle = hasChildren ? (expanded ? 'Click to collapse (Shift-Click to collapse all)' : 'Click to expand (Shift-Click to expand all)') : undefined;
 
 	return (
 		<div className={className} style={{ paddingLeft: indent }} onClick={handleClick}>
-			<span
-				className="trace-chev"
-				onClick={handleChevronClick}
-				title={chevronTitle}
-			>
+			<span className="trace-chev" onClick={handleChevronClick} title={chevronTitle}>
 				{hasChildren ? (expanded ? '\u25BC' : '\u25B6') : ''}
 			</span>
 			{isError && <span className="trace-err-icon">{'\u2716'}</span>}
 			<span className="trace-dot" style={{ backgroundColor: laneColor(row.lane) }} />
-			<span className={`trace-name ${isError ? 'trace-name-error' : ''}`}>
-				{row.filterName}
-			</span>
+			<span className={`trace-name ${isError ? 'trace-name-error' : ''}`}>{row.filterName}</span>
 			<span className="trace-col-lane">
 				<span className={`trace-badge trace-badge-${row.lane}`}>{laneDisplayName(row.lane)}</span>
 			</span>
-			{isError
-				? <span className="trace-col-time trace-time-error">ERROR</span>
-				: <span className="trace-col-time">{formatElapsed(elapsed)}</span>
-			}
+			{isError ? <span className="trace-col-time trace-time-error">ERROR</span> : <span className="trace-col-time">{formatElapsed(elapsed)}</span>}
 		</div>
 	);
 };
@@ -418,9 +389,7 @@ const TraceDetailPanel: React.FC<{
 	const { row } = node;
 	const elapsed = getRowElapsed(row);
 	const parentElapsed = node.parent ? getRowElapsed(node.parent.row) : null;
-	const pctOfParent = elapsed != null && parentElapsed != null && parentElapsed > 0
-		? Math.round((elapsed / parentElapsed) * 100)
-		: null;
+	const pctOfParent = elapsed != null && parentElapsed != null && parentElapsed > 0 ? Math.round((elapsed / parentElapsed) * 100) : null;
 
 	return (
 		<div className="trace-detail-panel">
@@ -469,10 +438,7 @@ const TraceDetailPanel: React.FC<{
 					{pctOfParent != null && (
 						<>
 							<div className="trace-dp-bar">
-								<div
-									className="trace-dp-bar-fill"
-									style={{ width: `${Math.min(pctOfParent, 100)}%` }}
-								/>
+								<div className="trace-dp-bar-fill" style={{ width: `${Math.min(pctOfParent, 100)}%` }} />
 							</div>
 							<div className="trace-dp-bar-label">
 								{pctOfParent}% of parent ({node.parent!.row.filterName}.{node.parent!.row.lane}: {formatElapsed(parentElapsed)})
@@ -483,46 +449,33 @@ const TraceDetailPanel: React.FC<{
 			)}
 
 			{/* Input Data */}
-			{row.data && (
+			{row.entryData && (
 				<div className="trace-dp-sect">
-					<div
-						className="trace-dp-toggle"
-						onClick={() => setInputExpanded(!inputExpanded)}
-					>
+					<div className="trace-dp-toggle" onClick={() => setInputExpanded(!inputExpanded)}>
 						<span className="trace-dp-arr">{inputExpanded ? '\u25BC' : '\u25B6'}</span>
 						Input Data
 					</div>
 					{inputExpanded && (
-						<pre className="trace-dp-code">
-							{JSON.stringify(row.data, null, 2)}
-						</pre>
+						<div className="trace-dp-tree">
+							<JsonTree data={row.entryData} defaultExpanded={2} />
+						</div>
 					)}
 				</div>
 			)}
 
 			{/* Output Data */}
-			{(row.result || row.error) && (
+			{(row.exitData || row.error) && (
 				<div className="trace-dp-sect">
-					<div
-						className="trace-dp-toggle"
-						onClick={() => setOutputExpanded(!outputExpanded)}
-					>
+					<div className="trace-dp-toggle" onClick={() => setOutputExpanded(!outputExpanded)}>
 						<span className="trace-dp-arr">{outputExpanded ? '\u25BC' : '\u25B6'}</span>
 						Output Data
 					</div>
 					{outputExpanded && (
-						<pre className="trace-dp-code">
-							{JSON.stringify(
-								row.error
-									? { result: row.result, error: row.error }
-									: { result: row.result },
-								null, 2
-							)}
-						</pre>
+						<div className="trace-dp-tree">
+							<JsonTree data={row.error ? { error: row.error } : row.exitData} defaultExpanded={2} />
+						</div>
 					)}
-					{!outputExpanded && (
-						<div className="trace-dp-expand-hint">Click to expand</div>
-					)}
+					{!outputExpanded && <div className="trace-dp-expand-hint">Click to expand</div>}
 				</div>
 			)}
 		</div>
@@ -533,10 +486,7 @@ const TraceDetailPanel: React.FC<{
 // MAIN COMPONENT
 // ============================================================================
 
-export const TraceSection: React.FC<TraceSectionProps> = ({
-	rows,
-	onClear
-}) => {
+export const TraceSection: React.FC<TraceSectionProps> = ({ rows, onClear }) => {
 	const [expandedObjects, setExpandedObjects] = useState<Set<number>>(new Set());
 	const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
 	const [selectedRowId, setSelectedRowId] = useState<number | null>(null);
@@ -548,12 +498,15 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 	const [resizeStartX, setResizeStartX] = useState(0);
 	const [resizeStartWidth, setResizeStartWidth] = useState(0);
 
-	const handleResizeStart = useCallback((e: React.MouseEvent) => {
-		e.preventDefault();
-		setIsResizing(true);
-		setResizeStartX(e.clientX);
-		setResizeStartWidth(detailWidth);
-	}, [detailWidth]);
+	const handleResizeStart = useCallback(
+		(e: React.MouseEvent) => {
+			e.preventDefault();
+			setIsResizing(true);
+			setResizeStartX(e.clientX);
+			setResizeStartWidth(detailWidth);
+		},
+		[detailWidth]
+	);
 
 	useEffect(() => {
 		if (!isResizing) return;
@@ -584,7 +537,7 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 	}, [selectedRowId, objectGroups]);
 
 	const toggleObject = useCallback((docId: number) => {
-		setExpandedObjects(prev => {
+		setExpandedObjects((prev) => {
 			const next = new Set(prev);
 			if (next.has(docId)) next.delete(docId);
 			else next.add(docId);
@@ -593,7 +546,7 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 	}, []);
 
 	const toggleNode = useCallback((id: number) => {
-		setExpandedNodes(prev => {
+		setExpandedNodes((prev) => {
 			const next = new Set(prev);
 			if (next.has(id)) next.delete(id);
 			else next.add(id);
@@ -603,12 +556,12 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 
 	const expandAllForObject = useCallback((group: TraceObjectGroup) => {
 		const allIds = collectAllParentIds(group.nodes);
-		setExpandedObjects(prev => {
+		setExpandedObjects((prev) => {
 			const next = new Set(prev);
 			next.add(group.docId);
 			return next;
 		});
-		setExpandedNodes(prev => {
+		setExpandedNodes((prev) => {
 			const next = new Set(prev);
 			for (const id of allIds) next.add(id);
 			return next;
@@ -617,7 +570,7 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 
 	const expandAllForNode = useCallback((node: TraceTreeNode) => {
 		const allIds = collectAllParentIds(node.children);
-		setExpandedNodes(prev => {
+		setExpandedNodes((prev) => {
 			const next = new Set(prev);
 			next.add(node.row.id);
 			for (const id of allIds) next.add(id);
@@ -627,12 +580,12 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 
 	const collapseAllForObject = useCallback((group: TraceObjectGroup) => {
 		const allIds = collectAllParentIds(group.nodes);
-		setExpandedObjects(prev => {
+		setExpandedObjects((prev) => {
 			const next = new Set(prev);
 			next.delete(group.docId);
 			return next;
 		});
-		setExpandedNodes(prev => {
+		setExpandedNodes((prev) => {
 			const next = new Set(prev);
 			for (const id of allIds) next.delete(id);
 			return next;
@@ -641,7 +594,7 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 
 	const collapseAllForNode = useCallback((node: TraceTreeNode) => {
 		const allIds = collectAllParentIds(node.children);
-		setExpandedNodes(prev => {
+		setExpandedNodes((prev) => {
 			const next = new Set(prev);
 			next.delete(node.row.id);
 			for (const id of allIds) next.delete(id);
@@ -650,7 +603,7 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 	}, []);
 
 	const revealMore = useCallback((groupKey: string) => {
-		setMoreRevealed(prev => {
+		setMoreRevealed((prev) => {
 			const next = new Map(prev);
 			next.set(groupKey, (next.get(groupKey) ?? 0) + 1);
 			return next;
@@ -658,7 +611,7 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 	}, []);
 
 	const selectRow = useCallback((id: number) => {
-		setSelectedRowId(prev => prev === id ? null : id);
+		setSelectedRowId((prev) => (prev === id ? null : id));
 	}, []);
 
 	return (
@@ -680,47 +633,21 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 					<div className="trace-layout">
 						<div className="trace-tree-scroll">
 							<TraceTreeHeader />
-							{objectGroups.map(group => {
+							{objectGroups.map((group) => {
 								const isExpanded = expandedObjects.has(group.docId);
-								const visibleNodes = isExpanded
-									? collectVisibleNodes(group.nodes, expandedNodes)
-									: [];
-								const renderItems = isExpanded
-									? buildRenderItems(visibleNodes, moreRevealed)
-									: [];
+								const visibleNodes = isExpanded ? collectVisibleNodes(group.nodes, expandedNodes) : [];
+								const renderItems = isExpanded ? buildRenderItems(visibleNodes, moreRevealed) : [];
 
 								return (
 									<React.Fragment key={group.docId}>
-										<TraceObjectRow
-											group={group}
-											expanded={isExpanded}
-											onToggle={() => toggleObject(group.docId)}
-											onExpandAll={() => expandAllForObject(group)}
-											onCollapseAll={() => collapseAllForObject(group)}
-										/>
-										{renderItems.map(item => {
+										<TraceObjectRow group={group} expanded={isExpanded} onToggle={() => toggleObject(group.docId)} onExpandAll={() => expandAllForObject(group)} onCollapseAll={() => collapseAllForObject(group)} />
+										{renderItems.map((item) => {
 											if (item.type === 'node') {
 												const node = item.node;
-												return (
-													<TraceNodeRow
-														key={node.row.id}
-														node={node}
-														expanded={expandedNodes.has(node.row.id)}
-														selected={selectedRowId === node.row.id}
-														onToggleExpand={() => toggleNode(node.row.id)}
-														onExpandAll={() => expandAllForNode(node)}
-														onCollapseAll={() => collapseAllForNode(node)}
-														onSelect={() => selectRow(node.row.id)}
-													/>
-												);
+												return <TraceNodeRow key={node.row.id} node={node} expanded={expandedNodes.has(node.row.id)} selected={selectedRowId === node.row.id} onToggleExpand={() => toggleNode(node.row.id)} onExpandAll={() => expandAllForNode(node)} onCollapseAll={() => collapseAllForNode(node)} onSelect={() => selectRow(node.row.id)} />;
 											}
 											return (
-												<div
-													key={`more-${item.groupKey}`}
-													className="trace-row trace-more-row"
-													style={{ paddingLeft: item.depth * 20 + 28 }}
-													onClick={() => revealMore(item.groupKey)}
-												>
+												<div key={`more-${item.groupKey}`} className="trace-row trace-more-row" style={{ paddingLeft: item.depth * 20 + 28 }} onClick={() => revealMore(item.groupKey)}>
 													<span className="trace-chev" />
 													<span className="trace-more-label">
 														{item.remaining} more... (click to show next {Math.min(BATCH_SIZE, item.remaining)})
@@ -733,11 +660,7 @@ export const TraceSection: React.FC<TraceSectionProps> = ({
 							})}
 						</div>
 						<div className="trace-detail-wrapper" style={{ width: detailWidth }}>
-							<div
-								className="trace-resize-handle"
-								onMouseDown={handleResizeStart}
-								aria-label="Resize detail panel"
-							/>
+							<div className="trace-resize-handle" onMouseDown={handleResizeStart} aria-label="Resize detail panel" />
 							<TraceDetailPanel node={selectedNode} />
 						</div>
 					</div>

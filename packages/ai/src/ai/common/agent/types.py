@@ -10,7 +10,7 @@ Defines the type contracts shared by all agent framework drivers:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, List, Optional, Protocol, TypedDict
+from typing import Any, Dict, List, Optional, Protocol, TypedDict
 
 from ai.common.schema import Question
 
@@ -22,17 +22,37 @@ AGENT_TOOL_CALLS_TYPE = 'RocketRide.agent.tool_calls.v1'
 class AgentHostLLM(Protocol):
     """Minimal host interface for invoking an LLM control-plane operation."""
 
-    def invoke(self, param: Any) -> Any: ...
+    def invoke(self, param: Any) -> Any:
+        pass
 
 
 class AgentHostTools(Protocol):
     """Minimal host interface for tool discovery/validation/invocation."""
 
-    def query(self) -> Any: ...
+    def query(self) -> Any:
+        pass
 
-    def validate(self, tool_name: str, input: Any) -> Any: ...
+    def validate(self, tool_name: str, input: Any) -> Any:
+        pass
 
-    def invoke(self, tool_name: str, input: Any) -> Any: ...
+    def invoke(self, tool_name: str, input: Any) -> Any:
+        pass
+
+
+class AgentHostMemory(Protocol):
+    """Run-scoped object store. Simple interface — all smart logic is in the executor."""
+
+    def put(self, key: str, value: Any) -> Dict[str, Any]:
+        pass
+
+    def get(self, key: str) -> Dict[str, Any]:
+        pass
+
+    def list(self) -> Dict[str, Any]:
+        pass
+
+    def clear(self, key: Optional[str] = None) -> Dict[str, Any]:
+        pass
 
 
 class AgentHost(Protocol):
@@ -40,6 +60,7 @@ class AgentHost(Protocol):
 
     llm: AgentHostLLM
     tools: AgentHostTools
+    memory: Optional[AgentHostMemory]
 
 
 class AgentMeta(TypedDict, total=False):
@@ -90,7 +111,6 @@ class AgentInput:
         started_at: UTC timestamp in ISO-8601 format.
     """
 
-    prompt: str
     question: Question
     run_id: str
     task_id: Optional[str]

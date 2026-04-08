@@ -44,17 +44,15 @@ export interface ConfigManagerInfo {
 	/** Default path for creating new pipeline files */
 	defaultPipelinePath: string;
 
-	/** Additional engine arguments (passed to engine subprocess in all connection modes) */
-	engineArgs: string[];
+	/** Additional engine arguments as a single string (passed to engine subprocess) */
+	engineArgs: string;
 
 	/** Local configuration */
 	local: {
-		/** Local host address (default: 'localhost') */
-		host: string;
-		/** Local port (default: 5565) */
-		port: number;
 		/** Engine version to download: 'latest', 'prerelease', or a specific tag */
 		engineVersion: string;
+		/** Enable full debug output (--trace=debugOut) */
+		debugOutput: boolean;
 	};
 
 	/** General settings */
@@ -65,7 +63,6 @@ export interface ConfigManagerInfo {
 
 	/** Environment variables loaded from .env file */
 	env: Record<string, string>;
-
 }
 
 /**
@@ -90,18 +87,17 @@ export class ConfigManager {
 		apiKey: '',
 		hostUrl: 'http://localhost:5565',
 		defaultPipelinePath: '',
-		engineArgs: [],
+		engineArgs: '',
 		local: {
-			host: '',
-			port: 5565,
 			engineVersion: 'latest',
+			debugOutput: false,
 		},
 		autoConnect: true,
 		pipelineRestartBehavior: 'prompt',
-		env: {}
+		env: {},
 	};
 
-	private constructor() { }
+	private constructor() {}
 
 	public static getInstance(): ConfigManager {
 		if (!ConfigManager.instance) {
@@ -128,10 +124,10 @@ export class ConfigManager {
 
 		// Listen for configuration changes
 		this.disposables.push(
-			vscode.workspace.onDidChangeConfiguration(async event => {
+			vscode.workspace.onDidChangeConfiguration(async (event) => {
 				if (event.affectsConfiguration(this.configSection)) {
 					await this.refreshConfig();
-					
+
 					// If hostUrl changed, sync to .env
 					if (event.affectsConfiguration(`${this.configSection}.hostUrl`)) {
 						await this.syncSettingsToEnv();
@@ -142,7 +138,7 @@ export class ConfigManager {
 
 		// Listen for secret storage changes (API key changes)
 		this.disposables.push(
-			context.secrets.onDidChange(async event => {
+			context.secrets.onDidChange(async (event) => {
 				if (event.key === this.API_KEY_SECRET_KEY) {
 					await this.refreshConfig();
 					// API key changed, sync to .env
@@ -169,17 +165,6 @@ export class ConfigManager {
 		const config = vscode.workspace.getConfiguration(this.configSection);
 		const hostUrl = config.get('hostUrl', 'http://localhost:5565');
 
-		// Parse host and port from the hostUrl - host will always be localhost
-		const parsedHost = 'localhost';
-		let parsedPort = 5565;
-
-		try {
-			const url = new URL(hostUrl);
-			parsedPort = url.port ? parseInt(url.port, 10) : (url.protocol === 'https:' ? 443 : 80);
-		} catch (error) {
-			console.warn('Failed to parse hostUrl, using defaults:', error);
-		}
-
 		// Get API key from secure storage
 		const apiKey = await this.getApiKeyFromStorage();
 
@@ -194,15 +179,14 @@ export class ConfigManager {
 			apiKey: apiKey,
 			hostUrl: hostUrl,
 			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
-			engineArgs: config.get('engineArgs', []),
+			engineArgs: config.get('engineArgs', ''),
 			local: {
-				host: parsedHost,
-				port: parsedPort,
-				engineVersion: config.get('local.engineVersion', 'latest')
+				engineVersion: config.get('local.engineVersion', 'latest'),
+				debugOutput: config.get('local.debugOutput', false),
 			},
 			autoConnect: config.get('autoConnect', true),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
-			env: this.config?.env || {}
+			env: this.config?.env || {},
 		};
 	}
 
@@ -221,28 +205,32 @@ export class ConfigManager {
 
 		// Watch for changes
 		this.envFileWatcher.onDidChange(() => {
-			this.loadEnvFile().then(async () => {
-				this.refreshConfig();
-				// Ensure required vars are present after manual edit
-				await this.ensureEnvFileSync();
-				// Notify listeners that env vars have changed
-				this.envChangeEmitter.fire(this.getEnvVars());
-			}).catch(error => {
-				console.error('Failed to reload .env file:', error);
-			});
+			this.loadEnvFile()
+				.then(async () => {
+					this.refreshConfig();
+					// Ensure required vars are present after manual edit
+					await this.ensureEnvFileSync();
+					// Notify listeners that env vars have changed
+					this.envChangeEmitter.fire(this.getEnvVars());
+				})
+				.catch((error) => {
+					console.error('Failed to reload .env file:', error);
+				});
 		});
 
 		// Watch for creation
 		this.envFileWatcher.onDidCreate(() => {
-			this.loadEnvFile().then(async () => {
-				this.refreshConfig();
-				// Ensure required vars are present in new file
-				await this.ensureEnvFileSync();
-				// Notify listeners that env vars have changed
-				this.envChangeEmitter.fire(this.getEnvVars());
-			}).catch(error => {
-				console.error('Failed to load .env file after creation:', error);
-			});
+			this.loadEnvFile()
+				.then(async () => {
+					this.refreshConfig();
+					// Ensure required vars are present in new file
+					await this.ensureEnvFileSync();
+					// Notify listeners that env vars have changed
+					this.envChangeEmitter.fire(this.getEnvVars());
+				})
+				.catch((error) => {
+					console.error('Failed to load .env file after creation:', error);
+				});
 		});
 
 		// Watch for deletion
@@ -251,14 +239,16 @@ export class ConfigManager {
 			if (this.config) {
 				this.config.env = {};
 			}
-			this.refreshConfig().then(async () => {
-				// Recreate .env file with required vars
-				await this.ensureEnvFileSync();
-				// Notify listeners that env vars have changed
-				this.envChangeEmitter.fire(this.getEnvVars());
-			}).catch(error => {
-				console.error('Failed to recreate .env file after deletion:', error);
-			});
+			this.refreshConfig()
+				.then(async () => {
+					// Recreate .env file with required vars
+					await this.ensureEnvFileSync();
+					// Notify listeners that env vars have changed
+					this.envChangeEmitter.fire(this.getEnvVars());
+				})
+				.catch((error) => {
+					console.error('Failed to recreate .env file after deletion:', error);
+				});
 		});
 
 		this.disposables.push(this.envFileWatcher);
@@ -328,8 +318,7 @@ export class ConfigManager {
 				let value = match[2].trim();
 
 				// Remove surrounding quotes if present
-				if ((value.startsWith('"') && value.endsWith('"')) ||
-					(value.startsWith("'") && value.endsWith("'"))) {
+				if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
 					value = value.slice(1, -1);
 				}
 
@@ -394,7 +383,7 @@ export class ConfigManager {
 			return this.substituteEnvVars(obj, env);
 		} else if (Array.isArray(obj)) {
 			// If it's an array, process each element
-			return obj.map(item => this.processEnvSubstitution(item, env));
+			return obj.map((item) => this.processEnvSubstitution(item, env));
 		} else if (obj !== null && typeof obj === 'object') {
 			// If it's an object, process each property
 			const result: Record<string, unknown> = {};
@@ -410,7 +399,7 @@ export class ConfigManager {
 	/**
 	 * Substitutes environment variables in an object (e.g., pipeline configuration) (SYNC)
 	 * Returns a new object with all ${ROCKETRIDE_*} patterns replaced with their values.
-	 * 
+	 *
 	 * @param obj The object to process (e.g., pipeline configuration)
 	 * @returns A new object with environment variables substituted
 	 */
@@ -427,7 +416,7 @@ export class ConfigManager {
 		return {
 			...this.config,
 			local: { ...this.config.local },
-			env: { ...this.config.env }
+			env: { ...this.config.env },
 		};
 	}
 
@@ -478,6 +467,31 @@ export class ConfigManager {
 	}
 
 	/**
+	 * Returns the effective engine args as an array, injecting --trace=debugOut
+	 * if debug output is enabled and the user hasn't specified their own --trace.
+	 *
+	 * Note: engineArgs is passed as a single string intentionally. The backend
+	 * engine splits all arguments according to shell parsing rules (handling
+	 * quoted paths, escaped spaces, etc.). Naive whitespace splitting here
+	 * would break arguments like --path='C:\Program Files\RocketRide'.
+	 */
+	public getEffectiveEngineArgs(): string[] {
+		const config = this.getConfig();
+		const rawArgs = config.engineArgs;
+		const argsStr = Array.isArray(rawArgs) ? rawArgs.join(' ') : String(rawArgs || '');
+		const hasTrace = argsStr.includes('--trace=');
+
+		const result: string[] = [];
+		if (argsStr.trim()) {
+			result.push(argsStr.trim());
+		}
+		if (config.local.debugOutput && !hasTrace) {
+			result.push('--trace=debugOut');
+		}
+		return result;
+	}
+
+	/**
 	 * Gets the API host URL for dynamic parameter replacement (SYNC)
 	 */
 	public getApiHost(): string {
@@ -486,8 +500,9 @@ export class ConfigManager {
 		if (config.connectionMode === 'cloud' || config.connectionMode === 'onprem') {
 			return config.hostUrl;
 		}
-		// Local mode - construct URL from host/port
-		return `http://${config.local.host}:${config.local.port}`;
+		// Local mode — always return the loopback fallback for .env sync;
+		// runtime resolution is handled by ConnectionManager.
+		return 'http://localhost:5565';
 	}
 
 	/**
@@ -521,17 +536,8 @@ export class ConfigManager {
 					errors.push('Host URL must be a valid URL');
 				}
 			}
-			if (!config.apiKey) {
-				errors.push('API key is required when using on-prem mode');
-			}
 		} else {
-			// local
-			if (!config.local.host) {
-				errors.push('Local host is required when using local mode');
-			}
-			if (!config.local.port || config.local.port < 1 || config.local.port > 65535) {
-				errors.push('Local port must be a valid port number (1-65535)');
-			}
+			// local — port is dynamically assigned, no validation needed
 		}
 
 		return errors;
@@ -634,7 +640,7 @@ export class ConfigManager {
 	 * @returns Disposable for cleanup
 	 */
 	public onConfigurationChanged(callback: (config: ConfigManagerInfo) => void): vscode.Disposable {
-		return vscode.workspace.onDidChangeConfiguration(async event => {
+		return vscode.workspace.onDidChangeConfiguration(async (event) => {
 			if (event.affectsConfiguration(this.configSection)) {
 				const config = this.getConfig();
 				callback(config);
@@ -691,10 +697,8 @@ export class ConfigManager {
 			await this.saveEnvFile();
 
 			this.envChangeEmitter.fire(this.getEnvVars());
-			console.log('[ConfigManager] Saved all environment variables');
 		} catch (error) {
 			console.error('[ConfigManager] Failed to save environment variables:', error);
-			throw new Error(`Failed to save environment variables: ${error}`);
 		}
 	}
 
@@ -724,7 +728,6 @@ export class ConfigManager {
 			}
 
 			await vscode.workspace.fs.writeFile(envPath, Buffer.from(this.envRawText || '', 'utf8'));
-
 		} catch (error) {
 			console.error('Error saving .env file:', error);
 			throw new Error(`Failed to save .env file: ${error}`);
@@ -735,10 +738,7 @@ export class ConfigManager {
 	 * Patches envRawText by updating, adding, or removing keys while preserving
 	 * comments, blank lines, and formatting.
 	 */
-	private updateEnvRawText(
-		updates: Record<string, string>,
-		keysToRemove?: Set<string>
-	): string {
+	private updateEnvRawText(updates: Record<string, string>, keysToRemove?: Set<string>): string {
 		const lines = this.envRawText.split('\n');
 		const consumedKeys = new Set<string>();
 		const resultLines: string[] = [];
@@ -779,7 +779,7 @@ export class ConfigManager {
 		}
 
 		// Append any new keys that weren't found in existing lines
-		const newKeys = Object.keys(updates).filter(k => !consumedKeys.has(k));
+		const newKeys = Object.keys(updates).filter((k) => !consumedKeys.has(k));
 		if (newKeys.length > 0) {
 			const lastLine = resultLines[resultLines.length - 1];
 			if (lastLine !== undefined && lastLine.trim() !== '') {
@@ -824,16 +824,13 @@ export class ConfigManager {
 			const updates: Record<string, string> = {};
 
 			if (!fileExists) {
-				console.log('[ConfigManager] Creating initial .env file');
 				updates['ROCKETRIDE_URI'] = this.getApiHost();
 				updates['ROCKETRIDE_APIKEY'] = this.getApiKey();
 			} else {
 				if (!('ROCKETRIDE_URI' in this.config.env)) {
-					console.log('[ConfigManager] Adding missing ROCKETRIDE_URI to .env file');
 					updates['ROCKETRIDE_URI'] = this.getApiHost();
 				}
 				if (!('ROCKETRIDE_APIKEY' in this.config.env)) {
-					console.log('[ConfigManager] Adding missing ROCKETRIDE_APIKEY to .env file');
 					updates['ROCKETRIDE_APIKEY'] = this.getApiKey();
 				}
 			}
@@ -842,10 +839,9 @@ export class ConfigManager {
 				Object.assign(this.config.env, updates);
 				this.envRawText = this.updateEnvRawText(updates);
 				await this.saveEnvFile();
-				console.log('[ConfigManager] Ensured .env file has ROCKETRIDE_URI and ROCKETRIDE_APIKEY');
 			}
-		} catch (error) {
-			console.error('[ConfigManager] Failed to ensure .env file sync:', error);
+		} catch (_error) {
+			return;
 		}
 	}
 
@@ -878,10 +874,9 @@ export class ConfigManager {
 				this.envRawText = this.updateEnvRawText(updates);
 				await this.saveEnvFile();
 				this.envChangeEmitter.fire(this.getEnvVars());
-				console.log('[ConfigManager] Synced ROCKETRIDE_URI/APIKEY to .env file');
 			}
-		} catch (error) {
-			console.error('[ConfigManager] Failed to sync settings to .env:', error);
+		} catch (_error) {
+			return;
 		}
 	}
 
@@ -895,7 +890,7 @@ export class ConfigManager {
 		this.envChangeEmitter.dispose();
 
 		// Dispose all resources
-		this.disposables.forEach(disposable => {
+		this.disposables.forEach((disposable) => {
 			try {
 				disposable.dispose();
 			} catch (error) {

@@ -33,13 +33,13 @@ struct SysInfo {
     int systemCPUCount = {};
     int systemGPUSize = {};
 
-    Error __toJson(json::Value& val) const noexcept {
+    Error __toJson(json::Value &val) const noexcept {
         val["platform"] = platform;
         val["nCPUCores"] = systemCPUCount;
         val["GPUSize"] = systemGPUSize;
         val["diskUtilization"] = systemDiskUtilization;
 
-        auto diskUsageToJson = [](TextView path, const plat::DiskUsage& du,
+        auto diskUsageToJson = [](TextView path, const plat::DiskUsage &du,
                                   bool includeUtiliation =
                                       true) -> json::Value {
             json::Value json;
@@ -51,18 +51,18 @@ struct SysInfo {
             return json;
         };
 
-        for (auto& [path, du] : diskStats) {
+        for (auto &[path, du] : diskStats) {
             val["disks"].append(diskUsageToJson(path, du));
         }
 
-        for (auto& [path, du] : systemPathStats) {
+        for (auto &[path, du] : systemPathStats) {
             val["paths"][path] = diskUsageToJson(path, du, false);
         }
 
         return {};
     }
 
-    static Error __fromJson(SysInfo& key, const json::Value& val) noexcept {
+    static Error __fromJson(SysInfo &key, const json::Value &val) noexcept {
         if (!val.isObject())
             return APERR(Ec::InvalidJson, "Expected object", val);
 
@@ -73,7 +73,7 @@ struct SysInfo {
         if (!val.lookupAssign("diskUtilization", systemDiskUtilization))
             key.systemDiskUtilization = systemDiskUtilization;
 
-        auto diskUsageFromJson = [](const json::Value& json)
+        auto diskUsageFromJson = [](const json::Value &json)
             -> ErrorOr<std::pair<Text, plat::DiskUsage>> {
             Text path;
             Size diskSize, diskFree;
@@ -88,19 +88,19 @@ struct SysInfo {
                 _mv(path), {diskSize * 1_gb, diskFree * 1_gb, utilization});
         };
 
-        for (auto& item : val["disks"]) {
+        for (auto &item : val["disks"]) {
             auto du = diskUsageFromJson(item);
             if (!du) return du.ccode();
 
             key.diskStats.insert(_mv(*du));
         }
 
-        auto& paths = val["paths"];
+        auto &paths = val["paths"];
         if (paths) {
             TextView sysPaths[] = {"data"_tv, "control"_tv, "cache"_tv,
                                    "log"_tv};
-            for (auto& item : sysPaths) {
-                auto& path = paths[item];
+            for (auto &item : sysPaths) {
+                auto &path = paths[item];
                 if (!path) continue;
 
                 auto du = diskUsageFromJson(path);
@@ -147,7 +147,7 @@ inline ErrorOr<SysInfo> sysInfo() {
 
     // Get the free space on all of our system paths
     TextView sysPaths[] = {"data"_tv, "control"_tv, "cache"_tv, "log"_tv};
-    for (auto& item : sysPaths) {
+    for (auto &item : sysPaths) {
         auto diskInfo = plat::diskUsage(config::paths().lookup(item));
         if (diskInfo) info.systemPathStats.emplace(item, _mv(diskInfo));
     }

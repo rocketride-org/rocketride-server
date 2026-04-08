@@ -106,7 +106,7 @@ async function readJsonSafe(filePath, defaultValue = null) {
  * @returns {Promise<string[]|fs.Dirent[]>}
  */
 async function readDir(dirPath, options = {}) {
-    return fsp.readdir(dirPath, options);
+    return await fsp.readdir(dirPath, options);
 }
 
 /**
@@ -292,31 +292,6 @@ async function statSafe(filePath) {
  */
 async function lstat(filePath) {
     return fsp.lstat(filePath);
-}
-
-// =============================================================================
-// Permission Operations
-// =============================================================================
-
-/**
- * Change file/directory mode (permissions)
- * @param {string} filePath - Path to file or directory
- * @param {number|string} mode - New mode (e.g., 0o755 or '755')
- * @returns {Promise<void>}
- */
-async function chmod(filePath, mode) {
-    return fsp.chmod(filePath, mode);
-}
-
-/**
- * Change file/directory owner
- * @param {string} filePath - Path to file or directory
- * @param {number} uid - User ID
- * @param {number} gid - Group ID
- * @returns {Promise<void>}
- */
-async function chown(filePath, uid, gid) {
-    return fsp.chown(filePath, uid, gid);
 }
 
 // =============================================================================
@@ -570,7 +545,7 @@ async function contentHash(dirPath, options = {}) {
 
     const hash = crypto.createHash('sha256');
     for (const f of files) {
-        const content = await fsp.readFile(f.full);
+        const content = (await fsp.readFile(f.full, 'utf8')).replace(/\r/g, '');
         hash.update(f.rel);
         hash.update(content);
     }
@@ -663,10 +638,6 @@ module.exports = {
     statSafe,
     lstat,
     
-    // Permissions
-    chmod,
-    chown,
-    
     // Links
     symlink,
     readlink,
@@ -692,4 +663,3 @@ module.exports = {
     hasSourceChanged,
     saveSourceHash
 };
-

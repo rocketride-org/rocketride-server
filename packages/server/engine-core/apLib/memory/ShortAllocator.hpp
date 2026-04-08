@@ -31,17 +31,17 @@ namespace ap::memory {
 template <std::size_t N, std::size_t alignment = alignof(std::max_align_t)>
 class arena {
     alignas(alignment) char buf_[N];
-    char* ptr_;
+    char *ptr_;
 
 public:
     ~arena() { ptr_ = nullptr; }
     arena() noexcept : ptr_(buf_) {}
-    arena(const arena&) = delete;
-    arena& operator=(const arena&) = delete;
+    arena(const arena &) = delete;
+    arena &operator=(const arena &) = delete;
 
     template <std::size_t ReqAlign>
-    char* allocate(std::size_t n);
-    void deallocate(char* p, std::size_t n) noexcept;
+    char *allocate(std::size_t n);
+    void deallocate(char *p, std::size_t n) noexcept;
 
     static constexpr std::size_t size() noexcept { return N; }
     std::size_t used() const noexcept {
@@ -54,20 +54,20 @@ private:
         return (n + (alignment - 1)) & ~(alignment - 1);
     }
 
-    bool pointer_in_buffer(char* p) noexcept {
+    bool pointer_in_buffer(char *p) noexcept {
         return buf_ <= p && p <= buf_ + N;
     }
 };
 
 template <std::size_t N, std::size_t alignment>
 template <std::size_t ReqAlign>
-char* arena<N, alignment>::allocate(std::size_t n) {
+char *arena<N, alignment>::allocate(std::size_t n) {
     static_assert(ReqAlign <= alignment,
                   "alignment is too small for this arena");
     assert(pointer_in_buffer(ptr_) && "ShortAllocator has outlived arena");
     auto const aligned_n = align_up(n);
     if (static_cast<decltype(aligned_n)>(buf_ + N - ptr_) >= aligned_n) {
-        char* r = ptr_;
+        char *r = ptr_;
         ptr_ += aligned_n;
         return r;
     }
@@ -77,11 +77,11 @@ char* arena<N, alignment>::allocate(std::size_t n) {
         "you've chosen an "
         "alignment that is larger than alignof(std::max_align_t), and "
         "cannot be guaranteed by normal operator new");
-    return static_cast<char*>(::operator new(n));
+    return static_cast<char *>(::operator new(n));
 }
 
 template <std::size_t N, std::size_t alignment>
-void arena<N, alignment>::deallocate(char* p, std::size_t n) noexcept {
+void arena<N, alignment>::deallocate(char *p, std::size_t n) noexcept {
     assert(pointer_in_buffer(ptr_) && "ShortAllocator has outlived arena");
     if (pointer_in_buffer(p)) {
         n = align_up(n);
@@ -102,22 +102,22 @@ private:
     Ref<arena_type> a_;
 
 public:
-    static arena_type& defaultArena() noexcept {
+    static arena_type &defaultArena() noexcept {
         _thread_local arena_type arena = {};
         return arena;
     }
 
     ShortAllocator() noexcept : a_(defaultArena()) {}
 
-    ShortAllocator(const ShortAllocator&) = default;
-    ShortAllocator& operator=(const ShortAllocator&) = default;
+    ShortAllocator(const ShortAllocator &) = default;
+    ShortAllocator &operator=(const ShortAllocator &) = default;
 
-    ShortAllocator(arena_type& a) noexcept : a_(a) {
+    ShortAllocator(arena_type &a) noexcept : a_(a) {
         static_assert(size % alignment == 0,
                       "size N needs to be a multiple of alignment Align");
     }
     template <class U>
-    ShortAllocator(const ShortAllocator<U, N, alignment>& a) noexcept
+    ShortAllocator(const ShortAllocator<U, N, alignment> &a) noexcept
         : a_(a.a_) {}
 
     template <class _Up>
@@ -125,18 +125,18 @@ public:
         using other = ShortAllocator<_Up, N, alignment>;
     };
 
-    T* allocate(std::size_t n) {
-        return reinterpret_cast<T*>(
+    T *allocate(std::size_t n) {
+        return reinterpret_cast<T *>(
             a_.get().template allocate<alignof(T)>(n * sizeof(T)));
     }
-    void deallocate(T* p, std::size_t n) noexcept {
-        a_.get().deallocate(reinterpret_cast<char*>(p), n * sizeof(T));
+    void deallocate(T *p, std::size_t n) noexcept {
+        a_.get().deallocate(reinterpret_cast<char *>(p), n * sizeof(T));
     }
 
     template <class T1, std::size_t N1, std::size_t A1, class U, std::size_t M,
               std::size_t A2>
-    friend bool operator==(const ShortAllocator<T1, N1, A1>& x,
-                           const ShortAllocator<U, M, A2>& y) noexcept;
+    friend bool operator==(const ShortAllocator<T1, N1, A1> &x,
+                           const ShortAllocator<U, M, A2> &y) noexcept;
 
     template <class U, std::size_t M, std::size_t A>
     friend class ShortAllocator;
@@ -144,15 +144,15 @@ public:
 
 template <class T, std::size_t N, std::size_t A1, class U, std::size_t M,
           std::size_t A2>
-inline bool operator==(const ShortAllocator<T, N, A1>& x,
-                       const ShortAllocator<U, M, A2>& y) noexcept {
+inline bool operator==(const ShortAllocator<T, N, A1> &x,
+                       const ShortAllocator<U, M, A2> &y) noexcept {
     return N == M && A1 == A2 && &x.a_.get() == &y.a_.get();
 }
 
 template <class T, std::size_t N, std::size_t A1, class U, std::size_t M,
           std::size_t A2>
-inline bool operator!=(const ShortAllocator<T, N, A1>& x,
-                       const ShortAllocator<U, M, A2>& y) noexcept {
+inline bool operator!=(const ShortAllocator<T, N, A1> &x,
+                       const ShortAllocator<U, M, A2> &y) noexcept {
     return !(x == y);
 }
 

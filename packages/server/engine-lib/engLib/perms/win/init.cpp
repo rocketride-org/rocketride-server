@@ -36,6 +36,6 @@ Error init() noexcept {
     return {};
 }
 
-const Sid& machineSid() noexcept { return g_machineSid; }
+const Sid &machineSid() noexcept { return g_machineSid; }
 
 }  // namespace engine::perms

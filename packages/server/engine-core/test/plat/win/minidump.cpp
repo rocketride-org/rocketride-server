@@ -39,7 +39,7 @@ TEST_CASE("plat::createMinidump") {
     };
     bool crashDumpCreated = false;
     file::Path minidumpPath;
-    ap::dev::crashDumpCreatedCallback() = [&](const file::Path& path) {
+    ap::dev::crashDumpCreatedCallback() = [&](const file::Path &path) {
         crashDumpCreated = true;
         minidumpPath = path;
     };

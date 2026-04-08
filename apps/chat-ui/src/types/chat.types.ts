@@ -32,8 +32,10 @@
 export interface Message {
 	id: number;
 	text: string;
-	sender: 'user' | 'bot' | 'system';
+	sender: 'user' | 'bot' | 'system' | 'status';
 	timestamp: string;
+	resultKey?: string | undefined;
+	sseType?: string;
 }
 
 /**

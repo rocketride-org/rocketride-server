@@ -44,14 +44,14 @@ Usage:
         TASK_STATUS,
         EventCallback
     )
-    
+
     # Type-safe client configuration
     config: RocketRideClientConfig = {
         'auth': 'your_api_key',
         'uri': 'wss://server.example.com',
         'on_event': my_event_handler
     }
-    
+
     # Type hints for better IDE support
     def handle_status(status: TASK_STATUS) -> None:
         print(f"Pipeline state: {status['state']}")
@@ -71,6 +71,7 @@ from .client import (
 
 from .pipeline import (
     PipelineInputConnection,
+    PipelineControlConnection,
     PipelineComponent,
     PipelineConfig,
 )
@@ -87,11 +88,38 @@ from .events import (
     EVENT_TYPE,
     EVENT_STATUS_UPDATE,
     EVENT_TASK,
+    TASK_EVENT,
+    TASK_EVENT_RUNNING,
+    TASK_EVENT_BEGIN,
+    TASK_EVENT_END,
+    TASK_EVENT_RESTART,
+    TASK_RUNNING_ENTRY,
+)
+
+from .dashboard import (
+    DASHBOARD_OVERVIEW,
+    DASHBOARD_MONITOR,
+    DASHBOARD_CONNECTION,
+    DASHBOARD_TASK,
+    DASHBOARD_RESPONSE,
+    DASHBOARD_EVENT,
+    DASHBOARD_EVENT_CONNECTION_ADDED,
+    DASHBOARD_EVENT_CONNECTION_REMOVED,
+    DASHBOARD_EVENT_TASK_STARTED,
+    DASHBOARD_EVENT_TASK_STOPPED,
+    DASHBOARD_EVENT_TASK_REMOVED,
+    DASHBOARD_EVENT_TASK_ERROR,
+    DASHBOARD_EVENT_AUTH_FAILED,
+    DASHBOARD_EVENT_MONITOR_CHANGED,
 )
 
 from .data import (
     PIPELINE_RESULT,
     UPLOAD_RESULT,
+)
+
+from .service import (
+    PROTOCOL_CAPS,
 )
 
 __all__ = [
@@ -107,6 +135,7 @@ __all__ = [
     'TransportCallbacks',
     # Pipeline types
     'PipelineInputConnection',
+    'PipelineControlConnection',
     'PipelineComponent',
     'PipelineConfig',
     # Task types
@@ -119,7 +148,30 @@ __all__ = [
     'EVENT_TYPE',
     'EVENT_STATUS_UPDATE',
     'EVENT_TASK',
+    'TASK_EVENT',
+    'TASK_EVENT_RUNNING',
+    'TASK_EVENT_BEGIN',
+    'TASK_EVENT_END',
+    'TASK_EVENT_RESTART',
+    'TASK_RUNNING_ENTRY',
+    # Dashboard types
+    'DASHBOARD_OVERVIEW',
+    'DASHBOARD_MONITOR',
+    'DASHBOARD_CONNECTION',
+    'DASHBOARD_TASK',
+    'DASHBOARD_RESPONSE',
+    'DASHBOARD_EVENT',
+    'DASHBOARD_EVENT_CONNECTION_ADDED',
+    'DASHBOARD_EVENT_CONNECTION_REMOVED',
+    'DASHBOARD_EVENT_TASK_STARTED',
+    'DASHBOARD_EVENT_TASK_STOPPED',
+    'DASHBOARD_EVENT_TASK_REMOVED',
+    'DASHBOARD_EVENT_TASK_ERROR',
+    'DASHBOARD_EVENT_AUTH_FAILED',
+    'DASHBOARD_EVENT_MONITOR_CHANGED',
     # Data types
     'PIPELINE_RESULT',
     'UPLOAD_RESULT',
+    # Service types
+    'PROTOCOL_CAPS',
 ]

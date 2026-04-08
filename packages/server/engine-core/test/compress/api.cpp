@@ -31,7 +31,7 @@ TEST_CASE("compress::api") {
         REQUIRE(_fs<Type>("LZ4") == Type::LZ4);
         REQUIRE(_fs<Type>("lz4") == Type::LZ4);
 
-        auto validate = [&](const auto& value) {
+        auto validate = [&](const auto &value) {
             Buffer compData;
             auto len = *deflate<Type::LZ4>(value, compData);
             LOG(Test, "Compressed {,s} to {,s} ", len, compData.size());
@@ -53,7 +53,7 @@ TEST_CASE("compress::api") {
     }
 
     SECTION("Uint32") {
-        auto validate = [&](const auto& value) {
+        auto validate = [&](const auto &value) {
             using namespace compress;
 
             Buffer compData;
@@ -79,7 +79,7 @@ TEST_CASE("compress::api") {
     }
 
     SECTION("FastPFor") {
-        auto validate = [&](const auto& value) {
+        auto validate = [&](const auto &value) {
             using namespace compress;
 
             memory::Data<uint32_t> compData;

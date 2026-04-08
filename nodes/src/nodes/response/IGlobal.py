@@ -30,7 +30,7 @@ class IGlobal(IGlobalBase):
 
     def beginGlobal(self):
         # This will create a local copy
-        self.lanes = None
+        self.lanes = {}
         self.laneName = None
 
         # Get this nodes config

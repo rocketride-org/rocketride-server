@@ -44,8 +44,8 @@ struct IsAllocator : std::false_type {};
 
 template <class T>
 struct IsAllocator<T, VoidType<typename T::value_type,
-                               decltype(std::declval<T&>().deallocate(
-                                   std::declval<T&>().allocate(std::size_t{1}),
+                               decltype(std::declval<T &>().deallocate(
+                                   std::declval<T &>().allocate(std::size_t{1}),
                                    std::size_t{1}))>> : std::true_type {};
 
 // Deduction guide

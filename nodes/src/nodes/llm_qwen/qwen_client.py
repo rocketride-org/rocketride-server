@@ -71,6 +71,7 @@ class Chat(ChatBase):
             api_key=apikey,
             base_url=base_url,
             temperature=0,
+            max_tokens=self._modelOutputTokens,
         )
 
         # Save our chat class into the bag
@@ -89,7 +90,7 @@ class Chat(ChatBase):
         elif isinstance(error, APIConnectionError):
             return True
         else:
-            return super().map_exception(error)
+            return False
 
     def map_exception(self, error):
         """

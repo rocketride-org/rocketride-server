@@ -122,7 +122,7 @@ TEST_CASE("json::parse") {
         // Include a UInt value
         doc["uintVal"] = json::UInt(222);
 
-        auto cleanSpaces = [](JSONCPP_STRING& str) {
+        auto cleanSpaces = [](JSONCPP_STRING &str) {
             str.remove("\n", "\r", "\t");
             str.erase(std::remove_if(str.begin(), str.end(),
                                      [skip = false](auto strChar) mutable {
@@ -228,7 +228,7 @@ TEST_CASE("json::parse") {
     SECTION("JSONCPP_ISTRINGSTREAM Read") {
         // Test >> operator to parse document from stringstream
 
-        testSimpleInput([](json::Value& doc, JSONCPP_ISTRINGSTREAM& in) {
+        testSimpleInput([](json::Value &doc, JSONCPP_ISTRINGSTREAM &in) {
             REQUIRE_NOTHROW(in >> doc);
         });
 
@@ -245,7 +245,7 @@ TEST_CASE("json::parse") {
     SECTION("json::Reader") {
         json::Reader regularReader;
         testSimpleInput(
-            [&regularReader](json::Value& doc, JSONCPP_ISTRINGSTREAM& in) {
+            [&regularReader](json::Value &doc, JSONCPP_ISTRINGSTREAM &in) {
                 REQUIRE(regularReader.parse(in, doc));
                 REQUIRE(regularReader.getFormattedErrorMessages().empty());
             });
@@ -253,7 +253,7 @@ TEST_CASE("json::parse") {
         json::Reader strictReader(json::Features::strictMode());
         // Check data is read correctly in strict mode
         testSimpleInput(
-            [&strictReader](json::Value& doc, JSONCPP_ISTRINGSTREAM& in) {
+            [&strictReader](json::Value &doc, JSONCPP_ISTRINGSTREAM &in) {
                 REQUIRE(strictReader.parse(in, doc));
                 REQUIRE(strictReader.getFormattedErrorMessages().empty());
             });
@@ -281,7 +281,7 @@ TEST_CASE("json::parse") {
             "A valid JSON document must be either an array or an object value.";
 
         REQUIRE(std::any_of(errors.begin(), errors.end(),
-                            [&noRootError](const auto& error) {
+                            [&noRootError](const auto &error) {
                                 return noRootError == error.message;
                             }));
 

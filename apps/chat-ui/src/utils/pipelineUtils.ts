@@ -39,12 +39,17 @@ import { PIPELINE_RESULT } from 'rocketride';
  * // If result has: { result_types: { "answers": "answers" }, answers: ["Hello", "World"] }
  * // Returns: ["Hello", "World"]
  */
-export const extractTextFromResult = (result: PIPELINE_RESULT): string[] => {
-	const textResponses: string[] = [];
+export interface TextResult {
+	text: string;
+	key: string;
+}
+
+export const extractTextFromResult = (result: PIPELINE_RESULT): TextResult[] => {
+	const textResponses: TextResult[] = [];
 
 	// If we didn't get any result types, make sure they were returned
 	if (!result.result_types) {
-		textResponses.push('### I don\'t see any answers in there...\nAre you sure you returned them in your pipeline?');
+		textResponses.push({ text: '### I don\'t see any answers in there...\nAre you sure you returned them in your pipeline?', key: '' });
 		return textResponses;
 	}
 
@@ -54,10 +59,14 @@ export const extractTextFromResult = (result: PIPELINE_RESULT): string[] => {
 			const fieldData = result[fieldName];
 
 			if (Array.isArray(fieldData)) {
-				// Add all non-empty text items from this field
-				textResponses.push(...fieldData.filter(item => typeof item === 'string' && item.trim()));
+				fieldData.filter(item => typeof item === 'string' && item.trim())
+					.forEach(item => textResponses.push({ text: item, key: fieldName }));
 			} else if (typeof fieldData === 'string' && fieldData.trim()) {
-				textResponses.push(fieldData);
+				textResponses.push({ text: fieldData, key: fieldName });
+			} else if (typeof fieldData === 'object' && fieldData !== null && typeof (fieldData as Record<string, unknown>).answer === 'string') {
+				// Answer objects arrive as { answer: string, expectJson: bool } — extract the text directly.
+				const text = ((fieldData as Record<string, unknown>).answer as string).trim();
+				if (text) textResponses.push({ text, key: fieldName });
 			}
 		}
 	}

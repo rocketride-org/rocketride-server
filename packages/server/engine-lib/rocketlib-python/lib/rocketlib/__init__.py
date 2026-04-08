@@ -40,6 +40,7 @@ from .engine import monitorCompleted
 from .engine import monitorFailed
 from .engine import monitorMetrics
 from .engine import monitorOther
+from .engine import monitorSSE
 from .engine import monitorStatus
 from .engine import monitorDependencyDownload
 from .engine import outputEndpointParameters
@@ -58,6 +59,9 @@ from .filters import IInstanceBase
 from .filters import IServiceEndpoint
 from .filters import IServiceFilterPipe
 from .filters import ILoader
+from .filters import invoke_function
+from .filters import tool_function
+from .filters import ToolDescriptor
 from .types import AVI_ACTION
 from .types import ENDPOINT_MODE
 from .types import Entry
@@ -68,6 +72,7 @@ from .types import IDict
 from .types import IInvoke
 from .types import IInvokeLLM
 from .types import IInvokeTool
+from .types import IInvokeCrew
 from .types import IJson
 from .types import OPEN_MODE
 from .types import PROTOCOL_CAPS
@@ -100,11 +105,13 @@ __all__ = [
     'IEndpointBase',
     'IGlobalBase',
     'IInstanceBase',
+    'invoke_function',
     'IServiceEndpoint',
     'IServiceFilterPipe',
     'IInvoke',
     'IInvokeLLM',
     'IInvokeTool',
+    'IInvokeCrew',
     'IJson',
     'ILoader',
     'isAppMonitor',
@@ -114,6 +121,7 @@ __all__ = [
     'monitorFailed',
     'monitorMetrics',
     'monitorOther',
+    'monitorSSE',
     'monitorStatus',
     'monitorDependencyDownload',
     'OPEN_MODE',
@@ -127,6 +135,8 @@ __all__ = [
     'SERVICE_MODE',
     'TAG',
     'TAG_ID',
+    'tool_function',
+    'ToolDescriptor',
     'validatePipeline',
     'warning',
 ]

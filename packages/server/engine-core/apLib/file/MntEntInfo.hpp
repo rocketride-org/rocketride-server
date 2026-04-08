@@ -37,9 +37,9 @@ struct MntEntInfo final : public PlatMntEntInfo {
 };
 
 // Given a file path, obtain the mounting path information for the file.
-ErrorOr<MntEntInfo> getMntEntInfo(const Path& path) noexcept;
+ErrorOr<MntEntInfo> getMntEntInfo(const Path &path) noexcept;
 
 // Given a file path, obtain if the underlying mounting path is removable.
-bool isOnRemovableDrive(const Path& path) noexcept;
+bool isOnRemovableDrive(const Path &path) noexcept;
 
 }  // namespace ap::file

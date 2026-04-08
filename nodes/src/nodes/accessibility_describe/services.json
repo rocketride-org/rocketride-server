@@ -1,0 +1,165 @@
+{
+	"title": "Accessibility Describe",
+	"protocol": "accessibility_describe://",
+	"classType": ["image"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.accessibility_describe",
+	"prefix": "accessibility_describe",
+	"description": ["An accessibility-focused image analysis node that generates scene descriptions ", "optimized for blind and visually impaired users. Powered by Google Gemini Vision, ", "it provides structured descriptions including spatial layout (clock positions), ", "hazard detection, text reading (OCR), people detection, and navigation guidance. ", "Designed for real-time assistive technology applications like smart glasses."],
+	"icon": "accessibility-describe.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Model: ${parameters.accessibility_describe.profile}"],
+	"lanes": {
+		"image": ["text"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "Image to analyze for accessibility description (JPEG, PNG, WebP)",
+			"output": [
+				{
+					"lane": "text",
+					"description": "Structured accessibility description with hazards, spatial layout, text, and navigation info"
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "gemini-2.5-flash",
+		"profiles": {
+			"gemini-2.5-flash": {
+				"title": "Gemini 2.5 Flash - Fast & Efficient (1M tokens)",
+				"model": "gemini-2.5-flash",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			},
+			"gemini-2.5-pro": {
+				"title": "Gemini 2.5 Pro - High Quality (1M tokens)",
+				"model": "gemini-2.5-pro",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			},
+			"gemini-2.0-flash": {
+				"title": "Gemini 2.0 Flash - Balanced (1M tokens)",
+				"model": "gemini-2.0-flash",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			}
+		}
+	},
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Google Gemini vision model"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Maximum context length in tokens"
+		},
+		"accessibility.systemPrompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "System Instructions",
+			"description": "Define the accessibility description behavior and priorities",
+			"default": "You are an accessibility-focused scene analyzer designed to help blind and visually impaired users understand their surroundings through image descriptions."
+		},
+		"accessibility.prompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Analysis Prompt",
+			"description": "Prompt template for generating accessibility descriptions from images",
+			"default": "Describe this image for a blind person. Include: environment type, hazards with positions, key objects with clock positions, visible text, people, and navigation guidance. Keep under 150 words."
+		},
+		"accessibility.prioritizeHazards": {
+			"type": "string",
+			"title": "Hazard Priority",
+			"description": "How aggressively to prioritize hazard detection",
+			"default": "high",
+			"enum": [
+				["high", "High - Always lead with hazards"],
+				["medium", "Medium - Include hazards when present"],
+				["low", "Low - Standard description order"]
+			]
+		},
+		"accessibility.spatialFormat": {
+			"type": "string",
+			"title": "Spatial Format",
+			"description": "How to describe spatial positions",
+			"default": "clock",
+			"enum": [
+				["clock", "Clock positions (12 o'clock, 3 o'clock)"],
+				["relative", "Relative (left, right, ahead, behind)"],
+				["both", "Both clock and relative"]
+			]
+		},
+		"accessibility_describe.gemini-2.5-flash": {
+			"object": "gemini-2.5-flash",
+			"properties": ["llm.cloud.apikey", "accessibility.systemPrompt", "accessibility.prompt", "accessibility.prioritizeHazards", "accessibility.spatialFormat"]
+		},
+		"accessibility_describe.gemini-2.5-pro": {
+			"object": "gemini-2.5-pro",
+			"properties": ["llm.cloud.apikey", "accessibility.systemPrompt", "accessibility.prompt", "accessibility.prioritizeHazards", "accessibility.spatialFormat"]
+		},
+		"accessibility_describe.gemini-2.0-flash": {
+			"object": "gemini-2.0-flash",
+			"properties": ["llm.cloud.apikey", "accessibility.systemPrompt", "accessibility.prompt", "accessibility.prioritizeHazards", "accessibility.spatialFormat"]
+		},
+		"accessibility_describe.profile": {
+			"title": "Vision Model",
+			"description": "Select the Gemini vision model for accessibility descriptions",
+			"type": "string",
+			"default": "gemini-2.5-flash",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "gemini-2.5-flash",
+					"properties": ["accessibility_describe.gemini-2.5-flash"]
+				},
+				{
+					"value": "gemini-2.5-pro",
+					"properties": ["accessibility_describe.gemini-2.5-pro"]
+				},
+				{
+					"value": "gemini-2.0-flash",
+					"properties": ["accessibility_describe.gemini-2.0-flash"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Accessibility Describe",
+			"properties": ["accessibility_describe.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["gemini-2.5-flash"],
+		"outputs": ["text"],
+		"timeout": 30,
+		"cases": [
+			{
+				"name": "Scene description from image with text",
+				"image": "images/ocr_test_text.png",
+				"expect": {
+					"text": {
+						"notEmpty": true
+					}
+				}
+			},
+			{
+				"name": "Mixed content scene description",
+				"image": "images/ocr_test_mixed.png",
+				"expect": {
+					"text": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	}
+}

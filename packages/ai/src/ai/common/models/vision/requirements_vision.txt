@@ -1,0 +1,5 @@
+# Vision (CLIP / ViT) image embedding
+# torch via ai.common.torch
+
+transformers
+Pillow

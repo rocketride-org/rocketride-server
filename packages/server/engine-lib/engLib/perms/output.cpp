@@ -33,8 +33,8 @@ namespace engine::perms {
 ///        Error
 //-------------------------------------------------------------------------
 ErrorOr<Text> outputPermission(
-    const Variant<CRef<PermissionSet>, CRef<GroupRecord>, CRef<UserRecord>>&
-        arg) noexcept {
+    const Variant<CRef<PermissionSet>, CRef<GroupRecord>, CRef<UserRecord>>
+        &arg) noexcept {
     MONITOR(status, "Writing permissions");
 
     Text line;
@@ -43,13 +43,13 @@ ErrorOr<Text> outputPermission(
     _visit(
         overloaded{
             [&](const CRef<PermissionSet> permSetRef) noexcept {
-                auto& permSet = permSetRef.get();
+                auto &permSet = permSetRef.get();
                 json::Value value;
                 json::Value permValue;
                 value["permissionId"] = permSet.id();
                 value["ownerId"] = permSet.ownerId;
                 value["permissions"] = json::Value(json::arrayValue);
-                for (const auto& perm : permSet.perms) {
+                for (const auto &perm : permSet.perms) {
                     permValue["id"] = perm.principalId;
                     permValue["rights"] = _ts(perm.rights);
                     value["permissions"].append(permValue);
@@ -60,7 +60,7 @@ ErrorOr<Text> outputPermission(
                       'P', value.stringify(false), '\n');
             },
             [&](const CRef<GroupRecord> groupRef) noexcept {
-                auto& group = groupRef.get();
+                auto &group = groupRef.get();
                 json::Value value;
                 value["groupId"] = group.id;
                 value["local"] = group.local ? true : false;
@@ -82,7 +82,7 @@ ErrorOr<Text> outputPermission(
                       'G', value.stringify(false), '\n');
             },
             [&](const CRef<UserRecord> userRef) noexcept {
-                auto& user = userRef.get();
+                auto &user = userRef.get();
                 json::Value value;
                 value["userId"] = user.id;
                 value["local"] = user.local ? true : false;
@@ -110,7 +110,7 @@ ErrorOr<Text> outputPermission(
 // The reason it's only needed for Windows is because in Unix stat function
 // already retrieves permissions data, while on Windows additional logic is
 // required.
-ErrorOr<PermissionSet> getPermissions(Text& osPath) noexcept {
+ErrorOr<PermissionSet> getPermissions(Text &osPath) noexcept {
     // Use the stack to store the security descriptor
     memory::SmallArena<uint8_t> arena;
     auto sdBuffer =

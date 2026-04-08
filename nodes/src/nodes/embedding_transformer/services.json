@@ -13,17 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"embedding"
-	],
+	"classType": ["embedding"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [
-		"gpu"
-	],
+	"capabilities": ["gpu"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -32,7 +28,7 @@
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -51,36 +47,22 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": [
-		"A component that transforms text into numerical vector representations using advanced embedding ",
-		"models. It converts input text—ranging from individual words to entire documents—into high-dimensional ",
-		"vectors that capture semantic meaning and relationships. These embeddings enable efficient similarity ",
-		"searches, clustering, and other advanced natural language processing tasks. The text embedder is highly ",
-		"configurable, supporting various pre-trained models and fine-tuning options, ensuring flexibility for ",
-		"different use cases across domains."
-	],
+	"description": ["A component that transforms text into numerical vector representations using advanced embedding ", "models. It converts input text—ranging from individual words to entire documents—into high-dimensional ", "vectors that capture semantic meaning and relationships. These embeddings enable efficient similarity ", "searches, clustering, and other advanced natural language processing tasks. The text embedder is highly ", "configurable, supporting various pre-trained models and fine-tuning options, ensuring flexibility for ", "different use cases across domains."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "embedding-text.svg",
+	"documentation": "https://docs.rocketride.org",
 	//
-	// Optional:
-	//	  Documentation link for this driver
-	//
-	"documentation": "https://bit.ly/4oLkyLt",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"documents": [
-			"documents"
-		],
-		"questions": [
-			"questions"
-		]
+		"documents": ["documents"],
+		"questions": ["questions"]
 	},
 	"input": [
 		{
@@ -122,7 +104,7 @@
 	},
 	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
@@ -134,27 +116,36 @@
 			"maxLength": 32,
 			"description": "Hugging face model to use for embedding"
 		},
+		"embedding.truncate_dim": {
+			"type": "number",
+			"title": "Truncate dimensions",
+			"description": "Truncate embeddings to this dimensionality (0 = use model default)"
+		},
+		"embedding.document_prefix": {
+			"type": "string",
+			"title": "Document prefix",
+			"description": "Prefix prepended to document text before encoding (e.g. 'search_document: ', 'passage: ')"
+		},
+		"embedding.query_prefix": {
+			"type": "string",
+			"title": "Query prefix",
+			"description": "Prefix prepended to query text before encoding (e.g. 'search_query: ', 'query: ')"
+		},
 		"embedding.custom": {
 			"object": "custom",
 			"title": "",
-			"properties": [
-				"embedding.model"
-			]
+			"properties": ["embedding.model", "embedding.truncate_dim", "embedding.document_prefix", "embedding.query_prefix"]
 		},
 		"embedding.profile": {
 			"title": "Model",
 			"description": "Embedding model",
 			"type": "string",
 			"default": "miniLM",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": [
-						"embedding.custom"
-					]
+					"properties": ["embedding.custom"]
 				}
 			]
 		},
@@ -173,21 +164,19 @@
 		{
 			"section": "Pipe",
 			"title": "Sentence Transformer",
-			"properties": [
-				"embedding.profile"
-			]
+			"properties": ["embedding.profile"]
 		}
 	],
+	//
+	//	Test configuration for automated node testing
+	//
 	"test": {
 		"profiles": ["miniLM"],
 		"outputs": ["documents", "questions"],
 		"cases": [
 			{
 				"name": "Embed text chunks",
-				"documents": [
-					{"page_content": "Hello world, this is a test document."},
-					{"page_content": "Second chunk for embedding."}
-				],
+				"documents": [{ "page_content": "Hello world, this is a test document." }, { "page_content": "Second chunk for embedding." }],
 				"expect": {
 					"documents": {
 						"notEmpty": true
@@ -210,5 +199,41 @@
 				}
 			}
 		]
-	}
+	},
+	//
+	//	Full test configuration - tests all sentence-transformer profiles.
+	//	Run via: builder model_server:fulltest
+	//
+	"fulltest": [
+		{
+			"profiles": ["miniLM", "miniAll", "mpnet"],
+			"outputs": ["documents", "questions"],
+			"cases": [
+				{
+					"name": "Embed text chunks",
+					"documents": [{ "page_content": "Hello world, this is a test document." }, { "page_content": "Second chunk for embedding." }],
+					"expect": {
+						"documents": {
+							"notEmpty": true
+						}
+					}
+				},
+				{
+					"name": "Embed single question (flat vector for Qdrant)",
+					"questions": "What is the capital of France?",
+					"expect": {
+						"questions": {
+							"notEmpty": true,
+							"property": [
+								{
+									"path": "[0].questions[0].embedding",
+									"minLength": 384
+								}
+							]
+						}
+					}
+				}
+			]
+		}
+	]
 }

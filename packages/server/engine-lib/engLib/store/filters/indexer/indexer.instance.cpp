@@ -205,79 +205,81 @@ Error IFilterInstance::renderObject(ServicePipe &target,
             return {};
         }
 
-        util::Guard releaseWordDb{localfcn{global.releaseWordDb();
+        auto releaseWordDbFcn = localfcn { global.releaseWordDb(); };
+        util::Guard releaseWordDb{_mv(releaseWordDbFcn)};
+
+        // Get the reference
+        auto &db = dbRef->get();
+
+        // Get the document id
+        auto docId = db.lookupDocId(object.componentId.hash());
+
+        // If we don't have it, pass it someone who may
+        if (!docId) return pDown->renderObject(target, object);
+
+        // Document hash is registered but has no indexed words (e.g. images)
+        if (!db.hasDocId(docId)) return {};
+
+        // The word buffer convertted to utf16
+        Utf16 utf16;
+
+        // Start walking the document list
+        for (auto wordId : db.lookupDocWordIdList(docId)) {
+            // If thread or process was cancelled let's finish immediately
+            if (auto ccode = ap::async::cancelled(_location)) {
+                return ccode;
+            }
+
+            // Stop at the first reserved word (i.e. metadata boundary)
+            if (index::db::isReservedWordId(wordId)) break;
+
+            // Lookup the word
+            auto word = db.lookupWord(wordId);
+
+            // And write it if this would overflow
+            if (dataSize + (word.length() * 2) > maxLength) {
+                // Get a view of it
+                auto data = Utf16{pDataBuffer, dataSize};
+
+                // Write the text
+                if (auto ccode = pDown->sendText(target, data)) return ccode;
+
+                // Clear it again
+                dataSize = 0;
+            }
+
+            // Ensure we clear the destination, always
+            utf16.clear();
+
+            // And convert
+            utf8::unchecked::utf8to16(word.begin(), word.end(),
+                                      std::back_inserter(utf16));
+
+            // Directly copy it
+            memcpy(&pDataBuffer[dataSize], utf16.ptr(),
+                   utf16.length() * sizeof(Utf16Chr));
+
+            // Adjust the size
+            dataSize += utf16.length();
+        }
+
+        // Flush any remaining
+        if (dataSize) {
+            // Get a view of it
+            auto data = Utf16{pDataBuffer, dataSize};
+
+            // Write the text
+            if (auto ccode = pDown->sendText(target, data)) return ccode;
+        }
+
+        // We rendered it
+        return {};
+    }  // namespace engine::store::filter::indexer
+    else {
+        // Push it down the stack, we haven't got it or we
+        // are being force to go to the source
+        return pDown->renderObject(target, object);
     }
-};
-
-// Get the reference
-auto &db = dbRef->get();
-
-// Get the document id
-auto docId = db.lookupDocId(object.componentId.hash());
-
-// If we don't have it, pass it someone who may
-if (!docId) return pDown->renderObject(target, object);
-
-// The word buffer convertted to utf16
-Utf16 utf16;
-
-// Start walking the document list
-for (auto wordId : db.lookupDocWordIdList(docId)) {
-    // If thread or process was cancelled let's finish immediately
-    if (auto ccode = ap::async::cancelled(_location)) {
-        return ccode;
-    }
-
-    // Stop at the first reserved word (i.e. metadata boundary)
-    if (index::db::isReservedWordId(wordId)) break;
-
-    // Lookup the word
-    auto word = db.lookupWord(wordId);
-
-    // And write it if this would overflow
-    if (dataSize + (word.length() * 2) > maxLength) {
-        // Get a view of it
-        auto data = Utf16{pDataBuffer, dataSize};
-
-        // Write the text
-        if (auto ccode = pDown->sendText(target, data)) return ccode;
-
-        // Clear it again
-        dataSize = 0;
-    }
-
-    // Ensure we clear the destination, always
-    utf16.clear();
-
-    // And convert
-    utf8::unchecked::utf8to16(word.begin(), word.end(),
-                              std::back_inserter(utf16));
-
-    // Directly copy it
-    memcpy(&pDataBuffer[dataSize], utf16.ptr(),
-           utf16.length() * sizeof(Utf16Chr));
-
-    // Adjust the size
-    dataSize += utf16.length();
-}
-
-// Flush any remaining
-if (dataSize) {
-    // Get a view of it
-    auto data = Utf16{pDataBuffer, dataSize};
-
-    // Write the text
-    if (auto ccode = pDown->sendText(target, data)) return ccode;
-}
-
-// We rendered it
-return {};
-}  // namespace engine::store::filter::indexer
-else {
-    // Push it down the stack, we haven't got it or we
-    // are being force to go to the source
-    return pDown->renderObject(target, object);
-}
 }
 
 //-------------------------------------------------------------------------

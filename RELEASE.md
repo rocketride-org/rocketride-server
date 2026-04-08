@@ -19,10 +19,10 @@ This document describes the automated release pipeline for the RocketRide Engine
 
 The release pipeline consists of two workflows:
 
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| **Nightly** (`.github/workflows/nightly.yaml`) | Daily at 02:00 UTC or manual dispatch | Build and publish prereleases from `develop` |
-| **Release** (`.github/workflows/release.yaml`) | Push to `main` | Build, publish to registries, and create stable GitHub Releases |
+| Workflow                                       | Trigger                               | Purpose                                                         |
+| ---------------------------------------------- | ------------------------------------- | --------------------------------------------------------------- |
+| **Nightly** (`.github/workflows/nightly.yaml`) | Daily at 02:00 UTC or manual dispatch | Build and publish prereleases from `stage`                      |
+| **Release** (`.github/workflows/release.yaml`) | Push to `main`                        | Build, publish to registries, and create stable GitHub Releases |
 
 Both workflows build the full project across three platforms (Linux, Windows, macOS), run tests, and package artifacts. The key difference is that nightly creates prereleases on GitHub only, while the release workflow publishes to external registries (npm, PyPI, VS Code Marketplace) and creates stable GitHub Releases.
 
@@ -30,19 +30,20 @@ Both workflows build the full project across three platforms (Linux, Windows, ma
 
 The monorepo produces five independently versioned and released packages:
 
-| Package | Description | Version Source | Registry |
-|---------|-------------|----------------|----------|
-| **Server** | Core RocketRide engine binaries | `package.json` (root) | GitHub Releases only |
-| **TypeScript Client** | Node.js/browser SDK | `packages/client-typescript/package.json` | [npm](https://www.npmjs.com/package/rocketride) |
-| **Python Client** | Python SDK | `packages/client-python/pyproject.toml` | [PyPI](https://pypi.org/project/rocketride/) |
-| **MCP Client** | Model Context Protocol integration | `packages/client-mcp/pyproject.toml` | [PyPI](https://pypi.org/project/rocketride-mcp/) |
-| **VS Code Extension** | Visual Studio Code extension | `apps/vscode/package.json` | [VS Code Marketplace](https://marketplace.visualstudio.com/) and [Open VSX](https://open-vsx.org/) |
+| Package               | Description                        | Version Source                            | Registry                                                                                           |
+| --------------------- | ---------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| **Server**            | Core RocketRide engine binaries    | `package.json` (root)                     | GitHub Releases only                                                                               |
+| **TypeScript Client** | Node.js/browser SDK                | `packages/client-typescript/package.json` | [npm](https://www.npmjs.com/package/rocketride)                                                    |
+| **Python Client**     | Python SDK                         | `packages/client-python/pyproject.toml`   | [PyPI](https://pypi.org/project/rocketride/)                                                       |
+| **MCP Client**        | Model Context Protocol integration | `packages/client-mcp/pyproject.toml`      | [PyPI](https://pypi.org/project/rocketride-mcp/)                                                   |
+| **VS Code Extension** | Visual Studio Code extension       | `apps/vscode/package.json`                | [VS Code Marketplace](https://marketplace.visualstudio.com/) and [Open VSX](https://open-vsx.org/) |
 
 ### Package Artifacts
 
 Each package produces specific artifacts during the build:
 
 **Server** (per platform):
+
 - `rocketride-server-v{version}-win64.zip` — Windows x64 binary archive
 - `rocketride-server-v{version}-win64.symbols.zip` — Windows debug symbols
 - `rocketride-server-v{version}-win64.manifest.json` — Build manifest with content hash
@@ -52,32 +53,37 @@ Each package produces specific artifacts during the build:
 - `rocketride-server-v{version}-darwin-arm64.manifest.json` — Build manifest
 
 **TypeScript Client:**
+
 - `rocketride-{version}.tgz` — npm package tarball
 
 **Python Client:**
+
 - `rocketride-{version}-py3-none-any.whl` — Python wheel
 - `rocketride-{version}.tar.gz` — Python source distribution
 
 **MCP Client:**
+
 - `rocketride_mcp-{version}-py3-none-any.whl` — Python wheel
 - `rocketride_mcp-{version}.tar.gz` — Python source distribution
 
 **VS Code Extension:**
+
 - `rocketride-{version}.vsix` — VS Code extension package
 
 ## Branching Strategy
 
 ```
 feature/* ──┐
-bugfix/*  ──┼──> develop ──────────────> main
-hotfix/*  ──┘        │                    │
-                     │                    │
-              Nightly builds        Stable releases
-              (prereleases)      (registry + GitHub)
+bugfix/*  ──┼──> develop ──> stage ──> main
+hotfix/*  ──┘                  │         │
+                               │         │
+                        Nightly builds   Stable releases
+                        (prereleases)  (registry + GitHub)
 ```
 
-- **`develop`** — Integration branch. All feature and bugfix branches merge here. Nightly prereleases are built from this branch.
-- **`main`** — Stable release branch. When `develop` is merged into `main`, the release workflow triggers automatically.
+- **`develop`** — Integration branch. All feature and bugfix branches merge here. No prereleases are built from this branch.
+- **`stage`** — Prerelease stabilization branch. Changes are promoted from `develop` to `stage` once they are ready to be validated. Nightly prereleases are built from this branch, so a broken commit on `develop` cannot leak into a prerelease.
+- **`main`** — Stable release branch. When `stage` is merged into `main`, the release workflow triggers automatically.
 - **`feature/*`**, **`bugfix/*`**, **`hotfix/*`** — Short-lived branches that merge into `develop` via pull request.
 
 ## Nightly Prereleases
@@ -91,6 +97,7 @@ hotfix/*  ──┘        │                    │
 1. **Initialize** — Extract current versions from all package files.
 
 2. **Build** — Compile and test the full project on all three platforms in parallel:
+
    - Ubuntu 22.04 (Linux x64)
    - Windows Server 2022 (Windows x64)
    - macOS 14 (ARM64)
@@ -99,13 +106,13 @@ hotfix/*  ──┘        │                    │
 
 4. **Create prereleases** — Create five separate GitHub Releases, one per package, each marked as a prerelease:
 
-   | GitHub Release | Tag |
-   |----------------|-----|
-   | Prerelease -- Server {version} | `server-v{version}-prerelease` |
+   | GitHub Release                            | Tag                                       |
+   | ----------------------------------------- | ----------------------------------------- |
+   | Prerelease -- Server {version}            | `server-v{version}-prerelease`            |
    | Prerelease -- TypeScript Client {version} | `client-typescript-v{version}-prerelease` |
-   | Prerelease -- Python Client {version} | `client-python-v{version}-prerelease` |
-   | Prerelease -- MCP Client {version} | `client-mcp-v{version}-prerelease` |
-   | Prerelease -- VS Code Extension {version} | `vscode-v{version}-prerelease` |
+   | Prerelease -- Python Client {version}     | `client-python-v{version}-prerelease`     |
+   | Prerelease -- MCP Client {version}        | `client-mcp-v{version}-prerelease`        |
+   | Prerelease -- VS Code Extension {version} | `vscode-v{version}-prerelease`            |
 
 ### What does NOT happen
 
@@ -114,13 +121,13 @@ hotfix/*  ──┘        │                    │
 
 ### Downloading nightly builds
 
-Visit the [Releases page](https://github.com/rocketride-org/rocketride-server/releases) and look for releases tagged with `-prerelease`. These contain the latest development builds from the `develop` branch.
+Visit the [Releases page](https://github.com/rocketride-org/rocketride-server/releases) and look for releases tagged with `-prerelease`. These contain the latest builds from the `stage` branch.
 
 ## Stable Releases
 
 **Workflow:** `.github/workflows/release.yaml`
 
-**Trigger:** Automatically runs when commits are pushed to the `main` branch (typically via a merge from `develop`).
+**Trigger:** Automatically runs when commits are pushed to the `main` branch (typically via a merge from `stage`).
 
 ### What happens
 
@@ -133,11 +140,12 @@ Visit the [Releases page](https://github.com/rocketride-org/rocketride-server/re
    a. **Check if already released** — If the git tag (e.g., `server-v1.0.3`) already exists, the package is skipped entirely. This makes the workflow fully idempotent.
 
    b. **Publish to registry** — Push the package to its external registry. Each registry publish includes a check to skip if the version already exists:
-      - TypeScript Client → `npm publish` to npmjs.org
-      - Python Client → `twine upload` to PyPI
-      - MCP Client → `twine upload` to PyPI
-      - VS Code Extension → `vsce publish` to VS Code Marketplace and `ovsx publish` to Open VSX
-      - Server → No registry publish (binaries are distributed via GitHub Releases only)
+
+   - TypeScript Client → `npm publish` to npmjs.org
+   - Python Client → `twine upload` to PyPI
+   - MCP Client → `twine upload` to PyPI
+   - VS Code Extension → `vsce publish` to VS Code Marketplace and `ovsx publish` to Open VSX
+   - Server → No registry publish (binaries are distributed via GitHub Releases only)
 
    c. **Create git tag** — Tag the commit (e.g., `server-v1.0.3`).
 
@@ -162,23 +170,29 @@ Each package is published independently:
 
 ### Where versions live
 
-| Package | File | Field |
-|---------|------|-------|
-| Server | `package.json` (root) | `version` |
-| TypeScript Client | `packages/client-typescript/package.json` | `version` |
-| Python Client | `packages/client-python/pyproject.toml` | `project.version` |
-| MCP Client | `packages/client-mcp/pyproject.toml` | `project.version` |
-| VS Code Extension | `apps/vscode/package.json` | `version` |
+| Package           | File                                      | Field             |
+| ----------------- | ----------------------------------------- | ----------------- |
+| Server            | `package.json` (root)                     | `version`         |
+| TypeScript Client | `packages/client-typescript/package.json` | `version`         |
+| Python Client     | `packages/client-python/pyproject.toml`   | `project.version` |
+| MCP Client        | `packages/client-mcp/pyproject.toml`      | `project.version` |
+| VS Code Extension | `apps/vscode/package.json`                | `version`         |
 
 ### How to release a new version
 
 1. **Bump the version** in the appropriate file(s) on the `develop` branch.
-2. **Commit and push** to `develop`. The next nightly build will create a prerelease with the new version.
+2. **Commit and push** to `develop`, then **merge `develop` into `stage`** once the change is ready to be validated:
+   ```bash
+   git checkout stage
+   git merge develop
+   git push origin stage
+   ```
+   The next nightly build will create a prerelease with the new version from `stage`.
 3. **Verify the prerelease** by downloading artifacts from the GitHub Releases page.
-4. **Merge `develop` into `main`**:
+4. **Merge `stage` into `main`**:
    ```bash
    git checkout main
-   git merge develop
+   git merge stage
    git push origin main
    ```
 5. The release workflow triggers automatically and publishes all packages with new versions.
@@ -202,18 +216,18 @@ Because each package is versioned independently, you can release a single packag
 
 ### Tag naming convention
 
-| Type | Pattern | Example |
-|------|---------|---------|
-| Server stable | `server-v{version}` | `server-v1.0.3` |
-| TypeScript Client stable | `client-typescript-v{version}` | `client-typescript-v1.0.1` |
-| Python Client stable | `client-python-v{version}` | `client-python-v1.0.1` |
-| MCP Client stable | `client-mcp-v{version}` | `client-mcp-v0.1.0` |
-| VS Code stable | `vscode-v{version}` | `vscode-v0.0.1` |
-| Server prerelease | `server-v{version}-prerelease` | `server-v1.0.3-prerelease` |
+| Type                         | Pattern                                   | Example                               |
+| ---------------------------- | ----------------------------------------- | ------------------------------------- |
+| Server stable                | `server-v{version}`                       | `server-v1.0.3`                       |
+| TypeScript Client stable     | `client-typescript-v{version}`            | `client-typescript-v1.0.1`            |
+| Python Client stable         | `client-python-v{version}`                | `client-python-v1.0.1`                |
+| MCP Client stable            | `client-mcp-v{version}`                   | `client-mcp-v0.1.0`                   |
+| VS Code stable               | `vscode-v{version}`                       | `vscode-v0.0.1`                       |
+| Server prerelease            | `server-v{version}-prerelease`            | `server-v1.0.3-prerelease`            |
 | TypeScript Client prerelease | `client-typescript-v{version}-prerelease` | `client-typescript-v1.0.1-prerelease` |
-| Python Client prerelease | `client-python-v{version}-prerelease` | `client-python-v1.0.1-prerelease` |
-| MCP Client prerelease | `client-mcp-v{version}-prerelease` | `client-mcp-v0.1.0-prerelease` |
-| VS Code prerelease | `vscode-v{version}-prerelease` | `vscode-v0.0.1-prerelease` |
+| Python Client prerelease     | `client-python-v{version}-prerelease`     | `client-python-v1.0.1-prerelease`     |
+| MCP Client prerelease        | `client-mcp-v{version}-prerelease`        | `client-mcp-v0.1.0-prerelease`        |
+| VS Code prerelease           | `vscode-v{version}-prerelease`            | `vscode-v0.0.1-prerelease`            |
 
 ### Tag lifecycle
 
@@ -262,11 +276,11 @@ Because each package is versioned independently, you can release a single packag
 
 Both workflows build on the same three platforms:
 
-| Platform | Runner | Server artifact format |
-|----------|--------|----------------------|
-| Linux x64 | `ubuntu-22.04` | `.tar.gz` |
+| Platform    | Runner         | Server artifact format  |
+| ----------- | -------------- | ----------------------- |
+| Linux x64   | `ubuntu-22.04` | `.tar.gz`               |
 | Windows x64 | `windows-2022` | `.zip` + `.symbols.zip` |
-| macOS ARM64 | `macos-14` | `.tar.gz` |
+| macOS ARM64 | `macos-14`     | `.tar.gz`               |
 
 Client packages (TypeScript, Python, MCP) and the VS Code extension are platform-independent and are built only on the Ubuntu runner.
 
@@ -317,11 +331,11 @@ If the tag exists and you need to re-release, delete the tag first (see "A git t
 
 The following secrets must be configured in the `release` environment:
 
-| Secret | Used for |
-|--------|----------|
-| `NPM_TOKEN` | Publishing to npm |
-| `PYPI_TOKEN` | Publishing to PyPI |
-| `VSCE_PAT` | Publishing to VS Code Marketplace |
-| `OVSX_PAT` | Publishing to Open VSX |
+| Secret       | Used for                          |
+| ------------ | --------------------------------- |
+| `NPM_TOKEN`  | Publishing to npm                 |
+| `PYPI_TOKEN` | Publishing to PyPI                |
+| `VSCE_PAT`   | Publishing to VS Code Marketplace |
+| `OVSX_PAT`   | Publishing to Open VSX            |
 
 Update these in GitHub Settings > Environments > `release` > Environment secrets.

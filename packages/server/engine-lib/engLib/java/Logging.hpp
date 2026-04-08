@@ -27,7 +27,7 @@ namespace engine::java {
 class Logging final {
 private:
     struct LoggingMethods {
-        LoggingMethods(const java::Jni& jni) noexcept(false) {
+        LoggingMethods(const java::Jni &jni) noexcept(false) {
             m_class = jni.getClass("com/rocketride/Logging");
             m_initMethodId = jni.getStaticMethodId(m_class, "init", "(I)V");
             m_testMonitorMethodId =
@@ -39,7 +39,7 @@ private:
         jmethodID m_testMonitorMethodId;
     };
 
-    static auto& methods(const java::Jni& jni) noexcept(false) {
+    static auto &methods(const java::Jni &jni) noexcept(false) {
         static LoggingMethods methods(jni);
         return methods;
     }
@@ -48,14 +48,14 @@ public:
     // Block construction (static class)
     Logging() = delete;
 
-    static void init(const java::Jni& jni) noexcept(false) {
-        auto& methodIds = methods(jni);
+    static void init(const java::Jni &jni) noexcept(false) {
+        auto &methodIds = methods(jni);
         jni.invokeStaticMethod(methodIds.m_class, methodIds.m_initMethodId,
                                static_cast<jint>(getLogLevel()));
     }
 
-    static void testMonitor(const java::Jni& jni) noexcept(false) {
-        auto& methodIds = methods(jni);
+    static void testMonitor(const java::Jni &jni) noexcept(false) {
+        auto &methodIds = methods(jni);
         jni.invokeStaticMethod(methodIds.m_class,
                                methodIds.m_testMonitorMethodId);
     }
@@ -92,7 +92,7 @@ private:
 ///	@param[in]	string
 ///		The message
 ///------------------------------------------------------------------------
-inline void logCallback(JNIEnv* env, jclass clazz, jstring string) noexcept {
+inline void logCallback(JNIEnv *env, jclass clazz, jstring string) noexcept {
     // Get a jni interface with the given env
     java::Jni jni(env);
 
@@ -121,9 +121,9 @@ inline void logCallback(JNIEnv* env, jclass clazz, jstring string) noexcept {
 inline void logRegisterCallbacks() noexcept(false) {
     // Register native callbacks
     JNINativeMethod nativeMethodTable[] = {
-        {_constCast<char*>("logCallback"),
-         _constCast<char*>("(Ljava/lang/String;)V"),
-         _reCast<void*>(&logCallback)}};
+        {_constCast<char *>("logCallback"),
+         _constCast<char *>("(Ljava/lang/String;)V"),
+         _reCast<void *>(&logCallback)}};
     registerNativeCallbacks("com/rocketride/Logging", nativeMethodTable,
                             std::size(nativeMethodTable));
 }

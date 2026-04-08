@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -22,30 +22,30 @@
  * SOFTWARE.
  */
 
-import { TransportWebSocket } from './core/TransportWebSocket';
-import { DAPClient } from './core/DAPClient';
-import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback } from './types';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig } from './types';
-import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants';
-import { Question } from './schema/Question';
-import { AuthenticationException } from './exceptions';
+import { TransportWebSocket } from './core/TransportWebSocket.js';
+import { DAPClient } from './core/DAPClient.js';
+import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig } from './types/index.js';
+import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
+import { Question } from './schema/Question.js';
+import { AuthenticationException, ConnectionException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
 let clientId = 0;
 
 /**
  * Streaming data pipe for sending large datasets to RocketRide pipelines.
- * 
+ *
  * DataPipe provides a stream-like interface for uploading data to an RocketRide
  * pipeline. It handles the low-level protocol details of opening, writing to,
  * and closing data pipes on the server.
- * 
+ *
  * Usage pattern:
  * 1. Create pipe using client.pipe()
  * 2. Call open() to establish the pipe
  * 3. Call write() multiple times with data chunks
  * 4. Call close() to finalize and get results
- * 
+ *
  * @example
  * ```typescript
  * const pipe = await client.pipe(token, { filename: 'data.json' }, 'application/json');
@@ -63,33 +63,31 @@ export class DataPipe {
 	private _pipeId?: number;
 	private _opened = false;
 	private _closed = false;
+	private _onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
 
 	/**
 	 * Creates a new DataPipe instance.
-	 * 
+	 *
 	 * @param client - The RocketRideClient instance managing this pipe
 	 * @param token - Task token for the pipeline receiving the data
 	 * @param objinfo - Metadata about the object being sent (e.g., filename, size)
 	 * @param mimeType - MIME type of the data being sent (default: 'application/octet-stream')
 	 * @param provider - Optional provider name for the data source
+	 * @param onSSE - Optional async callback invoked for each SSE event emitted by
+	 *                the pipeline node for this specific pipe
 	 */
-	constructor(
-		client: RocketRideClient,
-		token: string,
-		objinfo: Record<string, unknown> = {},
-		mimeType = 'application/octet-stream',
-		provider?: string
-	) {
+	constructor(client: RocketRideClient, token: string, objinfo: Record<string, unknown> = {}, mimeType = 'application/octet-stream', provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>) {
 		this._client = client;
 		this._token = token;
 		this._objinfo = objinfo;
 		this._mimeType = mimeType;
 		this._provider = provider;
+		this._onSSE = onSSE;
 	}
 
 	/**
 	 * Check if the pipe is currently open for writing.
-	 * 
+	 *
 	 * @returns true if the pipe has been opened and not yet closed
 	 */
 	get isOpened(): boolean {
@@ -98,10 +96,10 @@ export class DataPipe {
 
 	/**
 	 * Get the unique ID assigned to this pipe by the server.
-	 * 
+	 *
 	 * This ID is assigned when the pipe is opened and is used for subsequent
 	 * write operations. It remains undefined until open() is called successfully.
-	 * 
+	 *
 	 * @returns The server-assigned pipe ID, or undefined if not yet opened
 	 */
 	get pipeId(): number | undefined {
@@ -110,11 +108,11 @@ export class DataPipe {
 
 	/**
 	 * Open the pipe for data transmission.
-	 * 
+	 *
 	 * Establishes a data pipe on the server for streaming data to the pipeline.
 	 * Must be called before any write() operations. The server will assign a
 	 * unique pipe ID that is used for subsequent operations.
-	 * 
+	 *
 	 * @returns This DataPipe instance (for method chaining)
 	 * @throws Error if the pipe is already opened or if the pipeline is not running
 	 */
@@ -141,15 +139,22 @@ export class DataPipe {
 
 		this._pipeId = response.body?.pipe_id as number | undefined;
 		this._opened = true;
+
+		// If an SSE callback was provided, subscribe and register for this pipe
+		if (this._onSSE !== undefined && this._pipeId !== undefined) {
+			await this._client.setEvents(this._token, ['SSE'], this._pipeId);
+			this._client._ssePipeCallbacks.set(this._pipeId, this._onSSE);
+		}
+
 		return this;
 	}
 
 	/**
 	 * Write data to the pipe.
-	 * 
+	 *
 	 * Sends a chunk of data through the pipe to the server pipeline. Can be called
 	 * multiple times to stream large datasets. The pipe must be opened first.
-	 * 
+	 *
 	 * @param buffer - Data to write, must be a Uint8Array
 	 * @throws Error if the pipe is not opened, buffer is invalid, or write fails
 	 */
@@ -180,11 +185,11 @@ export class DataPipe {
 
 	/**
 	 * Close the pipe and get the processing results.
-	 * 
+	 *
 	 * Finalizes the data stream and signals the server that no more data will be sent.
 	 * The server processes any buffered data and returns the final result. After closing,
 	 * the pipe cannot be reopened or written to again.
-	 * 
+	 *
 	 * @returns The processing result from the server, or undefined if already closed
 	 * @throws Error if closing the pipe fails
 	 */
@@ -211,17 +216,27 @@ export class DataPipe {
 			return response.body as PIPELINE_RESULT;
 		} finally {
 			this._closed = true;
+
+			// Unregister SSE callback and scoped monitor subscription
+			if (this._onSSE !== undefined && this._pipeId !== undefined) {
+				this._client._ssePipeCallbacks.delete(this._pipeId);
+				try {
+					await this._client.setEvents(this._token, [], this._pipeId);
+				} catch {
+					// Best-effort cleanup
+				}
+			}
 		}
 	}
 }
 
 /**
  * Main RocketRide client for connecting to RocketRide servers and services.
- * 
+ *
  * This client provides a comprehensive API for interacting with RocketRide services,
  * including connection management, pipeline execution, data operations, AI chat,
  * event handling, and server connectivity testing.
- * 
+ *
  * Key features:
  * - Single shared WebSocket connection for all operations
  * - Connection management (connect/disconnect) with optional persistence
@@ -244,6 +259,8 @@ export class RocketRideClient extends DAPClient {
 	private _dapAttempted = false;
 	private _dapSend?: (event: unknown) => void;
 	private _nextChatId = 1;
+	/** Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch. */
+	readonly _ssePipeCallbacks = new Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>();
 
 	// Persistence properties for automatic reconnection
 	private _persist: boolean = false;
@@ -258,13 +275,13 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Creates a new RocketRideClient instance.
-	 * 
+	 *
 	 * Configuration priority (highest to lowest):
 	 * 1. Values passed in config parameter (auth, uri)
 	 * 2. Values from env parameter (if provided)
 	 * 3. Values from .env file (Node.js only)
 	 * 4. Default values
-	 * 
+	 *
 	 * @param config - Configuration options for the client
 	 * @param config.auth - API key for authentication (required)
 	 * @param config.uri - Server URI (default: CONST_DEFAULT_SERVICE)
@@ -276,9 +293,9 @@ export class RocketRideClient extends DAPClient {
 	 * @param config.requestTimeout - Default timeout in ms for individual requests
 	 * @param config.maxRetryTime - Max total time in ms to keep retrying connections
 	 * @param config.module - Optional module name for client identification
-	 * 
+	 *
 	 * @throws Error if auth is not provided via config, env, or .env file
-	 * 
+	 *
 	 * @example
 	 * ```typescript
 	 * // Using explicit auth and URI
@@ -288,7 +305,7 @@ export class RocketRideClient extends DAPClient {
 	 *   persist: true,
 	 *   onEvent: (event) => console.log('Event:', event)
 	 * });
-	 * 
+	 *
 	 * // Using custom env dictionary
 	 * const client = new RocketRideClient({
 	 *   env: {
@@ -304,64 +321,22 @@ export class RocketRideClient extends DAPClient {
 		const isBrowser = typeof window !== 'undefined';
 
 		// Build environment variables dictionary
-		// Priority: provided env > .env file
+		// Priority: provided env > process.env (Node.js only)
 		let clientEnv: Record<string, string> = {};
 
 		if (config.env) {
 			// Use provided env dictionary
 			clientEnv = { ...config.env };
-		} else {
-			// Load from .env file only (Node.js only)
-			if (!isBrowser) {
-				try {
-					const fs = require('fs');
-					const path = require('path');
-					const envPath = path.join(process.cwd(), '.env');
-
-					if (fs.existsSync(envPath)) {
-						const content = fs.readFileSync(envPath, 'utf-8');
-
-						// Parse each line
-						for (const line of content.split('\n')) {
-							const trimmed = line.trim();
-							// Skip comments and empty lines
-							if (!trimmed || trimmed.startsWith('#')) {
-								continue;
-							}
-
-							// Parse KEY=VALUE format
-							const match = trimmed.match(/^([^=]+)=(.*)$/);
-							if (match) {
-								const key = match[1].trim();
-								let value = match[2].trim();
-
-								// Remove quotes if present
-								if ((value.startsWith('"') && value.endsWith('"')) ||
-									(value.startsWith("'") && value.endsWith("'"))) {
-									value = value.slice(1, -1);
-								}
-
-								clientEnv[key] = value;
-							}
-						}
-					}
-				} catch {
-					// File doesn't exist or can't be read - that's okay
+		} else if (!isBrowser && typeof process !== 'undefined' && process.env) {
+			// In Node.js, copy process.env values that are strings
+			for (const [key, value] of Object.entries(process.env)) {
+				if (typeof value === 'string') {
+					clientEnv[key] = value;
 				}
 			}
 		}
 
-		const {
-			auth = config.auth || clientEnv.ROCKETRIDE_APIKEY,
-			uri = config.uri || clientEnv.ROCKETRIDE_URI || CONST_DEFAULT_WEB_CLOUD,
-			onEvent,
-			onConnected,
-			onDisconnected,
-			onConnectError,
-			persist,
-			maxRetryTime,
-			module,
-		} = config;
+		const { auth = config.auth || clientEnv.ROCKETRIDE_APIKEY, uri = config.uri || clientEnv.ROCKETRIDE_URI || CONST_DEFAULT_WEB_CLOUD, onEvent, onConnected, onDisconnected, onConnectError, persist, maxRetryTime, module } = config;
 
 		// Create unique client identifier
 		const clientName = module || `CLIENT-${clientId++}`;
@@ -403,7 +378,17 @@ export class RocketRideClient extends DAPClient {
 		try {
 			const url = new URL(normalized);
 
-			if (!url.port && !url.hostname.includes('rocketride.ai')) {
+			// The URL API silently strips ports that are default-for-scheme
+			// (e.g. :443 on https, :80 on http), so url.port alone cannot
+			// distinguish "no port given" from "scheme-default port given".
+			// Check the raw input for an explicit `:digits` after the scheme.
+			const withoutScheme = normalized.replace(/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//, '');
+			const authority = withoutScheme.split(/[/?#]/, 1)[0] ?? '';
+			const hasExplicitPort = authority.startsWith('[')
+				? /\]:\d+$/.test(authority) // IPv6 literal with explicit port
+				: /:\d+$/.test(authority); // hostname/IPv4 with explicit port
+
+			if (!url.port && !hasExplicitPort && !url.hostname.includes('rocketride.ai')) {
 				url.port = CONST_DEFAULT_WEB_PORT;
 			}
 
@@ -422,7 +407,7 @@ export class RocketRideClient extends DAPClient {
 
 		try {
 			const url = new URL(httpUrl);
-			const wsScheme = url.protocol === 'https:' ? 'wss:' : 'ws:';
+			const wsScheme = url.protocol === 'https:' || url.protocol === 'wss:' ? 'wss:' : 'ws:';
 			return `${wsScheme}//${url.host}/task/service`;
 		} catch {
 			return `${httpUrl}/task/service`;
@@ -548,9 +533,27 @@ export class RocketRideClient extends DAPClient {
 	 * Must be called before executing pipelines or other operations.
 	 * In persist mode, enables automatic reconnection on disconnect and on initial failure
 	 * (calls onConnectError on each failed attempt and keeps retrying).
-	 * @param timeout - Optional overall timeout in ms for the connect + auth handshake.
+	 * @param options - Optional timeout (number) or connection parameters object with uri, auth, and timeout.
 	 */
-	async connect(timeout?: number): Promise<void> {
+	async connect(options?: number | { uri?: string; auth?: string; timeout?: number }): Promise<void> {
+		let uri: string | undefined;
+		let auth: string | undefined;
+		let timeout: number | undefined;
+
+		if (typeof options === 'number') {
+			timeout = options;
+		} else if (options) {
+			({ uri, auth, timeout } = options);
+		}
+
+		// Apply optional overrides so they're used for this connect
+		if (uri !== undefined) {
+			this._setUri(uri);
+		}
+		if (auth !== undefined) {
+			this._setAuth(auth);
+		}
+
 		this._manualDisconnect = false;
 		this._currentReconnectDelay = 250;
 		this._retryStartTime = undefined;
@@ -626,7 +629,7 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Test connectivity to the RocketRide server.
-	 * 
+	 *
 	 * Sends a lightweight ping request to the server to verify it's responding
 	 * and reachable. This is useful for connectivity testing, health checks,
 	 * and measuring response times.
@@ -676,7 +679,7 @@ export class RocketRideClient extends DAPClient {
 			return this.substituteEnvVars(obj);
 		} else if (Array.isArray(obj)) {
 			// If it's an array, process each element
-			return obj.map(item => this.processEnvSubstitution(item));
+			return obj.map((item) => this.processEnvSubstitution(item));
 		} else if (obj !== null && typeof obj === 'object') {
 			// If it's an object, process each property
 			const result: Record<string, unknown> = {};
@@ -687,6 +690,42 @@ export class RocketRideClient extends DAPClient {
 		}
 		// For other types (number, boolean, null), return as is
 		return obj;
+	}
+
+	/**
+	 * Load Node.js fs/promises at runtime without static imports.
+	 * This keeps browser bundles free of Node built-ins while preserving Node features.
+	 */
+	private async _loadNodeFsPromises(): Promise<{
+		readFile: (path: string, encoding: string) => Promise<string>;
+		stat: (path: string) => Promise<{ size: number }>;
+	}> {
+		if (typeof window !== 'undefined') {
+			throw new Error('Node.js filesystem APIs are not available in browser environment.');
+		}
+
+		try {
+			const req = (0, eval)('require') as undefined | ((moduleName: string) => any);
+			if (typeof req === 'function') {
+				const fsPromises = req('fs/promises');
+				if (fsPromises) {
+					return fsPromises as {
+						readFile: (path: string, encoding: string) => Promise<string>;
+						stat: (path: string) => Promise<{ size: number }>;
+					};
+				}
+			}
+		} catch {
+			// Fall through to runtime dynamic import
+		}
+
+		// Use Function to avoid bundlers statically resolving Node built-ins.
+		const dynamicImport = new Function('specifier', 'return import(specifier);') as (specifier: string) => Promise<any>;
+		const fsPromises = await dynamicImport('fs/promises');
+		return fsPromises as {
+			readFile: (path: string, encoding: string) => Promise<string>;
+			stat: (path: string) => Promise<{ size: number }>;
+		};
 	}
 
 	// ============================================================================
@@ -722,17 +761,14 @@ export class RocketRideClient extends DAPClient {
 	 * }
 	 * ```
 	 */
-	async validate(options: {
-		pipeline: PipelineConfig | Record<string, unknown>;
-		source?: string;
-	}): Promise<Record<string, unknown>> {
+	async validate(options: { pipeline: PipelineConfig | Record<string, unknown>; source?: string }): Promise<Record<string, unknown>> {
 		const { pipeline, source } = options;
 		const arguments_: Record<string, unknown> = { pipeline };
 		if (source !== undefined) {
 			arguments_.source = source;
 		}
 		const request = this.buildRequest('rrext_validate', {
-			arguments: arguments_
+			arguments: arguments_,
 		});
 		const response = await this.request(request);
 		if (this.didFail(response)) {
@@ -751,59 +787,59 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * This method loads and executes a pipeline configuration. It automatically performs
 	 * environment variable substitution on the pipeline config, replacing ${ROCKETRIDE_*}
-	 * placeholders with values from the .env file.
-	 * 
+	 * placeholders with values from the .env file or the `env` dictionary passed to the constructor.
+	 *
+	 * When loading from a file via `filepath`, the client automatically unwraps `.pipe` files
+	 * that use the `{ "pipeline": { ... } }` wrapper format. If the file contains a top-level
+	 * `pipeline` key, the inner object is extracted; otherwise the file content is used as-is.
+	 *
+	 * When passing a `pipeline` object directly, provide a flat `PipelineConfig` with
+	 * `components`, `source`, and `project_id` at the top level — do NOT wrap it in
+	 * `{ pipeline: { ... } }`.
+	 *
 	 * @param options - Pipeline execution options
 	 * @param options.token - Custom token for the pipeline (auto-generated if not provided)
-	 * @param options.filepath - Path to JSON file containing pipeline configuration
-	 * @param options.pipeline - Pipeline configuration object (alternative to filepath)
+	 * @param options.filepath - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only)
+	 * @param options.pipeline - Flat PipelineConfig object (alternative to filepath)
 	 * @param options.source - Override pipeline source
 	 * @param options.threads - Number of threads for execution (default: 1)
 	 * @param options.useExisting - Use existing pipeline instance
 	 * @param options.args - Command line arguments to pass to pipeline
 	 * @param options.ttl - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
-	 * 
+	 * @param options.pipelineTraceLevel - Trace level: 'none' | 'metadata' | 'summary' | 'full'. When set, captures every lane write and invoke call in the response under '_trace'.
+	 *
 	 * @returns Promise resolving to an object containing the task token and other metadata
 	 * @throws Error if neither pipeline nor filepath is provided
-	 * 
+	 *
 	 * @example
 	 * ```typescript
-	 * // Using pipeline file
-	 * const result = await client.use({ filepath: './pipeline.json' });
-	 * 
-	 * // Using pipeline object
+	 * // Using a .pipe file (wrapper is automatically unwrapped)
+	 * const result = await client.use({ filepath: './chat.pipe' });
+	 *
+	 * // Using a flat pipeline config object
 	 * const result = await client.use({
-	 *   pipeline: { name: 'My Pipeline', components: [...], source: 'local', project_id: '123' }
+	 *   pipeline: { components: [...], source: 'chat_1', project_id: '...' }
 	 * });
-	 * 
-	 * // With environment variable substitution
-	 * // Pipeline config: { "endpoint": "${ROCKETRIDE_URI}/api" }
-	 * // Will be replaced with actual ROCKETRIDE_URI value from .env
+	 *
+	 * // Reuse an existing pipeline
+	 * const result = await client.use({ filepath: './chat.pipe', useExisting: true });
 	 * ```
 	 */
-	async use(options: {
-		token?: string;
-		filepath?: string;
-		pipeline?: PipelineConfig;
-		source?: string;
-		threads?: number;
-		useExisting?: boolean;
-		args?: string[];
-		ttl?: number;
-		/** Pipeline trace level. When set, captures every lane write and invoke call in the response under '_trace'. */
-		pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
-	} = {}): Promise<Record<string, unknown> & { token: string }> {
-		const {
-			token,
-			filepath,
-			pipeline,
-			source,
-			threads,
-			useExisting,
-			args,
-			ttl,
-			pipelineTraceLevel
-		} = options;
+	async use(
+		options: {
+			token?: string;
+			filepath?: string;
+			pipeline?: PipelineConfig;
+			source?: string;
+			threads?: number;
+			useExisting?: boolean;
+			args?: string[];
+			ttl?: number;
+			/** Pipeline trace level. When set, captures every lane write and invoke call in the response under '_trace'. */
+			pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
+		} = {}
+	): Promise<Record<string, unknown> & { token: string }> {
+		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel } = options;
 
 		// Validate required parameters
 		if (!pipeline && !filepath) {
@@ -819,10 +855,12 @@ export class RocketRideClient extends DAPClient {
 				throw new Error('File loading not available in browser environment. Please provide pipeline object directly.');
 			}
 
-			// Load file in Node.js
-			const fs = require('fs');
-			const fileContent = fs.readFileSync(filepath, 'utf-8');
-			pipelineConfig = JSON.parse(fileContent);
+			// Load file in Node.js without static fs imports (browser-safe bundle)
+			const fsPromises = await this._loadNodeFsPromises();
+			const fileContent = await fsPromises.readFile(filepath, 'utf-8');
+			const parsed = JSON.parse(fileContent);
+			// .pipe files wrap the config in { "pipeline": { ... } } — unwrap if present
+			pipelineConfig = parsed.pipeline ?? parsed;
 		} else {
 			pipelineConfig = pipeline!;
 		}
@@ -935,24 +973,14 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Create a data pipe for streaming operations.
 	 */
-	async pipe(
-		token: string,
-		objinfo: Record<string, unknown> = {},
-		mimeType?: string,
-		provider?: string
-	): Promise<DataPipe> {
-		return new DataPipe(this, token, objinfo, mimeType, provider);
+	async pipe(token: string, objinfo: Record<string, unknown> = {}, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>): Promise<DataPipe> {
+		return new DataPipe(this, token, objinfo, mimeType, provider, onSSE);
 	}
 
 	/**
 	 * Send data to a running pipeline.
 	 */
-	async send(
-		token: string,
-		data: string | Uint8Array,
-		objinfo: Record<string, unknown> = {},
-		mimetype?: string
-	): Promise<PIPELINE_RESULT | undefined> {
+	async send(token: string, data: string | Uint8Array, objinfo: Record<string, unknown> = {}, mimetype?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>): Promise<PIPELINE_RESULT | undefined> {
 		// Convert string to bytes if needed
 		let buffer: Uint8Array;
 		if (typeof data === 'string') {
@@ -964,7 +992,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Create and use a temporary pipe for the data
-		const pipe = await this.pipe(token, this._objinfoWithSize(objinfo, buffer.length), mimetype);
+		const pipe = await this.pipe(token, this._objinfoWithSize(objinfo, buffer.length), mimetype, undefined, onSSE);
 
 		try {
 			await pipe.open();
@@ -985,27 +1013,27 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Upload multiple files to a pipeline with progress tracking and parallel execution.
-	 * 
+	 *
 	 * This method efficiently uploads files in parallel with configurable concurrency control.
 	 * Each file is streamed through a data pipe, and progress events are emitted through the
 	 * event system for all subscribers. The order of results matches the input file order.
-	 * 
+	 *
 	 * Progress events are sent through the event system as 'apaevt_status_upload' events
 	 * (matching Python client behavior) rather than through a callback parameter.
-	 * 
+	 *
 	 * @param files - Array of file objects with optional metadata and MIME types
 	 * @param token - Pipeline task token to receive the uploads
 	 * @param maxConcurrent - Maximum number of concurrent uploads (default: 5)
-	 * 
+	 *
 	 * @returns Promise resolving to array of UPLOAD_RESULT objects in the same order as input
-	 * 
+	 *
 	 * @example
 	 * ```typescript
 	 * // Subscribe to upload events
 	 * client.on('apaevt_status_upload', (event) => {
 	 *   console.log(`${event.body.filepath}: ${event.body.bytes_sent}/${event.body.file_size}`);
 	 * });
-	 * 
+	 *
 	 * // Upload files
 	 * const results = await client.sendFiles(
 	 *   [
@@ -1036,7 +1064,7 @@ export class RocketRideClient extends DAPClient {
 				event: 'apaevt_status_upload',
 				body: body as unknown as Record<string, unknown>,
 				seq: 0,
-				type: 'event'
+				type: 'event',
 			};
 			this.onEvent(eventMessage);
 		};
@@ -1048,10 +1076,7 @@ export class RocketRideClient extends DAPClient {
 		 * 3. Close pipe
 		 * 4. Send status update
 		 */
-		const uploadFile = async (
-			fileData: { file: File; objinfo?: Record<string, unknown>; mimetype?: string },
-			index: number
-		): Promise<void> => {
+		const uploadFile = async (fileData: { file: File; objinfo?: Record<string, unknown>; mimetype?: string }, index: number): Promise<void> => {
 			const { file, objinfo = {}, mimetype } = fileData;
 			const startTime = Date.now();
 			let bytesUploaded = 0;
@@ -1063,8 +1088,8 @@ export class RocketRideClient extends DAPClient {
 			let fileSize = file.size;
 			if (typeof window === 'undefined' && objinfo?.filepath && typeof objinfo.filepath === 'string') {
 				try {
-					const fs = require('fs');
-					fileSize = fs.statSync(objinfo.filepath as string).size;
+					const fsPromises = await this._loadNodeFsPromises();
+					fileSize = (await fsPromises.stat(objinfo.filepath as string)).size;
 				} catch {
 					// fallback to file.size
 				}
@@ -1119,7 +1144,6 @@ export class RocketRideClient extends DAPClient {
 				});
 
 				result = await pipe.close();
-
 			} catch (err) {
 				error = err instanceof Error ? err.message : String(err);
 			}
@@ -1141,8 +1165,8 @@ export class RocketRideClient extends DAPClient {
 		};
 
 		// Create a promise for every file - let server handle queuing
-		const uploadPromises = files.map((fileData, index) => 
-			uploadFile(fileData, index).catch(err => {
+		const uploadPromises = files.map((fileData, index) =>
+			uploadFile(fileData, index).catch((err) => {
 				// Ensure errors don't kill the whole batch
 				console.error(`Upload failed for ${fileData.file.name}:`, err);
 			})
@@ -1161,11 +1185,8 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Ask a question to RocketRide's AI and get an intelligent response.
 	 */
-	async chat(options: {
-		token: string;
-		question: Question;
-	}): Promise<PIPELINE_RESULT> {
-		const { token, question } = options;
+	async chat(options: { token: string; question: Question; onSSE?: (type: string, data: Record<string, unknown>) => Promise<void> }): Promise<PIPELINE_RESULT> {
+		const { token, question, onSSE } = options;
 
 		try {
 			// Validate that we have a question to ask
@@ -1178,13 +1199,7 @@ export class RocketRideClient extends DAPClient {
 			this._nextChatId += 1;
 
 			// Create pipe instance
-			const pipe = new DataPipe(
-				this,
-				token,
-				objinfo,
-				'application/rocketride-question',
-				'chat'
-			);
+			const pipe = await this.pipe(token, objinfo, 'application/rocketride-question', 'chat', onSSE);
 
 			try {
 				// Open the communication channel to the AI
@@ -1205,7 +1220,6 @@ export class RocketRideClient extends DAPClient {
 
 				// Return success response in standard format
 				return result;
-
 			} finally {
 				// Ensure the pipe is properly closed even if errors occur
 				if (pipe.isOpened) {
@@ -1216,7 +1230,6 @@ export class RocketRideClient extends DAPClient {
 					}
 				}
 			}
-
 		} catch (error) {
 			// Return error response in standard format
 			throw new Error(error instanceof Error ? error.message : String(error));
@@ -1271,6 +1284,24 @@ export class RocketRideClient extends DAPClient {
 		// Forward to debugging interface if available
 		this._sendVSCodeEvent(eventType, eventBody);
 
+		// Dispatch pipe-scoped SSE events to the registered DataPipe callback
+		if (eventType === 'apaevt_sse') {
+			const pipeId = (eventBody as Record<string, unknown>)?.pipe_id as number | undefined;
+			if (pipeId !== undefined) {
+				const cb = this._ssePipeCallbacks.get(pipeId);
+				if (cb) {
+					try {
+						const body = eventBody as Record<string, unknown>;
+						const type = (body.type as string) ?? '';
+						const data = (body.data as Record<string, unknown>) ?? {};
+						await cb(type, data);
+					} catch (error) {
+						this.debugMessage(`Error in SSE callback for pipe ${pipeId}: ${error}`);
+					}
+				}
+			}
+		}
+
 		// Call user-provided event handler if available
 		if (this._callerOnEvent) {
 			try {
@@ -1289,7 +1320,8 @@ export class RocketRideClient extends DAPClient {
 	async onConnectError(error: Error): Promise<void> {
 		if (this._callerOnConnectError) {
 			try {
-				await this._callerOnConnectError(error instanceof Error ? error.message : String(error));
+				const connectionError = error instanceof ConnectionException ? error : new ConnectionException({ message: String(error) });
+				await this._callerOnConnectError(connectionError);
 			} catch (e) {
 				this.debugMessage(`Error in user onConnectError handler: ${e}`);
 			}
@@ -1351,10 +1383,13 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Subscribe to specific types of events from the server.
 	 */
-	async setEvents(token: string, eventTypes: string[]): Promise<void> {
+	async setEvents(token: string, eventTypes: string[], pipeId?: number): Promise<void> {
 		// Build event subscription request
+		const args: Record<string, unknown> = { types: eventTypes };
+		if (pipeId !== undefined) args.pipeId = pipeId;
+
 		const request = this.buildRequest('rrext_monitor', {
-			arguments: { types: eventTypes },
+			arguments: args,
 			token,
 		});
 
@@ -1372,632 +1407,332 @@ export class RocketRideClient extends DAPClient {
 	// PROJECT STORAGE MANAGEMENT
 	// ============================================================================
 
+	/** Save or update a project pipeline configuration. */
+	async saveProject(options: { projectId: string; pipeline: Record<string, any> }): Promise<void> {
+		this.validateId(options.projectId, 'projectId');
+		if (!options.pipeline || typeof options.pipeline !== 'object') throw new Error('pipeline must be a non-empty object');
+
+		await this.fsWriteJson(`.projects/${options.projectId}.json`, options.pipeline);
+	}
+
+	async getProject(options: { projectId: string }): Promise<Record<string, any>> {
+		this.validateId(options.projectId, 'projectId');
+
+		return this.fsReadJson(`.projects/${options.projectId}.json`);
+	}
+
+	async deleteProject(options: { projectId: string }): Promise<void> {
+		this.validateId(options.projectId, 'projectId');
+
+		await this.fsDelete(`.projects/${options.projectId}.json`);
+	}
+
+	async getAllProjects(): Promise<Array<{ id: string; name: string; sources: any[]; totalComponents: number }>> {
+		const dir = await this.fsListDir('.projects');
+		const projects: Array<{ id: string; name: string; sources: any[]; totalComponents: number }> = [];
+
+		for (const entry of dir.entries) {
+			if (entry.type !== 'file' || !entry.name.endsWith('.json')) continue;
+			try {
+				const id = entry.name.slice(0, -5);
+				const pipeline = await this.fsReadJson(`.projects/${entry.name}`);
+				const sources = (pipeline.components || []).filter((c: any) => c.config?.mode === 'Source').map((c: any) => ({ id: c.id, provider: c.provider, name: c.config?.name || c.id }));
+				projects.push({ id, name: pipeline.name || 'Untitled', sources, totalComponents: (pipeline.components || []).length });
+			} catch (err) {
+				console.debug(`[RocketRideClient] Failed to read .projects/${entry.name}:`, err);
+				continue;
+			}
+		}
+
+		return projects;
+	}
+
+	// ============================================================================
+	// TEMPLATE STORAGE MANAGEMENT (convenience wrappers using fsReadJson/fsWriteJson)
+	// ============================================================================
+
+	async saveTemplate(options: { templateId: string; pipeline: Record<string, any> }): Promise<void> {
+		this.validateId(options.templateId, 'templateId');
+		if (!options.pipeline || typeof options.pipeline !== 'object') throw new Error('pipeline must be a non-empty object');
+
+		await this.fsWriteJson(`.templates/${options.templateId}.json`, options.pipeline);
+	}
+
+	async getTemplate(options: { templateId: string }): Promise<Record<string, any>> {
+		this.validateId(options.templateId, 'templateId');
+
+		return this.fsReadJson(`.templates/${options.templateId}.json`);
+	}
+
+	async deleteTemplate(options: { templateId: string }): Promise<void> {
+		this.validateId(options.templateId, 'templateId');
+
+		await this.fsDelete(`.templates/${options.templateId}.json`);
+	}
+
+	async getAllTemplates(): Promise<Array<{ id: string; name: string; sources: any[]; totalComponents: number }>> {
+		const dir = await this.fsListDir('.templates');
+		const templates: Array<{ id: string; name: string; sources: any[]; totalComponents: number }> = [];
+
+		for (const entry of dir.entries) {
+			if (entry.type !== 'file' || !entry.name.endsWith('.json')) continue;
+			try {
+				const id = entry.name.slice(0, -5);
+				const pipeline = await this.fsReadJson(`.templates/${entry.name}`);
+				const sources = (pipeline.components || []).filter((c: any) => c.config?.mode === 'Source').map((c: any) => ({ id: c.id, provider: c.provider, name: c.config?.name || c.id }));
+				templates.push({ id, name: pipeline.name || 'Untitled', sources, totalComponents: (pipeline.components || []).length });
+			} catch (err) {
+				console.debug(`[RocketRideClient] Failed to read .templates/${entry.name}:`, err);
+				continue;
+			}
+		}
+
+		return templates;
+	}
+
+	// ============================================================================
+	// LOG STORAGE MANAGEMENT (convenience wrappers using fsReadJson/fsWriteJson)
+	// ============================================================================
+
+	async saveLog(options: { projectId: string; source: string; contents: Record<string, any> }): Promise<string> {
+		this.validateId(options.projectId, 'projectId');
+		this.validateId(options.source, 'source');
+		if (!options.contents || typeof options.contents !== 'object') throw new Error('contents must be a non-empty object');
+
+		const startTime = options.contents?.body?.startTime;
+		if (startTime === undefined) throw new Error('contents must contain body.startTime');
+
+		const filename = `${options.source}-${startTime}.log`;
+		await this.fsWriteJson(`.logs/${options.projectId}/${filename}`, options.contents);
+		return filename;
+	}
+
+	async getLog(options: { projectId: string; name: string }): Promise<Record<string, any>> {
+		this.validateId(options.projectId, 'projectId');
+		if (!options.name) throw new Error('name is required');
+
+		return this.fsReadJson(`.logs/${options.projectId}/${options.name}`);
+	}
+
+	async deleteLog(options: { projectId: string; name: string }): Promise<void> {
+		this.validateId(options.projectId, 'projectId');
+		if (!options.name) throw new Error('name is required');
+
+		await this.fsDelete(`.logs/${options.projectId}/${options.name}`);
+	}
+
+	async listLogs(options: { projectId: string; source?: string }): Promise<Array<{ name: string; modified?: number }>> {
+		this.validateId(options.projectId, 'projectId');
+		if (options.source) this.validateId(options.source, 'source');
+
+		const dir = await this.fsListDir(`.logs/${options.projectId}`);
+		let logs = dir.entries.filter((e) => e.type === 'file' && e.name.endsWith('.log')).map((e) => ({ name: e.name, modified: e.modified }));
+
+		if (options.source) {
+			logs = logs.filter((l) => l.name.startsWith(`${options.source}-`));
+		}
+
+		logs.sort((a, b) => (a.modified || 0) - (b.modified || 0));
+		return logs;
+	}
+
+	// ============================================================================
+	// HANDLE-BASED FILE STORE OPERATIONS
+	// ============================================================================
+
 	/**
-	 * Save or update a project pipeline.
-	 * 
-	 * Stores a project pipeline configuration on the server. If the project
-	 * already exists, it will be updated. Use expectedVersion to ensure
-	 * you're updating the version you expect (prevents conflicts).
-	 * 
-	 * @param options - Save project options
-	 * @param options.projectId - Unique identifier for the project
-	 * @param options.pipeline - Pipeline configuration object
-	 * @param options.expectedVersion - Expected current version for atomic updates (optional)
-	 * @returns Promise resolving to save result with success status, projectId, and new version
-	 * @throws Error if save fails due to version mismatch, storage error, or invalid input
-	 * 
-	 * @example
-	 * ```typescript
-	 * // Save a new project
-	 * const result = await client.saveProject({
-	 *   projectId: 'proj-123',
-	 *   pipeline: {
-	 *     name: 'Data Processor',
-	 *     source: 'source_1',
-	 *     components: [...]
-	 *   }
-	 * });
-	 * console.log(`Saved version: ${result.version}`);
-	 * 
-	 * // Update existing project with version check
-	 * const existing = await client.getProject({ projectId: 'proj-123' });
-	 * existing.name = 'Updated Name';
-	 * const updated = await client.saveProject({
-	 *   projectId: 'proj-123',
-	 *   pipeline: existing,
-	 *   expectedVersion: existing.version
-	 * });
-	 * ```
+	 * Open a file handle for reading or writing.
+	 *
+	 * @param path - Relative path within the account store
+	 * @param mode - 'r' for read, 'w' for write (default: 'r')
+	 * @param offset - Initial byte offset (read mode only)
+	 * @returns Object with 'handle' (string). Read mode also includes 'size' (number).
 	 */
-	async saveProject(options: {
-		projectId: string;
-		pipeline: Record<string, any>;
-		expectedVersion?: string;
-	}): Promise<{
-		success: boolean;
-		project_id: string;
-		version: string;
-	}> {
-		const { projectId, pipeline, expectedVersion } = options;
-
-		// Validate inputs
-		if (!projectId) {
-			throw new Error('projectId is required');
-		}
-		if (!pipeline || typeof pipeline !== 'object') {
-			throw new Error('pipeline must be a non-empty object');
-		}
-
-		// Build request arguments
-		const args: any = {
-			subcommand: 'save_project',
-			projectId,
-			pipeline,
-		};
-
-		// Add optional version for atomic updates
-		if (expectedVersion !== undefined) {
-			args.expectedVersion = expectedVersion;
-		}
-
-		// Send request to server
+	async fsOpen(path: string, mode: 'r' | 'w' = 'r'): Promise<{ handle: string; size?: number }> {
+		this.validateStorePath(path);
+		const args: Record<string, unknown> = { subcommand: 'fs_open', path, mode };
 		const request = this.buildRequest('rrext_store', { arguments: args });
 		const response = await this.request(request);
+		if (this.didFail(response)) throw new Error(response.message || 'Failed to open file');
+		return response.body as { handle: string; size?: number };
+	}
 
-		// Check for errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown error saving project';
-			this.debugMessage(`Project save failed: ${errorMsg}`);
-			throw new Error(errorMsg);
-		}
+	/**
+	 * Read data from an open read handle.
+	 *
+	 * @param handle - Handle ID returned by fsOpen
+	 * @param offset - Byte offset to read from
+	 * @param length - Max bytes to read (default 4 MB). Empty Uint8Array indicates EOF.
+	 * @returns The bytes read
+	 */
+	async fsRead(handle: string, offset: number = 0, length: number = 4_194_304): Promise<Uint8Array> {
+		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_read', handle, offset, length } });
+		const response = await this.request(request);
+		if (this.didFail(response)) throw new Error(response.message || 'Failed to read from handle');
+		return ((response.arguments as any)?.data as Uint8Array) || new Uint8Array(0);
+	}
 
-		// Extract and return response
-		this.debugMessage(`Project saved successfully: ${projectId}, version: ${response.body?.version}`);
+	/**
+	 * Write data to an open write handle.
+	 *
+	 * @param handle - Handle ID returned by fsOpen
+	 * @param data - Raw bytes to write
+	 * @returns Number of bytes written
+	 */
+	async fsWrite(handle: string, data: Uint8Array): Promise<number> {
+		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_write', handle, data } });
+		const response = await this.request(request);
+		if (this.didFail(response)) throw new Error(response.message || 'Failed to write to handle');
+		return (response.body as any)?.bytesWritten ?? 0;
+	}
+
+	/**
+	 * Close a file handle.
+	 *
+	 * @param handle - Handle ID returned by fsOpen
+	 * @param mode - 'r' or 'w' (must match the mode used in fsOpen)
+	 */
+	async fsClose(handle: string, mode: 'r' | 'w'): Promise<void> {
+		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_close', handle, mode } });
+		const response = await this.request(request);
+		if (this.didFail(response)) throw new Error(response.message || 'Failed to close handle');
+	}
+
+	/**
+	 * Delete a file.
+	 *
+	 * @param path - Relative path within the account store
+	 * @throws Error if file does not exist or delete fails
+	 */
+	async fsDelete(path: string): Promise<void> {
+		this.validateStorePath(path);
+		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_delete', path } });
+		const response = await this.request(request);
+		if (this.didFail(response)) throw new Error(response.message || 'Failed to delete file');
+	}
+
+	/**
+	 * List immediate children of a directory.
+	 *
+	 * @param path - Relative directory path (default: account root)
+	 * @returns Directory entries with name and type (file or dir)
+	 */
+	async fsListDir(path: string = ''): Promise<{ entries: Array<{ name: string; type: 'file' | 'dir'; size?: number; modified?: number }>; count: number }> {
+		if (path) this.validateStorePath(path);
+		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_list_dir', path } });
+		const response = await this.request(request);
+		if (this.didFail(response)) throw new Error(response.message || 'Failed to list directory');
 		return response.body as any;
 	}
 
 	/**
-	 * Retrieve a project by its ID.
-	 * 
-	 * Fetches the complete pipeline configuration and current version for
-	 * the specified project. Use this before updating to get the current
-	 * version for atomic updates.
-	 * 
-	 * @param options - Get project options
-	 * @param options.projectId - Unique identifier of the project to retrieve
-	 * @returns Promise resolving to project data with success status, pipeline, and version
-	 * @throws Error if project doesn't exist or retrieval fails
-	 * 
-	 * @example
-	 * ```typescript
-	 * // Get a project
-	 * try {
-	 *   const project = await client.getProject({ projectId: 'proj-123' });
-	 *   console.log(`Project: ${project.name}`);
-	 *   console.log(`Version: ${project.version}`);
-	 * } catch (error) {
-	 *   if (error.message.includes('NOT_FOUND')) {
-	 *     console.log("Project doesn't exist");
-	 *   }
-	 * }
-	 * 
-	 * // Before updating - get current version
-	 * const project = await client.getProject({ projectId: 'proj-123' });
-	 * project.name = 'Updated';
-	 * await client.saveProject({
-	 *   projectId: 'proj-123',
-	 *   pipeline: project,
-	 *   expectedVersion: project.version
-	 * });
-	 * ```
+	 * Create a directory.
+	 *
+	 * @param path - Relative directory path
 	 */
-	async getProject(options: {
-		projectId: string;
-	}): Promise<{
-		success: boolean;
-		pipeline: Record<string, any>;
-		version: string;
-	}> {
-		const { projectId } = options;
-
-		// Validate inputs
-		if (!projectId) {
-			throw new Error('projectId is required');
-		}
-
-		// Build request
-		const args = {
-			subcommand: 'get_project',
-			projectId,
-		};
-
-		// Send request to server
-		const request = this.buildRequest('rrext_store', { arguments: args });
+	async fsMkdir(path: string): Promise<void> {
+		this.validateStorePath(path);
+		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_mkdir', path } });
 		const response = await this.request(request);
-
-		// Check for errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown error retrieving project';
-			this.debugMessage(`Project retrieval failed: ${errorMsg}`);
-			throw new Error(errorMsg);
-		}
-
-		// Extract and return response
-		this.debugMessage(`Project retrieved successfully: ${projectId}`);
-		return response.body as any;
+		if (this.didFail(response)) throw new Error(response.message || 'Failed to create directory');
 	}
 
 	/**
-	 * Delete a project by its ID.
-	 * 
-	 * Permanently removes a project from storage. Optionally verify the
-	 * version before deletion to ensure you're deleting the version you
-	 * expect (prevents accidental deletion of modified projects).
-	 * 
-	 * @param options - Delete project options
-	 * @param options.projectId - Unique identifier of the project to delete
-	 * @param options.expectedVersion - Expected current version for atomic deletion (required)
-	 * @returns Promise resolving to deletion result with success status and message
-	 * @throws Error if project doesn't exist, version mismatch, or deletion fails
-	 * 
-	 * @example
-	 * ```typescript
-	 * // Safe deletion with version check
-	 * const project = await client.getProject({ projectId: 'proj-123' });
-	 * try {
-	 *   const result = await client.deleteProject({
-	 *     projectId: 'proj-123',
-	 *     expectedVersion: project.version
-	 *   });
-	 *   console.log('Project deleted successfully');
-	 * } catch (error) {
-	 *   if (error.message.includes('CONFLICT')) {
-	 *     console.log('Project was modified, deletion cancelled');
-	 *   }
-	 * }
-	 * ```
+	 * Get file or directory metadata.
+	 *
+	 * @param path - Relative path within the account store
+	 * @returns Metadata including existence, type, size (bytes), and modified epoch timestamp (for files)
 	 */
-	async deleteProject(options: {
-		projectId: string;
-		expectedVersion?: string;
-	}): Promise<{
-		success: boolean;
-		message: string;
-	}> {
-		const { projectId, expectedVersion } = options;
-
-		// Validate inputs
-		if (!projectId) {
-			throw new Error('projectId is required');
-		}
-
-		// Build request
-		const args: any = {
-			subcommand: 'delete_project',
-			projectId,
-		};
-
-		// Add optional version for atomic deletion
-		if (expectedVersion !== undefined) {
-			args.expectedVersion = expectedVersion;
-		}
-
-		// Send request to server
-		const request = this.buildRequest('rrext_store', { arguments: args });
+	async fsStat(path: string): Promise<{ exists: boolean; type?: 'file' | 'dir'; size?: number; modified?: number }> {
+		this.validateStorePath(path);
+		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_stat', path } });
 		const response = await this.request(request);
-
-		// Check for errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown error deleting project';
-			this.debugMessage(`Project deletion failed: ${errorMsg}`);
-			throw new Error(errorMsg);
-		}
-
-		// Extract and return response
-		this.debugMessage(`Project deleted successfully: ${projectId}`);
-		return response.body as any;
-	}
-
-	/**
-	 * List all projects for the current user.
-	 * 
-	 * Retrieves a summary of all projects stored for the authenticated user.
-	 * Each project summary includes the ID, name, list of data sources, and total component count.
-	 * 
-	 * @returns Promise resolving to list result with success status, projects array, and count
-	 * @throws Error if retrieval fails
-	 * 
-	 * @example
-	 * ```typescript
-	 * // List all projects
-	 * const result = await client.getAllProjects();
-	 * console.log(`Found ${result.count} projects:`);
-	 * for (const project of result.projects) {
-	 *   console.log(`- ${project.id}: ${project.name} (${project.totalComponents} components)`);
-	 *   for (const source of project.sources) {
-	 *     console.log(`  * ${source.name} (${source.provider})`);
-	 *   }
-	 * }
-	 * 
-	 * // Find specific project
-	 * const result = await client.getAllProjects();
-	 * const myProject = result.projects.find(p => p.id === 'proj-123');
-	 * ```
-	 */
-	async getAllProjects(): Promise<{
-		success: boolean;
-		projects: Array<{
-			id: string;
-			name: string;
-			sources: Array<{
-				id: string;
-				provider: string;
-				name: string;
-			}>;
-			totalComponents: number;
-		}>;
-		count: number;
-	}> {
-		// Build request
-		const args = {
-			subcommand: 'get_all_projects',
-		};
-
-		// Send request to server
-		const request = this.buildRequest('rrext_store', { arguments: args });
-		const response = await this.request(request);
-
-		// Check for errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown error listing projects';
-			this.debugMessage(`Project list retrieval failed: ${errorMsg}`);
-			throw new Error(errorMsg);
-		}
-
-		// Extract and return response
-		const projectCount = response.body?.count || 0;
-		this.debugMessage(`Projects retrieved successfully: ${projectCount} projects`);
+		if (this.didFail(response)) throw new Error(response.message || 'Failed to stat path');
 		return response.body as any;
 	}
 
 	// ============================================================================
-	// TEMPLATE STORAGE MANAGEMENT (System-wide templates)
+	// CONVENIENCE WRAPPERS (text/JSON over binary, handle open/close internally)
 	// ============================================================================
 
-	/**
-	 * Save or update a template pipeline.
-	 * 
-	 * Stores a template pipeline configuration on the server. Templates are system-wide
-	 * and accessible to all users. If the template already exists, it will be updated.
-	 * Use expectedVersion to ensure you're updating the version you expect.
-	 * 
-	 * @param options - Save template options
-	 * @param options.templateId - Unique identifier for the template
-	 * @param options.pipeline - Pipeline configuration object
-	 * @param options.expectedVersion - Expected current version for atomic updates (optional)
-	 * @returns Promise resolving to save result with success status, templateId, and new version
-	 * @throws Error if save fails due to version mismatch, storage error, or invalid input
-	 */
-	async saveTemplate(options: {
-		templateId: string;
-		pipeline: Record<string, any>;
-		expectedVersion?: string;
-	}): Promise<{
-		success: boolean;
-		template_id: string;
-		version: string;
-	}> {
-		const { templateId, pipeline, expectedVersion } = options;
-
-		// Validate inputs
-		if (!templateId) {
-			throw new Error('templateId is required');
+	/** Read a file as a UTF-8 string. */
+	async fsReadString(path: string): Promise<string> {
+		const { handle } = await this.fsOpen(path, 'r');
+		try {
+			const chunks: Uint8Array[] = [];
+			let offset = 0;
+			while (true) {
+				const chunk = await this.fsRead(handle, offset);
+				if (chunk.length === 0) break;
+				chunks.push(chunk);
+				offset += chunk.length;
+			}
+			const total = new Uint8Array(offset);
+			let pos = 0;
+			for (const chunk of chunks) {
+				total.set(chunk, pos);
+				pos += chunk.length;
+			}
+			return new TextDecoder().decode(total);
+		} finally {
+			await this.fsClose(handle, 'r');
 		}
-		if (!pipeline || typeof pipeline !== 'object') {
-			throw new Error('pipeline must be a non-empty object');
-		}
-
-		// Build request arguments
-		const args: any = {
-			subcommand: 'save_template',
-			templateId,
-			pipeline,
-		};
-
-		// Add optional version for atomic updates
-		if (expectedVersion !== undefined) {
-			args.expectedVersion = expectedVersion;
-		}
-
-		// Send request to server
-		const request = this.buildRequest('rrext_store', { arguments: args });
-		const response = await this.request(request);
-
-		// Check for errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown error saving template';
-			this.debugMessage(`Template save failed: ${errorMsg}`);
-			throw new Error(errorMsg);
-		}
-
-		// Extract and return response
-		this.debugMessage(`Template saved successfully: ${templateId}, version: ${response.body?.version}`);
-		return response.body as any;
 	}
 
-	/**
-	 * Retrieve a template by its ID.
-	 */
-	async getTemplate(options: {
-		templateId: string;
-	}): Promise<{
-		success: boolean;
-		pipeline: Record<string, any>;
-		version: string;
-	}> {
-		const { templateId } = options;
-
-		// Validate inputs
-		if (!templateId) {
-			throw new Error('templateId is required');
+	/** Write a UTF-8 string to a file. */
+	async fsWriteString(path: string, text: string): Promise<void> {
+		const { handle } = await this.fsOpen(path, 'w');
+		try {
+			await this.fsWrite(handle, new TextEncoder().encode(text));
+			await this.fsClose(handle, 'w');
+		} catch (err) {
+			try {
+				await this.fsClose(handle, 'w');
+			} catch {
+				/* best-effort */
+			}
+			throw err;
 		}
-
-		// Build request
-		const args = {
-			subcommand: 'get_template',
-			templateId,
-		};
-
-		// Send request to server
-		const request = this.buildRequest('rrext_store', { arguments: args });
-		const response = await this.request(request);
-
-		// Check for errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown error retrieving template';
-			this.debugMessage(`Template retrieval failed: ${errorMsg}`);
-			throw new Error(errorMsg);
-		}
-
-		// Extract and return response
-		this.debugMessage(`Template retrieved successfully: ${templateId}`);
-		return response.body as any;
 	}
 
-	/**
-	 * Delete a template by its ID.
-	 */
-	async deleteTemplate(options: {
-		templateId: string;
-		expectedVersion?: string;
-	}): Promise<{
-		success: boolean;
-		message: string;
-	}> {
-		const { templateId, expectedVersion } = options;
-
-		// Validate inputs
-		if (!templateId) {
-			throw new Error('templateId is required');
-		}
-
-		// Build request
-		const args: any = {
-			subcommand: 'delete_template',
-			templateId,
-		};
-
-		// Add optional version for atomic deletion
-		if (expectedVersion !== undefined) {
-			args.expectedVersion = expectedVersion;
-		}
-
-		// Send request to server
-		const request = this.buildRequest('rrext_store', { arguments: args });
-		const response = await this.request(request);
-
-		// Check for errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown error deleting template';
-			this.debugMessage(`Template deletion failed: ${errorMsg}`);
-			throw new Error(errorMsg);
-		}
-
-		// Extract and return response
-		this.debugMessage(`Template deleted successfully: ${templateId}`);
-		return response.body as any;
+	/** Read a JSON file. */
+	async fsReadJson<T = any>(path: string): Promise<T> {
+		const text = await this.fsReadString(path);
+		return JSON.parse(text);
 	}
 
-	/**
-	 * List all templates.
-	 */
-	async getAllTemplates(): Promise<{
-		success: boolean;
-		templates: Array<{
-			id: string;
-			name: string;
-			sources: Array<{
-				id: string;
-				provider: string;
-				name: string;
-			}>;
-			totalComponents: number;
-		}>;
-		count: number;
-	}> {
-		// Build request
-		const args = {
-			subcommand: 'get_all_templates',
-		};
-
-		// Send request to server
-		const request = this.buildRequest('rrext_store', { arguments: args });
-		const response = await this.request(request);
-
-		// Check for errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown error listing templates';
-			this.debugMessage(`Template list retrieval failed: ${errorMsg}`);
-			throw new Error(errorMsg);
-		}
-
-		// Extract and return response
-		const templateCount = response.body?.count || 0;
-		this.debugMessage(`Templates retrieved successfully: ${templateCount} templates`);
-		return response.body as any;
+	/** Write an object as JSON. */
+	async fsWriteJson(path: string, obj: any): Promise<void> {
+		await this.fsWriteString(path, JSON.stringify(obj, null, 2));
 	}
 
 	// ============================================================================
-	// LOG STORAGE MANAGEMENT (Per-project log files for historical tracking)
+	// PATH AND ID VALIDATION
 	// ============================================================================
 
-	/**
-	 * Save a log file for a source run.
-	 */
-	async saveLog(options: {
-		projectId: string;
-		source: string;
-		contents: Record<string, any>;
-	}): Promise<{
-		success: boolean;
-		filename: string;
-	}> {
-		const { projectId, source, contents } = options;
+	private static readonly INVALID_PATH_CHARS = new Set(['*', '?', '<', '>', '|', '"', '\x00']);
 
-		// Validate inputs
-		if (!projectId) {
-			throw new Error('projectId is required');
+	private validateStorePath(path: string): void {
+		for (const segment of path.replace(/\\/g, '/').split('/')) {
+			if (segment === '..') throw new Error(`Path traversal not allowed: ${path}`);
+			if (segment) {
+				for (const ch of segment) {
+					if (RocketRideClient.INVALID_PATH_CHARS.has(ch) || ch.charCodeAt(0) < 0x20) {
+						throw new Error(`Path contains invalid characters: ${path}`);
+					}
+				}
+			}
 		}
-		if (!source) {
-			throw new Error('source is required');
-		}
-		if (!contents || typeof contents !== 'object') {
-			throw new Error('contents must be a non-empty object');
-		}
-
-		// Build request arguments
-		const args = {
-			subcommand: 'save_log',
-			projectId,
-			source,
-			contents,
-		};
-
-		// Send request to server
-		const request = this.buildRequest('rrext_store', { arguments: args });
-		const response = await this.request(request);
-
-		// Check for errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown error saving log';
-			this.debugMessage(`Log save failed: ${errorMsg}`);
-			throw new Error(errorMsg);
-		}
-
-		// Extract and return response
-		this.debugMessage(`Log saved successfully: ${response.body?.filename}`);
-		return response.body as any;
 	}
 
-	/**
-	 * Get a log file by source name and start time.
-	 */
-	async getLog(options: {
-		projectId: string;
-		source: string;
-		startTime: number;
-	}): Promise<{
-		success: boolean;
-		contents: Record<string, any>;
-	}> {
-		const { projectId, source, startTime } = options;
-
-		// Validate inputs
-		if (!projectId) {
-			throw new Error('projectId is required');
+	private validateId(value: string, name: string): void {
+		if (!value) throw new Error(`${name} is required`);
+		if (value.includes('/') || value.includes('\\')) throw new Error(`${name} must not contain path separators`);
+		for (const ch of value) {
+			if (RocketRideClient.INVALID_PATH_CHARS.has(ch) || ch.charCodeAt(0) < 0x20) {
+				throw new Error(`${name} contains invalid characters: ${value}`);
+			}
 		}
-		if (!source) {
-			throw new Error('source is required');
-		}
-		if (startTime === undefined || startTime === null) {
-			throw new Error('startTime is required');
-		}
-
-		// Build request
-		const args = {
-			subcommand: 'get_log',
-			projectId,
-			source,
-			startTime,
-		};
-
-		// Send request to server
-		const request = this.buildRequest('rrext_store', { arguments: args });
-		const response = await this.request(request);
-
-		// Check for errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown error retrieving log';
-			this.debugMessage(`Log retrieval failed: ${errorMsg}`);
-			throw new Error(errorMsg);
-		}
-
-		// Extract and return response
-		this.debugMessage(`Log retrieved successfully: ${projectId}/${source}`);
-		return response.body as any;
-	}
-
-	/**
-	 * List log files for a project.
-	 */
-	async listLogs(options: {
-		projectId: string;
-		source?: string;
-		page?: number;
-	}): Promise<{
-		success: boolean;
-		logs: string[];
-		count: number;
-		total_count: number;
-		page: number;
-		total_pages: number;
-	}> {
-		const { projectId, source, page } = options;
-
-		// Validate inputs
-		if (!projectId) {
-			throw new Error('projectId is required');
-		}
-
-		// Build request
-		const args: any = {
-			subcommand: 'list_logs',
-			projectId,
-		};
-
-		// Add optional parameters
-		if (source !== undefined) {
-			args.source = source;
-		}
-		if (page !== undefined) {
-			args.page = page;
-		}
-
-		// Send request to server
-		const request = this.buildRequest('rrext_store', { arguments: args });
-		const response = await this.request(request);
-
-		// Check for errors
-		if (this.didFail(response)) {
-			const errorMsg = response.message || 'Unknown error listing logs';
-			this.debugMessage(`Log list retrieval failed: ${errorMsg}`);
-			throw new Error(errorMsg);
-		}
-
-		// Extract and return response
-		const logCount = response.body?.total_count || 0;
-		this.debugMessage(`Logs retrieved successfully: ${logCount} logs`);
-		return response.body as any;
 	}
 
 	// ============================================================================
@@ -2017,17 +1752,28 @@ export class RocketRideClient extends DAPClient {
 	 * @param timeout - Optional per-request timeout in ms
 	 * @returns The response DAPMessage from the server
 	 */
-	async dapRequest(
-		command: string,
-		args?: Record<string, unknown>,
-		token?: string,
-		timeout?: number
-	): Promise<DAPMessage> {
+	async dapRequest(command: string, args?: Record<string, unknown>, token?: string, timeout?: number): Promise<DAPMessage> {
 		const message = this.buildRequest(command, {
 			arguments: args,
 			token,
 		});
 		return await this.request(message, timeout);
+	}
+
+	// ============================================================================
+	// DASHBOARD METHODS
+	// ============================================================================
+
+	/**
+	 * Retrieve a server dashboard snapshot.
+	 *
+	 * Returns the current state of all connections, tasks, and aggregate
+	 * metrics from the server. Requires 'task.monitor' permission.
+	 *
+	 * @returns DAPMessage with body containing overview, connections, and tasks
+	 */
+	async getDashboard(): Promise<DAPMessage> {
+		return this.dapRequest('rrext_dashboard', {});
 	}
 
 	// ============================================================================
@@ -2046,10 +1792,7 @@ export class RocketRideClient extends DAPClient {
 	 * Static factory method for automatic connection management.
 	 * Equivalent to Python's async with pattern
 	 */
-	static async withConnection<T>(
-		config: RocketRideClientConfig,
-		callback: (client: RocketRideClient) => Promise<T>
-	): Promise<T> {
+	static async withConnection<T>(config: RocketRideClientConfig, callback: (client: RocketRideClient) => Promise<T>): Promise<T> {
 		const client = new RocketRideClient(config);
 		try {
 			await client.connect();
@@ -2065,24 +1808,24 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Retrieve all available service definitions from the server.
-	 * 
+	 *
 	 * Returns a dictionary containing all service definitions available on
 	 * the connected RocketRide server. Each service definition includes schemas,
 	 * UI schemas, and configuration metadata.
-	 * 
+	 *
 	 * @returns Promise resolving to object mapping service names to their definitions
 	 * @throws Error if the request fails or server returns an error
-	 * 
+	 *
 	 * @example
 	 * ```typescript
 	 * // Get all available services
 	 * const services = await client.getServices();
-	 * 
+	 *
 	 * // List available service names
 	 * for (const name of Object.keys(services)) {
 	 *   console.log(`Available service: ${name}`);
 	 * }
-	 * 
+	 *
 	 * // Access a specific service's schema
 	 * if (services['ocr']) {
 	 *   console.log('OCR schema:', services['ocr'].schema);
@@ -2108,14 +1851,14 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Retrieve a specific service definition from the server.
-	 * 
+	 *
 	 * Returns the definition for a specific service (connector) by name.
 	 * The definition includes schemas, UI schemas, and configuration metadata.
-	 * 
+	 *
 	 * @param service - Name of the service to retrieve (e.g., 'ocr', 'embed', 'chat')
 	 * @returns Promise resolving to service definition or undefined if not found
 	 * @throws Error if the request fails or server returns an error
-	 * 
+	 *
 	 * @example
 	 * ```typescript
 	 * // Get OCR service definition
@@ -2135,7 +1878,7 @@ export class RocketRideClient extends DAPClient {
 
 		// Build services request with specific service name
 		const request = this.buildRequest('rrext_services', {
-			arguments: { service }
+			arguments: { service },
 		});
 
 		// Send to server and wait for response

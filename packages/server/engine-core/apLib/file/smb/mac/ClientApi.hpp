@@ -102,8 +102,9 @@ struct security_ace_object {
     uint32_t flags;
     union security_ace_object_type
         type; /* [switch_is(flags&SEC_ACE_OBJECT_TYPE_PRESENT)] */
-    union security_ace_object_inherited_type inherited_type; /* [switch_is(flags&SEC_ACE_INHERITED_OBJECT_TYPE_PRESENT)]
-                                                              */
+    union security_ace_object_inherited_type
+        inherited_type; /* [switch_is(flags&SEC_ACE_INHERITED_OBJECT_TYPE_PRESENT)]
+                         */
 };
 
 union security_ace_object_ctr {

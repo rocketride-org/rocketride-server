@@ -1,0 +1,189 @@
+/**
+ * RocketRide Design Tokens — VS Code Theme Overrides
+ *
+ * Maps --rr-* CSS custom properties to VS Code's --vscode-* theme
+ * variables so the UI automatically matches the user's editor theme
+ * (light, dark, high contrast, etc.).
+ *
+ * This file is loaded IN ADDITION TO rocketride-default.css when the
+ * component is running inside a VS Code webview. The web defaults
+ * act as fallbacks if a VS Code variable is not defined.
+ *
+ * VS Code injects --vscode-* variables into the webview DOM
+ * automatically — no host-side changes are needed.
+ *
+ * See rocketride-default.css for the naming convention and full token docs.
+ */
+
+:root {
+	/* ================================================================== */
+	/* Brand                                                               */
+	/* ================================================================== */
+
+	--rr-brand: var(--vscode-button-background, #f7901f);
+
+	/* ================================================================== */
+	/* Palette mode                                                        */
+	/* ================================================================== */
+
+	/* --rr-palette-mode is computed at runtime by getMuiTheme(). */
+
+	/* ================================================================== */
+	/* Backgrounds                                                         */
+	/* ================================================================== */
+
+	--rr-bg-default: var(--vscode-editor-background, #ffffff);
+	--rr-bg-paper: var(--vscode-editor-background, #ffffff);
+	--rr-bg-surface: var(--vscode-editor-background);
+	--rr-bg-surface-alt: var(--vscode-editor-background, #fafafa);
+
+	/* ================================================================== */
+	/* Title bar                                                           */
+	/* ================================================================== */
+
+	--rr-fg-titleBar-active: var(--vscode-titleBar-activeForeground, #1a1a1a);
+	--rr-fg-titleBar-inactive: var(--vscode-titleBar-inactiveForeground, #666666);
+	--rr-bg-titleBar-active: var(--vscode-titleBar-activeBackground, #e8e8e8);
+	--rr-bg-titleBar-inactive: var(--vscode-titleBar-inactiveBackground, #f0f0f0);
+
+	/* ================================================================== */
+	/* Widget                                                              */
+	/* ================================================================== */
+
+	--rr-bg-widget: var(--vscode-sideBar-background, #f3f3f3);
+	--rr-fg-widget: var(--vscode-sideBar-foreground, var(--vscode-foreground));
+	--rr-bg-widget-header: var(--vscode-sideBarSectionHeader-background, rgba(0, 0, 0, 0.08));
+	--rr-bg-widget-hover: var(--vscode-list-hoverBackground, rgba(0, 0, 0, 0.04));
+	--rr-shadow-widget: var(--vscode-widget-shadow, rgba(0, 0, 0, 0.16));
+	--rr-font-family-widget: var(--vscode-font-family);
+	--rr-font-size-widget: var(--vscode-font-size, 13px);
+
+	/* ================================================================== */
+	/* Text                                                                */
+	/* ================================================================== */
+
+	--rr-text-primary: var(--vscode-foreground, #1a1a1a);
+	--rr-text-secondary: var(--vscode-descriptionForeground, #666666);
+	--rr-text-disabled: var(--vscode-disabledForeground, #838383);
+	--rr-text-link: var(--vscode-textLink-foreground, #1976d2);
+	--rr-text-caption: var(--vscode-descriptionForeground, #7d7d7d);
+
+	/* ================================================================== */
+	/* Semantic colours                                                    */
+	/* ================================================================== */
+
+	--rr-color-secondary: #007acc;
+	--rr-color-error: var(--vscode-errorForeground, #f44336);
+	--rr-color-error-light: var(--vscode-errorForeground, #f44336);
+	--rr-color-warning: var(--vscode-editorWarning-foreground, #e8b931);
+	--rr-color-info: var(--vscode-editorInfo-foreground, #3182ce);
+	--rr-color-success: var(--vscode-editorGutter-addedBackground, #229954);
+
+	/* ================================================================== */
+	/* Borders                                                             */
+	/* ================================================================== */
+
+	--rr-border: var(--vscode-widget-border, #dcdcdc);
+	--rr-border-hover: var(--vscode-widget-border, #aaaaaa);
+	--rr-border-focus: var(--vscode-focusBorder, #0078d4);
+	--rr-border-input: var(--vscode-input-border, #858585);
+	--rr-border-paper: none;
+
+	/* ================================================================== */
+	/* Accent                                                              */
+	/* ================================================================== */
+
+	--rr-accent: var(--vscode-button-background, #f7901f);
+	--rr-accent-faded: color-mix(in srgb, var(--vscode-button-background, #f7901f) 50%, transparent);
+
+	/* ================================================================== */
+	/* Buttons                                                             */
+	/* ================================================================== */
+
+	--rr-bg-button: var(--vscode-button-background);
+	--rr-fg-button: var(--vscode-button-foreground);
+
+	--rr-btn-sm-height: 16px;
+	--rr-btn-sm-padding: 0 6px;
+	--rr-btn-sm-font-size: 9px;
+	--rr-btn-sm-radius: 3px;
+
+	/* ================================================================== */
+	/* Inputs                                                              */
+	/* ================================================================== */
+
+	--rr-bg-input: var(--vscode-input-background, #ffffff);
+
+	/* ================================================================== */
+	/* Lists                                                               */
+	/* ================================================================== */
+
+	--rr-bg-list-hover: var(--vscode-list-hoverBackground, rgba(0, 0, 0, 0.04));
+	--rr-bg-list-active: var(--vscode-list-activeSelectionBackground, #0e639c);
+	--rr-fg-list-active: var(--vscode-list-activeSelectionForeground, #ffffff);
+
+	/* ================================================================== */
+	/* Scrollbar                                                           */
+	/* ================================================================== */
+
+	--rr-bg-scrollbar-thumb: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4));
+
+	/* ================================================================== */
+	/* Shadows                                                             */
+	/* ================================================================== */
+
+	--rr-shadow-idle: 0 0 0 1px var(--rr-border);
+	--rr-shadow-hover: 0 0 0 1.5px var(--rr-border-hover);
+	--rr-shadow-selected: 0 0 0 1.5px var(--rr-border-focus);
+
+	/* ================================================================== */
+	/* Grey ramp                                                           */
+	/* ================================================================== */
+
+	--rr-grey-200: var(--vscode-input-background, #d9d9d9);
+	--rr-grey-400: var(--vscode-input-border, #858585);
+	--rr-grey-500: var(--vscode-descriptionForeground, #8e8e8e);
+
+	/* ================================================================== */
+	/* Typography                                                          */
+	/* ================================================================== */
+
+	--rr-font-family: var(--vscode-font-family);
+	--rr-font-size: var(--vscode-font-size, 0.75rem);
+	--rr-font-size-sm: 0.6rem;
+	--rr-font-size-xs: 0.5rem;
+
+	--rr-font-size-h1: 1.15rem;
+	--rr-font-size-h2: 1.1rem;
+	--rr-font-size-h3: 1.05rem;
+	--rr-font-size-h4: 1rem;
+	--rr-font-size-h5: 0.79rem;
+	--rr-font-size-body: var(--vscode-font-size, inherit);
+	--rr-font-size-button: var(--vscode-font-size, 0.85rem);
+	--rr-font-size-caption: calc(var(--vscode-font-size, 14px) - 1px);
+	--rr-font-size-subtitle: var(--vscode-font-size, 0.875rem);
+
+	--rr-font-weight-h5: 700;
+	--rr-font-weight-button: 400;
+}
+
+/* ======================================================================
+ * Dark / High-Contrast theme overrides
+ *
+ * VS Code sets data-vscode-theme-kind on <body> to one of:
+ *   vscode-light | vscode-dark | vscode-high-contrast | vscode-high-contrast-light
+ *
+ * We use this to set --icon-filter in pure CSS — no JS required.
+ * This is the most reliable approach because it works even before
+ * getMuiTheme() runs and survives theme switches without a re-render.
+ * ====================================================================== */
+
+body[data-vscode-theme-kind='vscode-dark'],
+body[data-vscode-theme-kind='vscode-high-contrast'] {
+	--icon-filter: brightness(0) invert(1);
+}
+
+body[data-vscode-theme-kind='vscode-light'],
+body[data-vscode-theme-kind='vscode-high-contrast-light'] {
+	--icon-filter: none;
+}

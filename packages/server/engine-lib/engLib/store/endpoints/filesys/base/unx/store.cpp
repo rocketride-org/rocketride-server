@@ -24,7 +24,7 @@
 //-----------------------------------------------------------------------------
 //
 //	Defines the operations used for storing tagged formatted objects in native
-//format.
+// format.
 //
 //-----------------------------------------------------------------------------
 #include <engLib/eng.h>

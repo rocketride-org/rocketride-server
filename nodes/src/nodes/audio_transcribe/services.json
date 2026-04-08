@@ -13,9 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": [
-		"audio"
-	],
+	"classType": ["audio"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -24,13 +22,13 @@
 	"capabilities": [],
 	//
 	// Optional:
-	//		Register is either filter, endpoint or ignored if not specified. If the 
+	//		Register is either filter, endpoint or ignored if not specified. If the
 	//		type is specified, a factory is registered of that given type
 	//
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual pyhsical node to instantiate - if 
+	//		The node is the actual physical node to instantiate - if
 	//		not specified, the protocol will be used
 	//
 	"node": "python",
@@ -50,31 +48,22 @@
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
-	"description": [
-		"The Audio transcribe component recieves audio or video and transcribes into text."
-	],
+	"description": ["The Audio transcribe component recieves audio or video and transcribes into text."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "audio-transcribe.svg",
-		//
-	// Optional:
-	//	  Documentation link for this driver
+	"documentation": "https://docs.rocketride.org",
 	//
-	"documentation": "https://bit.ly/49BUbTI",
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
 	"lanes": {
-		"audio": [
-			"text"
-		],
-		"video": [
-			"text"
-		]
+		"audio": ["text"],
+		"video": ["text"]
 	},
 	"input": [
 		{
@@ -113,6 +102,46 @@
 				"min_seconds": 240,
 				"max_seconds": 300,
 				"vad_level": 1
+			},
+			"tiny": {
+				"mode": "tiny",
+				"language": "en",
+				"silence_threshold": 0.25,
+				"min_seconds": 240,
+				"max_seconds": 300,
+				"vad_level": 1
+			},
+			"base": {
+				"mode": "base",
+				"language": "en",
+				"silence_threshold": 0.25,
+				"min_seconds": 240,
+				"max_seconds": 300,
+				"vad_level": 1
+			},
+			"small": {
+				"mode": "small",
+				"language": "en",
+				"silence_threshold": 0.25,
+				"min_seconds": 240,
+				"max_seconds": 300,
+				"vad_level": 1
+			},
+			"medium": {
+				"mode": "medium",
+				"language": "en",
+				"silence_threshold": 0.25,
+				"min_seconds": 240,
+				"max_seconds": 300,
+				"vad_level": 1
+			},
+			"large-v3": {
+				"mode": "large-v3",
+				"language": "en",
+				"silence_threshold": 0.25,
+				"min_seconds": 240,
+				"max_seconds": 300,
+				"vad_level": 1
 			}
 		}
 	},
@@ -126,17 +155,39 @@
 			{
 				"video": "video/BBC - Tear down this wall.mp4",
 				"expect": {
-					"text": { 
-                        "beginsWith": "Where East meets West in the divided",
-                        "contains": "Mr Gorbachev, open this gate.\nMr Gorbachev, tear down this wall.\n",
-                        "endsWith": "as many again were arrested.\n\n\n" }
+					"text": {
+						"beginsWith": "Where East meets West in the divided",
+						"contains": "Mr Gorbachev, open this gate.\nMr Gorbachev, tear down this wall.\n",
+						"endsWith": "as many again were arrested.\n\n\n"
+					}
 				}
 			}
 		]
 	},
 	//
+	//	Full test configuration - tests all Whisper model sizes.
+	//	Run via: builder model_server:fulltest
+	//
+	"fulltest": [
+		{
+			"profiles": ["tiny", "base", "small", "medium", "large-v3"],
+			"outputs": ["text"],
+			"timeout": 300,
+			"cases": [
+				{
+					"video": "video/BBC - Tear down this wall.mp4",
+					"expect": {
+						"text": {
+							"contains": "Mr Gorbachev, tear down this wall."
+						}
+					}
+				}
+			]
+		}
+	],
+	//
 	// Optional:
-	//		Local fields defintions - these define fields only for the
+	//		Local fields definitions - these define fields only for the
 	//		current service. You may specify them here, or directly
 	//		in the shape
 	//
@@ -146,26 +197,11 @@
 			"title": "Model",
 			"description": "The Whisper model to use for transcription",
 			"enum": [
-				[
-					"tiny",
-					"Tiny - Faster, least acccurate"
-				],
-				[
-					"base",
-					"Base - Fast, low accuracy"
-				],
-				[
-					"small",
-					"Small - Medium, medium accuracy"
-				],
-				[
-					"medium",
-					"Medium - Slower, high accuracy"
-				],
-				[
-					"large",
-					"Large - Slowest, Highest accuracy"
-				]
+				["tiny", "Tiny - Faster, least acccurate"],
+				["base", "Base - Fast, low accuracy"],
+				["small", "Small - Medium, medium accuracy"],
+				["medium", "Medium - Slower, high accuracy"],
+				["large-v3", "Large v3 - Slowest, Highest accuracy"]
 			],
 			"default": "base"
 		},
@@ -193,50 +229,25 @@
 			"description": "The VAD level to use for silence detection (0-3)",
 			"default": 1,
 			"enum": [
-				[
-					0,
-					"Most permissive - detects the most audio as speech (risk: includes noise"
-				],
-				[
-					1,
-					"Slightly more aggressive - skips minor background noise."
-				],
-				[
-					2,
-					"Balanced - moderate filtering of non-speech (default in many tools)."
-				],
-				[
-					3,
-					"Most aggressive - filters aggressively, may cut off quiet or short speech."
-				]
+				[0, "Most permissive - detects the most audio as speech (risk: includes noise"],
+				[1, "Slightly more aggressive - skips minor background noise."],
+				[2, "Balanced - moderate filtering of non-speech (default in many tools)."],
+				[3, "Most aggressive - filters aggressively, may cut off quiet or short speech."]
 			]
 		},
 		"transcribe.default": {
 			"object": "default",
-			"properties": [
-				"transcribe.model",
-				"transcribe.silence_threshold",
-				"transcribe.min_seconds",
-				"transcribe.max_seconds",
-				"transcribe.vad_level"
-			]
+			"properties": ["transcribe.model", "transcribe.silence_threshold", "transcribe.min_seconds", "transcribe.max_seconds", "transcribe.vad_level"]
 		},
 		"transcribe.profile": {
 			"hidden": true,
 			"type": "string",
 			"default": "default",
-			"enum": [
-				[
-					"default",
-					"Default"
-				]
-			],
+			"enum": [["default", "Default"]],
 			"conditional": [
 				{
 					"value": "default",
-					"properties": [
-						"transcribe.default"
-					]
+					"properties": ["transcribe.default"]
 				}
 			]
 		}
@@ -250,9 +261,7 @@
 		{
 			"section": "Pipe",
 			"title": "Transcribe",
-			"properties": [
-				"transcribe.profile"
-			]
+			"properties": ["transcribe.profile"]
 		}
 	]
 }

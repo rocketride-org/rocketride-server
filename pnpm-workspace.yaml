@@ -1,21 +1,30 @@
 # Rocketride Engine Monorepo Workspace Configuration
 # This file defines which directories contain packages in the monorepo
 
-# Allow all dependency postinstall/preinstall scripts to run (disables the
-# default allow-list). Only enable if you trust your dependency graph.
-# See: https://pnpm.io/npmrc#dangerouslyallowallbuilds
-dangerouslyAllowAllBuilds: true
+# Only allow postinstall/install scripts for known, trusted packages that
+# require native compilation or binary downloads.
+# See: https://pnpm.io/npmrc#onlybuiltdependencies
+onlyBuiltDependencies:
+  - '@homebridge/node-pty-prebuilt-multiarch'
+  - 'core-js'
+  - 'cpu-features'
+  - 'esbuild'
+  - 'keytar'
+  - 'lefthook'
+  - 'protobufjs'
+  - 'ssh2'
+  - 'unrs-resolver'
 
 # Mute deprecation warnings for known deprecated (transitive) dependencies.
 # See: https://pnpm.io/npmrc#alloweddeprecatedversions
 allowedDeprecatedVersions:
-  "@mui/styles": "*"
-  glob: "*"
-  deep-diff: "*"
-  popper.js: "*"
-  rimraf: "*"
-  stable: "*"
-  whatwg-encoding: "*"
+  '@mui/styles': '*'
+  glob: '*'
+  deep-diff: '*'
+  popper.js: '*'
+  rimraf: '*'
+  stable: '*'
+  whatwg-encoding: '*'
 
 packages:
   # Shared UI components
@@ -31,4 +40,3 @@ packages:
 
   # Examples
   - 'examples/*'
-

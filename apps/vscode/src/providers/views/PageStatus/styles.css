@@ -1,4 +1,4 @@
- * =============================================================================
+/* =============================================================================
  * MIT License
  * Copyright (c) 2026 Aparavi Software AG
  *
@@ -40,6 +40,7 @@
 
 .status-container {
 	padding: 15px;
+	background-color: var(--vscode-editor-background);
 }
 
 /* ============================================================================ */
@@ -51,6 +52,7 @@
 	justify-content: center;
 	align-items: center;
 	min-height: 300px;
+	margin-top: 100px;
 	text-align: center;
 }
 
@@ -178,7 +180,9 @@
 	bottom: 0;
 	height: 2px;
 	background: var(--vscode-focusBorder);
-	transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+	transition:
+		left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+		width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 	border-radius: 1px 1px 0 0;
 }
 
@@ -303,6 +307,12 @@
 	background: var(--vscode-errorForeground);
 }
 
+.action-btn.stopping-btn {
+	background: var(--vscode-charts-orange);
+	color: white;
+	cursor: not-allowed;
+}
+
 .action-btn.run-btn {
 	background: var(--vscode-charts-green);
 	color: white;
@@ -328,7 +338,7 @@
 	justify-content: flex-end;
 }
 
-.tracing-toggle input[type="checkbox"] {
+.tracing-toggle input[type='checkbox'] {
 	accent-color: var(--vscode-focusBorder);
 	cursor: pointer;
 }
@@ -803,7 +813,9 @@
 	z-index: 10;
 	background: var(--vscode-panel-border);
 	opacity: 0.7;
-	transition: opacity 0.2s, background-color 0.2s;
+	transition:
+		opacity 0.2s,
+		background-color 0.2s;
 }
 
 .trace-resize-handle:hover {
@@ -939,6 +951,101 @@
 	color: var(--vscode-descriptionForeground);
 	font-style: italic;
 	margin-top: 4px;
+}
+
+/* JSON Tree viewer */
+.trace-dp-tree {
+	max-height: 320px;
+	overflow-y: auto;
+	overflow-x: auto;
+	font-family: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, monospace);
+	font-size: 11px;
+	line-height: 1.6;
+}
+
+.jt-root {
+	padding: 4px 0;
+}
+
+.jt-node {
+	/* nothing needed, just a structural wrapper */
+}
+
+.jt-row {
+	display: flex;
+	align-items: baseline;
+	white-space: nowrap;
+	padding: 0 2px;
+	border-radius: 2px;
+}
+
+.jt-row:hover {
+	background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.1));
+}
+
+.jt-expandable {
+	cursor: pointer;
+	user-select: none;
+}
+
+.jt-arrow {
+	width: 12px;
+	flex-shrink: 0;
+	font-size: 8px;
+	color: var(--vscode-descriptionForeground);
+	margin-right: 2px;
+}
+
+.jt-children {
+	padding-left: 16px;
+	border-left: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.2));
+	margin-left: 5px;
+}
+
+.jt-key {
+	color: var(--vscode-symbolIcon-propertyForeground, #9cdcfe);
+}
+
+.jt-val {
+	color: var(--vscode-foreground);
+}
+
+.jt-str {
+	color: var(--vscode-debugTokenExpression-string, #ce9178);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 280px;
+	display: inline-block;
+	vertical-align: bottom;
+}
+
+.jt-num {
+	color: var(--vscode-debugTokenExpression-number, #b5cea8);
+}
+
+.jt-bool {
+	color: var(--vscode-debugTokenExpression-boolean, #569cd6);
+}
+
+.jt-null {
+	color: var(--vscode-descriptionForeground);
+	font-style: italic;
+}
+
+.jt-preview {
+	color: var(--vscode-descriptionForeground);
+	font-style: italic;
+	margin-left: 4px;
+}
+
+.jt-bracket {
+	color: var(--vscode-descriptionForeground);
+}
+
+.jt-empty {
+	color: var(--vscode-descriptionForeground);
+	font-style: italic;
+	padding: 4px;
 }
 
 /* ============================================================================ */

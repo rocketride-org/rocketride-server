@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import { pluginTypeCheck } from '@rsbuild/plugin-type-check';
+import path from 'path';
 
 export default defineConfig(({ command }) => {
 	const isDev = command === 'dev';
@@ -57,7 +58,7 @@ export default defineConfig(({ command }) => {
 
 		output: {
 			distPath: {
-				root: '../../build/chat-ui'
+				root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'chat-ui')
 			},
 			assetPrefix: '/chat/',
 			cleanDistPath: true,

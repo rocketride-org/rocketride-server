@@ -8,10 +8,8 @@
 	"path": "nodes.tool_firecrawl",
 	"prefix": "firecrawl",
 	"icon": "firecrawl.svg",
-	"description": [
-		"Exposes Firecrawl web-scraping operations as agent tools.",
-		"Provides scrape_url (single page) and map_url (site structure discovery)."
-	],
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Exposes Firecrawl web-scraping operations as agent tools.", "Provides scrape_url (single page) and map_url (site structure discovery)."],
 	"tile": [],
 	"lanes": {},
 	"preconfig": {
@@ -39,11 +37,7 @@
 		{
 			"section": "Pipe",
 			"title": "Firecrawl",
-			"properties": [
-				"type",
-				"name",
-				"tool_firecrawl.apikey"
-			]
+			"properties": ["type", "tool_firecrawl.apikey"]
 		}
 	]
 }

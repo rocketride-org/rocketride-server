@@ -53,6 +53,7 @@ Usage:
     await client.terminate(token)
 """
 
+import asyncio
 import json
 import re
 import copy
@@ -160,20 +161,32 @@ class ExecutionMixin(DAPClient):
         AI operations, transform data formats, and more.
 
         You can start pipelines from:
-        - Configuration files (JSON or JSON5 format)
+        - Configuration files (JSON or JSON5 format, including ``.pipe`` files)
         - Pipeline configuration objects (dictionaries)
         - Both with custom parameters and arguments
 
+        When loading from a file via ``filepath``, the client automatically unwraps
+        ``.pipe`` files that use the ``{ "pipeline": { ... } }`` wrapper format. If the
+        file contains a top-level ``pipeline`` key, the inner object is extracted;
+        otherwise the file content is used as-is.
+
+        When passing a ``pipeline`` dict directly, provide a flat PipelineConfig with
+        ``components``, ``source``, and ``project_id`` at the top level — do NOT wrap
+        it in ``{ "pipeline": { ... } }``.
+
         Args:
             token: Custom task token (server generates one if not provided)
-            filepath: Path to JSON/JSON5 pipeline configuration file
-            pipeline: Pipeline configuration as a PipelineConfig dict
+            filepath: Path to a ``.pipe`` or JSON/JSON5 pipeline configuration file
+            pipeline: Flat PipelineConfig dict (components, source, project_id at top level)
             source: Override the source specified in the pipeline config
             threads: Number of processing threads to use (default: server decides)
             use_existing: Whether to reuse existing pipeline with same token
             args: Command-line style arguments to pass to the pipeline
-            ttl: Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
-            pipelineTraceLevel: Pipeline trace level ('none', 'metadata', 'summary', 'full'). When set, captures every lane write and invoke call in the response under '_trace'.
+            ttl: Time-to-live in seconds for idle pipelines (optional, server default
+                if not provided; use 0 for no timeout)
+            pipelineTraceLevel: Pipeline trace level ('none', 'metadata', 'summary',
+                'full'). When set, captures every lane write and invoke call in the
+                response under '_trace'.
 
         Returns:
             Dict containing:
@@ -187,8 +200,8 @@ class ExecutionMixin(DAPClient):
             json.JSONDecodeError: If configuration file has invalid JSON
 
         Example:
-            # Start from configuration file
-            result = await client.use(filepath="text_analyzer.json")
+            # Start from a .pipe file (wrapper is automatically unwrapped)
+            result = await client.use(filepath='chat.pipe')
             token = result['token']
 
             # Send data to the pipeline
@@ -196,33 +209,33 @@ class ExecutionMixin(DAPClient):
 
             # Start with custom parameters
             result = await client.use(
-                filepath="data_processor.json",
+                filepath='data_processor.pipe',
                 threads=8,                    # Use 8 processing threads
-                args=["--verbose"],          # Enable verbose logging
-                source="custom_input"        # Override input source
+                args=['--verbose'],           # Enable verbose logging
+                source='custom_input'         # Override input source
             )
 
-            # Start from Python configuration
+            # Reuse an existing pipeline
+            result = await client.use(filepath='chat.pipe', use_existing=True)
+
+            # Start from a flat Python configuration
             config: PipelineConfig = {
-                "name": "My Pipeline",
-                "project_id": "my-project",
-                "source": "webhook_1",
-                "components": [
-                    {"id": "webhook_1", "provider": "webhook", "config": {}},
-                    {"id": "ai_chat_1", "provider": "ai_chat", "config": {"model": "gpt-4"},
-                     "input": [{"from": "webhook_1", "lane": "output"}]},
-                    {"id": "response_1", "provider": "response", "config": {},
-                     "input": [{"from": "ai_chat_1", "lane": "answer"}]}
+                'project_id': 'e30fee74-0f71-4af2-8dab-5d89deee8f84',
+                'source': 'webhook_1',
+                'components': [
+                    {'id': 'webhook_1', 'provider': 'webhook', 'config': {}},
+                    {'id': 'ai_chat_1', 'provider': 'ai_chat', 'config': {'model': 'gpt-4'},
+                     'input': [{'from': 'webhook_1', 'lane': 'output'}]},
+                    {'id': 'response_1', 'provider': 'response', 'config': {},
+                     'input': [{'from': 'ai_chat_1', 'lane': 'answer'}]}
                 ]
             }
             result = await client.use(pipeline=config)
 
         Pipeline Configuration Format (PipelineConfig):
             {
-                "name": "Pipeline Name",
-                "description": "What this pipeline does",
                 "source": "entry_component_id",
-                "project_id": "project-identifier",
+                "project_id": "unique-guid",
                 "components": [
                     {"id": "comp_1", "provider": "webhook", "config": {...}},
                     {"id": "comp_2", "provider": "ai_chat", "config": {...},
@@ -242,14 +255,23 @@ class ExecutionMixin(DAPClient):
 
         # Load pipeline configuration from file if needed
         if not pipeline:
-            with open(filepath, 'r', encoding='utf-8') as file:
-                # Prefer JSON5 for better developer experience (comments, trailing commas)
-                if json5:
-                    pipeline_config = json5.load(file)
+
+            def _load_pipeline_config(path: str):
+                with open(path, 'r', encoding='utf-8') as file:
+                    parsed = json5.load(file) if json5 else json.load(file)
+                return parsed.get('pipeline', parsed) if isinstance(parsed, dict) else parsed
+
+            try:
+                if hasattr(asyncio, 'to_thread'):
+                    pipeline_config = await asyncio.to_thread(_load_pipeline_config, filepath)
                 else:
-                    pipeline_config = json.load(file)
+                    loop = asyncio.get_running_loop()
+                    pipeline_config = await loop.run_in_executor(None, _load_pipeline_config, filepath)
+            except FileNotFoundError as err:
+                raise FileNotFoundError(f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration.") from err
         else:
-            pipeline_config = pipeline
+            # Keep behavior consistent with filepath-based loading
+            pipeline_config = pipeline.get('pipeline', pipeline) if isinstance(pipeline, dict) else pipeline
 
         # Create a deep copy to avoid modifying the original
         processed_config = copy.deepcopy(pipeline_config)
@@ -263,7 +285,6 @@ class ExecutionMixin(DAPClient):
 
         # Build execution request with all parameters
         arguments = {
-            'apikey': self._apikey,
             'pipeline': processed_config,  # Use processed config with variables substituted
             'args': args or [],  # Default to empty args list
         }

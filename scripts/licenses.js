@@ -19,9 +19,8 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 // Paths
-const PROJECT_ROOT = path.join(__dirname, '..');
-const DIST_DIR = path.join(PROJECT_ROOT, 'dist');
-const OUTPUT_FILE = path.join(DIST_DIR, 'THIRD_PARTY_LICENSES.md');
+const { PROJECT_ROOT, DIST_ROOT } = require('./lib/paths');
+const OUTPUT_FILE = path.join(DIST_ROOT, 'THIRD_PARTY_LICENSES.md');
 
 // ============================================================================
 // Helpers
@@ -198,7 +197,7 @@ function collectVcpkgLicenses() {
     console.log('Collecting vcpkg licenses...');
     const licenses = new Map(); // Use Map to dedupe by normalized name
     
-    const vcpkgInstalledDir = path.join(PROJECT_ROOT, 'build', 'vcpkg', 'installed');
+    const vcpkgInstalledDir = path.join(BUILD_ROOT, 'vcpkg_installed');
     if (!fs.existsSync(vcpkgInstalledDir)) {
         console.log('  Warning: vcpkg installed directory not found');
         return [];

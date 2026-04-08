@@ -1,7 +1,7 @@
 {
 	//
 	// Handle the all. - combines services into a single selectable type
-	// 
+	//
 	"fields": {
 		"all.preprocessor": {
 			"title": "Preprocessor",

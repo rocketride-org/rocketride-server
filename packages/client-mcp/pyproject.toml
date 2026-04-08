@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rocketride-mcp"
-version = "1.0.2"
+version = "1.0.7"
 description = "RocketRide MCP stdio server that streams local files to RocketRide EaaS"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,7 +14,7 @@ authors = [
 license = "MIT"
 dependencies = [
   "mcp>=1.2.0",
-  "rocketride-client>=1.1.0",
+  "rocketride>=1.0.4",
 ]
 
 [project.urls]
@@ -23,8 +23,13 @@ Repository = "https://github.com/rocketride/rocketride-clients"
 
 [project.scripts]
 rocketride-mcp = "rocketride_mcp.server:main"
+rocketride-mcp-sse = "rocketride_mcp.sse_server:main"
 
 [project.optional-dependencies]
+sse = [
+  "uvicorn>=0.30.0",
+  "starlette>=0.38.0",
+]
 dev = [
   "ruff>=0.8.0",
   "pytest>=7.0.0",

@@ -29,7 +29,7 @@ TEST_CASE("plat::CpuInfo") {
     REQUIRE_FALSE(processors.empty());
 
     // Verify using the first processor (they should all be identical anyway)
-    auto& proc = processors.front();
+    auto &proc = processors.front();
     REQUIRE(proc.vendor == plat::cpuInfo().vendor());
     REQUIRE(proc.family == plat::cpuInfo().family());
     REQUIRE(proc.model == plat::cpuInfo().model());

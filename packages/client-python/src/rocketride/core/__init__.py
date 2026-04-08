@@ -36,7 +36,7 @@ transport layers.
 Components:
     DAPBase: Base class providing DAP messaging and logging capabilities
     DAPClient: Client implementation of the Debug Adapter Protocol
-    TransportBase: Abstract base class for transport implementations  
+    TransportBase: Abstract base class for transport implementations
     TransportWebSocket: WebSocket transport for client-server communication
     RocketRideException: Base exception class for all RocketRide operations
     ConnectionException: Raised for connection-related errors
@@ -49,10 +49,9 @@ Usage:
     from rocketride.core import DAPClient, TransportWebSocket, RocketRideException
 """
 
-from .dap_base import DAPBase
-from .dap_client import DAPClient
-from .transport_websocket import TransportWebSocket
-from .transport import TransportBase
+from .dap import DAPBase, DAPClient
+from .transport import TransportBase, TransportWebSocket
+from .runtime import RuntimeManager, StateDB, DockerRuntime
 from .constants import (
     CONST_DEFAULT_SERVICE,
     CONST_DEFAULT_WEB_CLOUD,
@@ -91,4 +90,7 @@ __all__ = [
     'DAPException',
     'TransportBase',
     'TransportWebSocket',
+    'RuntimeManager',
+    'StateDB',
+    'DockerRuntime',
 ]

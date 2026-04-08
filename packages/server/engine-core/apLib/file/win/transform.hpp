@@ -25,8 +25,8 @@
 
 namespace ap::file {
 
-inline void __transform(StatInfo& info, const ::WIN32_FIND_DATAW& platInfo,
-                        const Path& path) noexcept {
+inline void __transform(StatInfo &info, const ::WIN32_FIND_DATAW &platInfo,
+                        const Path &path) noexcept {
     info.plat = platInfo;
 
     // Fill in the generic stuff
@@ -63,9 +63,9 @@ inline void __transform(StatInfo& info, const ::WIN32_FIND_DATAW& platInfo,
     }
 }
 
-inline void __transform(StatInfo& info,
-                        const ::BY_HANDLE_FILE_INFORMATION& platInfo,
-                        const Path& path) noexcept {
+inline void __transform(StatInfo &info,
+                        const ::BY_HANDLE_FILE_INFORMATION &platInfo,
+                        const Path &path) noexcept {
     // Bootstrap the stat info by emulating a find info
     ::WIN32_FIND_DATAW findInfo = {};
     findInfo.ftCreationTime = platInfo.ftCreationTime;
@@ -83,7 +83,7 @@ inline void __transform(StatInfo& info,
     info.volumeId = platInfo.dwVolumeSerialNumber;
 }
 
-inline void __fromJson(const json::Value& val, PlatStatInfo& info) noexcept {
+inline void __fromJson(const json::Value &val, PlatStatInfo &info) noexcept {
     info.dwFileAttributes =
         _fj<decltype(info.dwFileAttributes)>(val["dwFileAttributes"]);
     info.ftCreationTime.dwLowDateTime =
@@ -121,7 +121,7 @@ inline void __fromJson(const json::Value& val, PlatStatInfo& info) noexcept {
                          cAlternateFileName.size()));
 }
 
-inline void __toJson(const PlatStatInfo& info, json::Value& val) noexcept {
+inline void __toJson(const PlatStatInfo &info, json::Value &val) noexcept {
     val["dwFileAttributes"] = _tj(info.dwFileAttributes);
     val["ftCreationTime"]["dwLowDateTime"] =
         _tj(info.ftCreationTime.dwLowDateTime);
