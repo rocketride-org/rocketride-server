@@ -39,7 +39,7 @@
 			}
 		},
 		"tool_exa_search.numResults": {
-			"type": "number",
+			"type": "integer",
 			"title": "Number of Results",
 			"description": "Maximum number of search results to return (1-50)",
 			"default": 10,
@@ -70,7 +70,7 @@
 		"tool_exa_search.includeText": {
 			"type": "boolean",
 			"title": "Include Text Content",
-			"description": "Include full text content in results (uses get_contents)",
+			"description": "Include full text content in results",
 			"default": true,
 			"enum": [
 				[true, "Yes"],

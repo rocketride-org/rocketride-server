@@ -32,6 +32,8 @@ then creates an ExaSearchDriver that implements the ToolsBase interface.
 
 from __future__ import annotations
 
+import os
+
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
@@ -49,7 +51,7 @@ class IGlobal(IGlobalBase):
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        apikey = str((cfg.get('apikey') or '')).strip()
+        apikey = str(cfg.get('apikey') or os.environ.get('EXA_API_KEY', '')).strip()
 
         if not apikey:
             raise Exception('tool_exa_search: apikey is required')
@@ -75,7 +77,7 @@ class IGlobal(IGlobalBase):
     def validateConfig(self) -> None:
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = str((cfg.get('apikey') or '')).strip()
+            apikey = str(cfg.get('apikey') or os.environ.get('EXA_API_KEY', '')).strip()
             if not apikey:
                 warning('apikey is required')
         except Exception as e:

@@ -148,6 +148,9 @@ class ExaSearchDriver(ToolsBase):
         if bare != 'exa_search':
             raise ValueError(f'Unknown tool {tool_name!r} (expected exa_search)')
 
+        # Normalize input so validation works for JSON strings, Pydantic models, etc.
+        input_obj = _normalize_tool_input(input_obj)
+
         if not isinstance(input_obj, dict):
             raise ValueError('Tool input must be a JSON object')
 
@@ -163,6 +166,32 @@ class ExaSearchDriver(ToolsBase):
         if num_results is not None:
             if not isinstance(num_results, int) or num_results < 1 or num_results > 50:
                 raise ValueError('num_results must be an integer between 1 and 50')
+
+        use_autoprompt = input_obj.get('use_autoprompt')
+        if use_autoprompt is not None and not isinstance(use_autoprompt, bool):
+            raise ValueError('use_autoprompt must be a boolean')
+
+        include_text = input_obj.get('include_text')
+        if include_text is not None and not isinstance(include_text, bool):
+            raise ValueError('include_text must be a boolean')
+
+        include_domains = input_obj.get('include_domains')
+        if include_domains is not None:
+            if not isinstance(include_domains, list) or not all(isinstance(d, str) for d in include_domains):
+                raise ValueError('include_domains must be an array of strings')
+
+        exclude_domains = input_obj.get('exclude_domains')
+        if exclude_domains is not None:
+            if not isinstance(exclude_domains, list) or not all(isinstance(d, str) for d in exclude_domains):
+                raise ValueError('exclude_domains must be an array of strings')
+
+        start_published_date = input_obj.get('start_published_date')
+        if start_published_date is not None and not isinstance(start_published_date, str):
+            raise ValueError('start_published_date must be a string in ISO 8601 format')
+
+        end_published_date = input_obj.get('end_published_date')
+        if end_published_date is not None and not isinstance(end_published_date, str):
+            raise ValueError('end_published_date must be a string in ISO 8601 format')
 
     def _tool_invoke(self, *, tool_name: str, input_obj: Any) -> Any:  # noqa: ANN401
         input_obj = _normalize_tool_input(input_obj)
@@ -328,7 +357,7 @@ def _normalize_tool_input(input_obj: Any) -> Dict[str, Any]:
             pass
 
     if not isinstance(input_obj, dict):
-        warning(f'exa_search: unexpected input type {type(input_obj).__name__}: {input_obj!r}')
+        warning(f'exa_search: unexpected input type {type(input_obj).__name__}')
         return {}
 
     # Unwrap ``{"input": {...}}`` wrappers that some framework paths leave behind
