@@ -35,7 +35,7 @@ import json
 import logging
 import socket
 import urllib.request
-from typing import Any
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 
@@ -48,7 +48,7 @@ _ALLOWED_SCHEMES = {'http', 'https'}
 class ApprovalNotifier:
     """Send human-approval notifications through configurable channels."""
 
-    def __init__(self, notification_type: str = 'log', webhook_url: str | None = None) -> None:
+    def __init__(self, notification_type: str = 'log', webhook_url: Optional[str] = None) -> None:
         """Initialise the notifier.
 
         Args:
@@ -71,7 +71,7 @@ class ApprovalNotifier:
     # Public API
     # ------------------------------------------------------------------
 
-    def notify(self, approval_request: dict[str, Any]) -> dict[str, Any] | None:
+    def notify(self, approval_request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Dispatch a notification for the given approval request.
 
         Returns:
@@ -84,7 +84,7 @@ class ApprovalNotifier:
             return self.notify_log(approval_request)
         return None
 
-    def notify_webhook(self, url: str | None, approval_request: dict[str, Any]) -> dict[str, Any]:
+    def notify_webhook(self, url: Optional[str], approval_request: Dict[str, Any]) -> Dict[str, Any]:
         """Prepare a webhook POST payload and send it.
 
         The HTTP call uses a short timeout (10 s) so it does not block the
@@ -107,7 +107,7 @@ class ApprovalNotifier:
         # Resolve hostname and validate the IP to prevent DNS rebinding attacks
         self._validate_resolved_ip(url)
 
-        payload: dict[str, Any] = {
+        payload: Dict[str, Any] = {
             'event': 'approval_requested',
             'approval_id': approval_request.get('approval_id', ''),
             'item_id': approval_request.get('item_id', ''),
@@ -135,9 +135,9 @@ class ApprovalNotifier:
 
         return payload
 
-    def notify_log(self, approval_request: dict[str, Any]) -> dict[str, Any]:
+    def notify_log(self, approval_request: Dict[str, Any]) -> Dict[str, Any]:
         """Log the pending approval for monitoring and return a log-entry dict."""
-        entry: dict[str, Any] = {
+        entry: Dict[str, Any] = {
             'event': 'approval_requested',
             'approval_id': approval_request.get('approval_id', ''),
             'item_id': approval_request.get('item_id', ''),
@@ -159,7 +159,7 @@ class ApprovalNotifier:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _validate_webhook_url(url: str | None) -> None:
+    def _validate_webhook_url(url: Optional[str]) -> None:
         """Reject URLs that could enable SSRF (non-http(s), internal IPs, etc.)."""
         if not url:
             raise ValueError('webhook_url is required for webhook notifications')
@@ -193,7 +193,7 @@ class ApprovalNotifier:
                     raise ValueError(f'Webhook URL must not point to a private network address: {host!r}')
 
     @staticmethod
-    def _validate_resolved_ip(url: str | None) -> None:
+    def _validate_resolved_ip(url: Optional[str]) -> None:
         """Resolve the webhook hostname and reject private/reserved IPs.
 
         This mitigates DNS rebinding attacks where a hostname resolves to
