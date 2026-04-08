@@ -87,6 +87,8 @@ class RerankClient:
         """
         self._logicalType = logicalType
         self._model = config.get('model', 'rerank-v3.5')
+        if not self._model or not self._model.strip():
+            raise ValueError('Cohere model name is required')
         self._top_n = config.get('top_n', 5)
         self._min_score = config.get('min_score', 0.0)
 
