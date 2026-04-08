@@ -40,7 +40,12 @@ def _validate_path(path: str) -> str:
     real_path = os.path.realpath(path)
     real_cwd = os.path.realpath(os.getcwd())
 
-    if not real_path.startswith(real_cwd + os.sep) and real_path != real_cwd:
+    try:
+        common = os.path.commonpath([real_path, real_cwd])
+    except ValueError:
+        raise ValueError(f'Path traversal detected: {path}')
+
+    if common != real_cwd:
         raise ValueError(f'Path {path} is outside the working directory')
 
     return real_path
@@ -159,7 +164,7 @@ class DatasetLoader:
         Transformations are applied in order: filter -> sample -> slice.
         Each step is optional and controlled by config values.
 
-        When cobalt-ai is installed, its Dataset class is used for transforms.
+        When basalt-ai-cobalt is installed, its Dataset class is used for transforms.
         Otherwise, a pure-Python fallback handles filter/sample/slice without
         requiring the cobalt dependency.
 
@@ -183,7 +188,7 @@ class DatasetLoader:
 
             return self._apply_transforms_cobalt(items, config, Dataset)
         except ImportError:
-            debug('Cobalt DatasetLoader: cobalt-ai not installed, using Python fallback for transforms')
+            debug('Cobalt DatasetLoader: basalt-ai-cobalt not installed, using Python fallback for transforms')
             return self._apply_transforms_fallback(items, config)
 
     def _apply_transforms_cobalt(self, items: List[Dict[str, Any]], config: Dict[str, Any], Dataset: Any) -> List[Dict[str, Any]]:

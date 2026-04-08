@@ -158,10 +158,28 @@ def _install_mocks():
         sys.modules['json5'] = ModuleType('json5')
 
 
-_original_modules = {name: sys.modules.get(name) for name in _MOCK_MODULE_NAMES}
-_original_path = sys.path[:]
+_original_modules: dict = {}
+_original_path: list = []
 
-# Install mocks at module level so node imports below succeed.
+
+def _snapshot_modules():
+    """Snapshot sys.modules entries before mock installation."""
+    _original_modules.update({name: sys.modules.get(name) for name in _MOCK_MODULE_NAMES})
+    _original_path[:] = sys.path[:]
+
+
+def _restore_modules_impl():
+    """Restore sys.modules to pre-mock state."""
+    sys.path[:] = _original_path
+    for name, orig in _original_modules.items():
+        if orig is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = orig
+
+
+# Snapshot before mocks are installed, then install mocks so node imports succeed.
+_snapshot_modules()
 _install_mocks()
 
 
@@ -169,12 +187,7 @@ _install_mocks()
 def _restore_modules():
     """Restore sys.modules after the entire test session completes."""
     yield
-    sys.path[:] = _original_path
-    for name, orig in _original_modules.items():
-        if orig is None:
-            sys.modules.pop(name, None)
-        else:
-            sys.modules[name] = orig
+    _restore_modules_impl()
 
 
 # ---------------------------------------------------------------------------
