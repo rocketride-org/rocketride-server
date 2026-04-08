@@ -99,8 +99,9 @@ def _llm_modules():
     """Session-scoped fixture that loads LLM modules and cleans up sys.modules after."""
     _setup_llm_modules()
     yield
-    for key in _INJECTED_MODULE_KEYS:
+    for key in list(_INJECTED_MODULE_KEYS):
         sys.modules.pop(key, None)
+    _INJECTED_MODULE_KEYS.clear()
 
 
 # Perform the initial load so that module-level references are available.
@@ -209,6 +210,11 @@ class TestStreamingConfig:
 
     def test_provider_none(self):
         assert is_provider_streaming_capable(None) is False
+
+    def test_provider_capable_suffixed(self):
+        """Suffixed variants like 'openai_api' should still be recognized."""
+        assert is_provider_streaming_capable('openai_api') is True
+        assert is_provider_streaming_capable('mistral_v2') is True
 
 
 # ===========================================================================
@@ -485,6 +491,21 @@ class TestStreamResponse:
         # A stream_end event must be emitted so SSE clients don't hang.
         end_calls = [c for c in mock_sse.call_args_list if c.args[0] == 'stream_end']
         assert len(end_calls) == 1
+
+    def test_stream_error_emitted_when_fallback_also_fails(self):
+        """If both streaming and fallback fail, stream_error must be emitted."""
+        inst, mock_sse = _make_instance()
+        h = StreamingHandler(inst, provider='openai')
+        question = _make_question('test')
+
+        chat_fn = MagicMock(side_effect=[RuntimeError('stream broke'), RuntimeError('fallback broke')])
+
+        with patch.dict('sys.modules', {'ai.common.schema': _fake_schema_module()}):
+            with pytest.raises(RuntimeError, match='fallback broke'):
+                h.stream_response(chat_fn, question)
+
+        error_calls = [c for c in mock_sse.call_args_list if c.args[0] == 'stream_error']
+        assert len(error_calls) == 1
 
     def test_fallback_returns_existing_answer_unchanged(self):
         """When chat_fn already returns an Answer, don't re-wrap it."""

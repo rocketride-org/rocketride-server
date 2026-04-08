@@ -115,9 +115,13 @@ def get_provider_name(logical_type: str) -> Optional[str]:
 def is_provider_streaming_capable(provider: str) -> bool:
     """Return ``True`` if *provider* is known to support streaming.
 
+    Handles suffixed variants like ``openai_api`` by canonicalizing
+    before the lookup.
+
     Args:
-        provider: Bare provider name (e.g. ``'openai'``).
+        provider: Bare provider name (e.g. ``'openai'``) or a suffixed
+            variant (e.g. ``'openai_api'``).
     """
     if not provider:
         return False
-    return provider.lower() in STREAMING_CAPABLE_PROVIDERS
+    return _canonicalize_provider(provider) in STREAMING_CAPABLE_PROVIDERS

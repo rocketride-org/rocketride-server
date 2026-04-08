@@ -196,11 +196,15 @@ class StreamingHandler:
             answer.setAnswer(accumulated_text)
             return answer
 
-        except Exception:
+        except Exception as exc:
             logger.debug('Streaming failed for provider=%s, falling back to non-streaming', self._provider, exc_info=True)
-            # Emit stream_end so SSE clients don't hang waiting for it.
+            try:
+                result = self._fallback(chat_fn, prompt, expect_json, Answer, **kwargs)
+            except Exception as fallback_exc:
+                self._emit_stream_error(str(fallback_exc))
+                raise fallback_exc from exc
             self._emit_stream_end({'input_tokens': 0, 'output_tokens': 0})
-            return self._fallback(chat_fn, prompt, expect_json, Answer, **kwargs)
+            return result
 
     # ------------------------------------------------------------------
     # Chunk text extraction
@@ -300,6 +304,10 @@ class StreamingHandler:
         """Send an SSE event with final token statistics."""
         self._send_sse('stream_end', **total_tokens)
 
+    def _emit_stream_error(self, error: str) -> None:
+        """Send an SSE event indicating a streaming error."""
+        self._send_sse('stream_error', error=error)
+
     def _send_sse(self, event_type: str, **data: Any) -> None:
         """Dispatch an SSE event via the engine's ``sendSSE`` interface.
 
@@ -382,5 +390,5 @@ class StreamingHandler:
             content = result.content
 
         answer = answer_cls(expectJson=expect_json)
-        answer.setAnswer(content if isinstance(content, str) else str(content))
+        answer.setAnswer(content)
         return answer
