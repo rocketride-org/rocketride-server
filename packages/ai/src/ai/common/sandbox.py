@@ -44,6 +44,7 @@ Runs agent-supplied code via RestrictedPython inside a controlled namespace with
 from __future__ import annotations
 
 import importlib
+import re
 import subprocess
 import operator
 import sys
@@ -299,16 +300,37 @@ def execute_sandboxed(
     return response
 
 
+# Dots are intentionally excluded: _pip_install receives the top-level module
+# name (from ``name.split('.')[0]``), which never contains dots.
+_VALID_PACKAGE_RE = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?$')
+_MAX_PACKAGE_NAME_LEN = 128
+_pip_lock = threading.Lock()
+
+
 def _pip_install(package: str) -> None:
     """Auto-install a package via pip. Only called for non-default allowlisted modules."""
-    subprocess.check_call(
-        [sys.executable, '-m', 'pip', 'install', '--quiet', package],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        timeout=60,
-    )
-    # Clear the import cache so the freshly installed module is found
-    importlib.invalidate_caches()
+    if not isinstance(package, str) or not package:
+        raise ValueError(f'Invalid package name: {package!r}')
+    if len(package) > _MAX_PACKAGE_NAME_LEN:
+        raise ValueError(f'Package name too long ({len(package)} chars, max {_MAX_PACKAGE_NAME_LEN})')
+    if not _VALID_PACKAGE_RE.match(package):
+        raise ValueError(
+            f'Invalid package name {package!r}: must contain only alphanumeric '
+            f'characters, hyphens, and underscores, and must start/end with an '
+            f'alphanumeric character'
+        )
+    with _pip_lock:
+        # Use subprocess.run with check=True so that stderr is included in the
+        # CalledProcessError on failure, making pip errors visible to callers.
+        subprocess.run(
+            [sys.executable, '-m', 'pip', 'install', '--quiet', package],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=60,
+            check=True,
+        )
+        # Clear the import cache so the freshly installed module is found
+        importlib.invalidate_caches()
 
 
 def _truncate(text: str, max_size: int = _MAX_OUTPUT) -> str:
