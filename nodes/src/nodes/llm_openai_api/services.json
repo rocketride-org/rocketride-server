@@ -1,30 +1,17 @@
 {
 	"title": "OpenAI-Compatible API",
 	"protocol": "llm_openai_api://",
-	"classType": [
-		"llm"
-	],
-	"capabilities": [
-		"invoke"
-	],
+	"classType": ["llm"],
+	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.llm_openai_api",
 	"prefix": "llm",
-	"description": [
-		"A component that connects to any OpenAI-compatible API endpoint for language model ",
-		"inference. Supports custom base URLs for providers like Featherless, Together, Groq, ",
-		"Ollama, LM Studio, and any other OpenAI SDK-compatible service. Configure with your ",
-		"provider's base URL, API key, and model name."
-	],
+	"description": ["A component that connects to any OpenAI-compatible API endpoint for language model ", "inference. Supports custom base URLs for providers like Featherless, Together, Groq, ", "Ollama, LM Studio, and any other OpenAI SDK-compatible service. Configure with your ", "provider's base URL, API key, and model name."],
 	"icon": "openai.svg",
-	"tile": [
-		"Model: ${parameters.llm_openai_api.model}"
-	],
+	"tile": ["Model: ${parameters.llm_openai_api.model}"],
 	"lanes": {
-		"questions": [
-			"answers"
-		]
+		"questions": ["answers"]
 	},
 	"input": [
 		{
@@ -65,38 +52,14 @@
 		},
 		"openai_api.custom": {
 			"object": "custom",
-			"properties": [
-				"model",
-				"base_url",
-				"modelTotalTokens",
-				"llm.cloud.apikey"
-			]
-		},
-		"openai_api.profile": {
-			"title": "Configuration",
-			"description": "API configuration",
-			"type": "string",
-			"default": "custom",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
-			"conditional": [
-				{
-					"value": "custom",
-					"properties": [
-						"openai_api.custom"
-					]
-				}
-			]
+			"properties": ["model", "base_url", "modelTotalTokens", "llm.cloud.apikey"]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "OpenAI-Compatible API",
-			"properties": [
-				"openai_api.profile"
-			]
+			"properties": ["openai_api.custom"]
 		}
 	],
 	"test": {

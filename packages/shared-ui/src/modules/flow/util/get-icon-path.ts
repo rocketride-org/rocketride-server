@@ -51,6 +51,7 @@ import fileSystemIcon from '../../../assets/nodes/file-system.svg';
 import firecrawlIcon from '../../../assets/nodes/firecrawl.svg';
 import frameGrabberIcon from '../../../assets/nodes/frame_grabber.svg';
 import geminiIcon from '../../../assets/nodes/gemini.svg';
+import gmiCloudIcon from '../../../assets/nodes/gmi_cloud.svg';
 import gmailIcon from '../../../assets/nodes/gmail.svg';
 import googleDriveIcon from '../../../assets/nodes/google-drive.svg';
 import hashIcon from '../../../assets/nodes/hash.svg';
@@ -141,6 +142,7 @@ const iconMap: Record<string, string> = {
 	firecrawl: firecrawlIcon,
 	frame_grabber: frameGrabberIcon,
 	gemini: geminiIcon,
+	gmi_cloud: gmiCloudIcon,
 	gmail: gmailIcon,
 	'google-drive': googleDriveIcon,
 	hash: hashIcon,
@@ -214,6 +216,8 @@ const THEME_DYNAMIC_ICONS: ReadonlySet<string> = new Set([
 	'embedding-text',
 	// LLMs
 	'anthropic',
+	'bland-ai',
+	'gmi_cloud',
 	'ollama',
 	'openai',
 	'perplexity',
@@ -226,6 +230,7 @@ const THEME_DYNAMIC_ICONS: ReadonlySet<string> = new Set([
 	'langchain',
 	// Database
 	'mysql',
+	'neo4j',
 	// Image processing
 	'frame_grabber',
 	'image_cleanup',
