@@ -44,7 +44,8 @@ class IGlobal(IGlobalBase):
 
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-            debug(f'    Loading anomaly detector: method={config.get("method", "z_score")}')
+            method = config.get('method', 'z_score')
+            debug(f'    Loading anomaly detector: method={method}')
             self.detector = AnomalyDetector(config)
             debug('    Anomaly detector initialized')
 

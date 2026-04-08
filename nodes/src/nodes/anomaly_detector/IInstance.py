@@ -70,15 +70,17 @@ class IInstance(IInstanceBase):
         for doc in documents:
             enriched_doc = doc.model_copy()
             if enriched_doc.metadata is None:
-                enriched_doc.metadata = {}
+                enriched_docs.append(enriched_doc)
+                continue
 
-            result = self.IGlobal.detector.evaluate_document(enriched_doc.metadata)
+            metadata_dict = enriched_doc.metadata.model_dump()
+            result = self.IGlobal.detector.evaluate_document(metadata_dict)
 
-            enriched_doc.metadata['anomaly_score'] = result['score']
-            enriched_doc.metadata['anomaly_severity'] = result['severity']
-            enriched_doc.metadata['anomaly_is_anomalous'] = result['is_anomalous']
+            enriched_doc.metadata.anomaly_score = result['score']
+            enriched_doc.metadata.anomaly_severity = result['severity']
+            enriched_doc.metadata.anomaly_is_anomalous = result['is_anomalous']
             if result.get('details'):
-                enriched_doc.metadata['anomaly_details'] = result['details']
+                enriched_doc.metadata.anomaly_details = result['details']
 
             enriched_docs.append(enriched_doc)
 

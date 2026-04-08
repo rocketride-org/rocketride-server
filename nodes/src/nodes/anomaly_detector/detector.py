@@ -138,11 +138,16 @@ class AnomalyDetector:
 
     def _detect_rolling_avg(self, value: float, window: list) -> Dict[str, Any]:
         """
-        Detect anomalies using rolling (moving) average deviation.
+        Detect anomalies using rolling (moving) average percentage deviation.
 
-        Computes a local mean from the most recent N values (where N defaults
-        to half the window size) and measures how far the new value deviates
-        from that local mean, normalized by the full window standard deviation.
+        Computes a simple moving average from the most recent N values (where
+        N defaults to half the window size) and measures how far the new value
+        deviates from that local mean as a percentage. The percentage is then
+        compared against the sensitivity threshold to classify severity.
+
+        Unlike Z-Score, this method does NOT normalize by standard deviation.
+        It uses relative percentage deviation, making it more intuitive for
+        business metrics where a "10% deviation" has a clear meaning.
         """
         if len(window) < 2:
             return {'score': 0.0, 'severity': 'normal', 'is_anomalous': False, 'details': 'insufficient data'}
@@ -152,22 +157,23 @@ class AnomalyDetector:
         recent = window[-rolling_n:]
         local_mean = sum(recent) / len(recent)
 
-        # Full window std dev for normalization
-        full_mean = sum(window) / len(window)
-        variance = sum((x - full_mean) ** 2 for x in window) / len(window)
-        std_dev = math.sqrt(variance)
+        if local_mean == 0:
+            return {'score': 0.0, 'severity': 'normal', 'is_anomalous': False, 'details': 'zero mean'}
 
-        if std_dev == 0:
-            return {'score': 0.0, 'severity': 'normal', 'is_anomalous': False, 'details': 'zero variance'}
+        # Percentage deviation from the rolling mean
+        pct_deviation = abs(value - local_mean) / abs(local_mean) * 100.0
 
-        deviation = abs(value - local_mean) / std_dev
-        severity = self._classify_severity(deviation)
+        # Map percentage deviation to score using sensitivity as the
+        # percentage threshold (e.g., sensitivity=2.0 means thresholds at
+        # warning_threshold * 10% and critical_threshold * 10%)
+        score = pct_deviation / (self.sensitivity * 10.0) if self.sensitivity > 0 else 0.0
+        severity = self._classify_severity(score)
 
         return {
-            'score': round(deviation, 4),
+            'score': round(score, 4),
             'severity': severity,
-            'is_anomalous': deviation >= self.warning_threshold,
-            'details': f'deviation={deviation:.4f} local_mean={local_mean:.4f} rolling_n={len(recent)} std={std_dev:.4f}',
+            'is_anomalous': score >= self.warning_threshold,
+            'details': f'pct_deviation={pct_deviation:.2f}% local_mean={local_mean:.4f} rolling_n={len(recent)}',
         }
 
     def detect(self, value: float) -> Dict[str, Any]:
