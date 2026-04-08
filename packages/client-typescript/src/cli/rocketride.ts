@@ -420,7 +420,8 @@ class StatusMonitor extends BoxMonitor {
 			const startStr = new Date(startTime * 1000).toLocaleString();
 			lines.push(`Started: ${startStr}`);
 
-			const endTime = status.completed ? Number(status.endTime) || 0 : undefined;
+			const parsedEndTime = Number(status.endTime) || 0;
+			const endTime = status.completed && parsedEndTime > 0 ? parsedEndTime : undefined;
 			const duration = this.formatDuration(startTime, endTime);
 			lines.push(`Elapsed: ${duration}`);
 		}
@@ -879,10 +880,14 @@ export class RocketRideCLI {
 
 				try {
 					const exitCode = await this.cmdStart();
-					process.exit(exitCode);
+					if (!this.isCancelled()) {
+						process.exit(exitCode);
+					}
 				} finally {
-					this.cancel();
-					await this.cleanupClient();
+					if (!this.isCancelled()) {
+						this.cancel();
+						await this.cleanupClient();
+					}
 				}
 			});
 
@@ -917,10 +922,14 @@ export class RocketRideCLI {
 
 				try {
 					const exitCode = await this.cmdUpload();
-					process.exit(exitCode);
+					if (!this.isCancelled()) {
+						process.exit(exitCode);
+					}
 				} finally {
-					this.cancel();
-					await this.cleanupClient();
+					if (!this.isCancelled()) {
+						this.cancel();
+						await this.cleanupClient();
+					}
 				}
 			});
 
@@ -946,10 +955,14 @@ export class RocketRideCLI {
 
 				try {
 					const exitCode = await this.cmdStatus();
-					process.exit(exitCode);
+					if (!this.isCancelled()) {
+						process.exit(exitCode);
+					}
 				} finally {
-					this.cancel();
-					await this.cleanupClient();
+					if (!this.isCancelled()) {
+						this.cancel();
+						await this.cleanupClient();
+					}
 				}
 			});
 
@@ -975,10 +988,14 @@ export class RocketRideCLI {
 
 				try {
 					const exitCode = await this.cmdStop();
-					process.exit(exitCode);
+					if (!this.isCancelled()) {
+						process.exit(exitCode);
+					}
 				} finally {
-					this.cancel();
-					await this.cleanupClient();
+					if (!this.isCancelled()) {
+						this.cancel();
+						await this.cleanupClient();
+					}
 				}
 			});
 
