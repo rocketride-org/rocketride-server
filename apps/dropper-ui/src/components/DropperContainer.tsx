@@ -83,7 +83,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 	 */
 	const handleDisconnected = useCallback(async (reason: string, hasError: boolean) => {
 		connectionAttemptsRef.current++;
-		setConnectionErrorMessage((prev) => (hasError ? reason || null : prev));
+		setConnectionErrorMessage((prev) => (hasError ? reason || prev : prev));
 		if (connectionAttemptsRef.current < 5) {
 			setStatusMessage(null);
 		} else {
@@ -164,7 +164,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 
 	/**
 	 * Auto-switch to the most relevant tab when results are available
-	 * Priority: text > tables > images > results
+	 * Priority: text > tables > images > videos > results
 	 */
 	useEffect(() => {
 		if (results) {
