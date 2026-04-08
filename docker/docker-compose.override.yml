@@ -14,9 +14,12 @@ services:
       - ROCKETRIDE_LOG_LEVEL=debug
       - ROCKETRIDE_DEV_MODE=true
     volumes:
-      # Hot-reload Python nodes during development
+      # Hot-reload Python nodes during development.
+      # Host path: <repo-root>/nodes/src/nodes
+      # Container path: /opt/rocketride/ai/nodes (matches WORKDIR /opt/rocketride + engine loads ./ai/nodes)
+      # Requires a prior `dist/server/` build; the bind mount shadows the built artifact at this path.
       - ../nodes/src/nodes:/opt/rocketride/ai/nodes:ro
 
   etcd:
     ports:
-      - "${ETCD_PORT:-2379}:2379"
+      - '${ETCD_PORT:-2379}:2379'

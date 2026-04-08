@@ -3,7 +3,11 @@
 ## Prerequisites
 
 - Docker Engine >= 24.0
-- Docker Compose V2 (bundled with Docker Desktop)
+- Docker Compose V2 >= 2.17 (bundled with Docker Desktop or installable as a plugin)
+
+> **Note:** `deploy.resources` limits (CPU/memory) require Docker Compose V2 ≥ 2.17
+> (shipped with Engine 23.0+). Engine 24.0+ is recommended and tested. Older
+> releases silently ignore resource limits.
 
 ## Quick Start
 
@@ -26,14 +30,14 @@ docker compose up -d
 
 ## Services
 
-| Service    | Default Port | Description                        |
-| ---------- | ------------ | ---------------------------------- |
-| engine     | 5565         | RocketRide processing engine       |
-| postgres   | 5432         | PostgreSQL 16 with pgvector        |
-| milvus     | 19530        | Milvus vector database             |
-| minio      | 9000 / 9001  | MinIO object storage (for Milvus)  |
-| etcd       | 2379         | etcd key-value store (for Milvus)  |
-| chroma     | 8000         | ChromaDB vector database           |
+| Service  | Default Port | Description                       |
+| -------- | ------------ | --------------------------------- |
+| engine   | 5565         | RocketRide processing engine      |
+| postgres | 5432         | PostgreSQL 16 with pgvector       |
+| milvus   | 19530        | Milvus vector database            |
+| minio    | 9000 / 9001  | MinIO object storage (for Milvus) |
+| etcd     | 2379         | etcd key-value store (for Milvus) |
+| chroma   | 8000         | ChromaDB vector database          |
 
 ## Common Commands
 
@@ -87,10 +91,10 @@ Change all passwords before any non-local deployment.
 
 Named volumes persist data between restarts:
 
-| Volume       | Used By   | Purpose              |
-| ------------ | --------- | -------------------- |
-| pgdata       | postgres  | Database files       |
-| etcddata     | etcd      | Metadata store       |
-| miniodata    | minio     | Object storage       |
-| milvusdata   | milvus    | Vector index data    |
-| chromadata   | chroma    | ChromaDB persistence |
+| Volume     | Used By  | Purpose              |
+| ---------- | -------- | -------------------- |
+| pgdata     | postgres | Database files       |
+| etcddata   | etcd     | Metadata store       |
+| miniodata  | minio    | Object storage       |
+| milvusdata | milvus   | Vector index data    |
+| chromadata | chroma   | ChromaDB persistence |

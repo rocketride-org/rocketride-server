@@ -17,7 +17,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.engine
     ports:
-      - "${ENGINE_PORT:-5565}:5565"
+      - '${ENGINE_PORT:-5565}:5565'
     environment:
       - ROCKETRIDE_LOG_LEVEL=${ROCKETRIDE_LOG_LEVEL:-info}
       - POSTGRES_URL=postgresql://${POSTGRES_USER:-rocketride}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-rocketride}
@@ -29,11 +29,15 @@ services:
       postgres:
         condition: service_healthy
       milvus:
-        condition: service_healthy
+        # service_started: Milvus is optional — engine must handle connection retries.
+        # Use service_healthy if your deployment always requires Milvus.
+        condition: service_started
       chroma:
-        condition: service_healthy
+        # service_started: Chroma is optional — engine must handle connection retries.
+        # Use service_healthy if your deployment always requires ChromaDB.
+        condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5565/ping"]
+      test: ['CMD', 'curl', '-f', 'http://localhost:5565/ping']
       interval: 30s
       timeout: 5s
       start_period: 10s
@@ -41,10 +45,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${ENGINE_CPU_LIMIT:-4}"
-          memory: "${ENGINE_MEMORY_LIMIT:-4G}"
+          cpus: '${ENGINE_CPU_LIMIT:-4}'
+          memory: '${ENGINE_MEMORY_LIMIT:-4G}'
         reservations:
-          cpus: "1"
+          cpus: '1'
           memory: 1G
     restart: unless-stopped
     networks:
@@ -58,11 +62,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
       POSTGRES_DB: ${POSTGRES_DB:-rocketride}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rocketride}"]
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-rocketride}']
       interval: 10s
       timeout: 5s
       start_period: 15s
@@ -76,9 +80,9 @@ services:
     image: quay.io/coreos/etcd:v3.5.16
     environment:
       ETCD_AUTO_COMPACTION_MODE: revision
-      ETCD_AUTO_COMPACTION_RETENTION: "1000"
-      ETCD_QUOTA_BACKEND_BYTES: "4294967296"  # 4 GiB
-      ETCD_SNAPSHOT_COUNT: "50000"
+      ETCD_AUTO_COMPACTION_RETENTION: '1000'
+      ETCD_QUOTA_BACKEND_BYTES: '4294967296' # 4 GiB
+      ETCD_SNAPSHOT_COUNT: '50000'
     command:
       - etcd
       - --advertise-client-urls=http://etcd:2379
@@ -87,7 +91,7 @@ services:
     volumes:
       - etcddata:/etcd
     healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
+      test: ['CMD', 'etcdctl', 'endpoint', 'health']
       interval: 15s
       timeout: 5s
       start_period: 10s
@@ -104,12 +108,12 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme}
     command: minio server /data --console-address ":9001"
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - '${MINIO_API_PORT:-9000}:9000'
+      - '${MINIO_CONSOLE_PORT:-9001}:9001'
     volumes:
       - miniodata:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
       interval: 15s
       timeout: 5s
       start_period: 10s
@@ -126,10 +130,10 @@ services:
       MINIO_ADDRESS: minio:9000
       MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-changeme}
-    command: ["milvus", "run", "standalone"]
+    command: ['milvus', 'run', 'standalone']
     ports:
-      - "${MILVUS_PORT:-19530}:19530"
-      - "${MILVUS_GRPC_PORT:-9091}:9091"
+      - '${MILVUS_PORT:-19530}:19530'
+      - '${MILVUS_GRPC_PORT:-9091}:9091'
     volumes:
       - milvusdata:/var/lib/milvus
     depends_on:
@@ -138,7 +142,7 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      test: ['CMD', 'curl', '-f', 'http://localhost:9091/healthz']
       interval: 20s
       timeout: 5s
       start_period: 30s
@@ -151,14 +155,14 @@ services:
   chroma:
     image: chromadb/chroma:0.6.3
     environment:
-      IS_PERSISTENT: "TRUE"
-      ANONYMIZED_TELEMETRY: "FALSE"
+      IS_PERSISTENT: 'TRUE'
+      ANONYMIZED_TELEMETRY: 'FALSE'
     ports:
-      - "${CHROMA_PORT:-8000}:8000"
+      - '${CHROMA_PORT:-8000}:8000'
     volumes:
       - chromadata:/chroma/chroma
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      test: ['CMD', 'curl', '-f', 'http://localhost:8000/api/v2/heartbeat']
       interval: 15s
       timeout: 5s
       start_period: 10s
