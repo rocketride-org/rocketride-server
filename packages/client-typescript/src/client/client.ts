@@ -1643,23 +1643,25 @@ export class RocketRideClient extends DAPClient {
 	// ============================================================================
 
 	/** Save or update a project pipeline configuration. */
-	async saveProject(options: { projectId: string; pipeline: Record<string, any> }): Promise<void> {
-		this.validateId(options.projectId, 'projectId');
-		if (!options.pipeline || typeof options.pipeline !== 'object') throw new Error('pipeline must be a non-empty object');
+	async saveProject(name: string, pipeline: PipelineConfig): Promise<void> {
+		this.validateId(name, 'name');
+		if (!pipeline || typeof pipeline !== 'object') throw new Error('pipeline must be a non-empty object');
 
-		await this.fsWriteJson(`.projects/${options.projectId}.json`, options.pipeline);
+		await this.fsWriteJson(`.projects/${name}.json`, pipeline);
 	}
 
-	async getProject(options: { projectId: string }): Promise<Record<string, any>> {
-		this.validateId(options.projectId, 'projectId');
+	/** Get a project by file name from .projects/<name>.json. */
+	async getProject(name: string): Promise<PipelineConfig> {
+		this.validateId(name, 'name');
 
-		return this.fsReadJson(`.projects/${options.projectId}.json`);
+		return this.fsReadJson(`.projects/${name}.json`) as Promise<PipelineConfig>;
 	}
 
-	async deleteProject(options: { projectId: string }): Promise<void> {
-		this.validateId(options.projectId, 'projectId');
+	/** Delete a project by file name. */
+	async deleteProject(name: string): Promise<void> {
+		this.validateId(name, 'name');
 
-		await this.fsDelete(`.projects/${options.projectId}.json`);
+		await this.fsDelete(`.projects/${name}.json`);
 	}
 
 	async getAllProjects(): Promise<Array<{ id: string; name: string; sources: any[]; totalComponents: number }>> {
