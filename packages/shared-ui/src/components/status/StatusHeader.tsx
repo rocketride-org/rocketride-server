@@ -9,7 +9,7 @@
  */
 
 import React from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import type { ITaskStatus } from '../../types/project';
 import { ITaskState } from '../../types/project';
 import { commonStyles } from '../../themes/styles';
@@ -66,6 +66,8 @@ export interface StatusHeaderProps {
 	currentElapsed: number;
 	/** Pipeline action callback. When provided, Run/Stop buttons are rendered. */
 	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
+	/** Extra content rendered to the left of the Run/Stop button. */
+	extraActions?: ReactNode;
 }
 
 export interface StatusActionsProps {
@@ -147,7 +149,7 @@ const getControlButton = (state: number) => {
  *   Row 2:   Status message
  *   Row 3:   Started Xs ago (when running)
  */
-export const StatusHeader: React.FC<StatusHeaderProps> = ({ name, taskStatus, currentElapsed, onPipelineAction }) => {
+export const StatusHeader: React.FC<StatusHeaderProps> = ({ name, taskStatus, currentElapsed, onPipelineAction, extraActions }) => {
 	const state = taskStatus?.state ?? ITaskState.NONE;
 	const hasStatus = !!taskStatus?.status;
 	const showElapsed = !!taskStatus && taskStatus.startTime > 0 && !taskStatus.completed;
@@ -170,7 +172,10 @@ export const StatusHeader: React.FC<StatusHeaderProps> = ({ name, taskStatus, cu
 			</div>
 			{/* Right column: buttons on top, elapsed below */}
 			<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-				{onPipelineAction && <StatusActions taskStatus={taskStatus} onPipelineAction={onPipelineAction} />}
+				<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+					{extraActions}
+					{onPipelineAction && <StatusActions taskStatus={taskStatus} onPipelineAction={onPipelineAction} />}
+				</div>
 				<div style={{ ...commonStyles.textMuted, fontSize: 'var(--rr-font-size-caption)', visibility: showElapsed ? 'visible' : 'hidden' }}>
 					Started <span style={styles.elapsedValue}>{formatElapsedTime(currentElapsed)}</span> ago
 				</div>

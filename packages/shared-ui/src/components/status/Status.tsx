@@ -162,7 +162,7 @@ export const Status: React.FC<StatusProps> = ({ taskStatus, currentElapsed }) =>
 
 	return (
 		<section>
-			<div style={commonStyles.cardHeader}>
+			<div style={{ ...commonStyles.cardHeader, background: 'none' }}>
 				<span style={commonStyles.sectionHeaderLabel}>Performance Metrics</span>
 				<div style={commonStyles.toggleGroup}>
 					{(['1min', '5min', '15min', 'all'] as TimeRange[]).map((range) => (

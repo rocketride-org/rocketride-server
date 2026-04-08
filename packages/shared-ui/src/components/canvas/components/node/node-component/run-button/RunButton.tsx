@@ -17,7 +17,7 @@
  */
 
 import React, { ReactElement, useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { Play, StopCircle, RefreshCw } from 'lucide-react';
+import { Play, Square, RefreshCw } from 'lucide-react';
 import { useFlowProject } from '../../../../context/FlowProjectContext';
 import { useFlowGraph } from '../../../../context/FlowGraphContext';
 import { ITaskState, IProject, INode, PIPELINE_SCHEMA_VERSION } from '../../../../types';
@@ -172,7 +172,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 				}}
 			>
 				<span style={styles.button}>
-					<StopCircle size={16} style={{ ...styles.icon, color: 'var(--rr-error)' }} />
+					<Square size={12} style={{ ...styles.icon, color: 'var(--rr-error)', fill: 'transparent', strokeWidth: 2.5 }} />
 				</span>
 				<span style={styles.label} className="run-btn-label">
 					Stop
