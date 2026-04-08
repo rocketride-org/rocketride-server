@@ -84,6 +84,14 @@ def _get_model_info(model_name: str) -> Dict[str, Any]:
     return {'provider': 'unknown', 'model': model_name, 'tier': 2}
 
 
+def _get_default_model_for_tier(tier: int) -> Dict[str, Any]:
+    """Return the first model in MODEL_TIERS that matches the given tier."""
+    for entry in MODEL_TIERS.values():
+        if entry['tier'] == tier:
+            return dict(entry)
+    return _get_model_info('claude-sonnet')
+
+
 def _estimate_complexity(text: Optional[str], threshold: int = 50) -> int:
     """Return a complexity score for the given text.
 
@@ -214,15 +222,15 @@ class ModelRouter:
 
         if score >= self.complexity_threshold:
             # Complex query -> tier 1 (powerful)
-            info = primary_info if primary_info['tier'] == 1 else _get_model_info('claude-opus')
+            info = primary_info if primary_info['tier'] == 1 else _get_default_model_for_tier(1)
             info['reason'] = f'complexity score {score} >= threshold {self.complexity_threshold}, routed to powerful model'
         elif score >= self.complexity_threshold // 2:
             # Medium complexity -> tier 2 (balanced)
-            info = primary_info if primary_info['tier'] == 2 else _get_model_info('claude-sonnet')
+            info = primary_info if primary_info['tier'] == 2 else _get_default_model_for_tier(2)
             info['reason'] = f'complexity score {score}, routed to balanced model'
         else:
             # Simple query -> tier 3 (fast/cheap)
-            info = primary_info if primary_info['tier'] == 3 else _get_model_info('claude-haiku')
+            info = primary_info if primary_info['tier'] == 3 else _get_default_model_for_tier(3)
             info['reason'] = f'complexity score {score} < {self.complexity_threshold // 2}, routed to fast model'
 
         info['complexity_score'] = score
@@ -231,32 +239,34 @@ class ModelRouter:
     def _route_cost_aware(self, text: str) -> Dict[str, Any]:
         """Route based on cumulative cost against budget.
 
-        Note: This strategy requires downstream nodes to call
-        ``router.record_cost(amount)`` after each LLM invocation so that
-        cumulative spend is tracked.  Without that integration the budget
-        will never be consumed and the router will always use the primary
-        model.
-
-        TODO: Wire up cost recording in the pipeline flow — either by
-        having downstream nodes call ``record_cost()`` after each LLM
-        invocation, or by estimating cost from token counts.
+        Each call records an estimated cost based on the selected model's
+        tier so that the budget is consumed even without downstream cost
+        reporting.  Downstream nodes may still call ``record_cost()`` to
+        refine the running total with actual spend.
         """
         with self._lock:
             self._request_count += 1
             current_cost = self._cumulative_cost
 
+        # Estimated cost per tier (USD) for budget tracking when actual
+        # costs are not reported by downstream nodes.
+        _tier_estimated_cost = {1: 0.03, 2: 0.01, 3: 0.002}
+
         if self.budget_limit > 0 and current_cost >= self.budget_limit:
             info = _get_model_info('gemini-flash')
             info['reason'] = f'budget exhausted (spent ${current_cost:.4f} of ${self.budget_limit:.4f}), routed to cheapest model'
+            self.record_cost(_tier_estimated_cost.get(info['tier'], 0.01))
             return info
 
         if self.budget_limit > 0 and current_cost >= self.budget_limit * 0.8:
             info = _get_model_info('claude-sonnet')
             info['reason'] = f'approaching budget limit (spent ${current_cost:.4f} of ${self.budget_limit:.4f}), routed to balanced model'
+            self.record_cost(_tier_estimated_cost.get(info['tier'], 0.01))
             return info
 
         info = _get_model_info(self.primary_model)
         info['reason'] = f'within budget (spent ${current_cost:.4f} of ${self.budget_limit:.4f}), using primary model'
+        self.record_cost(_tier_estimated_cost.get(info['tier'], 0.01))
         return info
 
     def _route_latency(self, text: str) -> Dict[str, Any]:
