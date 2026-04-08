@@ -45,37 +45,29 @@ import * as vscode from 'vscode';
 import { icons } from './icons';
 
 /**
- * Shared list of sensitive key patterns (lowercase) used for redaction.
- *
- * These are intentionally specific to avoid masking legitimate protocol fields
- * such as DAP `token`, pagination `nextToken`, or `tokenCount`.  Only keys that
- * unambiguously carry secrets are matched.
+ * Case-insensitive regex matching sensitive key names.
  */
-const SENSITIVE_KEY_PATTERNS: readonly string[] = [
-	'auth-key',
-	'authorization',
-	'apikey',
-	'api_key',
-	'access_token',
-	'refresh_token',
-	'token-key',
-	'bearer',
-	'password',
-	'secret',
-	'credential',
-	'private_key',
-] as const;
-
-/** Returns `true` when a **lowercase** key matches any sensitive pattern. */
-function isSensitiveKey(lowerKey: string): boolean {
-	return SENSITIVE_KEY_PATTERNS.some((pattern) => lowerKey.includes(pattern));
-}
+const SENSITIVE_KEY_PATTERN = new RegExp(
+	[
+		'auth[-_]?key',
+		'auth[-_]?token',
+		'authorization',
+		'api[-_]?key',
+		'access[-_]?token',
+		'refresh[-_]?token',
+		'private[-_]?key',
+		'token',
+		'bearer',
+		'password',
+		'secret',
+		'credential',
+	].join('|'),
+	'i'
+);
 
 /**
  * Recursively redacts sensitive fields in an object.
  * Modifies the object in place, replacing values of sensitive keys with "*****".
- *
- * Uses `SENSITIVE_KEY_PATTERNS` for pattern matching (case-insensitive).
  *
  * @param obj The object to redact (will be modified in place)
  */
@@ -98,8 +90,7 @@ function redactSensitiveFields(obj: unknown): void {
 		for (const key in record) {
 			if (Object.prototype.hasOwnProperty.call(record, key)) {
 				// Check if key contains any sensitive pattern (case-insensitive)
-				const lowerKey = key.toLowerCase();
-				if (isSensitiveKey(lowerKey)) {
+				if (SENSITIVE_KEY_PATTERN.test(key)) {
 					record[key] = '*****';
 				} else {
 					// Recursively process nested objects/arrays
@@ -115,14 +106,12 @@ function redactSensitiveFields(obj: unknown): void {
  * 
  * This function uses a lazy redaction strategy for optimal performance:
  * 1. Stringify the object first (required anyway for output)
- * 2. Quick string search for sensitive field patterns
+ * 2. Quick regex search for sensitive field patterns
  * 3. Only if found, parse, redact, and re-stringify
  * 
  * This ensures minimal overhead for the common case where no sensitive
  * data is present, while still protecting keys when they do appear.
  * 
- * Uses `SENSITIVE_KEY_PATTERNS` for detection (case-insensitive).
- *
  * @param obj The object to stringify
  * @returns JSON string with sensitive values redacted
  */
@@ -130,10 +119,8 @@ export function safeJSONStringify(obj: unknown): string {
 	// Stringify first - we need to do this anyway
 	const jsonString = JSON.stringify(obj);
 
-	// Quick check: does this contain sensitive fields?
-	// Search for common patterns in lowercase for case-insensitive matching
-	const lowerString = jsonString.toLowerCase();
-	if (SENSITIVE_KEY_PATTERNS.some((pattern) => lowerString.includes(pattern))) {
+	// Quick check: does the serialized string contain any sensitive field names?
+	if (SENSITIVE_KEY_PATTERN.test(jsonString)) {
 		// Yes - parse (creating a deep clone), redact, and re-stringify
 		const parsed = JSON.parse(jsonString);
 		redactSensitiveFields(parsed);
