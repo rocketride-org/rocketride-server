@@ -20,7 +20,7 @@
 		"Generates React UI components from natural-language prompts using Vercel's v0 API.",
 		"Provides generate_ui (create component) and refine_ui (iterate on existing generation)."
 	],
-	"tile": ["Tool: v0.generate_ui"],
+	"tile": ["Tool: v0 UI Generation"],
 	"lanes": {},
 	"preconfig": {
 		"default": "default",

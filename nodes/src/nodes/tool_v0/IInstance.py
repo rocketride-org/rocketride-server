@@ -75,6 +75,7 @@ class IInstance(IInstanceBase):
                 'success': {'type': 'boolean'},
                 'code': {'type': 'string', 'description': 'Generated React component code.'},
                 'message_id': {'type': 'string', 'description': 'v0 message ID for follow-up refinements.'},
+                'error': {'type': 'string', 'description': 'Error message on failure.'},
             },
         },
         description='Generate a React UI component from a natural-language description. Provide a detailed prompt describing the desired UI and receive production-ready React + Tailwind CSS code.',
@@ -145,6 +146,7 @@ class IInstance(IInstanceBase):
                 'success': {'type': 'boolean'},
                 'code': {'type': 'string', 'description': 'Refined React component code.'},
                 'message_id': {'type': 'string', 'description': 'Updated message ID for further refinements.'},
+                'error': {'type': 'string', 'description': 'Error message on failure.'},
             },
         },
         description='Refine a previously generated UI component by providing follow-up instructions. Requires the message_id from a prior generate_ui call.',
@@ -209,9 +211,13 @@ class IInstance(IInstanceBase):
                     json=payload,
                 )
                 resp.raise_for_status()
-                return resp.json()
+                try:
+                    return resp.json()
+                except (json.JSONDecodeError, ValueError) as exc:
+                    warning(f'v0 API returned non-JSON response: {exc}')
+                    raise ValueError('v0 API returned non-JSON response') from exc
         except httpx.HTTPStatusError as e:
-            warning(f'v0 API error: {e.response.status_code} - {e.response.text}')
+            warning(f'v0 API error: status={e.response.status_code}')
             raise
         except Exception as e:
             warning(f'v0 API request failed: {e}')
