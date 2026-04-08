@@ -41,6 +41,8 @@ interface IInvokeHandleProps extends HandleProps {
 	invokeType?: string;
 	/** Called when the handle is clicked (not dragged). */
 	onClick?: (event: React.MouseEvent) => void;
+	/** Native tooltip shown on hover. */
+	tooltip?: string;
 }
 
 // =============================================================================
@@ -52,7 +54,7 @@ interface IInvokeHandleProps extends HandleProps {
  *
  * Color priority: connected (accent) > default (hollow).
  */
-export default function InvokeHandle({ isConnected, disabled, type, style, invokeType, onClick, ...props }: IInvokeHandleProps): ReactElement {
+export default function InvokeHandle({ isConnected, disabled, type, style, invokeType, onClick, tooltip, ...props }: IInvokeHandleProps): ReactElement {
 	/** Dimmed styles applied when handle is disabled. */
 	const disabledStyles: CSSProperties = useMemo(() => (disabled ? { pointerEvents: 'none' as const, opacity: 0.4 } : {}), [disabled]);
 
@@ -94,7 +96,7 @@ export default function InvokeHandle({ isConnected, disabled, type, style, invok
 	);
 
 	return (
-		<div style={{ position: 'relative', margin: '0 20px' }}>
+		<div style={{ position: 'relative', margin: '0 20px' }} title={tooltip}>
 			{invokeType && (
 				<span
 					style={{
@@ -112,7 +114,7 @@ export default function InvokeHandle({ isConnected, disabled, type, style, invok
 						whiteSpace: 'nowrap',
 					}}
 				>
-					{invokeType === 'llm' ? 'LLM' : invokeType.charAt(0).toUpperCase() + invokeType.slice(1)}
+					{invokeType === 'llm' ? 'LLM' : invokeType === 'crewai' ? 'CrewAI' : invokeType.charAt(0).toUpperCase() + invokeType.slice(1)}
 				</span>
 			)}
 			<RFHandle

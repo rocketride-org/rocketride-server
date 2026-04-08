@@ -312,7 +312,7 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 
 				items.push({ key: providerKey, service });
 			}
-			if (items.length > 0) groups[groupKey] = items;
+			if (items.length > 0 && CATEGORY_TITLES[groupKey]) groups[groupKey] = items;
 		}
 
 		// Sort keys: "source" first, then alphabetical by display title

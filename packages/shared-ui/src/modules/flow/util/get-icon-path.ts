@@ -39,6 +39,7 @@ import chromaIcon from '../../../assets/nodes/chroma.svg';
 import classificationIcon from '../../../assets/nodes/classification.svg';
 import confluenceIcon from '../../../assets/nodes/confluence.svg';
 import crewaiIcon from '../../../assets/nodes/crewai.svg';
+import crewaiAgentIcon from '../../../assets/nodes/crewai_agent.svg';
 import deepseekIcon from '../../../assets/nodes/deepseek.svg';
 import dictionaryIcon from '../../../assets/nodes/dictionary.svg';
 import dropperIcon from '../../../assets/nodes/dropper.svg';
@@ -130,6 +131,7 @@ const iconMap: Record<string, string> = {
 	classification: classificationIcon,
 	confluence: confluenceIcon,
 	crewai: crewaiIcon,
+	crewai_agent: crewaiAgentIcon,
 	deepseek: deepseekIcon,
 	dictionary: dictionaryIcon,
 	dropper: dropperIcon,

@@ -1,22 +1,26 @@
 {
-	"title": "CrewAI Manager",
+	"title": "CrewAI",
 	"protocol": "agent_crewai_manager://",
-	"classType": ["agent", "tool"],
+	"classType": ["agent"],
 	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.agent_crewai",
 	"prefix": "agent",
-	"description": ["Multi-agent manager using CrewAI hierarchical process.", "Fans out to connected CrewAI sub-agent nodes, assembles a Crew, and synthesizes their outputs.", "Can be invoked as a tool (`<nodeId>.run_agent`) for nested orchestration."],
+	"description": ["Runs as a standalone agent or orchestrates a team of CrewAI sub-agents using hierarchical delegation.", "Connect CrewAI Agent nodes to enable multi-agent mode; without them it runs as a single agent."],
 	"icon": "crewai.svg",
 	"invoke": {
 		"llm": {
-			"description": "LLM used by the manager manager agent",
+			"description": "LLM used by the agent",
 			"min": 1
 		},
+		"tool": {
+			"description": "Tools available to the agent",
+			"min": 0
+		},
 		"crewai": {
-			"description": "Connected CrewAI sub-agent nodes",
-			"min": 1
+			"description": "Connected CrewAI Agent sub-agent nodes. When connected, runs as a hierarchical crew.",
+			"min": 0
 		}
 	},
 	"lanes": {
@@ -34,8 +38,11 @@
 			"default": {
 				"instructions": [],
 				"advanced_mode": false,
+				"role": "",
 				"goal": "",
-				"backstory": ""
+				"backstory": "",
+				"task_description": "",
+				"expected_output": ""
 			}
 		}
 	},
@@ -43,7 +50,7 @@
 		"instructions": {
 			"type": "array",
 			"title": "Instructions",
-			"description": "Additional instructions to guide the manager's delegation strategy.",
+			"description": "Additional instructions to guide the agent.",
 			"items": {
 				"type": "string",
 				"format": "textarea"
@@ -52,7 +59,7 @@
 		"advanced_mode": {
 			"type": "boolean",
 			"title": "Advanced Mode",
-			"description": "Expose CrewAI manager Agent configuration directly.",
+			"description": "Expose CrewAI Agent and Task configuration directly.",
 			"default": false,
 			"enum": [
 				[false, "Off"],
@@ -61,21 +68,38 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": ["goal", "backstory"]
+					"properties": ["role", "goal", "backstory", "task_description", "expected_output"]
 				}
 			]
+		},
+		"role": {
+			"type": "string",
+			"title": "Role",
+			"description": "Agent role name (e.g. 'Senior Analyst'). Maps to CrewAI Agent(role=...)."
 		},
 		"goal": {
 			"type": "string",
 			"format": "textarea",
-			"title": "Manager Goal",
-			"description": "What the manager manager is trying to achieve. Maps to CrewAI Agent(goal=...)."
+			"title": "Goal",
+			"description": "What this agent is trying to achieve. Maps to CrewAI Agent(goal=...)."
 		},
 		"backstory": {
 			"type": "string",
 			"format": "textarea",
-			"title": "Manager Backstory",
-			"description": "Background context for the manager's persona. Maps to CrewAI Agent(backstory=...)."
+			"title": "Backstory",
+			"description": "Background context for this agent's persona. Maps to CrewAI Agent(backstory=...)."
+		},
+		"task_description": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Task",
+			"description": "What this agent should do. If blank, the incoming question is used. Maps to CrewAI Task(description=...)."
+		},
+		"expected_output": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Expected Output",
+			"description": "Description of the expected output format. Maps to CrewAI Task(expected_output=...)."
 		},
 		"agent_crewai_manager.default": {
 			"object": "default",
@@ -85,7 +109,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "CrewAI Manager",
+			"title": "CrewAI",
 			"properties": ["agent_crewai_manager.default"]
 		}
 	]

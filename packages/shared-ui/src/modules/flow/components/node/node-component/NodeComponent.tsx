@@ -156,6 +156,15 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 	/** Keys of invoke channels this node can source (e.g. ["llm", "memory", "tool"]). */
 	const invokeSourceKeys = useMemo(() => Object.keys(invokeConfig ?? {}), [invokeConfig]);
 
+	/** True when at least one crewai sub-agent is connected — tools are unused in hierarchical mode. */
+	const hasCrewaiConnection = useMemo(() => edges.some((e) => e.source === id && e.sourceHandle === 'invoke-source.crewai'), [edges, id]);
+
+	/** True when this node is connected via the 'tool' channel to a parent running in hierarchical (crewai) mode. */
+	const isInactiveInHierarchical = useMemo(() => {
+		const parentIds = edges.filter((e) => e.target === id && e.sourceHandle === 'invoke-source.tool').map((e) => e.source);
+		return parentIds.some((parentId) => edges.some((e) => e.source === parentId && e.sourceHandle === 'invoke-source.crewai'));
+	}, [edges, id]);
+
 	/** Whether this node has any invoke source channels. */
 	const hasInvokeSource = invokeSourceKeys.length > 0;
 
@@ -263,6 +272,8 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 							position={Position.Bottom}
 							invokeType={key}
 							isConnected={edges.some((edge: Edge) => edge.sourceHandle === `invoke-source.${key}` && edge.source === id)}
+							disabled={key === 'tool' && hasCrewaiConnection}
+							tooltip={key === 'tool' && hasCrewaiConnection ? 'Tools are not active in hierarchical mode' : undefined}
 							onClick={(e: React.MouseEvent) =>
 								setQuickAddState({
 									nodeId: id,
@@ -278,6 +289,25 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 					))}
 				</div>
 			</ConditionalRender>
+
+			{/* Dim overlay — shown when this tool is wired to a manager running in hierarchical mode */}
+			{isInactiveInHierarchical && (
+				<div
+					title="Not active in hierarchical mode"
+					style={{
+						position: 'absolute',
+						top: '-9px',
+						right: 0,
+						bottom: 0,
+						left: 0,
+						borderRadius: '4px',
+						backgroundColor: 'var(--rr-bg-paper)',
+						opacity: 0.6,
+						zIndex: 10,
+						pointerEvents: 'none',
+					}}
+				/>
+			)}
 		</>
 	);
 }
