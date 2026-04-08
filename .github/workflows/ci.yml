@@ -7,9 +7,9 @@ concurrency:
 
 on:
   push:
-    branches: [develop, main, 'release/**']
+    branches: [develop, stage, main, 'release/**']
   pull_request:
-    branches: [develop, main, 'release/**']
+    branches: [develop, stage, main, 'release/**']
   merge_group:
     types: [checks_requested]
   schedule:
