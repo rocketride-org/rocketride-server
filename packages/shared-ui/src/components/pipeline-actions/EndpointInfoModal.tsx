@@ -12,7 +12,6 @@
 
 import React, { ReactElement, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { TabPanel } from '../tab-panel/TabPanel';
 import { IEndpointInfo } from './PipelineActions';
 import { appendAuthQueryParam, buildIntegrationExamples, type IntegrationTabId } from './endpointIntegrationExamples';
 import { commonStyles } from '../../themes/styles';
@@ -420,11 +419,16 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 					<div style={styles.testBox}>
 						<div style={styles.testTitle}>Integration examples</div>
 						<div style={styles.envHint}>{isWebhookEndpoint ? 'Webhook: POST JSON with Bearer auth, or use the URL with ?auth= if supported.' : 'Chat / UI: prefer opening the URL with auth in a browser or embedded webview.'}</div>
-						<TabPanel tabs={INTEGRATION_TABS} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as IntegrationTabId)}>
-							<div style={styles.integrationCodeScroll}>
-								<div style={styles.curlBlock}>{examples[activeTab]}</div>
-							</div>
-						</TabPanel>
+						<div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+							{INTEGRATION_TABS.map((tab) => (
+								<button key={tab.id} style={commonStyles.toggleButton(activeTab === tab.id)} onClick={() => setActiveTab(tab.id as IntegrationTabId)}>
+									{tab.label}
+								</button>
+							))}
+						</div>
+						<div style={styles.integrationCodeScroll}>
+							<div style={styles.curlBlock}>{examples[activeTab]}</div>
+						</div>
 						<div style={styles.testActions}>
 							<button style={iconBtn(`ex-${activeTab}`)} onClick={() => handleCopy(examples[activeTab], `ex-${activeTab}`)}>
 								{copyFeedback === `ex-${activeTab}` ? 'Copied!' : 'Copy'}
