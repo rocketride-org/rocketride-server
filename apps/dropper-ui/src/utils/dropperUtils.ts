@@ -47,7 +47,7 @@ const processTextData = (data: any): string[] => {
 	const results: string[] = [];
 
 	if (Array.isArray(data)) {
-		const validItems = data.filter(item => typeof item === 'string' && item.trim());
+		const validItems = data.filter((item) => typeof item === 'string' && item.trim());
 		if (validItems.length > 0) {
 			results.push(validItems.join('\n\n'));
 		}
@@ -67,7 +67,7 @@ const processObjectData = (data: any): any[] => {
 	const results: any[] = [];
 
 	if (Array.isArray(data)) {
-		data.forEach(item => {
+		data.forEach((item) => {
 			if (item !== null && item !== undefined) {
 				results.push(item);
 			}
@@ -86,7 +86,7 @@ const processTableData = (data: any): string[] => {
 	const results: string[] = [];
 
 	if (Array.isArray(data)) {
-		const validItems = data.filter(item => typeof item === 'string' && item.trim());
+		const validItems = data.filter((item) => typeof item === 'string' && item.trim());
 		if (validItems.length > 0) {
 			results.push(validItems.map(normalizeTable).join('\n\n'));
 		}
@@ -104,7 +104,7 @@ const processImageData = (data: any): string[] => {
 	const imageUrls: string[] = [];
 
 	if (Array.isArray(data)) {
-		data.forEach(item => {
+		data.forEach((item) => {
 			if (typeof item === 'object' && item.image && item.mime_type) {
 				const dataUrl = `data:${item.mime_type};base64,${item.image}`;
 				imageUrls.push(dataUrl);
@@ -144,7 +144,7 @@ const groupByFilename = (items: Array<{ filename: string; content: any; fieldNam
 	// Convert Map to array format
 	return Array.from(grouped.entries()).map(([filename, contents]) => ({
 		filename,
-		contents
+		contents,
 	}));
 };
 
@@ -158,6 +158,7 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 	const documentItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 	const tableItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 	const imageItems: Array<{ filename: string; content: any; fieldName: string }> = [];
+	const videoItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 	const questionItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 	const answerItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 
@@ -178,7 +179,7 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 			switch (fieldType) {
 				case 'text':
 					// Process text content (simple strings)
-					processTextData(fieldData).forEach(content => {
+					processTextData(fieldData).forEach((content) => {
 						textItems.push({ filename, content, fieldName });
 					});
 					break;
@@ -186,7 +187,7 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 				case 'document':
 				case 'documents':
 					// Process document content (Doc objects)
-					processObjectData(fieldData).forEach(content => {
+					processObjectData(fieldData).forEach((content) => {
 						documentItems.push({ filename, content, fieldName });
 					});
 					break;
@@ -194,13 +195,13 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 				case 'table':
 				case 'tables':
 					// Process and normalize table content (strings)
-					processTableData(fieldData).forEach(content => {
+					processTableData(fieldData).forEach((content) => {
 						tableItems.push({ filename, content, fieldName });
 					});
 					break;
 
 				case 'image':
-				case 'images':
+				case 'images': {
 					// Process image content (data URLs)
 					const imageUrls = processImageData(fieldData);
 					if (imageUrls.length > 0) {
@@ -208,15 +209,30 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 						imageItems.push({
 							filename,
 							content: imageUrls.join('|||'),
-							fieldName
+							fieldName,
 						});
+					}
+					break;
+				}
+
+				case 'video':
+				case 'videos':
+					// Video content is a Blob URL assembled from SSE chunks — pass through as-is
+					if (Array.isArray(fieldData)) {
+						fieldData.forEach((item) => {
+							if (typeof item === 'string' && item.trim()) {
+								videoItems.push({ filename, content: item, fieldName });
+							}
+						});
+					} else if (typeof fieldData === 'string' && fieldData.trim()) {
+						videoItems.push({ filename, content: fieldData, fieldName });
 					}
 					break;
 
 				case 'question':
 				case 'questions':
 					// Process question content (Question objects)
-					processObjectData(fieldData).forEach(content => {
+					processObjectData(fieldData).forEach((content) => {
 						questionItems.push({ filename, content, fieldName });
 					});
 					break;
@@ -224,7 +240,7 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 				case 'answer':
 				case 'answers':
 					// Process answer content (Answer objects - can be text, object, or array)
-					processObjectData(fieldData).forEach(content => {
+					processObjectData(fieldData).forEach((content) => {
 						answerItems.push({ filename, content, fieldName });
 					});
 					break;
@@ -243,8 +259,9 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 		documents: groupByFilename(documentItems),
 		tables: groupByFilename(tableItems),
 		images: groupByFilename(imageItems),
+		videos: groupByFilename(videoItems),
 		questions: groupByFilename(questionItems),
-		answers: groupByFilename(answerItems)
+		answers: groupByFilename(answerItems),
 	};
 };
 
