@@ -88,11 +88,10 @@ class IInstance(IInstanceBase):
         elif action == AVI_ACTION.END:
             video_data = self._video_data
             self._video_data = None
-            if self._video_data is not None and len(self._video_data) > 0:
-                self._process_video(bytes(self._video_data))
-            elif self._video_data is None:
+            if video_data is not None and len(video_data) > 0:
+                self._process_video(bytes(video_data))
+            elif video_data is None:
                 warning('Video was rejected (size limit exceeded or missing BEGIN), skipping embedding')
-            self._video_data = None
 
     def _process_video(self, video_bytes: bytes):
         """

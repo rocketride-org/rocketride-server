@@ -108,19 +108,19 @@
 	//		in the shape
 	//
 	"fields": {
-		"embedding_video.model": {
+		"embedding.model": {
 			"type": "string",
 			"title": "Model name",
 			"minLength": 2,
 			"maxLength": 256,
 			"description": "Hugging Face model to use for frame embedding"
 		},
-		"embedding_video.custom": {
+		"embedding.custom": {
 			"object": "custom",
 			"title": "",
-			"properties": ["embedding_video.model"]
+			"properties": ["embedding.model"]
 		},
-		"embedding_video.profile": {
+		"embedding.profile": {
 			"title": "Model",
 			"description": "Embedding model for video frames",
 			"type": "string",
@@ -129,47 +129,47 @@
 			"conditional": [
 				{
 					"value": "custom",
-					"properties": ["embedding_video.custom"]
+					"properties": ["embedding.custom"]
 				}
 			]
 		},
-		"embedding_video.interval": {
+		"embedding.interval": {
 			"type": "number",
 			"title": "Interval (in seconds) between frames",
 			"description": "Time in seconds between extracted frames",
 			"default": 5
 		},
-		"embedding_video.max_frames": {
+		"embedding.max_frames": {
 			"type": "number",
 			"title": "Maximum number of frames to extract (0=unlimited)",
 			"description": "Limit the total number of frames extracted from the video. Set to 0 for unlimited.",
 			"default": 50
 		},
-		"embedding_video.start_time": {
+		"embedding.start_time": {
 			"type": "number",
 			"title": "Start time (in seconds) for frame extraction (0=beginning)",
 			"default": 0
 		},
-		"embedding_video.duration": {
+		"embedding.duration": {
 			"type": "number",
 			"title": "Duration (in seconds) for frame extraction (0=end of video)",
 			"default": 0
 		},
-		"embedding_video.maxVideoSizeMB": {
+		"embedding.maxVideoSizeMB": {
 			"type": "number",
 			"title": "Maximum video file size (MB)",
 			"description": "Maximum allowed video file size in megabytes. Videos exceeding this limit will be rejected.",
 			"default": 500
 		},
-		"embedding_video.extraction": {
+		"embedding.extraction": {
 			"object": "extraction",
 			"title": "Frame Extraction",
 			"properties": [
-				"embedding_video.interval",
-				"embedding_video.max_frames",
-				"embedding_video.start_time",
-				"embedding_video.duration",
-				"embedding_video.maxVideoSizeMB"
+				"embedding.interval",
+				"embedding.max_frames",
+				"embedding.start_time",
+				"embedding.duration",
+				"embedding.maxVideoSizeMB"
 			]
 		}
 	},
@@ -182,7 +182,7 @@
 		{
 			"section": "Pipe",
 			"title": "Video Embedding",
-			"properties": ["embedding_video.profile", "embedding_video.extraction"]
+			"properties": ["embedding.profile", "embedding.extraction"]
 		}
 	],
 	//

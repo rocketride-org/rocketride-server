@@ -67,7 +67,8 @@ class IGlobal(IGlobalBase):
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
         # Instantiate the Embedding object for generating frame embeddings.
-        self.embedding = Embedding(self.glb.logicalType, config, bag)
+        # Pass raw connConfig since Embedding calls getNodeConfig internally.
+        self.embedding = Embedding(self.glb.logicalType, self.glb.connConfig, bag)
 
         # Store frame extraction settings from the config.
         self.frame_interval = config.get('interval', 5)
