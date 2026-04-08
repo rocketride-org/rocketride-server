@@ -65,9 +65,13 @@ _BUILTINS = {
 # Context value resolution
 # ---------------------------------------------------------------------------
 def _resolve(name: str, context: dict):
-    """Resolve a dotted name against *context*, falling back to built-ins."""
+    """Resolve a dotted name against *context*, falling back to built-ins.
+
+    Resolution order: context takes priority over built-in helpers.
+    """
     name = name.strip()
 
+    # 1. Try context first — user-supplied values always win
     parts = name.split('.')
     value = context
     for part in parts:
@@ -76,11 +80,16 @@ def _resolve(name: str, context: dict):
         else:
             value = getattr(value, part, _MISSING)
         if value is _MISSING:
-            # Fall back to built-in helpers if not found in context
-            if name in _BUILTINS:
-                return _BUILTINS[name]()
-            return ''
-    return value
+            break
+
+    if value is not _MISSING:
+        return value
+
+    # 2. Fall back to built-in helpers only when context lookup failed
+    if name in _BUILTINS:
+        return _BUILTINS[name]()
+
+    return ''
 
 
 # ---------------------------------------------------------------------------

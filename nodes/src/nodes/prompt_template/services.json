@@ -127,6 +127,21 @@
 						"notEmpty": true
 					}
 				}
+			},
+			{
+				"config": {
+					"template": "Summarize the following: {{input}}",
+					"variables": {"input": "The quick brown fox jumps over the lazy dog."}
+				},
+				"questions": {
+					"questions": [{"text": "test prompt"}]
+				},
+				"expect": {
+					"questions": {
+						"notEmpty": true,
+						"contains": "Summarize the following:"
+					}
+				}
 			}
 		]
 	},
