@@ -18,7 +18,7 @@ import pytest
 # Add the node source directory to sys.path so we can import the module
 # without triggering the top-level nodes/__init__.py (which requires the
 # engine runtime).
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src' / 'nodes' / 'tool_http_request'))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_http_request'))
 
 from rate_limiter import RateLimiter, RateLimitError  # noqa: E402
 
