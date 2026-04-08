@@ -89,7 +89,7 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 	const [remainingFiles, setRemainingFiles] = useState<number>(0);
 
 	/** Accumulates base64 video chunks per filename as they stream in via SSE */
-	const videoChunksRef = useRef<Map<string, { chunks: string[]; mimeType: string; totalBytes: number }>>(new Map());
+	const videoChunksRef = useRef<Map<string, { chunks: string[]; mimeType: string; totalBytes: number; oversized?: boolean }>>(new Map());
 
 	/** Tracks active Blob URLs created from SSE video chunks so they can be revoked */
 	const videoBlobUrlsRef = useRef<Map<string, string>>(new Map());
@@ -134,8 +134,10 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 					// Bytes being sent - update progress
 					setUploadProgress((prev) => prev.map((item) => (item.filepath === uploadEvent.filepath ? uploadEvent : item)));
 				} else if (uploadEvent.action === 'complete') {
-					// Upload finished successfully - update file status immediately
-					setUploadedFiles((prev) => prev.map((file) => (file.file.name === uploadEvent.filepath ? { ...file, status: 'completed' as const } : file)));
+					// Upload finished successfully - update file status (skip if oversized — stays 'error')
+					if (!videoChunksRef.current.get(uploadEvent.filepath)?.oversized) {
+						setUploadedFiles((prev) => prev.map((file) => (file.file.name === uploadEvent.filepath ? { ...file, status: 'completed' as const } : file)));
+					}
 					// Remove from progress list
 					setUploadProgress((prev) => prev.filter((item) => item.filepath !== uploadEvent.filepath));
 					// Accumulate upload results for final parsing
@@ -184,40 +186,48 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 		// When remaining files reaches 0 and we're processing, we're done
 		if (isProcessing && remainingFiles === 0 && uploadedFiles.length > 0) {
 			// Parse results if we have any
-			if (uploadResults.length > 0) {
-				// Enrich results with any assembled video Blob URLs from SSE chunks
-				const enrichedResults = uploadResults.map((r) => {
-					const videoEntry = videoChunksRef.current.get(r.filepath);
-					if (!videoEntry || !r.result) return r;
-					// Validate all chunks are present and non-empty before assembly.
-					// chunks is a sparse array built by index; missing slots would stringify
-					// as "undefined" in join(''), silently corrupting the atob call.
-					const allPresent = videoEntry.chunks.length > 0 && videoEntry.chunks.every((c) => typeof c === 'string' && c.length > 0);
-					if (!allPresent) {
-						console.error('[useFileProcessing] Incomplete video chunks for', r.filepath, '— skipping assembly');
-						return r;
-					}
-					const binary = atob(videoEntry.chunks.join(''));
-					const bytes = new Uint8Array(binary.length);
-					for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-					// Revoke any existing URL for this file before creating a new one
-					const existingUrl = videoBlobUrlsRef.current.get(r.filepath);
-					if (existingUrl) URL.revokeObjectURL(existingUrl);
-					const blobUrl = URL.createObjectURL(new Blob([bytes], { type: videoEntry.mimeType }));
-					videoBlobUrlsRef.current.set(r.filepath, blobUrl);
-					return {
-						...r,
-						result: {
-							...r.result,
-							result_types: { ...r.result.result_types, video: 'video' },
-							video: blobUrl,
-						},
-					};
-				});
-				const parsedResults = parseDropperResults(enrichedResults);
-				setResults(parsedResults);
+			try {
+				if (uploadResults.length > 0) {
+					// Enrich results with any assembled video Blob URLs from SSE chunks
+					const enrichedResults = uploadResults.map((r) => {
+						const videoEntry = videoChunksRef.current.get(r.filepath);
+						// Skip oversized files (already in 'error' state) and files with no video entry
+						if (!videoEntry || !r.result || videoEntry.oversized) return r;
+						// Validate all chunks are present and non-empty before assembly.
+						// chunks is a sparse array built by index; missing slots would stringify
+						// as "undefined" in join(''), silently corrupting the atob call.
+						const allPresent = videoEntry.chunks.length > 0 && videoEntry.chunks.every((c) => typeof c === 'string' && c.length > 0);
+						if (!allPresent) {
+							console.error('[useFileProcessing] Incomplete video chunks for', r.filepath, '— skipping assembly');
+							return r;
+						}
+						const binary = atob(videoEntry.chunks.join(''));
+						const bytes = new Uint8Array(binary.length);
+						for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+						// Revoke any existing URL for this file before creating a new one
+						const existingUrl = videoBlobUrlsRef.current.get(r.filepath);
+						if (existingUrl) URL.revokeObjectURL(existingUrl);
+						const blobUrl = URL.createObjectURL(new Blob([bytes], { type: videoEntry.mimeType }));
+						videoBlobUrlsRef.current.set(r.filepath, blobUrl);
+						// Free the raw chunk buffer — the Blob URL is now the only reference needed
+						videoChunksRef.current.delete(r.filepath);
+						return {
+							...r,
+							result: {
+								...r.result,
+								result_types: { ...r.result.result_types, video: 'video' },
+								video: blobUrl,
+							},
+						};
+					});
+					const parsedResults = parseDropperResults(enrichedResults);
+					setResults(parsedResults);
+				}
+			} catch (err) {
+				console.error('[useFileProcessing] Error assembling video chunks:', err);
+			} finally {
+				setIsProcessing(false);
 			}
-			setIsProcessing(false);
 		}
 	}, [remainingFiles, isProcessing, uploadedFiles.length, uploadResults]);
 
@@ -260,7 +270,8 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 						const entry = videoChunksRef.current.get(chunk.filename) ?? { chunks: [], mimeType: chunk.mime_type, totalBytes: 0 };
 						const incoming = chunk.data.length;
 						if (entry.totalBytes + incoming > MAX_VIDEO_BASE64_BYTES) {
-							// Chunk would exceed memory limit — mark file as errored and stop accumulating
+							// Mark as terminally oversized, free the partial buffer, stop accumulating
+							videoChunksRef.current.set(chunk.filename, { chunks: [], mimeType: entry.mimeType, totalBytes: entry.totalBytes, oversized: true });
 							setUploadedFiles((prev) => prev.map((f) => (f.file.name === chunk.filename ? { ...f, status: 'error' as const, error: 'Video too large to display in browser (limit: ~96 MB).' } : f)));
 							return;
 						}
@@ -304,10 +315,12 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 		async (files: File[]): Promise<void> => {
 			if (files.length === 0) return;
 
-			// Clear old data immediately
+			// Clear old data immediately — revoke prior batch Blob URLs before clearing refs
+			videoBlobUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+			videoBlobUrlsRef.current.clear();
+			videoChunksRef.current.clear();
 			setUploadProgress([]);
 			setUploadResults([]);
-			videoChunksRef.current.clear();
 
 			// Set remaining files counter
 			setRemainingFiles(files.length);
