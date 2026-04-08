@@ -21,6 +21,8 @@
 # SOFTWARE.
 # =============================================================================
 
+from __future__ import annotations
+
 from rocketlib import IInstanceBase, invoke_function
 from ai.common.schema import Question, Answer
 
