@@ -60,6 +60,54 @@ jobs:
               - 'builder.cmd'
               - '.github/workflows/**'
 
+  # ---------------------------------------------------------------------------
+  #  Helm lint + schema validation (only on PRs touching deploy/helm/**)
+  # ---------------------------------------------------------------------------
+  helm-changes:
+    name: Detect Helm changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      helm: ${{ steps.filter.outputs.helm }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        id: filter
+        with:
+          filters: |
+            helm:
+              - 'deploy/helm/**'
+
+  helm-lint:
+    name: Helm lint & kubeconform
+    needs: helm-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: needs.helm-changes.outputs.helm == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@fe7b79cd5ee1e45176fcad797de68ecaf3ca4814 # v4
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+
+      - name: Helm lint
+        run: helm lint deploy/helm/rocketride
+
+      - name: Helm template | kubeconform
+        run: |
+          helm template rocketride deploy/helm/rocketride \
+            --values deploy/helm/rocketride/tests/values_test.yaml \
+            | kubeconform -strict -summary -kubernetes-version 1.29.0
+
   build:
     name: Build
     needs: [init, changes]

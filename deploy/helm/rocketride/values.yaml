@@ -7,8 +7,10 @@ global:
 
 # -- Engine (core RocketRide data processing server)
 engine:
-  # -- Number of engine replicas (ignored if autoscaling.enabled is true)
-  replicaCount: 2
+  # -- Number of engine replicas (ignored if autoscaling.enabled is true).
+  # Default is 1 for single-node/lab environments. For HA production deployments
+  # set to 2+ or enable autoscaling. See deploy/helm/rocketride/README.md.
+  replicaCount: 1
 
   image:
     # -- Engine container image repository
@@ -88,8 +90,8 @@ engine:
   autoscaling:
     # -- Enable HPA for the engine deployment
     enabled: false
-    # -- Minimum number of replicas
-    minReplicas: 2
+    # -- Minimum number of replicas (set to 2+ for production HA)
+    minReplicas: 1
     # -- Maximum number of replicas
     maxReplicas: 10
     # -- Target CPU utilization percentage
