@@ -33,7 +33,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
-from rocketlib import IInstanceBase, tool_function, warning
+from rocketlib import IInstanceBase, debug, tool_function, warning
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 
@@ -122,7 +122,7 @@ class IInstance(IInstanceBase):
         try:
             docs: List[Doc] = store.searchSemantic(question, doc_filter)
         except Exception as e:
-            warning(f'tool_vectordb: semantic search failed ({e}), trying keyword search')
+            debug(f'tool_vectordb: semantic search failed ({e}), falling back to keyword search')
             try:
                 docs = store.searchKeyword(question, doc_filter)
             except Exception as e2:
@@ -149,9 +149,10 @@ class IInstance(IInstanceBase):
                 }
             )
 
+        truncated = results[:top_k]
         return {
-            'results': results[:top_k],
-            'total': len(results),
+            'results': truncated,
+            'total': len(truncated),
         }
 
     @tool_function(
@@ -175,8 +176,13 @@ class IInstance(IInstanceBase):
                             },
                             'metadata': {
                                 'type': 'object',
-                                'description': 'Optional metadata key-value pairs to store with the document.',
-                                'additionalProperties': True,
+                                'description': 'Optional metadata. Recognized fields: nodeId (string), parent (string), chunkId (integer). Other keys are ignored.',
+                                'properties': {
+                                    'nodeId': {'type': 'string', 'description': 'Logical node identifier (default: "tool_vectordb").'},
+                                    'parent': {'type': 'string', 'description': 'Parent path (default: "/").'},
+                                    'chunkId': {'type': 'integer', 'description': 'Chunk index (default: 0).'},
+                                },
+                                'additionalProperties': False,
                             },
                         },
                         'required': ['content', 'object_id'],
@@ -189,9 +195,10 @@ class IInstance(IInstanceBase):
             'properties': {
                 'success': {'type': 'boolean'},
                 'count': {'type': 'integer'},
+                'skipped': {'type': 'integer'},
             },
         },
-        description='Add or update documents in the vector database. Each document requires content text and an object ID for deduplication. Note: documents are stored as text chunks without embeddings; the backend must be configured to compute embeddings on ingest, or an upstream embedding node must be present in the pipeline.',
+        description='Add or update documents in the vector database. Each document requires content text and an object ID for deduplication. Documents missing content or object_id are skipped. Note: documents are stored as text chunks without embeddings; the backend must be configured to compute embeddings on ingest, or an upstream embedding node must be present in the pipeline.',
     )
     def upsert(self, args):
         """Add or update documents in the vector database."""
@@ -204,6 +211,7 @@ class IInstance(IInstanceBase):
         if not isinstance(raw_docs, list) or not raw_docs:
             raise ValueError('upsert requires a non-empty "documents" array')
 
+        total_input = len(raw_docs)
         docs: List[Doc] = []
         for raw in raw_docs:
             if not isinstance(raw, dict):
@@ -230,11 +238,15 @@ class IInstance(IInstanceBase):
         if not docs:
             raise ValueError('upsert: no valid documents provided')
 
+        skipped = total_input - len(docs)
+        if skipped > 0:
+            debug(f'tool_vectordb: skipped {skipped}/{total_input} documents (missing content or object_id)')
+
         if any(not getattr(doc, 'embedding', None) for doc in docs):
             warning('tool_vectordb: upserting documents without pre-computed embeddings. Ensure the backend is configured to generate embeddings on ingest, or results may not be searchable via semantic search.')
 
         store.addChunks(docs)
-        return {'success': True, 'count': len(docs)}
+        return {'success': True, 'count': len(docs), 'skipped': skipped}
 
     @tool_function(
         input_schema={

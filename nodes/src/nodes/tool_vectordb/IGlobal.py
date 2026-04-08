@@ -72,7 +72,7 @@ class IGlobal(IGlobalBase):
         self.store = self._create_store(backend, conn_config, bag)
 
     @staticmethod
-    def _create_store(backend: str, conn_config: dict, bag: dict):  # noqa: ANN205
+    def _create_store(backend: str, conn_config: dict, bag: dict) -> DocumentStoreBase:
         """Dynamically import and instantiate the backend Store class."""
         import importlib
 
