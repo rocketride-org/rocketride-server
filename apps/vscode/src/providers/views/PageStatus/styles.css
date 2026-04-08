@@ -312,6 +312,11 @@
 	cursor: not-allowed;
 }
 
+.action-btn.stopping-btn:hover {
+	background: var(--vscode-charts-orange);
+	opacity: 1;
+}
+
 .action-btn.run-btn {
 	background: var(--vscode-charts-green);
 	color: white;
