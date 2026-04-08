@@ -117,7 +117,7 @@ class BranchEngine:
         _VALID_MODES = ('any', 'all')
         mode = mode.lower().strip() if isinstance(mode, str) else mode
         if mode not in _VALID_MODES:
-            raise ValueError(f'unsupported contains mode: {mode!r} (expected one of {_VALID_MODES})')
+            return {'matched': False, 'condition': 'contains', 'details': f'unsupported mode: {mode!r}'}
 
         if not text or not keywords:
             return {'matched': False, 'condition': 'contains', 'details': 'empty text or keywords'}

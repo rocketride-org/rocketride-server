@@ -21,6 +21,8 @@
 # SOFTWARE.
 # =============================================================================
 
+from typing import Optional
+
 from rocketlib import IInstanceBase
 from ai.common.schema import Question, Answer
 from .IGlobal import IGlobal
@@ -29,7 +31,7 @@ from .IGlobal import IGlobal
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
-    def _build_data(self, text: str, metadata: dict = None, score: float = 0.0) -> dict:
+    def _build_data(self, text: str, metadata: Optional[dict] = None, score: float = 0.0) -> dict:
         """Build a data dict suitable for the branch engine."""
         return {
             'text': text or '',

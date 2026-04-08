@@ -286,9 +286,10 @@ class TestContainsCondition:
         result = BranchEngine.contains('hello world', ' hello , world ', 'all')
         assert result['matched'] is True
 
-    def test_invalid_mode_raises_value_error(self):
-        with pytest.raises(ValueError, match='unsupported contains mode'):
-            BranchEngine.contains('hello', 'hello', 'invalid')
+    def test_invalid_mode_returns_non_match(self):
+        result = BranchEngine.contains('hello', 'hello', 'invalid')
+        assert result['matched'] is False
+        assert 'unsupported mode' in result['details']
 
     def test_mode_case_insensitive(self):
         result = BranchEngine.contains('hello world', 'hello', 'ANY')

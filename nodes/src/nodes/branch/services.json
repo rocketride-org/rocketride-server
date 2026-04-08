@@ -118,6 +118,13 @@
 				"pattern": "",
 				"default_lane": "questions"
 			},
+			"length": {
+				"title": "Text Length",
+				"type": "length",
+				"min": null,
+				"max": null,
+				"default_lane": "questions"
+			},
 			"score": {
 				"title": "Score Threshold",
 				"type": "score_threshold",
@@ -256,6 +263,16 @@
 			"minLength": 0,
 			"maxLength": 256
 		},
+		"min": {
+			"type": "number",
+			"title": "Minimum Length",
+			"description": "Minimum text length (inclusive). Leave empty for no lower bound."
+		},
+		"max": {
+			"type": "number",
+			"title": "Maximum Length",
+			"description": "Maximum text length (inclusive). Leave empty for no upper bound."
+		},
 		"expected": {
 			"type": "string",
 			"title": "Expected Sentiment",
@@ -287,6 +304,10 @@
 			"object": "score",
 			"properties": ["threshold", "operator", "default_lane"]
 		},
+		"branch.length": {
+			"object": "length",
+			"properties": ["min", "max", "default_lane"]
+		},
 		"branch.sentiment": {
 			"object": "sentiment",
 			"properties": ["expected", "default_lane"]
@@ -305,6 +326,10 @@
 				{
 					"value": "regex",
 					"properties": ["branch.regex"]
+				},
+				{
+					"value": "length",
+					"properties": ["branch.length"]
 				},
 				{
 					"value": "score",
