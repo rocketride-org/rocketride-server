@@ -18,6 +18,7 @@ export const VideosView: React.FC<VideosViewProps> = ({ videos, compareMode, set
 	const [videoErrors, setVideoErrors] = useState<Set<string>>(new Set());
 
 	const handleVideoError = (src: string) => {
+		console.warn('[VideosView] Failed to load video blob URL:', src);
 		setVideoErrors((prev) => new Set(prev).add(src));
 	};
 
