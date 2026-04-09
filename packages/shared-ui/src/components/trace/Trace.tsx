@@ -6,8 +6,9 @@
  * All styles are inline CSSProperties objects; no external CSS files.
  * Colour tokens use the --rr-* namespace.
  */
-import React, { useState, useMemo, useCallback, useEffect, CSSProperties } from 'react';
+import React, { useState, useMemo, useCallback, CSSProperties } from 'react';
 import { JsonTree } from './JsonTree';
+import { renderTraceData, summaryTraceData } from './renderers';
 import type { TraceRow } from '../../modules/project/types';
 import { commonStyles } from '../../themes/styles';
 
@@ -46,14 +47,23 @@ const LANE_COLORS: Record<string, string> = {
 	documents: 'var(--rr-chart-purple)',
 	closing: 'var(--rr-chart-orange)',
 	close: 'var(--rr-chart-red)',
+	data: 'var(--rr-chart-green)',
+	video: 'var(--rr-chart-purple)',
+	audio: 'var(--rr-chart-blue)',
+	image: 'var(--rr-chart-orange)',
+	table: 'var(--rr-chart-yellow)',
+	invoke: 'var(--rr-chart-green)',
+	questions: 'var(--rr-chart-purple)',
+	answers: 'var(--rr-chart-green)',
 };
 
 const LANE_DISPLAY_NAMES: Record<string, string> = {
 	tags: 'data',
+	closing: 'flush',
 };
 
 function laneDisplayName(lane: string): string {
-	return LANE_DISPLAY_NAMES[lane] || lane;
+	return LANE_DISPLAY_NAMES[lane] || LANE_DISPLAY_NAMES[lane.toLowerCase()] || lane;
 }
 
 const BATCH_SIZE = 10;
@@ -189,12 +199,13 @@ const S = {
 
 	// -- chevron ----------------------------------------------------------------
 	chev: {
-		width: 18,
+		width: 14,
 		flexShrink: 0,
 		textAlign: 'center',
-		fontSize: 10,
+		fontSize: 'inherit',
 		color: 'var(--rr-text-secondary)',
 		userSelect: 'none',
+		cursor: 'pointer',
 	} as CSSProperties,
 
 	// -- name -------------------------------------------------------------------
@@ -355,7 +366,7 @@ const S = {
 	} as CSSProperties,
 
 	dpSect: {
-		marginBottom: 14,
+		marginBottom: 6,
 	} as CSSProperties,
 
 	dpH3: {
@@ -371,7 +382,7 @@ const S = {
 		display: 'flex',
 		justifyContent: 'space-between',
 		alignItems: 'baseline',
-		padding: '2px 0',
+		padding: '1px 0',
 		gap: 8,
 	} as CSSProperties,
 
@@ -420,6 +431,7 @@ const S = {
 		alignItems: 'center',
 		gap: 4,
 		userSelect: 'none',
+		marginTop: 6,
 		marginBottom: 4,
 	} as CSSProperties,
 
@@ -434,7 +446,7 @@ const S = {
 		marginTop: 4,
 		padding: 6,
 		borderRadius: 4,
-		backgroundColor: 'var(--rr-bg-default)',
+		backgroundColor: 'var(--rr-bg-paper)',
 		overflow: 'auto',
 		maxHeight: 300,
 	} as CSSProperties,
@@ -452,12 +464,31 @@ const S = {
 // HELPER: Badge style per lane (background tint derived from lane colour)
 // =============================================================================
 
+/** Map lane to explicit background tints (no color-mix — not supported in all webviews). */
+const LANE_BG: Record<string, string> = {
+	open: 'rgba(66,99,235,0.12)',
+	tags: 'rgba(64,192,87,0.12)',
+	data: 'rgba(64,192,87,0.12)',
+	text: 'rgba(230,119,0,0.12)',
+	documents: 'rgba(112,72,232,0.12)',
+	closing: 'rgba(230,119,0,0.12)',
+	close: 'rgba(201,42,42,0.12)',
+	video: 'rgba(112,72,232,0.12)',
+	audio: 'rgba(66,99,235,0.12)',
+	image: 'rgba(230,119,0,0.12)',
+	table: 'rgba(230,119,0,0.12)',
+	invoke: 'rgba(64,192,87,0.12)',
+	questions: 'rgba(112,72,232,0.12)',
+	answers: 'rgba(64,192,87,0.12)',
+};
+
 function badgeStyle(lane: string): CSSProperties {
-	const color = LANE_COLORS[lane] || 'var(--rr-text-secondary)';
+	const color = laneColor(lane);
+	const bg = LANE_BG[lane] || LANE_BG[lane.toLowerCase()] || 'rgba(134,142,150,0.12)';
 	return {
 		...S.badge,
 		color,
-		backgroundColor: `color-mix(in srgb, ${color} 14%, transparent)`,
+		backgroundColor: bg,
 	};
 }
 
@@ -478,7 +509,7 @@ function buildObjectGroups(rows: TraceRow[]): TraceObjectGroup[] {
 
 	const groups: TraceObjectGroup[] = [];
 
-	for (const [docId, docRows] of grouped) {
+	for (const [docId, docRows] of Array.from(grouped.entries())) {
 		const rootNodes: TraceTreeNode[] = [];
 		const stack: TraceTreeNode[] = [];
 		let hasError = false;
@@ -535,92 +566,6 @@ function buildObjectGroups(rows: TraceRow[]): TraceObjectGroup[] {
 }
 
 // =============================================================================
-// HELPER: Find a node by id in a tree
-// =============================================================================
-
-function findNodeById(nodes: TraceTreeNode[], id: number): TraceTreeNode | null {
-	for (const node of nodes) {
-		if (node.row.id === id) return node;
-		const found = findNodeById(node.children, id);
-		if (found) return found;
-	}
-	return null;
-}
-
-// =============================================================================
-// HELPER: Collect all visible nodes (respecting collapsed state)
-// =============================================================================
-
-function collectVisibleNodes(nodes: TraceTreeNode[], expandedNodes: Set<number>): TraceTreeNode[] {
-	const result: TraceTreeNode[] = [];
-	for (const node of nodes) {
-		result.push(node);
-		if (node.children.length > 0 && expandedNodes.has(node.row.id)) {
-			result.push(...collectVisibleNodes(node.children, expandedNodes));
-		}
-	}
-	return result;
-}
-
-// =============================================================================
-// HELPER: Build render items with "more..." batching
-// =============================================================================
-
-type RenderItem = { type: 'node'; node: TraceTreeNode } | { type: 'more'; remaining: number; groupKey: string; depth: number };
-
-function buildRenderItems(nodes: TraceTreeNode[], moreRevealed: Map<string, number>): RenderItem[] {
-	const items: RenderItem[] = [];
-	let i = 0;
-
-	while (i < nodes.length) {
-		const node = nodes[i];
-		const isLeaf = node.children.length === 0;
-
-		if (!isLeaf) {
-			items.push({ type: 'node', node });
-			i++;
-			continue;
-		}
-
-		// Find consecutive run of identical leaf nodes (same filterName + lane + depth)
-		let runEnd = i + 1;
-		while (runEnd < nodes.length && nodes[runEnd].children.length === 0 && nodes[runEnd].row.filterName === node.row.filterName && nodes[runEnd].row.lane === node.row.lane && nodes[runEnd].row.depth === node.row.depth) {
-			runEnd++;
-		}
-
-		const runLength = runEnd - i;
-
-		if (runLength <= BATCH_SIZE) {
-			for (let j = i; j < runEnd; j++) {
-				items.push({ type: 'node', node: nodes[j] });
-			}
-		} else {
-			const groupKey = String(node.row.id);
-			const batches = moreRevealed.get(groupKey) ?? 0;
-			const showCount = Math.min(BATCH_SIZE + batches * BATCH_SIZE, runLength);
-
-			for (let j = i; j < i + showCount; j++) {
-				items.push({ type: 'node', node: nodes[j] });
-			}
-
-			const remaining = runLength - showCount;
-			if (remaining > 0) {
-				items.push({
-					type: 'more',
-					remaining,
-					groupKey,
-					depth: node.row.depth,
-				});
-			}
-		}
-
-		i = runEnd;
-	}
-
-	return items;
-}
-
-// =============================================================================
 // HELPER: Collect all parent node IDs (for expand-all)
 // =============================================================================
 
@@ -657,20 +602,8 @@ function getRowElapsed(row: TraceRow): number | null {
 // =============================================================================
 
 function laneColor(lane: string): string {
-	return LANE_COLORS[lane] || 'var(--rr-text-secondary)';
+	return LANE_COLORS[lane] || LANE_COLORS[lane.toLowerCase()] || 'var(--rr-text-secondary)';
 }
-
-// =============================================================================
-// SUB-COMPONENT: Tree column header
-// =============================================================================
-
-const TraceTreeHeader: React.FC = () => (
-	<div style={S.treeHdr}>
-		<div style={S.colCall}>Call</div>
-		<div style={S.colLane}>Lane</div>
-		<div style={S.colTime}>Time</div>
-	</div>
-);
 
 // =============================================================================
 // SUB-COMPONENT: Object (file) row -- top-level collapsible group
@@ -710,249 +643,371 @@ const TraceObjectRow: React.FC<{
 	return (
 		<div style={rowStyle} onClick={handleClick} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
 			<span style={S.chev} title={chevronTitle}>
-				{expanded ? '\u25BC' : '\u25B6'}
+				{expanded ? '\u25BE' : '\u25B8'}
 			</span>
 			<span style={S.nameFile}>{group.objectName}</span>
-			<span style={S.colLane}>{group.inFlight && <span style={S.inFlightBadge}>processing</span>}</span>
+			{group.inFlight && <span style={S.inFlightBadge}>processing</span>}
+			<span style={{ flex: 1 }} />
 			{timeDisplay}
 		</div>
 	);
 };
 
 // =============================================================================
-// SUB-COMPONENT: Individual call-tree node row
+// STYLES: Collapsed/Expanded call tree
 // =============================================================================
 
-const TraceNodeRow: React.FC<{
+const SN = {
+	nest: {
+		marginLeft: 20,
+		borderLeft: '1px solid var(--rr-border-subtle, rgba(0,0,0,0.06))',
+	} as CSSProperties,
+	collapsedRow: {
+		display: 'flex',
+		alignItems: 'center',
+		padding: '3px 8px',
+		cursor: 'pointer',
+		borderBottom: '1px solid rgba(0,0,0,0.025)',
+		gap: 3,
+		minHeight: 26,
+	} as CSSProperties,
+	expandedHeader: {
+		display: 'flex',
+		alignItems: 'center',
+		padding: '3px 8px',
+		cursor: 'pointer',
+		borderBottom: '1px solid rgba(0,0,0,0.025)',
+		gap: 3,
+		minHeight: 26,
+		background: 'var(--rr-bg-surface, rgba(0,0,0,0.015))',
+	} as CSSProperties,
+	enterLeaveRow: {
+		display: 'flex',
+		alignItems: 'center',
+		padding: '2px 8px',
+		cursor: 'pointer',
+		borderBottom: '1px solid rgba(0,0,0,0.015)',
+		gap: 5,
+		minHeight: 24,
+	} as CSSProperties,
+	elLabel: {
+		fontSize: 9,
+		fontWeight: 700,
+		textTransform: 'uppercase' as const,
+		padding: '1px 5px',
+		borderRadius: 2,
+	} as CSSProperties,
+	enterLabel: {
+		color: 'var(--rr-color-success, #2b8a3e)',
+		backgroundColor: 'rgba(43,138,62,0.08)',
+	} as CSSProperties,
+	leaveLabel: {
+		color: 'var(--rr-color-warning, #e67a2e)',
+		backgroundColor: 'rgba(230,122,46,0.08)',
+	} as CSSProperties,
+	summary: {
+		flex: 1,
+		color: 'var(--rr-text-secondary)',
+		fontWeight: 400,
+		fontSize: 11,
+		fontStyle: 'italic' as const,
+		overflow: 'hidden',
+		textOverflow: 'ellipsis',
+		whiteSpace: 'nowrap' as const,
+		marginLeft: 4,
+	} as CSSProperties,
+	moreRow: {
+		padding: '3px 8px 3px 26px',
+		cursor: 'pointer',
+		borderBottom: '1px solid rgba(0,0,0,0.025)',
+		color: 'var(--rr-chart-blue, #4263eb)',
+		fontSize: 11,
+		fontStyle: 'italic' as const,
+	} as CSSProperties,
+};
+
+// =============================================================================
+// SUB-COMPONENT: Collapsible call-tree node
+// =============================================================================
+
+/** Build a short summary of trace data for display in the row. */
+function dataSummary(data: Record<string, unknown> | undefined | null): string {
+	if (!data) return '';
+	const keys = Object.keys(data);
+	if (!keys.length) return '';
+	const maxLen = 70;
+	const parts = keys.slice(0, 3).map((k) => {
+		const v = data[k];
+		if (v === null) return `${k}: null`;
+		if (typeof v === 'string') return `${k}: "${v.length > 20 ? v.slice(0, 20) + '\u2026' : v}"`;
+		if (typeof v === 'number') return `${k}: ${v}`;
+		if (typeof v === 'object') return `${k}: {\u2026}`;
+		return `${k}: ${String(v)}`;
+	});
+	const result = parts.join(', ');
+	return result.length > maxLen ? result.slice(0, maxLen) + '\u2026' : result;
+}
+
+interface TraceCallNodeProps {
 	node: TraceTreeNode;
-	expanded: boolean;
-	selected: boolean;
-	onToggleExpand: () => void;
-	onExpandAll: () => void;
-	onCollapseAll: () => void;
-	onSelect: () => void;
-}> = ({ node, expanded, selected, onToggleExpand, onExpandAll, onCollapseAll, onSelect }) => {
-	const [hovered, setHovered] = useState(false);
+	selectedRowId: number | null;
+	expandedNodes: Set<number>;
+	moreRevealed: Map<string, number>;
+	onToggleExpand: (id: number) => void;
+	onExpandAll: (node: TraceTreeNode) => void;
+	onCollapseAll: (node: TraceTreeNode) => void;
+	onSelect: (id: number) => void;
+	onRevealMore: (key: string) => void;
+}
+
+const TraceCallNode: React.FC<TraceCallNodeProps> = ({ node, selectedRowId, expandedNodes, moreRevealed, onToggleExpand, onExpandAll, onCollapseAll, onSelect, onRevealMore }) => {
 	const { row } = node;
-	const hasChildren = node.children.length > 0;
+	const isExpanded = expandedNodes.has(row.id);
 	const isError = !!row.error;
 	const elapsed = getRowElapsed(row);
-	const indent = row.depth * 20 + 28;
+	const summary = summaryTraceData(row.entryData, row.lane) || summaryTraceData(row.exitData, row.lane) || dataSummary(row.entryData) || dataSummary(row.exitData) || '';
 
-	const rowStyle: CSSProperties = {
-		...S.row,
-		paddingLeft: indent,
-		...(selected ? S.rowSelected : {}),
-		...(isError && !selected ? S.rowError : {}),
-		...(hovered && !selected ? S.rowHover : {}),
-	};
+	if (!isExpanded) {
+		// ── COLLAPSED: single row with ▸ ──
+		const isSelected = selectedRowId === row.id;
+		return (
+			<>
+				<div style={{ ...SN.collapsedRow, ...(isSelected ? S.rowSelected : {}), ...(isError && !isSelected ? S.rowError : {}) }} onClick={() => onToggleExpand(row.id)}>
+					<span style={S.chev}>{'\u25B8'}</span>
+					{isError && <span style={S.errIcon}>{'\u2716'}</span>}
+					<span style={isError ? S.nameError : { ...S.name, flex: 'none' }}>{row.filterName}</span>
+					<span style={badgeStyle(row.lane)}>{laneDisplayName(row.lane)}</span>
+					{summary && <span style={SN.summary}>{summary}</span>}
+					<span style={{ flex: 1 }} />
+					{isError ? <span style={S.timeError}>ERROR</span> : <span style={S.timeCol}>{formatElapsed(elapsed)}</span>}
+				</div>
+				{isSelected && row.entryData && <InlineDataBox node={node} data={row.entryData} label="Input" lane={row.lane} showCallInfo />}
+				{isSelected && (row.exitData || row.error) && <InlineDataBox node={node} data={row.error ? { error: row.error } : row.exitData} label="Output" lane={row.lane} defaultOpen={false} />}
+			</>
+		);
+	}
 
-	const handleClick = () => {
-		onSelect();
-	};
-
-	const handleChevronClick = (e: React.MouseEvent) => {
-		if (hasChildren) {
-			e.stopPropagation();
-			if (e.shiftKey) {
-				if (expanded) {
-					onCollapseAll();
-				} else {
-					onExpandAll();
-				}
-			} else {
-				onToggleExpand();
-			}
-		}
-	};
-
-	const chevronTitle = hasChildren ? (expanded ? 'Click to collapse (Shift-Click to collapse all)' : 'Click to expand (Shift-Click to expand all)') : undefined;
-
+	// ── EXPANDED: ▾ header → Input box → children → Output box ──
 	return (
-		<div style={rowStyle} onClick={handleClick} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-			<span style={S.chev} onClick={handleChevronClick} title={chevronTitle}>
-				{hasChildren ? (expanded ? '\u25BC' : '\u25B6') : ''}
-			</span>
-			{isError && <span style={S.errIcon}>{'\u2716'}</span>}
-			<span style={{ ...S.dot, backgroundColor: laneColor(row.lane) }} />
-			<span style={isError ? S.nameError : S.name}>{row.filterName}</span>
-			<span style={S.colLane}>
+		<div>
+			{/* ▾ Header */}
+			<div style={SN.expandedHeader} onClick={() => onToggleExpand(row.id)}>
+				<span style={S.chev}>{'\u25BE'}</span>
+				{isError && <span style={S.errIcon}>{'\u2716'}</span>}
+				<span style={isError ? S.nameError : { ...S.name, flex: 'none' }}>{row.filterName}</span>
 				<span style={badgeStyle(row.lane)}>{laneDisplayName(row.lane)}</span>
-			</span>
-			{isError ? <span style={S.timeError}>ERROR</span> : <span style={S.timeCol}>{formatElapsed(elapsed)}</span>}
+				<span style={{ flex: 1 }} />
+				{isError ? <span style={S.timeError}>ERROR</span> : <span style={S.timeCol}>{formatElapsed(elapsed)}</span>}
+			</div>
+
+			<div style={SN.nest}>
+				{/* Input box with call info */}
+				{row.entryData && <InlineDataBox node={node} data={row.entryData} label="Input" lane={row.lane} showCallInfo />}
+
+				{/* Children */}
+				<TraceCallChildren nodes={node.children} selectedRowId={selectedRowId} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={onToggleExpand} onExpandAll={onExpandAll} onCollapseAll={onCollapseAll} onSelect={onSelect} onRevealMore={onRevealMore} />
+
+				{/* Output box — collapsed by default */}
+				{(row.exitData || row.error) && <InlineDataBox node={node} data={row.error ? { error: row.error } : row.exitData} label="Output" lane={row.lane} defaultOpen={false} />}
+			</div>
 		</div>
 	);
 };
 
-// =============================================================================
-// SUB-COMPONENT: Detail panel
-// =============================================================================
+/** Data view mode toggle buttons and renderer. */
+type DataViewMode = 'tree' | 'json' | 'raw';
 
-const TraceDetailPanel: React.FC<{
-	node: TraceTreeNode | null;
-}> = ({ node }) => {
-	const [inputExpanded, setInputExpanded] = useState(true);
-	const [outputExpanded, setOutputExpanded] = useState(false);
+const viewModeLabels: { mode: DataViewMode; label: string }[] = [
+	{ mode: 'tree', label: 'Tree' },
+	{ mode: 'json', label: 'JSON' },
+	{ mode: 'raw', label: 'Raw' },
+];
 
-	if (!node) {
-		return <div style={S.dpEmpty}>Click a row to view details</div>;
+const DataViewToggle: React.FC<{ mode: DataViewMode; onChange: (m: DataViewMode) => void }> = ({ mode, onChange }) => (
+	<div style={{ display: 'flex', gap: 1, marginLeft: 'auto' }}>
+		{viewModeLabels.map((v) => (
+			<button
+				key={v.mode}
+				onClick={(e) => {
+					e.stopPropagation();
+					onChange(v.mode);
+				}}
+				style={{
+					padding: '1px 6px',
+					fontSize: 9,
+					fontWeight: 600,
+					border: '1px solid var(--rr-border)',
+					borderRadius: 2,
+					cursor: 'pointer',
+					backgroundColor: mode === v.mode ? 'var(--rr-brand)' : 'transparent',
+					color: mode === v.mode ? 'var(--rr-fg-button, #fff)' : 'var(--rr-text-secondary)',
+				}}
+			>
+				{v.label}
+			</button>
+		))}
+	</div>
+);
+
+const DataRenderer: React.FC<{ data: unknown; mode: DataViewMode; lane?: string }> = ({ data, mode, lane }) => {
+	if (mode === 'tree') {
+		return renderTraceData(data, lane || '');
 	}
+	if (mode === 'json') {
+		return (
+			<div style={S.dpTree}>
+				<JsonTree data={data} defaultExpanded={2} />
+			</div>
+		);
+	}
+	// raw
+	return <pre style={{ ...S.dpTree, fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{JSON.stringify(data)}</pre>;
+};
+
+/** Inline data box — shown directly when a node is expanded. */
+const InlineDataBox: React.FC<{ node: TraceTreeNode; data: unknown; label: string; lane: string; showCallInfo?: boolean; defaultOpen?: boolean }> = ({ node, data, label, lane, showCallInfo, defaultOpen = true }) => {
+	const [expanded, setExpanded] = useState(defaultOpen);
+	const [viewMode, setViewMode] = useState<DataViewMode>('json');
 
 	const { row } = node;
 	const elapsed = getRowElapsed(row);
 	const parentElapsed = node.parent ? getRowElapsed(node.parent.row) : null;
 	const pctOfParent = elapsed != null && parentElapsed != null && parentElapsed > 0 ? Math.round((elapsed / parentElapsed) * 100) : null;
 
+	// Build call chain
+	const chainParts: string[] = [];
+	if (showCallInfo) {
+		let p: TraceTreeNode | null = node;
+		while (p) {
+			chainParts.unshift(p.row.filterName);
+			p = p.parent;
+		}
+	}
+
+	const boxStyle: CSSProperties = {
+		background: 'var(--rr-bg-widget)',
+		borderRadius: 4,
+		padding: '6px 10px',
+		margin: '2px 0 4px',
+		fontSize: 12,
+	};
+
+	const kvStyle: CSSProperties = { display: 'flex', gap: 8, fontSize: 11, lineHeight: '16px' };
+	const kStyle: CSSProperties = { color: 'var(--rr-text-secondary)', flexShrink: 0, minWidth: 60 };
+	const vStyle: CSSProperties = { color: 'var(--rr-text-primary)' };
+
 	return (
-		<div style={S.dp}>
-			{/* Header */}
-			<div style={S.dpHdr}>
-				<h2 style={S.dpH2}>Node Detail</h2>
-				<div style={S.dpHint}>{row.filterName}</div>
-			</div>
-
-			{/* Call Info */}
-			<div style={S.dpSect}>
-				<h3 style={S.dpH3}>Call Info</h3>
-				<div style={S.dpKv}>
-					<span style={S.dpK}>Node</span>
-					<span style={S.dpV}>{row.filterName}</span>
-				</div>
-				<div style={S.dpKv}>
-					<span style={S.dpK}>Called by</span>
-					<span style={S.dpV}>{node.parent?.row.filterName || '\u2014'}</span>
-				</div>
-				<div style={S.dpKv}>
-					<span style={S.dpK}>Lane</span>
-					<span style={S.dpV}>
-						<span style={badgeStyle(row.lane)}>{laneDisplayName(row.lane)}</span>
-					</span>
-				</div>
-				{row.result && (
-					<div style={S.dpKv}>
-						<span style={S.dpK}>Result</span>
-						<span style={S.dpV}>{row.result}</span>
+		<div style={boxStyle}>
+			{/* Call info (only on input box) */}
+			{showCallInfo && (
+				<div style={{ marginBottom: 6 }}>
+					<div style={kvStyle}>
+						<span style={kStyle}>Node</span>
+						<span style={vStyle}>{row.filterName}</span>
 					</div>
-				)}
-				<div style={S.dpKv}>
-					<span style={S.dpK}>Depth</span>
-					<span style={S.dpV}>{row.depth}</span>
-				</div>
-			</div>
-
-			{/* Elapsed Time */}
-			{elapsed != null && (
-				<div style={S.dpSect}>
-					<h3 style={S.dpH3}>Elapsed Time</h3>
-					<div style={S.dpKv}>
-						<span style={S.dpK}>Self</span>
-						<span style={S.dpTime}>{formatElapsed(elapsed)}</span>
+					<div style={kvStyle}>
+						<span style={kStyle}>Called by</span>
+						<span style={vStyle}>{node.parent?.row.filterName || '\u2014'}</span>
 					</div>
-					{pctOfParent != null && (
-						<>
-							<div style={S.dpBar}>
-								<div
-									style={{
-										...S.dpBarFill,
-										width: `${Math.min(pctOfParent, 100)}%`,
-									}}
-								/>
-							</div>
-							<div style={S.dpBarLabel}>
-								{pctOfParent}% of parent ({node.parent!.row.filterName}.{node.parent!.row.lane}: {formatElapsed(parentElapsed)})
-							</div>
-						</>
+					<div style={kvStyle}>
+						<span style={kStyle}>Lane</span>
+						<span style={vStyle}>
+							<span style={badgeStyle(row.lane)}>{laneDisplayName(row.lane)}</span>
+						</span>
+					</div>
+					{row.result && (
+						<div style={kvStyle}>
+							<span style={kStyle}>Result</span>
+							<span style={vStyle}>{row.result}</span>
+						</div>
 					)}
-				</div>
-			)}
-
-			{/* Input Data */}
-			{row.entryData && (
-				<div style={S.dpSect}>
-					<div style={S.dpToggle} onClick={() => setInputExpanded(!inputExpanded)}>
-						<span style={S.dpArr}>{inputExpanded ? '\u25BC' : '\u25B6'}</span>
-						Input Data
-					</div>
-					{inputExpanded && (
-						<div style={S.dpTree}>
-							<JsonTree data={row.entryData} defaultExpanded={2} />
+					{chainParts.length > 1 && (
+						<div style={kvStyle}>
+							<span style={kStyle}>Chain</span>
+							<span style={{ ...vStyle, display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
+								{chainParts.map((name, i) => (
+									<React.Fragment key={i}>
+										{i > 0 && <span style={{ color: 'var(--rr-text-secondary)', fontSize: 10 }}>{'\u2192'}</span>}
+										<span style={{ padding: '0 4px', borderRadius: 3, backgroundColor: 'var(--rr-bg-surface, #e9ecef)', fontSize: 11, fontWeight: 500 }}>{name}</span>
+									</React.Fragment>
+								))}
+							</span>
+						</div>
+					)}
+					{elapsed != null && (
+						<div style={kvStyle}>
+							<span style={kStyle}>Elapsed</span>
+							<span style={{ ...vStyle, fontWeight: 600, fontFamily: 'var(--rr-font-mono, monospace)', color: 'var(--rr-brand, #e67a2e)' }}>{formatElapsed(elapsed)}</span>
+							{pctOfParent != null && (
+								<span style={{ color: 'var(--rr-text-secondary)', marginLeft: 6, fontSize: 10 }}>
+									({pctOfParent}% of {node.parent!.row.filterName})
+								</span>
+							)}
 						</div>
 					)}
 				</div>
 			)}
 
-			{/* Output Data */}
-			{(row.exitData || row.error) && (
-				<div style={S.dpSect}>
-					<div style={S.dpToggle} onClick={() => setOutputExpanded(!outputExpanded)}>
-						<span style={S.dpArr}>{outputExpanded ? '\u25BC' : '\u25B6'}</span>
-						Output Data
-					</div>
-					{outputExpanded && (
-						<div style={S.dpTree}>
-							<JsonTree data={row.error ? { error: row.error } : row.exitData} defaultExpanded={2} />
-						</div>
-					)}
-					{!outputExpanded && <div style={S.dpExpandHint}>Click to expand</div>}
+			{/* Data section */}
+			<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+				<div style={S.dpToggle} onClick={() => setExpanded(!expanded)}>
+					<span style={S.dpArr}>{expanded ? '\u25BC' : '\u25B6'}</span>
+					{label}
 				</div>
-			)}
+				{expanded && <DataViewToggle mode={viewMode} onChange={setViewMode} />}
+			</div>
+			{expanded && <DataRenderer data={data} mode={viewMode} lane={lane} />}
 		</div>
 	);
+};
+
+/** Renders a list of children with batching for identical consecutive siblings. */
+const TraceCallChildren: React.FC<Omit<TraceCallNodeProps, 'node'> & { nodes: TraceTreeNode[] }> = ({ nodes, selectedRowId, expandedNodes, moreRevealed, onToggleExpand, onExpandAll, onCollapseAll, onSelect, onRevealMore }) => {
+	const items: React.ReactNode[] = [];
+	let i = 0;
+	while (i < nodes.length) {
+		const child = nodes[i];
+		// Batch detection
+		let runEnd = i + 1;
+		while (runEnd < nodes.length && nodes[runEnd].row.filterName === child.row.filterName && nodes[runEnd].row.lane === child.row.lane && nodes[runEnd].children.length === 0 && child.children.length === 0) {
+			runEnd++;
+		}
+		const runLen = runEnd - i;
+		if (runLen > BATCH_SIZE) {
+			const batchKey = String(child.row.id);
+			const revealed = moreRevealed.get(batchKey) ?? 0;
+			const showCount = Math.min(BATCH_SIZE + revealed * BATCH_SIZE, runLen);
+			for (let j = i; j < i + showCount; j++) {
+				items.push(<TraceCallNode key={nodes[j].row.id} node={nodes[j]} selectedRowId={selectedRowId} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={onToggleExpand} onExpandAll={onExpandAll} onCollapseAll={onCollapseAll} onSelect={onSelect} onRevealMore={onRevealMore} />);
+			}
+			const remaining = runLen - showCount;
+			if (remaining > 0) {
+				items.push(
+					<div key={`more-${batchKey}`} style={SN.moreRow} onClick={() => onRevealMore(batchKey)}>
+						{remaining} more... (click to show next {Math.min(BATCH_SIZE, remaining)})
+					</div>
+				);
+			}
+			i = runEnd;
+		} else {
+			items.push(<TraceCallNode key={nodes[i].row.id} node={nodes[i]} selectedRowId={selectedRowId} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={onToggleExpand} onExpandAll={onExpandAll} onCollapseAll={onCollapseAll} onSelect={onSelect} onRevealMore={onRevealMore} />);
+			i++;
+		}
+	}
+	return <>{items}</>;
 };
 
 // =============================================================================
 // MAIN COMPONENT
 // =============================================================================
 
-const Trace: React.FC<TraceProps> = ({ rows, onClear }) => {
+const Trace: React.FC<TraceProps> = ({ rows }) => {
 	const [expandedObjects, setExpandedObjects] = useState<Set<number>>(new Set());
 	const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
 	const [selectedRowId, setSelectedRowId] = useState<number | null>(null);
 	const [moreRevealed, setMoreRevealed] = useState<Map<string, number>>(new Map());
 
-	// Detail panel resize state
-	const [detailWidth, setDetailWidth] = useState(280);
-	const [isResizing, setIsResizing] = useState(false);
-	const [resizeStartX, setResizeStartX] = useState(0);
-	const [resizeStartWidth, setResizeStartWidth] = useState(0);
-
-	const handleResizeStart = useCallback(
-		(e: React.MouseEvent) => {
-			e.preventDefault();
-			setIsResizing(true);
-			setResizeStartX(e.clientX);
-			setResizeStartWidth(detailWidth);
-		},
-		[detailWidth]
-	);
-
-	useEffect(() => {
-		if (!isResizing) return;
-		const onMove = (e: MouseEvent) => {
-			const delta = resizeStartX - e.clientX;
-			const next = Math.min(600, Math.max(200, resizeStartWidth + delta));
-			setDetailWidth(next);
-		};
-		const onUp = () => setIsResizing(false);
-		window.addEventListener('mousemove', onMove);
-		window.addEventListener('mouseup', onUp);
-		return () => {
-			window.removeEventListener('mousemove', onMove);
-			window.removeEventListener('mouseup', onUp);
-		};
-	}, [isResizing, resizeStartX, resizeStartWidth]);
-
 	const objectGroups = useMemo(() => buildObjectGroups(rows), [rows]);
-
-	// Find the selected node across all groups
-	const selectedNode = useMemo(() => {
-		if (selectedRowId == null) return null;
-		for (const group of objectGroups) {
-			const found = findNodeById(group.nodes, selectedRowId);
-			if (found) return found;
-		}
-		return null;
-	}, [selectedRowId, objectGroups]);
 
 	const toggleObject = useCallback((docId: number) => {
 		setExpandedObjects((prev) => {
@@ -1034,60 +1089,21 @@ const Trace: React.FC<TraceProps> = ({ rows, onClear }) => {
 
 	return (
 		<section style={S.section}>
-			<header style={S.header}>
-				<span>Trace</span>
-				<div style={S.controls}>
-					{rows.length > 0 && (
-						<button style={S.clearBtn} onClick={onClear}>
-							Clear
-						</button>
-					)}
-				</div>
-			</header>
 			<div style={S.content}>
 				{objectGroups.length === 0 ? (
 					<div style={S.noData}>No trace data</div>
 				) : (
-					<div style={S.layout}>
-						<div style={S.treeScroll}>
-							<TraceTreeHeader />
-							{objectGroups.map((group) => {
-								const isExpanded = expandedObjects.has(group.docId);
-								const visibleNodes = isExpanded ? collectVisibleNodes(group.nodes, expandedNodes) : [];
-								const renderItems = isExpanded ? buildRenderItems(visibleNodes, moreRevealed) : [];
+					<div style={S.treeScroll}>
+						{objectGroups.map((group) => {
+							const isExpanded = expandedObjects.has(group.docId);
 
-								return (
-									<React.Fragment key={group.docId}>
-										<TraceObjectRow group={group} expanded={isExpanded} onToggle={() => toggleObject(group.docId)} onExpandAll={() => expandAllForObject(group)} onCollapseAll={() => collapseAllForObject(group)} />
-										{renderItems.map((item) => {
-											if (item.type === 'node') {
-												const nd = item.node;
-												return <TraceNodeRow key={nd.row.id} node={nd} expanded={expandedNodes.has(nd.row.id)} selected={selectedRowId === nd.row.id} onToggleExpand={() => toggleNode(nd.row.id)} onExpandAll={() => expandAllForNode(nd)} onCollapseAll={() => collapseAllForNode(nd)} onSelect={() => selectRow(nd.row.id)} />;
-											}
-											return (
-												<div
-													key={`more-${item.groupKey}`}
-													style={{
-														...S.row,
-														paddingLeft: item.depth * 20 + 28,
-													}}
-													onClick={() => revealMore(item.groupKey)}
-												>
-													<span style={S.chev} />
-													<span style={S.moreLabel}>
-														{item.remaining} more... (click to show next {Math.min(BATCH_SIZE, item.remaining)})
-													</span>
-												</div>
-											);
-										})}
-									</React.Fragment>
-								);
-							})}
-						</div>
-						<div style={{ ...S.detailWrapper, width: detailWidth }}>
-							<div style={isResizing ? S.resizeHandleActive : S.resizeHandle} onMouseDown={handleResizeStart} aria-label="Resize detail panel" />
-							<TraceDetailPanel node={selectedNode} />
-						</div>
+							return (
+								<React.Fragment key={group.docId}>
+									<TraceObjectRow group={group} expanded={isExpanded} onToggle={() => toggleObject(group.docId)} onExpandAll={() => expandAllForObject(group)} onCollapseAll={() => collapseAllForObject(group)} />
+									{isExpanded && <TraceCallChildren nodes={group.nodes} selectedRowId={selectedRowId} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={(id) => toggleNode(id)} onExpandAll={expandAllForNode} onCollapseAll={collapseAllForNode} onSelect={selectRow} onRevealMore={revealMore} />}
+								</React.Fragment>
+							);
+						})}
 					</div>
 				)}
 			</div>
