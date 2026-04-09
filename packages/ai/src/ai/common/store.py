@@ -2,7 +2,7 @@ import importlib
 import json
 import threading
 from abc import abstractmethod, ABC
-from typing import List, Callable, Dict, Any, Tuple
+from typing import List, Callable, Dict, Any, Optional, Tuple
 from rocketlib import IInstanceBase, tool_function, warning
 from .schema import Doc, DocFilter, DocMetadata, Question, QuestionText, QuestionType, Answer
 
@@ -573,6 +573,7 @@ def getStore(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> 
 
 _VECTORDB_TOOL_MAX_TOP_K = 100
 _VECTORDB_TOOL_DEFAULT_TOP_K = 10
+_VECTORDB_DEFAULT_SERVER_NAME = 'vectordb'
 
 
 def _normalize_vectordb_tool_input(input_obj: Any) -> Dict[str, Any]:
@@ -642,6 +643,14 @@ class VectorStoreToolMixin:
     To enable tool discovery, the node's ``services.json`` must also include
     ``"tool"`` in its ``classType`` list and ``"invoke"`` in its
     ``capabilities`` list.
+
+    Tool names follow the established ``<serverName>.<toolName>`` convention
+    documented in ``ai.common.tools`` and used by the MCP client: every tool
+    method on this mixin is exposed as ``<serverName>.search``,
+    ``<serverName>.upsert`` and ``<serverName>.delete`` where ``serverName``
+    comes from ``self.IGlobal.serverName`` (user-configurable via
+    ``services.json``). This prevents tool-name collisions when a pipeline
+    contains more than one vectordb node.
     """
 
     # --- Configuration knobs (override via IGlobal) ------------------------
@@ -669,6 +678,100 @@ class VectorStoreToolMixin:
         if store is None:
             raise RuntimeError('vectordb tool: store not initialized')
         return store
+
+    def _vectordb_server_name(self) -> str:
+        """Return the namespace prefix for this node's tools.
+
+        Reads ``self.IGlobal.serverName`` (set from the node config). Falls
+        back to the provider name (``self.IGlobal.glb.logicalType``) and
+        finally to ``'vectordb'`` if neither is available. The returned value
+        is stripped of leading/trailing whitespace and ``'.'`` characters to
+        guarantee a clean ``<server>.<tool>`` format.
+        """
+        glb = getattr(self, 'IGlobal', None)
+        name = getattr(glb, 'serverName', None)
+        if not name:
+            # Fall back to the node's logical type (e.g. 'pinecone').
+            inner = getattr(glb, 'glb', None)
+            name = getattr(inner, 'logicalType', None)
+        if not isinstance(name, str):
+            name = _VECTORDB_DEFAULT_SERVER_NAME
+        name = name.strip().strip('.')
+        return name or _VECTORDB_DEFAULT_SERVER_NAME
+
+    def _vectordb_compute_embedding(self, query_text: str) -> Optional[List[float]]:
+        """Attempt to compute a query embedding for semantic search.
+
+        Tool invocations run in the control-plane ``invoke()`` path and do
+        not pass through the data-lane embedding filters that normally
+        populate ``QuestionText.embedding``. This hook gives nodes a chance
+        to compute an embedding for the tool path. Override in a subclass or
+        provide an ``embed_query`` callable on ``self.IGlobal`` (signature:
+        ``embed_query(text: str) -> list[float]``).
+
+        Returns ``None`` if no embedding provider is available; the caller
+        will fall back to keyword search.
+        """
+        glb = getattr(self, 'IGlobal', None)
+        embed_fn = getattr(glb, 'embed_query', None)
+        if embed_fn is None or not callable(embed_fn):
+            return None
+        try:
+            embedding = embed_fn(query_text)
+        except Exception as exc:
+            warning(f'vectordb tool: embed_query raised {type(exc).__name__}: {exc}')
+            return None
+        if not embedding:
+            return None
+        if not isinstance(embedding, (list, tuple)):
+            warning(f'vectordb tool: embed_query returned unexpected type {type(embedding).__name__}')
+            return None
+        return list(embedding)
+
+    # --- Tool descriptor / dispatch plumbing ------------------------------
+    #
+    # Override ``_collect_tool_methods`` so that our bare Python method
+    # names ``search``/``upsert``/``delete`` are exposed to the engine as
+    # namespaced tool names like ``pinecone.search``. The descriptor
+    # builder in ``IInstanceBase`` uses the dict key as the outbound
+    # ``descriptor['name']``, and the dispatcher looks up the inbound
+    # ``tool_name`` in the same dict — so namespacing both sides with one
+    # override is sufficient. We still delegate collection to ``super()``
+    # so that any further @tool_function methods added in subclasses are
+    # picked up (and namespaced) automatically.
+
+    def _collect_tool_methods(self) -> Dict[str, Callable]:
+        # Delegate to IInstanceBase (or any intermediate mixin) to discover
+        # all @tool_function methods via MRO walking. Fall back to a local
+        # walk when this mixin is instantiated outside an IInstance chain
+        # (e.g. in unit tests) so ``super()`` wouldn't resolve the method.
+        try:
+            collected = super()._collect_tool_methods()  # type: ignore[misc]
+        except AttributeError:
+            collected = {}
+            for attr_name in dir(type(self)):
+                attr = getattr(type(self), attr_name, None)
+                if attr is not None and hasattr(attr, '__tool_meta__'):
+                    collected[attr_name] = getattr(self, attr_name)
+
+        server = self._vectordb_server_name()
+
+        # Only namespace methods that actually live on VectorStoreToolMixin —
+        # other @tool_function methods a subclass defines should keep their
+        # own conventions unless the subclass explicitly opts in.
+        owned = set()
+        for attr_name in vars(VectorStoreToolMixin):
+            attr = getattr(VectorStoreToolMixin, attr_name, None)
+            if attr is not None and hasattr(attr, '__tool_meta__'):
+                owned.add(attr_name)
+
+        namespaced: Dict[str, Callable] = {}
+        for name, method in collected.items():
+            if name in owned:
+                namespaced[f'{server}.{name}'] = method
+            else:
+                namespaced[name] = method
+        return namespaced
 
     # --- Tool methods ------------------------------------------------------
 
@@ -710,7 +813,12 @@ class VectorStoreToolMixin:
                 'total': {'type': 'integer'},
             },
         },
-        description='Search for documents in the vector database using semantic similarity. Returns matching documents ranked by relevance with their content, metadata, and similarity scores.',
+        description=(
+            'Search for documents in the vector database. If an embedding provider is bound to this '
+            'node (via IGlobal.embed_query), performs semantic similarity search. Otherwise falls back '
+            'to keyword (substring) matching — bind an upstream embedding module to enable semantic '
+            'ranking. Returns matching documents with their content, metadata, and scores.'
+        ),
     )
     def search(self, args):
         """Search for documents in the vector database."""
@@ -744,14 +852,39 @@ class VectorStoreToolMixin:
         doc_filter.limit = top_k
         question = QuestionText(text=query_text)
 
-        try:
-            docs: List[Doc] = store.searchSemantic(question, doc_filter)
-        except Exception as exc:
-            warning(f'vectordb tool: semantic search failed ({exc}), trying keyword search')
+        # Attempt to compute an embedding for semantic search. The control-plane
+        # invoke() path does not flow through the data-lane embedding filters,
+        # so we give nodes a hook (``IGlobal.embed_query``) to plug in their
+        # own embedder. If unavailable, we do a keyword-only search — which is
+        # lossy but is always better than a hard failure on every call.
+        embedding = self._vectordb_compute_embedding(query_text)
+        if embedding is not None:
+            question.embedding = embedding
+            embed_model = getattr(getattr(self, 'IGlobal', None), 'embed_model_name', None)
+            if isinstance(embed_model, str) and embed_model:
+                question.embedding_model = embed_model
+            try:
+                docs: List[Doc] = store.searchSemantic(question, doc_filter)
+            except Exception as exc:
+                warning(f'vectordb tool: semantic search failed ({type(exc).__name__}: {exc}); falling back to keyword search. Check that the store is initialized and the embedding model matches the collection.')
+                try:
+                    docs = store.searchKeyword(question, doc_filter)
+                except Exception as exc2:
+                    raise RuntimeError(f'vectordb tool: search failed: {exc2}') from exc2
+        else:
+            # No embedding available — use keyword search directly. Emit a
+            # one-shot warning (via a flag on self) so repeated tool calls
+            # don't spam the log.
+            if not getattr(self, '_vectordb_keyword_fallback_warned', False):
+                warning(f'vectordb tool: no embedding provider bound to IGlobal.embed_query; the {self._vectordb_server_name()}.search tool is running in keyword-only mode. To enable semantic similarity ranking, set IGlobal.embed_query to a callable(text) -> list[float].')
+                try:
+                    setattr(self, '_vectordb_keyword_fallback_warned', True)
+                except Exception:
+                    pass
             try:
                 docs = store.searchKeyword(question, doc_filter)
-            except Exception as exc2:
-                raise RuntimeError(f'vectordb tool: search failed: {exc2}') from exc2
+            except Exception as exc:
+                raise RuntimeError(f'vectordb tool: keyword search failed: {exc}') from exc
 
         score_threshold = self._vectordb_score_threshold()
         results: List[Dict[str, Any]] = []

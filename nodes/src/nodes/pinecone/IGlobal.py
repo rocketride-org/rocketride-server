@@ -40,6 +40,7 @@ HTTP_BODY_MARKER = 'http response body:'
 class IGlobal(IGlobalTransform):
     # Class attributes - properly defined for IDE support
     store: 'Store | None' = None
+    serverName: str = 'pinecone'
 
     def beginGlobal(self):
         """
@@ -61,6 +62,14 @@ class IGlobal(IGlobalTransform):
 
             # Get the passed configuration
             connConfig = self.getConnConfig()
+
+            # Resolve the namespace used for agent-facing tool names
+            # (pinecone.search/upsert/delete). Read from the merged config
+            # so it honors both profile defaults and user overrides.
+            cfg = Config.getNodeConfig(self.glb.logicalType, connConfig)
+            resolved_name = cfg.get('serverName') if isinstance(cfg, dict) or hasattr(cfg, 'get') else None
+            if isinstance(resolved_name, str) and resolved_name.strip():
+                self.serverName = resolved_name.strip()
 
             # Get the configuration
             self.store = Store(self.glb.logicalType, connConfig, bag)
