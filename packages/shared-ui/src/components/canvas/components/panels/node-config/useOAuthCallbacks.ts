@@ -147,6 +147,8 @@ export function useOAuthCallbacks() {
 	 * Uses replaceState so the token-bearing URL doesn't remain in history.
 	 */
 	const clearSecureParamsFromUrl = useCallback(() => {
+		// Skip in srcdoc iframes — replaceState is not allowed when origin is "null"
+		if (window.location.origin === 'null' || window.location.protocol === 'about:') return;
 		const cleanUrl = window.location.origin + window.location.pathname;
 		window.history.replaceState({}, document.title, cleanUrl);
 	}, []);

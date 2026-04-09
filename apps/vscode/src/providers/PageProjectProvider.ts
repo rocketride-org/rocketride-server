@@ -150,6 +150,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 								op: body.op || 'enter',
 								pipes: body.pipes || [],
 								trace: body.trace || {},
+								source: body.source,
 							},
 						});
 					}

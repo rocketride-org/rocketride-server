@@ -18,15 +18,13 @@ const styles = {
 		gap: 8,
 	} as CSSProperties,
 	pipeline: {
-		...commonStyles.card,
-		borderRadius: 6,
+		overflow: 'hidden',
 	} as CSSProperties,
 	pipelineHeader: {
 		display: 'flex',
 		alignItems: 'center',
 		gap: 8,
-		padding: '8px 12px',
-		backgroundColor: 'var(--rr-bg-widget)',
+		padding: '8px 0',
 		fontSize: 'var(--rr-font-size-widget)',
 		fontWeight: 600,
 		color: 'var(--rr-text-secondary)',
@@ -45,7 +43,7 @@ const styles = {
 		flexWrap: 'wrap',
 		alignItems: 'center',
 		gap: 6,
-		padding: '8px 12px',
+		padding: '4px 0',
 	} as CSSProperties,
 	stage: (running: boolean): CSSProperties => ({
 		padding: '3px 10px',

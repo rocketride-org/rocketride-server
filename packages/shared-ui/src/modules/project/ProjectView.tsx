@@ -32,7 +32,7 @@ import Errors from '../../components/errors/Errors';
 import { commonStyles } from '../../themes/styles';
 
 import PipelineActions from '../../components/pipeline-actions/PipelineActions';
-import type { IProjectViewProps, ProjectViewRef, ProjectViewMode, ViewState, ProjectViewIncoming, ProjectViewOutgoing, TaskStatus, TraceEvent } from './types';
+import type { IProjectViewProps, ProjectViewRef, ProjectViewMode, ViewState, ProjectViewIncoming, ProjectViewOutgoing, TaskStatus, TraceEvent, TraceRow } from './types';
 
 // =============================================================================
 // STYLES
@@ -62,9 +62,8 @@ const styles = {
 		padding: 32,
 	} as CSSProperties,
 	sourcePane: {
-		border: '1px solid var(--rr-border)',
+		...commonStyles.card,
 		borderRadius: 6,
-		overflow: 'hidden',
 		marginBottom: 25,
 	} as CSSProperties,
 	sourceName: {
@@ -72,8 +71,22 @@ const styles = {
 		fontSize: 'var(--rr-font-size-h5)',
 		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
-	sourceBody: {
-		padding: '8px 12px',
+	sourceBody: commonStyles.cardBody,
+	errorBadge: {
+		fontSize: 11,
+		fontWeight: 600,
+		padding: '2px 8px',
+		borderRadius: 10,
+		backgroundColor: 'var(--rr-color-error)',
+		color: '#fff',
+	} as CSSProperties,
+	warningBadge: {
+		fontSize: 11,
+		fontWeight: 600,
+		padding: '2px 8px',
+		borderRadius: 10,
+		backgroundColor: 'var(--rr-color-warning)',
+		color: '#fff',
 	} as CSSProperties,
 };
 
@@ -335,11 +348,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceFlowPane key={src.id} source={src} taskStatus={statusMap[src.id]} viewMode={viewState.flowViewMode ?? 'pipeline'} onViewModeChange={(vm) => updateViewState({ flowViewMode: vm })} />) : <div style={styles.empty}>No source components found</div>}</div>,
 		},
 		trace: {
-			content: (
-				<div style={commonStyles.tabContent}>
-					<Trace rows={traceRows} onClear={handleTraceClear} />
-				</div>
-			),
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTracePane key={src.id} source={src} rows={traceRows.filter((r) => r.source === src.id)} onClear={handleTraceClear} />) : <div style={styles.empty}>No source components found</div>}</div>,
 		},
 		errors: {
 			content: (
@@ -348,11 +357,28 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 						const errs = ts.errors?.length ?? 0;
 						const warns = ts.warnings?.length ?? 0;
 						if (errs === 0 && warns === 0) return null;
+						const displayName = sources.find((s) => s.id === source)?.name ?? source;
 						return (
-							<div key={source} style={{ marginBottom: 12 }}>
-								{sources.length > 1 && <div style={styles.sourceName}>{source}</div>}
-								{errs > 0 && <Errors title="Errors" items={ts.errors} type="error" />}
-								{warns > 0 && <Errors title="Warnings" items={ts.warnings} type="warning" />}
+							<div key={source} style={{ ...commonStyles.card, borderRadius: 6, marginBottom: 25 }}>
+								<div style={commonStyles.cardHeader}>
+									<span style={styles.sourceName}>{displayName}</span>
+									<div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+										{errs > 0 && (
+											<span style={styles.errorBadge}>
+												{errs} {errs === 1 ? 'Error' : 'Errors'}
+											</span>
+										)}
+										{warns > 0 && (
+											<span style={styles.warningBadge}>
+												{warns} {warns === 1 ? 'Warning' : 'Warnings'}
+											</span>
+										)}
+									</div>
+								</div>
+								<div style={commonStyles.cardBody}>
+									{errs > 0 && <Errors title="Errors" items={ts.errors} type="error" />}
+									{warns > 0 && <Errors title="Warnings" items={ts.warnings} type="warning" />}
+								</div>
 							</div>
 						);
 					})}
@@ -407,7 +433,7 @@ const SourceTokensPane: React.FC<{
 	return (
 		<div style={styles.sourcePane}>
 			{/* Source name only when multiple sources exist */}
-			<div style={{ padding: '8px 12px', borderBottom: '1px solid var(--rr-border)' }}>
+			<div style={commonStyles.cardHeader}>
 				<span style={styles.sourceName}>{source.name}</span>
 			</div>
 			<div style={styles.sourceBody}>
@@ -429,7 +455,7 @@ const SourceFlowPane: React.FC<{
 }> = ({ source, taskStatus, viewMode, onViewModeChange }) => {
 	return (
 		<div style={styles.sourcePane}>
-			<div style={{ padding: '8px 12px', borderBottom: '1px solid var(--rr-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+			<div style={commonStyles.cardHeader}>
 				<span style={styles.sourceName}>{source.name}</span>
 				<div style={commonStyles.toggleGroup}>
 					<button style={commonStyles.toggleButton(viewMode === 'pipeline')} onClick={() => onViewModeChange('pipeline')}>
@@ -442,6 +468,32 @@ const SourceFlowPane: React.FC<{
 			</div>
 			<div style={styles.sourceBody}>
 				<SourceFlowContent taskStatus={taskStatus ?? null} viewMode={viewMode} />
+			</div>
+		</div>
+	);
+};
+
+// =============================================================================
+// SOURCE TRACE PANE
+// =============================================================================
+
+const SourceTracePane: React.FC<{
+	source: SourceInfo;
+	rows: TraceRow[];
+	onClear: () => void;
+}> = ({ source, rows, onClear }) => {
+	return (
+		<div style={styles.sourcePane}>
+			<div style={commonStyles.cardHeader}>
+				<span style={styles.sourceName}>{source.name}</span>
+				{rows.length > 0 && (
+					<button style={commonStyles.buttonSecondary} onClick={onClear}>
+						Clear
+					</button>
+				)}
+			</div>
+			<div style={styles.sourceBody}>
+				<Trace rows={rows} onClear={onClear} />
 			</div>
 		</div>
 	);

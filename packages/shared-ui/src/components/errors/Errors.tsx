@@ -52,10 +52,7 @@ const styles: Record<string, CSSProperties> = {
 		display: 'flex',
 		flexDirection: 'column',
 		gap: '4px',
-		padding: '6px 8px',
-		borderRadius: '4px',
-		border: '1px solid var(--rr-border)',
-		backgroundColor: 'var(--rr-bg-default)',
+		padding: '6px 0',
 	},
 	errorHeader: {
 		display: 'flex',
@@ -180,11 +177,6 @@ export const Errors: React.FC<ErrorsProps> = ({ title, items, type }) => {
 
 	return (
 		<section style={commonStyles.section}>
-			<header style={styles.header}>
-				<span style={commonStyles.sectionHeaderLabel}>{title}</span>
-				<span style={styles.countBadge}>{items.length}</span>
-			</header>
-
 			<div style={styles.content}>
 				{items.map((item, index) => {
 					const parsed = parseItem(item);

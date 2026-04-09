@@ -68,6 +68,7 @@ const sectionHeader: CSSProperties = {
 	display: 'flex',
 	alignItems: 'center',
 	justifyContent: 'space-between',
+	padding: '8px 0',
 };
 
 /** Section header label text. */

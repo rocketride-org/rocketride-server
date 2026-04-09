@@ -39,12 +39,7 @@ const styles: Record<string, CSSProperties> = {
 	},
 
 	header: {
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'space-between',
-		padding: '14px 18px',
-		borderBottom: '1px solid var(--rr-border)',
-		backgroundColor: 'var(--rr-bg-widget-header)',
+		...commonStyles.cardHeader,
 		borderRadius: '8px 8px 0 0',
 	},
 

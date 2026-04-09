@@ -86,14 +86,12 @@ from .task import (
 
 from .events import (
     EVENT_TYPE,
-    EVENT_STATUS_UPDATE,
-    EVENT_TASK,
     TASK_EVENT,
+    TASK_EVENT_FLOW,
     TASK_EVENT_RUNNING,
     TASK_EVENT_BEGIN,
     TASK_EVENT_END,
     TASK_EVENT_RESTART,
-    TASK_RUNNING_ENTRY,
 )
 
 from .dashboard import (
@@ -153,14 +151,12 @@ __all__ = [
     'TASK_METRICS',
     # Event types
     'EVENT_TYPE',
-    'EVENT_STATUS_UPDATE',
-    'EVENT_TASK',
     'TASK_EVENT',
+    'TASK_EVENT_FLOW',
     'TASK_EVENT_RUNNING',
     'TASK_EVENT_BEGIN',
     'TASK_EVENT_END',
     'TASK_EVENT_RESTART',
-    'TASK_RUNNING_ENTRY',
     # Dashboard types
     'DASHBOARD_OVERVIEW',
     'DASHBOARD_MONITOR',
