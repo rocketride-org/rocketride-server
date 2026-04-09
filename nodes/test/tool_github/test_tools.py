@@ -5,7 +5,7 @@ Calls every GitHub API endpoint used by the 37 tool functions.
 Requires a GitHub PAT with repo + issues + pull_requests + workflows scopes.
 
     export GITHUB_TOKEN=<your token>
-    export GITHUB_TEST_REPO=ryan-t-christensen/skyrim   # default
+    export GITHUB_TEST_REPO=owner/repo
     pytest nodes/test/tool_github/test_tools.py -v
 """
 
@@ -22,9 +22,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes' / '
 from github_client import call  # noqa: E402
 
 TOKEN = os.getenv('GITHUB_TOKEN', '')
-REPO = os.getenv('GITHUB_TEST_REPO', 'ryan-t-christensen/skyrim')
+REPO = os.getenv('GITHUB_TEST_REPO', '')
 
-pytestmark = pytest.mark.skipif(not TOKEN, reason='GITHUB_TOKEN not set')
+pytestmark = pytest.mark.skipif(
+    not TOKEN or not REPO,
+    reason='GITHUB_TOKEN and GITHUB_TEST_REPO must both be set',
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -71,43 +74,45 @@ class TestFiles:
         assert 'content' in data or data.get('type') == 'file'
 
     def test_file_create_edit_delete(self):
+        import base64
+
         uid = uuid.uuid4().hex[:8]
         path = f'test-{uid}.txt'
+        current_sha = None
 
-        # Create
-        create = c(
-            'PUT',
-            repo_path(f'/contents/{path}'),
-            body={
-                'message': f'test: create {path}',
-                'content': __import__('base64').b64encode(b'hello rocketride').decode(),
-            },
-        )
-        sha = create['content']['sha']
-        assert sha
+        try:
+            # Create
+            create = c(
+                'PUT',
+                repo_path(f'/contents/{path}'),
+                body={
+                    'message': f'test: create {path}',
+                    'content': base64.b64encode(b'hello rocketride').decode(),
+                },
+            )
+            current_sha = create['content']['sha']
+            assert current_sha
 
-        # Edit
-        edit = c(
-            'PUT',
-            repo_path(f'/contents/{path}'),
-            body={
-                'message': f'test: edit {path}',
-                'content': __import__('base64').b64encode(b'hello rocketride updated').decode(),
-                'sha': sha,
-            },
-        )
-        new_sha = edit['content']['sha']
-        assert new_sha != sha
-
-        # Delete
-        c(
-            'DELETE',
-            repo_path(f'/contents/{path}'),
-            body={
-                'message': f'test: delete {path}',
-                'sha': new_sha,
-            },
-        )
+            # Edit
+            edit = c(
+                'PUT',
+                repo_path(f'/contents/{path}'),
+                body={
+                    'message': f'test: edit {path}',
+                    'content': base64.b64encode(b'hello rocketride updated').decode(),
+                    'sha': current_sha,
+                },
+            )
+            new_sha = edit['content']['sha']
+            assert new_sha != current_sha
+            current_sha = new_sha
+        finally:
+            if current_sha:
+                c(
+                    'DELETE',
+                    repo_path(f'/contents/{path}'),
+                    body={'message': f'test: delete {path}', 'sha': current_sha},
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -136,73 +141,40 @@ class TestCommits:
 
 
 class TestIssues:
-    _issue_number: int = None
-
-    def test_issue_create(self):
-        uid = uuid.uuid4().hex[:8]
-        data = c(
-            'POST',
-            repo_path('/issues'),
-            body={
-                'title': f'[test] {uid}',
-                'body': 'Automated test issue — safe to close.',
-                'labels': [],
-            },
-        )
-        assert data['number']
-        TestIssues._issue_number = data['number']
-
-    def test_issue_get(self):
-        assert TestIssues._issue_number, 'depends on test_issue_create'
-        data = c('GET', repo_path(f'/issues/{TestIssues._issue_number}'))
-        assert data['number'] == TestIssues._issue_number
-
     def test_issue_list(self):
         data = c('GET', repo_path('/issues'), params={'state': 'open', 'per_page': 10})
         assert isinstance(data, list)
 
-    def test_issue_comment(self):
-        assert TestIssues._issue_number, 'depends on test_issue_create'
-        data = c(
-            'POST',
-            repo_path(f'/issues/{TestIssues._issue_number}/comments'),
-            body={
-                'body': 'Automated test comment.',
-            },
-        )
-        assert data['id']
+    def test_issue_lifecycle(self):
+        uid = uuid.uuid4().hex[:8]
+        issue_number = None
+        try:
+            # Create
+            data = c(
+                'POST',
+                repo_path('/issues'),
+                body={'title': f'[test] {uid}', 'body': 'Automated test issue — safe to close.', 'labels': []},
+            )
+            issue_number = data['number']
+            assert issue_number
 
-    def test_issue_edit(self):
-        assert TestIssues._issue_number, 'depends on test_issue_create'
-        data = c(
-            'PATCH',
-            repo_path(f'/issues/{TestIssues._issue_number}'),
-            body={
-                'title': f'[test][edited] {TestIssues._issue_number}',
-            },
-        )
-        assert 'edited' in data['title']
+            # Get
+            data = c('GET', repo_path(f'/issues/{issue_number}'))
+            assert data['number'] == issue_number
 
-    def test_issue_lock(self):
-        assert TestIssues._issue_number, 'depends on test_issue_create'
-        c(
-            'PUT',
-            repo_path(f'/issues/{TestIssues._issue_number}/lock'),
-            body={
-                'lock_reason': 'resolved',
-            },
-        )
+            # Comment
+            data = c('POST', repo_path(f'/issues/{issue_number}/comments'), body={'body': 'Automated test comment.'})
+            assert data['id']
 
-    def test_issue_close(self):
-        assert TestIssues._issue_number, 'depends on test_issue_create'
-        data = c(
-            'PATCH',
-            repo_path(f'/issues/{TestIssues._issue_number}'),
-            body={
-                'state': 'closed',
-            },
-        )
-        assert data['state'] == 'closed'
+            # Edit
+            data = c('PATCH', repo_path(f'/issues/{issue_number}'), body={'title': f'[test][edited] {issue_number}'})
+            assert 'edited' in data['title']
+
+            # Lock
+            c('PUT', repo_path(f'/issues/{issue_number}/lock'), body={'lock_reason': 'resolved'})
+        finally:
+            if issue_number:
+                c('PATCH', repo_path(f'/issues/{issue_number}'), body={'state': 'closed'})
 
 
 # ---------------------------------------------------------------------------
@@ -244,67 +216,42 @@ class TestReviews:
 
 
 class TestReleases:
-    _release_id: int = None
-
     def test_release_list(self):
         data = c('GET', repo_path('/releases'), params={'per_page': 10})
         assert isinstance(data, list)
 
-    def test_release_create(self):
+    def test_release_lifecycle(self):
         uid = uuid.uuid4().hex[:8]
-        # Need a tag — use the latest commit SHA as lightweight ref
-        commits = c('GET', repo_path('/commits'), params={'per_page': 1})
-        sha = commits[0]['sha']
-
-        # Create a temp tag
         tag = f'test-{uid}'
-        c(
-            'POST',
-            repo_path('/git/refs'),
-            body={
-                'ref': f'refs/tags/{tag}',
-                'sha': sha,
-            },
-        )
+        release_id = None
+        tag_created = False
 
-        data = c(
-            'POST',
-            repo_path('/releases'),
-            body={
-                'tag_name': tag,
-                'name': f'Test Release {uid}',
-                'body': 'Automated test release — safe to delete.',
-                'draft': True,
-            },
-        )
-        assert data['id']
-        TestReleases._release_id = data['id']
-        TestReleases._tag = tag
+        try:
+            commits = c('GET', repo_path('/commits'), params={'per_page': 1})
+            sha = commits[0]['sha']
+            c('POST', repo_path('/git/refs'), body={'ref': f'refs/tags/{tag}', 'sha': sha})
+            tag_created = True
 
-    def test_release_get(self):
-        if not TestReleases._release_id:
-            pytest.skip('depends on test_release_create')
-        data = c('GET', repo_path(f'/releases/{TestReleases._release_id}'))
-        assert data['id'] == TestReleases._release_id
+            data = c(
+                'POST',
+                repo_path('/releases'),
+                body={'tag_name': tag, 'name': f'Test Release {uid}', 'body': 'Automated test release.', 'draft': True},
+            )
+            release_id = data['id']
+            assert release_id
 
-    def test_release_update(self):
-        if not TestReleases._release_id:
-            pytest.skip('depends on test_release_create')
-        data = c(
-            'PATCH',
-            repo_path(f'/releases/{TestReleases._release_id}'),
-            body={
-                'name': 'Test Release (updated)',
-            },
-        )
-        assert 'updated' in data['name']
+            # Get
+            data = c('GET', repo_path(f'/releases/{release_id}'))
+            assert data['id'] == release_id
 
-    def test_release_delete(self):
-        if not TestReleases._release_id:
-            pytest.skip('depends on test_release_create')
-        c('DELETE', repo_path(f'/releases/{TestReleases._release_id}'))
-        # Clean up the tag too
-        c('DELETE', repo_path(f'/git/refs/tags/{TestReleases._tag}'))
+            # Update
+            data = c('PATCH', repo_path(f'/releases/{release_id}'), body={'name': 'Test Release (updated)'})
+            assert 'updated' in data['name']
+        finally:
+            if release_id:
+                c('DELETE', repo_path(f'/releases/{release_id}'))
+            if tag_created:
+                c('DELETE', repo_path(f'/git/refs/tags/{tag}'))
 
 
 # ---------------------------------------------------------------------------

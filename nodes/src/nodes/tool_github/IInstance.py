@@ -103,10 +103,7 @@ class IInstance(IInstanceBase):
         if isinstance(data, list):
             raise ValueError(f'Path "{path}" is a directory — use file_list instead')
         content_b64 = data.get('content', '')
-        try:
-            content = base64.b64decode(content_b64).decode('utf-8', errors='replace')
-        except Exception:
-            content = content_b64
+        content = base64.b64decode(content_b64).decode('utf-8', errors='replace')
         return {
             'path': data.get('path'),
             'name': data.get('name'),
@@ -715,7 +712,7 @@ class IInstance(IInstanceBase):
             'required': ['workflow_id'],
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'workflow_id': {'type': 'string', 'description': 'Workflow ID (integer) or filename (e.g. "ci.yml")'},
+                'workflow_id': {'type': ['string', 'integer'], 'description': 'Workflow ID (integer) or filename (e.g. "ci.yml")'},
             },
         },
         description='Get a single workflow by ID or filename.',
@@ -732,7 +729,7 @@ class IInstance(IInstanceBase):
             'required': ['workflow_id', 'ref'],
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'workflow_id': {'type': 'string', 'description': 'Workflow ID or filename (e.g. "ci.yml")'},
+                'workflow_id': {'type': ['string', 'integer'], 'description': 'Workflow ID or filename (e.g. "ci.yml")'},
                 'ref': {'type': 'string', 'description': 'Branch or tag to run the workflow on'},
                 'inputs': {'type': 'object', 'description': 'Key-value inputs defined by the workflow', 'additionalProperties': {'type': 'string'}},
             },
@@ -757,7 +754,7 @@ class IInstance(IInstanceBase):
             'required': ['workflow_id'],
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'workflow_id': {'type': 'string', 'description': 'Workflow ID or filename'},
+                'workflow_id': {'type': ['string', 'integer'], 'description': 'Workflow ID or filename'},
             },
         },
         description='Enable a previously disabled workflow.',
@@ -776,7 +773,7 @@ class IInstance(IInstanceBase):
             'required': ['workflow_id'],
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'workflow_id': {'type': 'string', 'description': 'Workflow ID or filename'},
+                'workflow_id': {'type': ['string', 'integer'], 'description': 'Workflow ID or filename'},
             },
         },
         description='Disable a workflow so it will not run.',
@@ -795,7 +792,7 @@ class IInstance(IInstanceBase):
             'required': ['workflow_id'],
             'properties': {
                 'repo': {'type': 'string', 'description': _REPO_DESC},
-                'workflow_id': {'type': 'string', 'description': 'Workflow ID or filename'},
+                'workflow_id': {'type': ['string', 'integer'], 'description': 'Workflow ID or filename'},
             },
         },
         description='Get billable minutes and run counts for a workflow.',
@@ -1021,8 +1018,10 @@ def _normalize(input_obj):
     if not isinstance(input_obj, dict):
         warning(f'tool_github: unexpected input type {type(input_obj).__name__}')
         return {}
-    if 'input' in input_obj and isinstance(input_obj.get('input'), dict):
+    if 'input' in input_obj:
         inner = input_obj['input']
+        if not isinstance(inner, dict):
+            inner = _normalize(inner)
         extras = {k: v for k, v in input_obj.items() if k != 'input'}
         input_obj = {**inner, **extras}
     input_obj.pop('security_context', None)
