@@ -34,7 +34,7 @@ const cardHeader: CSSProperties = {
 	alignItems: 'center',
 	justifyContent: 'space-between',
 	padding: '12px 16px',
-	background: 'var(--rr-bg-surface-alt)',
+	background: 'var(--rr-bg-titleBar-inactive)',
 	fontSize: 13,
 	fontWeight: 600,
 	color: 'var(--rr-text-primary)',
