@@ -791,7 +791,7 @@ class TestIInstanceRouting:
 
 
 class TestDeepCopy:
-    """Ensure data is deep-copied before routing to prevent cross-branch mutation."""
+    """Reference copy.deepcopy behavior only; IInstance intentionally does not deep-copy routed data."""
 
     def test_question_mutation_prevention(self):
         original = {'text': 'original', 'metadata': {'key': 'value'}}
