@@ -36,6 +36,7 @@ import bedrockIcon from '../../../assets/nodes/bedrock.svg';
 import captivePortalIcon from '../../../assets/nodes/Captive portal.svg';
 import chatIcon from '../../../assets/nodes/chat.svg';
 import chromaIcon from '../../../assets/nodes/chroma.svg';
+import cohereIcon from '../../../assets/nodes/cohere.svg';
 import classificationIcon from '../../../assets/nodes/classification.svg';
 import confluenceIcon from '../../../assets/nodes/confluence.svg';
 import crewaiIcon from '../../../assets/nodes/crewai.svg';
@@ -128,6 +129,7 @@ const iconMap: Record<string, string> = {
 	chat: chatIcon,
 	chartjs: chartjsIcon,
 	chroma: chromaIcon,
+	cohere: cohereIcon,
 	classification: classificationIcon,
 	confluence: confluenceIcon,
 	crewai: crewaiIcon,
