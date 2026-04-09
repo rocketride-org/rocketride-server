@@ -436,7 +436,7 @@ def plan(
 
     # Single LLM call — the response is parsed as JSON by getJson().
     # The schema layer enforces the fenced-JSON format requested via expectJson.
-    result = host.llm.invoke(IInvokeLLM(op='ask', question=wave_prompt)).getJson()
+    result = host.llm.invoke(IInvokeLLM.Ask(question=wave_prompt)).getJson()
     debug(f'plan: result={json.dumps(result, ensure_ascii=False, default=str)[:500]}')
 
     # Diagnostic trace file — append each REQUEST/RESULT pair for offline

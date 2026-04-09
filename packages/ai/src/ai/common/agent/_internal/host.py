@@ -11,12 +11,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from rocketlib.types import IInvokeLLM, IInvokeTool
+from rocketlib.types import IInvokeOp, IInvokeTool, IInvokeMemory
 
 
 class AgentHostServices:
     class LLM:
-        """LLM host interface backed by `invoke('llm', ...)`."""
+        """LLM host interface backed by IInvokeLLM operations."""
 
         def __init__(self, invoker):
             """Create an LLM host service wrapper bound to an engine invoker."""
@@ -30,21 +30,20 @@ class AgentHostServices:
             self._invoker = invoker
             self._llm = node[0]
 
-        def invoke(self, param: IInvokeLLM) -> Any:
+        def invoke(self, param: IInvokeOp) -> Any:
             """
             Invoke the host LLM control-plane operation.
 
             Args:
-                param: An `IInvokeLLM` request object (e.g. op="ask").
+                param: An IInvokeLLM operation (e.g. IInvokeLLM.Ask(question=q)).
 
             Returns:
                 The engine-native response object.
             """
-            # Call the self._llm nodeId, type llm with the given param
-            return self._invoker.instance.invoke('llm', param, nodeId=self._llm)
+            return self._invoker.instance.invoke(param, component_id=self._llm)
 
     class Tools:
-        """Tool host interface backed by `invoke('tool', ...)`."""
+        """Tool host interface backed by IInvokeTool operations."""
 
         _tool_nodes: List[str] = []
         _tool_list: Dict[Any] = {}
@@ -60,7 +59,7 @@ class AgentHostServices:
                 # Get this nodes tool list
                 param = IInvokeTool.Query()
                 try:
-                    self._invoker.instance.invoke('tool', param, nodeId=tool_node)
+                    self._invoker.instance.invoke(param, component_id=tool_node)
                 except Exception:
                     # We expect this to throw because no node will
                     # return success — but param.tools should be populated with the tool descriptors from this node
@@ -141,7 +140,7 @@ class AgentHostServices:
             param = IInvokeTool.Validate(tool_name=entry['tool_id'], input=input)
 
             # Call the tool to validate - throws on error
-            self._invoker.instance.invoke('tool', param, nodeId=entry['node_id'])
+            self._invoker.instance.invoke(param, component_id=entry['node_id'])
 
         def invoke(self, tool_name: str, input: Any) -> Any:
             """
@@ -164,35 +163,38 @@ class AgentHostServices:
             param = IInvokeTool.Invoke(tool_name=entry['tool_id'], input=input)
 
             # Invoke it
-            self._invoker.instance.invoke('tool', param, nodeId=entry['node_id'])
+            self._invoker.instance.invoke(param, component_id=entry['node_id'])
 
             # And return the output
             return getattr(param, 'output', None)
 
     class Memory:
-        """Memory host interface — thin wrapper over the memory_internal node."""
+        """Memory host interface backed by IInvokeMemory operations."""
 
         def __init__(self, invoker, node_id: str) -> None:
             """Create a Memory host service wrapper bound to an engine invoker."""
             self._invoker = invoker
             self._node_id = node_id
 
-        def _invoke(self, tool_name: str, args: dict) -> Dict[str, Any]:
-            param = IInvokeTool.Invoke(tool_name=tool_name, input=args)
-            self._invoker.instance.invoke('memory', param, nodeId=self._node_id)
+        def put(self, key: str, value: Any) -> Dict[str, Any]:
+            param = IInvokeMemory.Put(input={'key': key, 'value': value})
+            self._invoker.instance.invoke(param, component_id=self._node_id)
             return getattr(param, 'output', None) or {}
 
-        def put(self, key: str, value: Any) -> Dict[str, Any]:
-            return self._invoke('put', {'key': key, 'value': value})
-
         def get(self, key: str) -> Dict[str, Any]:
-            return self._invoke('get', {'key': key})
+            param = IInvokeMemory.Get(input={'key': key})
+            self._invoker.instance.invoke(param, component_id=self._node_id)
+            return getattr(param, 'output', None) or {}
 
         def list(self) -> Dict[str, Any]:
-            return self._invoke('list', {})
+            param = IInvokeMemory.List(input={})
+            self._invoker.instance.invoke(param, component_id=self._node_id)
+            return getattr(param, 'output', None) or {}
 
         def clear(self, key: Optional[str] = None) -> Dict[str, Any]:
-            return self._invoke('clear', {'key': key} if key is not None else {})
+            param = IInvokeMemory.Clear(input={'key': key} if key else {})
+            self._invoker.instance.invoke(param, component_id=self._node_id)
+            return getattr(param, 'output', None) or {}
 
     def __init__(self, invoker):
         """Create host service wrappers bound to an engine invoker."""

@@ -301,7 +301,7 @@ class IInstance(IInstanceBase):
         if previous_cypher and error_message:
             question.addContext(f'Your previous attempt produced the following Cypher:\n\n{previous_cypher}\n\nNeo4J rejected it with this error:\n\n{error_message}\n\nPlease fix the query and try again.')
 
-        result = self.instance.invoke('llm', IInvokeLLM(op='ask', question=question))
+        result = self.instance.invoke(IInvokeLLM.Ask(question=question))
 
         if not result or not result.answer:
             raise ValueError('LLM failed to return a Cypher query.')

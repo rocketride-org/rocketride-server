@@ -154,7 +154,7 @@ class IInstance(IInstanceBase):
         if not llm_nodes:
             raise RuntimeError('Chart generator requires an LLM node connected to the pipeline.')
 
-        result = self.instance.invoke('llm', IInvokeLLM(op='ask', question=q), nodeId=llm_nodes[0])
+        result = self.instance.invoke(IInvokeLLM.Ask(question=q), component_id=llm_nodes[0])
 
         if hasattr(result, 'getText') and callable(result.getText):
             response_text = (result.getText() or '').strip()

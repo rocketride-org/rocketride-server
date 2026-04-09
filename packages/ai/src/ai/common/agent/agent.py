@@ -286,7 +286,7 @@ class AgentBase(ABC):
         transcript = messages_to_transcript(messages)
         q = Question(role=question_role)
         q.addQuestion(transcript)
-        result = host.llm.invoke(IInvokeLLM(op='ask', question=q))
+        result = host.llm.invoke(IInvokeLLM.Ask(question=q))
         text = extract_text(result)
         return truncate_at_stop_words(text, stop_words)
 

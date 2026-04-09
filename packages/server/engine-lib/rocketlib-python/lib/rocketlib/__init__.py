@@ -70,9 +70,11 @@ from .types import getObject
 from .types import IControl
 from .types import IDict
 from .types import IInvoke
+from .types import IInvokeOp
 from .types import IInvokeLLM
 from .types import IInvokeTool
 from .types import IInvokeCrew
+from .types import IInvokeMemory
 from .types import IJson
 from .types import OPEN_MODE
 from .types import PROTOCOL_CAPS
@@ -109,9 +111,11 @@ __all__ = [
     'IServiceEndpoint',
     'IServiceFilterPipe',
     'IInvoke',
+    'IInvokeOp',
     'IInvokeLLM',
     'IInvokeTool',
     'IInvokeCrew',
+    'IInvokeMemory',
     'IJson',
     'ILoader',
     'isAppMonitor',

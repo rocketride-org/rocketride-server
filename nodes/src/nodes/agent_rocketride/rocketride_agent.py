@@ -46,6 +46,7 @@ from .executor import execute_wave, resolve_answer_refs
 # Can be overridden via the ``max_waves`` node configuration field.
 _DEFAULT_MAX_WAVES = 10
 
+
 class RocketRideDriver(AgentBase):
     """
     RocketRide Wave framework driver.
@@ -274,7 +275,7 @@ class RocketRideDriver(AgentBase):
         q.addContext(f'Information gathered:\n{gathered}')
         q.addQuestion('Based on the above, provide a complete and accurate final answer.')
         try:
-            result = host.llm.invoke(IInvokeLLM(op='ask', question=q))
+            result = host.llm.invoke(IInvokeLLM.Ask(question=q))
             return extract_text(result)
         except Exception as exc:
             return f'Unable to produce final answer: {exc}'

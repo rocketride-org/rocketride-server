@@ -8,6 +8,9 @@ export const RS = {
 	section: {
 		marginBottom: 6,
 	} as CSSProperties,
+	sectionContent: {
+		paddingLeft: 10,
+	} as CSSProperties,
 	label: {
 		fontSize: 10,
 		fontWeight: 600,
