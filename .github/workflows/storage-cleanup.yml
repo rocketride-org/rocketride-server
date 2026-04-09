@@ -73,6 +73,7 @@ jobs:
 
           DELETED=0
           BYTES=0
+          FAILED=0
           while read -r id created size name; do
             CREATED_EPOCH=$(date -u -d "${created}" +%s)
             if [ "${CREATED_EPOCH}" -lt "${CUTOFF}" ]; then
@@ -81,6 +82,7 @@ jobs:
                 BYTES=$((BYTES + size))
                 echo "  deleted #${id} (${name}, ${size} bytes, ${created})"
               else
+                FAILED=$((FAILED + 1))
                 echo "  failed to delete #${id}" >&2
               fi
             fi
@@ -91,6 +93,11 @@ jobs:
           echo "## Artifacts cleaned" >> $GITHUB_STEP_SUMMARY
           echo "- Deleted: ${DELETED}" >> $GITHUB_STEP_SUMMARY
           echo "- Freed: ${MB} MiB" >> $GITHUB_STEP_SUMMARY
+          if [ "${FAILED}" -gt 0 ]; then
+            echo "- Failed: ${FAILED}" >> $GITHUB_STEP_SUMMARY
+            echo "::error::Artifact cleanup had ${FAILED} failed deletions"
+            exit 1
+          fi
 
       - name: Delete old caches
         env:
@@ -115,6 +122,7 @@ jobs:
 
           DELETED=0
           BYTES=0
+          FAILED=0
           while read -r id last_used size key; do
             ACCESSED_EPOCH=$(date -u -d "${last_used}" +%s)
             if [ "${ACCESSED_EPOCH}" -lt "${CUTOFF}" ]; then
@@ -123,6 +131,7 @@ jobs:
                 BYTES=$((BYTES + size))
                 echo "  deleted cache #${id} (${key}, ${size} bytes, accessed ${last_used})"
               else
+                FAILED=$((FAILED + 1))
                 echo "  failed to delete cache #${id}" >&2
               fi
             fi
@@ -133,6 +142,11 @@ jobs:
           echo "## Caches cleaned" >> $GITHUB_STEP_SUMMARY
           echo "- Deleted: ${DELETED}" >> $GITHUB_STEP_SUMMARY
           echo "- Freed: ${MB} MiB" >> $GITHUB_STEP_SUMMARY
+          if [ "${FAILED}" -gt 0 ]; then
+            echo "- Failed: ${FAILED}" >> $GITHUB_STEP_SUMMARY
+            echo "::error::Cache cleanup had ${FAILED} failed deletions"
+            exit 1
+          fi
 
       - name: Report current usage
         env:
