@@ -1,11 +1,7 @@
 ---
-title: 'Web Hook'
+title: Webhook
 date: 2025-05-18
 ---
-
-<head>
-  <title>Web Hook - RocketRide Documentation</title>
-</head>
 
 ## **What does it do?**
 
