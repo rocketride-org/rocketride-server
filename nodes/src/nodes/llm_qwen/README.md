@@ -30,18 +30,22 @@ Connects Alibaba Cloud Qwen models to your pipeline via the DashScope API. Used 
 
 API keys are not interchangeable between regions.
 
-| Value  | Region          |
-| ------ | --------------- |
-| `us`   | US (Virginia)   |
-| `intl` | Singapore       |
-| `cn`   | China (Beijing) |
+| Value          | Region             |
+| -------------- | ------------------ |
+| `us`           | US (Virginia)      |
+| `intl`         | Singapore          |
+| `cn`           | China (Beijing)    |
+| `cn-hongkong`  | Hong Kong          |
+| `eu-central-1` | Europe (Frankfurt) |
+
+US deployments require the `-us` model suffix (e.g., `qwen3.5-flash-us`).
 
 ## Profiles
 
-| Profile                | Model        | Context |
-| ---------------------- | ------------ | ------- |
-| Qwen Flash _(default)_ | `qwen-flash` | 131,072 |
-| Qwen Plus              | `qwen-plus`  | 131,072 |
+| Profile                | Model           | Context   |
+| ---------------------- | --------------- | --------- |
+| Qwen Flash _(default)_ | `qwen3.5-flash` | 1,000,000 |
+| Qwen Plus              | `qwen3.5-plus`  | 1,000,000 |
 
 ## Upstream docs
 

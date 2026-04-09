@@ -36,7 +36,7 @@ Extracts named entities (people, organizations, locations, dates, etc.) from tex
 | BERT Base (English)              | `dslim/bert-base-NER`                               | Balanced performance                 |
 | DistilBERT (English)             | `Davlan/distilbert-base-multilingual-cased-ner-hrl` | Fast and lightweight                 |
 | XLM-RoBERTa (Multilingual)       | `Davlan/xlm-roberta-base-ner-hrl`                   | 100+ languages                       |
-| DeBERTa v3 (English)             | `dslim/distilbert-NER`                              | State-of-the-art accuracy            |
+| DistilBERT NER (English)         | `dslim/distilbert-NER`                              | Lightweight, fast English NER        |
 | BioBERT (Biomedical)             | `dmis-lab/biobert-base-cased-v1.1`                  | Medical/scientific entities          |
 | Custom                           | _(user-specified)_                                  | Any compatible HuggingFace NER model |
 

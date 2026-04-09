@@ -25,13 +25,13 @@ Documents must be run through an embedding node before reaching this node.
 
 ## Configuration
 
-| Field           | Description                                                             |
-| --------------- | ----------------------------------------------------------------------- |
-| Host            | Milvus server address (cloud: `<instance>.<region>.zillizcloud.com`)    |
-| Port            | Server port                                                             |
-| API Key         | Zilliz Cloud API key (cloud profile only)                               |
-| Retrieval Score | Minimum similarity threshold: Related, Highly Related, or Most Relevant |
-| Collection      | Collection name to store and query documents                            |
+| Field           | Description                                                          |
+| --------------- | -------------------------------------------------------------------- |
+| Host            | Milvus server address (cloud: `<instance>.<region>.zillizcloud.com`) |
+| Port            | Server port                                                          |
+| API Key         | Zilliz Cloud API key (cloud profile only)                            |
+| Retrieval Score | Minimum similarity threshold (default 0.5)                           |
+| Collection      | Collection name to store and query documents                         |
 
 ## Profiles
 

@@ -16,7 +16,7 @@ Scans text for sensitive entities (names, emails, phone numbers, organizations, 
 
 **Example:**
 
-```
+```text
 Input:  John Smith is a patient at St. Mary's Hospital.
 Output: ████ █████ is a patient at ██ █████████████████.
 ```

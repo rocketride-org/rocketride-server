@@ -1,16 +1,16 @@
 ---
-title: Neo4J
+title: Neo4j
 date: 2026-04-08
 sidebar_position: 1
 ---
 
 <head>
-  <title>Neo4J - RocketRide Documentation</title>
+  <title>Neo4j - RocketRide Documentation</title>
 </head>
 
 ## What it does
 
-Neo4J node with two roles: pipeline node (natural-language questions → Cypher → results via lanes) and tool node (agents call it directly). Read-only — write operations are blocked by design.
+Neo4j node with two roles: pipeline node (natural-language questions → Cypher → results via lanes) and tool node (agents call it directly). Read-only — write operations are blocked by design.
 
 ## Connections
 
@@ -44,7 +44,7 @@ When connected to an agent, exposes three functions under the configured server 
 
 | Field                   | Default                  | Description                                                                      |
 | ----------------------- | ------------------------ | -------------------------------------------------------------------------------- |
-| Connection URI          | `neo4j://localhost:7687` | Bolt URI. Use `neo4j+s://` for TLS (e.g. Neo4J Aura)                             |
+| Connection URI          | `neo4j://localhost:7687` | Bolt URI. Use `neo4j+s://` for TLS (e.g. Neo4j Aura)                             |
 | Authentication          | `Username & Password`    | `Username & Password` or `Bearer Token`                                          |
 | User                    | `neo4j`                  | Username (userpass auth only)                                                    |
 | Password                | —                        | Password (userpass auth only)                                                    |
@@ -59,5 +59,5 @@ Generated Cypher is validated with `EXPLAIN` before execution. If validation fai
 
 ## Upstream docs
 
-- [Neo4J documentation](https://neo4j.com/docs/)
-- [Neo4J Aura](https://neo4j.com/cloud/aura/)
+- [Neo4j documentation](https://neo4j.com/docs/)
+- [Neo4j Aura](https://neo4j.com/cloud/aura/)

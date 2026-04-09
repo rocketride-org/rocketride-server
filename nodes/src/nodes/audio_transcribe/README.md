@@ -1,12 +1,8 @@
 ---
-title: Transcribe
+title: 'Transcribe - RocketRide Documentation'
 date: 2026-04-08
 sidebar_position: 1
 ---
-
-<head>
-  <title>Transcribe - RocketRide Documentation</title>
-</head>
 
 ## What it does
 
@@ -18,22 +14,12 @@ Runs locally via `faster-whisper` — no API key required. Routes to a model ser
 
 ## Configuration
 
-| Field             | Default | Description                                             |
-| ----------------- | ------- | ------------------------------------------------------- |
-| Model             | `base`  | Whisper model size (see table below)                    |
-| Silence Threshold | `0.25s` | Minimum silence duration to split speech segments       |
-| Minimum Seconds   | `240s`  | Minimum audio buffered before looking for a split point |
-| Maximum Seconds   | `300s`  | Maximum audio to buffer before forcing transcription    |
-| VAD Level         | `1`     | Voice activity detection aggressiveness (0–3)           |
-
-**VAD Level:**
-
-| Level | Behavior                                                       |
-| ----- | -------------------------------------------------------------- |
-| `0`   | Most permissive — may include background noise                 |
-| `1`   | Slightly aggressive — skips minor background noise _(default)_ |
-| `2`   | Balanced — moderate filtering                                  |
-| `3`   | Most aggressive — may cut off quiet or short speech            |
+| Field               | Default | Description                                                                              |
+| ------------------- | ------- | ---------------------------------------------------------------------------------------- |
+| Model               | `base`  | Whisper model size (see table below)                                                     |
+| `silence_threshold` | `0.25`  | VAD probability threshold — speech below this confidence is treated as silence (0.0–1.0) |
+| `min_seconds`       | `240`   | Minimum audio (seconds) buffered before looking for a split point                        |
+| `max_seconds`       | `300`   | Maximum audio (seconds) to buffer before forcing transcription                           |
 
 ## Models
 

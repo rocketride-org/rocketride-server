@@ -10,14 +10,14 @@ sidebar_position: 1
 
 ## What it does
 
-Parses documents using the Reducto cloud API, extracting clean markdown text and structured tables. Handles PDFs, images, scanned documents, and mixed-content files.
+Parses documents using the Reducto cloud API, extracting clean Markdown text and structured tables. Handles PDFs, images, scanned documents, and mixed-content files.
 
 **Lanes:**
 
 | Lane in | Lane out | Description                               |
 | ------- | -------- | ----------------------------------------- |
-| `Data`  | `text`   | Extracted text as markdown                |
-| `Data`  | `table`  | Extracted tables in markdown table format |
+| `Data`  | `text`   | Extracted text as Markdown                |
+| `Data`  | `table`  | Extracted tables in Markdown table format |
 
 ## Configuration
 
