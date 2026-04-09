@@ -28,11 +28,10 @@ components (system prompt, query, documents, history), and truncating or
 summarizing content to fit within model limits.
 """
 
-import logging
 import re
 from typing import Any, ClassVar, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
+from rocketlib import warning
 
 
 class ContextOptimizer:
@@ -87,7 +86,7 @@ class ContextOptimizer:
         try:
             self.max_context_tokens: int = max(0, int(config.get('max_context_tokens', 0)))
         except (ValueError, TypeError):
-            logger.warning('context_optimizer: max_context_tokens is not a valid integer, defaulting to 0')
+            warning('context_optimizer: max_context_tokens is not a valid integer, defaulting to 0')
             self.max_context_tokens = 0
 
         # Validate budget percentages (issue #4: non-numeric values, issue #5: negative values)
@@ -99,7 +98,7 @@ class ContextOptimizer:
         # Warn if budget percentages sum to less than 90 (issue #5)
         pct_sum = self.system_prompt_budget_pct + self.query_budget_pct + self.document_budget_pct + self.history_budget_pct
         if pct_sum < 90:
-            logger.warning('context_optimizer: budget percentages sum to %.1f%% (< 90%%), context window may be underutilized', pct_sum)
+            warning(f'context_optimizer: budget percentages sum to {pct_sum:.1f}% (< 90%), context window may be underutilized')
 
         # Resolve the effective token limit
         if self.max_context_tokens > 0:
@@ -116,13 +115,13 @@ class ContextOptimizer:
         try:
             pct = float(value)
         except (ValueError, TypeError):
-            logger.warning('context_optimizer: %s is not a valid number, defaulting to 0', name)
+            warning(f'context_optimizer: {name} is not a valid number, defaulting to 0')
             return 0.0
         if pct < 0:
-            logger.warning('context_optimizer: %s is negative (%.1f), clamping to 0', name, pct)
+            warning(f'context_optimizer: {name} is negative ({pct:.1f}), clamping to 0')
             return 0.0
         if pct > 100:
-            logger.warning('context_optimizer: %s exceeds 100 (%.1f), clamping to 100', name, pct)
+            warning(f'context_optimizer: {name} exceeds 100 ({pct:.1f}), clamping to 100')
             return 100.0
         return pct
 
@@ -261,7 +260,7 @@ class ContextOptimizer:
                 break
 
         if result_parts:
-            # Note: joining normalizes inter-sentence whitespace to single spaces
+            # Intentional: joining normalizes inter-sentence whitespace to single spaces.
             return ' '.join(result_parts)
 
         # Fallback: first sentence is too long -- truncate at token level
