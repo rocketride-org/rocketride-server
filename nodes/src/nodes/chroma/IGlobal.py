@@ -25,10 +25,13 @@
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
 from rocketlib import OPEN_MODE
+from ai.common.config import Config
 from ai.common.transform import IGlobalTransform
 
 
 class IGlobal(IGlobalTransform):
+    serverName: str = 'chroma'
+
     def beginGlobal(self):
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             # We are going to get a call to configureService but
@@ -46,6 +49,14 @@ class IGlobal(IGlobalTransform):
 
             # Get the passed configuration
             connConfig = self.getConnConfig()
+
+            # Resolve the namespace used for agent-facing tool names
+            # (chroma.search/upsert/delete). Read from the merged config
+            # so it honors both profile defaults and user overrides.
+            cfg = Config.getNodeConfig(self.glb.logicalType, connConfig)
+            resolved_name = cfg.get('serverName') if isinstance(cfg, dict) or hasattr(cfg, 'get') else None
+            if isinstance(resolved_name, str) and resolved_name.strip():
+                self.serverName = resolved_name.strip()
 
             # Create the loader
             self.store = Store(self.glb.logicalType, connConfig, bag)

@@ -37,6 +37,8 @@ QDRANT_COLLECTION_RE = re.compile(r'^[A-Za-z0-9._-]{1,255}$')
 
 
 class IGlobal(IGlobalTransform):
+    serverName: str = 'qdrant'
+
     def beginGlobal(self):
         # Are we in config mode or some other mode?
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -55,6 +57,14 @@ class IGlobal(IGlobalTransform):
 
             # Get the passed configuration
             connConfig = self.getConnConfig()
+
+            # Resolve the namespace used for agent-facing tool names
+            # (qdrant.search/upsert/delete). Read from the merged config
+            # so it honors both profile defaults and user overrides.
+            cfg = Config.getNodeConfig(self.glb.logicalType, connConfig)
+            resolved_name = cfg.get('serverName') if isinstance(cfg, dict) or hasattr(cfg, 'get') else None
+            if isinstance(resolved_name, str) and resolved_name.strip():
+                self.serverName = resolved_name.strip()
 
             # Get the configuration
             self.store = Store(self.glb.logicalType, connConfig, bag)
