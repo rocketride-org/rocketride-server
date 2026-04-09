@@ -87,7 +87,7 @@ Step-by-step instructions:
 | Parameter     | Description                              | Effect/Usage                             |
 | ------------- | ---------------------------------------- | ---------------------------------------- |
 | Webhook URL   | The endpoint to send data to             | Triggers the pipeline with uploaded data |
-| HTTP Method   | Should be set to PUT                     | Required for correct operation           |
+| HTTP Method   | Should be set to POST                    | Required for correct operation           |
 | Authorization | API key provided in the URL              | Authenticates the request                |
 | Content-Type  | Set automatically based on uploaded file | Ensures correct file handling            |
 | Body (File)   | The file or data to upload               | Input for the pipeline                   |
