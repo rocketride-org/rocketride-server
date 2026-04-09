@@ -94,20 +94,26 @@ jobs:
 
           CATEGORY_DISPLAY="${CATEGORY_EMOJI:+$CATEGORY_EMOJI }$CATEGORY_NAME"
 
-          # ── Status + color ───────────────────────────────────────────────
+          # ── State + answer status + color ────────────────────────────────
           if [ "$IS_CLOSED" = "true" ]; then
-            COLOR=15158332; STATUS="🔴 Closed"
-          elif [ "$IS_ANSWERABLE" = "true" ] && [ -n "$ANSWER_CHOSEN" ]; then
-            COLOR=3066993
-            if [ -n "$ANSWER_URL" ]; then
-              STATUS="🟢 [Answered]($ANSWER_URL)"
-            else
-              STATUS="🟢 Answered"
-            fi
-          elif [ "$IS_ANSWERABLE" = "true" ]; then
-            COLOR=15105570; STATUS="🟡 Unanswered"
+            STATE="🔴 Closed"; COLOR=15158332
           else
-            COLOR=3447003;  STATUS="🔵 Open"
+            STATE="🔵 Open";   COLOR=3447003
+          fi
+
+          ANSWER_STATUS=""
+          if [ "$IS_ANSWERABLE" = "true" ]; then
+            if [ -n "$ANSWER_CHOSEN" ]; then
+              COLOR=3066993
+              if [ -n "$ANSWER_URL" ]; then
+                ANSWER_STATUS="🟢 [Answered]($ANSWER_URL)"
+              else
+                ANSWER_STATUS="🟢 Answered"
+              fi
+            else
+              COLOR=15105570
+              ANSWER_STATUS="🟡 Unanswered"
+            fi
           fi
 
           # ── Build payload ────────────────────────────────────────────────
@@ -118,7 +124,8 @@ jobs:
             --arg  author   "$AUTHOR" \
             --arg  avatar   "$AVATAR" \
             --arg  repo     "$REPO" \
-            --arg  status   "$STATUS" \
+            --arg  state    "$STATE" \
+            --arg  answer   "$ANSWER_STATUS" \
             --arg  category "$CATEGORY_DISPLAY" \
             --arg  comments "$COMMENT_COUNT" \
             --arg  labels   "$LABELS" \
@@ -128,7 +135,8 @@ jobs:
               description: (if $desc == "" then null else $desc end),
               author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
               fields: [
-                {name: "Status",   value: $status,   inline: true},
+                {name: "State",    value: $state,    inline: true},
+                (if $answer != "" then {name: "Answer", value: $answer, inline: true} else empty end),
                 {name: "Category", value: $category, inline: true},
                 {name: "Comments", value: $comments, inline: true},
                 {name: "Labels",   value: $labels,   inline: true},
