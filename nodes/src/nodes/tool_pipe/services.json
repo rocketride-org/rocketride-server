@@ -7,52 +7,28 @@
 	"node": "python",
 	"path": "nodes.tool_pipe",
 	"prefix": "tool_pipe",
-	"description": ["Exposes any RocketRide pipeline as an agent tool.", "The agent calls this tool with a text input; the node starts the target", "pipeline via the SDK, sends the input through its webhook source,", "and returns the configured response lane back to the agent."],
-	"tile": ["Tool: ${parameters.tool_pipe.${profile}.tool_name}", "Pipe: ${parameters.tool_pipe.${profile}.pipe}"],
-	"lanes": {},
+	"description": ["Exposes an inline pipeline as an agent tool.", "Connect this node's output lanes to any pipeline nodes on the same canvas.", "When an agent calls the tool, the input is routed to whichever lane has", "a connected node. End the sub-pipeline with a response node to return results."],
+	"tile": ["run_pipe"],
+	"lanes": {
+		"_source": ["text", "questions", "documents", "table", "answers"]
+	},
+	"input": [
+		{
+			"lane": "_source",
+			"output": [{ "lane": "text" }, { "lane": "questions" }, { "lane": "documents" }, { "lane": "table" }, { "lane": "answers" }]
+		}
+	],
 	"preconfig": {
 		"default": "default",
 		"profiles": {
 			"default": {
 				"title": "Pipeline Tool",
-				"uri": "",
-				"apikey": "",
-				"pipe": "",
-				"tool_name": "",
 				"tool_description": "",
 				"return_type": "text"
 			}
 		}
 	},
 	"fields": {
-		"tool_pipe.uri": {
-			"type": "string",
-			"title": "Server URI",
-			"description": "RocketRide server URI, e.g. ws://localhost:8080",
-			"default": ""
-		},
-		"tool_pipe.apikey": {
-			"type": "string",
-			"title": "API Key",
-			"description": "RocketRide API key",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
-		},
-		"tool_pipe.pipe": {
-			"type": "string",
-			"title": "Pipeline File",
-			"description": "Path to the .pipe file to run as a tool",
-			"default": ""
-		},
-		"tool_pipe.tool_name": {
-			"type": "string",
-			"title": "Tool Name",
-			"description": "Short identifier the agent uses when referring to this tool (e.g. search_graveyard)",
-			"default": ""
-		},
 		"tool_pipe.tool_description": {
 			"type": "string",
 			"title": "Tool Description",
@@ -62,7 +38,7 @@
 		"tool_pipe.return_type": {
 			"type": "string",
 			"title": "Return Type",
-			"description": "Which response lane to return to the agent",
+			"description": "Which response lane value to return to the agent",
 			"default": "text",
 			"enum": ["text", "answers", "documents", "table", "image"]
 		}
@@ -71,7 +47,7 @@
 		{
 			"section": "Pipe",
 			"title": "Pipeline Tool",
-			"properties": ["type", "tool_pipe.uri", "tool_pipe.apikey", "tool_pipe.pipe", "tool_pipe.tool_name", "tool_pipe.tool_description", "tool_pipe.return_type"]
+			"properties": ["type", "tool_pipe.tool_description", "tool_pipe.return_type"]
 		}
 	]
 }
