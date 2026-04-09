@@ -26,11 +26,11 @@
 """
 tool_pipe node instance.
 
-Exposes a configurable tool to agents. When invoked, routes the input to the
-first connected output lane (questions > documents > table > text). The write
-call is synchronous — by the time it returns, the downstream response node has
-already populated currentObject.response. The new response entries are
-snapshotted and then removed so they don't leak into the parent pipeline.
+Exposes a configurable tool to agents. When invoked, routes the input to all
+connected output lanes. The write call is synchronous — by the time it returns,
+all the downstream response nodes have already populated currentObject.response.
+The new response entries are snapshotted and then removed so they don't leak
+into the parent pipeline.
 """
 
 from __future__ import annotations
@@ -90,12 +90,16 @@ class IInstance(IInstanceBase):
         debug(f'tool_pipe: run_pipe invoked data_len={len(data)}')
 
         entry = getObject()
+        opened = False
         try:
             self.instance.open(entry)
+            opened = True
             self._send_to_connected_lane(data)
-            self.instance.close()
         except Exception:
             return {'result': ''}
+        finally:
+            if opened:
+                self.instance.close()
 
         response = _to_python_dict(entry.response)
 
@@ -112,7 +116,7 @@ class IInstance(IInstanceBase):
     # ------------------------------------------------------------------
 
     def _send_to_connected_lane(self, data: str) -> None:
-        """Write data to the first connected output lane."""
+        """Write data to all connected output lanes."""
         if self.instance.hasListener('questions'):
             from ai.common.schema import Question
 
@@ -124,11 +128,15 @@ class IInstance(IInstanceBase):
             from ai.common.schema import Doc
 
             self.instance.writeDocuments([Doc(page_content=data)])
+
         if self.instance.hasListener('table'):
             self.instance.writeTable(data)
 
         if self.instance.hasListener('text'):
             self.instance.writeText(data)
+
+        if self.instance.hasListener('answers'):
+            self.instance.writeAnswers([data])
 
 
 # ---------------------------------------------------------------------------

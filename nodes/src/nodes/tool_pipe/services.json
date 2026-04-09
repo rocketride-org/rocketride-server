@@ -8,6 +8,7 @@
 	"path": "nodes.tool_pipe",
 	"prefix": "tool_pipe",
 	"description": ["Exposes an inline pipeline as an agent tool.", "Connect this node's output lanes to any pipeline nodes on the same canvas.", "When an agent calls the tool, the input is routed to whichever lane has", "a connected node. End the sub-pipeline with a response node to return results."],
+	"icon": "pipetool.svg",
 	"tile": ["run_pipe"],
 	"lanes": {
 		"_source": ["text", "questions", "documents", "table", "answers"]
