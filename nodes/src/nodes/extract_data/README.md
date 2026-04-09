@@ -10,7 +10,7 @@ sidebar_position: 1
 
 ## What it does
 
-Reads text or tables and uses an LLM to extract a structured set of fields you define. Results are accumulated across all chunks of a document and emitted as consolidated table data (rows emitted as individual documents) at the end.
+Reads text or tables and uses an LLM to extract a structured set of fields you define. Results are accumulated across all chunks of a document — the `documents` lane emits one document per extracted row, while the `answers` lane emits the full consolidated table as a single answer.
 
 **Lanes:**
 

@@ -4,10 +4,6 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
-<head>
-  <title>Milvus - RocketRide Documentation</title>
-</head>
-
 ## What it does
 
 Vector store node backed by Milvus. Stores embedded documents and retrieves them by semantic (vector) similarity search. Supports both self-hosted Milvus and Zilliz Cloud.
