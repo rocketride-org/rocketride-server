@@ -1092,6 +1092,8 @@ class Task(DAPBase):
                 'op': operation,
                 'pipes': self._status.pipeflow.byPipe[pipe_index],
                 'trace': trace or {},
+                'project_id': self.project_id,
+                'source': self.source,
             }
             flow = self.build_event('apaevt_flow', body=body)
 

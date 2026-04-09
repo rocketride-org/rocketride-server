@@ -36,6 +36,8 @@ export interface TraceEvent {
 		result?: string;
 		error?: string;
 	};
+	/** Source node ID (e.g. "chat_1") — identifies which pipeline source generated this event. */
+	source?: string;
 }
 
 /** Processed trace row for display in Trace component. */
@@ -53,6 +55,8 @@ export interface TraceRow {
 	timestamp: number;
 	endTimestamp?: number;
 	objectName: string;
+	/** Source node ID that generated this trace. */
+	source?: string;
 }
 
 // =============================================================================

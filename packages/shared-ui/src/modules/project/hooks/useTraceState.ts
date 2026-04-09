@@ -1,24 +1,6 @@
 // =============================================================================
 // MIT License
 // Copyright (c) 2026 Aparavi Software AG Inc.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
 // =============================================================================
 
 /**
@@ -29,12 +11,11 @@
  * bookkeeping (document map, slot bindings, pending call stacks) via refs
  * so that re-renders only occur when the final row list changes.
  *
- * The hook is designed to work incrementally: on each render it processes
- * only the new events appended since the last pass. If the host resets
- * the events array (length shrinks), all internal state is cleared.
+ * Processing runs in a useEffect to avoid mutating refs during render
+ * (which breaks React 18 Strict Mode double-invocation).
  */
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import type { TraceEvent, TraceRow } from '../types';
 
 // =============================================================================
@@ -125,38 +106,34 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 	};
 
 	// =========================================================================
-	// Reset detection
+	// Incremental processing — runs as an effect, not during render
 	// =========================================================================
 
-	if (traceEvents.length < processedCountRef.current) {
-		// Host cleared the events array -- reset all internal state
-		documentsRef.current.clear();
-		docOrderRef.current = [];
-		slotBindingsRef.current.clear();
-		pendingStacksRef.current.clear();
-		rowCounterRef.current = 0;
-		nextDocIdRef.current = 0;
-		processedCountRef.current = 0;
-		// rows will be flushed below (no new events, but flush clears)
-	}
+	useEffect(() => {
+		const start = processedCountRef.current;
+		const end = traceEvents.length;
 
-	// =========================================================================
-	// Incremental processing
-	// =========================================================================
+		// Handle reset: if events array shrank (host cleared), reset all state
+		if (end < start) {
+			documentsRef.current.clear();
+			docOrderRef.current = [];
+			slotBindingsRef.current.clear();
+			pendingStacksRef.current.clear();
+			rowCounterRef.current = 0;
+			nextDocIdRef.current = 0;
+			processedCountRef.current = 0;
+			setRows([]);
+			return;
+		}
 
-	const start = processedCountRef.current;
-	const end = traceEvents.length;
+		if (start >= end) return; // nothing new
 
-	if (start < end) {
 		for (let i = start; i < end; i++) {
 			const event = traceEvents[i];
-			const { pipelineId, op, pipes, trace } = event;
+			const { pipelineId, op, pipes, trace, source: eventSource } = event;
 			const lane = trace.lane || op;
 
 			switch (op) {
-				// -----------------------------------------------------------------
-				// begin: allocate a new document and bind the pipeline slot
-				// -----------------------------------------------------------------
 				case 'begin': {
 					const docId = nextDocIdRef.current++;
 					const objectName = pipes[0] || '';
@@ -172,9 +149,6 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 					break;
 				}
 
-				// -----------------------------------------------------------------
-				// enter: create a new TraceRow and push it onto the pending stack
-				// -----------------------------------------------------------------
 				case 'enter': {
 					const docId = slotBindingsRef.current.get(pipelineId);
 					if (docId == null) break;
@@ -195,6 +169,7 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 						entryData: trace.data,
 						timestamp: Date.now(),
 						objectName: doc.objectName,
+						source: eventSource,
 					};
 
 					doc.rows.push(row);
@@ -202,9 +177,6 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 					break;
 				}
 
-				// -----------------------------------------------------------------
-				// leave: pop the pending stack and enrich the row with exit data
-				// -----------------------------------------------------------------
 				case 'leave': {
 					const docId = slotBindingsRef.current.get(pipelineId);
 					if (docId == null) break;
@@ -227,9 +199,6 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 					break;
 				}
 
-				// -----------------------------------------------------------------
-				// end: mark the document completed and unbind the slot
-				// -----------------------------------------------------------------
 				case 'end': {
 					const docId = slotBindingsRef.current.get(pipelineId);
 					if (docId != null) {
@@ -246,10 +215,7 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 
 		processedCountRef.current = end;
 		flush();
-	} else if (start > end) {
-		// Already handled by reset detection above; just flush the empty state
-		flush();
-	}
+	}, [traceEvents, flush]);
 
 	// =========================================================================
 	// clearTrace — callable by the host to manually reset

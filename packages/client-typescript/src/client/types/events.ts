@@ -22,8 +22,6 @@
  * SOFTWARE.
  */
 
-import { TASK_STATUS } from './task.js';
-
 /**
  * Event type enumeration for sophisticated client subscription and event routing.
  *
@@ -130,49 +128,6 @@ export enum EVENT_TYPE {
 }
 
 /**
- * DAP event for task status updates with comprehensive processing statistics.
- *
- * This event is sent whenever a task's status changes, providing real-time
- * visibility into task execution progress, error conditions, and performance
- * metrics. It contains the complete TASK_STATUS structure with all processing
- * statistics, error tracking, and operational state information.
- *
- * Event Triggers:
- * - Task state changes (NONE → STARTING → RUNNING → COMPLETED, etc.)
- * - Processing progress updates (item counts, byte counts, rates)
- * - Error and warning conditions
- * - Service health status changes
- * - Pipeline component execution flow changes
- *
- * Client Subscriptions:
- * - DETAIL: Real-time updates for immediate display
- * - SUMMARY: Periodic consolidated updates for dashboards
- * - ALL: Comprehensive monitoring for administrative tools
- *
- * @example
- * ```typescript
- * function handleStatusUpdate(event: EVENT_STATUS_UPDATE): void {
- *     const status = event.body;
- *     console.log(`Task ${status.name} is ${status.state === 3 ? 'running' : 'idle'}`);
- *     console.log(`Progress: ${status.completedCount}/${status.totalCount} items`);
- * }
- * ```
- */
-export interface EVENT_STATUS_UPDATE {
-	/** DAP message type - always "event" for events */
-	type: 'event';
-
-	/** Event type identifier for status update events */
-	event: 'apaevt_status_update';
-
-	/** Complete task status information with processing statistics and metrics */
-	body: TASK_STATUS;
-
-	/** Additional DAP fields may be present but should be ignored by status handlers */
-	[key: string]: unknown;
-}
-
-/**
  * DAP event for task lifecycle management with discriminated union for type safety.
  *
  * This event handles three distinct task lifecycle scenarios using TypeScript's
@@ -210,7 +165,7 @@ export interface EVENT_STATUS_UPDATE {
  * ```
  */
 /** Task info entry in the 'running' action payload. */
-export interface TaskRunningEntry {
+interface TaskRunningEntry {
 	/** Unique task identifier. */
 	id: string;
 	/** Project identifier. */
@@ -260,3 +215,39 @@ interface TaskEventRestart {
 
 /** Discriminated union of all apaevt_task event body shapes. */
 export type TaskEvent = TaskEventRunning | TaskEventBegin | TaskEventEnd | TaskEventRestart;
+
+/**
+ * DAP event for pipeline flow tracking — component execution and data flow visualization.
+ *
+ * Sent during pipeline execution to track data flowing through components.
+ * Each event represents a pipeline operation (begin, enter, leave, end) on
+ * a specific pipe within the pipeline.
+ *
+ * Client Subscriptions:
+ * - FLOW: Pipeline execution tracking
+ * - ALL: Comprehensive monitoring
+ */
+export interface TaskEventFlow {
+	/** Pipe index within the pipeline. */
+	id: number;
+
+	/** Operation type. */
+	op: 'begin' | 'enter' | 'leave' | 'end';
+
+	/** Component names in the current pipe's execution path. */
+	pipes: string[];
+
+	/** Trace data — lane, input/output data, result, error. */
+	trace: {
+		lane?: string;
+		data?: Record<string, unknown>;
+		result?: string;
+		error?: string;
+	};
+
+	/** Project identifier. */
+	project_id: string;
+
+	/** Source component identifier (e.g. "chat_1"). */
+	source: string;
+}

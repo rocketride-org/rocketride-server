@@ -155,7 +155,7 @@ export const StatusHeader: React.FC<StatusHeaderProps> = ({ name, taskStatus, cu
 	const showElapsed = !!taskStatus && taskStatus.startTime > 0 && !taskStatus.completed;
 
 	return (
-		<div style={{ padding: '8px 12px', display: 'flex', justifyContent: 'space-between', gap: 12, borderBottom: '1px solid var(--rr-border)' }}>
+		<div style={commonStyles.cardHeader}>
 			{/* Left column: name, state, status */}
 			<div style={styles.stack}>
 				<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
