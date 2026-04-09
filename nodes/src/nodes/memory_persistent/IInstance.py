@@ -24,9 +24,11 @@ class IInstance(IInstanceBase):
     """Pipeline instance for the memory_persistent node."""
 
     IGlobal: IGlobal
+    _current_session_id: str | None = None
 
     def open(self, _obj: Entry) -> None:
-        """Reset per-object state. Nothing to reset for this node."""
+        """Reset per-object state for the current pipeline item."""
+        self._current_session_id = None
 
     def writeQuestions(self, question: Question) -> None:
         """Load session context from memory and attach to question metadata, then forward.
@@ -47,6 +49,7 @@ class IInstance(IInstanceBase):
         session_id = None
         if hasattr(question, 'metadata') and isinstance(question.metadata, dict):
             session_id = question.metadata.get('session_id')
+        self._current_session_id = session_id
 
         if session_id:
             # Ensure session exists (resume or create).
@@ -57,6 +60,7 @@ class IInstance(IInstanceBase):
                 if not resume.get('ok'):
                     store.create_session(session_id)
             except ValueError:
+                self._current_session_id = None
                 debug(f'Ignoring invalid session_id in question metadata: {session_id!r}')
                 self.instance.writeQuestions(question)
                 return
@@ -98,6 +102,8 @@ class IInstance(IInstanceBase):
         session_id = None
         if hasattr(answer, 'metadata') and isinstance(answer.metadata, dict):
             session_id = answer.metadata.get('session_id')
+        if not session_id:
+            session_id = self._current_session_id
 
         if session_id:
             # Ensure session exists.

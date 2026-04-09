@@ -50,7 +50,7 @@ class MemoryBackend(ABC):
     """Abstract backend for persistent memory storage."""
 
     @abstractmethod
-    def create_session(self, session_id: str, ttl_seconds: Optional[int] = None) -> Dict[str, Any]:
+    def create_session(self, session_id: str, ttl_seconds: Optional[float] = None) -> Dict[str, Any]:
         """Create a new session. Returns metadata about the session."""
 
     @abstractmethod
@@ -133,7 +133,7 @@ class InMemoryBackend(MemoryBackend):
             return True
         return False
 
-    def create_session(self, session_id: str, ttl_seconds: Optional[int] = None) -> Dict[str, Any]:
+    def create_session(self, session_id: str, ttl_seconds: Optional[float] = None) -> Dict[str, Any]:
         _validate_session_id(session_id)
         with self._lock:
             if session_id in self._sessions:
@@ -323,10 +323,11 @@ class RedisBackend(MemoryBackend):
     def _meta_key(self, session_id: str) -> str:
         return f'{_REDIS_PREFIX}:{session_id}:__meta__'
 
-    def _set_ttl(self, session_id: str, ttl_seconds: Optional[int]) -> None:
+    def _set_ttl(self, session_id: str, ttl_seconds: Optional[float]) -> None:
         """Apply TTL to all keys belonging to a session."""
         if ttl_seconds is None or ttl_seconds <= 0:
             return
+        ttl_ms = max(1, int(round(ttl_seconds * 1000)))
         keys_to_expire = [
             self._keys_key(session_id),
             self._history_key(session_id),
@@ -336,16 +337,16 @@ class RedisBackend(MemoryBackend):
         members = self._client.smembers(self._keys_key(session_id))
         keys_to_expire.extend(self._data_key(session_id, member) for member in members)
         for k in keys_to_expire:
-            self._client.expire(k, ttl_seconds)
+            self._client.pexpire(k, ttl_ms)
 
-    def _get_ttl_seconds(self, session_id: str) -> Optional[int]:
+    def _get_ttl_seconds(self, session_id: str) -> Optional[float]:
         """Retrieve the TTL for a session from metadata."""
         raw = self._client.hget(self._meta_key(session_id), 'ttl_seconds')
         if raw and raw != 'None':
-            return int(raw)
+            return float(raw)
         return None
 
-    def create_session(self, session_id: str, ttl_seconds: Optional[int] = None) -> Dict[str, Any]:
+    def create_session(self, session_id: str, ttl_seconds: Optional[float] = None) -> Dict[str, Any]:
         _validate_session_id(session_id)
         with self._lock:
             if self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
@@ -440,14 +441,13 @@ class RedisBackend(MemoryBackend):
                     }
                 ),
             )
-            pipe.execute()
-            # Align new key's expiry with the session metadata key's
-            # remaining TTL so it doesn't outlive the session.
-            remaining_ms = self._client.pttl(self._meta_key(session_id))
+            # Keep the newly written key set aligned with the TTL observed
+            # before the write, so it cannot outlive the session metadata.
             if remaining_ms and remaining_ms > 0:
-                self._client.pexpire(self._data_key(session_id, key), remaining_ms)
-                self._client.pexpire(self._keys_key(session_id), remaining_ms)
-                self._client.pexpire(self._history_key(session_id), remaining_ms)
+                pipe.pexpire(self._data_key(session_id, key), remaining_ms)
+                pipe.pexpire(self._keys_key(session_id), remaining_ms)
+                pipe.pexpire(self._history_key(session_id), remaining_ms)
+            pipe.execute()
             return {'ok': True, 'session_id': session_id, 'key': key}
 
     def get(self, session_id: str, key: str) -> Dict[str, Any]:
@@ -606,7 +606,7 @@ class PersistentMemoryStore:
         self.max_history = max_history
         self.auto_summarize = auto_summarize
         self.session_ttl_hours = session_ttl_hours
-        self._ttl_seconds: Optional[int] = int(session_ttl_hours * 3600) if session_ttl_hours > 0 else None
+        self._ttl_seconds: Optional[float] = session_ttl_hours * 3600 if session_ttl_hours > 0 else None
 
         if backend == 'redis':
             self._backend: MemoryBackend = RedisBackend(

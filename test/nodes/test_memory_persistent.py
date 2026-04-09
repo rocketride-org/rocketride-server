@@ -357,8 +357,9 @@ class TestRedisBackendMocked:
 
         result = backend.put('sess', 'mykey', {'data': 42})
         assert result['ok'] is True
-        # Should call pexpire on the data key, keys key, and history key
-        assert backend._client.pexpire.call_count == 3
+        # The TTL should be queued on the pipeline, not applied after execute().
+        assert pipe_mock.pexpire.call_count == 3
+        assert backend._client.pexpire.call_count == 0
 
     def test_get_redis_found(self):
         backend = self._make_backend()
@@ -573,12 +574,17 @@ class TestTTLEnforcement:
         backend.put('forever', 'k', 'v')
         assert backend.resume_session('forever')['ok'] is True
 
-    def test_ttl_from_store_config(self):
+    def test_ttl_from_store_config_preserves_fractional_seconds(self):
         store = PersistentMemoryStore(backend='memory', session_ttl_hours=0.0001)  # ~0.36 seconds
+        assert store._ttl_seconds == pytest.approx(0.36)
         store.create_session('s1')
         store.put('s1', 'k', 'v')
         # Should be accessible immediately
         assert store.resume_session('s1')['ok'] is True
+        time.sleep(0.45)
+        result = store.resume_session('s1')
+        assert result['ok'] is False
+        assert 'expired' in result['error']
 
 
 # =============================================================================
@@ -950,6 +956,26 @@ class TestIInstanceLifecycle:
         assert result['ok'] is True
         assert result['value'] == 'The answer is 42'
 
+    def test_write_answers_uses_session_id_from_previous_question(self):
+        store = PersistentMemoryStore(backend='memory')
+        store.create_session('test-sess')
+
+        inst = self._make_instance(store=store)
+        question = MagicMock()
+        question.metadata = {'session_id': 'test-sess'}
+        inst.writeQuestions(question)
+
+        answer = MagicMock()
+        answer.metadata = {}
+        answer.getText.return_value = 'Follow-up answer'
+
+        inst.writeAnswers(answer)
+
+        result = store.get('test-sess', 'last_answer')
+        assert result['ok'] is True
+        assert result['value'] == 'Follow-up answer'
+        assert store.get('test-sess', 'answer_count')['value'] == 1
+
     def test_write_answers_increments_count(self):
         store = PersistentMemoryStore(backend='memory')
         store.create_session('test-sess')
@@ -963,6 +989,20 @@ class TestIInstanceLifecycle:
 
         count = store.get('test-sess', 'answer_count')
         assert count['value'] == 3
+
+    def test_open_clears_current_session_state(self):
+        store = PersistentMemoryStore(backend='memory')
+        store.create_session('test-sess')
+
+        inst = self._make_instance(store=store)
+        question = MagicMock()
+        question.metadata = {'session_id': 'test-sess'}
+
+        inst.writeQuestions(question)
+        assert inst._current_session_id == 'test-sess'
+
+        inst.open(MagicMock())
+        assert inst._current_session_id is None
 
     def test_write_questions_no_session_id(self):
         store = PersistentMemoryStore(backend='memory')
