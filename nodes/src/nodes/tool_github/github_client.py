@@ -60,14 +60,17 @@ def call(
     }
 
     url = BASE_URL + path
-    resp = requests.request(
-        method.upper(),
-        url,
-        headers=headers,
-        params={k: v for k, v in (params or {}).items() if v is not None},
-        json=body,
-        timeout=DEFAULT_TIMEOUT,
-    )
+    try:
+        resp = requests.request(
+            method.upper(),
+            url,
+            headers=headers,
+            params={k: v for k, v in (params or {}).items() if v is not None},
+            json=body,
+            timeout=DEFAULT_TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        raise ValueError(f'GitHub request failed: {exc}') from exc
 
     if resp.status_code == 204:
         return {}

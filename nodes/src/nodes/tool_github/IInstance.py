@@ -271,8 +271,8 @@ class IInstance(IInstanceBase):
             'state': args.get('state', 'open'),
             'labels': args.get('labels'),
             'assignee': args.get('assignee'),
-            'per_page': min(int(args.get('per_page') or 30), 100),
-            'page': args.get('page', 1),
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
         }
         data = call(self._token(), 'GET', f'/repos/{repo}/issues', params=params)
         # GitHub issues endpoint includes PRs — filter them out
@@ -418,8 +418,8 @@ class IInstance(IInstanceBase):
         params = {
             'state': args.get('state', 'open'),
             'base': args.get('base'),
-            'per_page': min(int(args.get('per_page') or 30), 100),
-            'page': args.get('page', 1),
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
         }
         data = call(self._token(), 'GET', f'/repos/{repo}/pulls', params=params)
         return [clean_pr(pr) for pr in data]
@@ -503,7 +503,7 @@ class IInstance(IInstanceBase):
         args = _normalize(args)
         repo = self._repo(args)
         num = _require_int(args, 'pr_number', 'review_list')
-        params = {'per_page': min(int(args.get('per_page') or 30), 100), 'page': args.get('page', 1)}
+        params = {'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
         data = call(self._token(), 'GET', f'/repos/{repo}/pulls/{num}/reviews', params=params)
         return [{'id': r.get('id'), 'state': r.get('state'), 'body': r.get('body'), 'user': clean_user(r.get('user')), 'submitted_at': r.get('submitted_at')} for r in data]
 
@@ -587,7 +587,7 @@ class IInstance(IInstanceBase):
     def release_list(self, args):
         args = _normalize(args)
         repo = self._repo(args)
-        params = {'per_page': min(int(args.get('per_page') or 30), 100), 'page': args.get('page', 1)}
+        params = {'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
         data = call(self._token(), 'GET', f'/repos/{repo}/releases', params=params)
         return [clean_release(r) for r in data]
 
@@ -699,7 +699,7 @@ class IInstance(IInstanceBase):
     def workflow_list(self, args):
         args = _normalize(args)
         repo = self._repo(args)
-        params = {'per_page': min(int(args.get('per_page') or 30), 100), 'page': args.get('page', 1)}
+        params = {'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
         data = call(self._token(), 'GET', f'/repos/{repo}/actions/workflows', params=params)
         return [clean_workflow(w) for w in (data.get('workflows') or [])]
 
@@ -822,8 +822,8 @@ class IInstance(IInstanceBase):
         org = _require_str(args, 'org', 'org_list_repos')
         params = {
             'type': args.get('type', 'all'),
-            'per_page': min(int(args.get('per_page') or 30), 100),
-            'page': args.get('page', 1),
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
         }
         data = call(self._token(), 'GET', f'/orgs/{org}/repos', params=params)
         return [clean_repo(r) for r in data]
@@ -849,8 +849,8 @@ class IInstance(IInstanceBase):
         username = (args.get('username') or '').strip()
         params = {
             'type': args.get('type', 'owner'),
-            'per_page': min(int(args.get('per_page') or 30), 100),
-            'page': args.get('page', 1),
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
         }
         path = f'/users/{username}/repos' if username else '/user/repos'
         data = call(self._token(), 'GET', path, params=params)
@@ -900,7 +900,7 @@ class IInstance(IInstanceBase):
         repo = (args.get('repo') or self.IGlobal.default_repo or '').strip()
         if repo:
             q = f'{q} repo:{repo}'
-        params = {'q': q, 'per_page': min(int(args.get('per_page') or 30), 100), 'page': args.get('page', 1)}
+        params = {'q': q, 'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
         data = call(self._token(), 'GET', '/search/code', params=params)
         return [
             {
@@ -934,7 +934,7 @@ class IInstance(IInstanceBase):
             q = f'{q} repo:{repo}'
         if args.get('state'):
             q = f'{q} is:{args["state"]}'
-        params = {'q': q, 'per_page': min(int(args.get('per_page') or 30), 100), 'page': args.get('page', 1)}
+        params = {'q': q, 'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
         data = call(self._token(), 'GET', '/search/issues', params=params)
         return [clean_issue(i) for i in (data.get('items') or [])]
 
@@ -957,8 +957,8 @@ class IInstance(IInstanceBase):
         params = {
             'path': args.get('path'),
             'sha': args.get('sha'),
-            'per_page': min(int(args.get('per_page') or 30), 100),
-            'page': args.get('page', 1),
+            'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
+            'page': max(1, int(args.get('page') or 1)),
         }
         data = call(self._token(), 'GET', f'/repos/{repo}/commits', params=params)
         return [clean_commit(c) for c in data]

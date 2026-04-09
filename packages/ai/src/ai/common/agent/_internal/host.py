@@ -192,7 +192,7 @@ class AgentHostServices:
             return self._invoke('list', {})
 
         def clear(self, key: Optional[str] = None) -> Dict[str, Any]:
-            return self._invoke('clear', {'key': key} if key else {})
+            return self._invoke('clear', {'key': key} if key is not None else {})
 
     def __init__(self, invoker):
         """Create host service wrappers bound to an engine invoker."""
