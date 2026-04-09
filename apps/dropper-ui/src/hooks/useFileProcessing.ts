@@ -203,7 +203,7 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 					const enrichedResults = uploadResults.map((r) => {
 						const videoEntry = videoChunksRef.current.get(r.filepath);
 						// Skip oversized files (already in 'error' state) and files with no video entry
-						if (!videoEntry || !r.result || videoEntry.oversized) return r;
+						if (!videoEntry || videoEntry.oversized) return r;
 						// Validate all chunks are present using totalChunks from the SSE data.
 						// .every() skips sparse-array holes, so we explicitly iterate 0..totalChunks-1
 						// to catch any missing index.
@@ -223,11 +223,12 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 						videoBlobUrlsRef.current.set(r.filepath, blobUrl);
 						// Free the raw chunk buffer — the Blob URL is now the only reference needed
 						videoChunksRef.current.delete(r.filepath);
+						const baseResult = r.result ?? { name: r.filepath, path: r.filepath, objectId: r.filepath };
 						return {
 							...r,
 							result: {
-								...r.result,
-								result_types: { ...r.result.result_types, video: 'video' },
+								...baseResult,
+								result_types: { ...(baseResult.result_types ?? {}), video: 'video' },
 								video: blobUrl,
 							},
 						};
