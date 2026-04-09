@@ -44,7 +44,7 @@ export const RS = {
 	} as CSSProperties,
 	kvMono: {
 		color: 'var(--rr-text-primary)',
-		fontFamily: 'var(--rr-font-mono, monospace)',
+		fontFamily: 'monospace',
 	} as CSSProperties,
 	badge: {
 		display: 'inline-block',
@@ -58,7 +58,7 @@ export const RS = {
 	historyItem: {
 		padding: '2px 0',
 		fontSize: 11,
-		borderBottom: '1px solid var(--rr-border-subtle, rgba(0,0,0,0.04))',
+		borderBottom: '1px solid var(--rr-border)',
 	} as CSSProperties,
 	historyRole: {
 		color: 'var(--rr-text-secondary)',

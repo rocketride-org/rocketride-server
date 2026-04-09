@@ -69,7 +69,7 @@ const tableStyles = {
 		width: '100%',
 		borderCollapse: 'collapse',
 		fontSize: 11,
-		fontFamily: 'var(--rr-font-mono, monospace)',
+		fontFamily: 'monospace',
 	} as CSSProperties,
 	th: {
 		textAlign: 'left',
@@ -83,7 +83,7 @@ const tableStyles = {
 	} as CSSProperties,
 	td: {
 		padding: '3px 8px',
-		borderBottom: '1px solid var(--rr-border-subtle, rgba(0,0,0,0.04))',
+		borderBottom: '1px solid var(--rr-border)',
 		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
 };
