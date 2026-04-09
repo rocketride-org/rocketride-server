@@ -453,9 +453,8 @@ class TestRetryWithBackoff:
             call_count += 1
             raise RateLimitError()
 
-        with patch('llm_base.resilience.time.sleep', side_effect=recording_sleep):
-            with pytest.raises(RateLimitError):
-                fail()
+        with patch('llm_base.resilience.time.sleep', side_effect=recording_sleep), pytest.raises(RateLimitError):
+            fail()
 
         # We should have 3 recorded delays (one per retry).
         assert len(delays) == 3
@@ -480,9 +479,8 @@ class TestRetryWithBackoff:
             call_count += 1
             raise RateLimitError()
 
-        with patch('llm_base.resilience.time.sleep', side_effect=recording_sleep):
-            with pytest.raises(RateLimitError):
-                fail()
+        with patch('llm_base.resilience.time.sleep', side_effect=recording_sleep), pytest.raises(RateLimitError):
+            fail()
 
         for d in delays:
             assert d <= 15.0

@@ -151,7 +151,11 @@ def get_provider_config(provider_name: str) -> ResilienceConfig:
 
 
 def create_resilience_policy(provider_name: str, config: Optional[ResilienceConfig] = None) -> LLMResiliencePolicy:
-    """Create (or reuse) an ``LLMResiliencePolicy`` for *provider_name*."""
+    """Create a new ``LLMResiliencePolicy`` for *provider_name*.
+
+    The underlying circuit breaker may still be reused by
+    ``LLMResiliencePolicy.__init__`` via the shared provider registry.
+    """
     if config is None:
         config = get_provider_config(provider_name)
     return LLMResiliencePolicy(
