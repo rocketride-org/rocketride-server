@@ -10,7 +10,7 @@ sidebar_position: 1
 
 ## What it does
 
-Connects any OpenAI-compatible API endpoint to your pipeline. Use this node for providers that implement the OpenAI API spec (Featherless, Together, Groq, LM Studio, and others) but don't have a dedicated RocketRide node. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM. Can also be used directly via lanes.
+Connects any OpenAI-compatible API endpoint to your pipeline. Use this node for providers that implement the OpenAI API spec (Featherless, Together, Groq, LM Studio, and others) but don't have a dedicated RocketRide node. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM, but can also be used directly via lanes.
 
 **Lanes:**
 

@@ -52,7 +52,7 @@ Only `SELECT` is permitted for queries. Insert operations use the `answers` lane
 | User                    | `postgres`  | Database username                                                               |
 | Password                | —           | Database password                                                               |
 | Database                | `postgres`  | Database name                                                                   |
-| Table                   | —           | Target table name                                                               |
+| Table                   | `table`     | Target table name                                                               |
 | Max Validation Attempts | `5`         | Retry limit for EXPLAIN-based SQL validation (range 1–20)                       |
 
 ## SQL validation

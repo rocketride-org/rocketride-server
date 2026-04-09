@@ -28,7 +28,7 @@ Connects GMI Cloud-hosted models to your pipeline via an OpenAI-compatible API. 
 
 ## Model tiers
 
-GMI Cloud has two tiers:
+GMI Cloud has three tiers:
 
 **Shared (always-on)** — available immediately, API key only:
 

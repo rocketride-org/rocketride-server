@@ -12,16 +12,16 @@ sidebar_position: 1
 
 Assembles a structured `Question` object from multiple pipeline inputs and emits it downstream. This is the primary mechanism for injecting retrieved documents, extracted text, and table content into a question before it reaches an LLM or agent node.
 
-Each input lane maps to a different section of the rendered prompt. The `questions` lane is the trigger — when a question arrives, all accumulated inputs are merged and the enriched question is emitted.
+Each input lane maps to a different section of the rendered prompt. The `questions` lane collects inputs as they arrive; the fully assembled question is not emitted until `closing()` is called, at which point all accumulated inputs are merged and the enriched question is emitted downstream.
 
 **Lanes:**
 
-| Lane in     | Lane out    | Description                                         |
-| ----------- | ----------- | --------------------------------------------------- |
-| `documents` | —           | Added to `### Documents:` section of the prompt     |
-| `text`      | —           | Added to `### Context:` section of the prompt       |
-| `table`     | —           | Added to `### Context:` section of the prompt       |
-| `questions` | `questions` | Triggers merge — emits the fully assembled Question |
+| Lane in     | Lane out    | Description                                                                    |
+| ----------- | ----------- | ------------------------------------------------------------------------------ |
+| `documents` | —           | Added to `### Documents:` section of the prompt                                |
+| `text`      | —           | Added to `### Context:` section of the prompt                                  |
+| `table`     | —           | Added to `### Context:` section of the prompt                                  |
+| `questions` | `questions` | Collects inputs; emits the fully assembled Question when `closing()` is called |
 
 ## Configuration
 

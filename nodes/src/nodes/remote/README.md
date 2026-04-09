@@ -23,7 +23,7 @@ Forwards pipeline execution to a separate RocketRide server. The pipeline config
 | Field   | Description                                    |
 | ------- | ---------------------------------------------- |
 | Host    | Hostname or IP of the remote RocketRide server |
-| Port    | Server port (default `5565`)                   |
+| Port    | Server port (required, no default)             |
 | API Key | Authentication key for the remote server       |
 
 ## Profiles
