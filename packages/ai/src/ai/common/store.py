@@ -1,8 +1,9 @@
 import importlib
+import json
 import threading
 from abc import abstractmethod, ABC
 from typing import List, Callable, Dict, Any, Tuple
-from rocketlib import IInstanceBase
+from rocketlib import IInstanceBase, tool_function, warning
 from .schema import Doc, DocFilter, DocMetadata, Question, QuestionText, QuestionType, Answer
 
 
@@ -549,3 +550,354 @@ def getStore(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> 
 
     # Create an instance of the class
     return cls(provider, connConfig, bag)
+
+
+# ---------------------------------------------------------------------------
+# Vector DB tool mixin
+# ---------------------------------------------------------------------------
+#
+# Rod's review feedback on PR #524 suggested co-locating the tool definitions
+# with the underlying store so every vectordb node can "morph into a tool"
+# without a separate generic wrapper node. Because the engine dispatches
+# ``invoke`` against the node's ``IInstance`` (not the ``DocumentStoreBase``
+# subclass, which is composed via ``self.IGlobal.store``), the tool methods
+# must live on a class that the ``IInstance`` subclasses. This mixin is that
+# class: it lives next to ``DocumentStoreBase`` so the store interface stays
+# together in a single file, and it delegates every call to
+# ``self.IGlobal.store`` (which is a ``DocumentStoreBase`` instance).
+#
+# Any vectordb ``IInstance`` that subclasses ``VectorStoreToolMixin`` picks up
+# the ``search``, ``upsert`` and ``delete`` tools automatically via
+# ``IInstanceBase._collect_tool_methods`` (which walks the full MRO).
+
+
+_VECTORDB_TOOL_MAX_TOP_K = 100
+_VECTORDB_TOOL_DEFAULT_TOP_K = 10
+
+
+def _normalize_vectordb_tool_input(input_obj: Any) -> Dict[str, Any]:
+    """Normalize a tool-call payload into a plain ``dict``.
+
+    Handles ``None``, plain dicts, pydantic models (``model_dump`` / ``dict``),
+    JSON strings, and nested ``input`` wrappers the host may produce. A
+    nested ``input`` value of any supported shape (dict, JSON string,
+    pydantic model) is re-normalized before merging with any sibling
+    ``extras`` in the outer payload so values like ``{'input': '{"query":
+    "x"}'}`` or ``{'input': SomeModel(...)}`` are handled correctly.
+    """
+    if input_obj is None:
+        return {}
+
+    # Pydantic (v2 prefers model_dump; fall back to v1 dict())
+    if hasattr(input_obj, 'model_dump') and callable(getattr(input_obj, 'model_dump')):
+        input_obj = input_obj.model_dump()
+    elif hasattr(input_obj, 'dict') and callable(getattr(input_obj, 'dict')):
+        try:
+            input_obj = input_obj.dict()
+        except TypeError:
+            # Not a pydantic-style ``dict()`` (e.g. builtin dict) — leave as is.
+            pass
+
+    # JSON string
+    if isinstance(input_obj, str):
+        try:
+            parsed = json.loads(input_obj)
+            if isinstance(parsed, dict):
+                input_obj = parsed
+            else:
+                warning(f'vectordb tool: JSON input did not parse to a dict (got {type(parsed).__name__})')
+                return {}
+        except (json.JSONDecodeError, ValueError) as exc:
+            warning(f'vectordb tool: malformed JSON input, returning empty dict: {exc}')
+            return {}
+
+    if not isinstance(input_obj, dict):
+        warning(f'vectordb tool: unexpected input type {type(input_obj).__name__}')
+        return {}
+
+    # Unwrap nested ``input`` wrappers the host may produce. Re-run the
+    # normalizer on the inner value so string-, model- or dict-wrapped
+    # payloads all get the same treatment.
+    if 'input' in input_obj:
+        inner_raw = input_obj['input']
+        extras = {k: v for k, v in input_obj.items() if k != 'input'}
+        inner = _normalize_vectordb_tool_input(inner_raw)
+        if isinstance(inner, dict):
+            input_obj = {**inner, **extras}
+
+    input_obj.pop('security_context', None)
+    return input_obj
+
+
+class VectorStoreToolMixin:
+    """
+    Expose vector DB search/upsert/delete as agent tools.
+
+    Any vectordb ``IInstance`` that inherits from this mixin is automatically
+    discoverable through the ``tool.*`` control-plane protocol. The mixin
+    delegates all storage operations to ``self.IGlobal.store`` (a
+    :class:`DocumentStoreBase` implementation) so backend-specific code stays
+    in the backend driver.
+
+    To enable tool discovery, the node's ``services.json`` must also include
+    ``"tool"`` in its ``classType`` list and ``"invoke"`` in its
+    ``capabilities`` list.
+    """
+
+    # --- Configuration knobs (override via IGlobal) ------------------------
+
+    def _vectordb_default_top_k(self) -> int:
+        glb = getattr(self, 'IGlobal', None)
+        value = getattr(glb, 'default_top_k', None)
+        try:
+            value = int(value) if value is not None else _VECTORDB_TOOL_DEFAULT_TOP_K
+        except (TypeError, ValueError):
+            value = _VECTORDB_TOOL_DEFAULT_TOP_K
+        return max(1, min(value, _VECTORDB_TOOL_MAX_TOP_K))
+
+    def _vectordb_score_threshold(self) -> float:
+        glb = getattr(self, 'IGlobal', None)
+        value = getattr(glb, 'score_threshold', None)
+        try:
+            value = float(value) if value is not None else 0.0
+        except (TypeError, ValueError):
+            value = 0.0
+        return max(0.0, min(value, 1.0))
+
+    def _vectordb_store(self) -> 'DocumentStoreBase':
+        store = getattr(getattr(self, 'IGlobal', None), 'store', None)
+        if store is None:
+            raise RuntimeError('vectordb tool: store not initialized')
+        return store
+
+    # --- Tool methods ------------------------------------------------------
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['query'],
+            'properties': {
+                'query': {
+                    'type': 'string',
+                    'description': 'The search query text. Will be matched against stored documents using semantic similarity.',
+                },
+                'top_k': {
+                    'type': 'integer',
+                    'description': 'Maximum number of results to return (default: 10).',
+                    'default': _VECTORDB_TOOL_DEFAULT_TOP_K,
+                },
+                'filter': {
+                    'type': 'object',
+                    'description': 'Optional metadata filter. Keys are metadata field names, values are the required values. Example: {"nodeId": "my-node", "parent": "/docs"}',
+                    'additionalProperties': True,
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'results': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'content': {'type': 'string'},
+                            'score': {'type': 'number'},
+                            'metadata': {'type': 'object'},
+                        },
+                    },
+                },
+                'total': {'type': 'integer'},
+            },
+        },
+        description='Search for documents in the vector database using semantic similarity. Returns matching documents ranked by relevance with their content, metadata, and similarity scores.',
+    )
+    def search(self, args):
+        """Search for documents in the vector database."""
+        args = _normalize_vectordb_tool_input(args)
+        store = self._vectordb_store()
+
+        query_text = str(args.get('query', '')).strip()
+        if not query_text:
+            raise ValueError('search requires a non-empty "query" string')
+
+        default_top_k = self._vectordb_default_top_k()
+        try:
+            top_k = int(args.get('top_k', default_top_k))
+        except (TypeError, ValueError):
+            top_k = default_top_k
+        top_k = max(1, min(top_k, _VECTORDB_TOOL_MAX_TOP_K))
+
+        raw_filter = args.get('filter') or {}
+        doc_filter = DocFilter()
+        if isinstance(raw_filter, dict):
+            object_id = raw_filter.get('objectId')
+            if object_id:
+                doc_filter.objectIds = [object_id] if isinstance(object_id, str) else list(object_id)
+            node_id = raw_filter.get('nodeId')
+            if node_id:
+                doc_filter.nodeId = node_id
+            parent = raw_filter.get('parent')
+            if parent:
+                doc_filter.parent = parent
+
+        doc_filter.limit = top_k
+        question = QuestionText(text=query_text)
+
+        try:
+            docs: List[Doc] = store.searchSemantic(question, doc_filter)
+        except Exception as exc:
+            warning(f'vectordb tool: semantic search failed ({exc}), trying keyword search')
+            try:
+                docs = store.searchKeyword(question, doc_filter)
+            except Exception as exc2:
+                raise RuntimeError(f'vectordb tool: search failed: {exc2}') from exc2
+
+        score_threshold = self._vectordb_score_threshold()
+        results: List[Dict[str, Any]] = []
+        for doc in docs:
+            score = getattr(doc, 'score', 0.0) or 0.0
+            if score_threshold > 0 and score < score_threshold:
+                continue
+            meta: Dict[str, Any] = {}
+            if doc.metadata:
+                meta = {
+                    'objectId': doc.metadata.objectId,
+                    'nodeId': doc.metadata.nodeId,
+                    'parent': doc.metadata.parent,
+                    'chunkId': doc.metadata.chunkId,
+                }
+            results.append(
+                {
+                    'content': doc.page_content or '',
+                    'score': score,
+                    'metadata': meta,
+                }
+            )
+
+        trimmed = results[:top_k]
+        return {
+            'results': trimmed,
+            'total': len(trimmed),
+        }
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['documents'],
+            'properties': {
+                'documents': {
+                    'type': 'array',
+                    'description': 'Array of documents to upsert.',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'content': {
+                                'type': 'string',
+                                'description': 'The text content of the document.',
+                            },
+                            'object_id': {
+                                'type': 'string',
+                                'description': 'Unique identifier for the document. Used for deduplication.',
+                            },
+                            'metadata': {
+                                'type': 'object',
+                                'description': 'Optional metadata key-value pairs to store with the document.',
+                                'additionalProperties': True,
+                            },
+                        },
+                        'required': ['content', 'object_id'],
+                    },
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'count': {'type': 'integer'},
+                'skipped': {'type': 'integer'},
+            },
+        },
+        description='Add or update documents in the vector database. Each document requires content text and an object ID for deduplication. Note: documents are stored as text chunks without embeddings; the backend must be configured to compute embeddings on ingest, or an upstream embedding node must be present in the pipeline.',
+    )
+    def upsert(self, args):
+        """Add or update documents in the vector database."""
+        args = _normalize_vectordb_tool_input(args)
+        store = self._vectordb_store()
+
+        raw_docs = args.get('documents', [])
+        if not isinstance(raw_docs, list) or not raw_docs:
+            raise ValueError('upsert requires a non-empty "documents" array')
+
+        docs: List[Doc] = []
+        skipped = 0
+        for raw in raw_docs:
+            if not isinstance(raw, dict):
+                skipped += 1
+                continue
+            content = str(raw.get('content', '')).strip()
+            object_id = str(raw.get('object_id', '')).strip()
+            if not content or not object_id:
+                skipped += 1
+                continue
+
+            extra_meta = raw.get('metadata') or {}
+            metadata = DocMetadata(
+                objectId=object_id,
+                nodeId=extra_meta.get('nodeId', 'vectordb_tool'),
+                parent=extra_meta.get('parent', '/'),
+                chunkId=extra_meta.get('chunkId', 0),
+                isDeleted=False,
+            )
+            doc = Doc(
+                page_content=content,
+                metadata=metadata,
+            )
+            docs.append(doc)
+
+        if not docs:
+            raise ValueError('upsert: no valid documents provided')
+
+        if any(not getattr(doc, 'embedding', None) for doc in docs):
+            warning('vectordb tool: upserting documents without pre-computed embeddings. Ensure the backend is configured to generate embeddings on ingest, or results may not be searchable via semantic search.')
+
+        store.addChunks(docs)
+        return {'success': True, 'count': len(docs), 'skipped': skipped}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['object_ids'],
+            'properties': {
+                'object_ids': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': 'List of object IDs to delete.',
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'deleted_count': {'type': 'integer'},
+            },
+        },
+        description='Delete documents from the vector database by their object IDs.',
+    )
+    def delete(self, args):
+        """Delete documents from the vector database by object IDs."""
+        args = _normalize_vectordb_tool_input(args)
+        store = self._vectordb_store()
+
+        object_ids = args.get('object_ids', [])
+        if not isinstance(object_ids, list) or not object_ids:
+            raise ValueError('delete requires a non-empty "object_ids" array')
+
+        clean_ids = [str(oid).strip() for oid in object_ids if str(oid).strip()]
+        if not clean_ids:
+            raise ValueError('delete: no valid object IDs provided')
+
+        store.remove(clean_ids)
+        return {'success': True, 'deleted_count': len(clean_ids)}

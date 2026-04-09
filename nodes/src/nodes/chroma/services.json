@@ -13,13 +13,14 @@
 	// Required:
 	//      Class type of the node - what it does
 	//
-	"classType": ["store"],
+	"classType": ["store", "tool"],
 	//
 	// Required:
 	//      Capabilities are flags that change the behavior of the underlying
-	//      engine
+	//      engine. "invoke" lets agents call the vector DB tools exposed via
+	//      VectorStoreToolMixin (search, upsert, delete).
 	//
-	"capabilities": [],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
