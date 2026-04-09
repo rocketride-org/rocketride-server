@@ -37,6 +37,7 @@ import re
 import uuid as _uuid
 from datetime import datetime, timezone
 from random import random as _random
+from typing import Any
 
 
 # Sentinel used to distinguish "key missing" from "key is None"
@@ -64,7 +65,7 @@ _BUILTINS = {
 # ---------------------------------------------------------------------------
 # Context value resolution
 # ---------------------------------------------------------------------------
-def _resolve(name: str, context: dict):
+def _resolve(name: str, context: dict) -> Any:
     """Resolve a dotted name against *context*, falling back to built-ins.
 
     Resolution order: context takes priority over built-in helpers.
@@ -169,7 +170,7 @@ def _eval_tokens(tokens: list[tuple[str, str]], context: dict) -> str:
     return ''.join(parts)
 
 
-def _at_top_level(tokens, start, pos):
+def _at_top_level(tokens: list[tuple[str, str]], start: int, pos: int) -> bool:
     """Check if *pos* is at the top nesting level between *start* and *pos*."""
     depth_if = 0
     depth_for = 0
@@ -188,7 +189,12 @@ def _at_top_level(tokens, start, pos):
     return depth_if == 0 and depth_for == 0
 
 
-def _handle_if(tokens, start, context, parts):
+def _handle_if(
+    tokens: list[tuple[str, str]],
+    start: int,
+    context: dict,
+    parts: list[str],
+) -> int:
     """Process an {% if %}...{% elif %}...{% else %}...{% endif %} block."""
     end = _find_matching_end(tokens, start + 1, 'if', 'endif')
     if end == -1:
@@ -225,7 +231,12 @@ def _handle_if(tokens, start, context, parts):
     return end + 1
 
 
-def _handle_for(tokens, start, context, parts):
+def _handle_for(
+    tokens: list[tuple[str, str]],
+    start: int,
+    context: dict,
+    parts: list[str],
+) -> int:
     """Process a {% for item in list %}...{% endfor %} block."""
     end = _find_matching_end(tokens, start + 1, 'for', 'endfor')
     if end == -1:

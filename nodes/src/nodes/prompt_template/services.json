@@ -21,7 +21,7 @@
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": [],
+	"capabilities": ["experimental"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -140,6 +140,20 @@
 					"questions": {
 						"notEmpty": true,
 						"contains": "Summarize the following:"
+					}
+				}
+			},
+			{
+				"config": {
+					"template": "Q={{question}} | I={{input}}",
+					"variables": {"input": "ctx"}
+				},
+				"questions": {
+					"questions": [{"text": "what is this?"}]
+				},
+				"expect": {
+					"questions": {
+						"contains": "Q=what is this?"
 					}
 				}
 			}
