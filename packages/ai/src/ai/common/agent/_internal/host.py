@@ -183,16 +183,16 @@ class AgentHostServices:
             return getattr(param, 'output', None) or {}
 
         def put(self, key: str, value: Any) -> Dict[str, Any]:
-            return self._invoke('memory.put', {'key': key, 'value': value})
+            return self._invoke('put', {'key': key, 'value': value})
 
         def get(self, key: str) -> Dict[str, Any]:
-            return self._invoke('memory.get', {'key': key})
+            return self._invoke('get', {'key': key})
 
         def list(self) -> Dict[str, Any]:
-            return self._invoke('memory.list', {})
+            return self._invoke('list', {})
 
         def clear(self, key: Optional[str] = None) -> Dict[str, Any]:
-            return self._invoke('memory.clear', {'key': key} if key else {})
+            return self._invoke('clear', {'key': key} if key is not None else {})
 
     def __init__(self, invoker):
         """Create host service wrappers bound to an engine invoker."""
