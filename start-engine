@@ -1,0 +1,12 @@
+#!/bin/bash
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIST="$DIR/dist/server"
+
+if [ ! -f "$DIST/engine" ]; then
+    echo "Error: engine binary not found at $DIST/engine"
+    echo "Run './builder server:build' first to compile the engine."
+    exit 1
+fi
+
+cd "$DIST" && exec ./engine --trace=ServicePython ./ai/eaas.py "$@"

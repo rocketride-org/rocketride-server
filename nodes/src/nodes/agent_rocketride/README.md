@@ -49,8 +49,6 @@ The agent uses a two-level memory model to stay token-efficient:
 
 - **Structural summaries** — always visible in the planning prompt. Show data shape without loading raw values into context.
 - **`memory.peek`** — built-in tool the LLM calls on demand to extract specific values via JMESPath (e.g. `rows[0:5].city`). Arrays are capped at 50 items per call; large raw values can be paged with `offset`/`length`.
-- **`{{memory.ref:key}}`** — embeds the stored value by key at render time.
-- **`{{memory.ref:key:format}}`** — renders bulk data in a specific format (`csv`, `json`, or `table`) without loading it into context.
-- **`{{memory.ref:key:format:path}}`** — extracts a nested path from the stored value before formatting (e.g. `results.rows`). Arrays can be paged with `offset`/`length`. All variants are resolved by the executor at render time.
+- **`{{memory.ref:key:format}}`** — used in the final answer to embed bulk data (tables, CSV, JSON) without ever loading it into context. Resolved by the engine at render time.
 
 The LLM maintains a **scratch** field — persistent working notes (memory keys, extracted values, intermediate calculations) that carry forward across waves. When the LLM is done with a result key it signals `remove: ["wave-0.r0"]` to evict it, keeping the planning prompt lean for long-running tasks.

@@ -4,6 +4,10 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
+<head>
+  <title>Ollama Vision - RocketRide Documentation</title>
+</head>
+
 ## What it does
 
 Sends images to locally-hosted Ollama vision models and returns text analysis. No API key required — models run on your own hardware. Accepts either a single image or a stream of image documents (e.g. from the frame grabber). Metadata such as frame number and timestamp is preserved on the `documents` output.

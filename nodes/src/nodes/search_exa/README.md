@@ -4,6 +4,10 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
+<head>
+  <title>Exa Search - RocketRide Documentation</title>
+</head>
+
 ## What it does
 
 Performs web search using the Exa API. Accepts a question and returns semantic or keyword search results, with optional highlighted excerpts from matching pages.

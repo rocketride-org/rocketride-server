@@ -49,4 +49,4 @@ By default only **Agent Description** and **Instructions** are shown. Toggle **A
 
 ## Using as a sub-agent
 
-Wire into a `CrewAI Manager` node via the `crewai` invoke channel. The manager invokes `crewai.describe` to collect this node's role, goal, backstory, and task. Tool resolution is handled separately by the manager and is not a direct field in the `crewai.describe` response.
+Wire into a `CrewAI Manager` node via the `crewai` invoke channel. The manager fans out `crewai.describe` to collect this node's role, goal, backstory, task, and tools before building the hierarchical Crew.

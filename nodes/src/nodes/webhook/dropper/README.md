@@ -64,10 +64,10 @@ Each results tab includes a download button (📥) to save the processed data:
 ### **Supported Features**
 
 - **Multiple Files:** Upload several files simultaneously
-- **Large Files:** Supports large file uploads (actual limit depends on server configuration)
-- **All File Types:** Accepts any file type supported by your pipeline
-- **Real-time Processing:** Immediate feedback on upload and processing status
-- **Progress Tracking:** Visual indication of processing progress
+- **Large Files**: Handle files up to 1GB in size
+- **All File Types**: Accept any file type for processing
+- **Real-time Processing**: Immediate feedback on upload and processing status
+- **Progress Tracking**: Visual indication of processing progress
 
 ### **Processing Workflow**
 

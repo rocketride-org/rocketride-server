@@ -34,7 +34,7 @@ Splits text into chunks for downstream embedding or LLM processing. Uses LangCha
 | Default _(default)_ | `RecursiveCharacterTextSplitter` | General-purpose prose                                                  |
 | Recursive           | `RecursiveCharacterTextSplitter` | General-purpose with custom separators                                 |
 | Character           | `CharacterTextSplitter`          | Simple splitting on a fixed separator                                  |
-| Markdown            | `MarkdownTextSplitter`           | Structured Markdown documents                                          |
+| Markdown            | `MarkdownTextSplitter`           | Structured markdown documents                                          |
 | LaTeX               | `LatexTextSplitter`              | Scientific/academic documents                                          |
 | NLTK                | `NLTKTextSplitter`               | Sentence-based splitting                                               |
 | Spacy               | `SpacyTextSplitter`              | NLP-based sentence splitting (English, German, French, Spanish models) |

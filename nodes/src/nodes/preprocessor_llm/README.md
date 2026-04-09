@@ -4,6 +4,10 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
+<head>
+  <title>LLM Preprocessor - RocketRide Documentation</title>
+</head>
+
 ## What it does
 
 Splits text into semantically coherent chunks using an LLM to detect context boundaries. Unlike rule-based splitters, the LLM preserves meaning across chunk boundaries. Requires an LLM connection.
@@ -23,6 +27,6 @@ Splits text into semantically coherent chunks using an LLM to detect context bou
 
 ## Configuration
 
-| Field                      | Description                                                                                                                                                                                               |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Number of tokens per chunk | Target chunk size for output documents (default `384`). This node does not perform embeddings — set this value to match the input limit of the embedding model that will process these chunks downstream. |
+| Field                      | Description                                                                         |
+| -------------------------- | ----------------------------------------------------------------------------------- |
+| Number of tokens per chunk | Target chunk size — should match your embedding model's input limit (default `384`) |

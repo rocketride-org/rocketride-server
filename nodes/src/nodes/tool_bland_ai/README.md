@@ -4,6 +4,10 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
+<head>
+  <title>Bland AI - RocketRide Documentation</title>
+</head>
+
 ## What it does
 
 Gives agents the ability to make and manage AI-powered phone calls via the Bland AI API. Useful for automating outbound calls — scheduling, surveys, follow-ups, or any task that requires a voice interaction.
@@ -25,6 +29,8 @@ Gives agents the ability to make and manage AI-powered phone calls via the Bland
 | `first_sentence` | no       | Opening line spoken by the AI           |
 | `voice`          | no       | Override the default voice              |
 | `max_duration`   | no       | Override the default max call length    |
+| `language`       | no       | Override the default language           |
+| `record`         | no       | Override the default recording setting  |
 | `webhook`        | no       | URL to receive call events              |
 
 Returns a `call_id` for use with `get_call` and `analyze_call`.

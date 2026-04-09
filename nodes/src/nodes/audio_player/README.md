@@ -10,7 +10,7 @@ sidebar_position: 1
 
 ## What it does
 
-Plays audio through the system's default output device in real time. Accepts audio lane payloads as container-format bytes (for example WAV/MP3, with MIME type) or video input (audio track extracted). Terminal node — no output lanes.
+Plays audio through the system's default output device in real time. Accepts raw audio or video (audio track extracted). Terminal node — no output lanes.
 
 **Lanes:** `audio` → _(speakers)_, `video` → _(speakers)_
 
@@ -22,9 +22,9 @@ Not available in SaaS deployments — local only.
 
 No configuration options. Fixed playback settings:
 
-| Parameter   | Value                                             |
-| ----------- | ------------------------------------------------- |
-| Sample rate | 44,100 Hz                                         |
-| Channels    | Stereo                                            |
-| Format      | PCM int16 (internal playback format after decode) |
-| Latency     | Low                                               |
+| Parameter   | Value     |
+| ----------- | --------- |
+| Sample rate | 44,100 Hz |
+| Channels    | Stereo    |
+| Format      | PCM int16 |
+| Latency     | Low       |

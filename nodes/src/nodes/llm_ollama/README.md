@@ -73,5 +73,5 @@ Connects locally-hosted Ollama models to your pipeline. Used primarily as an `ll
 
 ## Upstream docs
 
-- [Ollama documentation](https://docs.ollama.com/)
+- [Ollama documentation](https://ollama.ai/docs)
 - [Ollama model library](https://ollama.com/library)

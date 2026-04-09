@@ -4,6 +4,10 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
+<head>
+  <title>Firecrawl - RocketRide Documentation</title>
+</head>
+
 ## What it does
 
 Gives agents the ability to scrape web pages and map website structures using the Firecrawl API. Useful for agents that need to read live web content or discover URLs across a site.

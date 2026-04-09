@@ -25,14 +25,14 @@ Documents must be run through an embedding node before reaching this node.
 
 ## Configuration
 
-| Field           | Description                                                                                             |
-| --------------- | ------------------------------------------------------------------------------------------------------- |
-| Host            | Weaviate server address (e.g., `your-instance.weaviate.cloud` for cloud or `localhost` for self-hosted) |
-| Port            | REST port (default `8080` for local, `443` for cloud)                                                   |
-| gRPC Port       | gRPC port for local deployments (default `50051`)                                                       |
-| API Key         | Weaviate Cloud API key (cloud profile only)                                                             |
-| Retrieval Score | Minimum similarity threshold (default `0.5`)                                                            |
-| Collection      | Collection name — must start with an uppercase letter                                                   |
+| Field           | Description                                                     |
+| --------------- | --------------------------------------------------------------- |
+| Host            | Weaviate server address (cloud: `your-instance.weaviate.cloud`) |
+| Port            | REST port (default `8080` for local, `443` for cloud)           |
+| gRPC Port       | gRPC port for local deployments (default `50051`)               |
+| API Key         | Weaviate Cloud API key (cloud profile only)                     |
+| Retrieval Score | Minimum similarity threshold (default `0.5`)                    |
+| Collection      | Collection name — must start with an uppercase letter           |
 
 ## Profiles
 

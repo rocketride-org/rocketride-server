@@ -42,6 +42,8 @@ Connects IBM WatsonX foundation models to your pipeline via the IBM Cloud API. U
 | `ca-tor`   | Toronto       |
 | `br-sao`   | São Paulo     |
 
+There are no preset profiles — enter any valid WatsonX model ID directly.
+
 ## Upstream docs
 
 - [IBM WatsonX foundation models](https://www.ibm.com/products/watsonx-ai/foundation-models)

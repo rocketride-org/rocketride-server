@@ -4,6 +4,10 @@ date: 2026-04-08
 sidebar_position: 1
 ---
 
+<head>
+  <title>OpenAI Embedding - RocketRide Documentation</title>
+</head>
+
 ## What it does
 
 Generates text embeddings using OpenAI's embedding API. Requires an OpenAI API key.

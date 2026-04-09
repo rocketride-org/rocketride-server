@@ -27,9 +27,9 @@ Splits incoming text into chunks and uses an LLM to extract a summary, key point
 
 ## Configuration
 
-| Field (`config key`)                                              | Description                                                         |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Number of chunks to summarize (`summarization.numberOfSummaries`) | How many chunks to process after the document is split (default: 2) |
-| Words per summary (`summarization.numberOfSummaryWords`)          | Word limit per summary — set to `0` to disable (default: 1500)      |
-| Words per key point (`summarization.numberOfKeyPointWords`)       | Word limit per key point — set to `0` to disable (default: 250)     |
-| Entities to extract (`summarization.numberOfEntities`)            | Max named entities to extract — set to `0` to disable (default: 25) |
+| Field                         | Description                                                         |
+| ----------------------------- | ------------------------------------------------------------------- |
+| Number of chunks to summarize | How many chunks to process after the document is split (default: 2) |
+| Words per summary             | Word limit per summary — set to `0` to disable (default: 1500)      |
+| Words per key point           | Word limit per key point — set to `0` to disable (default: 250)     |
+| Entities to extract           | Max named entities to extract — set to `0` to disable (default: 25) |

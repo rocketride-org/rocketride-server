@@ -10,14 +10,14 @@ sidebar_position: 1
 
 ## What it does
 
-Parses documents using the Reducto cloud API, extracting clean Markdown text and structured tables. Handles PDFs, images, scanned documents, and mixed-content files.
+Parses documents using the Reducto cloud API, extracting clean markdown text and structured tables. Handles PDFs, images, scanned documents, and mixed-content files.
 
 **Lanes:**
 
 | Lane in | Lane out | Description                               |
 | ------- | -------- | ----------------------------------------- |
-| `Data`  | `text`   | Extracted text as Markdown                |
-| `Data`  | `table`  | Extracted tables in Markdown table format |
+| `Data`  | `text`   | Extracted text as markdown                |
+| `Data`  | `table`  | Extracted tables in markdown table format |
 
 ## Configuration
 
@@ -31,7 +31,7 @@ Parses documents using the Reducto cloud API, extracting clean Markdown text and
 | Field                       | Description                                                     |
 | --------------------------- | --------------------------------------------------------------- |
 | Contains Handwritten Text   | Enables Agentic OCR for better handwriting recognition          |
-| Contains Non-English Text   | Enables multilingual OCR for non-Germanic languages and Unicode |
+| Contains Non-English Text   | Enables multilingual OCR for non-Germanic languages and unicode |
 | AI Summarize Figures/Images | Generate AI summaries for figures, diagrams, and images         |
 
 ### Advanced mode

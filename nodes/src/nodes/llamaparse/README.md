@@ -10,15 +10,14 @@ sidebar_position: 1
 
 ## What it does
 
-Parses documents using the LlamaIndex cloud API. Handles PDFs, images, Word, Excel, and other formats. Extracts text and tables, including Markdown tables found in structured output.
+Parses documents using the LlamaIndex cloud API. Handles PDFs, images, Word, Excel, and other formats. Extracts text and tables, including markdown tables found in structured output.
 
 **Lanes:**
 
-| Lane in | Lane out    | Description                                                       |
-| ------- | ----------- | ----------------------------------------------------------------- |
-| `tags`  | `text`      | Parse document, emit extracted text                               |
-| `tags`  | `table`     | Parse document, emit extracted tables                             |
-| `tags`  | `documents` | Parse document, emit full document objects (when listener exists) |
+| Lane in | Lane out | Description                           |
+| ------- | -------- | ------------------------------------- |
+| `data`  | `text`   | Parse document, emit extracted text   |
+| `data`  | `table`  | Parse document, emit extracted tables |
 
 Requires a LlamaIndex API key. Processing happens in the cloud.
 
@@ -57,20 +56,6 @@ Available when using LVM legacy, Agentic, or Agentic Plus modes:
 | Anthropic Sonnet 3.5             |       |
 | GPT-4o                           |       |
 | GPT-4o Mini                      |       |
-
-## Advanced configuration (JSON mode)
-
-When **Advanced Configuration** is enabled, supply a raw JSON object instead of the simple options. The following parameters are supported:
-
-| Key                              | Type    | Description                                                                                                                                                                                                                                                                                                                                                            |
-| -------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `parse_mode`                     | string  | API-level parse mode passed directly to LlamaIndex. Accepted values: `parse_page_with_llm` (cost-effective text parsing), `parse_page_with_agent` (agentic/diagram-aware parsing), `parse_page_with_lvm` (legacy LVM-based parsing). Note: simple-mode aliases (`agentic`, `agentic_plus`, `cost_effective`) are not valid here — they are only mapped in simple mode. |
-| `system_prompt_append`           | string  | Text appended to the parsing system prompt. In advanced mode, this is honored directly from the JSON payload regardless of simple-mode toggles. In simple mode, only applied in LVM legacy mode (`parse_page_with_lvm`) when **Use Additional Instructions** is on.                                                                                                    |
-| `spreadsheet_extract_sub_tables` | boolean | Extract sub-tables embedded within spreadsheet cells. Corresponds to the **Extract Sub Tables** toggle in simple mode.                                                                                                                                                                                                                                                 |
-| `vendor_multimodal_model_name`   | string  | Vision model used for LVM and agentic modes (e.g. `anthropic-sonnet-4-0`).                                                                                                                                                                                                                                                                                             |
-| `page_error_tolerance`           | number  | Fraction of pages allowed to fail before the job is aborted (default `0.05` in LVM legacy mode).                                                                                                                                                                                                                                                                       |
-
-> Advanced mode bypasses all simple-mode settings. Unknown keys will produce a warning but will not abort execution.
 
 ## Upstream docs
 
