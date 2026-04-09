@@ -77,13 +77,13 @@ jobs:
           while read -r id created size name; do
             CREATED_EPOCH=$(date -u -d "${created}" +%s)
             if [ "${CREATED_EPOCH}" -lt "${CUTOFF}" ]; then
-              if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}" >/dev/null 2>&1; then
+              if err=$(gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}" 2>&1 >/dev/null); then
                 DELETED=$((DELETED + 1))
                 BYTES=$((BYTES + size))
                 echo "  deleted #${id} (${name}, ${size} bytes, ${created})"
               else
                 FAILED=$((FAILED + 1))
-                echo "  failed to delete #${id}" >&2
+                echo "  failed to delete #${id}: ${err}" >&2
               fi
             fi
           done < "${ARTIFACTS_FILE}"
@@ -126,13 +126,13 @@ jobs:
           while read -r id last_used size key; do
             ACCESSED_EPOCH=$(date -u -d "${last_used}" +%s)
             if [ "${ACCESSED_EPOCH}" -lt "${CUTOFF}" ]; then
-              if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${id}" >/dev/null 2>&1; then
+              if err=$(gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${id}" 2>&1 >/dev/null); then
                 DELETED=$((DELETED + 1))
                 BYTES=$((BYTES + size))
                 echo "  deleted cache #${id} (${key}, ${size} bytes, accessed ${last_used})"
               else
                 FAILED=$((FAILED + 1))
-                echo "  failed to delete cache #${id}" >&2
+                echo "  failed to delete cache #${id}: ${err}" >&2
               fi
             fi
           done < "${CACHES_FILE}"
