@@ -159,7 +159,6 @@ def clean_commit(c: dict) -> dict:
         'sha': c.get('sha'),
         'message': commit.get('message'),
         'author': author.get('name'),
-        'email': author.get('email'),
         'date': author.get('date'),
         'html_url': c.get('html_url'),
     }

@@ -248,6 +248,8 @@ class IInstance(IInstanceBase):
         repo = self._repo(args)
         num = _require_int(args, 'issue_number', 'issue_get')
         data = call(self._token(), 'GET', f'/repos/{repo}/issues/{num}')
+        if data.get('pull_request'):
+            raise ValueError(f'#{num} is a pull request — use pr_get instead')
         return clean_issue(data)
 
     @tool_function(
@@ -936,7 +938,13 @@ class IInstance(IInstanceBase):
             q = f'{q} is:{args["state"]}'
         params = {'q': q, 'per_page': max(1, min(int(args.get('per_page') or 30), 100)), 'page': max(1, int(args.get('page') or 1))}
         data = call(self._token(), 'GET', '/search/issues', params=params)
-        return [clean_issue(i) for i in (data.get('items') or [])]
+        results = []
+        for i in data.get('items') or []:
+            cleaned = clean_issue(i)
+            cleaned['repository'] = i.get('repository_url', '').removeprefix('https://api.github.com/repos/')
+            cleaned['is_pull_request'] = 'pull_request' in i
+            results.append(cleaned)
+        return results
 
     @tool_function(
         input_schema={
