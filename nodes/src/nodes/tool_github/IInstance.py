@@ -157,7 +157,9 @@ class IInstance(IInstanceBase):
         self._require_write()
         repo = self._repo(args)
         path = _require_str(args, 'path', 'file_create')
-        content = _require_str(args, 'content', 'file_create')
+        content = args.get('content')
+        if content is None:
+            raise ValueError('file_create: "content" is required')
         message = _require_str(args, 'message', 'file_create')
         body: dict = {
             'message': message,
@@ -188,7 +190,9 @@ class IInstance(IInstanceBase):
         self._require_write()
         repo = self._repo(args)
         path = _require_str(args, 'path', 'file_edit')
-        content = _require_str(args, 'content', 'file_edit')
+        content = args.get('content')
+        if content is None:
+            raise ValueError('file_edit: "content" is required')
         message = _require_str(args, 'message', 'file_edit')
         sha = _require_str(args, 'sha', 'file_edit')
         body: dict = {
