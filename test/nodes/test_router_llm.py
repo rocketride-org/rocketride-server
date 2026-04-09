@@ -263,6 +263,7 @@ class TestCostAwareRouting:
         router.record_cost(5.0)
         result = router.select_model('Any question')
         assert result['tier'] == 3
+        assert result['model'] == 'gemini-flash'
         assert 'budget exhausted' in result['reason']
 
     def test_near_budget_routes_to_balanced(self):
@@ -270,6 +271,7 @@ class TestCostAwareRouting:
         router.record_cost(8.5)  # 85% of budget
         result = router.select_model('Any question')
         assert result['tier'] == 2
+        assert result['model'] == 'claude-sonnet'
         assert 'approaching budget' in result['reason']
 
     def test_zero_budget_always_uses_primary(self):
@@ -387,11 +389,9 @@ class TestABTestRouting:
         result = router.select_model('Any query')
         assert result['ab_group'] == 'A'
 
-    def test_no_fallback_uses_primary_for_both(self):
-        router = ModelRouter({'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': '', 'ab_split_percent': 50})
-        result = router.select_model('Hello')
-        # Both groups should map to primary when no fallback
-        assert result['model'] == 'claude-sonnet'
+    def test_no_fallback_is_rejected(self):
+        with pytest.raises(ValueError, match='ab_test strategy requires at least one fallback model that differs'):
+            ModelRouter({'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': '', 'ab_split_percent': 50})
 
     def test_result_includes_ab_bucket(self):
         router = ModelRouter({'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': 'gpt-5-mini'})
@@ -425,9 +425,9 @@ class TestInitValidation:
             ModelRouter({'strategy': 'ab_test', 'ab_split_percent': 101})
 
     def test_ab_split_boundary_values_accepted(self):
-        r0 = ModelRouter({'strategy': 'ab_test', 'ab_split_percent': 0})
+        r0 = ModelRouter({'strategy': 'ab_test', 'fallback_models': 'gpt-5-mini', 'ab_split_percent': 0})
         assert r0.ab_split_percent == 0
-        r100 = ModelRouter({'strategy': 'ab_test', 'ab_split_percent': 100})
+        r100 = ModelRouter({'strategy': 'ab_test', 'fallback_models': 'gpt-5-mini', 'ab_split_percent': 100})
         assert r100.ab_split_percent == 100
 
     def test_complexity_threshold_zero_rejected(self):
@@ -471,22 +471,21 @@ class TestComplexityRoutingTier3Primary:
 
 
 class TestABTestWarning:
-    """Verify that A/B test warns when both groups use the same model."""
+    """Verify that A/B test validates fallback configuration."""
 
-    def test_warning_when_no_fallback(self):
-        router = ModelRouter({'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': '', 'ab_split_percent': 50})
-        result = router.select_model('Hello')
-        assert 'ab_warning' in result
+    def test_rejects_when_no_fallback(self):
+        with pytest.raises(ValueError, match='ab_test strategy requires at least one fallback model that differs'):
+            ModelRouter({'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': '', 'ab_split_percent': 50})
 
-    def test_warning_when_fallback_matches_primary(self):
-        router = ModelRouter({'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': 'claude-sonnet', 'ab_split_percent': 50})
-        result = router.select_model('Hello')
-        assert 'ab_warning' in result
+    def test_rejects_when_fallback_matches_primary(self):
+        with pytest.raises(ValueError, match='ab_test strategy requires at least one fallback model that differs'):
+            ModelRouter({'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': 'claude-sonnet', 'ab_split_percent': 50})
 
     def test_no_warning_when_fallback_differs(self):
         router = ModelRouter({'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': 'gpt-5-mini', 'ab_split_percent': 50})
         result = router.select_model('Hello')
-        assert 'ab_warning' not in result
+        assert result['model'] in {'claude-sonnet', 'gpt-5-mini'}
+        assert result['ab_group'] in {'A', 'B'}
 
     def test_distinct_second_fallback_used_when_first_matches_primary(self):
         router = ModelRouter({'strategy': 'ab_test', 'primary_model': 'claude-sonnet', 'fallback_models': 'claude-sonnet,gpt-5-mini', 'ab_split_percent': 0})
@@ -494,7 +493,6 @@ class TestABTestWarning:
         # Should pick gpt-5-mini since claude-sonnet matches primary
         assert result['model'] == 'gpt-5-mini'
         assert result['ab_group'] == 'B'
-        assert 'ab_warning' not in result
 
 
 # ===========================================================================

@@ -156,6 +156,10 @@ class ModelRouter:
         if self.complexity_threshold < 1:
             raise ValueError(f'complexity_threshold must be >= 1, got {self.complexity_threshold}')
 
+        if self.strategy == 'ab_test':
+            if not any(model != self.primary_model for model in self.fallback_models):
+                raise ValueError('ab_test strategy requires at least one fallback model that differs from primary_model for meaningful A/B testing')
+
         # Runtime state — guarded by _lock for thread safety across pipeline threads
         self._lock = threading.Lock()
         self._cumulative_cost: float = 0.0
@@ -287,7 +291,7 @@ class ModelRouter:
         with self._lock:
             self._request_count += 1
 
-        chain = [self.primary_model] + self.fallback_models
+        chain = [self.primary_model, *self.fallback_models]
         # Deduplicate while preserving order
         seen = set()
         unique_chain: List[str] = []
