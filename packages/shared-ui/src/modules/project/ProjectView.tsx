@@ -193,15 +193,26 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	// --- Extract source components from project ------------------------------
 
-	const sources: SourceInfo[] = useMemo(() => {
-		const components = project?.components as Array<{ provider: string; name?: string; id?: string; config?: Record<string, any> }> | undefined;
-		if (!components) return [];
+	const components = useMemo(() => {
+		return (project?.components ?? []) as Array<{ provider: string; name?: string; id?: string; config?: Record<string, any> }>;
+	}, [project]);
 
+	const sources: SourceInfo[] = useMemo(() => {
+		if (!components.length) return [];
 		return components
 			.filter((c) => c.config?.mode === 'Source')
 			.map((c) => ({ id: c.id || c.name || c.provider, name: c.name || c.id || c.provider }))
 			.sort((a, b) => a.name.localeCompare(b.name));
-	}, [project]);
+	}, [components]);
+
+	/** Map component id → display name for the trace viewer. */
+	const componentNames: Map<string, string> = useMemo(() => {
+		const map = new Map<string, string>();
+		for (const c of components) {
+			if (c.id && c.name) map.set(c.id, c.name);
+		}
+		return map;
+	}, [components]);
 
 	// --- View state + preferences (separate concerns) -----------------------
 
@@ -348,7 +359,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceFlowPane key={src.id} source={src} taskStatus={statusMap[src.id]} viewMode={viewState.flowViewMode ?? 'pipeline'} onViewModeChange={(vm) => updateViewState({ flowViewMode: vm })} />) : <div style={styles.empty}>No source components found</div>}</div>,
 		},
 		trace: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTracePane key={src.id} source={src} rows={traceRows.filter((r) => r.source === src.id)} onClear={handleTraceClear} />) : <div style={styles.empty}>No source components found</div>}</div>,
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTracePane key={src.id} source={src} rows={traceRows.filter((r) => r.source === src.id)} componentNames={componentNames} onClear={handleTraceClear} />) : <div style={styles.empty}>No source components found</div>}</div>,
 		},
 		errors: {
 			content: (
@@ -480,8 +491,9 @@ const SourceFlowPane: React.FC<{
 const SourceTracePane: React.FC<{
 	source: SourceInfo;
 	rows: TraceRow[];
+	componentNames: Map<string, string>;
 	onClear: () => void;
-}> = ({ source, rows, onClear }) => {
+}> = ({ source, rows, componentNames, onClear }) => {
 	return (
 		<div style={styles.sourcePane}>
 			<div style={commonStyles.cardHeader}>
@@ -493,7 +505,7 @@ const SourceTracePane: React.FC<{
 				)}
 			</div>
 			<div style={styles.sourceBody}>
-				<Trace rows={rows} onClear={onClear} />
+				<Trace rows={rows} componentNames={componentNames} />
 			</div>
 		</div>
 	);

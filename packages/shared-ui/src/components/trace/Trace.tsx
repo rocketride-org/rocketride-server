@@ -18,7 +18,8 @@ import { commonStyles } from '../../themes/styles';
 
 interface TraceProps {
 	rows: TraceRow[];
-	onClear: () => void;
+	/** Map of component id → display name from the pipeline definition. */
+	componentNames?: Map<string, string>;
 }
 
 interface TraceTreeNode {
@@ -80,31 +81,8 @@ const S = {
 		height: '100%',
 		overflow: 'hidden',
 		color: 'var(--rr-text-primary)',
-		fontFamily: 'var(--rr-font-sans, sans-serif)',
+		fontFamily: 'var(--rr-font-family)',
 		fontSize: 13,
-	} as CSSProperties,
-
-	header: {
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'space-between',
-		padding: '6px 12px',
-		fontWeight: 600,
-		fontSize: 13,
-		borderBottom: '1px solid var(--rr-border-default)',
-		flexShrink: 0,
-	} as CSSProperties,
-
-	controls: {
-		display: 'flex',
-		gap: 6,
-	} as CSSProperties,
-
-	clearBtn: {
-		...commonStyles.buttonSecondary,
-		padding: '2px 8px',
-		fontSize: 12,
-		borderRadius: 3,
 	} as CSSProperties,
 
 	content: {
@@ -117,50 +95,11 @@ const S = {
 		fontStyle: 'italic',
 	} as CSSProperties,
 
-	// -- layout -----------------------------------------------------------------
-	layout: {
-		display: 'flex',
-		height: '100%',
-		overflow: 'hidden',
-	} as CSSProperties,
-
 	treeScroll: {
 		flex: 1,
 		overflowY: 'auto',
 		overflowX: 'hidden',
 		minWidth: 0,
-	} as CSSProperties,
-
-	// -- tree header ------------------------------------------------------------
-	treeHdr: {
-		display: 'flex',
-		alignItems: 'center',
-		padding: '4px 8px 4px 28px',
-		fontSize: 11,
-		fontWeight: 600,
-		color: 'var(--rr-text-secondary)',
-		textTransform: 'uppercase',
-		letterSpacing: '0.04em',
-		borderBottom: '1px solid var(--rr-border-default)',
-		flexShrink: 0,
-	} as CSSProperties,
-
-	colCall: {
-		flex: 1,
-		minWidth: 0,
-	} as CSSProperties,
-
-	colLane: {
-		width: 80,
-		flexShrink: 0,
-		textAlign: 'center',
-	} as CSSProperties,
-
-	colTime: {
-		width: 64,
-		flexShrink: 0,
-		textAlign: 'right',
-		paddingRight: 8,
 	} as CSSProperties,
 
 	// -- row (shared base) ------------------------------------------------------
@@ -169,31 +108,26 @@ const S = {
 		alignItems: 'center',
 		padding: '3px 8px',
 		cursor: 'pointer',
-		borderBottom: '1px solid var(--rr-border-subtle)',
-	} as CSSProperties,
-
-	rowSelected: {
-		backgroundColor: 'var(--rr-bg-active)',
+		borderBottom: '1px solid var(--rr-border)',
 	} as CSSProperties,
 
 	rowError: {
-		backgroundColor: 'var(--rr-bg-error)',
+		backgroundColor: 'var(--rr-bg-widget-hover)',
 	} as CSSProperties,
 
 	rowHover: {
-		// applied via onMouseEnter/Leave
-		backgroundColor: 'var(--rr-bg-hover)',
+		backgroundColor: 'var(--rr-bg-list-hover)',
 	} as CSSProperties,
 
 	// -- object row -------------------------------------------------------------
 	objectRow: {
 		fontWeight: 600,
-		backgroundColor: 'var(--rr-bg-surface)',
+		backgroundColor: 'var(--rr-bg-surface-alt)',
 	} as CSSProperties,
 
 	objectRowInFlight: {
 		fontWeight: 600,
-		backgroundColor: 'var(--rr-bg-surface)',
+		backgroundColor: 'var(--rr-bg-surface-alt)',
 		opacity: 0.85,
 	} as CSSProperties,
 
@@ -229,15 +163,6 @@ const S = {
 		color: 'var(--rr-color-error)',
 	} as CSSProperties,
 
-	// -- dot (lane colour) ------------------------------------------------------
-	dot: {
-		width: 8,
-		height: 8,
-		borderRadius: '50%',
-		flexShrink: 0,
-		marginRight: 6,
-	} as CSSProperties,
-
 	// -- error icon -------------------------------------------------------------
 	errIcon: {
 		marginRight: 4,
@@ -269,7 +194,7 @@ const S = {
 		letterSpacing: '0.03em',
 		lineHeight: '16px',
 		color: 'var(--rr-chart-blue)',
-		backgroundColor: 'rgba(25, 118, 210, 0.12)',
+		backgroundColor: 'var(--rr-bg-widget-hover)',
 	} as CSSProperties,
 
 	// -- time -------------------------------------------------------------------
@@ -280,7 +205,7 @@ const S = {
 		paddingRight: 8,
 		fontSize: 11,
 		color: 'var(--rr-text-secondary)',
-		fontFamily: 'var(--rr-font-mono, monospace)',
+		fontFamily: 'monospace',
 	} as CSSProperties,
 
 	timeError: {
@@ -289,141 +214,12 @@ const S = {
 		textAlign: 'right',
 		paddingRight: 8,
 		fontSize: 11,
-		fontFamily: 'var(--rr-font-mono, monospace)',
+		fontFamily: 'monospace',
 		color: 'var(--rr-color-error)',
 		fontWeight: 600,
 	} as CSSProperties,
 
-	// -- "more..." row ----------------------------------------------------------
-	moreLabel: {
-		color: 'var(--rr-chart-blue)',
-		fontStyle: 'italic',
-		cursor: 'pointer',
-		fontSize: 12,
-	} as CSSProperties,
-
-	// -- detail wrapper ---------------------------------------------------------
-	detailWrapper: {
-		position: 'relative',
-		flexShrink: 0,
-		overflowY: 'auto',
-		overflowX: 'hidden',
-		borderLeft: '1px solid var(--rr-border-default)',
-	} as CSSProperties,
-
-	resizeHandle: {
-		position: 'absolute',
-		top: 0,
-		left: 0,
-		width: 4,
-		height: '100%',
-		cursor: 'col-resize',
-		zIndex: 10,
-		background: 'transparent',
-	} as CSSProperties,
-
-	resizeHandleActive: {
-		position: 'absolute',
-		top: 0,
-		left: 0,
-		width: 4,
-		height: '100%',
-		cursor: 'col-resize',
-		zIndex: 10,
-		background: 'var(--rr-chart-blue)',
-		opacity: 0.4,
-	} as CSSProperties,
-
-	// -- detail panel -----------------------------------------------------------
-	dp: {
-		padding: '12px 10px',
-		fontSize: 12,
-		lineHeight: '18px',
-		color: 'var(--rr-text-primary)',
-	} as CSSProperties,
-
-	dpEmpty: {
-		padding: '24px 16px',
-		textAlign: 'center',
-		color: 'var(--rr-text-secondary)',
-		fontStyle: 'italic',
-	} as CSSProperties,
-
-	dpHdr: {
-		marginBottom: 12,
-	} as CSSProperties,
-
-	dpH2: {
-		margin: 0,
-		fontSize: 14,
-		fontWeight: 700,
-	} as CSSProperties,
-
-	dpHint: {
-		fontSize: 11,
-		color: 'var(--rr-text-secondary)',
-		marginTop: 2,
-	} as CSSProperties,
-
-	dpSect: {
-		marginBottom: 6,
-	} as CSSProperties,
-
-	dpH3: {
-		margin: '0 0 6px 0',
-		fontSize: 11,
-		fontWeight: 700,
-		textTransform: 'uppercase',
-		letterSpacing: '0.04em',
-		color: 'var(--rr-text-secondary)',
-	} as CSSProperties,
-
-	dpKv: {
-		display: 'flex',
-		justifyContent: 'space-between',
-		alignItems: 'baseline',
-		padding: '1px 0',
-		gap: 8,
-	} as CSSProperties,
-
-	dpK: {
-		color: 'var(--rr-text-secondary)',
-		flexShrink: 0,
-		fontSize: 11,
-	} as CSSProperties,
-
-	dpV: {
-		textAlign: 'right',
-		wordBreak: 'break-word',
-		minWidth: 0,
-	} as CSSProperties,
-
-	dpTime: {
-		fontFamily: 'var(--rr-font-mono, monospace)',
-		fontWeight: 600,
-		textAlign: 'right',
-	} as CSSProperties,
-
-	dpBar: {
-		height: 6,
-		borderRadius: 3,
-		backgroundColor: 'var(--rr-bg-surface)',
-		overflow: 'hidden',
-		marginTop: 4,
-	} as CSSProperties,
-
-	dpBarFill: {
-		height: '100%',
-		borderRadius: 3,
-		backgroundColor: 'var(--rr-chart-blue)',
-	} as CSSProperties,
-
-	dpBarLabel: {
-		fontSize: 10,
-		color: 'var(--rr-text-secondary)',
-		marginTop: 2,
-	} as CSSProperties,
-
+	// -- data toggle / tree -----------------------------------------------------
 	dpToggle: {
 		cursor: 'pointer',
 		fontWeight: 600,
@@ -449,14 +245,6 @@ const S = {
 		backgroundColor: 'var(--rr-bg-paper)',
 		overflow: 'auto',
 		maxHeight: 300,
-	} as CSSProperties,
-
-	dpExpandHint: {
-		fontSize: 10,
-		color: 'var(--rr-text-secondary)',
-		fontStyle: 'italic',
-		marginTop: 2,
-		paddingLeft: 16,
 	} as CSSProperties,
 } as const;
 
@@ -590,6 +378,15 @@ function formatElapsed(ms: number | null | undefined): string {
 	return `${(ms / 1000).toFixed(1)}s`;
 }
 
+/** Count total nodes in a tree (including the roots themselves). */
+function countAllNodes(nodes: TraceTreeNode[]): number {
+	let count = 0;
+	for (const n of nodes) {
+		count += 1 + countAllNodes(n.children);
+	}
+	return count;
+}
+
 function getRowElapsed(row: TraceRow): number | null {
 	if (row.endTimestamp && row.timestamp) {
 		return row.endTimestamp - row.timestamp;
@@ -605,6 +402,18 @@ function laneColor(lane: string): string {
 	return LANE_COLORS[lane] || LANE_COLORS[lane.toLowerCase()] || 'var(--rr-text-secondary)';
 }
 
+/** Resolve a component ID to its display name via the pipeline lookup map.
+ *  Falls back to stripping the trailing _N instance suffix. */
+function resolveDisplayName(filterName: string, componentNames?: Map<string, string>): string {
+	if (componentNames) {
+		// Try exact match first (e.g. "parse_1" mapped directly)
+		const exact = componentNames.get(filterName);
+		if (exact) return exact;
+	}
+	// Fallback: strip trailing _N instance suffix
+	return filterName.replace(/_\d+$/, '');
+}
+
 // =============================================================================
 // SUB-COMPONENT: Object (file) row -- top-level collapsible group
 // =============================================================================
@@ -618,6 +427,7 @@ const TraceObjectRow: React.FC<{
 }> = ({ group, expanded, onToggle, onExpandAll, onCollapseAll }) => {
 	const [hovered, setHovered] = useState(false);
 
+	const totalCalls = countAllNodes(group.nodes);
 	const timeDisplay = group.hasError ? <span style={S.timeError}>ERROR</span> : <span style={S.timeCol}>{formatElapsed(group.totalElapsed)}</span>;
 
 	const handleClick = (e: React.MouseEvent) => {
@@ -648,6 +458,7 @@ const TraceObjectRow: React.FC<{
 			<span style={S.nameFile}>{group.objectName}</span>
 			{group.inFlight && <span style={S.inFlightBadge}>processing</span>}
 			<span style={{ flex: 1 }} />
+			{totalCalls > 0 && <span style={{ fontSize: 10, color: 'var(--rr-text-disabled)', marginRight: 4 }}>({totalCalls} calls)</span>}
 			{timeDisplay}
 		</div>
 	);
@@ -660,14 +471,13 @@ const TraceObjectRow: React.FC<{
 const SN = {
 	nest: {
 		marginLeft: 20,
-		borderLeft: '1px solid var(--rr-border-subtle, rgba(0,0,0,0.06))',
+		borderLeft: '1px solid var(--rr-border)',
 	} as CSSProperties,
 	collapsedRow: {
 		display: 'flex',
 		alignItems: 'center',
 		padding: '3px 8px',
 		cursor: 'pointer',
-		borderBottom: '1px solid rgba(0,0,0,0.025)',
 		gap: 3,
 		minHeight: 26,
 	} as CSSProperties,
@@ -676,34 +486,9 @@ const SN = {
 		alignItems: 'center',
 		padding: '3px 8px',
 		cursor: 'pointer',
-		borderBottom: '1px solid rgba(0,0,0,0.025)',
 		gap: 3,
 		minHeight: 26,
-		background: 'var(--rr-bg-surface, rgba(0,0,0,0.015))',
-	} as CSSProperties,
-	enterLeaveRow: {
-		display: 'flex',
-		alignItems: 'center',
-		padding: '2px 8px',
-		cursor: 'pointer',
-		borderBottom: '1px solid rgba(0,0,0,0.015)',
-		gap: 5,
-		minHeight: 24,
-	} as CSSProperties,
-	elLabel: {
-		fontSize: 9,
-		fontWeight: 700,
-		textTransform: 'uppercase' as const,
-		padding: '1px 5px',
-		borderRadius: 2,
-	} as CSSProperties,
-	enterLabel: {
-		color: 'var(--rr-color-success, #2b8a3e)',
-		backgroundColor: 'rgba(43,138,62,0.08)',
-	} as CSSProperties,
-	leaveLabel: {
-		color: 'var(--rr-color-warning, #e67a2e)',
-		backgroundColor: 'rgba(230,122,46,0.08)',
+		background: 'var(--rr-bg-surface-alt)',
 	} as CSSProperties,
 	summary: {
 		flex: 1,
@@ -719,8 +504,7 @@ const SN = {
 	moreRow: {
 		padding: '3px 8px 3px 26px',
 		cursor: 'pointer',
-		borderBottom: '1px solid rgba(0,0,0,0.025)',
-		color: 'var(--rr-chart-blue, #4263eb)',
+		color: 'var(--rr-chart-blue)',
 		fontSize: 11,
 		fontStyle: 'italic' as const,
 	} as CSSProperties,
@@ -750,40 +534,40 @@ function dataSummary(data: Record<string, unknown> | undefined | null): string {
 
 interface TraceCallNodeProps {
 	node: TraceTreeNode;
-	selectedRowId: number | null;
+	componentNames?: Map<string, string>;
 	expandedNodes: Set<number>;
 	moreRevealed: Map<string, number>;
 	onToggleExpand: (id: number) => void;
 	onExpandAll: (node: TraceTreeNode) => void;
 	onCollapseAll: (node: TraceTreeNode) => void;
-	onSelect: (id: number) => void;
 	onRevealMore: (key: string) => void;
 }
 
-const TraceCallNode: React.FC<TraceCallNodeProps> = ({ node, selectedRowId, expandedNodes, moreRevealed, onToggleExpand, onExpandAll, onCollapseAll, onSelect, onRevealMore }) => {
+const TraceCallNode: React.FC<TraceCallNodeProps> = ({ node, componentNames, expandedNodes, moreRevealed, onToggleExpand, onExpandAll, onCollapseAll, onRevealMore }) => {
 	const { row } = node;
 	const isExpanded = expandedNodes.has(row.id);
 	const isError = !!row.error;
+	const isEmpty = node.children.length === 0 && !row.entryData && !row.exitData && !row.error;
 	const elapsed = getRowElapsed(row);
 	const summary = summaryTraceData(row.entryData, row.lane) || summaryTraceData(row.exitData, row.lane) || dataSummary(row.entryData) || dataSummary(row.exitData) || '';
+	const name = resolveDisplayName(row.filterName, componentNames);
+	const childCount = countAllNodes(node.children);
+
+	const nameStyle: CSSProperties = isError ? S.nameError : isEmpty ? { ...S.name, flex: 'none', color: 'var(--rr-text-disabled)' } : { ...S.name, flex: 'none' };
 
 	if (!isExpanded) {
 		// ── COLLAPSED: single row with ▸ ──
-		const isSelected = selectedRowId === row.id;
 		return (
-			<>
-				<div style={{ ...SN.collapsedRow, ...(isSelected ? S.rowSelected : {}), ...(isError && !isSelected ? S.rowError : {}) }} onClick={() => onToggleExpand(row.id)}>
-					<span style={S.chev}>{'\u25B8'}</span>
-					{isError && <span style={S.errIcon}>{'\u2716'}</span>}
-					<span style={isError ? S.nameError : { ...S.name, flex: 'none' }}>{row.filterName}</span>
-					<span style={badgeStyle(row.lane)}>{laneDisplayName(row.lane)}</span>
-					{summary && <span style={SN.summary}>{summary}</span>}
-					<span style={{ flex: 1 }} />
-					{isError ? <span style={S.timeError}>ERROR</span> : <span style={S.timeCol}>{formatElapsed(elapsed)}</span>}
-				</div>
-				{isSelected && row.entryData && <InlineDataBox node={node} data={row.entryData} label="Input" lane={row.lane} showCallInfo />}
-				{isSelected && (row.exitData || row.error) && <InlineDataBox node={node} data={row.error ? { error: row.error } : row.exitData} label="Output" lane={row.lane} defaultOpen={false} />}
-			</>
+			<div style={{ ...SN.collapsedRow, ...(isError ? S.rowError : {}) }} onClick={() => onToggleExpand(row.id)}>
+				<span style={S.chev}>{'\u25B8'}</span>
+				{isError && <span style={S.errIcon}>{'\u2716'}</span>}
+				<span style={nameStyle}>{name}</span>
+				<span style={isEmpty ? { ...badgeStyle(row.lane), opacity: 0.5 } : badgeStyle(row.lane)}>{laneDisplayName(row.lane)}</span>
+				{summary && <span style={SN.summary}>{summary}</span>}
+				<span style={{ flex: 1 }} />
+				{childCount > 0 && <span style={{ fontSize: 10, color: 'var(--rr-text-disabled)', marginRight: 4 }}>({childCount} calls)</span>}
+				{isError ? <span style={S.timeError}>ERROR</span> : <span style={isEmpty ? { ...S.timeCol, color: 'var(--rr-text-disabled)' } : S.timeCol}>{formatElapsed(elapsed)}</span>}
+			</div>
 		);
 	}
 
@@ -794,21 +578,22 @@ const TraceCallNode: React.FC<TraceCallNodeProps> = ({ node, selectedRowId, expa
 			<div style={SN.expandedHeader} onClick={() => onToggleExpand(row.id)}>
 				<span style={S.chev}>{'\u25BE'}</span>
 				{isError && <span style={S.errIcon}>{'\u2716'}</span>}
-				<span style={isError ? S.nameError : { ...S.name, flex: 'none' }}>{row.filterName}</span>
+				<span style={nameStyle}>{name}</span>
 				<span style={badgeStyle(row.lane)}>{laneDisplayName(row.lane)}</span>
 				<span style={{ flex: 1 }} />
+				{childCount > 0 && <span style={{ fontSize: 10, color: 'var(--rr-text-disabled)', marginRight: 4 }}>({childCount} calls)</span>}
 				{isError ? <span style={S.timeError}>ERROR</span> : <span style={S.timeCol}>{formatElapsed(elapsed)}</span>}
 			</div>
 
 			<div style={SN.nest}>
-				{/* Input box with call info */}
-				{row.entryData && <InlineDataBox node={node} data={row.entryData} label="Input" lane={row.lane} showCallInfo />}
+				{/* Input box with call info — always show call info even if no data */}
+				<InlineDataBox node={node} data={row.entryData} label="Input" lane={row.lane} componentNames={componentNames} showCallInfo />
 
 				{/* Children */}
-				<TraceCallChildren nodes={node.children} selectedRowId={selectedRowId} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={onToggleExpand} onExpandAll={onExpandAll} onCollapseAll={onCollapseAll} onSelect={onSelect} onRevealMore={onRevealMore} />
+				<TraceCallChildren nodes={node.children} componentNames={componentNames} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={onToggleExpand} onExpandAll={onExpandAll} onCollapseAll={onCollapseAll} onRevealMore={onRevealMore} />
 
 				{/* Output box — collapsed by default */}
-				{(row.exitData || row.error) && <InlineDataBox node={node} data={row.error ? { error: row.error } : row.exitData} label="Output" lane={row.lane} defaultOpen={false} />}
+				{(row.exitData || row.error || row.result) && <InlineDataBox node={node} data={row.error ? { error: row.error } : row.exitData} label="Output" lane={row.lane} componentNames={componentNames} showResult defaultOpen={false} />}
 			</div>
 		</div>
 	);
@@ -817,15 +602,15 @@ const TraceCallNode: React.FC<TraceCallNodeProps> = ({ node, selectedRowId, expa
 /** Data view mode toggle buttons and renderer. */
 type DataViewMode = 'tree' | 'json' | 'raw';
 
-const viewModeLabels: { mode: DataViewMode; label: string }[] = [
-	{ mode: 'tree', label: 'Tree' },
+const VIEW_MODES: { mode: DataViewMode; label: string }[] = [
+	{ mode: 'tree', label: 'Data' },
 	{ mode: 'json', label: 'JSON' },
 	{ mode: 'raw', label: 'Raw' },
 ];
 
-const DataViewToggle: React.FC<{ mode: DataViewMode; onChange: (m: DataViewMode) => void }> = ({ mode, onChange }) => (
+const DataViewToggle: React.FC<{ mode: DataViewMode; modes: typeof VIEW_MODES; onChange: (m: DataViewMode) => void }> = ({ mode, modes, onChange }) => (
 	<div style={{ display: 'flex', gap: 1, marginLeft: 'auto' }}>
-		{viewModeLabels.map((v) => (
+		{modes.map((v) => (
 			<button
 				key={v.mode}
 				onClick={(e) => {
@@ -840,7 +625,7 @@ const DataViewToggle: React.FC<{ mode: DataViewMode; onChange: (m: DataViewMode)
 					borderRadius: 2,
 					cursor: 'pointer',
 					backgroundColor: mode === v.mode ? 'var(--rr-brand)' : 'transparent',
-					color: mode === v.mode ? 'var(--rr-fg-button, #fff)' : 'var(--rr-text-secondary)',
+					color: mode === v.mode ? 'var(--rr-fg-button)' : 'var(--rr-text-secondary)',
 				}}
 			>
 				{v.label}
@@ -861,13 +646,15 @@ const DataRenderer: React.FC<{ data: unknown; mode: DataViewMode; lane?: string 
 		);
 	}
 	// raw
-	return <pre style={{ ...S.dpTree, fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{JSON.stringify(data)}</pre>;
+	return <pre style={{ ...S.dpTree, fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{JSON.stringify(data)}</pre>;
 };
 
 /** Inline data box — shown directly when a node is expanded. */
-const InlineDataBox: React.FC<{ node: TraceTreeNode; data: unknown; label: string; lane: string; showCallInfo?: boolean; defaultOpen?: boolean }> = ({ node, data, label, lane, showCallInfo, defaultOpen = true }) => {
+const InlineDataBox: React.FC<{ node: TraceTreeNode; data: unknown; label: string; lane: string; componentNames?: Map<string, string>; showCallInfo?: boolean; showResult?: boolean; defaultOpen?: boolean }> = ({ node, data, label, lane, componentNames, showCallInfo, showResult, defaultOpen = true }) => {
+	const hasTreeView = data != null && renderTraceData(data, lane) != null;
+	const availableModes = hasTreeView ? VIEW_MODES : VIEW_MODES.filter((v) => v.mode !== 'tree');
 	const [expanded, setExpanded] = useState(defaultOpen);
-	const [viewMode, setViewMode] = useState<DataViewMode>('json');
+	const [viewMode, setViewMode] = useState<DataViewMode>(() => (hasTreeView ? 'tree' : 'json'));
 
 	const { row } = node;
 	const elapsed = getRowElapsed(row);
@@ -879,14 +666,14 @@ const InlineDataBox: React.FC<{ node: TraceTreeNode; data: unknown; label: strin
 	if (showCallInfo) {
 		let p: TraceTreeNode | null = node;
 		while (p) {
-			chainParts.unshift(p.row.filterName);
+			chainParts.unshift(resolveDisplayName(p.row.filterName, componentNames));
 			p = p.parent;
 		}
 	}
 
 	const boxStyle: CSSProperties = {
 		background: 'var(--rr-bg-widget)',
-		borderRadius: 4,
+		borderRadius: '0 4px 4px 0',
 		padding: '6px 10px',
 		margin: '2px 0 4px',
 		fontSize: 12,
@@ -896,73 +683,85 @@ const InlineDataBox: React.FC<{ node: TraceTreeNode; data: unknown; label: strin
 	const kStyle: CSSProperties = { color: 'var(--rr-text-secondary)', flexShrink: 0, minWidth: 60 };
 	const vStyle: CSSProperties = { color: 'var(--rr-text-primary)' };
 
+	// Result text for the output box header
+	const resultText = showResult && row.result ? row.result : null;
+
 	return (
 		<div style={boxStyle}>
 			{/* Call info (only on input box) */}
 			{showCallInfo && (
 				<div style={{ marginBottom: 6 }}>
-					<div style={kvStyle}>
-						<span style={kStyle}>Node</span>
-						<span style={vStyle}>{row.filterName}</span>
-					</div>
-					<div style={kvStyle}>
-						<span style={kStyle}>Called by</span>
-						<span style={vStyle}>{node.parent?.row.filterName || '\u2014'}</span>
-					</div>
-					<div style={kvStyle}>
-						<span style={kStyle}>Lane</span>
-						<span style={vStyle}>
-							<span style={badgeStyle(row.lane)}>{laneDisplayName(row.lane)}</span>
-						</span>
-					</div>
-					{row.result && (
+					{elapsed != null && (
 						<div style={kvStyle}>
-							<span style={kStyle}>Result</span>
-							<span style={vStyle}>{row.result}</span>
+							<span style={kStyle}>Elapsed</span>
+							<span style={{ ...vStyle, fontWeight: 600, fontFamily: 'monospace', color: 'var(--rr-brand)' }}>{formatElapsed(elapsed)}</span>
+							{pctOfParent != null && (
+								<span style={{ color: 'var(--rr-text-secondary)', marginLeft: 6, fontSize: 10 }}>
+									({pctOfParent}% of {node.parent ? resolveDisplayName(node.parent.row.filterName, componentNames) : ''})
+								</span>
+							)}
 						</div>
 					)}
 					{chainParts.length > 1 && (
-						<div style={kvStyle}>
+						<div style={{ ...kvStyle, marginTop: 4, paddingTop: 4 }}>
 							<span style={kStyle}>Chain</span>
 							<span style={{ ...vStyle, display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
-								{chainParts.map((name, i) => (
+								{chainParts.map((cname, i) => (
 									<React.Fragment key={i}>
 										{i > 0 && <span style={{ color: 'var(--rr-text-secondary)', fontSize: 10 }}>{'\u2192'}</span>}
-										<span style={{ padding: '0 4px', borderRadius: 3, backgroundColor: 'var(--rr-bg-surface, #e9ecef)', fontSize: 11, fontWeight: 500 }}>{name}</span>
+										<span style={{ padding: '0 4px', borderRadius: 3, backgroundColor: 'var(--rr-bg-surface-alt)', fontSize: 11, fontWeight: 500 }}>{cname}</span>
 									</React.Fragment>
 								))}
 							</span>
 						</div>
 					)}
-					{elapsed != null && (
-						<div style={kvStyle}>
-							<span style={kStyle}>Elapsed</span>
-							<span style={{ ...vStyle, fontWeight: 600, fontFamily: 'var(--rr-font-mono, monospace)', color: 'var(--rr-brand, #e67a2e)' }}>{formatElapsed(elapsed)}</span>
-							{pctOfParent != null && (
-								<span style={{ color: 'var(--rr-text-secondary)', marginLeft: 6, fontSize: 10 }}>
-									({pctOfParent}% of {node.parent!.row.filterName})
-								</span>
-							)}
-						</div>
-					)}
 				</div>
 			)}
 
-			{/* Data section */}
-			<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-				<div style={S.dpToggle} onClick={() => setExpanded(!expanded)}>
-					<span style={S.dpArr}>{expanded ? '\u25BC' : '\u25B6'}</span>
-					{label}
+			{/* Result info (only on output box, when expanded) */}
+			{showResult && expanded && resultText && (
+				<div style={{ ...kvStyle, marginBottom: 6 }}>
+					<span style={kStyle}>Result</span>
+					<span style={vStyle}>{resultText}</span>
 				</div>
-				{expanded && <DataViewToggle mode={viewMode} onChange={setViewMode} />}
-			</div>
-			{expanded && <DataRenderer data={data} mode={viewMode} lane={lane} />}
+			)}
+
+			{/* Data section — only if data exists */}
+			{data != null && (
+				<>
+					<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+						<div style={S.dpToggle} onClick={() => setExpanded(!expanded)}>
+							<span style={S.dpArr}>{expanded ? '\u25BC' : '\u25B6'}</span>
+							{label}
+						</div>
+						{/* Inline result hint when collapsed */}
+						{!expanded && resultText && (
+							<span style={{ fontSize: 11, color: 'var(--rr-text-secondary)', fontStyle: 'italic' }}>
+								{'\u2014'} {resultText}
+							</span>
+						)}
+						{expanded && <DataViewToggle mode={viewMode} modes={availableModes} onChange={setViewMode} />}
+					</div>
+					{expanded && (
+						<div style={{ padding: '0 8px' }}>
+							<DataRenderer data={data} mode={viewMode} lane={lane} />
+						</div>
+					)}
+				</>
+			)}
+
+			{/* Output box with no data — just show the result inline */}
+			{data == null && resultText && (
+				<div style={{ fontSize: 11, color: 'var(--rr-text-secondary)' }}>
+					{label} {'\u2014'} {resultText}
+				</div>
+			)}
 		</div>
 	);
 };
 
 /** Renders a list of children with batching for identical consecutive siblings. */
-const TraceCallChildren: React.FC<Omit<TraceCallNodeProps, 'node'> & { nodes: TraceTreeNode[] }> = ({ nodes, selectedRowId, expandedNodes, moreRevealed, onToggleExpand, onExpandAll, onCollapseAll, onSelect, onRevealMore }) => {
+const TraceCallChildren: React.FC<Omit<TraceCallNodeProps, 'node'> & { nodes: TraceTreeNode[] }> = ({ nodes, componentNames, expandedNodes, moreRevealed, onToggleExpand, onExpandAll, onCollapseAll, onRevealMore }) => {
 	const items: React.ReactNode[] = [];
 	let i = 0;
 	while (i < nodes.length) {
@@ -978,7 +777,7 @@ const TraceCallChildren: React.FC<Omit<TraceCallNodeProps, 'node'> & { nodes: Tr
 			const revealed = moreRevealed.get(batchKey) ?? 0;
 			const showCount = Math.min(BATCH_SIZE + revealed * BATCH_SIZE, runLen);
 			for (let j = i; j < i + showCount; j++) {
-				items.push(<TraceCallNode key={nodes[j].row.id} node={nodes[j]} selectedRowId={selectedRowId} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={onToggleExpand} onExpandAll={onExpandAll} onCollapseAll={onCollapseAll} onSelect={onSelect} onRevealMore={onRevealMore} />);
+				items.push(<TraceCallNode key={nodes[j].row.id} node={nodes[j]} componentNames={componentNames} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={onToggleExpand} onExpandAll={onExpandAll} onCollapseAll={onCollapseAll} onRevealMore={onRevealMore} />);
 			}
 			const remaining = runLen - showCount;
 			if (remaining > 0) {
@@ -990,7 +789,7 @@ const TraceCallChildren: React.FC<Omit<TraceCallNodeProps, 'node'> & { nodes: Tr
 			}
 			i = runEnd;
 		} else {
-			items.push(<TraceCallNode key={nodes[i].row.id} node={nodes[i]} selectedRowId={selectedRowId} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={onToggleExpand} onExpandAll={onExpandAll} onCollapseAll={onCollapseAll} onSelect={onSelect} onRevealMore={onRevealMore} />);
+			items.push(<TraceCallNode key={nodes[i].row.id} node={nodes[i]} componentNames={componentNames} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={onToggleExpand} onExpandAll={onExpandAll} onCollapseAll={onCollapseAll} onRevealMore={onRevealMore} />);
 			i++;
 		}
 	}
@@ -1001,10 +800,9 @@ const TraceCallChildren: React.FC<Omit<TraceCallNodeProps, 'node'> & { nodes: Tr
 // MAIN COMPONENT
 // =============================================================================
 
-const Trace: React.FC<TraceProps> = ({ rows }) => {
+const Trace: React.FC<TraceProps> = ({ rows, componentNames }) => {
 	const [expandedObjects, setExpandedObjects] = useState<Set<number>>(new Set());
 	const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
-	const [selectedRowId, setSelectedRowId] = useState<number | null>(null);
 	const [moreRevealed, setMoreRevealed] = useState<Map<string, number>>(new Map());
 
 	const objectGroups = useMemo(() => buildObjectGroups(rows), [rows]);
@@ -1083,10 +881,6 @@ const Trace: React.FC<TraceProps> = ({ rows }) => {
 		});
 	}, []);
 
-	const selectRow = useCallback((id: number) => {
-		setSelectedRowId((prev) => (prev === id ? null : id));
-	}, []);
-
 	return (
 		<section style={S.section}>
 			<div style={S.content}>
@@ -1100,7 +894,11 @@ const Trace: React.FC<TraceProps> = ({ rows }) => {
 							return (
 								<React.Fragment key={group.docId}>
 									<TraceObjectRow group={group} expanded={isExpanded} onToggle={() => toggleObject(group.docId)} onExpandAll={() => expandAllForObject(group)} onCollapseAll={() => collapseAllForObject(group)} />
-									{isExpanded && <TraceCallChildren nodes={group.nodes} selectedRowId={selectedRowId} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={(id) => toggleNode(id)} onExpandAll={expandAllForNode} onCollapseAll={collapseAllForNode} onSelect={selectRow} onRevealMore={revealMore} />}
+									{isExpanded && (
+										<div style={{ paddingLeft: 20 }}>
+											<TraceCallChildren nodes={group.nodes} componentNames={componentNames} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={(id) => toggleNode(id)} onExpandAll={expandAllForNode} onCollapseAll={collapseAllForNode} onRevealMore={revealMore} />
+										</div>
+									)}
 								</React.Fragment>
 							);
 						})}

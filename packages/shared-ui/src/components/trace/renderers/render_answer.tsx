@@ -56,7 +56,7 @@ export function renderAnswer(data: AnswerData): ReactElement {
 					<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
 						{Object.entries(a.tokens).map(([k, v]) => (
 							<div key={k} style={{ backgroundColor: 'var(--rr-bg-paper)', border: '1px solid var(--rr-border)', borderRadius: 4, padding: '4px 10px', display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 55 }}>
-								<span style={{ fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 14, fontWeight: 700, color: 'var(--rr-brand)' }}>{typeof v === 'number' ? v.toLocaleString() : v}</span>
+								<span style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 700, color: 'var(--rr-brand)' }}>{typeof v === 'number' ? v.toLocaleString() : v}</span>
 								<span style={{ fontSize: 8, color: 'var(--rr-text-secondary)', textTransform: 'uppercase' }}>{k.replace(/_/g, ' ')}</span>
 							</div>
 						))}

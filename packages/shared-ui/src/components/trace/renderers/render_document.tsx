@@ -1,5 +1,5 @@
 // =============================================================================
-// Trace Renderer: Document Lane
+// Trace Renderer: Documents Lane
 // =============================================================================
 
 import { ReactElement } from 'react';
@@ -9,24 +9,23 @@ import { RS } from './styles';
 // TYPE GUARD
 // =============================================================================
 
-interface DocumentData {
-	documents?: {
-		page_content?: string;
-		metadata?: Record<string, unknown>;
-		embedding_model?: string;
-		score?: number;
-		tokens?: number;
-	};
+interface DocumentEntry {
 	page_content?: string;
 	metadata?: Record<string, unknown>;
+	embedding_model?: string;
+	score?: number;
+	tokens?: number;
+}
+
+interface DocumentData {
+	documents: DocumentEntry | DocumentEntry[];
+	count?: number;
 }
 
 export function isDocument(data: unknown): data is DocumentData {
 	if (!data || typeof data !== 'object') return false;
 	const d = data as Record<string, unknown>;
-	if (d.documents && typeof d.documents === 'object') return true;
-	if (typeof d.page_content === 'string') return true;
-	return false;
+	return d.documents != null && typeof d.documents === 'object';
 }
 
 // =============================================================================
@@ -34,27 +33,32 @@ export function isDocument(data: unknown): data is DocumentData {
 // =============================================================================
 
 export function summaryDocument(data: DocumentData): string {
-	const doc = data.documents || data;
-	if (doc.page_content) return doc.page_content;
-	const meta = doc.metadata;
-	if (meta?.parent) return String(meta.parent);
-	return '';
+	const docs = Array.isArray(data.documents) ? data.documents : [data.documents];
+	if (docs.length === 0) return '';
+	const first = docs[0];
+	const label = first.page_content || (first.metadata?.parent ? String(first.metadata.parent) : '');
+	if (docs.length === 1) return label;
+	return `${docs.length} documents`;
 }
 
 // =============================================================================
 // RENDERER
 // =============================================================================
 
-export function renderDocument(data: DocumentData): ReactElement {
-	const doc = data.documents || data;
+function renderSingleDoc(doc: DocumentEntry, index: number, total: number): ReactElement {
 	const content = doc.page_content;
 	const metadata = doc.metadata;
-	const embeddingModel = (doc as Record<string, unknown>).embedding_model as string | undefined;
-	const score = (doc as Record<string, unknown>).score as number | undefined;
-	const tokens = (doc as Record<string, unknown>).tokens as number | undefined;
+	const embeddingModel = doc.embedding_model;
+	const score = doc.score;
+	const tokens = doc.tokens;
 
 	return (
-		<div>
+		<div key={index} style={total > 1 ? { marginBottom: 10, paddingBottom: 8, borderBottom: '1px solid var(--rr-border)' } : undefined}>
+			{total > 1 && (
+				<div style={{ fontSize: 9, fontWeight: 700, color: 'var(--rr-text-disabled)', textTransform: 'uppercase', marginBottom: 4 }}>
+					Document {index + 1} of {total}
+				</div>
+			)}
 			{content && (
 				<div style={RS.section}>
 					<div style={RS.label}>Content</div>
@@ -70,41 +74,45 @@ export function renderDocument(data: DocumentData): ReactElement {
 					</div>
 				</div>
 			)}
-			{metadata && (
-				<div style={RS.section}>
-					<div style={RS.label}>Metadata</div>
-					{metadata.parent && (
-						<div style={RS.kvRow}>
-							<span style={RS.kvKey}>Source</span>
-							<span style={RS.kvVal}>{String(metadata.parent)}</span>
+			{metadata &&
+				(() => {
+					const m = metadata as Record<string, string | number | boolean | undefined>;
+					return (
+						<div style={RS.section}>
+							<div style={RS.label}>Metadata</div>
+							{m.parent && (
+								<div style={RS.kvRow}>
+									<span style={RS.kvKey}>Source</span>
+									<span style={RS.kvVal}>{String(m.parent)}</span>
+								</div>
+							)}
+							{m.objectId && (
+								<div style={RS.kvRow}>
+									<span style={RS.kvKey}>Object ID</span>
+									<span style={RS.kvMono}>{String(m.objectId)}</span>
+								</div>
+							)}
+							{m.chunkId != null && (
+								<div style={RS.kvRow}>
+									<span style={RS.kvKey}>Chunk</span>
+									<span style={RS.kvVal}>{String(m.chunkId)}</span>
+								</div>
+							)}
+							{m.nodeId && (
+								<div style={RS.kvRow}>
+									<span style={RS.kvKey}>Node</span>
+									<span style={RS.kvMono}>{String(m.nodeId)}</span>
+								</div>
+							)}
+							{m.isTable && (
+								<div style={RS.kvRow}>
+									<span style={RS.kvKey}>Type</span>
+									<span style={RS.kvVal}>Table data</span>
+								</div>
+							)}
 						</div>
-					)}
-					{metadata.objectId && (
-						<div style={RS.kvRow}>
-							<span style={RS.kvKey}>Object ID</span>
-							<span style={RS.kvMono}>{String(metadata.objectId)}</span>
-						</div>
-					)}
-					{metadata.chunkId != null && (
-						<div style={RS.kvRow}>
-							<span style={RS.kvKey}>Chunk</span>
-							<span style={RS.kvVal}>{String(metadata.chunkId)}</span>
-						</div>
-					)}
-					{metadata.nodeId && (
-						<div style={RS.kvRow}>
-							<span style={RS.kvKey}>Node</span>
-							<span style={RS.kvMono}>{String(metadata.nodeId)}</span>
-						</div>
-					)}
-					{metadata.isTable && (
-						<div style={RS.kvRow}>
-							<span style={RS.kvKey}>Type</span>
-							<span style={RS.kvVal}>Table data</span>
-						</div>
-					)}
-				</div>
-			)}
+					);
+				})()}
 			{embeddingModel && (
 				<div style={RS.kvRow}>
 					<span style={RS.kvKey}>Embedding</span>
@@ -117,6 +125,21 @@ export function renderDocument(data: DocumentData): ReactElement {
 					<span style={RS.kvMono}>{score.toFixed(4)}</span>
 				</div>
 			)}
+		</div>
+	);
+}
+
+export function renderDocument(data: DocumentData): ReactElement {
+	const docs = Array.isArray(data.documents) ? data.documents : [data.documents];
+
+	return (
+		<div>
+			{data.count != null && (
+				<div style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginBottom: 6 }}>
+					{data.count} document{data.count !== 1 ? 's' : ''}
+				</div>
+			)}
+			{docs.map((doc, i) => renderSingleDoc(doc, i, docs.length))}
 		</div>
 	);
 }

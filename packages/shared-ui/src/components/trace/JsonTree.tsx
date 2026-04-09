@@ -32,7 +32,7 @@ interface JsonNodeProps {
 
 const styles = {
 	root: {
-		fontFamily: 'var(--rr-font-mono, monospace)',
+		fontFamily: 'monospace',
 		fontSize: 12,
 		lineHeight: '18px',
 		color: 'var(--rr-text-primary)',
@@ -40,7 +40,7 @@ const styles = {
 	} as CSSProperties,
 
 	empty: {
-		fontFamily: 'var(--rr-font-mono, monospace)',
+		fontFamily: 'monospace',
 		fontSize: 12,
 		lineHeight: '18px',
 		color: 'var(--rr-text-secondary)',
@@ -96,7 +96,7 @@ const styles = {
 
 	children: {
 		paddingLeft: 14,
-		borderLeft: '1px solid var(--rr-border-subtle)',
+		borderLeft: '1px solid var(--rr-border)',
 		marginLeft: 5,
 	} as CSSProperties,
 
