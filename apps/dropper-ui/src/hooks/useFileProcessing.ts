@@ -223,11 +223,12 @@ export const useFileProcessing = (client: RocketRideClient | null, authToken: st
 						videoBlobUrlsRef.current.set(r.filepath, blobUrl);
 						// Free the raw chunk buffer — the Blob URL is now the only reference needed
 						videoChunksRef.current.delete(r.filepath);
+						const baseResult = r.result ?? { name: r.filepath, path: r.filepath, objectId: r.filepath };
 						return {
 							...r,
 							result: {
-								...(r.result ?? {}),
-								result_types: { ...(r.result?.result_types ?? {}), video: 'video' },
+								...baseResult,
+								result_types: { ...(baseResult.result_types ?? {}), video: 'video' },
 								video: blobUrl,
 							},
 						};

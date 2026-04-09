@@ -29,6 +29,16 @@ from ai.common.table import Table
 
 from .IGlobal import IGlobal
 
+_LOG = '/tmp/brandy_pipeline.log'
+
+
+def _plog(msg: str) -> None:
+    import datetime
+
+    line = f'[{datetime.datetime.now().isoformat(timespec="milliseconds")}] [clip_buffer  ] {msg}\n'
+    with open(_LOG, 'a') as f:
+        f.write(line)
+
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
@@ -41,6 +51,7 @@ class IInstance(IInstanceBase):
 
         vsf_ids = self.instance.getControllerNodeIds('visual_similarity')
         self._vsf_node_id: Optional[str] = vsf_ids[0] if vsf_ids else None
+        _plog(f'beginInstance: scan_interval={self._scan_interval} buffer_seconds={self._buffer_seconds} scene_threshold={self._scene_threshold} vsf_node_id={self._vsf_node_id!r}')
 
     def endInstance(self):
         pass
@@ -103,6 +114,7 @@ class IInstance(IInstanceBase):
         # 0. First frame: send to VSF to establish the reference image
         if not self._reference_set:
             self._reference_set = True
+            _plog(f'reference: setting reference from first frame ts={timestamp:.3f}')
             self._invoke_vsf(frame_bytes)
             self._last_scan = timestamp  # treat as just scanned so next poll is scan_interval away
 
@@ -116,13 +128,17 @@ class IInstance(IInstanceBase):
             # 2. Sparse VSF poll
             if (timestamp - self._last_scan) >= self._scan_interval:
                 self._last_scan = timestamp
-                if self._invoke_vsf(frame_bytes):
+                result = self._invoke_vsf(frame_bytes)
+                _plog(f'scan: ts={timestamp:.3f} vsf_result={result}')
+                if result:
+                    _plog(f'match: clip_idx={self._clip_idx} pre_buffer_frames={len(self._buffer)}')
                     self._in_match = True
                     self._clip = list(self._buffer)  # snapshot pre-buffer (includes this frame)
         else:
             # 3. Collecting — append frame, flush on scene change
             self._clip.append((timestamp, frame_bytes, mime))
             if scene_change_score >= self._scene_threshold:
+                _plog(f'scene_change: ts={timestamp:.3f} score={scene_change_score:.3f} clip_frames={len(self._clip)}')
                 self._flush_clip()
                 self._in_match = False
                 self._clip = []
@@ -130,16 +146,20 @@ class IInstance(IInstanceBase):
 
     def _invoke_vsf(self, frame_bytes: bytes) -> bool:
         if self._vsf_node_id is None:
+            _plog('invoke_vsf: no VSF wired — stub match=True')
             return True  # stub: always match when no VSF wired (dev/test)
         try:
-            return bool(self.instance.invoke('visual_similarity', frame_bytes, nodeId=self._vsf_node_id))
-        except Exception:
+            result = bool(self.instance.invoke('visual_similarity', frame_bytes, nodeId=self._vsf_node_id))
+            return result
+        except Exception as e:
+            _plog(f'invoke_vsf: EXCEPTION {e}')
             return False
 
     def _flush_clip(self):
         if not self._clip:
             return
 
+        _plog(f'flush_clip: clip_idx={self._clip_idx} frames={len(self._clip)} has_image_listener={self.instance.hasListener("image")}')
         table_rows = []
         for frame_ts, frame_bytes, mime in self._clip:
             if self.instance.hasListener('image'):
