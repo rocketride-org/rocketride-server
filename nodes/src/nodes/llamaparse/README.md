@@ -10,14 +10,14 @@ sidebar_position: 1
 
 ## What it does
 
-Parses documents using the LlamaIndex cloud API. Handles PDFs, images, Word, Excel, and other formats. Extracts text and tables, including markdown tables found in structured output.
+Parses documents using the LlamaIndex cloud API. Handles PDFs, images, Word, Excel, and other formats. Extracts text and tables, including Markdown tables found in structured output.
 
 **Lanes:**
 
 | Lane in | Lane out | Description                           |
 | ------- | -------- | ------------------------------------- |
-| `data`  | `text`   | Parse document, emit extracted text   |
-| `data`  | `table`  | Parse document, emit extracted tables |
+| `tags`  | `text`   | Parse document, emit extracted text   |
+| `tags`  | `table`  | Parse document, emit extracted tables |
 
 Requires a LlamaIndex API key. Processing happens in the cloud.
 

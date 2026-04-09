@@ -64,8 +64,7 @@ Each results tab includes a download button (📥) to save the processed data:
 ### **Supported Features**
 
 - **Multiple Files:** Upload several files simultaneously
-- **Large Files**: Handle files up to 1GB in size
-- **All File Types**: Accept any file type for processing
+- **File Uploads**: Supports file upload through the UI (actual size and type limits depend on server and infrastructure configuration)
 - **Real-time Processing**: Immediate feedback on upload and processing status
 - **Progress Tracking**: Visual indication of processing progress
 

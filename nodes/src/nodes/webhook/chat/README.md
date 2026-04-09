@@ -12,9 +12,9 @@ The Chat node is used to connect to a custom chat endpoint, allowing communicati
 ### Configuration Steps
 
 - Host - Enter the IP address or hostname of the server hosting the chat service.
-  - Default value is 0.0.0.0, which allows external access.
-  - Use 127.0.0.1 if you only want local access.
+  - Default value is `0.0.0.0`, which allows external access.
+  - Use `127.0.0.1` if you only want local access.
 - Port - Enter the port number that the chat service is running on.
-  - Default is 5566.
+  - Default is `5566`.
 - Endpoint - Enter the endpoint route where the chat service is available.
-  - Example - / or /chat.
+  - Example: `/` or `/chat`.

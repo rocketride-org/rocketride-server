@@ -29,7 +29,7 @@ Reads text or tables and uses an LLM to extract a structured set of fields you d
 
 ## Configuration
 
-Define up to 32 fields. For each field:
+Define the fields to extract. For each field:
 
 | Field         | Description                                   |
 | ------------- | --------------------------------------------- |
