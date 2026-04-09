@@ -31,7 +31,7 @@ Parses documents using the Reducto cloud API, extracting clean Markdown text and
 | Field                       | Description                                                     |
 | --------------------------- | --------------------------------------------------------------- |
 | Contains Handwritten Text   | Enables Agentic OCR for better handwriting recognition          |
-| Contains Non-English Text   | Enables multilingual OCR for non-Germanic languages and unicode |
+| Contains Non-English Text   | Enables multilingual OCR for non-Germanic languages and Unicode |
 | AI Summarize Figures/Images | Generate AI summaries for figures, diagrams, and images         |
 
 ### Advanced mode
