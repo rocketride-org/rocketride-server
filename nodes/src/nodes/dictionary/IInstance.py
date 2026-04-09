@@ -100,7 +100,7 @@ to be delinquent on their repayment schedule by 60 days or more.
         # Add the documents text
         question.addDocuments(text)
 
-        result = self.instance.invoke('llm', IInvokeLLM(op='ask', question=question))
+        result = self.instance.invoke(IInvokeLLM.Ask(question=question))
 
         # Process the answer and write documents
         self.writeAnswers(result)

@@ -44,11 +44,13 @@ export function summaryTraceData(data: unknown, lane: string): string {
 	}
 }
 
+export type RenderContext = 'input' | 'output';
+
 /**
  * Renders trace data using a lane-specific typed renderer.
  * Returns null if lane is unknown or data doesn't match expected shape.
  */
-export function renderTraceData(data: unknown, lane: string): ReactElement | null {
+export function renderTraceData(data: unknown, lane: string, context?: RenderContext): ReactElement | null {
 	if (!data || typeof data !== 'object') return null;
 	const l = lane.toLowerCase();
 
@@ -70,7 +72,7 @@ export function renderTraceData(data: unknown, lane: string): ReactElement | nul
 		case 'table':
 			return isTable(data) ? renderTable(data) : null;
 		case 'invoke':
-			return isInvoke(data) ? renderInvoke(data) : null;
+			return isInvoke(data) ? renderInvoke(data, context) : null;
 		default:
 			return null;
 	}
