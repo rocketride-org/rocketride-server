@@ -14,7 +14,7 @@ Text-to-speech node for RocketRide pipelines.
 - Local / model-based:
   - `piper`
   - `kokoro`
-  - `bark` (`bak` is accepted as alias)
+  - `bark`
 - Cloud:
   - `openai`
   - `elevenlabs`

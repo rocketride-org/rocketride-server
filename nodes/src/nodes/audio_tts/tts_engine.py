@@ -154,7 +154,7 @@ class TTSEngine:
             return self._piper(text)
         if engine == 'kokoro':
             return self._kokoro(text)
-        if engine in ('bark', 'bak'):
+        if engine == 'bark':
             return self._bark(text)
         if engine == 'elevenlabs':
             return self._elevenlabs(text)

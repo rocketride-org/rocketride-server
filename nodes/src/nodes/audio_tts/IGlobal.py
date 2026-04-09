@@ -33,7 +33,7 @@ from ai.common.models.base import get_model_server_address
 
 _CLEANUP_INTERVAL_SEC = 300  # run stale-file cleanup at most once every 5 minutes
 
-_CANONICAL_TTS_ENGINES = frozenset({'piper', 'kokoro', 'bark', 'bak', 'openai', 'elevenlabs'})
+_CANONICAL_TTS_ENGINES = frozenset({'piper', 'kokoro', 'bark', 'openai', 'elevenlabs'})
 
 
 def _normalize_engine_id(raw: Any) -> str:
@@ -80,7 +80,7 @@ class IGlobal(IGlobalBase):
             default when no value is configured.
         """
         e = engine.lower()
-        if e in ('bark', 'bak'):
+        if e == 'bark':
             return str(cfg.get('bark_model') or cfg.get('model') or 'suno/bark-small').strip()
         if e == 'openai':
             return str(cfg.get('openai_model') or cfg.get('model') or 'gpt-4o-mini-tts').strip()
@@ -262,8 +262,8 @@ class IGlobal(IGlobalBase):
             return ('piper', str(cfg.get('piper_voice') or '').strip(), bool(cfg.get('piper_use_model_server')))
         if e == 'kokoro':
             return ('kokoro', str(cfg.get('kokoro_voice') or '').strip(), bool(cfg.get('kokoro_use_model_server')))
-        if e in ('bark', 'bak'):
-            return (e, str(cfg.get('model') or '').strip())
+        if e == 'bark':
+            return ('bark', str(cfg.get('model') or '').strip())
         if e == 'openai':
             return ('openai', str(cfg.get('model') or '').strip(), str(cfg.get('voice') or '').strip())
         if e == 'elevenlabs':

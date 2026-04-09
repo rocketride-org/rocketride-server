@@ -22,7 +22,7 @@ model type without model-specific branching.
 from .base import BaseLoader
 
 # Audio models
-from .audio import ElevenLabsTTSLoader, OpenAITTSLoader, KokoroLoader, PiperLoader, Whisper, WhisperLoader
+from .audio import KokoroLoader, PiperLoader, Whisper, WhisperLoader
 
 # GLiNER models (zero-shot NER)
 from .gliner import GLiNER, GLiNERLoader
@@ -44,8 +44,6 @@ __all__ = [
     # Base
     'BaseLoader',
     # Audio
-    'ElevenLabsTTSLoader',
-    'OpenAITTSLoader',
     'KokoroLoader',
     'PiperLoader',
     'Whisper',
