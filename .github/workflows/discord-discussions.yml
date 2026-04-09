@@ -2,7 +2,7 @@ name: Discord Discussion Notification
 
 on:
   discussion:
-    types: [created, answered, unanswered, closed, reopened, labeled, unlabeled, category_changed]
+    types: [created, answered, unanswered, labeled, unlabeled, category_changed]
   discussion_comment:
     types: [created]
 
