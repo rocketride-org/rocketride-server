@@ -8,7 +8,8 @@
  */
 import React, { useState, useMemo, useCallback, CSSProperties } from 'react';
 import { JsonTree } from './JsonTree';
-import { renderTraceData, summaryTraceData } from './renderers';
+import { renderTraceInput, renderTraceOutput, summaryTraceInput, renderTraceData } from './renderers';
+import { traceDataEqual } from './renderers/utils';
 import type { TraceRow } from '../../modules/project/types';
 import { commonStyles } from '../../themes/styles';
 
@@ -549,7 +550,7 @@ const TraceCallNode: React.FC<TraceCallNodeProps> = ({ node, componentNames, exp
 	const isError = !!row.error;
 	const isEmpty = node.children.length === 0 && !row.entryData && !row.exitData && !row.error;
 	const elapsed = getRowElapsed(row);
-	const summary = summaryTraceData(row.entryData, row.lane) || summaryTraceData(row.exitData, row.lane) || dataSummary(row.entryData) || dataSummary(row.exitData) || '';
+	const summary = summaryTraceInput(row.entryData, row.lane) || summaryTraceInput(row.exitData, row.lane) || dataSummary(row.entryData) || dataSummary(row.exitData) || '';
 	const name = resolveDisplayName(row.filterName, componentNames);
 	const childCount = countAllNodes(node.children);
 
@@ -586,14 +587,24 @@ const TraceCallNode: React.FC<TraceCallNodeProps> = ({ node, componentNames, exp
 			</div>
 
 			<div style={SN.nest}>
-				{/* Input box with call info — always show call info even if no data */}
-				<InlineDataBox node={node} data={row.entryData} label="Input" lane={row.lane} componentNames={componentNames} showCallInfo />
+				{/* Data boxes — single "Data" when identical, split Input/Output when different */}
+				{(() => {
+					const outputData = row.error ? { error: row.error } : row.exitData;
+					const hasOutput = !!(row.exitData || row.error || row.result);
+					const identical = hasOutput && traceDataEqual(row.entryData, outputData);
 
-				{/* Children */}
-				<TraceCallChildren nodes={node.children} componentNames={componentNames} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={onToggleExpand} onExpandAll={onExpandAll} onCollapseAll={onCollapseAll} onRevealMore={onRevealMore} />
+					return (
+						<>
+							<InputDataBox node={node} data={row.entryData} label={identical || !hasOutput ? 'Data' : 'Input'} lane={row.lane} componentNames={componentNames} showCallInfo />
 
-				{/* Output box — collapsed by default */}
-				{(row.exitData || row.error || row.result) && <InlineDataBox node={node} data={row.error ? { error: row.error } : row.exitData} label="Output" lane={row.lane} componentNames={componentNames} showResult defaultOpen={false} />}
+							{/* Children */}
+							<TraceCallChildren nodes={node.children} componentNames={componentNames} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={onToggleExpand} onExpandAll={onExpandAll} onCollapseAll={onCollapseAll} onRevealMore={onRevealMore} />
+
+							{/* Output box — only when data differs */}
+							{hasOutput && !identical && <OutputDataBox node={node} data={outputData} inputData={row.entryData} lane={row.lane} componentNames={componentNames} />}
+						</>
+					);
+				})()}
 			</div>
 		</div>
 	);
@@ -634,26 +645,37 @@ const DataViewToggle: React.FC<{ mode: DataViewMode; modes: typeof VIEW_MODES; o
 	</div>
 );
 
-const DataRenderer: React.FC<{ data: unknown; mode: DataViewMode; lane?: string }> = ({ data, mode, lane }) => {
-	if (mode === 'tree') {
-		return renderTraceData(data, lane || '');
-	}
-	if (mode === 'json') {
-		return (
-			<div style={S.dpTree}>
-				<JsonTree data={data} defaultExpanded={2} />
-			</div>
-		);
-	}
-	// raw
-	return <pre style={{ ...S.dpTree, fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{JSON.stringify(data)}</pre>;
+// =============================================================================
+// SHARED BOX STYLES
+// =============================================================================
+
+const boxStyle: CSSProperties = {
+	background: 'var(--rr-bg-widget)',
+	borderRadius: '0 4px 4px 0',
+	padding: '6px 10px',
+	margin: '2px 0 4px',
+	fontSize: 12,
 };
 
-/** Inline data box — shown directly when a node is expanded. */
-const InlineDataBox: React.FC<{ node: TraceTreeNode; data: unknown; label: string; lane: string; componentNames?: Map<string, string>; showCallInfo?: boolean; showResult?: boolean; defaultOpen?: boolean }> = ({ node, data, label, lane, componentNames, showCallInfo, showResult, defaultOpen = true }) => {
+const kvStyle: CSSProperties = { display: 'flex', gap: 8, fontSize: 11, lineHeight: '16px' };
+const kStyle: CSSProperties = { color: 'var(--rr-text-secondary)', flexShrink: 0, minWidth: 60 };
+const vStyle: CSSProperties = { color: 'var(--rr-text-primary)' };
+
+// =============================================================================
+// INPUT DATA BOX
+// =============================================================================
+
+const InputDataBox: React.FC<{
+	node: TraceTreeNode;
+	data: unknown;
+	label?: string;
+	lane: string;
+	componentNames?: Map<string, string>;
+	showCallInfo?: boolean;
+}> = ({ node, data, label = 'Input', lane, componentNames, showCallInfo }) => {
 	const hasTreeView = data != null && renderTraceData(data, lane) != null;
 	const availableModes = hasTreeView ? VIEW_MODES : VIEW_MODES.filter((v) => v.mode !== 'tree');
-	const [expanded, setExpanded] = useState(defaultOpen);
+	const [expanded, setExpanded] = useState(true);
 	const [viewMode, setViewMode] = useState<DataViewMode>(() => (hasTreeView ? 'tree' : 'json'));
 
 	const { row } = node;
@@ -671,24 +693,8 @@ const InlineDataBox: React.FC<{ node: TraceTreeNode; data: unknown; label: strin
 		}
 	}
 
-	const boxStyle: CSSProperties = {
-		background: 'var(--rr-bg-widget)',
-		borderRadius: '0 4px 4px 0',
-		padding: '6px 10px',
-		margin: '2px 0 4px',
-		fontSize: 12,
-	};
-
-	const kvStyle: CSSProperties = { display: 'flex', gap: 8, fontSize: 11, lineHeight: '16px' };
-	const kStyle: CSSProperties = { color: 'var(--rr-text-secondary)', flexShrink: 0, minWidth: 60 };
-	const vStyle: CSSProperties = { color: 'var(--rr-text-primary)' };
-
-	// Result text for the output box header
-	const resultText = showResult && row.result ? row.result : null;
-
 	return (
 		<div style={boxStyle}>
-			{/* Call info (only on input box) */}
 			{showCallInfo && (
 				<div style={{ marginBottom: 6 }}>
 					{elapsed != null && (
@@ -718,15 +724,6 @@ const InlineDataBox: React.FC<{ node: TraceTreeNode; data: unknown; label: strin
 				</div>
 			)}
 
-			{/* Result info (only on output box, when expanded) */}
-			{showResult && expanded && resultText && (
-				<div style={{ ...kvStyle, marginBottom: 6 }}>
-					<span style={kStyle}>Result</span>
-					<span style={vStyle}>{resultText}</span>
-				</div>
-			)}
-
-			{/* Data section — only if data exists */}
 			{data != null && (
 				<>
 					<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -734,7 +731,63 @@ const InlineDataBox: React.FC<{ node: TraceTreeNode; data: unknown; label: strin
 							<span style={S.dpArr}>{expanded ? '\u25BC' : '\u25B6'}</span>
 							{label}
 						</div>
-						{/* Inline result hint when collapsed */}
+						{expanded && <DataViewToggle mode={viewMode} modes={availableModes} onChange={setViewMode} />}
+					</div>
+					{expanded && (
+						<div style={{ padding: '0 8px' }}>
+							{viewMode === 'tree' ? (
+								renderTraceInput(data, lane)
+							) : viewMode === 'json' ? (
+								<div style={S.dpTree}>
+									<JsonTree data={data} defaultExpanded={2} />
+								</div>
+							) : (
+								<pre style={{ ...S.dpTree, fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{JSON.stringify(data)}</pre>
+							)}
+						</div>
+					)}
+				</>
+			)}
+		</div>
+	);
+};
+
+// =============================================================================
+// OUTPUT DATA BOX
+// =============================================================================
+
+const OutputDataBox: React.FC<{
+	node: TraceTreeNode;
+	data: unknown;
+	inputData: unknown;
+	lane: string;
+	componentNames?: Map<string, string>;
+}> = ({ node, data, inputData, lane }) => {
+	const hasTreeView = data != null && renderTraceOutput(data, lane, inputData) != null;
+	const availableModes = hasTreeView ? VIEW_MODES : VIEW_MODES.filter((v) => v.mode !== 'tree');
+	const [expanded, setExpanded] = useState(false);
+	const [viewMode, setViewMode] = useState<DataViewMode>(() => (hasTreeView ? 'tree' : 'json'));
+
+	const { row } = node;
+	const resultText = row.result || null;
+
+	return (
+		<div style={boxStyle}>
+			{/* Result info when expanded */}
+			{expanded && resultText && (
+				<div style={{ ...kvStyle, marginBottom: 6 }}>
+					<span style={kStyle}>Result</span>
+					<span style={vStyle}>{resultText}</span>
+				</div>
+			)}
+
+			{data != null ? (
+				<>
+					<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+						<div style={S.dpToggle} onClick={() => setExpanded(!expanded)}>
+							<span style={S.dpArr}>{expanded ? '\u25BC' : '\u25B6'}</span>
+							Output
+						</div>
 						{!expanded && resultText && (
 							<span style={{ fontSize: 11, color: 'var(--rr-text-secondary)', fontStyle: 'italic' }}>
 								{'\u2014'} {resultText}
@@ -744,18 +797,23 @@ const InlineDataBox: React.FC<{ node: TraceTreeNode; data: unknown; label: strin
 					</div>
 					{expanded && (
 						<div style={{ padding: '0 8px' }}>
-							<DataRenderer data={data} mode={viewMode} lane={lane} />
+							{viewMode === 'tree' ? (
+								renderTraceOutput(data, lane, inputData)
+							) : viewMode === 'json' ? (
+								<div style={S.dpTree}>
+									<JsonTree data={data} defaultExpanded={2} />
+								</div>
+							) : (
+								<pre style={{ ...S.dpTree, fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{JSON.stringify(data)}</pre>
+							)}
 						</div>
 					)}
 				</>
-			)}
-
-			{/* Output box with no data — just show the result inline */}
-			{data == null && resultText && (
+			) : resultText ? (
 				<div style={{ fontSize: 11, color: 'var(--rr-text-secondary)' }}>
-					{label} {'\u2014'} {resultText}
+					Output {'\u2014'} {resultText}
 				</div>
-			)}
+			) : null}
 		</div>
 	);
 };
