@@ -27,6 +27,16 @@ from .IGlobal import IGlobal
 from ai.common.schema import DocMetadata, Doc
 from ai.common.table import Table
 
+_LOG = '/tmp/brandy_pipeline.log'
+
+
+def _plog(msg: str) -> None:
+    import datetime
+
+    line = f'[{datetime.datetime.now().isoformat(timespec="milliseconds")}] [frame_grabber] {msg}\n'
+    with open(_LOG, 'a') as f:
+        f.write(line)
+
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
@@ -45,11 +55,13 @@ class IInstance(IInstanceBase):
         self._reader = None
 
     def open(self, obj: Entry):
+        _plog(f'open: name={obj.name!r}')
         # Reset the start times
         self._startTimes = []
         self._prev_frame = None
 
     def close(self):
+        _plog(f'close: total_frames={len(self._startTimes)}')
         # If we are listening on tables
         if self.instance.hasListener('table') and len(self._startTimes) > 0:
             # Generate the table
@@ -105,6 +117,7 @@ class IInstance(IInstanceBase):
             self.instance.writeDocuments([doc])
 
         if self.instance.hasListener('image'):
+            _plog(f'frame: frame_number={frame_number} time_stamp={time_stamp:.3f}')
             # Send the image
             self.instance.writeImage(AVI_ACTION.BEGIN, 'image/png')
             self.instance.writeImage(AVI_ACTION.WRITE, 'image/png', image)

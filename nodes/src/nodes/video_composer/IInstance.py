@@ -41,6 +41,17 @@ def _log(msg: str) -> None:
     _logger.debug(msg)
 
 
+_PLOG = '/tmp/brandy_pipeline.log'
+
+
+def _plog(msg: str) -> None:
+    import datetime
+
+    line = f'[{datetime.datetime.now().isoformat(timespec="milliseconds")}] [video_composer] {msg}\n'
+    with open(_PLOG, 'a') as f:
+        f.write(line)
+
+
 class IInstance(IInstanceBase):
     """Pipeline instance for the video composer node.
 
@@ -85,21 +96,26 @@ class IInstance(IInstanceBase):
         self._frames = []
         self._filename = (obj.name if obj.hasName else None) or 'output.mp4'
         _log('open: in-memory frame buffer initialised')
+        _plog(f'open: filename={self._filename!r} obj.hasName={obj.hasName}')
 
     def close(self):
         """Encode accumulated frames to MP4 and stream the result; no-op if no frames."""
         frame_count = len(self._frames)
         _log(f'close: frame_count={frame_count}')
+        _plog(f'close: frame_count={frame_count} filename={self._filename!r}')
         if frame_count == 0:
+            _plog('close: no frames — skipping encode')
             self._cleanup()
             return
 
         mp4_bytes = self._encode_video()
         if mp4_bytes:
             _log(f'close: encoded ok size={len(mp4_bytes)} bytes, streaming')
+            _plog(f'close: encoded ok size={len(mp4_bytes)} bytes — sending SSE')
             self._output_video(mp4_bytes)
         else:
             _log('close: encode failed')
+            _plog('close: ENCODE FAILED')
 
         self._cleanup()
 
@@ -120,6 +136,7 @@ class IInstance(IInstanceBase):
         elif action == AVI_ACTION.END:
             if self._image_buf:
                 self._frames.append(bytes(self._image_buf))
+                _plog(f'frame_received: total={len(self._frames)} size={len(self._image_buf)}')
             self._image_buf = bytearray()
 
     # ------------------------------------------------------------------
@@ -243,6 +260,7 @@ class IInstance(IInstanceBase):
             chunk_index += 1
         self.instance.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
         self.instance.sendSSE('video_complete', filename=self._filename)
+        _plog(f'output_video: done — sent {total_chunks} SSE chunks filename={self._filename!r}')
 
     # ------------------------------------------------------------------
     # Cleanup
