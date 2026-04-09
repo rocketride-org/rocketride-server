@@ -110,6 +110,9 @@ engine:
   # If set, the chart will not create a Secret resource
   existingSecret: ''
 
+  # -- Bump this when rotating an externally managed secret to force a rollout
+  existingSecretChecksum: ''
+
   # -- Secret values (only used when existingSecret is empty)
   # These will be base64-encoded and stored in a Kubernetes Secret
   secrets:

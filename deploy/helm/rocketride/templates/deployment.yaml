@@ -18,7 +18,11 @@ spec:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.engine.existingSecret }}
+        checksum/secret: {{ printf "%s:%s" .Values.engine.existingSecret (.Values.engine.existingSecretChecksum | default "") | sha256sum }}
+        {{- else }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
         {{- with .Values.engine.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

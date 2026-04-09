@@ -41,14 +41,15 @@ See [`values.yaml`](values.yaml) for the full list of configurable parameters wi
 
 Key parameters:
 
-| Parameter                    | Default                 | Description                      |
-| ---------------------------- | ----------------------- | -------------------------------- |
-| `engine.replicaCount`        | `1`                     | Replica count (set to 2+ for HA) |
-| `engine.image.tag`           | `""` (Chart appVersion) | Engine image tag                 |
-| `engine.resources`           | see values.yaml         | CPU/memory requests and limits   |
-| `engine.autoscaling.enabled` | `false`                 | Enable HPA                       |
-| `engine.existingSecret`      | `""`                    | Name of a pre-existing Secret    |
-| `ingress.enabled`            | `false`                 | Expose engine via Ingress        |
+| Parameter                       | Default                 | Description                                      |
+| ------------------------------- | ----------------------- | ------------------------------------------------ |
+| `engine.replicaCount`           | `1`                     | Replica count (set to 2+ for HA)                 |
+| `engine.image.tag`              | `""` (Chart appVersion) | Engine image tag                                 |
+| `engine.resources`              | see values.yaml         | CPU/memory requests and limits                   |
+| `engine.autoscaling.enabled`    | `false`                 | Enable HPA                                       |
+| `engine.existingSecret`         | `""`                    | Name of a pre-existing Secret                    |
+| `engine.existingSecretChecksum` | `""`                    | Manual rollout bump for external secret rotation |
+| `ingress.enabled`               | `false`                 | Expose engine via Ingress                        |
 
 ## Managing Secrets
 
@@ -66,9 +67,10 @@ engine:
 ```yaml
 engine:
   existingSecret: 'rocketride-credentials'
+  existingSecretChecksum: '2026-04-09-rotation-1'
 ```
 
-The chart will mount the named Secret as environment variables and will not create its own Secret resource. Pod checksums ensure a rolling restart when the Secret changes.
+The chart will mount the named Secret as environment variables and will not create its own Secret resource. For chart-managed secrets (`engine.secrets`), the pod checksum changes automatically when the rendered Secret changes. For externally managed secrets (`engine.existingSecret`), bump `engine.existingSecretChecksum` when the external Secret rotates to force a rollout.
 
 ## Examples
 

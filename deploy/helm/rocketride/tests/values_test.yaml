@@ -41,8 +41,8 @@ engine:
   existingSecret: ''
 
   secrets:
-    OPENAI_API_KEY: 'sk-test-key-not-real'
-    ANTHROPIC_API_KEY: 'sk-ant-test-key-not-real'
+    OPENAI_API_KEY: 'openai-test-placeholder'
+    ANTHROPIC_API_KEY: 'anthropic-test-placeholder'
 
   podAnnotations:
     prometheus.io/scrape: 'true'
