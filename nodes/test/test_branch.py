@@ -877,6 +877,7 @@ class TestServicesJson:
         profiles = services['preconfig']['profiles']
         assert 'keyword' in profiles
         assert 'regex' in profiles
+        assert 'length' in profiles
         assert 'score' in profiles
         assert 'sentiment' in profiles
 
@@ -902,3 +903,28 @@ class TestServicesJson:
     def test_has_shape(self, services):
         assert len(services['shape']) >= 1
         assert services['shape'][0]['title'] == 'Conditional Branch'
+
+    def test_length_profile_is_exposed_in_preconfig_and_shape(self, services):
+        profiles = services['preconfig']['profiles']
+        assert profiles['length']['type'] == 'length'
+        assert 'min' in profiles['length']
+        assert 'max' in profiles['length']
+
+        fields = services['fields']
+        assert fields['branch.length']['properties'] == ['min', 'max', 'default_lane']
+
+        conditional = fields['branch.profile']['conditional']
+        assert any(entry['value'] == 'length' and entry['properties'] == ['branch.length'] for entry in conditional)
+
+    def test_sentiment_profile_exposes_expected_selector(self, services):
+        profiles = services['preconfig']['profiles']
+        assert profiles['sentiment']['type'] == 'sentiment'
+        assert profiles['sentiment']['expected'] == 'positive'
+
+        fields = services['fields']
+        assert fields['expected']['enum'] == [
+            ['positive', 'Positive'],
+            ['negative', 'Negative'],
+            ['neutral', 'Neutral'],
+        ]
+        assert fields['branch.sentiment']['properties'] == ['expected', 'default_lane']
