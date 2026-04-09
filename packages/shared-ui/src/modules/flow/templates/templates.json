@@ -144,8 +144,8 @@
 				"control": [{ "classType": "memory", "from": "agent_rocketride_1" }]
 			},
 			{
-				"id": "chart_chartjs_1",
-				"provider": "chart_chartjs",
+				"id": "tool_chartjs_1",
+				"provider": "tool_chartjs",
 				"position": { "x": 283, "y": 325 },
 				"input": [],
 				"control": [{ "classType": "tool", "from": "agent_rocketride_1" }]
@@ -164,7 +164,7 @@
 				"input": [],
 				"control": [
 					{ "classType": "llm", "from": "agent_rocketride_1" },
-					{ "classType": "llm", "from": "chart_chartjs_1" }
+					{ "classType": "llm", "from": "tool_chartjs_1" }
 				]
 			},
 			{

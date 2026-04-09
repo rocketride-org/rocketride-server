@@ -1,87 +1,34 @@
-# Exa Search node
+---
+title: Exa Search
+date: 2026-04-08
+sidebar_position: 1
+---
 
-`search_exa` is a direct search node that sends a single user question to Exa Search and returns the raw Exa JSON response.
+<head>
+  <title>Exa Search - RocketRide Documentation</title>
+</head>
 
-## Pipeline shape
+## What it does
 
-- **Input lane**: `questions`
-- **Output lanes**: `answers`, `text`
-- **Category**: `search`
+Performs web search using the Exa API. Accepts a question and returns semantic or keyword search results, with optional highlighted excerpts from matching pages.
 
-Use it in pipelines such as:
+**Lanes:**
 
-```json
-{
-  "components": [
-    {
-      "id": "chat_1",
-      "provider": "chat",
-      "config": {
-        "mode": "Source",
-        "type": "chat"
-      }
-    },
-    {
-      "id": "search_exa_1",
-      "provider": "search_exa",
-      "config": {
-        "apikey": "${ROCKETRIDE_APIKEY_EXA}",
-        "profile": "default",
-        "default": {
-          "type": "auto",
-          "numResults": 5,
-          "includeHighlights": true,
-          "highlightChars": 600
-        }
-      },
-      "input": [
-        {
-          "lane": "questions",
-          "from": "chat_1"
-        }
-      ]
-    },
-    {
-      "id": "response_1",
-      "provider": "response",
-      "config": {
-        "lanes": []
-      },
-      "input": [
-        {
-          "lane": "answers",
-          "from": "search_exa_1"
-        }
-      ]
-    }
-  ],
-  "source": "chat_1"
-}
-```
+| Lane in     | Lane out  | Description                  |
+| ----------- | --------- | ---------------------------- |
+| `questions` | `answers` | Search results as answers    |
+| `questions` | `text`    | Search results as plain text |
 
 ## Configuration
 
-- `apikey`: Exa API key. Required.
-- `profile`: currently `default`.
-- `type`: `auto`, `keyword`, or `neural`.
-- `numResults`: number of results to request.
-- `includeHighlights`: whether to request Exa highlights.
-- `highlightChars`: maximum highlight characters returned by Exa.
+| Field              | Description                                           |
+| ------------------ | ----------------------------------------------------- |
+| API Key            | Exa API key                                           |
+| Search Type        | `Auto`, `Keyword`, or `Neural` (default: Auto)        |
+| Number of Results  | How many results to return (1–20, default: 5)         |
+| Include Highlights | Return highlighted excerpts from matching pages       |
+| Highlight Length   | Max characters per highlight (100–4000, default: 600) |
 
-For local development, prefer environment-backed configuration:
+## Upstream docs
 
-```bash
-ROCKETRIDE_APIKEY_EXA=your_exa_api_key
-```
-
-and in the pipe:
-
-```json
-"apikey": "${ROCKETRIDE_APIKEY_EXA}"
-```
-
-## Behavior
-
-- Expects exactly one question per invocation.
-- Returns the raw Exa API response JSON.
-- Maps common Exa errors into clearer authentication, rate-limit, and request failure messages.
+- [Exa documentation](https://docs.exa.ai)
