@@ -11,6 +11,7 @@ import { isVideo, renderVideo, summaryVideo } from './render_video';
 import { isAudio, renderAudio, summaryAudio } from './render_audio';
 import { isImage, renderImage, summaryImage } from './render_image';
 import { isTable, renderTable, summaryTable } from './render_table';
+import { isInvoke, renderInvoke, summaryInvoke } from './render_invoke';
 
 /**
  * Returns a short summary string for trace data, dispatched by lane.
@@ -36,6 +37,8 @@ export function summaryTraceData(data: unknown, lane: string): string {
 			return isImage(data) ? summaryImage(data) : '';
 		case 'table':
 			return isTable(data) ? summaryTable(data) : '';
+		case 'invoke':
+			return isInvoke(data) ? summaryInvoke(data) : '';
 		default:
 			return '';
 	}
@@ -66,6 +69,8 @@ export function renderTraceData(data: unknown, lane: string): ReactElement | nul
 			return isImage(data) ? renderImage(data) : null;
 		case 'table':
 			return isTable(data) ? renderTable(data) : null;
+		case 'invoke':
+			return isInvoke(data) ? renderInvoke(data) : null;
 		default:
 			return null;
 	}

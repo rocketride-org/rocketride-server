@@ -31,7 +31,7 @@ from depends import depends
 
 depends()
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from engLib import PROTOCOL_CAPS as _PROTOCOL_CAPS
 from engLib import TAG_ID as _TAG_ID, TAG as _TAG
@@ -192,6 +192,12 @@ class IInvoke(IControl):
     """
 
     control: str = 'invoke'
+
+    @computed_field
+    @property
+    def type(self) -> str:
+        """Returns the class name (e.g. 'IInvokeLLM') for trace rendering."""
+        return type(self).__name__
 
     model_config = ConfigDict(extra='allow')  # Pydantic v2 way to allow extra fields
 
