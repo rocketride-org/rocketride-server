@@ -174,6 +174,7 @@ class TestIssues:
             c('PUT', repo_path(f'/issues/{issue_number}/lock'), body={'lock_reason': 'resolved'})
         finally:
             if issue_number:
+                c('DELETE', repo_path(f'/issues/{issue_number}/lock'))
                 c('PATCH', repo_path(f'/issues/{issue_number}'), body={'state': 'closed'})
 
 
