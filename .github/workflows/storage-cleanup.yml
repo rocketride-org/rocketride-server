@@ -17,12 +17,12 @@ on:
   workflow_dispatch:
     inputs:
       artifact_max_age_days:
-        description: Delete artifacts older than this many days
+        description: Delete artifacts older than this many days (minimum 1)
         required: false
         type: string
-        default: '2'
+        default: '3'
       cache_max_age_days:
-        description: Delete caches older than this many days
+        description: Delete caches older than this many days (minimum 1)
         required: false
         type: string
         default: '7'
@@ -44,11 +44,32 @@ jobs:
       - name: Delete old artifacts
         env:
           GH_TOKEN: ${{ github.token }}
-          MAX_AGE_DAYS: ${{ inputs.artifact_max_age_days || '2' }}
+          MAX_AGE_DAYS: ${{ inputs.artifact_max_age_days || '3' }}
         run: |
           set -euo pipefail
+
+          # Reject 0 / non-positive: a 0-day window resolves to "now" and would
+          # delete every artifact created before the script started, including
+          # ones uploaded seconds earlier. Aligns with the nightly's
+          # retention_days: 3 default.
+          if ! [[ "${MAX_AGE_DAYS}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::artifact_max_age_days must be a positive integer (got '${MAX_AGE_DAYS}')"
+            exit 1
+          fi
+
           CUTOFF=$(date -u -d "${MAX_AGE_DAYS} days ago" +%s)
           echo "Deleting artifacts created before $(date -u -d @${CUTOFF} -Iseconds)"
+
+          # Materialize the API output to a file so producer failures surface
+          # via set -e. Process substitution (`< <(gh api ...)`) is async and
+          # its exit code is not visible to the surrounding command, so a
+          # failed `gh api --paginate` would be silently treated as an empty
+          # list and the job would report "0 deleted" instead of failing.
+          ARTIFACTS_FILE=$(mktemp)
+          trap 'rm -f "${ARTIFACTS_FILE}"' EXIT
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts" \
+            --jq '.artifacts[] | "\(.id) \(.created_at) \(.size_in_bytes) \(.name)"' \
+            > "${ARTIFACTS_FILE}"
 
           DELETED=0
           BYTES=0
@@ -63,8 +84,7 @@ jobs:
                 echo "  failed to delete #${id}" >&2
               fi
             fi
-          done < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts" \
-                    --jq '.artifacts[] | "\(.id) \(.created_at) \(.size_in_bytes) \(.name)"')
+          done < "${ARTIFACTS_FILE}"
 
           MB=$((BYTES / 1024 / 1024))
           echo "Artifact cleanup complete: ${DELETED} artifacts, ${MB} MiB freed"
@@ -78,8 +98,20 @@ jobs:
           MAX_AGE_DAYS: ${{ inputs.cache_max_age_days || '7' }}
         run: |
           set -euo pipefail
+
+          if ! [[ "${MAX_AGE_DAYS}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::cache_max_age_days must be a positive integer (got '${MAX_AGE_DAYS}')"
+            exit 1
+          fi
+
           CUTOFF=$(date -u -d "${MAX_AGE_DAYS} days ago" +%s)
           echo "Deleting caches last accessed before $(date -u -d @${CUTOFF} -Iseconds)"
+
+          CACHES_FILE=$(mktemp)
+          trap 'rm -f "${CACHES_FILE}"' EXIT
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches" \
+            --jq '.actions_caches[] | "\(.id) \(.last_accessed_at) \(.size_in_bytes) \(.key)"' \
+            > "${CACHES_FILE}"
 
           DELETED=0
           BYTES=0
@@ -94,8 +126,7 @@ jobs:
                 echo "  failed to delete cache #${id}" >&2
               fi
             fi
-          done < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches" \
-                    --jq '.actions_caches[] | "\(.id) \(.last_accessed_at) \(.size_in_bytes) \(.key)"')
+          done < "${CACHES_FILE}"
 
           MB=$((BYTES / 1024 / 1024))
           echo "Cache cleanup complete: ${DELETED} caches, ${MB} MiB freed"
