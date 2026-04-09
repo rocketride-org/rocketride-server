@@ -136,7 +136,11 @@ class IInstance(IInstanceBase):
             self.instance.writeText(data)
 
         if self.instance.hasListener('answers'):
-            self.instance.writeAnswers([data])
+            from ai.common.schema import Answer
+
+            answer = Answer()
+            answer.setAnswer(data)
+            self.instance.writeAnswers(answer)
 
 
 # ---------------------------------------------------------------------------

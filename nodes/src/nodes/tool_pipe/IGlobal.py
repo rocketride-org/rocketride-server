@@ -36,7 +36,7 @@ from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 
-VALID_RETURN_TYPES = {'text', 'answers', 'documents', 'table', 'image'}
+VALID_RETURN_TYPES = {'text', 'answers', 'documents', 'table'}
 
 
 class IGlobal(IGlobalBase):

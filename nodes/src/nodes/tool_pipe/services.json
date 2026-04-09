@@ -41,7 +41,7 @@
 			"title": "Return Type",
 			"description": "Which response lane value to return to the agent",
 			"default": "text",
-			"enum": ["text", "answers", "documents", "table", "image"]
+			"enum": ["text", "answers", "documents", "table"]
 		}
 	},
 	"shape": [
