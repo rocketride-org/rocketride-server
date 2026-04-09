@@ -145,6 +145,12 @@ function makeRunPytestAction(options = {}) {
             // Use absolute paths since cwd is dist/server
             const pytestArgs = ['-m', 'pytest', TEST_DIR, '-v', '--rootdir', PACKAGE_DIR];
 
+            if (!options.test_full) {
+                pytestArgs.push(
+                    '--ignore-glob', '**/test_*_full.py',
+                    '--ignore-glob', '**/test_*_full/**');
+            }
+
             // Exclude skip_node tests by default (same as skip_nodes in pytest_generate_tests for dynamic tests)
             const pytestOpts = options.pytest;
             const markersOpt = options.markers;
@@ -211,6 +217,33 @@ function makeRunContractTestsAction() {
     };
 }
 
+function makeTestAction(options = {}) {
+    return {
+        description: 'Test pipeline nodes (full integration)',
+        steps: [
+            'server:build',
+            parallel([
+                'nodes:build',
+                'ai:build',
+                'client-python:build'
+            ], 'Build dependencies'),
+            bracket({
+                name: 'node-test-server',
+                setup: makeStartTestServerAction(options),
+                teardown: makeStopTestServerAction(options),
+                steps: [
+                    {
+                        name: options.test_full 
+                            ? 'nodes:run-pytest-full'
+                            : 'nodes:run-pytest',
+                        action: makeRunPytestAction(options)
+                    }
+                ]
+            })
+        ]
+    }
+}
+
 // ============================================================================
 // Module Export
 // ============================================================================
@@ -224,7 +257,6 @@ module.exports = {
         { name: 'nodes:sync', action: makeSyncNodesAction },
         { name: 'nodes:start-server', action: makeStartTestServerAction },
         { name: 'nodes:stop-server', action: makeStopTestServerAction },
-        { name: 'nodes:run-pytest', action: makeRunPytestAction },
         { name: 'nodes:run-contracts', action: makeRunContractTestsAction },
 
         // Public actions (have descriptions)
@@ -232,27 +264,8 @@ module.exports = {
             description: 'Build pipeline nodes',
             steps: ['server:build', 'nodes:sync']
         })},
-        { name: 'nodes:test', action: () => ({
-            description: 'Test pipeline nodes',
-            steps: ['nodes:build', 'nodes:run-contracts']
-        })},
-        { name: 'nodes:test-full', action: () => ({
-            description: 'Test pipeline nodes (full integration)',
-            steps: [
-                'server:build',
-                parallel([
-                    'nodes:build',
-                    'ai:build',
-                    'client-python:build'
-                ], 'Build dependencies'),
-                bracket({
-                    name: 'node-test-server',
-                    setup: makeStartTestServerAction(),
-                    teardown: makeStopTestServerAction(),
-                    steps: ['nodes:run-pytest']
-                })
-            ]
-        })},
+        { name: 'nodes:test', action: (options) => makeTestAction({ ...options, test_full: false }) },
+        { name: 'nodes:test-full', action: (options) => makeTestAction({ ...options, test_full: true }) },
         { name: 'nodes:test-contracts', action: () => ({
             description: 'Test node contracts',
             steps: ['server:build', 'nodes:run-contracts']
