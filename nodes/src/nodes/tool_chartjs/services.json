@@ -1,16 +1,16 @@
 {
 	"title": "Chart (Chart.js)",
-	"protocol": "chart_chartjs://",
+	"protocol": "tool_chartjs://",
 	"classType": ["tool"],
 	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
-	"path": "nodes.chart_chartjs",
+	"path": "nodes.tool_chartjs",
 	"prefix": "chartjs",
 	"icon": "chartjs.svg",
 	"documentation": "https://docs.rocketride.org",
 	"description": ["Generates Chart.js v4 chart configurations from data using the pipeline LLM.", "The agent provides raw data and an optional chart type or description.", "Returns a ```chartjs fenced code block ready for rendering in the chat UI."],
-	"tile": ["Tool: ${parameters.chart_chartjs.serverName}.generate_chart"],
+	"tile": ["Tool: ${parameters.tool_chartjs.serverName}.generate_chart"],
 	"invoke": {
 		"llm": {
 			"description": "LLM used to generate Chart.js configurations from data",
@@ -28,7 +28,7 @@
 		}
 	},
 	"fields": {
-		"chart_chartjs.serverName": {
+		"tool_chartjs.serverName": {
 			"hidden": true,
 			"type": "string",
 			"title": "Server name",

@@ -291,13 +291,13 @@ A single LLM/tool/memory node can be shared by multiple invokers — just add mu
 	"control": [
 		{ "classType": "llm", "from": "agent_rocketride_1" },
 		{ "classType": "llm", "from": "agent_crewai_1" },
-		{ "classType": "llm", "from": "chart_chartjs_1" },
+		{ "classType": "llm", "from": "tool_chartjs_1" },
 		{ "classType": "llm", "from": "db_postgres_1" }
 	]
 }
 ```
 
-This applies to agents, but also to non-agent components like `summarization`, `extract_data`, `dictionary`, `db_postgres`, and `chart_chartjs` — any component whose catalog entry has an `invoke` field.
+This applies to agents, but also to non-agent components like `summarization`, `extract_data`, `dictionary`, `db_postgres`, and `tool_chartjs` — any component whose catalog entry has an `invoke` field.
 
 ### Memory Requirements by Agent Type
 
@@ -623,7 +623,7 @@ questions → agent_rocketride → answers
 
 ```text
 questions → agent_rocketride → answers
-    [controlled by agent: llm_openai, memory_internal, db_postgres, db_mysql, chart_chartjs]
+    [controlled by agent: llm_openai, memory_internal, db_postgres, db_mysql, tool_chartjs]
 ```
 
 **Multi-agent comparison (fan-out from single chat):**

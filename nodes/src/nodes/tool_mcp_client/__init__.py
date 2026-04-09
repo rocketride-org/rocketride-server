@@ -1,4 +1,6 @@
 # =============================================================================
+# RocketRide Engine
+# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -21,18 +23,7 @@
 # SOFTWARE.
 # =============================================================================
 
-"""
-Chart (Chart.js) tool node — global (shared) state.
+from .IGlobal import IGlobal
+from .IInstance import IInstance
 
-Tool logic lives on IInstance via @tool_function. Nothing to hold here.
-"""
-
-from __future__ import annotations
-
-from rocketlib import IGlobalBase
-
-
-class IGlobal(IGlobalBase):
-    """Global state for chart_chartjs."""
-
-    pass
+__all__ = ['IGlobal', 'IInstance']

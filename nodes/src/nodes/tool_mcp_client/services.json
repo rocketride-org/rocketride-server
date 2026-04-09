@@ -5,7 +5,7 @@
 	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
-	"path": "nodes.mcp_client",
+	"path": "nodes.tool_mcp_client",
 	"prefix": "mcp",
 	"icon": "mcp.svg",
 	"documentation": "https://docs.rocketride.org",
