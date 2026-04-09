@@ -37,10 +37,12 @@ export function renderText(data: TextData): ReactElement {
 		<div>
 			<div style={RS.section}>
 				<div style={RS.label}>Text</div>
-				<div style={{ ...RS.textBlock, borderLeft: '3px solid var(--rr-chart-yellow)' }}>{data.text}</div>
-				<div style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginTop: 2 }}>
-					{(data.length ?? data.text.length).toLocaleString()} chars
-					{' \u00B7 '}~{data.text.split(/\s+/).length} words
+				<div style={RS.sectionContent}>
+					<div style={{ ...RS.textBlock, borderLeft: '3px solid var(--rr-chart-yellow)' }}>{data.text}</div>
+					<div style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginTop: 2 }}>
+						{(data.length ?? data.text.length).toLocaleString()} chars
+						{' \u00B7 '}~{data.text.split(/\s+/).length} words
+					</div>
 				</div>
 			</div>
 		</div>

@@ -62,15 +62,17 @@ function renderSingleDoc(doc: DocumentEntry, index: number, total: number): Reac
 			{content && (
 				<div style={RS.section}>
 					<div style={RS.label}>Content</div>
-					<div style={{ ...RS.textBlock, borderLeft: '3px solid var(--rr-chart-purple)' }}>{content}</div>
-					<div style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginTop: 2 }}>
-						{content.length.toLocaleString()} chars
-						{tokens != null && (
-							<span>
-								{' '}
-								{'\u00B7'} {tokens} tokens
-							</span>
-						)}
+					<div style={RS.sectionContent}>
+						<div style={{ ...RS.textBlock, borderLeft: '3px solid var(--rr-chart-purple)' }}>{content}</div>
+						<div style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginTop: 2 }}>
+							{content.length.toLocaleString()} chars
+							{tokens != null && (
+								<span>
+									{' '}
+									{'\u00B7'} {tokens} tokens
+								</span>
+							)}
+						</div>
 					</div>
 				</div>
 			)}
@@ -80,36 +82,38 @@ function renderSingleDoc(doc: DocumentEntry, index: number, total: number): Reac
 					return (
 						<div style={RS.section}>
 							<div style={RS.label}>Metadata</div>
-							{m.parent && (
-								<div style={RS.kvRow}>
-									<span style={RS.kvKey}>Source</span>
-									<span style={RS.kvVal}>{String(m.parent)}</span>
-								</div>
-							)}
-							{m.objectId && (
-								<div style={RS.kvRow}>
-									<span style={RS.kvKey}>Object ID</span>
-									<span style={RS.kvMono}>{String(m.objectId)}</span>
-								</div>
-							)}
-							{m.chunkId != null && (
-								<div style={RS.kvRow}>
-									<span style={RS.kvKey}>Chunk</span>
-									<span style={RS.kvVal}>{String(m.chunkId)}</span>
-								</div>
-							)}
-							{m.nodeId && (
-								<div style={RS.kvRow}>
-									<span style={RS.kvKey}>Node</span>
-									<span style={RS.kvMono}>{String(m.nodeId)}</span>
-								</div>
-							)}
-							{m.isTable && (
-								<div style={RS.kvRow}>
-									<span style={RS.kvKey}>Type</span>
-									<span style={RS.kvVal}>Table data</span>
-								</div>
-							)}
+							<div style={RS.sectionContent}>
+								{m.parent && (
+									<div style={RS.kvRow}>
+										<span style={RS.kvKey}>Source</span>
+										<span style={RS.kvVal}>{String(m.parent)}</span>
+									</div>
+								)}
+								{m.objectId && (
+									<div style={RS.kvRow}>
+										<span style={RS.kvKey}>Object ID</span>
+										<span style={RS.kvMono}>{String(m.objectId)}</span>
+									</div>
+								)}
+								{m.chunkId != null && (
+									<div style={RS.kvRow}>
+										<span style={RS.kvKey}>Chunk</span>
+										<span style={RS.kvVal}>{String(m.chunkId)}</span>
+									</div>
+								)}
+								{m.nodeId && (
+									<div style={RS.kvRow}>
+										<span style={RS.kvKey}>Node</span>
+										<span style={RS.kvMono}>{String(m.nodeId)}</span>
+									</div>
+								)}
+								{m.isTable && (
+									<div style={RS.kvRow}>
+										<span style={RS.kvKey}>Type</span>
+										<span style={RS.kvVal}>Table data</span>
+									</div>
+								)}
+							</div>
 						</div>
 					);
 				})()}

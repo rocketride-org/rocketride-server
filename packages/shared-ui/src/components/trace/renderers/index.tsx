@@ -11,12 +11,14 @@ import { isVideo, renderVideo, summaryVideo } from './render_video';
 import { isAudio, renderAudio, summaryAudio } from './render_audio';
 import { isImage, renderImage, summaryImage } from './render_image';
 import { isTable, renderTable, summaryTable } from './render_table';
-import { isInvoke, renderInvoke, summaryInvoke } from './render_invoke';
+import { isInvoke, renderInvokeInput, renderInvokeOutput, summaryInvokeInput, summaryInvokeOutput } from './render_invoke';
+import { DiffView, diffObjects, summaryDiff } from './utils';
 
-/**
- * Returns a short summary string for trace data, dispatched by lane.
- */
-export function summaryTraceData(data: unknown, lane: string): string {
+// =============================================================================
+// INPUT SUMMARY — short string for collapsed row display
+// =============================================================================
+
+export function summaryTraceInput(data: unknown, lane: string): string {
 	if (!data || typeof data !== 'object') return '';
 	const l = lane.toLowerCase();
 
@@ -38,19 +40,35 @@ export function summaryTraceData(data: unknown, lane: string): string {
 		case 'table':
 			return isTable(data) ? summaryTable(data) : '';
 		case 'invoke':
-			return isInvoke(data) ? summaryInvoke(data) : '';
+			return isInvoke(data) ? summaryInvokeInput(data) : '';
 		default:
 			return '';
 	}
 }
 
-export type RenderContext = 'input' | 'output';
+// =============================================================================
+// OUTPUT SUMMARY — short string for collapsed output row
+// =============================================================================
 
-/**
- * Renders trace data using a lane-specific typed renderer.
- * Returns null if lane is unknown or data doesn't match expected shape.
- */
-export function renderTraceData(data: unknown, lane: string, context?: RenderContext): ReactElement | null {
+export function summaryTraceOutput(data: unknown, lane: string, inputData?: unknown): string {
+	if (!data || typeof data !== 'object') return '';
+	const l = lane.toLowerCase();
+
+	// Invoke has type-specific output summaries
+	if (l === 'invoke' && isInvoke(data)) {
+		return summaryInvokeOutput(data, inputData);
+	}
+
+	// Default: diff summary
+	const { entries, total } = diffObjects(inputData, data);
+	return summaryDiff(entries, total);
+}
+
+// =============================================================================
+// INPUT RENDERER — typed renderer per lane
+// =============================================================================
+
+export function renderTraceInput(data: unknown, lane: string): ReactElement | null {
 	if (!data || typeof data !== 'object') return null;
 	const l = lane.toLowerCase();
 
@@ -72,8 +90,35 @@ export function renderTraceData(data: unknown, lane: string, context?: RenderCon
 		case 'table':
 			return isTable(data) ? renderTable(data) : null;
 		case 'invoke':
-			return isInvoke(data) ? renderInvoke(data, context) : null;
+			return isInvoke(data) ? renderInvokeInput(data) : null;
 		default:
 			return null;
 	}
 }
+
+// =============================================================================
+// OUTPUT RENDERER — diff view by default, invoke overrides
+// =============================================================================
+
+export function renderTraceOutput(data: unknown, lane: string, inputData?: unknown): ReactElement | null {
+	if (!data || typeof data !== 'object') return null;
+	const l = lane.toLowerCase();
+
+	// Invoke has type-specific output renderers
+	if (l === 'invoke' && isInvoke(data)) {
+		return renderInvokeOutput(data, inputData);
+	}
+
+	// Default: DiffView comparing input to output
+	return DiffView({ before: inputData, after: data });
+}
+
+// =============================================================================
+// BACKWARD COMPAT ALIASES
+// =============================================================================
+
+/** Alias for renderTraceInput — used by hasTreeView check. */
+export const renderTraceData = renderTraceInput;
+
+/** Alias for summaryTraceInput — used by collapsed row summary. */
+export const summaryTraceData = summaryTraceInput;
