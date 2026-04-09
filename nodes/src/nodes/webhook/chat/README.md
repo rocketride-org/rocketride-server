@@ -15,6 +15,6 @@ The Chat node is used to connect to a custom chat endpoint, allowing communicati
   - Default value is `0.0.0.0`, which allows external access.
   - Use `127.0.0.1` if you only want local access.
 - Port - Enter the port number that the chat service is running on.
-  - Default is `5566`.
+  - Default is `5567`.
 - Endpoint - Enter the endpoint route where the chat service is available.
   - Example: `/` or `/chat`.
