@@ -2,42 +2,139 @@ name: Discord Issue Notification
 
 on:
   issues:
-    types: [opened]
+    types: [opened, closed, reopened, labeled, unlabeled, assigned, unassigned]
 
 permissions:
   contents: read
+  issues: write
+
+concurrency:
+  group: discord-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
 
 jobs:
   notify:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_ISSUES_WEBHOOK_URL }}
+      REPO: ${{ github.repository }}
     steps:
-      - name: Post to Discord
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_ISSUES_WEBHOOK_URL }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_URL: ${{ github.event.issue.html_url }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
-          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
-          ISSUE_AVATAR: ${{ github.event.issue.user.avatar_url }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+      - name: Build embed, post or patch Discord
         run: |
-          # Truncate body and close unclosed code blocks
-          BODY="${ISSUE_BODY:0:1500}"
-          BACKTICK_COUNT=$(echo "$BODY" | grep -o '```' | wc -l)
-          if (( BACKTICK_COUNT % 2 != 0 )); then
-            BODY="${ISSUE_BODY:0:1500}..."$'\n```'
+          # ── Guard: bail if webhook is not configured ─────────────────────
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_ISSUES_WEBHOOK_URL secret is not set — skipping"
+            exit 0
           fi
 
+          NUMBER="${{ github.event.issue.number }}"
+
+          # ── Fetch current issue state (always fresh, not from stale event payload) ──
+          if ! ISSUE=$(gh api "/repos/$REPO/issues/$NUMBER") || [ -z "$ISSUE" ]; then
+            echo "Failed to fetch issue #$NUMBER — skipping"
+            exit 0
+          fi
+
+          TITLE=$(echo    "$ISSUE" | jq -r '.title')
+          URL=$(echo      "$ISSUE" | jq -r '.html_url')
+          AUTHOR=$(echo   "$ISSUE" | jq -r '.user.login')
+          AVATAR=$(echo   "$ISSUE" | jq -r '.user.avatar_url')
+          STATE=$(echo    "$ISSUE" | jq -r '.state')
+          REASON=$(echo   "$ISSUE" | jq -r '.state_reason // empty')
+
+          LABELS=$(echo    "$ISSUE" | jq -r '[.labels[].name]       | if length==0 then "None"       else join(", ") end')
+          ASSIGNEES=$(echo "$ISSUE" | jq -r '[.assignees[].login]   | if length==0 then "Unassigned" else join(", ") end')
+          MILESTONE=$(echo "$ISSUE" | jq -r '.milestone.title // "None"')
+
+          # ── Status + color ───────────────────────────────────────────────
+          if [ "$STATE" = "open" ]; then
+            COLOR=3066993;  STATUS="🟢 Open"
+          elif [ "$REASON" = "not_planned" ]; then
+            COLOR=9807270;  STATUS="⚫ Closed (not planned)"
+          else
+            COLOR=15158332; STATUS="🔴 Closed"
+          fi
+
+          # ── Build payload ────────────────────────────────────────────────
           PAYLOAD=$(jq -n \
-            --arg title "#$ISSUE_NUMBER $ISSUE_TITLE" \
-            --arg url "$ISSUE_URL" \
-            --arg desc "$BODY" \
-            --arg author "$ISSUE_AUTHOR" \
-            --arg avatar "$ISSUE_AVATAR" \
-            --arg repo "$GITHUB_REPOSITORY" \
-            '{embeds: [{title: $title, url: $url, description: $desc, color: 15548997,
-               author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
-               fields: [
-                 {name: "Repo", value: $repo, inline: true}
-               ]}]}')
-          curl -sS -f -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
+            --arg  title     "#$NUMBER $TITLE" \
+            --arg  url       "$URL" \
+            --arg  author    "$AUTHOR" \
+            --arg  avatar    "$AVATAR" \
+            --arg  repo      "$REPO" \
+            --arg  status    "$STATUS" \
+            --arg  labels    "$LABELS" \
+            --arg  assignees "$ASSIGNEES" \
+            --arg  milestone "$MILESTONE" \
+            --argjson color  "$COLOR" \
+            '{embeds: [{
+              title: $title, url: $url, color: $color,
+              author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
+              fields: [
+                {name: "Status",    value: $status,    inline: true},
+                {name: "Labels",    value: $labels,    inline: true},
+                {name: "Assignees", value: $assignees, inline: true},
+                {name: "Milestone", value: $milestone, inline: true},
+                {name: "Repo",      value: $repo,      inline: true}
+              ]
+            }]}')
+
+          # ── Look up stored message ID ────────────────────────────────────
+          COMMENTS=$(gh api "/repos/$REPO/issues/$NUMBER/comments" \
+            --jq '[.[] | {id: .id, body: .body, author: .user.login}]')
+
+          DISCORD_MSG_ID=$(echo "$COMMENTS" | \
+            jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$"))) | .body' | \
+            grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2 | head -1)
+
+          WEBHOOK_ID=$(echo    "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $(NF-1)}')
+          WEBHOOK_TOKEN=$(echo "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $NF}')
+
+          # ── Post or patch ────────────────────────────────────────────────
+          if [ -n "$DISCORD_MSG_ID" ]; then
+            PATCH_RESPONSE=$(curl -sS -w "\n%{http_code}" -X PATCH \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID")
+
+            PATCH_BODY=$(echo "$PATCH_RESPONSE" | head -n -1)
+            PATCH_STATUS=$(echo "$PATCH_RESPONSE" | tail -n 1)
+            echo "PATCH status: $PATCH_STATUS"
+
+            if [ "$PATCH_STATUS" = "404" ]; then
+              STALE_COMMENT_ID=$(echo "$COMMENTS" | \
+                jq -r '.[] | select(.author == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$"))) | .id' | head -1)
+              gh api -X DELETE "/repos/$REPO/issues/comments/$STALE_COMMENT_ID"
+              DISCORD_MSG_ID=""
+            elif [ "$PATCH_STATUS" != "200" ]; then
+              echo "PATCH failed ($PATCH_STATUS): $PATCH_BODY"
+              exit 1
+            fi
+          fi
+
+          if [ -z "$DISCORD_MSG_ID" ]; then
+            RESPONSE=$(curl -sS -f \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "${DISCORD_WEBHOOK_URL}?wait=true")
+            NEW_MSG_ID=$(echo "$RESPONSE" | jq -r '.id')
+
+            # ── Race guard: re-check for a comment created by a concurrent run ──
+            EXISTING=$(gh api "/repos/$REPO/issues/$NUMBER/comments" \
+              --jq '[.[] | select(.user.login == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$")))] | first // empty' 2>/dev/null)
+
+            if [ -n "$EXISTING" ]; then
+              # Another run won the race — delete our duplicate message, use theirs
+              curl -sS -X DELETE "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$NEW_MSG_ID" || true
+              DISCORD_MSG_ID=$(echo "$EXISTING" | jq -r '.body' | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
+              # Patch the existing message with our payload
+              curl -sS -X PATCH -H "Content-Type: application/json" -d "$PAYLOAD" \
+                "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID" > /dev/null
+            else
+              DISCORD_MSG_ID="$NEW_MSG_ID"
+              gh api "/repos/$REPO/issues/$NUMBER/comments" \
+                -X POST \
+                -f body="<!-- discord-msg-id:${DISCORD_MSG_ID} -->"
+            fi
+          fi

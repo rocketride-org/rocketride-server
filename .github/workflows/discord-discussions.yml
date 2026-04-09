@@ -2,45 +2,213 @@ name: Discord Discussion Notification
 
 on:
   discussion:
+    types: [created, answered, unanswered, closed, reopened, labeled, unlabeled, category_changed]
+  discussion_comment:
     types: [created]
 
 permissions:
   contents: read
+  discussions: write
+
+concurrency:
+  group: discord-discussion-${{ github.event.discussion.number }}
+  cancel-in-progress: false
 
 jobs:
   notify:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_DISCUSSIONS_WEBHOOK_URL }}
+      REPO: ${{ github.repository }}
     steps:
-      - name: Post to Discord
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_DISCUSSIONS_WEBHOOK_URL }}
-          DISCUSSION_TITLE: ${{ github.event.discussion.title }}
-          DISCUSSION_URL: ${{ github.event.discussion.html_url }}
-          DISCUSSION_BODY: ${{ github.event.discussion.body }}
-          DISCUSSION_AUTHOR: ${{ github.event.discussion.user.login }}
-          DISCUSSION_AVATAR: ${{ github.event.discussion.user.avatar_url }}
-          DISCUSSION_NUMBER: ${{ github.event.discussion.number }}
-          DISCUSSION_CATEGORY: ${{ github.event.discussion.category.name }}
+      - name: Build embed, post or patch Discord
         run: |
-          # Truncate body and close unclosed code blocks
-          BODY="${DISCUSSION_BODY:0:1500}"
-          BACKTICK_COUNT=$(echo "$BODY" | grep -o '```' | wc -l)
-          if (( BACKTICK_COUNT % 2 != 0 )); then
-            BODY="${DISCUSSION_BODY:0:1500}..."$'\n```'
+          # ── Guard: bail if webhook is not configured ─────────────────────
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_DISCUSSIONS_WEBHOOK_URL secret is not set — skipping"
+            exit 0
           fi
 
+          NUMBER="${{ github.event.discussion.number }}"
+          OWNER="${REPO%/*}"
+          NAME="${REPO#*/}"
+
+          # ── Fetch discussion via GraphQL (data + last 20 comments in one call) ──
+          QUERY='query($owner:String!,$name:String!,$number:Int!){
+            repository(owner:$owner,name:$name){
+              discussion(number:$number){
+                id title url number body
+                closed
+                locked
+                comments(last:20){ totalCount nodes{ id body author{ login } } }
+                answerChosenAt
+                answer{ url }
+                category{ name emoji isAnswerable }
+                labels(first:10){ nodes{ name } }
+                author{ login avatarUrl }
+              }
+            }
+          }'
+
+          if ! RESULT=$(gh api graphql -f query="$QUERY" \
+            -f owner="$OWNER" -f name="$NAME" -F number="$NUMBER") || [ -z "$RESULT" ]; then
+            echo "Failed to fetch discussion #$NUMBER — skipping"
+            exit 0
+          fi
+
+          DISCUSSION=$(echo "$RESULT" | jq '.data.repository.discussion')
+          if [ "$DISCUSSION" = "null" ] || [ -z "$DISCUSSION" ]; then
+            echo "Discussion #$NUMBER not found (possibly deleted) — skipping"
+            exit 0
+          fi
+
+          TITLE=$(echo       "$DISCUSSION" | jq -r '.title')
+          URL=$(echo         "$DISCUSSION" | jq -r '.url')
+          NODE_ID=$(echo     "$DISCUSSION" | jq -r '.id')
+          IS_CLOSED=$(echo   "$DISCUSSION" | jq -r '.closed')
+          AUTHOR=$(echo      "$DISCUSSION" | jq -r '.author.login')
+          AVATAR=$(echo      "$DISCUSSION" | jq -r '.author.avatarUrl')
+
+          CATEGORY_NAME=$(echo  "$DISCUSSION" | jq -r '.category.name')
+          CATEGORY_EMOJI=$(echo "$DISCUSSION" | jq -r '.category.emoji // empty')
+          IS_ANSWERABLE=$(echo  "$DISCUSSION" | jq -r '.category.isAnswerable')
+          ANSWER_CHOSEN=$(echo  "$DISCUSSION" | jq -r '.answerChosenAt // empty')
+          ANSWER_URL=$(echo     "$DISCUSSION" | jq -r '.answer.url // empty')
+          COMMENT_COUNT=$(echo  "$DISCUSSION" | jq -r '.comments.totalCount')
+          # Remove HTML comments and blank lines, keep markdown formatting
+          BODY=$(echo "$DISCUSSION" | jq -r '
+            (.body // "") |
+            # Remove HTML comments (single and multi-line)
+            gsub("<!--[\\s\\S]*?-->"; "") |
+            # Remove horizontal rules
+            gsub("(?m)^\\s*[-*_]{3,}\\s*$"; "") |
+            # Collapse multiple newlines into single newline
+            gsub("\n\\s*\n+"; "\n") |
+            # Trim leading/trailing whitespace
+            gsub("^\\s+|\\s+$"; "") |
+            # Truncate to 1500 chars
+            if length > 1500 then .[:1500] + "..." else . end')
+
+          LABELS=$(echo "$DISCUSSION" | jq -r '[.labels.nodes[].name] | if length==0 then "None" else join(", ") end')
+
+          CATEGORY_DISPLAY="${CATEGORY_EMOJI:+$CATEGORY_EMOJI }$CATEGORY_NAME"
+
+          # ── Status + color ───────────────────────────────────────────────
+          if [ "$IS_CLOSED" = "true" ]; then
+            COLOR=15158332; STATUS="🔴 Closed"
+          elif [ "$IS_ANSWERABLE" = "true" ] && [ -n "$ANSWER_CHOSEN" ]; then
+            COLOR=3066993
+            if [ -n "$ANSWER_URL" ]; then
+              STATUS="🟢 [Answered]($ANSWER_URL)"
+            else
+              STATUS="🟢 Answered"
+            fi
+          elif [ "$IS_ANSWERABLE" = "true" ]; then
+            COLOR=15105570; STATUS="🟡 Unanswered"
+          else
+            COLOR=3447003;  STATUS="🔵 Open"
+          fi
+
+          # ── Build payload ────────────────────────────────────────────────
           PAYLOAD=$(jq -n \
-            --arg title "#$DISCUSSION_NUMBER $DISCUSSION_TITLE" \
-            --arg url "$DISCUSSION_URL" \
-            --arg desc "$BODY" \
-            --arg author "$DISCUSSION_AUTHOR" \
-            --arg avatar "$DISCUSSION_AVATAR" \
-            --arg category "$DISCUSSION_CATEGORY" \
-            --arg repo "$GITHUB_REPOSITORY" \
-            '{embeds: [{title: $title, url: $url, description: $desc, color: 10181046,
-               author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
-               fields: [
-                 {name: "Category", value: $category, inline: true},
-                 {name: "Repo", value: $repo, inline: true}
-               ]}]}')
-          curl -sS -f -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
+            --arg  title    "#$NUMBER $TITLE" \
+            --arg  url      "$URL" \
+            --arg  desc     "$BODY" \
+            --arg  author   "$AUTHOR" \
+            --arg  avatar   "$AVATAR" \
+            --arg  repo     "$REPO" \
+            --arg  status   "$STATUS" \
+            --arg  category "$CATEGORY_DISPLAY" \
+            --arg  comments "$COMMENT_COUNT" \
+            --arg  labels   "$LABELS" \
+            --argjson color "$COLOR" \
+            '{embeds: [{
+              title: $title, url: $url, color: $color,
+              description: (if $desc == "" then null else $desc end),
+              author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
+              fields: [
+                {name: "Status",   value: $status,   inline: true},
+                {name: "Category", value: $category, inline: true},
+                {name: "Comments", value: $comments, inline: true},
+                {name: "Labels",   value: $labels,   inline: true},
+                {name: "Repo",     value: $repo,     inline: true}
+              ]
+            }]}')
+
+          # ── Look up stored message ID from discussion comments ───────────
+          DISCORD_MSG_ID=""
+          MARKER_COMMENT_ID=""
+
+          while IFS= read -r line; do
+            COMMENT_AUTHOR=$(echo "$line" | jq -r '.author.login')
+            COMMENT_BODY=$(echo "$line" | jq -r '.body')
+            COMMENT_ID=$(echo "$line" | jq -r '.id')
+
+            if [ "$COMMENT_AUTHOR" = "github-actions[bot]" ] && echo "$COMMENT_BODY" | grep -qP '^<!-- discord-msg-id:[0-9]+ -->\s*$'; then
+              DISCORD_MSG_ID=$(echo "$COMMENT_BODY" | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
+              MARKER_COMMENT_ID="$COMMENT_ID"
+              break
+            fi
+          done < <(echo "$DISCUSSION" | jq -c '.comments.nodes[]')
+
+          WEBHOOK_ID=$(echo    "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $(NF-1)}')
+          WEBHOOK_TOKEN=$(echo "$DISCORD_WEBHOOK_URL" | awk -F'/' '{print $NF}')
+
+          # ── Post or patch ────────────────────────────────────────────────
+          if [ -n "$DISCORD_MSG_ID" ]; then
+            PATCH_RESPONSE=$(curl -sS -w "\n%{http_code}" -X PATCH \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID")
+
+            PATCH_BODY=$(echo "$PATCH_RESPONSE" | head -n -1)
+            PATCH_STATUS=$(echo "$PATCH_RESPONSE" | tail -n 1)
+            echo "PATCH status: $PATCH_STATUS"
+
+            if [ "$PATCH_STATUS" = "404" ]; then
+              # Discord message was deleted — remove stale marker comment
+              gh api graphql -f query='mutation($id:ID!){ deleteDiscussionComment(input:{id:$id}){ clientMutationId } }' \
+                -f id="$MARKER_COMMENT_ID" || true
+              DISCORD_MSG_ID=""
+            elif [ "$PATCH_STATUS" != "200" ]; then
+              echo "PATCH failed ($PATCH_STATUS): $PATCH_BODY"
+              exit 1
+            fi
+          fi
+
+          if [ -z "$DISCORD_MSG_ID" ]; then
+            RESPONSE=$(curl -sS -f \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "${DISCORD_WEBHOOK_URL}?wait=true")
+            NEW_MSG_ID=$(echo "$RESPONSE" | jq -r '.id')
+
+            # ── Race guard: re-query comments for a marker created by a concurrent run ──
+            RACE_RESULT=$(gh api graphql -f query='query($owner:String!,$name:String!,$number:Int!){
+              repository(owner:$owner,name:$name){
+                discussion(number:$number){
+                  comments(last:20){ nodes{ id body author{ login } } }
+                }
+              }
+            }' -f owner="$OWNER" -f name="$NAME" -F number="$NUMBER")
+
+            EXISTING_MARKER=$(echo "$RACE_RESULT" | jq -r '
+              [.data.repository.discussion.comments.nodes[]
+                | select(.author.login == "github-actions[bot]" and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$")))
+              ] | first // empty')
+
+            if [ -n "$EXISTING_MARKER" ] && [ "$EXISTING_MARKER" != "null" ]; then
+              # Another run won the race — delete our duplicate message, use theirs
+              curl -sS -X DELETE "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$NEW_MSG_ID" || true
+              DISCORD_MSG_ID=$(echo "$EXISTING_MARKER" | jq -r '.body' | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
+              curl -sS -X PATCH -H "Content-Type: application/json" -d "$PAYLOAD" \
+                "https://discord.com/api/webhooks/$WEBHOOK_ID/$WEBHOOK_TOKEN/messages/$DISCORD_MSG_ID" > /dev/null
+            else
+              DISCORD_MSG_ID="$NEW_MSG_ID"
+              gh api graphql \
+                -f query='mutation($id:ID!,$body:String!){ addDiscussionComment(input:{discussionId:$id,body:$body}){ clientMutationId } }' \
+                -f id="$NODE_ID" \
+                -f body="<!-- discord-msg-id:${DISCORD_MSG_ID} -->"
+            fi
+          fi
