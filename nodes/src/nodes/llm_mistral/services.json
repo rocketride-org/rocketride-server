@@ -165,20 +165,7 @@
 			"description": "Mistral AI model selection",
 			"type": "string",
 			"default": "mistral-large",
-			"enum": [
-				["custom", "Custom Model"],
-				["mistral-large", "Mistral Large 3"],
-				["mistral-medium", "Mistral Medium 3.1"],
-				["mistral-small", "Mistral Small 3.2"],
-				["magistral-medium", "Magistral Medium 1.2"],
-				["magistral-small", "Magistral Small 1.2"],
-				["devstral-medium", "Devstral Medium 1.0"],
-				["devstral-small", "Devstral Small 1.1"],
-				["ministral-14b", "Ministral 3 14B"],
-				["ministral-8b", "Ministral 3 8B"],
-				["ministral-3b", "Ministral 3 3B"],
-				["codestral", "Codestral"]
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "custom",

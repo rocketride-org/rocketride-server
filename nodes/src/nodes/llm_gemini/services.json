@@ -89,104 +89,103 @@
 			"custom": {
 				"model": "",
 				"modelTotalTokens": 1114112,
-				"outputTokens": 65536,
+				"modelOutputTokens": 65536,
 				"apikey": ""
 			},
 			"gemini-3.1-pro-preview": {
 				"model": "models/gemini-3.1-pro-preview",
 				"title": "Gemini 3.1 Pro",
-				"modelTotalTokens": 1114112,
-				"outputTokens": 65536,
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 65536,
 				"apikey": ""
 			},
 			"gemini-3.1-flash-image-preview": {
 				"model": "models/gemini-3.1-flash-image-preview",
-				"title": "Gemini 3.1 Flash Image",
-				"modelTotalTokens": 163840,
-				"outputTokens": 32768,
+				"title": "Gemini 3.1 Flash Image Preview",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 32768,
 				"apikey": ""
 			},
 			"gemini-3.1-flash-lite-preview": {
 				"model": "models/gemini-3.1-flash-lite-preview",
 				"title": "Gemini 3.1 Flash Lite",
-				"modelTotalTokens": 1114112,
-				"outputTokens": 65536,
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 65536,
 				"apikey": ""
 			},
 			"gemini-3-flash-preview": {
 				"model": "models/gemini-3-flash-preview",
-				"title": "Gemini 3 Flash",
-				"modelTotalTokens": 1064000,
-				"outputTokens": 65536,
+				"title": "Gemini 3 Flash Preview",
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 65536,
 				"apikey": ""
 			},
 			"gemini-3-pro-image-preview": {
 				"model": "models/gemini-3-pro-image-preview",
-				"title": "Gemini 3 Pro Image",
-				"modelTotalTokens": 98304,
-				"outputTokens": 32768,
+				"title": "Gemini 3 Pro Image Preview",
+				"modelTotalTokens": 65536,
+				"modelOutputTokens": 32768,
 				"apikey": ""
 			},
 			"gemini-2.5-pro": {
 				"model": "models/gemini-2.5-pro",
 				"title": "Gemini 2.5 Pro",
-				"modelTotalTokens": 1114112,
-				"outputTokens": 65536,
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 65535,
 				"apikey": ""
 			},
 			"gemini-2.5-flash": {
 				"model": "models/gemini-2.5-flash",
 				"title": "Gemini 2.5 Flash",
-				"modelTotalTokens": 1114112,
-				"outputTokens": 65536,
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 65536,
 				"apikey": ""
 			},
 			"gemini-2.5-flash-lite": {
 				"model": "models/gemini-2.5-flash-lite",
 				"title": "Gemini 2.5 Flash Lite",
-				"modelTotalTokens": 1114112,
-				"outputTokens": 65536,
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 65536,
 				"apikey": ""
 			},
 			"gemini-2.5-flash-image": {
 				"model": "models/gemini-2.5-flash-image",
 				"title": "Gemini 2.5 Flash Image",
-				"modelTotalTokens": 98304,
-				"outputTokens": 32768,
+				"modelTotalTokens": 32768,
+				"modelOutputTokens": 32768,
 				"apikey": ""
 			},
 			"gemini-3-pro-preview": {
-				"model": "models/gemini-3.1-pro-preview",
-				"title": "Gemini 3 Pro (Deprecated)",
-				"modelTotalTokens": 1114112,
-				"outputTokens": 65536,
+				"model": "models/gemini-3-pro-preview",
+				"title": "Gemini 3 Pro Preview",
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 65536,
 				"apikey": "",
 				"deprecated": true,
 				"migration": "Please use 'gemini-3.1-pro-preview' instead"
 			},
 			"gemini-3-pro-image": {
-				"model": "models/gemini-3-pro-image-preview",
-				"title": "Gemini 3 Pro Image (Deprecated)",
+				"model": "models/gemini-3-pro-image",
+				"title": "Gemini 3 Pro Image",
 				"modelTotalTokens": 98304,
-				"outputTokens": 32768,
+				"modelOutputTokens": 32768,
 				"apikey": "",
 				"deprecated": true,
 				"migration": "Please use 'gemini-3-pro-image-preview' instead"
 			},
 			"gemini-2_0-flash": {
 				"model": "models/gemini-2.5-flash",
-				"title": "Gemini 2.0 Flash (Deprecated)",
-				"modelTotalTokens": 1114112,
-				"outputTokens": 65536,
+				"title": "Gemini 2.0 Flash",
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 65535,
 				"apikey": "",
 				"deprecated": true,
 				"migration": "Please use 'gemini-2.5-flash' instead"
 			},
 			"gemini-2_0-flash-lite": {
-				"model": "models/gemini-2.5-flash-lite",
-				"title": "Gemini 2.0 Flash Lite (Deprecated)",
-				"modelTotalTokens": 1114112,
-				"outputTokens": 65536,
+				"model": "models/gemini-2.0-flash-lite",
+				"title": "Gemini 2.0 Flash Lite",
+				"modelOutputTokens": 65536,
 				"apikey": "",
 				"deprecated": true,
 				"migration": "Please use 'gemini-2.5-flash-lite' instead"
