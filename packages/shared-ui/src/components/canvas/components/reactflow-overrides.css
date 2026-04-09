@@ -75,21 +75,29 @@
 
 /* ── Node cap / header background colour transitions ────────────────── */
 
-/* Top corner cap */
+/* Top corner cap — inactive → active on hover / selected */
 .rr-corner-cap-top {
 	height: 8px;
 	border-radius: 4px 4px 0 0;
-	background-color: var(--rr-bg-surface-alt);
+	background-color: var(--rr-bg-titleBar-inactive);
+}
+.react-flow__node:hover .rr-corner-cap-top,
+.react-flow__node.selected .rr-corner-cap-top {
+	background-color: var(--rr-bg-titleBar-active);
 }
 
-/* Bottom corner cap — variant that matches the header */
+/* Bottom corner cap — variant that matches the header titlebar */
 .rr-corner-cap-bottom-header {
 	height: 4px;
 	border-radius: 0 0 4px 4px;
-	background-color: var(--rr-bg-surface-alt);
+	background-color: var(--rr-bg-titleBar-inactive);
+}
+.react-flow__node:hover .rr-corner-cap-bottom-header,
+.react-flow__node.selected .rr-corner-cap-bottom-header {
+	background-color: var(--rr-bg-titleBar-active);
 }
 
-/* Node header row */
+/* Node header row — inactive → active on hover / selected */
 .rr-node-header {
 	display: flex;
 	align-items: center;
@@ -97,8 +105,13 @@
 	justify-content: space-between;
 	padding: 0.15rem 0.25rem 0.4rem 0.6rem;
 	width: 100%;
-	background-color: var(--rr-bg-surface-alt);
-	color: var(--rr-text-primary);
+	background-color: var(--rr-bg-titleBar-inactive);
+	color: var(--rr-fg-titleBar-inactive);
+}
+.react-flow__node:hover .rr-node-header,
+.react-flow__node.selected .rr-node-header {
+	background-color: var(--rr-bg-titleBar-active);
+	color: var(--rr-fg-titleBar-active);
 }
 
 /* Annotation root — reveals header on hover */
