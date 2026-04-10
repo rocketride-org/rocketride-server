@@ -55,11 +55,32 @@ Binder::Binder(IServiceFilterInstance *pThis) {
 /**
  * @brief Binds a method name to a service filter instance.
  *
+ * When methodName is ``"then"`` or ``"else"`` (meta-lanes), the bind expands
+ * to every data lane and tags the instance with branch 0 or 1 respectively,
+ * so later dispatches filtered by ``selectBranch`` reach only the matching
+ * branch.
+ *
  * @param methodName The name of the method to bind.
  * @param pInstance A pointer to the IServiceFilterInstance to bind.
  */
 Error Binder::bind(const std::string &methodName,
                    IServiceFilterInstance *pInstance) noexcept {
+    // Meta-lanes: expand to every data lane and tag the instance with its
+    // branch index for later dispatch filtering.
+    if (methodName == "then" || methodName == "else") {
+        int branch = (methodName == "then") ? 0 : 1;
+        for (const char *name : MethodNames) {
+            std::string n(name);
+            // Skip lifecycle, meta-lanes, and tags
+            if (n == "open" || n == "closing" || n == "close" ||
+                n == "tags" || n == "then" || n == "else")
+                continue;
+            if (auto ccode = bind(n, pInstance)) return ccode;
+        }
+        m_branchMap[pInstance] = branch;
+        return {};
+    }
+
     auto it = methodMap.find(methodName);
     if (it == methodMap.end()) {
         return APERR(Ec::InvalidParam, "Invalid method name", methodName);
@@ -113,6 +134,14 @@ Error Binder::callMethods(
 
     // Iterate over bound instances and invoke the callback
     for (auto *pInstance : *(it->second)) {
+        // Branch filter: skip instances whose branch doesn't match
+        if (pThis->m_activeBranch >= 0) {
+            auto branchIt = pThis->m_branchMap.find(pInstance);
+            if (branchIt != pThis->m_branchMap.end() &&
+                branchIt->second != pThis->m_activeBranch)
+                continue;
+        }
+
         // Build enter trace
         json::Value enterTrace;
         if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {
@@ -537,6 +566,27 @@ Error Binder::close() noexcept {
     auto serializeTrace = [](PIPELINE_TRACE_LEVEL, json::Value &) {};
 
     return callMethods(this, "close", call, serializeTrace);
+}
+
+/**
+ * @brief Selects which branch receives subsequent write dispatches.
+ *
+ * When a branch is selected, callMethods only dispatches to instances
+ * tagged with the matching branch (via the ``"then"``/``"else"`` meta-lane
+ * bind). Untagged instances are always dispatched. Used by conditional
+ * nodes to implement if/then/else routing.
+ *
+ * @param branch The branch index to activate (0 = then, 1 = else).
+ */
+void Binder::selectBranch(int branch) noexcept {
+    m_activeBranch = branch;
+}
+
+/**
+ * @brief Clears branch selection, restoring normal fan-out dispatch.
+ */
+void Binder::clearBranchSelection() noexcept {
+    m_activeBranch = -1;
 }
 
 }  // namespace engine::store

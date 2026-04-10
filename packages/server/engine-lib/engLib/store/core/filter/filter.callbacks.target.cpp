@@ -709,4 +709,19 @@ void IServiceFilterInstance::cb_closing() noexcept(false) {
         if (ccode) throw ccode;
     }
 }
+
+void IServiceFilterInstance::cb_selectBranch(int branch) noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use selectBranch");
+    binder.selectBranch(branch);
+}
+
+void IServiceFilterInstance::cb_clearBranchSelection() noexcept(false) {
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use clearBranchSelection");
+    binder.clearBranchSelection();
+}
+
 }  // namespace engine::store

@@ -1,0 +1,123 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Conditional",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "conditional://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["conditional"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.conditional",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "conditional",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["A pipeline routing component that evaluates a Python condition and ", "directs data to one of two exclusive branches (then/else). ", "Supports text and questions lanes."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "util-conditional.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces. Input lanes enter on the left,
+	//		"then" and "else" are the exclusive branch outputs on the right.
+	//		Meta-lanes "then"/"else" expand to all data lanes at bind time.
+	//
+	"lanes": {
+		"text": ["then", "else"],
+		"questions": ["then", "else"]
+	},
+	"input": [
+		{
+			"lane": "text",
+			"description": "Text input",
+			"min": 0,
+			"output": [
+				{
+					"lane": "then",
+					"description": "Routed when condition is true"
+				},
+				{
+					"lane": "else",
+					"description": "Routed when condition is false"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "python",
+		"profiles": {
+			"python": {
+				"title": "Python expression",
+				"condition": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"condition": {
+			"type": "string",
+			"title": "Python condition",
+			"description": "A Python expression evaluated in a sandbox against the incoming content. Variables in scope: ``text`` (str) when a text chunk arrives, ``questions`` (object) when a question arrives. Any expression works — comparisons, string methods, comprehensions, boolean logic, etc. Truthy routes to ``then``; falsy routes to ``else``. Examples: ``'confidential' in text`` | ``len(text) > 100`` | ``text.lower().startswith('error')`` | ``any(kw in text for kw in ['secret','draft'])``"
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Conditional",
+			"properties": ["condition"]
+		}
+	]
+}

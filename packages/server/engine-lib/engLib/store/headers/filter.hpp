@@ -354,6 +354,10 @@ public:
     virtual void cb_close() noexcept(false);
     virtual void cb_closing() noexcept(false);
 
+    // Conditional branch selection (delegates to binder)
+    virtual void cb_selectBranch(int branch) noexcept(false);
+    virtual void cb_clearBranchSelection() noexcept(false);
+
     //-----------------------------------------------------------------
     /// @details
     ///		Keeps track of all of our binding connections

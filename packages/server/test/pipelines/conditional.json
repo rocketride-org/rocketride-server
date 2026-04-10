@@ -1,0 +1,86 @@
+{
+	"source": "dropper_1",
+	"components": [
+		{
+			"id": "dropper_1",
+			"provider": "dropper",
+			"config": {
+				"hideForm": true,
+				"mode": "Source",
+				"parameters": {},
+				"type": "dropper"
+			},
+			"ui": {}
+		},
+		{
+			"id": "parser_1",
+			"provider": "parse",
+			"config": {},
+			"ui": {},
+			"input": [
+				{
+					"lane": "tags",
+					"from": "dropper_1"
+				}
+			]
+		},
+		{
+			"id": "conditional_1",
+			"provider": "conditional",
+			"config": {
+				"condition": "'confidential' in text"
+			},
+			"ui": {},
+			"input": [
+				{
+					"lane": "text",
+					"from": "parser_1"
+				}
+			]
+		},
+		{
+			"id": "anonymize_1",
+			"provider": "anonymize_text",
+			"config": {},
+			"ui": {},
+			"input": [
+				{
+					"lane": "then",
+					"from": "conditional_1"
+				}
+			]
+		},
+		{
+			"id": "response_confidential",
+			"provider": "response",
+			"ui": {},
+			"config": {
+				"keys": {
+					"documents": "confidential_docs"
+				}
+			},
+			"input": [
+				{
+					"lane": "text",
+					"from": "anonymize_1"
+				}
+			]
+		},
+		{
+			"id": "response_public",
+			"provider": "response",
+			"ui": {},
+			"config": {
+				"keys": {
+					"documents": "public_docs"
+				}
+			},
+			"input": [
+				{
+					"lane": "else",
+					"from": "conditional_1"
+				}
+			]
+		}
+	]
+}

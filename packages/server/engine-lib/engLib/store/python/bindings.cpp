@@ -946,6 +946,12 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(close, &IServiceFilterInstance::cb_close)
         .PYBIND(closing, &IServiceFilterInstance::cb_close)
 
+        // Conditional branch selection
+        .PYBIND(selectBranch, &IServiceFilterInstance::cb_selectBranch,
+                py::arg("branch"))
+        .PYBIND(clearBranchSelection,
+                &IServiceFilterInstance::cb_clearBranchSelection)
+
         .PYBIND_PROP_READONLY_CUSTOM(
             currentObject, [](IServiceFilterInstance &obj) -> py::object {
                 if (obj.currentEntry)

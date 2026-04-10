@@ -56,8 +56,19 @@ private:
                        std::unique_ptr<std::vector<IServiceFilterInstance *>>>
         methodMap;
 
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Conditional branching support.
+    ///		m_activeBranch: -1 = normal fan-out (no filter),
+    ///		               >= 0 = only dispatch to matching branch.
+    ///		m_branchMap: maps each instance to its branch index
+    ///		             (-1 = untagged, always dispatched).
+    //-----------------------------------------------------------------
+    int m_activeBranch = -1;
+    std::unordered_map<IServiceFilterInstance *, int> m_branchMap;
+
 public:
-    static constexpr std::array<const char *, 15> MethodNames = {
+    static constexpr std::array<const char *, 17> MethodNames = {
         "open",
         "tags",
         "text",
@@ -72,7 +83,9 @@ public:
         "classificationContext",
         "documents",
         "closing",
-        "close"};
+        "close",
+        "then",   // Conditional branch output (meta-lane)
+        "else"};  // Conditional branch output (meta-lane)
 
     //-----------------------------------------------------------------
     ///	@details
@@ -95,6 +108,15 @@ public:
         std::function<Error(IServiceFilterInstance *)> fcn,
         std::function<void(PIPELINE_TRACE_LEVEL, json::Value &)>
             serializeTrace) noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Conditional branch selection. selectBranch() sets which
+    ///		branch receives subsequent write dispatches.
+    ///		clearBranchSelection() restores normal fan-out.
+    //-----------------------------------------------------------------
+    void selectBranch(int branch) noexcept;
+    void clearBranchSelection() noexcept;
 
     //-----------------------------------------------------------------
     ///	@details

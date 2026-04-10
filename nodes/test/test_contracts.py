@@ -599,10 +599,11 @@ class TestNodeLanes:
     def test_lane_has_valid_name(self, service: ServiceConfig, lane: LaneDefinition):
         """Verify lane names are valid."""
         valid_lanes = {
-            'text', 'documents', 'questions', 'answers', 
+            'text', 'documents', 'questions', 'answers',
             'table', 'image', 'audio', 'video',
             'classifications', 'classificationContext',
-            'tags', '_source'  # Special lanes
+            'tags', '_source',  # Special lanes
+            'then', 'else',  # Conditional branch outputs
         }
         assert lane.lane in valid_lanes or lane.lane.startswith('_'), \
             f"{service.test_id}: Unknown lane '{lane.lane}'"
@@ -616,9 +617,10 @@ class TestNodeLanes:
         """Verify output lane names are valid."""
         valid_lanes = {
             'text', 'documents', 'questions', 'answers',
-            'table', 
+            'table',
             'image', 'audio', 'video',
-            'classifications', 'classificationContext', 'tags'
+            'classifications', 'classificationContext', 'tags',
+            'then', 'else',  # Conditional branch outputs
         }
         for output in lane.outputs:
             assert output in valid_lanes, \
