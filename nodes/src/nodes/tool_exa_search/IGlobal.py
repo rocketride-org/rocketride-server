@@ -26,8 +26,8 @@
 """
 Exa Search tool node - global (shared) state.
 
-Reads the Exa API key and search configuration from the node config,
-then creates an ExaSearchDriver that implements the ToolsBase interface.
+Reads the Exa API key and search configuration from the node config.
+Tool logic lives on IInstance via @tool_function.
 """
 
 from __future__ import annotations
@@ -35,15 +35,17 @@ from __future__ import annotations
 import os
 
 from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
-
-from .exa_driver import ExaSearchDriver
+from rocketlib import IGlobalBase, OPEN_MODE, error, warning
 
 
 class IGlobal(IGlobalBase):
     """Global state for tool_exa_search."""
 
-    driver: ExaSearchDriver | None = None
+    apikey: str = ''
+    num_results: int = 10
+    use_autoprompt: bool = True
+    search_type: str = 'auto'
+    include_text: bool = True
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -54,25 +56,14 @@ class IGlobal(IGlobalBase):
         apikey = str(cfg.get('apikey') or os.environ.get('EXA_API_KEY', '')).strip()
 
         if not apikey:
-            raise Exception('tool_exa_search: apikey is required')
+            error('tool_exa_search: apikey is required — set it in node config or EXA_API_KEY env var')
+            raise ValueError('tool_exa_search: apikey is required')
 
-        num_results = int(cfg.get('numResults') or 10)
-        use_autoprompt = bool(cfg.get('useAutoprompt', True))
-        search_type = str(cfg.get('searchType') or 'auto').strip()
-        include_text = bool(cfg.get('includeText', True))
-
-        try:
-            self.driver = ExaSearchDriver(
-                server_name='exa',
-                apikey=apikey,
-                num_results=num_results,
-                use_autoprompt=use_autoprompt,
-                search_type=search_type,
-                include_text=include_text,
-            )
-        except Exception as e:
-            warning(str(e))
-            raise
+        self.apikey = apikey
+        self.num_results = max(1, min(50, int(cfg.get('numResults') or 10)))
+        self.use_autoprompt = bool(cfg.get('useAutoprompt', True))
+        self.search_type = str(cfg.get('searchType') or 'auto').strip()
+        self.include_text = bool(cfg.get('includeText', True))
 
     def validateConfig(self) -> None:
         try:
@@ -84,4 +75,4 @@ class IGlobal(IGlobalBase):
             warning(str(e))
 
     def endGlobal(self) -> None:
-        self.driver = None
+        self.apikey = ''

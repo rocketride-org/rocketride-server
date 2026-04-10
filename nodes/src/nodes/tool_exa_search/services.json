@@ -78,6 +78,19 @@
 			]
 		}
 	},
+	"test": {
+		"profiles": {
+			"default": {
+				"title": "Exa Search Test",
+				"apikey": "test-key",
+				"numResults": 5,
+				"useAutoprompt": false,
+				"searchType": "auto",
+				"includeText": true
+			}
+		},
+		"outputs": ["results"]
+	},
 	"shape": [
 		{
 			"section": "Pipe",
