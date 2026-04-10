@@ -48,10 +48,9 @@ class IInstance(IInstanceBase):
         self._scan_interval = float(cfg.get('scan_interval', 5.0))
         self._buffer_seconds = float(cfg.get('buffer_seconds', 5.0))
         self._scene_threshold = float(cfg.get('scene_threshold', 0.25))
-
-        vsf_ids = self.instance.getControllerNodeIds('visual_similarity')
-        self._vsf_node_id: Optional[str] = vsf_ids[0] if vsf_ids else None
-        _plog(f'beginInstance: scan_interval={self._scan_interval} buffer_seconds={self._buffer_seconds} scene_threshold={self._scene_threshold} vsf_node_id={self._vsf_node_id!r}')
+        self._vsf_node_id: Optional[str] = None
+        self._vsf_resolved: bool = False
+        _plog(f'init: scan_interval={self._scan_interval}s buffer={self._buffer_seconds}s scene_threshold={self._scene_threshold}')
 
     def endInstance(self):
         pass
@@ -71,6 +70,7 @@ class IInstance(IInstanceBase):
     def close(self):
         # Flush any in-progress clip if the video ends mid-match
         if self._in_match and self._clip:
+            _plog(f'close: flushing open clip clip_idx={self._clip_idx} frames={len(self._clip)}')
             self._flush_clip()
 
     # ------------------------------------------------------------------
@@ -114,7 +114,6 @@ class IInstance(IInstanceBase):
         # 0. First frame: send to VSF to establish the reference image
         if not self._reference_set:
             self._reference_set = True
-            _plog(f'reference: setting reference from first frame ts={timestamp:.3f}')
             self._invoke_vsf(frame_bytes)
             self._last_scan = timestamp  # treat as just scanned so next poll is scan_interval away
 
@@ -129,7 +128,6 @@ class IInstance(IInstanceBase):
             if (timestamp - self._last_scan) >= self._scan_interval:
                 self._last_scan = timestamp
                 result = self._invoke_vsf(frame_bytes)
-                _plog(f'scan: ts={timestamp:.3f} vsf_result={result}')
                 if result:
                     _plog(f'match: clip_idx={self._clip_idx} pre_buffer_frames={len(self._buffer)}')
                     self._in_match = True
@@ -143,10 +141,18 @@ class IInstance(IInstanceBase):
                 self._in_match = False
                 self._clip = []
                 self._buffer.clear()
+                self._last_scan = timestamp  # cooldown: don't re-scan until buffer_seconds have elapsed
 
     def _invoke_vsf(self, frame_bytes: bytes) -> bool:
+        if not self._vsf_resolved:
+            self._vsf_resolved = True
+            try:
+                vsf_ids = self.instance.getControllerNodeIds('visual_similarity')
+                self._vsf_node_id = vsf_ids[0] if vsf_ids else None
+                _plog(f'vsf wired: {self._vsf_node_id!r}')
+            except Exception as e:
+                _plog(f'vsf resolve EXCEPTION {e}')
         if self._vsf_node_id is None:
-            _plog('invoke_vsf: no VSF wired — stub match=True')
             return True  # stub: always match when no VSF wired (dev/test)
         try:
             result = bool(self.instance.invoke('visual_similarity', frame_bytes, nodeId=self._vsf_node_id))
@@ -159,7 +165,6 @@ class IInstance(IInstanceBase):
         if not self._clip:
             return
 
-        _plog(f'flush_clip: clip_idx={self._clip_idx} frames={len(self._clip)} has_image_listener={self.instance.hasListener("image")}')
         table_rows = []
         for frame_ts, frame_bytes, mime in self._clip:
             if self.instance.hasListener('image'):
