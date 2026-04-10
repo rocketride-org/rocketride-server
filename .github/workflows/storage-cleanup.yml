@@ -1,0 +1,166 @@
+name: Actions storage cleanup
+run-name: Cleanup ${{ github.event_name == 'workflow_dispatch' && '(manual)' || '(scheduled)' }}
+
+# Why this workflow exists:
+#   GitHub Actions storage (artifacts + caches) is org-wide and counts against
+#   the included quota for the rocketride-org account. This monorepo's nightly
+#   build matrix uploads ~30 platform/client artifact bundles per run, which
+#   accumulates well beyond the 0.5 GB free tier even with retention_days: 3.
+#
+#   Storage usage is averaged over the billing cycle, so deleting old artifacts
+#   doesn't retroactively reduce the bill — but it lowers the rate of growth and
+#   prevents the next cycle from starting in the red. This job runs daily.
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # Daily 06:00 UTC, 4h after the nightly build
+  workflow_dispatch:
+    inputs:
+      artifact_max_age_days:
+        description: Delete artifacts older than this many days (minimum 1)
+        required: false
+        type: string
+        default: '3'
+      cache_max_age_days:
+        description: Delete caches older than this many days (minimum 1)
+        required: false
+        type: string
+        default: '7'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: storage-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Delete old artifacts and caches
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Delete old artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAX_AGE_DAYS: ${{ inputs.artifact_max_age_days || '3' }}
+        run: |
+          set -euo pipefail
+
+          # Reject 0 / non-positive: a 0-day window resolves to "now" and would
+          # delete every artifact created before the script started, including
+          # ones uploaded seconds earlier. Aligns with the nightly's
+          # retention_days: 3 default.
+          if ! [[ "${MAX_AGE_DAYS}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::artifact_max_age_days must be a positive integer (got '${MAX_AGE_DAYS}')"
+            exit 1
+          fi
+
+          CUTOFF=$(date -u -d "${MAX_AGE_DAYS} days ago" +%s)
+          echo "Deleting artifacts created before $(date -u -d @${CUTOFF} -Iseconds)"
+
+          # Materialize the API output to a file so producer failures surface
+          # via set -e. Process substitution (`< <(gh api ...)`) is async and
+          # its exit code is not visible to the surrounding command, so a
+          # failed `gh api --paginate` would be silently treated as an empty
+          # list and the job would report "0 deleted" instead of failing.
+          ARTIFACTS_FILE=$(mktemp)
+          trap 'rm -f "${ARTIFACTS_FILE}"' EXIT
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts" \
+            --jq '.artifacts[] | "\(.id) \(.created_at) \(.size_in_bytes) \(.name)"' \
+            > "${ARTIFACTS_FILE}"
+
+          DELETED=0
+          BYTES=0
+          FAILED=0
+          while read -r id created size name; do
+            CREATED_EPOCH=$(date -u -d "${created}" +%s)
+            if [ "${CREATED_EPOCH}" -lt "${CUTOFF}" ]; then
+              if err=$(gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}" 2>&1 >/dev/null); then
+                DELETED=$((DELETED + 1))
+                BYTES=$((BYTES + size))
+                echo "  deleted #${id} (${name}, ${size} bytes, ${created})"
+              else
+                FAILED=$((FAILED + 1))
+                echo "  failed to delete #${id}: ${err}" >&2
+              fi
+            fi
+          done < "${ARTIFACTS_FILE}"
+
+          MB=$((BYTES / 1024 / 1024))
+          echo "Artifact cleanup complete: ${DELETED} artifacts, ${MB} MiB freed"
+          echo "## Artifacts cleaned" >> $GITHUB_STEP_SUMMARY
+          echo "- Deleted: ${DELETED}" >> $GITHUB_STEP_SUMMARY
+          echo "- Freed: ${MB} MiB" >> $GITHUB_STEP_SUMMARY
+          if [ "${FAILED}" -gt 0 ]; then
+            echo "- Failed: ${FAILED}" >> $GITHUB_STEP_SUMMARY
+            echo "::error::Artifact cleanup had ${FAILED} failed deletions"
+            exit 1
+          fi
+
+      - name: Delete old caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAX_AGE_DAYS: ${{ inputs.cache_max_age_days || '7' }}
+        run: |
+          set -euo pipefail
+
+          if ! [[ "${MAX_AGE_DAYS}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::cache_max_age_days must be a positive integer (got '${MAX_AGE_DAYS}')"
+            exit 1
+          fi
+
+          CUTOFF=$(date -u -d "${MAX_AGE_DAYS} days ago" +%s)
+          echo "Deleting caches last accessed before $(date -u -d @${CUTOFF} -Iseconds)"
+
+          CACHES_FILE=$(mktemp)
+          trap 'rm -f "${CACHES_FILE}"' EXIT
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches" \
+            --jq '.actions_caches[] | "\(.id) \(.last_accessed_at) \(.size_in_bytes) \(.key)"' \
+            > "${CACHES_FILE}"
+
+          DELETED=0
+          BYTES=0
+          FAILED=0
+          while read -r id last_used size key; do
+            ACCESSED_EPOCH=$(date -u -d "${last_used}" +%s)
+            if [ "${ACCESSED_EPOCH}" -lt "${CUTOFF}" ]; then
+              if err=$(gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${id}" 2>&1 >/dev/null); then
+                DELETED=$((DELETED + 1))
+                BYTES=$((BYTES + size))
+                echo "  deleted cache #${id} (${key}, ${size} bytes, accessed ${last_used})"
+              else
+                FAILED=$((FAILED + 1))
+                echo "  failed to delete cache #${id}: ${err}" >&2
+              fi
+            fi
+          done < "${CACHES_FILE}"
+
+          MB=$((BYTES / 1024 / 1024))
+          echo "Cache cleanup complete: ${DELETED} caches, ${MB} MiB freed"
+          echo "## Caches cleaned" >> $GITHUB_STEP_SUMMARY
+          echo "- Deleted: ${DELETED}" >> $GITHUB_STEP_SUMMARY
+          echo "- Freed: ${MB} MiB" >> $GITHUB_STEP_SUMMARY
+          if [ "${FAILED}" -gt 0 ]; then
+            echo "- Failed: ${FAILED}" >> $GITHUB_STEP_SUMMARY
+            echo "::error::Cache cleanup had ${FAILED} failed deletions"
+            exit 1
+          fi
+
+      - name: Report current usage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ARTIFACT_COUNT=$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts" --jq '.total_count')
+          CACHE_INFO=$(gh api "repos/${GITHUB_REPOSITORY}/actions/cache/usage")
+          CACHE_COUNT=$(echo "${CACHE_INFO}" | jq -r '.active_caches_count')
+          CACHE_BYTES=$(echo "${CACHE_INFO}" | jq -r '.active_caches_size_in_bytes')
+          CACHE_MB=$((CACHE_BYTES / 1024 / 1024))
+
+          echo "## Current storage" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifacts remaining: ${ARTIFACT_COUNT}" >> $GITHUB_STEP_SUMMARY
+          echo "- Active caches: ${CACHE_COUNT} (${CACHE_MB} MiB)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Note: cache usage counter recalculates every 6–12h, so values here may lag actual deletions._" >> $GITHUB_STEP_SUMMARY
