@@ -96,7 +96,7 @@ class IInstance(IInstanceBase):
 
     def invoke(self, frame_bytes: bytes) -> bool:
         matched, similarity = self._score_frame(frame_bytes)
-        _plog(f'invoke: matched={matched} similarity={similarity:.4f} reference_set={self.IGlobal.reference_embedding is not None}')
+        _plog(f'invoke: similarity={similarity:.4f} matched={matched}')
         return matched
 
     # ------------------------------------------------------------------
@@ -114,18 +114,17 @@ class IInstance(IInstanceBase):
         with self.IGlobal.device_lock:
             if self.IGlobal.reference_embedding is None:
                 self.IGlobal.reference_embedding = self.IGlobal.embedder.embed(image_bytes)
-                _plog('_score_frame: reference set (first call)')
+                _plog('reference set')
                 return True, 1.0
             frame_emb = self.IGlobal.embedder.embed(image_bytes)
 
         try:
             similarity = float(np.dot(self.IGlobal.reference_embedding, frame_emb))
         except Exception as e:
-            _plog(f'_score_frame: EXCEPTION {e}')
+            _plog(f'EXCEPTION scoring frame: {e}')
             return False, 0.0
         threshold = self.IGlobal.embedder.similarity_threshold
         matched = similarity >= threshold
-        _plog(f'_score_frame: similarity={similarity:.4f} threshold={threshold:.4f} matched={matched}')
         return matched, similarity
 
     def _on_frame_complete(self, image_bytes: bytes, mime: str):

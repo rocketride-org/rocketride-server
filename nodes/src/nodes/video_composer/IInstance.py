@@ -136,7 +136,6 @@ class IInstance(IInstanceBase):
         elif action == AVI_ACTION.END:
             if self._image_buf:
                 self._frames.append(bytes(self._image_buf))
-                _plog(f'frame_received: total={len(self._frames)} size={len(self._image_buf)}')
             self._image_buf = bytearray()
 
     # ------------------------------------------------------------------

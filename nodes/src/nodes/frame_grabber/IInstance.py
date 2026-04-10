@@ -117,7 +117,6 @@ class IInstance(IInstanceBase):
             self.instance.writeDocuments([doc])
 
         if self.instance.hasListener('image'):
-            _plog(f'frame: frame_number={frame_number} time_stamp={time_stamp:.3f}')
             # Send the image
             self.instance.writeImage(AVI_ACTION.BEGIN, 'image/png')
             self.instance.writeImage(AVI_ACTION.WRITE, 'image/png', image)
