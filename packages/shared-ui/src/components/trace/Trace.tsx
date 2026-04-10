@@ -109,7 +109,6 @@ const S = {
 		alignItems: 'center',
 		padding: '3px 8px',
 		cursor: 'pointer',
-		borderBottom: '1px solid var(--rr-border)',
 	} as CSSProperties,
 
 	rowError: {
@@ -556,10 +555,21 @@ const TraceCallNode: React.FC<TraceCallNodeProps> = ({ node, componentNames, exp
 
 	const nameStyle: CSSProperties = isError ? S.nameError : isEmpty ? { ...S.name, flex: 'none', color: 'var(--rr-text-disabled)' } : { ...S.name, flex: 'none' };
 
+	const handleClick = (e: React.MouseEvent) => {
+		e.preventDefault();
+		e.stopPropagation();
+		if (e.ctrlKey || e.metaKey || e.shiftKey) {
+			if (isExpanded) onCollapseAll(node);
+			else onExpandAll(node);
+		} else {
+			onToggleExpand(row.id);
+		}
+	};
+
 	if (!isExpanded) {
 		// ── COLLAPSED: single row with ▸ ──
 		return (
-			<div style={{ ...SN.collapsedRow, ...(isError ? S.rowError : {}) }} onClick={() => onToggleExpand(row.id)}>
+			<div style={{ ...SN.collapsedRow, ...(isError ? S.rowError : {}) }} onClick={handleClick} title="Click to expand (Shift/Ctrl-Click to expand all)">
 				<span style={S.chev}>{'\u25B8'}</span>
 				{isError && <span style={S.errIcon}>{'\u2716'}</span>}
 				<span style={nameStyle}>{name}</span>
@@ -576,7 +586,7 @@ const TraceCallNode: React.FC<TraceCallNodeProps> = ({ node, componentNames, exp
 	return (
 		<div>
 			{/* ▾ Header */}
-			<div style={SN.expandedHeader} onClick={() => onToggleExpand(row.id)}>
+			<div style={SN.expandedHeader} onClick={handleClick} title="Click to collapse (Shift/Ctrl-Click to collapse all)">
 				<span style={S.chev}>{'\u25BE'}</span>
 				{isError && <span style={S.errIcon}>{'\u2716'}</span>}
 				<span style={nameStyle}>{name}</span>
@@ -598,10 +608,17 @@ const TraceCallNode: React.FC<TraceCallNodeProps> = ({ node, componentNames, exp
 							<InputDataBox node={node} data={row.entryData} label={identical || !hasOutput ? 'Data' : 'Input'} lane={row.lane} componentNames={componentNames} showCallInfo />
 
 							{/* Children */}
-							<TraceCallChildren nodes={node.children} componentNames={componentNames} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={onToggleExpand} onExpandAll={onExpandAll} onCollapseAll={onCollapseAll} onRevealMore={onRevealMore} />
+							{node.children.length > 0 && (
+								<div style={{ margin: '10px 0' }}>
+									<TraceCallChildren nodes={node.children} componentNames={componentNames} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={onToggleExpand} onExpandAll={onExpandAll} onCollapseAll={onCollapseAll} onRevealMore={onRevealMore} />
+								</div>
+							)}
 
 							{/* Output box — only when data differs */}
 							{hasOutput && !identical && <OutputDataBox node={node} data={outputData} inputData={row.entryData} lane={row.lane} componentNames={componentNames} />}
+
+							{/* Result footer — always shown when there's a result */}
+							{(row.result || row.error) && <ResultFooter result={row.result} error={row.error} />}
 						</>
 					);
 				})()}
@@ -814,6 +831,57 @@ const OutputDataBox: React.FC<{
 					Output {'\u2014'} {resultText}
 				</div>
 			) : null}
+		</div>
+	);
+};
+
+// =============================================================================
+// RESULT FOOTER — small box at the bottom showing the call's result status
+// =============================================================================
+
+const ResultFooter: React.FC<{ result?: string; error?: string }> = ({ result, error }) => {
+	const footerStyle: CSSProperties = {
+		...boxStyle,
+		marginTop: -4, // butt against the box above
+		padding: '4px 10px',
+		fontSize: 11,
+		display: 'flex',
+		alignItems: 'center',
+		gap: 6,
+	};
+
+	if (error || result === 'error') {
+		return (
+			<div style={{ ...footerStyle, color: 'var(--rr-color-error)' }}>
+				<span style={{ fontWeight: 600 }}>Error</span>
+				{error && <span style={{ color: 'var(--rr-text-primary)' }}>{error}</span>}
+			</div>
+		);
+	}
+
+	if (result === 'skip') {
+		return (
+			<div style={{ ...footerStyle, color: 'var(--rr-color-warning)' }}>
+				<span style={{ fontWeight: 600 }}>Skip</span>
+				<span style={{ color: 'var(--rr-text-secondary)' }}>child calls will be skipped</span>
+			</div>
+		);
+	}
+
+	if (result === 'preventDefault') {
+		return (
+			<div style={{ ...footerStyle, color: 'var(--rr-color-warning)' }}>
+				<span style={{ fontWeight: 600 }}>Prevent Default</span>
+				<span style={{ color: 'var(--rr-text-secondary)' }}>default action prevented</span>
+			</div>
+		);
+	}
+
+	// Default: continue / OK
+	return (
+		<div style={{ ...footerStyle, color: 'var(--rr-color-success)' }}>
+			<span style={{ fontWeight: 600 }}>OK</span>
+			{result && result !== 'continue' && <span style={{ color: 'var(--rr-text-secondary)' }}>{result}</span>}
 		</div>
 	);
 };

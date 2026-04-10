@@ -10,7 +10,8 @@
 
 import { ReactElement } from 'react';
 import { RS } from './styles';
-import { CollapsibleSection } from './utils';
+import { renderQuestionFields, summaryQuestionFields, QuestionFields } from './format_question';
+import { renderAnswerFields, summaryAnswerFields, AnswerFields } from './format_answer';
 
 // =============================================================================
 // TYPES
@@ -111,23 +112,14 @@ function renderResult(data: InvokeData): ReactElement | null {
 
 const summarize_IInvokeLLM: InvokeSummarizer = (payload, _data, operation) => {
 	if (operation === 'Ask') {
-		const q = payload.question as Record<string, unknown> | null;
-		// Show the question text if available
-		if (q?.questions && Array.isArray(q.questions) && q.questions.length > 0) {
-			const first = q.questions[0] as Record<string, unknown>;
-			if (first?.text && typeof first.text === 'string') {
-				return first.text.length > 60 ? first.text.slice(0, 60) + '\u2026' : first.text;
-			}
-		}
-		// Fall back to role
-		if (q?.role && typeof q.role === 'string') return q.role;
-		return 'LLM: Ask';
+		const summary = summaryQuestionFields(payload.question as QuestionFields | null);
+		return summary || 'LLM: Ask';
 	}
 	return `LLM: ${operation || payload.op || ''}`;
 };
 
 const render_IInvokeLLM: InvokeRenderer = (payload, data, operation) => {
-	const q = payload.question as Record<string, unknown> | null;
+	const q = payload.question as QuestionFields | null;
 	const isAsk = operation === 'Ask' || payload.op === 'ask';
 
 	return (
@@ -141,90 +133,7 @@ const render_IInvokeLLM: InvokeRenderer = (payload, data, operation) => {
 				<span style={RS.kvVal}>{operation || payload.op || ''}</span>
 			</div>
 
-			{isAsk && q && (
-				<>
-					{q.expectJson && (
-						<div style={RS.kvRow}>
-							<span style={RS.kvKey}>Format</span>
-							<span style={RS.kvVal}>JSON expected</span>
-						</div>
-					)}
-
-					{q.role && (
-						<div style={{ ...RS.kvRow, marginBottom: 6 }}>
-							<span style={RS.kvKey}>Role</span>
-							<span style={RS.kvVal}>{String(q.role)}</span>
-						</div>
-					)}
-
-					{Array.isArray(q.goals) && q.goals.length > 0 && (
-						<div style={RS.section}>
-							<div style={RS.label}>Goal{(q.goals as unknown[]).length > 1 ? 's' : ''}</div>
-							<div style={RS.sectionContent}>
-								{(q.goals as unknown[]).map((g: unknown, i: number) => (
-									<div key={i} style={{ ...RS.textBlock, borderLeft: '3px solid var(--rr-chart-blue)' }}>
-										{String(g)}
-									</div>
-								))}
-							</div>
-						</div>
-					)}
-
-					{Array.isArray(q.questions) && q.questions.length > 0 && (
-						<div style={RS.section}>
-							<div style={RS.label}>Question{(q.questions as unknown[]).length > 1 ? 's' : ''}</div>
-							<div style={RS.sectionContent}>
-								{(q.questions as unknown[]).map((qt: unknown, i: number) => {
-									const item = qt as Record<string, unknown>;
-									return item.text ? (
-										<div key={i} style={{ ...RS.textBlock, borderLeft: '3px solid var(--rr-chart-purple)' }}>
-											{String(item.text)}
-										</div>
-									) : null;
-								})}
-							</div>
-						</div>
-					)}
-
-					{Array.isArray(q.instructions) && q.instructions.length > 0 && (
-						<CollapsibleSection label={`Instructions (${q.instructions.length})`}>
-							{q.instructions.map((inst: unknown, i: number) => {
-								const item = inst as Record<string, unknown>;
-								return (
-									<div key={i} style={{ marginBottom: 6, marginTop: i > 0 ? 8 : 0 }}>
-										{item.subtitle != null && <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--rr-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 3 }}>{String(item.subtitle)}</div>}
-										{item.instructions != null && <div style={{ ...RS.textBlock, fontSize: 11, maxHeight: 100, marginLeft: 10, borderLeft: '3px solid var(--rr-chart-yellow)' }}>{String(item.instructions).trim()}</div>}
-									</div>
-								);
-							})}
-						</CollapsibleSection>
-					)}
-
-					{Array.isArray(q.context) && q.context.length > 0 && (
-						<CollapsibleSection label={`Context (${q.context.length})`}>
-							{q.context.map((ctx: unknown, i: number) => (
-								<div key={i} style={{ ...RS.textBlock, borderLeft: '3px solid var(--rr-chart-green)', maxHeight: 150 }}>
-									{String(ctx)}
-								</div>
-							))}
-						</CollapsibleSection>
-					)}
-
-					{Array.isArray(q.history) && q.history.length > 0 && (
-						<CollapsibleSection label={`History (${q.history.length})`}>
-							{q.history.map((h: unknown, i: number) => {
-								const item = h as Record<string, unknown>;
-								return (
-									<div key={i} style={RS.kvRow}>
-										<span style={{ ...RS.kvKey, fontWeight: 600 }}>{String(item.role || 'message')}</span>
-										<span style={RS.kvVal}>{truncate(item.content || item.text || item)}</span>
-									</div>
-								);
-							})}
-						</CollapsibleSection>
-					)}
-				</>
-			)}
+			{isAsk && renderQuestionFields(q)}
 
 			{renderResult(data)}
 		</div>
@@ -373,6 +282,63 @@ const renderOutput_IInvokeMemory: InvokeOutputRenderer = (payload, data, _operat
 };
 
 // =============================================================================
+// IInvokeCrew
+// =============================================================================
+
+const summarize_IInvokeCrew: InvokeSummarizer = (payload, _data, _operation) => {
+	const agents = payload.agents as unknown[] | undefined;
+	if (Array.isArray(agents) && agents.length > 0) {
+		return `Crew Discovery (${agents.length} agents)`;
+	}
+	return 'Crew: describe';
+};
+
+const render_IInvokeCrew: InvokeRenderer = (payload, _data, _operation) => {
+	const agents = payload.agents as unknown[] | undefined;
+
+	return (
+		<div>
+			<div style={RS.kvRow}>
+				<span style={RS.kvKey}>Type</span>
+				<span style={RS.kvVal}>Crew</span>
+			</div>
+			<div style={RS.kvRow}>
+				<span style={RS.kvKey}>Operation</span>
+				<span style={RS.kvVal}>{payload.op || 'crewai.describe'}</span>
+			</div>
+
+			{Array.isArray(agents) && agents.length > 0 && (
+				<div style={RS.section}>
+					<div style={RS.label}>Agents ({agents.length})</div>
+					<div style={RS.sectionContent}>
+						{agents.map((agent: unknown, i: number) => {
+							const a = agent as Record<string, unknown>;
+							return (
+								<div key={i} style={{ marginBottom: 8, borderLeft: '3px solid var(--rr-chart-purple)', paddingLeft: 8 }}>
+									{a.role && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--rr-text-primary)' }}>{String(a.role)}</div>}
+									{a.task_description && <div style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginTop: 2 }}>{String(a.task_description)}</div>}
+									{a.goal && (
+										<div style={RS.kvRow}>
+											<span style={RS.kvKey}>Goal</span>
+											<span style={RS.kvVal}>{String(a.goal)}</span>
+										</div>
+									)}
+								</div>
+							);
+						})}
+					</div>
+				</div>
+			)}
+		</div>
+	);
+};
+
+const renderOutput_IInvokeCrew: InvokeOutputRenderer = (_payload, data, _operation) => {
+	// After describe fan-out, result contains the populated agents list
+	return renderResult(data);
+};
+
+// =============================================================================
 // Generic fallback — summary only, no Data renderer for unknown types
 // =============================================================================
 
@@ -395,12 +361,14 @@ const RENDERERS: Record<string, InvokeRenderer> = {
 	IInvokeLLM: render_IInvokeLLM,
 	IInvokeTool: render_IInvokeTool,
 	IInvokeMemory: render_IInvokeMemory,
+	IInvokeCrew: render_IInvokeCrew,
 };
 
 const SUMMARIZERS: Record<string, InvokeSummarizer> = {
 	IInvokeLLM: summarize_IInvokeLLM,
 	IInvokeTool: summarize_IInvokeTool,
 	IInvokeMemory: summarize_IInvokeMemory,
+	IInvokeCrew: summarize_IInvokeCrew,
 };
 
 // =============================================================================
@@ -409,14 +377,8 @@ const SUMMARIZERS: Record<string, InvokeSummarizer> = {
 
 const summarizeOutput_IInvokeLLM: InvokeOutputSummarizer = (_payload, data, operation) => {
 	if (operation === 'Ask') {
-		const r = data.result as Record<string, unknown> | null;
-		if (r?.answer) {
-			const a = r.answer;
-			if (typeof a === 'string') return a.length > 60 ? a.slice(0, 60) + '\u2026' : a;
-			const obj = a as Record<string, unknown>;
-			if (obj.summary && typeof obj.summary === 'string') return String(obj.summary).length > 60 ? String(obj.summary).slice(0, 60) + '\u2026' : String(obj.summary);
-		}
-		return 'LLM Answer';
+		const summary = summaryAnswerFields(data.result as AnswerFields | null);
+		return summary || 'LLM Answer';
 	}
 	// Scalar ops
 	if (data.result != null) return String(data.result);
@@ -424,12 +386,38 @@ const summarizeOutput_IInvokeLLM: InvokeOutputSummarizer = (_payload, data, oper
 };
 
 const renderOutput_IInvokeLLM: InvokeOutputRenderer = (_payload, data, operation) => {
-	if (operation === 'Ask') return renderLLMAskOutput(data);
+	if (operation === 'Ask') {
+		const rendered = renderAnswerFields(data.result as AnswerFields | null);
+		return rendered || <div style={RS.muted}>No answer</div>;
+	}
 	return renderResult(data);
 };
 
-// Tool/Memory: return null to fall through to DiffView
-const renderOutput_IInvokeTool: InvokeOutputRenderer = () => null;
+// Tool: show discovered tools list for Query, fall through to DiffView for others
+const renderOutput_IInvokeTool: InvokeOutputRenderer = (payload, _data, operation) => {
+	const isQuery = operation === 'Query' || payload.op === 'tool.query';
+	if (isQuery && Array.isArray(payload.tools) && payload.tools.length > 0) {
+		return (
+			<div style={RS.section}>
+				<div style={RS.label}>Discovered Tools ({payload.tools.length})</div>
+				<div style={RS.sectionContent}>
+					{payload.tools.map((tool, i) => {
+						const tl = tool as Record<string, unknown>;
+						const name = tl.name || tl.tool_name || `Tool ${i + 1}`;
+						const desc = tl.description ? String(tl.description) : '';
+						return (
+							<div key={i} style={{ marginBottom: 4 }}>
+								<div style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 600, color: 'var(--rr-text-primary)' }}>{String(name)}</div>
+								{desc && <div style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginLeft: 8 }}>{truncate(desc, 200)}</div>}
+							</div>
+						);
+					})}
+				</div>
+			</div>
+		);
+	}
+	return null;
+};
 
 const summarizeOutput_generic: InvokeOutputSummarizer = (_payload, data) => {
 	if (data.result != null) {
@@ -443,64 +431,13 @@ const OUTPUT_RENDERERS: Record<string, InvokeOutputRenderer> = {
 	IInvokeLLM: renderOutput_IInvokeLLM,
 	IInvokeTool: renderOutput_IInvokeTool,
 	IInvokeMemory: renderOutput_IInvokeMemory,
+	IInvokeCrew: renderOutput_IInvokeCrew,
 };
 
 const OUTPUT_SUMMARIZERS: Record<string, InvokeOutputSummarizer> = {
 	IInvokeLLM: summarizeOutput_IInvokeLLM,
 	IInvokeMemory: summarizeOutput_IInvokeMemory,
 };
-
-// =============================================================================
-// LLM ASK — STRUCTURED ANSWER RENDERER
-// =============================================================================
-
-function renderLLMAskOutput(data: InvokeData): ReactElement {
-	const result = data.result;
-	if (result == null) {
-		return <div style={RS.muted}>No result</div>;
-	}
-	if (typeof result !== 'object') {
-		return (
-			<div style={RS.kvRow}>
-				<span style={RS.kvKey}>Result</span>
-				<span style={RS.kvMono}>{String(result)}</span>
-			</div>
-		);
-	}
-
-	// Result shape is Answer: { answer: string | dict | list, expectJson: bool }
-	const r = result as Record<string, unknown>;
-	const answer = r.answer;
-
-	if (answer == null) {
-		return <div style={RS.muted}>No answer</div>;
-	}
-
-	// String answer
-	if (typeof answer === 'string') {
-		return (
-			<div style={RS.section}>
-				<div style={RS.label}>Answer</div>
-				<div style={RS.sectionContent}>
-					<div style={{ ...RS.textBlock, borderLeft: '3px solid var(--rr-chart-green)' }}>{answer}</div>
-					<div style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginTop: 2 }}>
-						{answer.length.toLocaleString()} chars {'\u00B7'} ~{Math.round(answer.split(/\s+/).length)} words
-					</div>
-				</div>
-			</div>
-		);
-	}
-
-	// Object or array answer — render as formatted JSON
-	return (
-		<div style={RS.section}>
-			<div style={RS.label}>Answer {r.expectJson ? '(JSON)' : ''}</div>
-			<div style={RS.sectionContent}>
-				<div style={{ ...RS.textBlock, borderLeft: '3px solid var(--rr-chart-green)' }}>{JSON.stringify(answer, null, 2)}</div>
-			</div>
-		</div>
-	);
-}
 
 // =============================================================================
 // PUBLIC API — INPUT

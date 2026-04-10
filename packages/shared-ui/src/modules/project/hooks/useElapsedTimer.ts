@@ -49,9 +49,9 @@ export function useElapsedTimer(taskStatus: TaskStatus | null | undefined): numb
 			intervalRef.current = null;
 		}
 
-		const isRunning = taskStatus != null && taskStatus.state === TASK_STATE.RUNNING && taskStatus.startTime > 0 && !taskStatus.completed;
+		const isActive = taskStatus != null && (taskStatus.state === TASK_STATE.RUNNING || taskStatus.state === TASK_STATE.INITIALIZING) && taskStatus.startTime > 0 && !taskStatus.completed;
 
-		if (isRunning) {
+		if (isActive) {
 			const updateElapsed = () => {
 				const nowSeconds = Math.floor(Date.now() / 1000);
 				const elapsed = nowSeconds - taskStatus.startTime;
