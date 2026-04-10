@@ -156,6 +156,51 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 					if (!doc) break;
 
 					const stack = pendingStacksRef.current.get(pipelineId);
+					if (!stack) break;
+
+					// Expected parent chain for this enter:
+					//   pipes = [base, parent..., self]
+					//   parent chain = pipes[1..length-1]  (skip the base/objectName)
+					// The current stack should equal that parent chain.
+					const parentChain = pipes.slice(1, pipes.length - 1);
+
+					// Align the stack to parentChain.
+					// 1. Pop frames that don't match (missed leaves) — mark as orphans.
+					// 2. Push synthetic frames for missing parents (missed enters).
+					while (stack.length > parentChain.length || (stack.length > 0 && stack[stack.length - 1].filterName !== parentChain[stack.length - 1])) {
+						const orphan = stack.pop();
+						if (!orphan) break;
+						const idx = doc.rows.findIndex((r) => r.id === orphan.id);
+						if (idx !== -1) {
+							doc.rows[idx] = {
+								...doc.rows[idx],
+								result: 'error',
+								error: 'missing leave event',
+								endTimestamp: Date.now(),
+							};
+						}
+					}
+
+					// Push synthetic frames for any parents we missed enters for.
+					while (stack.length < parentChain.length) {
+						const missingName = parentChain[stack.length];
+						const synthetic: TraceRow = {
+							id: rowCounterRef.current++,
+							docId,
+							completed: false,
+							lane,
+							filterName: missingName,
+							depth: stack.length,
+							timestamp: Date.now(),
+							objectName: doc.objectName,
+							source: eventSource,
+							error: 'missing enter event',
+							result: 'error',
+						};
+						doc.rows.push(synthetic);
+						stack.push(synthetic);
+					}
+
 					const filterName = pipes[pipes.length - 1] || '';
 					const depth = Math.max(0, pipes.length - 2);
 
@@ -173,7 +218,7 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 					};
 
 					doc.rows.push(row);
-					stack?.push(row);
+					stack.push(row);
 					break;
 				}
 
@@ -183,7 +228,46 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 					const doc = documentsRef.current.get(docId);
 					if (!doc) break;
 
-					const pending = pendingStacksRef.current.get(pipelineId)?.pop();
+					const stack = pendingStacksRef.current.get(pipelineId);
+					if (!stack || stack.length === 0) break;
+
+					// Expected parent chain for this leave:
+					//   pipes = [base, parent...]  (the leaving frame's parent path)
+					// The leaving frame's path is parentChain + [leavingFrame.filterName]
+					// So stack length should be parentChain.length + 1 and the
+					// top frame's filterName + parents should match.
+					const parentChain = pipes.slice(1);
+
+					// Pop orphans until top matches expected: stack length === parentChain.length + 1
+					// AND every frame in stack matches parentChain prefix.
+					while (stack.length > parentChain.length + 1) {
+						const orphan = stack.pop();
+						if (!orphan) break;
+						const idx = doc.rows.findIndex((r) => r.id === orphan.id);
+						if (idx !== -1) {
+							doc.rows[idx] = {
+								...doc.rows[idx],
+								result: 'error',
+								error: 'missing leave event',
+								endTimestamp: Date.now(),
+							};
+						}
+					}
+
+					// Validate the parent chain matches the stack below the top frame
+					let aligned = stack.length === parentChain.length + 1;
+					if (aligned) {
+						for (let p = 0; p < parentChain.length; p++) {
+							if (stack[p].filterName !== parentChain[p]) {
+								aligned = false;
+								break;
+							}
+						}
+					}
+
+					if (!aligned) break; // can't safely match — skip this leave
+
+					const pending = stack.pop();
 					if (pending) {
 						const idx = doc.rows.findIndex((r) => r.id === pending.id);
 						if (idx !== -1) {
