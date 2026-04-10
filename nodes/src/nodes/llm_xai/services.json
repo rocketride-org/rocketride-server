@@ -195,17 +195,7 @@
 			"description": "LLM model",
 			"type": "string",
 			"default": "grok-3",
-			"enum": [
-				["custom", "Custom Model"],
-				["grok-4-1-fast-reasoning", "Grok 4.1 Fast"],
-				["grok-4-1-fast-non-reasoning", "Grok 4.1 Fast Non-Reasoning"],
-				["grok-code-fast-1", "Grok Code Fast 1"],
-				["grok-4-fast-reasoning", "Grok 4 Fast"],
-				["grok-4-fast-non-reasoning", "Grok 4 Fast Non-Reasoning"],
-				["grok-4", "Grok 4"],
-				["grok-3-mini", "Grok 3 Mini"],
-				["grok-3", "Grok 3"]
-			],
+			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "custom",
