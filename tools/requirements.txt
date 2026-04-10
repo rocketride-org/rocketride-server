@@ -1,0 +1,19 @@
+# Sync script — provider SDKs
+openai
+anthropic
+google-genai
+# mistralai SDK deliberately omitted — the Mistral API is OpenAI-compatible,
+# so providers/mistral.py uses openai.OpenAI(base_url="https://api.mistral.ai/v1").
+
+# JSON5 parsing (services.json uses // comments and trailing commas)
+json5
+
+# .env file loading
+python-dotenv
+
+# LiteLLM — model database (context windows, token limits) for all providers
+litellm
+
+# Test dependencies
+pytest
+pytest-asyncio

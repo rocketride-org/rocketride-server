@@ -22,7 +22,7 @@ class ModuleRegistry {
 		const gitignorePath = path.join(rootDir, '.gitignore');
 		const gitignore = (await exists(gitignorePath)) ? parse(gitignorePath) : [];
 
-		const taskFiles = await glob(['{packages,apps,nodes,examples,extension}/**/scripts/tasks.js', 'scripts/tasks.js'], {
+		const taskFiles = await glob(['{packages,apps,nodes,examples,extension,tools}/**/scripts/tasks.js', 'scripts/tasks.js'], {
 			cwd: rootDir,
 			ignore: gitignore,
 			absolute: true,

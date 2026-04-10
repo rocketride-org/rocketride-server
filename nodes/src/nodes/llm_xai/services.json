@@ -98,42 +98,106 @@
 			"grok-4-1-fast-reasoning": {
 				"title": "Grok 4.1 Fast",
 				"model": "grok-4-1-fast-reasoning",
-				"modelTotalTokens": 2000000
+				"modelTotalTokens": 2000000,
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model."
 			},
 			"grok-4-1-fast-non-reasoning": {
 				"title": "Grok 4.1 Fast Non-Reasoning",
 				"model": "grok-4-1-fast-non-reasoning",
-				"modelTotalTokens": 2000000
+				"modelSource": "manual",
+				"modelTotalTokens": 2000000,
+				"modelOutputTokens": 4096 // default
 			},
 			"grok-code-fast-1": {
 				"title": "Grok Code Fast 1",
 				"model": "grok-code-fast-1",
-				"modelTotalTokens": 256000
+				"modelSource": "manual",
+				"modelTotalTokens": 256000,
+				"modelOutputTokens": 10000 // openrouter
 			},
 			"grok-4-fast-reasoning": {
 				"title": "Grok 4 Fast",
 				"model": "grok-4-fast-reasoning",
-				"modelTotalTokens": 2000000
+				"modelTotalTokens": 2000000,
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model."
 			},
 			"grok-4-fast-non-reasoning": {
 				"title": "Grok 4 Fast Non-Reasoning",
 				"model": "grok-4-fast-non-reasoning",
-				"modelTotalTokens": 2000000
+				"modelTotalTokens": 2000000,
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model."
 			},
 			"grok-4": {
 				"title": "Grok 4",
 				"model": "grok-4-0709",
-				"modelTotalTokens": 256000
+				"modelSource": "manual",
+				"modelTotalTokens": 256000,
+				"modelOutputTokens": 256000 // litellm
 			},
 			"grok-3-mini": {
 				"title": "Grok 3 Mini",
 				"model": "grok-3-mini",
-				"modelTotalTokens": 131072
+				"modelSource": "manual",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 131072 // litellm
 			},
 			"grok-3": {
 				"title": "Grok 3",
 				"model": "grok-3",
-				"modelTotalTokens": 131072
+				"modelSource": "manual",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 131072 // litellm
+			},
+			"grok-4-20-multi-agent": {
+				"title": "Grok 4.20 Multi Agent",
+				"model": "grok-4.20-multi-agent",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 2000000, // openrouter
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"grok-4-20": {
+				"title": "Grok 4.20",
+				"model": "grok-4.20",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 2000000, // openrouter
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"grok-4-1-fast": {
+				"title": "Grok 4.1 Fast",
+				"model": "grok-4.1-fast",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 2000000, // openrouter
+				"modelOutputTokens": 30000, // openrouter
+				"apikey": ""
+			},
+			"grok-4-fast": {
+				"title": "Grok 4 Fast",
+				"model": "grok-4-fast",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 2000000, // openrouter
+				"modelOutputTokens": 30000, // openrouter
+				"apikey": ""
+			},
+			"grok-3-mini-beta": {
+				"title": "Grok 3 Mini Beta",
+				"model": "grok-3-mini-beta",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072, // openrouter
+				"modelOutputTokens": 131072, // litellm
+				"apikey": ""
+			},
+			"grok-3-beta": {
+				"title": "Grok 3 Beta",
+				"model": "grok-3-beta",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072, // openrouter
+				"modelOutputTokens": 131072, // litellm
+				"apikey": ""
 			}
 		}
 	},
@@ -232,8 +296,56 @@
 				{
 					"value": "grok-3",
 					"properties": ["xai.grok-3"]
+				},
+				{
+					"value": "grok-4-20",
+					"properties": ["xai.grok-4-20"]
+				},
+				{
+					"value": "grok-4-20-multi-agent",
+					"properties": ["xai.grok-4-20-multi-agent"]
+				},
+				{
+					"value": "grok-3-mini-beta",
+					"properties": ["xai.grok-3-mini-beta"]
+				},
+				{
+					"value": "grok-4-fast",
+					"properties": ["xai.grok-4-fast"]
+				},
+				{
+					"value": "grok-3-beta",
+					"properties": ["xai.grok-3-beta"]
+				},
+				{
+					"value": "grok-4-1-fast",
+					"properties": ["xai.grok-4-1-fast"]
 				}
 			]
+		},
+		"xai.grok-4-20": {
+			"object": "grok-4-20",
+			"properties": ["llm.cloud.apikey"]
+		},
+		"xai.grok-4-20-multi-agent": {
+			"object": "grok-4-20-multi-agent",
+			"properties": ["llm.cloud.apikey"]
+		},
+		"xai.grok-3-mini-beta": {
+			"object": "grok-3-mini-beta",
+			"properties": ["llm.cloud.apikey"]
+		},
+		"xai.grok-4-fast": {
+			"object": "grok-4-fast",
+			"properties": ["llm.cloud.apikey"]
+		},
+		"xai.grok-3-beta": {
+			"object": "grok-3-beta",
+			"properties": ["llm.cloud.apikey"]
+		},
+		"xai.grok-4-1-fast": {
+			"object": "grok-4-1-fast",
+			"properties": ["llm.cloud.apikey"]
 		}
 	},
 	//

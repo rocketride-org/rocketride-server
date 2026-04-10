@@ -28,33 +28,51 @@
 		"default": "sonar",
 		"profiles": {
 			"sonar-pro": {
-				"model": "sonar-pro",
 				"title": "Sonar Pro",
+				"model": "sonar-pro",
+				"modelSource": "manual",
 				"modelTotalTokens": 200000,
+				"modelOutputTokens": 8000, // openrouter
 				"apikey": ""
 			},
 			"sonar": {
-				"model": "sonar",
 				"title": "Sonar",
-				"modelTotalTokens": 128000,
+				"model": "sonar",
+				"modelSource": "manual",
+				"modelTotalTokens": 127072, // openrouter
+				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
 			"sonar-reasoning-pro": {
-				"model": "sonar-reasoning-pro",
 				"title": "Sonar Reasoning Pro",
+				"model": "sonar-reasoning-pro",
+				"modelSource": "manual",
 				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
 			"sonar-reasoning": {
-				"model": "sonar-reasoning",
 				"title": "Sonar Reasoning",
+				"model": "sonar-reasoning",
 				"modelTotalTokens": 128000,
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"apikey": ""
 			},
 			"sonar-deep-research": {
-				"model": "sonar-deep-research",
 				"title": "Sonar Deep Research",
+				"model": "sonar-deep-research",
+				"modelSource": "manual",
 				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"sonar-pro-search": {
+				"title": "SonarPro Search",
+				"model": "sonar-pro-search",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000, // openrouter
+				"modelOutputTokens": 8000, // openrouter
 				"apikey": ""
 			}
 		}
@@ -116,8 +134,16 @@
 				{
 					"value": "sonar-deep-research",
 					"properties": ["perplexity.sonar-deep-research"]
+				},
+				{
+					"value": "sonar-pro-search",
+					"properties": ["perplexity.sonar-pro-search"]
 				}
 			]
+		},
+		"perplexity.sonar-pro-search": {
+			"object": "sonar-pro-search",
+			"properties": ["llm.cloud.apikey"]
 		}
 	},
 	"shape": [

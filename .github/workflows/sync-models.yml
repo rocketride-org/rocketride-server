@@ -1,0 +1,61 @@
+name: Sync LLM Models
+
+on:
+  schedule:
+    - cron: '0 5 * * 1'   # Mondays 05:00 UTC
+  workflow_dispatch:       # Allow manual trigger from GitHub Actions UI
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install sync script dependencies
+        run: pip install -r tools/requirements.txt
+
+      - name: Run model sync (dry run first — fail fast if script errors)
+        run: python tools/src/sync_models.py --all
+        env:
+          ROCKETRIDE_APIKEY_OPENAI: ${{ secrets.ROCKETRIDE_APIKEY_OPENAI }}
+          ROCKETRIDE_APIKEY_ANTHROPIC: ${{ secrets.ROCKETRIDE_APIKEY_ANTHROPIC }}
+          ROCKETRIDE_APIKEY_GEMINI: ${{ secrets.ROCKETRIDE_APIKEY_GEMINI }}
+          ROCKETRIDE_APIKEY_MISTRAL: ${{ secrets.ROCKETRIDE_APIKEY_MISTRAL }}
+          ROCKETRIDE_APIKEY_DEEPSEEK: ${{ secrets.ROCKETRIDE_APIKEY_DEEPSEEK }}
+          ROCKETRIDE_APIKEY_XAI: ${{ secrets.ROCKETRIDE_APIKEY_XAI }}
+          ROCKETRIDE_APIKEY_PERPLEXITY: ${{ secrets.ROCKETRIDE_APIKEY_PERPLEXITY }}
+          ROCKETRIDE_APIKEY_QWEN: ${{ secrets.ROCKETRIDE_APIKEY_QWEN }}
+
+      - name: Apply model sync and capture PR body
+        run: python tools/src/sync_models.py --all --apply --pr-body
+        env:
+          ROCKETRIDE_APIKEY_OPENAI: ${{ secrets.ROCKETRIDE_APIKEY_OPENAI }}
+          ROCKETRIDE_APIKEY_ANTHROPIC: ${{ secrets.ROCKETRIDE_APIKEY_ANTHROPIC }}
+          ROCKETRIDE_APIKEY_GEMINI: ${{ secrets.ROCKETRIDE_APIKEY_GEMINI }}
+          ROCKETRIDE_APIKEY_MISTRAL: ${{ secrets.ROCKETRIDE_APIKEY_MISTRAL }}
+          ROCKETRIDE_APIKEY_DEEPSEEK: ${{ secrets.ROCKETRIDE_APIKEY_DEEPSEEK }}
+          ROCKETRIDE_APIKEY_XAI: ${{ secrets.ROCKETRIDE_APIKEY_XAI }}
+          ROCKETRIDE_APIKEY_PERPLEXITY: ${{ secrets.ROCKETRIDE_APIKEY_PERPLEXITY }}
+          ROCKETRIDE_APIKEY_QWEN: ${{ secrets.ROCKETRIDE_APIKEY_QWEN }}
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          title: 'chore(models): sync LLM model lists'
+          branch: chore/sync-models
+          commit-message: 'chore(models): sync LLM model lists'
+          delete-branch: true
+          body: ${{ env.SYNC_OUTPUT }}
+          labels: |
+            automated
+            models
