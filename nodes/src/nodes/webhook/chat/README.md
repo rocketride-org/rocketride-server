@@ -1,16 +1,25 @@
 ---
 title: Chat
-date: 2025-05-18
+date: 2026-04-09
+sidebar_position: 1
 ---
 
-The Chat node is used to connect to a custom chat endpoint, allowing communication through a specified host, port, and endpoint path. This node is useful when integrating a running chat service into a pipeline.
+<head>
+  <title>Chat - RocketRide Documentation</title>
+</head>
 
-## Configuration Steps
+## What it does
 
-- Host - Enter the IP address or hostname of the server hosting the chat service.
-  - Default value is `0.0.0.0`, which allows external access.
-  - Use `127.0.0.1` if you only want local access.
-- Port - Enter the port number that the chat service is running on.
-  - Default is `5567`.
-- Endpoint - Enter the endpoint route where the chat service is available.
-  - Example: `/` or `/chat`.
+Source node that serves a web-based chat interface. Users open the chat URL in a browser, type questions, and each submission flows through the pipeline as a `questions` lane. Results are returned in the chat window.
+
+After the pipeline starts, the Project Log displays the chat URL and public authorization key.
+
+**Lanes:**
+
+| Lane in | Lane out    | Description                                               |
+| ------- | ----------- | --------------------------------------------------------- |
+| —       | `questions` | Each message submitted via the chat UI becomes a question |
+
+## Configuration
+
+None. The chat URL and authorization key are generated automatically when the pipeline starts.
