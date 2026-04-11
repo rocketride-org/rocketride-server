@@ -5,12 +5,18 @@ Wraps the engine control-plane invoke seam into a small interface:
   - host.llm.invoke(...)
   - host.tools.query/validate/invoke(...)
   - host.memory.put/get/list/clear(...)
+
+Also defines `AgentContext` — the per-call run scaffolding object that
+threads through `_run`, `call_llm`, `call_tool`, and `sendSSE`.  See the
+plan in plans/elegant-cooking-finch.md for the architectural rationale.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from rocketlib import ToolDescriptor
 from rocketlib.types import IInvokeOp, IInvokeTool, IInvokeMemory
 
 
@@ -45,14 +51,22 @@ class AgentHostServices:
     class Tools:
         """Tool host interface backed by IInvokeTool operations."""
 
-        _tool_nodes: List[str] = []
-        _tool_list: Dict[Any] = {}
+        # NOTE: Do NOT declare _tool_nodes/_tool_list as class attributes.
+        # They are per-instance state, fully initialized in __init__.  A
+        # class-level mutable default would be shared across every Tools
+        # instance in the process and silently leak tool descriptors between
+        # concurrent agent runs.
 
         def __init__(self, invoker):
-            """Create a Tools host service wrapper bound to an engine invoker."""
+            """Create a Tools host service wrapper bound to an engine invoker.
+
+            Discovers all tools on every connected tool node once at
+            construction.  Drivers read the prepared catalog as
+            ``self.list`` (a flat ``List[ToolDescriptor]``).
+            """
             self._invoker = invoker
-            self._tool_list: Dict[Any] = {}
-            self._tool_nodes = self._invoker.instance.getControllerNodeIds('tool')
+            self._tool_list: Dict[str, Any] = {}
+            self._tool_nodes: List[str] = self._invoker.instance.getControllerNodeIds('tool')
 
             # For every tool node
             for tool_node in self._tool_nodes:
@@ -85,8 +99,9 @@ class AgentHostServices:
                         'tool': descriptor,
                     }
 
-            # And done initializing the tool list
-            return
+            # Prepared flat descriptor list, ready for direct reference
+            # via `context.tools.list` from any driver.
+            self.list: List[ToolDescriptor] = [entry['tool'] for entry in self._tool_list.values()]
 
         def get(self, tool_name: str) -> Any:
             """
@@ -142,13 +157,15 @@ class AgentHostServices:
             # Call the tool to validate - throws on error
             self._invoker.instance.invoke(param, component_id=entry['node_id'])
 
-        def invoke(self, tool_name: str, input: Any) -> Any:
+        def invoke(self, tool_name: str, args: Dict[str, Any]) -> Any:
             """
-            Invoke a tool with the given input payload.
+            Invoke a tool with a clean args dict.
 
             Args:
                 tool_name: Tool name as published by discovery.
-                input: Tool input payload.
+                args: Tool arguments as a dict — already in the shape the
+                    underlying tool expects.  Framework-shape conversion
+                    happens in the driver wrapper before this is called.
 
             Returns:
                 The tool output (extracted from ``param.output``).
@@ -160,7 +177,7 @@ class AgentHostServices:
             # Build the invoke using the original (un-prefixed) name so the
             # provider's _owns_tool() match works.
             entry = self._tool_list[tool_name]
-            param = IInvokeTool.Invoke(tool_name=entry['tool_id'], input=input)
+            param = IInvokeTool.Invoke(tool_name=entry['tool_id'], input=args)
 
             # Invoke it
             self._invoker.instance.invoke(param, component_id=entry['node_id'])
@@ -202,3 +219,68 @@ class AgentHostServices:
         self.tools = AgentHostServices.Tools(invoker)
         nodes = invoker.instance.getControllerNodeIds('memory')
         self.memory: Optional[AgentHostServices.Memory] = AgentHostServices.Memory(invoker, nodes[0]) if nodes else None
+
+
+# ============================================================================
+# AGENT CONTEXT
+# ============================================================================
+
+
+# AgentContext is the per-call run scaffolding object passed to every
+# driver `_run` and into the `call_llm` / `call_tool` host adapters on
+# `AgentBase`.  It is built once per question by `AgentBase.run_agent`
+# from a cached `AgentHostServices` (lazy-attached to the IInstance via
+# `iInstance._agent_host`) and is passed unchanged through the entire
+# run.  Drivers never construct `AgentContext` themselves except inside
+# the per-sub-agent loop in `CrewManager`, which builds a sub-context
+# inheriting parent run metadata.
+#
+# Question is intentionally NOT a field on AgentContext.  It travels
+# alongside as a separate `_run` parameter so the same context can be
+# passed through reentrant `call_llm` / `call_tool` chains without
+# carrying a stale "current question" through frames where the question
+# means something different (e.g. each LLM call inside a framework loop
+# synthesizes a new question from framework messages).
+@dataclass(frozen=True)
+class AgentContext:
+    """Per-call run scaffolding for an agent run.
+
+    Frozen dataclass — built once at the top of `AgentBase.run_agent`
+    and passed unchanged through the entire run.  Threading this object
+    through reentrant call chains is safe because none of its fields
+    ever change during a run.
+
+    Fields:
+        invoker: The engine `IInstance` (a.k.a. ``pSelf``) for this run.
+        llm: The host LLM channel (cached on the IInstance via
+            ``iInstance._agent_host``).
+        tools: The host Tools channel.  Read ``context.tools.list`` for
+            the prepared flat tool descriptor list — no `discover_tools`
+            helper needed.
+        memory: The host Memory channel, or ``None`` when no memory node
+            is connected.  Drivers that require memory should set
+            ``REQUIRES_MEMORY = True`` on their AgentBase subclass —
+            `AgentBase.run_agent` enforces the requirement at first
+            question.
+        run_id: Unique identifier for this run.  Stamped fresh per call.
+        pipe_id: The pipeline instance id (from ``iInstance.instance.pipeId``).
+            Useful for per-pipe diagnostics; identifies which concurrent
+            pipeline instance is running.
+        framework: The driver's `FRAMEWORK` class attribute (e.g. ``'crewai'``,
+            ``'langchain'``, ``'wave'``).  Stamped from ``self.FRAMEWORK``
+            at construction time.
+        started_at: ISO-8601 timestamp of when the run started.
+    """
+
+    invoker: Any
+
+    # Host channels — flattened from AgentHostServices for ergonomic access
+    llm: 'AgentHostServices.LLM'
+    tools: 'AgentHostServices.Tools'
+    memory: Optional['AgentHostServices.Memory']
+
+    # Run metadata
+    run_id: str
+    pipe_id: int
+    framework: str
+    started_at: str

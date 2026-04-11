@@ -21,60 +21,68 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Deep Agent node instance — bridges the RocketRide engine to ``DeepAgentDriver``."""
+"""
+Deep Agent node instance — bridges the RocketRide engine to ``DeepAgentDriver``.
+
+Receives questions on the questions lane and runs the deep-agent loop.
+Also exposes itself as a `run_agent` tool via `@tool_function` so this node
+can be invoked by parent agents in the pipeline.
+"""
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from rocketlib import IInstanceBase
+from rocketlib import IInstanceBase, tool_function
+from ai.common.agent.types import AGENT_TOOL_INPUT_SCHEMA, AGENT_TOOL_OUTPUT_SCHEMA
 from ai.common.schema import Question
 
 from .IGlobal import IGlobal
 
 
 class IInstance(IInstanceBase):
-    """
-    Per-instance handler for the Deep Agent node.
-
-    Receives pipeline questions via ``writeQuestions`` and forwards them to
-    ``DeepAgentDriver.run_agent``.  Also handles hierarchical ``tool.*`` invoke
-    operations so this node can be used as a tool inside another agent.
-    """
+    """Per-instance handler for the Deep Agent node."""
 
     IGlobal: IGlobal
 
     def writeQuestions(self, question: Question) -> None:
-        """
-        Process an incoming pipeline question by running the deep agent.
-
-        Delegates execution to ``DeepAgentDriver.run_agent``, which writes a single
-        JSON answer to the ``answers`` lane on completion.
-
-        Args:
-            question: The ``Question`` object from the pipeline lane.
-
-        Returns:
-            None
-        """
+        """Run the deep agent loop on the incoming question."""
         self.IGlobal.agent.run_agent(self, question, emit_answers_lane=True)
 
-    def invoke(self, param: Any) -> Any:  # noqa: ANN401
-        """
-        Handle a control-plane invocation on this node instance.
+    @tool_function(
+        input_schema=AGENT_TOOL_INPUT_SCHEMA,
+        output_schema=AGENT_TOOL_OUTPUT_SCHEMA,
+        description=lambda self: (
+            f'This agent: {self.IGlobal.agent._agent_description} Invoke this agent as a tool. Input: {{query: string, context?: object}}. Output: {{content, meta, stack}}.'
+            if getattr(self.IGlobal.agent, '_agent_description', '')
+            else ('Invoke this agent as a tool. Input: {query: string, context?: object}. Output: {content, meta, stack}.')
+        ),
+    )
+    def run_agent(self, input_obj: Any) -> Any:  # noqa: ANN401
+        """Invoke this agent as a tool from a parent agent."""
+        if not isinstance(input_obj, dict):
+            raise ValueError('agent tool: input must be an object')
 
-        Intercepts ``tool.*`` operations so the node can be composed as a tool inside
-        a parent agent.  All other operations are forwarded to the base-class handler.
+        query = input_obj.get('query')
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError('agent tool: input.query must be a non-empty string')
 
-        Args:
-            param: Invocation parameter dict (with an ``op`` key) or an object with
-                an ``op`` attribute.
+        ctx = input_obj.get('context')
+        if ctx is not None and not isinstance(ctx, dict):
+            raise ValueError('agent tool: input.context must be an object if provided')
 
-        Returns:
-            The result of ``DeepAgentDriver.handle_invoke`` for ``tool.*`` ops, or the
-            base-class ``invoke`` result otherwise.
-        """
-        op = param.get('op') if isinstance(param, dict) else getattr(param, 'op', None)
-        if isinstance(op, str) and op.startswith('tool.'):
-            return self.IGlobal.agent.handle_invoke(self, param)
-        return super().invoke(param)
+        q = Question(role='')
+        q.addQuestion(query)
+        if ctx is not None:
+            try:
+                q.addContext(
+                    json.dumps(
+                        {'type': 'RocketRide.agent.tool_context.v1', 'context': ctx},
+                        default=str,
+                    )
+                )
+            except Exception:
+                pass
+
+        return self.IGlobal.agent.run_agent(self, q, emit_answers_lane=False)

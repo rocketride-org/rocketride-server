@@ -304,7 +304,7 @@ const render_IInvokeCrew: InvokeRenderer = (payload, _data, _operation) => {
 			</div>
 			<div style={RS.kvRow}>
 				<span style={RS.kvKey}>Operation</span>
-				<span style={RS.kvVal}>{payload.op || 'crewai.describe'}</span>
+				<span style={RS.kvVal}>{payload.op || 'describe'}</span>
 			</div>
 
 			{Array.isArray(agents) && agents.length > 0 && (

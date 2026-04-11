@@ -1,52 +1,59 @@
 """
 Agent base class (framework-agnostic pipeline boundary) implemented as a shared driver.
 
-Implements the agent pipeline entrypoint (`run_agent`) and exposes framework drivers
-to host services via two control-plane seams:
-- `invoke("llm", IInvokeLLM(op="ask", ...))`
-- `invoke("tool", IInvokeTool.*)`
+Implements the agent pipeline entrypoint (`run_agent`) and exposes two host
+adapters that drivers route every LLM/tool call through:
+- `call_llm(context, prompt, *, role, stop_words)` — invoke the host LLM
+- `call_tool(context, tool_name, args)` — invoke a host tool
 
-Framework nodes subclass `AgentBase` and implement `_run(...)` plus binding hooks for
-their specific tool/LLM integration.
+Framework drivers subclass `AgentBase` and implement `_run(*, context, question)`.
+The two host adapters above are the *only* code in the agent package that
+builds engine envelopes (`Question`, `IInvokeLLM.Ask`).  Drivers never touch
+`IInvokeLLM` directly.
 """
 
 from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from rocketlib import debug, error
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 
-from .types import AgentHost, AgentInput
-from ._internal.host import AgentHostServices
-from ._internal.agent_tool import handle_agent_tool_invoke
+from ._internal.host import AgentContext, AgentHostServices
 from ._internal.utils import (
     extract_text,
     messages_to_transcript,
     now_iso,
     new_run_id,
-    normalize_invocation_payload,
     safe_str,
     truncate_at_stop_words,
 )
-from rocketlib import ToolDescriptor
 
 
 class AgentBase(ABC):
     """
     Base class for all agent framework drivers.
 
-    Drivers implement `_run(...)` to execute their framework internals.
+    Drivers implement `_run(*, context, question)` to execute their framework
+    internals.  Per-driver concrete `_build_llm` / `_build_tools` methods (not
+    abstract on this base class) construct the framework wrapper subclasses
+    that CrewAI / LangChain / deepagents demand.
+
+    All host calls go through the two adapters on this base:
+      - `self.call_llm(context, prompt, *, role, stop_words)`
+      - `self.call_tool(context, tool_name, args)`
+
+    Subclasses set `REQUIRES_MEMORY = True` if their `_run` requires a memory
+    node to be connected.  `run_agent` enforces the requirement at first
+    question (during the lazy `AgentHostServices` construction).
     """
 
     FRAMEWORK: str = 'unknown'
     _AGENT_TOOL_NAME: str = 'run_agent'
-
-    _host: Optional[AgentHostServices] = None
-    _invoker: Any = None
+    REQUIRES_MEMORY: bool = False
 
     def __init__(
         self,
@@ -71,22 +78,29 @@ class AgentBase(ABC):
         self._instructions = config.get('instructions', [])
         self._agent_description = config.get('agent_description', '') or ''
 
-    # ---------------------------------------------------------------------
-    # Pipeline-facing entrypoint
-    # ---------------------------------------------------------------------
+    # =========================================================================
+    # PIPELINE-FACING ENTRYPOINT
+    # =========================================================================
     def run_agent(
         self,
         iInstance,
         question: Question,
         *,
-        host: Optional[AgentHostServices] = None,
         emit_answers_lane: bool = True,
     ) -> Any:
         """
         Execute a single agent run for a pipeline `Question`.
 
-        This method builds an `AgentInput`, delegates execution to `_run(...)`, and
-        writes a single JSON payload to the answers lane (`Answer(expectJson=True)`).
+        This method:
+          1. Lazy-builds and caches `AgentHostServices` on the IInstance
+             (via `iInstance._agent_host`) so tool discovery happens once
+             per IInstance, not once per question.
+          2. Enforces `REQUIRES_MEMORY` at first question for drivers that
+             need a memory node.
+          3. Builds the per-call `AgentContext` inline (no factory method)
+             with fresh metadata.
+          4. Delegates execution to the driver's `_run(*, context, question)`.
+          5. Writes the answer JSON payload to the answers lane.
 
         Args:
             iInstance: Node instance (`IInstance`) provided by the engine.
@@ -100,12 +114,16 @@ class AgentBase(ABC):
         run_id = new_run_id()
         debug(f'agent base run_agent run_id={run_id} framework={self.FRAMEWORK}')
 
-        # Use provided host (per-instance, e.g. from IInstance.beginInstance),
-        # or create one lazily if not provided.
-        if host is not None:
-            self._host = host
-        elif not self._host:
-            self._host = AgentHostServices(iInstance)
+        # Lazy host construction.  Built once per IInstance, cached on
+        # the invoker via attribute assignment.  Tool discovery (one
+        # engine invoke per connected tool node) happens at first
+        # question, not on every question.
+        if getattr(iInstance, '_agent_host', None) is None:
+            host = AgentHostServices(iInstance)
+            if self.REQUIRES_MEMORY and host.memory is None:
+                raise ValueError(f'{self.FRAMEWORK} agent requires a memory node to be connected')
+            iInstance._agent_host = host
+        host = iInstance._agent_host
 
         def _json_safe(value: Any) -> Any:
             """
@@ -122,29 +140,33 @@ class AgentBase(ABC):
             for inst in self._instructions:
                 question.addInstruction('Additional Instruction', inst.strip())
 
-            # Get the jobs taskId
-            task_id = iInstance.IEndpoint.endpoint.jobConfig['taskId']
+            # Get the jobs taskId — kept as a local variable inside the
+            # try/except so a missing/inaccessible jobConfig produces a
+            # graceful error answer instead of an unhandled AttributeError.
+            # Not on AgentContext: task_id is the same for every IInstance
+            # of a pipeline, so it serves no purpose as run scaffolding.
+            try:
+                task_id = iInstance.IEndpoint.endpoint.jobConfig.get('taskId')
+            except Exception:
+                task_id = None
 
-            # Create the input we will send to the agent
-            agent_input = AgentInput(
-                question=question,
+            # Build the per-call context inline.  Channels come from the
+            # cached host; metadata is stamped fresh per call.
+            context = AgentContext(
+                invoker=iInstance,
+                llm=host.llm,
+                tools=host.tools,
+                memory=host.memory,
                 run_id=run_id,
-                task_id=task_id,
+                pipe_id=iInstance.instance.pipeId if iInstance.instance else 0,
+                framework=self.FRAMEWORK,
                 started_at=started_at,
             )
 
-            # Save the invoker so sendSSE() can delegate to self.instance.sendSSE()
-            self._invoker = iInstance
-
-            # Build up the context so we know what we are doing
-            pipe_id = iInstance.instance.pipeId if iInstance and iInstance.instance else 0
-            runtime_ctx = {'run_id': run_id, 'task_id': task_id, 'framework': self.FRAMEWORK, 'pipe_id': pipe_id}
-
             # And execute
             content, raw = self._run(
-                agent_input=agent_input,
-                host=self._host,
-                ctx=runtime_ctx,
+                context=context,
+                question=question,
             )
 
             if not isinstance(content, str):
@@ -201,13 +223,24 @@ class AgentBase(ABC):
 
         return answer_payload
 
-    # ---------------------------------------------------------------------
-    # Abstract hook: framework run
-    # ---------------------------------------------------------------------
+    # =========================================================================
+    # ABSTRACT HOOK: FRAMEWORK RUN
+    # =========================================================================
     @abstractmethod
-    def _run(self, *, agent_input: AgentInput, host: AgentHost, ctx: Dict[str, Any]) -> tuple[str, Any]:
+    def _run(
+        self,
+        *,
+        context: AgentContext,
+        question: Question,
+    ) -> tuple[str, Any]:
         """
         Run the framework-specific agent execution.
+
+        Both `context` and `question` are required keyword-only parameters.
+        Drivers receive run scaffolding via `context` (invoker, llm/tools/memory
+        channels, run_id, pipe_id, framework, started_at) and the entry-point
+        pipeline question via `question`.  All host calls go through
+        `self.call_llm(context, ...)` and `self.call_tool(context, ...)`.
 
         Drivers return a tuple of:
         - content: final user-facing text
@@ -215,67 +248,41 @@ class AgentBase(ABC):
         """
         raise NotImplementedError
 
-    # ---------------------------------------------------------------------
-    # Framework-facing host operations
-    # ---------------------------------------------------------------------
-    def discover_tools(self, *, host: AgentHost) -> List[ToolDescriptor]:
-        """
-        Discover available tools for framework drivers to expose.
-
-        Returns:
-            A list of tool descriptors as returned by the tool query seam.
-        """
-        try:
-            catalog = host.tools.query()
-        except Exception as e:
-            catalog = {'error': str(e), 'type': type(e).__name__}
-        tools_attr = getattr(catalog, 'tools', None)
-        if isinstance(tools_attr, list):
-            return tools_attr
-        if isinstance(catalog, dict) and isinstance(catalog.get('tools'), list):
-            return catalog.get('tools')
-        if isinstance(catalog, list):
-            return catalog
-        return []
-
-    def invoke_host_tool(
+    # =========================================================================
+    # HOST ADAPTERS — THE ONLY PLACE ENGINE ENVELOPES GET BUILT
+    # =========================================================================
+    def call_llm(
         self,
+        context: AgentContext,
+        prompt: Union[Question, Any],
         *,
-        host: AgentHost,
-        tool_name: str,
-        input: Any = None,  # noqa: A002
-        kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Any:
-        """
-        Invoke a host tool after normalizing invocation payload shapes.
-
-        Args:
-            host: Host tools interface.
-            tool_name: Tool name as published by discovery.
-            input: Positional tool input payload (framework-dependent).
-            kwargs: Extra keyword arguments captured by a framework tool wrapper.
-
-        Returns:
-            Tool output object returned by the underlying tool provider.
-        """
-        payload = normalize_invocation_payload(input=input, kwargs=kwargs)
-        return host.tools.invoke(tool_name, payload)
-
-    def call_host_llm(
-        self,
-        *,
-        host: AgentHost,
-        messages: Any,
-        question_role: str,
-        stop_words: Any = None,
+        role: Optional[str] = None,
+        stop_words: Optional[List[str]] = None,
     ) -> str:
         """
-        Call the host LLM and return extracted text.
+        Invoke the host LLM and return extracted, truncated text.
+
+        `prompt` may be either:
+          - a pre-built `Question` (used by drivers like rocketride that
+            want explicit prompt structure: multiple questions, structured
+            context, instructions, etc.); OR
+          - any framework-native message list / string that
+            `messages_to_transcript` knows how to flatten into a single
+            transcript string.
+
+        When `prompt` is a `Question`, `role` is ignored — the Question
+        carries its own role.  When `prompt` is messages, `role` is used to
+        stamp the synthesized Question (defaults to ``''`` if not given).
+
+        This is the ONLY place in the agent package that builds engine
+        envelopes.  Drivers never touch `IInvokeLLM` or construct
+        `IInvokeLLM.Ask` directly.
 
         Args:
-            host: Host LLM interface.
-            messages: Framework-provided message(s) used to build a transcript.
-            question_role: Role/persona string passed into the `Question`.
+            context: The current agent run context.
+            prompt: A pre-built Question or framework messages to flatten.
+            role: Role/persona string used when synthesizing a Question
+                from `messages`.  Ignored when `prompt` is already a Question.
             stop_words: Optional stop word list used to truncate returned text.
 
         Returns:
@@ -283,67 +290,97 @@ class AgentBase(ABC):
         """
         from rocketlib.types import IInvokeLLM
 
-        transcript = messages_to_transcript(messages)
-        q = Question(role=question_role)
-        q.addQuestion(transcript)
-        result = host.llm.invoke(IInvokeLLM.Ask(question=q))
-        text = extract_text(result)
-        return truncate_at_stop_words(text, stop_words)
+        if isinstance(prompt, Question):
+            q = prompt
+        else:
+            transcript = messages_to_transcript(prompt)
+            q = Question(role=role or '')
+            q.addQuestion(transcript)
 
-    # ---------------------------------------------------------------------
-    # Framework binding hooks (framework drivers implement these)
-    # ---------------------------------------------------------------------
-    @abstractmethod
-    def _bind_framework_llm(
+        result = context.llm.invoke(IInvokeLLM.Ask(question=q))
+        return truncate_at_stop_words(extract_text(result), stop_words)
+
+    def call_llm_json(
         self,
+        context: AgentContext,
+        prompt: Union[Question, Any],
         *,
-        host: AgentHost,
-        call_llm: Callable[..., str],
-        ctx: Dict[str, Any],
+        role: Optional[str] = None,
     ) -> Any:
-        raise NotImplementedError
-
-    @abstractmethod
-    def _bind_framework_tools(
-        self,
-        *,
-        host: AgentHost,
-        tool_descriptors: List[ToolDescriptor],
-        invoke_tool: Callable[..., Any],
-        log_tool_call: Callable[..., None],
-        ctx: Dict[str, Any],
-    ) -> List[Any]:
-        raise NotImplementedError
-
-    # ---------------------------------------------------------------------
-    # Tool-provider surface (agent-as-tool)
-    # ---------------------------------------------------------------------
-    def handle_invoke(self, pSelf: Any, param: Any) -> Any:
         """
-        Handle tool control-plane operations when this agent is exposed as a tool.
+        Invoke the host LLM and return the parsed JSON response.
 
-        This is the node-facing entrypoint for `tool.query`/`tool.validate`/`tool.invoke`
-        for the agent-as-tool adapter.
-        """
-        return handle_agent_tool_invoke(agent=self, pSelf=pSelf, param=param)
+        Same `prompt` polymorphism as `call_llm`: accepts a pre-built
+        `Question` (typical) or framework messages.  The Question must
+        have ``expectJson = True`` set so the schema layer parses the
+        response as JSON.
 
-    # ---------------------------------------------------------------------
-    # Engine utilities
-    # ---------------------------------------------------------------------
-    def sendSSE(self, type: str, **data) -> None:
-        """
-        Send a real-time SSE status update to the UI for this agent's pipe.
-
-        Delegates to ``self._invoker.instance.sendSSE()`` using the invoker
-        captured at the start of the current ``run_agent`` invocation.
-        Safe to call from ``_run`` or any helper it delegates to.
+        Used by drivers like rocketride whose planner expects structured
+        JSON output (tool calls, done flags, scratch notes) rather than
+        flat text.  Like `call_llm`, this is one of the only two places
+        in the agent package that builds engine envelopes.
 
         Args:
+            context: The current agent run context.
+            prompt: A pre-built Question (typically with expectJson=True)
+                or framework messages to flatten.
+            role: Role/persona string used when synthesizing a Question
+                from `messages`.  Ignored when `prompt` is already a Question.
+
+        Returns:
+            The parsed JSON object returned by the LLM (typically a dict).
+        """
+        from rocketlib.types import IInvokeLLM
+
+        if isinstance(prompt, Question):
+            q = prompt
+        else:
+            transcript = messages_to_transcript(prompt)
+            q = Question(role=role or '')
+            q.addQuestion(transcript)
+
+        result = context.llm.invoke(IInvokeLLM.Ask(question=q))
+        return result.getJson()
+
+    def call_tool(
+        self,
+        context: AgentContext,
+        tool_name: str,
+        args: Dict[str, Any],
+    ) -> Any:
+        """
+        Invoke a host tool by name with a clean args dict.
+
+        Driver wrappers convert framework arg shapes to a clean dict before
+        calling this — there is no normalization layer here.
+
+        Args:
+            context: The current agent run context.
+            tool_name: Tool name as published by `context.tools.list`.
+            args: Clean dict of tool arguments.
+
+        Returns:
+            The raw tool output (whatever the tool returned).
+        """
+        return context.tools.invoke(tool_name, args)
+
+    # =========================================================================
+    # ENGINE UTILITIES
+    # =========================================================================
+    def sendSSE(self, context: AgentContext, type: str, **data) -> None:
+        """
+        Send a real-time SSE status update to the UI for the given run's pipe.
+
+        The invoker is read from the explicit `context` (per-call), not from
+        `self`, so concurrent pipes never cross-route SSE events.
+
+        Args:
+            context: The current run context (carries the per-pipe invoker).
             type:    Event type string (e.g. 'thinking', 'acting', 'confirm').
             **data:  Keyword arguments included as the event data payload.
         """
-        if self._invoker and self._invoker.instance:
-            self._invoker.instance.sendSSE(type, **data)
+        if context and context.invoker and context.invoker.instance:
+            context.invoker.instance.sendSSE(type, **data)
 
     def _agent_id(self, pSelf: Any) -> str:
         """Return the logical agent identifier used in answer metadata."""

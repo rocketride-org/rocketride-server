@@ -1,13 +1,13 @@
 {
-	"title": "CrewAI",
+	"title": "CrewAI Agent",
 	"protocol": "agent_crewai://",
-	"classType": ["agent", "tool", "crewai"],
+	"classType": ["agent", "tool"],
 	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
-	"path": "nodes.agent_crewai",
+	"path": "nodes.agent_crewai.crewai_agent",
 	"prefix": "agent",
-	"description": ["Single-agent execution using CrewAI.", "Can be invoked as a tool (`<nodeId>.run_agent`) for hierarchical agent orchestration."],
+	"description": ["Standalone single-agent CrewAI node.", "Can be invoked as a tool (`<nodeId>.run_agent`) by other agents.", "For multi-agent delegation, use a CrewAI Manager + CrewAI Subagent nodes."],
 	"icon": "crewai.svg",
 	"documentation": "https://docs.rocketride.org",
 	"invoke": {
@@ -127,7 +127,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "CrewAI",
+			"title": "CrewAI Agent",
 			"properties": ["agent_crewai.default"]
 		}
 	]

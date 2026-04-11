@@ -2191,6 +2191,103 @@ class TestConcurrentPipelineOperations:
                     print(f'Warning: failed to terminate pipeline token={token}: {e}')
             await client.disconnect()
 
+    @pytest.mark.asyncio
+    async def test_should_handle_two_independent_clients_sending_concurrently_to_the_same_task(self):
+        """
+        Two-client variant of the concurrent-sends test, designed to exercise
+        eaas's outbound _data_client multiplexing.
+
+        When two independent RocketRideClient instances share a backend task
+        (via use_existing), eaas proxies their requests over a single connection
+        to the subprocess (data_server.DataConn). Each inbound client has its
+        own DAP seq counter, so they independently issue overlapping seqs
+        (e.g. both reach seq=4 within milliseconds). If eaas's _send_data
+        forwarded the inbound dict verbatim, those colliding seqs would clobber
+        the outbound _data_client._pending_requests map and one of the responses
+        would be silently dropped, hanging the originating client forever.
+
+        The fix builds a fresh outbound DAP packet via dap_request() so the
+        eaas->subprocess hop allocates its own unique seq from
+        _data_client._next_seq(), and rebuilds the inbound response envelope so
+        the original client still sees its own seq in request_seq.
+
+        Note: the single-client concurrent tests above do NOT exercise this
+        path because one client has one monotonic seq counter -- it never
+        collides with itself. Two independent clients fanning into one task are
+        the necessary precondition.
+        """
+        SHARED_TOKEN = f'{self.CONCURRENT_TOKEN}-cross-client-shared'
+        SENDS_PER_CLIENT = 12
+
+        # Two independent clients.  Each has its own DAP connection, its own
+        # seq counter, and its own _pending_requests map.
+        client_a = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        client_b = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client_a.connect()
+            await client_b.connect()
+
+            # Both clients use the SAME task via use_existing so the second
+            # client.use() attaches to the existing task instead of starting a
+            # fresh one.  This is what makes both clients fan into ONE shared
+            # eaas->subprocess _data_client.
+            res_a = await client_a.use(pipeline=get_echo_pipeline(), token=SHARED_TOKEN, use_existing=True)
+            res_b = await client_b.use(pipeline=get_echo_pipeline(), token=SHARED_TOKEN, use_existing=True)
+            assert res_b['token'] == res_a['token']
+
+            # Generate distinct payloads per client so we can verify no cross-routing.
+            data_a = [{'index': i, 'text': f'clientA-send-{i}: {"".join(random.choices(string.ascii_lowercase, k=8))} time-{int(time.time())}-A-{i}'} for i in range(SENDS_PER_CLIENT)]
+            data_b = [{'index': i, 'text': f'clientB-send-{i}: {"".join(random.choices(string.ascii_lowercase, k=8))} time-{int(time.time())}-B-{i}'} for i in range(SENDS_PER_CLIENT)]
+
+            async def send_a(d):
+                await asyncio.sleep(random.random() * 0.05)
+                response = await client_a.send(res_a['token'], d['text'], {}, 'text/plain')
+                return {'client': 'A', 'index': d['index'], 'original_text': d['text'], 'response': response}
+
+            async def send_b(d):
+                await asyncio.sleep(random.random() * 0.05)
+                response = await client_b.send(res_b['token'], d['text'], {}, 'text/plain')
+                return {'client': 'B', 'index': d['index'], 'original_text': d['text'], 'response': response}
+
+            # Fire both clients' sends concurrently.  Pre-fix this would hang
+            # on whichever pipe lost the seq collision race.
+            sends_a = [send_a(d) for d in data_a]
+            sends_b = [send_b(d) for d in data_b]
+            all_results = await asyncio.gather(*sends_a, *sends_b)
+
+            # Every send must have completed (no hangs).
+            assert len(all_results) == SENDS_PER_CLIENT * 2
+
+            # Each response must contain its own original text AND the right
+            # client tag (proves no cross-routing between clients).
+            for r in all_results:
+                assert r['response'] is not None
+                response_text = r['response']['text'][0]
+                assert r['original_text'] in response_text
+                assert f'client{r["client"]}-send-{r["index"]}' in response_text
+
+            # No two responses share the same text -- final guard against
+            # cross-contamination.
+            unique_texts = set(r['response']['text'][0] for r in all_results)
+            assert len(unique_texts) == SENDS_PER_CLIENT * 2
+
+            print('Two-client cross-task concurrent test completed:')
+            print(f'- 2 independent clients × {SENDS_PER_CLIENT} concurrent sends each')
+            print(f'- {len(all_results)} responses received and verified')
+            print(f'- All responses unique: {len(unique_texts) == SENDS_PER_CLIENT * 2}')
+        finally:
+            # Clean up the shared task via whichever client is still alive.
+            for c in (client_a, client_b):
+                if c.is_connected():
+                    try:
+                        await c.terminate(SHARED_TOKEN)
+                    except Exception:
+                        pass
+                    try:
+                        await c.disconnect()
+                    except Exception:
+                        pass
+
 
 async def is_server_available() -> bool:
     """Check if the RocketRide server is available for testing."""

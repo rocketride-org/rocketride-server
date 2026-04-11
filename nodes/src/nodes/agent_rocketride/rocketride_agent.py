@@ -32,11 +32,11 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from rocketlib import debug, error
-from rocketlib.types import IInvokeLLM
 
-from ai.common.agent import AgentBase, extract_text, safe_str
-from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
+from ai.common.agent import AgentBase, AgentContext, safe_str
+from ai.common.agent.types import AgentRunResult
 from ai.common.config import Config
+from ai.common.schema import Question
 
 from .planner import plan as plan_wave
 from .executor import execute_wave, resolve_answer_refs
@@ -51,12 +51,19 @@ class RocketRideDriver(AgentBase):
     """
     RocketRide Wave framework driver.
 
-    Subclasses AgentBase and implements the wave-planning execution loop
-    directly against the host LLM and tool infrastructure — no third-party
-    agent framework required.
+    Subclasses AgentBase and implements the wave-planning execution loop.
+    The Wave loop is its own framework — there are no third-party agent
+    libraries to wrap, so there are no `_build_llm` / `_build_tools`
+    methods.  All host calls go through `self.call_llm(context, ...)` and
+    `self.call_tool(context, ...)` like every other driver, but the
+    planner builds its own structured `Question` objects (because the
+    wave algorithm needs prompt structure that flatten-to-transcript
+    would destroy) and passes them to `call_llm` via the polymorphic
+    `prompt: Union[Question, Any]` parameter.
     """
 
     FRAMEWORK = 'wave'
+    REQUIRES_MEMORY = True
 
     def __init__(self, iGlobal) -> None:
         """Initialize the Wave driver and load host services."""
@@ -65,26 +72,14 @@ class RocketRideDriver(AgentBase):
         self._max_waves = config.get('max_waves', _DEFAULT_MAX_WAVES)
 
     # ------------------------------------------------------------------
-    # AgentBase abstract stubs — unused; we call the host directly
-    # ------------------------------------------------------------------
-    def _bind_framework_llm(self, *, host: Any, call_llm_text: Any, ctx: Any) -> None:
-        """No-op — the Wave driver calls ``host.llm.invoke()`` directly."""
-        return None
-
-    def _bind_framework_tools(self, *, host: Any, tool_descriptors: Any, invoke_tool: Any, log_tool_call: Any, ctx: Any) -> List:
-        """No-op — the Wave driver calls ``host.tools.invoke()`` directly."""
-        return []
-
-    # ------------------------------------------------------------------
     # Main driver
     # ------------------------------------------------------------------
 
     def _run(
         self,
         *,
-        agent_input: AgentInput,
-        host: AgentHost,
-        ctx: Dict[str, Any],
+        context: AgentContext,
+        question: Question,
     ) -> AgentRunResult:
         """Execute the wave-planning loop.
 
@@ -100,9 +95,9 @@ class RocketRideDriver(AgentBase):
         Returns:
             A ``(content, trace)`` tuple consumed by ``AgentBase.run_agent``.
         """
-        run_id = ctx.get('run_id', '')
+        run_id = context.run_id
         debug(f'rocketride wave _run start run_id={run_id}')
-        self.sendSSE('thinking', message='Analyzing your request...')
+        self.sendSSE(context, 'thinking', message='Analyzing your request...')
 
         # waves accumulates the full history of every tool call and its result
         # summary.  It is passed to plan_wave() each iteration so the planner
@@ -121,15 +116,16 @@ class RocketRideDriver(AgentBase):
 
         for wave_num in range(self._max_waves):
             debug(f'rocketride wave wave_num={wave_num} run_id={run_id}')
-            self.sendSSE('thinking', message=f'Planning step {wave_num + 1}...')
+            self.sendSSE(context, 'thinking', message=f'Planning step {wave_num + 1}...')
 
             # Run the planner — one LLM call with all tool descriptions.
             # Returns either {"done": true, "answer": "..."} or {"tool_calls": [...]}
             # or {} if the LLM response was malformed.
             try:
                 result = plan_wave(
-                    agent_input=agent_input,
-                    host=host,
+                    agent_base=self,
+                    context=context,
+                    question=question,
                     waves=waves,
                     instructions=self._instructions,
                     current_scratch=current_scratch,
@@ -157,7 +153,7 @@ class RocketRideDriver(AgentBase):
             if remove_keys:
                 for key in remove_keys:
                     try:
-                        host.memory.clear(key)
+                        context.memory.clear(key)
                     except Exception as exc:
                         debug(f'rocketride wave remove key={key!r} failed: {exc}')
                 # Strip removed result entries from wave history to keep context lean
@@ -170,14 +166,14 @@ class RocketRideDriver(AgentBase):
             # what the agent is doing this turn.  Shown in the "thinking" panel.
             thought = safe_str(result.get('thought', ''))
             if thought:
-                self.sendSSE('thinking', message=thought)
+                self.sendSSE(context, 'thinking', message=thought)
 
             # ------------------------------------------------------------------
             # Done — resolve answer refs and return
             # ------------------------------------------------------------------
 
             if result.get('done'):
-                self.sendSSE('thinking', message='Generating final answer...')
+                self.sendSSE(context, 'thinking', message='Generating final answer...')
                 answer = safe_str(result.get('answer', ''))
 
                 # Resolve {{memory.ref:key:format:path}} references in the answer.
@@ -186,7 +182,7 @@ class RocketRideDriver(AgentBase):
                 # fetches each referenced key from memory, applies the JMESPath
                 # extraction and formatter, and substitutes the result into the answer
                 # string — all without the LLM ever having seen the raw data.
-                answer = resolve_answer_refs(answer, host)
+                answer = resolve_answer_refs(answer, agent_base=self, context=context)
                 debug(f'rocketride wave done wave_num={wave_num} run_id={run_id}')
                 return answer, trace
 
@@ -204,15 +200,15 @@ class RocketRideDriver(AgentBase):
 
             # Inform the UI which tools are about to run this wave
             tool_names = [c.get('tool', '?') for c in tool_calls]
-            self.sendSSE('thinking', message=f'Running: {", ".join(tool_names)}', wave=wave_num + 1, tools=tool_names)
+            self.sendSSE(context, 'thinking', message=f'Running: {", ".join(tool_names)}', wave=wave_num + 1, tools=tool_names)
 
             # Execute all tool calls in this wave concurrently.  Each result is
             # stored in memory under "wave-N.rM" and a structural summary is
             # returned.  The summary is what gets injected into the next prompt
             # as context; the full result stays in memory for later peek access.
-            results = execute_wave(tool_calls, host=host, wave_name=f'wave-{wave_num}')
+            results = execute_wave(tool_calls, agent_base=self, context=context, wave_name=f'wave-{wave_num}')
             waves.append({'wave_num': wave_num, 'calls': tool_calls, 'results': results})
-            self.sendSSE('thinking', message=f'Step {wave_num + 1} complete', results=len(results))
+            self.sendSSE(context, 'thinking', message=f'Step {wave_num + 1} complete', results=len(results))
 
         # ------------------------------------------------------------------
         # Synthesis fallback — max waves reached without done=true
@@ -223,8 +219,8 @@ class RocketRideDriver(AgentBase):
         # from everything that was gathered.  This prevents the agent from
         # silently returning nothing after a long run.
         debug(f'rocketride wave max waves reached run_id={run_id}, synthesizing final answer')
-        self.sendSSE('thinking', message='Synthesizing final answer...')
-        return self._synthesize(agent_input=agent_input, waves=waves, host=host), trace
+        self.sendSSE(context, 'thinking', message='Synthesizing final answer...')
+        return self._synthesize(question=question, waves=waves, context=context), trace
 
     # ------------------------------------------------------------------
     # Final synthesis (fallback when max waves exhausted)
@@ -233,9 +229,9 @@ class RocketRideDriver(AgentBase):
     def _synthesize(
         self,
         *,
-        agent_input: AgentInput,
+        question: Question,
         waves: List[Dict[str, Any]],
-        host: AgentHost,
+        context: AgentContext,
     ) -> str:
         """Ask the LLM to produce a final answer from all gathered results.
 
@@ -261,8 +257,8 @@ class RocketRideDriver(AgentBase):
         gathered = '\n'.join(lines) if lines else '(no results gathered)'
 
         # Build a synthesis prompt from the original question context.
-        # Deep-copy to avoid mutating the original AgentInput.
-        q = agent_input.question.model_copy(deep=True)
+        # Deep-copy to avoid mutating the original question.
+        q = question.model_copy(deep=True)
         q.role = 'You are a helpful assistant.'
 
         # Promote original questions to goals so the LLM understands the
@@ -275,7 +271,6 @@ class RocketRideDriver(AgentBase):
         q.addContext(f'Information gathered:\n{gathered}')
         q.addQuestion('Based on the above, provide a complete and accurate final answer.')
         try:
-            result = host.llm.invoke(IInvokeLLM.Ask(question=q))
-            return extract_text(result)
+            return self.call_llm(context, q)
         except Exception as exc:
             return f'Unable to produce final answer: {exc}'

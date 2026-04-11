@@ -329,26 +329,33 @@ class IInvokeMemory(IInvokeTool):
 
 class IInvokeCrew(IInvoke):
     """
-    Control-plane type for CrewAI sub-agent discovery (crewai.describe fan-out).
+    Crew invoke operations.  Pure namespace — construct via inner classes.
 
-    Each sub-agent connected on the 'crewai' channel appends a DescribeResponse
-    to Describe.agents when the orchestrator fans out a Describe request.
+    Usage::
+
+        param = IInvokeCrew.Describe()
+        instance.invoke(param, component_id=subagent_node_id)
+
+    Each sub-agent connected on the 'crewai' lane appends a DescribeResponse
+    to ``Describe.agents`` when the orchestrator fans out a Describe request.
+    The op name is the bare 'describe' so it routes to an @invoke_function
+    decorated method named ``describe`` on the receiving IInstance.
     """
 
-    op: str = 'crewai.describe'
-    model_config = ConfigDict(extra='allow')
-
-    class Describe(BaseModel):
+    class Describe(IInvokeOp):
         """Fan-out request: each connected sub-agent appends its descriptor."""
 
-        op: str = Field(default='crewai.describe', frozen=True)
+        lane: str = 'crewai'
+        op: str = Field(default='describe', frozen=True)
         agents: List[Any] = Field(default_factory=list)
-        model_config = ConfigDict(extra='allow')
 
     class DescribeResponse(BaseModel):
-        """Sub-agent descriptor returned in response to crewai.describe."""
+        """Sub-agent descriptor value object — appended to ``Describe.agents``.
 
-        op: str = Field(default='crewai.describe', frozen=True)
+        Not an `IInvokeOp` because this is a value object that travels inside
+        a Describe response, not an invoke operation that gets dispatched.
+        """
+
         role: str
         task_description: str
         goal: str = ''

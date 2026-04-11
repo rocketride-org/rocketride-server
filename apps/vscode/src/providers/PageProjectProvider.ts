@@ -745,6 +745,22 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 })();
 </script>
 </body></html>`;
+
+		// Bridge clipboard requests from the embedded iframe.  The chat-ui
+		// (and any future embedded web app) cannot read the OS clipboard from
+		// inside a VSCode webview iframe — VSCode intercepts native paste at
+		// the Electron layer.  The iframe posts {type:'requestPaste'} up to
+		// the bridge script, which forwards it here via vscode.postMessage;
+		// we read the clipboard via the extension-host API and post the text
+		// back to the webview, where the bridge relays it into the iframe.
+		panel.webview.onDidReceiveMessage(async (msg) => {
+			if (msg?.type === 'requestPaste') {
+				const text = await vscode.env.clipboard.readText();
+				panel.webview.postMessage({ type: 'pasteContent', text });
+			} else if (msg?.type === 'copyText' && typeof msg.text === 'string') {
+				await vscode.env.clipboard.writeText(msg.text);
+			}
+		});
 	}
 
 	// =========================================================================
