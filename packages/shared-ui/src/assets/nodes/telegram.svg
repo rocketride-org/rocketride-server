@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" fill="none">
+  <circle cx="120" cy="120" r="120" fill="url(#tg-grad)"/>
+  <defs>
+    <linearGradient id="tg-grad" x1="0" y1="0" x2="240" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2AABEE"/>
+      <stop offset="100%" stop-color="#229ED9"/>
+    </linearGradient>
+  </defs>
+  <path fill="#fff" d="M175.5 63.8L50.2 113c-8.6 3.5-8.5 8.3-1.6 10.5l32 10 74.1-46.7c3.5-2.1 6.7-.97 4.1 1.4L96 126.4l-1.5 33.4c2.2 0 3.2-1 4.4-2.2l10.6-10.2 32.4 23.9c6 3.3 10.3 1.6 11.8-5.5l21.4-100.6c2.1-8.5-3.2-12.3-9.6-9.4z"/>
+</svg>
