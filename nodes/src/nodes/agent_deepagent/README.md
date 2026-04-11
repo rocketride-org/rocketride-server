@@ -10,7 +10,7 @@ sidebar_position: 1
 
 ## What it does
 
-Agent node built on the [`deepagents`](https://github.com/NirDiamant/deep_agent) library (LangChain/LangGraph). Adds strategic planning, persistent state, and long-context management on top of a standard LangChain agent loop.
+Agent node built on the [`deepagents`](https://github.com/langchain-ai/deepagents) library (LangChain/LangGraph). Adds strategic planning, persistent state, and long-context management on top of a standard LangChain agent loop.
 
 **Lanes:** `questions` → `answers`
 
