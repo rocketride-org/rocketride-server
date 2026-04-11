@@ -7,7 +7,7 @@
 Parallel wave executor for the RocketRide Wave.
 
 Each wave is a list of tool calls that are dispatched concurrently
-to the host tool infrastructure via ``host.tools.invoke()``.
+through ``agent_base.call_tool(context, name, args)``.
 
 Template references (e.g. ``"{{memory.ref:key}}"`` ) are resolved before
 tool invocation and in the final answer.  An optional format and JMESPath
@@ -35,10 +35,7 @@ import jmespath
 
 from rocketlib import debug, error
 
-from rocketlib.types import IInvokeLLM
-
-from ai.common.agent import extract_text
-from ai.common.agent.types import AgentHost
+from ai.common.agent import AgentBase, AgentContext
 from ai.common.schema import Question
 
 from .formatters import format_data
@@ -152,7 +149,7 @@ def _describe_dict(d: dict, depth: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _memory_get(key: str, host: AgentHost) -> Any:
+def _memory_get(key: str, context: AgentContext) -> Any:
     """Fetch a raw value from the memory store.
 
     Returns ``None`` on missing key, failed lookup, or any error — callers
@@ -160,7 +157,7 @@ def _memory_get(key: str, host: AgentHost) -> Any:
     in the template output.
     """
     try:
-        result = host.memory.get(key)
+        result = context.memory.get(key)
         # Memory store returns {ok: bool, value: Any} — only unwrap on success
         if isinstance(result, dict) and result.get('ok'):
             return result.get('value')
@@ -169,7 +166,13 @@ def _memory_get(key: str, host: AgentHost) -> Any:
     return None
 
 
-def _format_value(value: Any, fmt: str, host: AgentHost) -> str:
+def _format_value(
+    value: Any,
+    fmt: str,
+    *,
+    agent_base: AgentBase,
+    context: AgentContext,
+) -> str:
     """Apply a named formatter to *value*, falling back to LLM for unknown formats.
 
     Built-in formatters (markdown_table, html_table, csv, json, text) are
@@ -191,15 +194,19 @@ def _format_value(value: Any, fmt: str, host: AgentHost) -> str:
     q.addContext(raw)
     q.addQuestion(f'Format the data above as: {fmt}. Output ONLY the formatted result, nothing else.')
     try:
-        result = host.llm.invoke(IInvokeLLM.Ask(question=q))
-        return extract_text(result)
+        return agent_base.call_llm(context, q)
     except Exception as exc:
         debug(f'rocketride wave format LLM fallback failed: {exc}')
         # Last resort: return the raw value rather than crashing
         return raw
 
 
-def _resolve_refs(value: Any, host: AgentHost) -> Any:
+def _resolve_refs(
+    value: Any,
+    *,
+    agent_base: AgentBase,
+    context: AgentContext,
+) -> Any:
     """
     Recursively walk *value* and replace ``{{memory.ref:key}}``,
     ``{{memory.ref:key:format}}``, or ``{{memory.ref:key:format:path}}``
@@ -223,7 +230,7 @@ def _resolve_refs(value: Any, host: AgentHost) -> Any:
             key = exact.group(1)
             fmt = exact.group(2)
             path = exact.group(3)
-            v = _memory_get(key, host)
+            v = _memory_get(key, context)
             if v is None:
                 return None
             # Apply JMESPath extraction before formatting so format receives
@@ -234,7 +241,7 @@ def _resolve_refs(value: Any, host: AgentHost) -> Any:
                 except Exception:
                     pass  # Bad path — fall through with the full value
             if fmt:
-                return _format_value(v, fmt, host)
+                return _format_value(v, fmt, agent_base=agent_base, context=context)
             # No format requested — return native type intact
             return v
 
@@ -247,7 +254,7 @@ def _resolve_refs(value: Any, host: AgentHost) -> Any:
             key = m.group(1)
             fmt = m.group(2)
             path = m.group(3)
-            v = _memory_get(key, host)
+            v = _memory_get(key, context)
             if v is None:
                 return ''  # Missing key → empty string, don't break the surrounding text
             if path:
@@ -257,7 +264,7 @@ def _resolve_refs(value: Any, host: AgentHost) -> Any:
                     # Bad path — fall through with the original value so surrounding text still renders
                     pass
             if fmt:
-                return _format_value(v, fmt, host)
+                return _format_value(v, fmt, agent_base=agent_base, context=context)
             # No format — serialize to string for embedding in text
             if isinstance(v, str):
                 return v
@@ -271,16 +278,21 @@ def _resolve_refs(value: Any, host: AgentHost) -> Any:
     # Recurse into dicts and lists so template tags nested inside tool
     # argument objects are resolved before the tool is invoked.
     if isinstance(value, dict):
-        return {k: _resolve_refs(v, host) for k, v in value.items()}
+        return {k: _resolve_refs(v, agent_base=agent_base, context=context) for k, v in value.items()}
 
     if isinstance(value, list):
-        return [_resolve_refs(v, host) for v in value]
+        return [_resolve_refs(v, agent_base=agent_base, context=context) for v in value]
 
     # Non-string scalar — nothing to resolve
     return value
 
 
-def resolve_answer_refs(answer: str, host: AgentHost) -> str:
+def resolve_answer_refs(
+    answer: str,
+    *,
+    agent_base: AgentBase,
+    context: AgentContext,
+) -> str:
     """Resolve ``{{memory.ref:key[:format][:path]}}`` references in a final answer.
 
     Called by the agent driver after the LLM emits done=true so that any
@@ -291,7 +303,7 @@ def resolve_answer_refs(answer: str, host: AgentHost) -> str:
     if not isinstance(answer, str) or not _REF_PATTERN.search(answer):
         # Fast exit — no template references to resolve
         return answer
-    return _resolve_refs(answer, host)
+    return _resolve_refs(answer, agent_base=agent_base, context=context)
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +321,12 @@ def _auto_key(wave_name: str, idx: int) -> str:
     return f'{wave_name}.r{idx}'
 
 
-def _store_and_preview(tool: str, key: str, result: Any, host: AgentHost) -> Dict[str, Any]:
+def _store_and_preview(
+    tool: str,
+    key: str,
+    result: Any,
+    context: AgentContext,
+) -> Dict[str, Any]:
     """Store *result* in memory under *key* and return a compact summary dict.
 
     The summary dict is what gets recorded in the wave history and injected
@@ -323,7 +340,7 @@ def _store_and_preview(tool: str, key: str, result: Any, host: AgentHost) -> Dic
     re-parsing a JSON string.
     """
     try:
-        host.memory.put(key, result)
+        context.memory.put(key, result)
     except Exception as exc:
         error(f'rocketride wave memory.put key={key!r} failed: {exc}')
         raise
@@ -340,7 +357,8 @@ def _store_and_preview(tool: str, key: str, result: Any, host: AgentHost) -> Dic
 def _execute_wave_calls(
     wave: List[Dict[str, Any]],
     *,
-    host: AgentHost,
+    agent_base: AgentBase,
+    context: AgentContext,
     wave_name: str = 'wave-0',
 ) -> List[Dict[str, Any]]:
     """Execute all tool calls in a wave in parallel and return result dicts.
@@ -371,7 +389,7 @@ def _execute_wave_calls(
         # Resolve any {{memory.ref:...}} template references in the args
         # before passing them to the tool.  This lets the LLM compose tool
         # inputs from previously stored results without extra peek calls.
-        args = _resolve_refs(args, host)
+        args = _resolve_refs(args, agent_base=agent_base, context=context)
 
         debug(f'rocketride wave execute tool={tool!r} key={key!r}')
         try:
@@ -388,7 +406,7 @@ def _execute_wave_calls(
             if tool == 'memory.peek':
                 mem_key = args.get('key', '')
                 path = args.get('path', '')
-                mem_result = host.memory.get(mem_key)
+                mem_result = context.memory.get(mem_key)
                 if not (isinstance(mem_result, dict) and mem_result.get('ok')):
                     return {'tool': tool, 'key': key, 'error': f'key {mem_key!r} not found'}
 
@@ -438,14 +456,15 @@ def _execute_wave_calls(
                     'total_chars': len(value),
                 }
 
-            # Regular tool — route through the host's tool pipeline which
-            # dispatches to the appropriate node via the control-plane invoke seam.
-            result = host.tools.invoke(tool, args)
+            # Regular tool — route through AgentBase.call_tool, which forwards
+            # to context.tools.invoke (and ultimately the engine's control-plane
+            # invoke seam at the appropriate node).
+            result = agent_base.call_tool(context, tool, args)
 
             # Store the result in memory and return a structural summary.
             # The summary is what gets injected into the next planning prompt;
             # the full result stays in memory for later memory.peek access.
-            return _store_and_preview(tool, key, result, host)
+            return _store_and_preview(tool, key, result, context)
 
         except Exception as exc:
             err_msg = f'{type(exc).__name__}: {exc}'
@@ -485,7 +504,8 @@ def _execute_wave_calls(
 def execute_wave(
     wave: List[Dict[str, Any]],
     *,
-    host: AgentHost,
+    agent_base: AgentBase,
+    context: AgentContext,
     wave_name: str = 'wave-0',
 ) -> List[Dict[str, Any]]:
     """Execute all tool calls in a wave concurrently.
@@ -496,10 +516,12 @@ def execute_wave(
 
     Args:
         wave: List of ``{"tool": str, "args": dict}`` dicts.
-        host: The agent host providing tool invocation via ``host.tools.invoke()``.
+        agent_base: The driver instance — used to call ``call_tool`` for
+            tool invocation through the AgentBase host adapter.
+        context: The current agent run context (carries the host channels).
         wave_name: Name prefix for generated memory keys (e.g. ``"wave-0"``).
 
     Returns:
         List of result dicts (same order as wave).
     """
-    return _execute_wave_calls(wave, host=host, wave_name=wave_name)
+    return _execute_wave_calls(wave, agent_base=agent_base, context=context, wave_name=wave_name)

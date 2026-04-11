@@ -4,11 +4,11 @@
 # =============================================================================
 
 """
-RocketRide Wave node instance.
+CrewAI Agent — IInstance for the standalone single-agent CrewAI node.
 
-Receives questions on the questions lane and runs the wave-planning agent
-loop.  Also exposes itself as a `run_agent` tool via `@tool_function` so
-this node can be invoked by parent agents in the pipeline.
+Handles the questions lane (delegates to `CrewAgent.run_agent`) and exposes
+itself as a `run_agent` tool via `@tool_function` so this node can be invoked
+by parent agents in the pipeline.
 """
 
 from __future__ import annotations
@@ -24,12 +24,9 @@ from .IGlobal import IGlobal
 
 
 class IInstance(IInstanceBase):
-    """Pipeline instance for the RocketRide Wave agent node."""
-
     IGlobal: IGlobal
 
-    def writeQuestions(self, question: Question) -> None:
-        """Entry point for the questions lane — runs the wave agent loop."""
+    def writeQuestions(self, question: Question):
         self.IGlobal.agent.run_agent(self, question, emit_answers_lane=True)
 
     @tool_function(

@@ -1,16 +1,16 @@
 ---
-title: CrewAI
-date: 2026-03-02
+title: CrewAI Agent
+date: 2026-04-11
 sidebar_position: 3
 ---
 
 <head>
-  <title>CrewAI - RocketRide Documentation</title>
+  <title>CrewAI Agent - RocketRide Documentation</title>
 </head>
 
 ## What it does
 
-Single-agent [CrewAI](https://docs.crewai.com/) node. Receives a question, runs a one-agent `Crew`, and emits an answer.
+Standalone single-agent [CrewAI](https://docs.crewai.com/) node. Receives a question, runs a one-agent `Crew`, and emits an answer. Can also be invoked as a tool by other agents via `<nodeId>.run_agent`.
 
 **Lanes:** `questions` → `answers`
 
@@ -47,6 +47,6 @@ By default only **Agent Description** and **Instructions** are shown. Toggle **A
 | Task            | _(incoming prompt)_ | `Task(description=...)`     |
 | Expected Output | built-in            | `Task(expected_output=...)` |
 
-## Using as a sub-agent
+## Multi-agent workflows
 
-Wire into a `CrewAI Manager` node via the `crewai` invoke channel. The manager invokes `crewai.describe` to collect this node's role, goal, backstory, and task. Tool resolution is handled separately by the manager and is not a direct field in the `crewai.describe` response.
+For hierarchical multi-agent orchestration, use the `CrewAI Manager` node with one or more `CrewAI Subagent` nodes instead. A `CrewAI Agent` node cannot be used as a sub-agent under a Manager — that role is filled by `CrewAI Subagent`.

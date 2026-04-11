@@ -28,9 +28,189 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict, List, Optional
 
-from ai.common.agent import AgentBase
-from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
 from rocketlib import ToolDescriptor
+
+from ai.common.agent import AgentBase, AgentContext
+from ai.common.agent.types import AgentRunResult
+from ai.common.schema import Question
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# FRAMEWORK WRAPPER BUILDERS — DRIVER-PRIVATE MODULE HELPERS
+# ────────────────────────────────────────────────────────────────────────────────
+
+
+def _build_langchain_llm(agent_base: AgentBase, context: AgentContext) -> Any:
+    """Build a LangChain BaseChatModel that delegates to AgentBase.call_llm.
+
+    LangChain agents expect a chat model that returns structured `tool_calls`,
+    but RocketRide's LLM seam is text-only.  We prompt the model to emit a
+    strict JSON envelope describing either a tool call or a final answer,
+    then parse it into an `AIMessage` with `tool_calls`.
+    """
+    from langchain_core.language_models import BaseChatModel
+    from langchain_core.messages import AIMessage
+    from langchain_core.outputs import ChatGeneration, ChatResult
+
+    class RocketRideToolCallingChatModel(BaseChatModel):
+        def __init__(self):
+            super().__init__()
+            self._bound_tools: List[Dict[str, Any]] = []
+
+        @property
+        def _llm_type(self) -> str:
+            return 'rocketride-host-llm'
+
+        @property
+        def _identifying_params(self) -> Dict[str, Any]:
+            return {'framework': 'rocketride', 'adapter': 'tool_calling_json'}
+
+        def bind_tools(self, tools: object, **_kwargs: Any) -> 'RocketRideToolCallingChatModel':
+            try:
+                self._bound_tools = _normalize_bound_tools(tools)
+            except Exception:
+                self._bound_tools = []
+            return self
+
+        def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> Any:
+            transcript = _langchain_messages_to_transcript(messages)
+            tool_hint = _tool_call_protocol_prompt(self._bound_tools)
+            prompt = (tool_hint + '\n\n' + transcript).strip()
+
+            raw = ''
+            for attempt in range(3):
+                raw = _safe_str(
+                    agent_base.call_llm(
+                        context,
+                        prompt,
+                        role='You are a helpful assistant.',
+                        stop_words=stop,
+                    )
+                ).strip()
+                msg = _parse_tool_call_envelope(raw)
+                if msg is not None:
+                    return ChatResult(generations=[ChatGeneration(message=msg)])
+                if attempt < 2:
+                    prompt = prompt + '\n\nsystem: Your last output was invalid. Output ONLY a single JSON object per the schema.'
+
+            return ChatResult(generations=[ChatGeneration(message=AIMessage(content=raw))])
+
+    return RocketRideToolCallingChatModel()
+
+
+def _build_langchain_tools(
+    agent_base: AgentBase,
+    context: AgentContext,
+    tool_descriptors: List[ToolDescriptor],
+) -> List[Any]:
+    """Convert host tool descriptors into LangChain BaseTool instances.
+
+    The inner ``HostTool`` subclass captures `agent_base` and `context` via
+    closure on the enclosing function so its `_run` method can call
+    `agent_base.call_tool(context, ...)`.
+    """
+    from langchain_core.tools import BaseTool
+    from pydantic import BaseModel, ConfigDict, Field, create_model
+
+    class _ToolInput(BaseModel):
+        """
+        Accept arbitrary tool args through a stable `input` field.
+
+        LangChain tool execution paths vary across versions; this schema keeps
+        invocation robust when arguments are passed either via `input=...` or
+        as extra keyword args.
+        """
+
+        input: Any = Field(default=None, description='Tool input payload')
+        model_config = ConfigDict(extra='allow')
+
+    def _make_args_schema(input_schema: Optional[Dict[str, Any]]) -> type[BaseModel]:
+        """
+        Build a Pydantic model from a JSON Schema object.
+
+        LangChain tool execution can filter kwargs based on `args_schema`. Using
+        the real tool schema helps preserve tool parameters end-to-end.
+        """
+        if not isinstance(input_schema, dict):
+            return _ToolInput
+        props = input_schema.get('properties', {})
+        if not isinstance(props, dict) or not props:
+            return _ToolInput
+        required_keys = set(input_schema.get('required', []) or [])
+
+        field_defs: Dict[str, Any] = {}
+        for key, prop in props.items():
+            if not isinstance(key, str) or not key:
+                continue
+            if not isinstance(prop, dict):
+                prop = {}
+            desc = prop.get('description', '')
+            if key in required_keys:
+                field_defs[key] = (Any, Field(..., description=desc))
+            else:
+                default = prop.get('default', None)
+                field_defs[key] = (Any, Field(default=default, description=desc))
+
+        if not field_defs:
+            return _ToolInput
+
+        try:
+            return create_model(
+                '_DynToolInput',
+                __config__=ConfigDict(extra='ignore'),
+                **field_defs,
+            )
+        except Exception:
+            return _ToolInput
+
+    class HostTool(BaseTool):  # type: ignore[misc]
+        name: str
+        description: str
+        args_schema: type[BaseModel] = _ToolInput
+
+        def _run(self, **framework_args: Any) -> str:  # noqa: ANN401
+            tool_name = _safe_str(getattr(self, 'name', ''))
+
+            try:
+                out = agent_base.call_tool(context, tool_name, framework_args)
+            except Exception as e:
+                out = {'error': str(e), 'type': type(e).__name__}
+
+            try:
+                return json.dumps(out, default=str) if isinstance(out, (dict, list)) else _safe_str(out)
+            except Exception:
+                return _safe_str(out)
+
+    tools: List[Any] = []
+    for td in tool_descriptors:
+        if not hasattr(td, 'get'):
+            continue
+        name = td.get('name')
+        if not isinstance(name, str) or not name.strip():
+            continue
+        desc = td.get('description') if isinstance(td.get('description'), str) else f'Invoke host tool: {name}'
+        input_schema = td.get('inputSchema')
+        if isinstance(input_schema, dict):
+            try:
+                schema_text = json.dumps(input_schema, ensure_ascii=False)
+            except Exception:
+                schema_text = ''
+            if schema_text:
+                desc = f'{desc}\n\nTool input schema (JSON): {schema_text}'
+
+        schema_cls = _make_args_schema(input_schema if isinstance(input_schema, dict) else None)
+        tool = HostTool(name=name, description=desc, args_schema=schema_cls)
+        try:
+            setattr(tool, '_rr_input_schema', input_schema)
+        except Exception:
+            pass
+        tools.append(tool)
+    return tools
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# LANGCHAIN DRIVER
+# ────────────────────────────────────────────────────────────────────────────────
 
 
 class LangChainDriver(AgentBase):
@@ -40,174 +220,13 @@ class LangChainDriver(AgentBase):
         """Initialize the LangChain driver."""
         super().__init__(iGlobal)
 
-    # ------------------------------------------------------------------
-    # Bindings
-    # ------------------------------------------------------------------
-    def _bind_framework_llm(
-        self,
-        *,
-        host: AgentHost,
-        call_llm: Callable[..., str],
-        ctx: Dict[str, Any],
-    ) -> Any:
-        from langchain_core.language_models import BaseChatModel
-        from langchain_core.messages import AIMessage
-        from langchain_core.outputs import ChatGeneration, ChatResult
+    def _run(self, *, context: AgentContext, question: Question) -> AgentRunResult:
+        # Bound SSE forwarder -- captures context so the LangChain callback handler
+        # always routes events to the correct invoker, even if the framework
+        # invokes the callback from a worker thread.
+        def _send_sse(type: str, **data: Any) -> None:
+            self.sendSSE(context, type, **data)
 
-        class RocketRideToolCallingChatModel(BaseChatModel):
-            def __init__(self):
-                super().__init__()
-                self._bound_tools: List[Dict[str, Any]] = []
-
-            @property
-            def _llm_type(self) -> str:
-                return 'rocketride-host-llm'
-
-            @property
-            def _identifying_params(self) -> Dict[str, Any]:
-                return {'framework': 'rocketride', 'adapter': 'tool_calling_json'}
-
-            def bind_tools(self, tools: object, **_kwargs: Any) -> RocketRideToolCallingChatModel:
-                try:
-                    self._bound_tools = _normalize_bound_tools(tools)
-                except Exception:
-                    self._bound_tools = []
-                return self
-
-            def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> Any:
-                transcript = _langchain_messages_to_transcript(messages)
-                tool_hint = _tool_call_protocol_prompt(self._bound_tools)
-                prompt = (tool_hint + '\n\n' + transcript).strip()
-
-                raw = ''
-                for attempt in range(3):
-                    raw = _safe_str(call_llm(prompt, stop_words=stop)).strip()
-                    msg = _parse_tool_call_envelope(raw)
-                    if msg is not None:
-                        return ChatResult(generations=[ChatGeneration(message=msg)])
-                    if attempt < 2:
-                        prompt = prompt + '\n\nsystem: Your last output was invalid. Output ONLY a single JSON object per the schema.'
-
-                return ChatResult(generations=[ChatGeneration(message=AIMessage(content=raw))])
-
-        return RocketRideToolCallingChatModel()
-
-    def _bind_framework_tools(
-        self,
-        *,
-        host: AgentHost,
-        tool_descriptors: List[ToolDescriptor],
-        invoke_tool: Callable[..., Any],
-        log_tool_call: Callable[..., None],
-        ctx: Dict[str, Any],
-    ) -> List[Any]:
-        from langchain_core.tools import BaseTool
-        from pydantic import BaseModel, ConfigDict, Field, create_model
-
-        class _ToolInput(BaseModel):
-            """
-            Accept arbitrary tool args through a stable `input` field.
-
-            LangChain tool execution paths vary across versions; this schema keeps
-            invocation robust when arguments are passed either via `input=...` or
-            as extra keyword args.
-            """
-
-            input: Any = Field(default=None, description='Tool input payload')
-            model_config = ConfigDict(extra='allow')
-
-        def _make_args_schema(input_schema: Optional[Dict[str, Any]]) -> type[BaseModel]:
-            """
-            Build a Pydantic model from a JSON Schema object.
-
-            LangChain tool execution can filter kwargs based on `args_schema`. Using
-            the real tool schema helps preserve tool parameters end-to-end.
-            """
-            if not isinstance(input_schema, dict):
-                return _ToolInput
-            props = input_schema.get('properties', {})
-            if not isinstance(props, dict) or not props:
-                return _ToolInput
-            required_keys = set(input_schema.get('required', []) or [])
-
-            field_defs: Dict[str, Any] = {}
-            for key, prop in props.items():
-                if not isinstance(key, str) or not key:
-                    continue
-                if not isinstance(prop, dict):
-                    prop = {}
-                desc = prop.get('description', '')
-                if key in required_keys:
-                    field_defs[key] = (Any, Field(..., description=desc))
-                else:
-                    default = prop.get('default', None)
-                    field_defs[key] = (Any, Field(default=default, description=desc))
-
-            if not field_defs:
-                return _ToolInput
-
-            try:
-                return create_model(
-                    '_DynToolInput',
-                    __config__=ConfigDict(extra='ignore'),
-                    **field_defs,
-                )
-            except Exception:
-                return _ToolInput
-
-        class HostTool(BaseTool):  # type: ignore[misc]
-            name: str
-            description: str
-            args_schema: type[BaseModel] = _ToolInput
-
-            def _run(self, input: Any = None, **kwargs: Any) -> str:  # noqa: ANN401, A002
-                tool_name = _safe_str(getattr(self, 'name', ''))
-
-                try:
-                    out = invoke_tool(tool_name, input=input, kwargs=kwargs)
-                except Exception as e:
-                    out = {'error': str(e), 'type': type(e).__name__}
-
-                try:
-                    log_tool_call(tool_name=tool_name, input={'input': input, **kwargs}, output=out)
-                except Exception:
-                    pass
-
-                try:
-                    return json.dumps(out, default=str) if isinstance(out, (dict, list)) else _safe_str(out)
-                except Exception:
-                    return _safe_str(out)
-
-        tools: List[Any] = []
-        for td in tool_descriptors:
-            if not hasattr(td, 'get'):
-                continue
-            name = td.get('name')
-            if not isinstance(name, str) or not name.strip():
-                continue
-            desc = td.get('description') if isinstance(td.get('description'), str) else f'Invoke host tool: {name}'
-            input_schema = td.get('inputSchema')
-            if isinstance(input_schema, dict):
-                try:
-                    schema_text = json.dumps(input_schema, ensure_ascii=False)
-                except Exception:
-                    schema_text = ''
-                if schema_text:
-                    desc = f'{desc}\n\nTool input schema (JSON): {schema_text}'
-
-            schema_cls = _make_args_schema(input_schema if isinstance(input_schema, dict) else None)
-            tool = HostTool(name=name, description=desc, args_schema=schema_cls)
-            try:
-                setattr(tool, '_rr_input_schema', input_schema)
-            except Exception:
-                pass
-            tools.append(tool)
-        return tools
-
-    # ------------------------------------------------------------------
-    # Run
-    # ------------------------------------------------------------------
-    def _run(self, *, agent_input: AgentInput, host: AgentHost, ctx: Dict[str, Any]) -> AgentRunResult:
         from langchain.agents import create_agent
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
         from langchain_core.callbacks import BaseCallbackHandler
@@ -245,27 +264,9 @@ class LangChainDriver(AgentBase):
             def on_llm_error(self, error: Any, **kwargs: Any) -> None:
                 self._send_sse('thinking', message=f'LLM error: {_safe_str(error)}')
 
-        tool_descriptors = self.discover_tools(host=host)
-
-        def _call_llm(messages: Any, stop_words: Any = None) -> str:
-            return self.call_host_llm(
-                host=host,
-                messages=messages,
-                question_role='You are a helpful assistant.',
-                stop_words=stop_words,
-            )
-
-        def _invoke_tool(tool_name: str, input: Any = None, kwargs: Optional[Dict[str, Any]] = None) -> Any:  # noqa: A002
-            return self.invoke_host_tool(host=host, tool_name=tool_name, input=input, kwargs=kwargs)
-
-        llm = self._bind_framework_llm(host=host, call_llm=_call_llm, ctx=ctx)
-        tools_for_agent = self._bind_framework_tools(
-            host=host,
-            tool_descriptors=tool_descriptors,
-            invoke_tool=_invoke_tool,
-            log_tool_call=lambda **_: None,
-            ctx=ctx,
-        )
+        tool_descriptors = context.tools.list
+        llm = _build_langchain_llm(self, context)
+        tools_for_agent = _build_langchain_tools(self, context, tool_descriptors)
 
         system_parts = [
             'You are an agent node in a tool-invocation hierarchy.',
@@ -273,14 +274,14 @@ class LangChainDriver(AgentBase):
         ]
         system_message = SystemMessage(content='\n'.join(system_parts).strip())
 
-        self.sendSSE('thinking', message='Starting LangChain agent...')
+        _send_sse('thinking', message='Starting LangChain agent...')
         stage = 'create_agent'
         try:
             agent = create_agent(model=llm, tools=tools_for_agent, system_prompt=system_message, debug=False)
             stage = 'invoke'
             state = agent.invoke(
-                {'messages': [HumanMessage(content=_safe_str(agent_input.question.getPrompt() or ''))]},
-                config={'callbacks': [_SSECallbackHandler(self.sendSSE)]},
+                {'messages': [HumanMessage(content=_safe_str(question.getPrompt() or ''))]},
+                config={'callbacks': [_SSECallbackHandler(_send_sse)]},
             )
         except Exception as e:
             raise RuntimeError('LangChain agent {} failed: {}: {}'.format(stage, type(e).__name__, _safe_str(e))) from e
@@ -302,14 +303,16 @@ class LangChainDriver(AgentBase):
         return _safe_str(final_text), state
 
 
-# ------------------------------------------------------------------
-# Helpers for tool calling with RocketRide LLM
+# ────────────────────────────────────────────────────────────────────────────────
+# DRIVER-PRIVATE HELPERS
 #
 # Problem: LangChain agents expect a chat model that returns structured `tool_calls`,
-# but RocketRide's LLM seam is text-only (`IInvokeLLM(op="ask")`).
-# Solution: we prompt the model to emit a strict JSON envelope describing either a
-# tool call or a final answer, then parse it into an `AIMessage` with `tool_calls`.
-# ------------------------------------------------------------------
+# but RocketRide's LLM seam is text-only.  Solution: we prompt the model to emit a
+# strict JSON envelope describing either a tool call or a final answer, then parse
+# it into an `AIMessage` with `tool_calls`.
+# ────────────────────────────────────────────────────────────────────────────────
+
+
 def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
     tools_json = json.dumps(bound_tools, ensure_ascii=False)
     return '\n'.join(
