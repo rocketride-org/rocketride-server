@@ -16,8 +16,8 @@ Parses documents using the Reducto cloud API, extracting clean Markdown text and
 
 | Lane in | Lane out | Description                               |
 | ------- | -------- | ----------------------------------------- |
-| `Data`  | `text`   | Extracted text as Markdown                |
-| `Data`  | `table`  | Extracted tables in Markdown table format |
+| `data`  | `text`   | Extracted text as Markdown                |
+| `data`  | `table`  | Extracted tables in Markdown table format |
 
 ## Configuration
 
@@ -38,7 +38,7 @@ Parses documents using the Reducto cloud API, extracting clean Markdown text and
 
 Exposes the full Reducto API. Enter Python dictionaries into the **Options**, **Advanced Options**, and **Experimental Options** fields. Simple mode settings are ignored when Advanced mode is on.
 
-See the [Reducto parsing configurations documentation](https://docs.reducto.ai/parsing/default-configurations) for available parameters and formatting examples.
+See the [Reducto parsing configurations documentation](https://docs.reducto.ai/v/legacy/parsing/default-configurations) for available parameters and formatting examples.
 
 ## Upstream docs
 

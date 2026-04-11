@@ -16,9 +16,9 @@ Parses documents using the LlamaIndex cloud API. Handles PDFs, images, Word, Exc
 
 | Lane in | Lane out    | Description                                                       |
 | ------- | ----------- | ----------------------------------------------------------------- |
-| `tags`  | `text`      | Parse document, emit extracted text                               |
-| `tags`  | `table`     | Parse document, emit extracted tables                             |
-| `tags`  | `documents` | Parse document, emit full document objects (when listener exists) |
+| `data`  | `text`      | Parse document, emit extracted text                               |
+| `data`  | `table`     | Parse document, emit extracted tables                             |
+| `data`  | `documents` | Parse document, emit full document objects (when listener exists) |
 
 Requires a LlamaIndex API key. Processing happens in the cloud.
 
