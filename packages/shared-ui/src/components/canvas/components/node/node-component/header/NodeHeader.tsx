@@ -56,7 +56,7 @@ import { useFlow, useNodeActionLabels, useCopy, usePaste } from '../../../../hoo
 
 const nodeLabel = {
 	letterSpacing: 0,
-	lineHeight: 1,
+	lineHeight: 1.2,
 	textAlign: 'left' as const,
 	overflow: 'hidden',
 	whiteSpace: 'normal' as const,

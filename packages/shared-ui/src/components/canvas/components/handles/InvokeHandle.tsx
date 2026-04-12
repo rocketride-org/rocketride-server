@@ -16,6 +16,7 @@
 
 import React, { CSSProperties, ReactElement, useMemo, useRef, useCallback } from 'react';
 import { HandleProps, Handle as RFHandle } from '@xyflow/react';
+import { renameInvokeType } from '../../util/helpers';
 
 // =============================================================================
 // Styles
@@ -112,7 +113,7 @@ export default function InvokeHandle({ isConnected, disabled, type, style, invok
 						whiteSpace: 'nowrap',
 					}}
 				>
-					{invokeType === 'llm' ? 'LLM' : invokeType.charAt(0).toUpperCase() + invokeType.slice(1)}
+					{renameInvokeType(invokeType)}
 				</span>
 			)}
 			<RFHandle
