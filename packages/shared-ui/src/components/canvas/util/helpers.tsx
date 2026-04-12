@@ -105,6 +105,21 @@ export const renameLanes = (originalLaneName = ''): string => {
 	}
 };
 
+/**
+ * Maps internal invoke type keys to user-friendly display labels.
+ * Add new entries here as new invoke types are introduced.
+ */
+const INVOKE_TYPE_LABELS: Record<string, string> = {
+	llm: 'LLM',
+	crewai: 'CrewAI',
+};
+
+/**
+ * @param invokeType - The raw invoke type key from the service definition (e.g. "llm", "crewai").
+ * @returns The display label for the invoke type.
+ */
+export const renameInvokeType = (invokeType = ''): string => INVOKE_TYPE_LABELS[invokeType] ?? invokeType.charAt(0).toUpperCase() + invokeType.slice(1);
+
 // =============================================================================
 // HTML Sanitisation
 // =============================================================================
