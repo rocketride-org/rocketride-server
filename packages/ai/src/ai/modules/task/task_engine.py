@@ -42,7 +42,7 @@ import re
 from typing import TYPE_CHECKING, Dict, Any, List, Optional
 from tenacity import retry, stop_after_attempt, wait_fixed
 
-from rocketlib import args as startup_args
+from rocketlib import debug, args as startup_args
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS,
@@ -552,8 +552,20 @@ class Task(DAPBase):
             if provider and provider != self._provider:
                 raise RuntimeError(f'You are looking for a "{provider}", but this pipeline isn\'t it')
 
-        # Send request and return response
-        response = await self._data_client.request(data)
+        # Build a brand new DAP packet for the outbound hop instead of forwarding
+        # the inbound dict.  Many concurrent inbound chat clients multiplex through
+        # this single _data_client; if we forwarded their dicts verbatim, the
+        # caller-supplied seqs (e.g. two clients both using seq=128) would collide
+        # in DAPClient._pending_requests, the second future would overwrite the
+        # first, and one of the two responses would be silently dropped -- hanging
+        # the originating chat forever.  dap_request() builds a fresh envelope via
+        # build_request() which allocates a unique seq from _data_client._next_seq()
+        # so each outbound message has its own correlation slot.
+        response = await self._data_client.dap_request(
+            command=data['command'],
+            arguments=args,
+            token=data.get('token'),
+        )
         return response
 
     async def _terminated(self) -> None:
@@ -1092,6 +1104,8 @@ class Task(DAPBase):
                 'op': operation,
                 'pipes': self._status.pipeflow.byPipe[pipe_index],
                 'trace': trace or {},
+                'project_id': self.project_id,
+                'source': self.source,
             }
             flow = self.build_event('apaevt_flow', body=body)
 
@@ -1110,6 +1124,7 @@ class Task(DAPBase):
         # Handle debug output
         elif event_type == 'output':
             output_message = body.get('output', '')
+            debug(output_message)
 
             self._status_trace.append(output_message)
 
