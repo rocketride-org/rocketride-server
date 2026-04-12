@@ -22,42 +22,45 @@
 // =============================================================================
 
 /**
- * cloud-manager.ts - Cloud/On-prem Backend Manager
+ * remote-manager.ts - Remote Backend Manager (cloud, on-prem, service, etc.)
  *
- * Manages the cloud or on-prem backend: validates that credentials
- * are configured before ConnectionManager connects the WebSocket client.
+ * Handles credential validation and client connection for remote server modes.
+ * No engine process to manage:
+ *
+ *   connect    → validate credentials → connect client
+ *   disconnect → disconnect client
  */
 
+import { RocketRideClient } from 'rocketride';
 import { BaseManager, ManagerInfo } from './base-manager';
 import { ConfigManagerInfo } from '../config';
 import { connectionModeRequiresApiKey } from '../shared/util/connectionModeAuth';
 
-export class CloudManager extends BaseManager {
-	/**
-	 * Validates that cloud/onprem credentials are configured.
-	 */
-	public async start(config: ConfigManagerInfo): Promise<void> {
-		this.emit('status', 'Validating credentials...');
+// =============================================================================
+// MANAGER
+// =============================================================================
 
+export class RemoteManager extends BaseManager {
+	// =========================================================================
+	// LIFECYCLE
+	// =========================================================================
+
+	async connect(client: RocketRideClient, config: ConfigManagerInfo): Promise<void> {
 		if (!config.hostUrl) {
-			throw new Error('Host URL is required for cloud/on-prem connections. Configure it in Settings.');
+			throw new Error('Host URL is required for remote connections. Configure it in Settings.');
 		}
 		if (connectionModeRequiresApiKey(config.connectionMode) && !config.apiKey) {
 			throw new Error('API key is required for cloud connections. Configure it in Settings.');
 		}
+
+		await client.connect({ uri: config.hostUrl, auth: config.apiKey });
 	}
 
-	/**
-	 * No-op — cloud connections have no backend process to stop.
-	 */
-	public async stop(): Promise<void> {
-		// Nothing to do
+	async disconnect(client: RocketRideClient): Promise<void> {
+		await client.disconnect();
 	}
 
-	/**
-	 * Cloud mode has no locally installed engine.
-	 */
-	public getInfo(): ManagerInfo | null {
+	getInfo(): ManagerInfo | null {
 		return null;
 	}
 }

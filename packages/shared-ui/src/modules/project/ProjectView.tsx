@@ -40,12 +40,36 @@ import type { IProjectViewProps, ProjectViewRef, ProjectViewMode, ViewState, Pro
 
 const styles = {
 	container: {
+		position: 'relative',
 		display: 'flex',
 		flexDirection: 'column',
 		width: '100%',
 		height: '100%',
 		overflow: 'hidden',
 		backgroundColor: 'var(--rr-bg-default)',
+	} as CSSProperties,
+	disconnectOverlay: {
+		position: 'absolute',
+		inset: 0,
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		backgroundColor: 'rgba(0, 0, 0, 0.45)',
+		backdropFilter: 'blur(8px)',
+		WebkitBackdropFilter: 'blur(8px)',
+		zIndex: 1000,
+	} as CSSProperties,
+	disconnectButton: {
+		padding: '14px 40px',
+		fontSize: 'var(--rr-font-size-h4)',
+		fontWeight: 700,
+		fontFamily: 'var(--rr-font-family)',
+		color: '#ffffff',
+		backgroundColor: 'transparent',
+		border: '2px solid rgba(255, 255, 255, 0.7)',
+		borderRadius: 6,
+		cursor: 'default',
+		letterSpacing: '0.05em',
 	} as CSSProperties,
 	canvasPadding: {
 		padding: 2,
@@ -164,6 +188,12 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 					setTraceEvents((prev) => [...prev, msg.event]);
 					break;
 				case 'project:connectionState':
+					// On reconnect, clear stale data so only fresh server
+					// events repopulate the panels.
+					if (msg.isConnected) {
+						setStatusMap({});
+						setTraceEvents([]);
+					}
 					setIsConnected(msg.isConnected);
 					break;
 				case 'project:initialState':
@@ -350,7 +380,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} />}</div>,
 		},
 		status: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} onPipelineAction={handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={styles.empty}>No source components found</div>}</div>,
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} onPipelineAction={handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={styles.empty}>No source components found</div>}</div>,
 		},
 		tokens: {
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTokensPane key={src.id} source={src} taskStatus={statusMap[src.id]} />) : <div style={styles.empty}>No source components found</div>}</div>,
@@ -404,6 +434,13 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	return (
 		<div style={styles.container}>
 			<TabPanel tabs={tabs} activeTab={viewState.mode} onTabChange={handleModeChange} panels={panels} />
+			{!isConnected && (
+				<div style={styles.disconnectOverlay}>
+					<button type="button" style={styles.disconnectButton} disabled>
+						[ Disconnected ]
+					</button>
+				</div>
+			)}
 		</div>
 	);
 });
@@ -417,17 +454,18 @@ ProjectView.displayName = 'ProjectView';
 const SourceStatusPane: React.FC<{
 	source: SourceInfo;
 	taskStatus: TaskStatus | undefined;
+	isConnected: boolean;
 	onPipelineAction: (action: 'run' | 'stop' | 'restart', source?: string) => void;
 	onOpenLink?: (url: string, displayName?: string) => void;
 	serverHost?: string;
-}> = ({ source, taskStatus, onPipelineAction, onOpenLink, serverHost }) => {
+}> = ({ source, taskStatus, isConnected, onPipelineAction, onOpenLink, serverHost }) => {
 	const currentElapsed = useElapsedTimer(taskStatus ?? null);
 
 	return (
 		<div style={styles.sourcePane}>
 			<StatusHeader name={source.name} taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)} extraActions={<PipelineActions notes={taskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />} />
 			<div style={styles.sourceBody}>
-				<Status taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} />
+				<Status taskStatus={taskStatus ?? null} currentElapsed={currentElapsed} isConnected={isConnected} />
 			</div>
 		</div>
 	);

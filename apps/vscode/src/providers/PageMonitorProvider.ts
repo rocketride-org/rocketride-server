@@ -204,10 +204,11 @@ export class PageMonitorProvider {
 		await this.panel.webview.postMessage(msg);
 
 		if (status.state === ConnectionState.CONNECTED) {
+			// SDK replays monitor subscriptions automatically on reconnect;
+			// just refresh data and restart polling.
 			await this.fetchAndPost();
-			await this.subscribeDashboardEvents();
 			this.startPolling();
-		} else {
+		} else if (status.state === ConnectionState.DISCONNECTED) {
 			this.stopPolling();
 		}
 	}

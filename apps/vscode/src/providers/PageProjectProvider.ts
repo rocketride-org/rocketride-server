@@ -39,7 +39,6 @@ interface EditorState {
 	document: vscode.TextDocument;
 	webviewPanel: vscode.WebviewPanel;
 	projectId?: string;
-	isMonitoring: boolean;
 	isDisposed: boolean;
 	isReady: boolean;
 	cachedStatuses: Record<string, TaskStatus>;
@@ -94,9 +93,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 		const connectionStateListener = this.connectionManager.on('connectionStateChanged', async (connectionStatus) => {
 			try {
 				if (connectionStatus.state === ConnectionState.CONNECTED) {
-					await this.startMonitoringForAllEditors();
-				} else {
-					await this.stopMonitoringForAllEditors();
+					this.onConnectedClearStaleData();
 				}
 				this.broadcastConnectionState(this.connectionManager.isConnected());
 			} catch (error) {
@@ -195,7 +192,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 
 	private async startMonitoring(documentUri: string): Promise<void> {
 		const editorState = this.editorStates.get(documentUri);
-		if (!editorState || editorState.isMonitoring || editorState.isDisposed || !editorState.projectId || !this.connectionManager.isConnected()) {
+		if (!editorState || editorState.isDisposed || !editorState.projectId || !this.connectionManager.isConnected()) {
 			return;
 		}
 
@@ -203,10 +200,8 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 			const client = this.connectionManager.getClient();
 			if (!client) throw new Error('No client available');
 			await client.addMonitor({ projectId: editorState.projectId, source: '*' }, ['summary', 'flow']);
-			editorState.isMonitoring = true;
 		} catch (error) {
 			this.logger.error(`Starting monitoring for project ${editorState.projectId}: ${error}`);
-			editorState.isMonitoring = false;
 		}
 	}
 
@@ -220,31 +215,11 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 		} catch (error) {
 			this.logger.error(`Stopping monitoring for project ${editorState.projectId}: ${error}`);
 		}
-
-		editorState.isMonitoring = false;
 	}
 
-	private async startMonitoringForAllEditors(): Promise<void> {
-		for (const [documentUri, editorState] of this.editorStates) {
-			try {
-				await this.startMonitoring(documentUri);
-				if (!editorState.isDisposed && editorState.isReady && editorState.webviewPanel.webview) {
-					for (const [source, taskStatus] of Object.entries(editorState.cachedStatuses)) {
-						editorState.webviewPanel.webview.postMessage({
-							type: 'status:update',
-							taskStatus: { ...taskStatus, source },
-						});
-					}
-				}
-			} catch (error) {
-				this.logger.error(`Starting monitoring for ${documentUri}: ${error}`);
-			}
-		}
-	}
-
-	private async stopMonitoringForAllEditors(): Promise<void> {
+	private onConnectedClearStaleData(): void {
 		for (const editorState of this.editorStates.values()) {
-			editorState.isMonitoring = false;
+			editorState.cachedStatuses = {};
 		}
 	}
 
@@ -296,7 +271,6 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 			document,
 			webviewPanel,
 			projectId,
-			isMonitoring: false,
 			isDisposed: false,
 			isReady: false,
 			cachedStatuses: {},
@@ -354,12 +328,10 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 					});
 
 					// Start monitoring
-					if (!editorState.isMonitoring) {
-						try {
-							await this.startMonitoring(document.uri.toString());
-						} catch (error) {
-							this.logger.error(`Starting monitoring after webview ready: ${error}`);
-						}
+					try {
+						await this.startMonitoring(document.uri.toString());
+					} catch (error) {
+						this.logger.error(`Starting monitoring after webview ready: ${error}`);
 					}
 					break;
 				}
