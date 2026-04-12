@@ -28,6 +28,7 @@ import { commonStyles } from '../../themes/styles';
 
 const styles = {
 	root: {
+		position: 'relative',
 		display: 'flex',
 		flexDirection: 'column',
 		height: '100%',
@@ -51,6 +52,29 @@ const styles = {
 		fontSize: 32,
 		color: 'var(--rr-text-disabled)',
 		marginBottom: 8,
+	} as CSSProperties,
+	disconnectOverlay: {
+		position: 'absolute',
+		inset: 0,
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		backgroundColor: 'rgba(0, 0, 0, 0.45)',
+		backdropFilter: 'blur(8px)',
+		WebkitBackdropFilter: 'blur(8px)',
+		zIndex: 1000,
+	} as CSSProperties,
+	disconnectButton: {
+		padding: '14px 40px',
+		fontSize: 'var(--rr-font-size-h4)',
+		fontWeight: 700,
+		fontFamily: 'var(--rr-font-family)',
+		color: '#ffffff',
+		backgroundColor: 'transparent',
+		border: '2px solid rgba(255, 255, 255, 0.7)',
+		borderRadius: 6,
+		cursor: 'default',
+		letterSpacing: '0.05em',
 	} as CSSProperties,
 };
 
@@ -133,22 +157,16 @@ const ServerMonitor: React.FC<IServerMonitorProps> = ({ data, events, isConnecte
 		};
 	}, [data, events]);
 
-	// Disconnected state
-	if (!isConnected) {
-		return (
-			<div style={{ ...styles.root, padding: 15 }}>
-				<div style={styles.disconnected}>
-					<div style={styles.disconnectedIcon}>&#9675;</div>
-					<div>Disconnected from server</div>
-					<div style={commonStyles.textMuted}>Reconnect to view server status</div>
-				</div>
-			</div>
-		);
-	}
-
 	return (
 		<div style={styles.root}>
 			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as TabId)} panels={panels} />
+			{!isConnected && (
+				<div style={styles.disconnectOverlay}>
+					<button type="button" style={styles.disconnectButton} disabled>
+						[ Disconnected ]
+					</button>
+				</div>
+			)}
 		</div>
 	);
 };

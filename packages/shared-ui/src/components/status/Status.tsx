@@ -31,6 +31,8 @@ interface StatusProps {
 	currentElapsed: number;
 	/** When true, the built-in StatusHeader is hidden (caller renders its own). */
 	hideHeader?: boolean;
+	/** When false, the chart interval is paused and no new data points are appended. */
+	isConnected?: boolean;
 }
 
 // =============================================================================
@@ -58,7 +60,7 @@ const buildEmptyPoints = (count: number, now: number): StatusDataPoint[] => {
 	return pts;
 };
 
-export const Status: React.FC<StatusProps> = ({ taskStatus, currentElapsed }) => {
+export const Status: React.FC<StatusProps> = ({ taskStatus, currentElapsed, isConnected = true }) => {
 	// State
 	const [dataPoints, setDataPoints] = useState<StatusDataPoint[]>([]);
 	const [timeRange, setTimeRange] = useState<TimeRange>('1min');
@@ -85,11 +87,29 @@ export const Status: React.FC<StatusProps> = ({ taskStatus, currentElapsed }) =>
 		setDataPoints(buildEmptyPoints(MAX_DATA_POINTS, Date.now()));
 	}, []);
 
+	// Track connected state in a ref so the interval can read it without restarting.
+	const isConnectedRef = useRef(isConnected);
+	useEffect(() => {
+		isConnectedRef.current = isConnected;
+	}, [isConnected]);
+
+	// Reset chart data and counters when connection is re-established.
+	useEffect(() => {
+		if (isConnected) {
+			prevTotalRef.current = 0;
+			prevFailedRef.current = 0;
+			setDataPoints(buildEmptyPoints(MAX_DATA_POINTS, Date.now()));
+		}
+	}, [isConnected]);
+
 	// Set up 1-second sampling interval.
 	// Runs ONCE on mount and continuously samples data.
-	// Uses taskStatusRef to access latest taskStatus without recreating interval.
+	// Uses refs to access latest values without recreating the interval.
 	useEffect(() => {
 		const interval = setInterval(() => {
+			// Pause while disconnected — chart freezes in place.
+			if (!isConnectedRef.current) return;
+
 			const currentTaskStatus = taskStatusRef.current;
 
 			if (!currentTaskStatus) {
