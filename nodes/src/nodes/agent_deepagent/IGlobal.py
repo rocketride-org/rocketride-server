@@ -65,9 +65,14 @@ class IGlobal(IGlobalBase):
         requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
         depends(requirements)
 
-        from .deepagent import DeepAgentDriver
+        if self.glb.logicalType == 'agent_deepagent_subagent':
+            from .deepagent import DeepAgentSubagentDriver
 
-        self.agent = DeepAgentDriver(self)
+            self.agent = DeepAgentSubagentDriver(self)
+        else:
+            from .deepagent import DeepAgentDriver
+
+            self.agent = DeepAgentDriver(self)
 
     def endGlobal(self) -> None:
         """

@@ -294,6 +294,37 @@ class IInvokeCrew(IInvoke):
         model_config = ConfigDict(extra='allow')
 
 
+class IInvokeDeepagent(IInvoke):
+    """
+    Control-plane type for DeepAgent sub-agent discovery (deepagent.describe fan-out).
+
+    Each sub-agent connected on the 'deepagent' channel appends a DescribeResponse
+    to Describe.agents when the orchestrator fans out a Describe request.
+    """
+
+    op: str = 'deepagent.describe'
+    model_config = ConfigDict(extra='allow')
+
+    class Describe(BaseModel):
+        """Fan-out request: each connected sub-agent appends its descriptor."""
+
+        op: str = Field(default='deepagent.describe', frozen=True)
+        agents: List[Any] = Field(default_factory=list)
+        model_config = ConfigDict(extra='allow')
+
+    class DescribeResponse(BaseModel):
+        """Sub-agent descriptor returned in response to deepagent.describe."""
+
+        op: str = Field(default='deepagent.describe', frozen=True)
+        name: str  # agent_description or logicalType
+        description: str = ''
+        system_prompt: str = ''
+        instructions: List[str] = Field(default_factory=list)
+        node_id: str = ''  # pSelf.instance.pipeType['id'] — used to identify the sub-agent node
+        invoke: Any = Field(default=None)  # full pSelf IInstance — passed to AgentHostServices(d.invoke)
+        model_config = ConfigDict(extra='allow')
+
+
 class IJson(Impl_IJson):
     """
     A wrapper class for IJson that provides utility methods for handling JSON-like structures.

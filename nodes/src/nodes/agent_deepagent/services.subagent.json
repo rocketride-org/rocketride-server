@@ -1,0 +1,100 @@
+{
+	"title": "DeepAgent - Subagent",
+	"protocol": "agent_deepagent_subagent://",
+	"classType": ["agent", "tool", "deepagent"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.agent_deepagent",
+	"prefix": "agent",
+	"description": ["Sub-agent node for use within a DeepAgent orchestrator.", "Connect to a Deep Agent node via the 'deepagent' invoke channel.", "Can also be invoked as a standalone agent or as a tool (`<nodeId>.run_agent`)."],
+	"invoke": {
+		"llm": {
+			"description": "LLM used by this sub-agent",
+			"min": 1
+		},
+		"tool": {
+			"description": "Tools available to this sub-agent (via control-plane invoke)",
+			"min": 0
+		}
+	},
+	"lanes": {
+		"questions": ["answers"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [
+				{
+					"lane": "answers"
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"description": "",
+				"instructions": [],
+				"system_prompt": ""
+			}
+		}
+	},
+	"fields": {
+		"description": {
+			"type": "string",
+			"title": "Description",
+			"default": "",
+			"optional": true,
+			"description": "A concise explanation of what this sub-agent does. The orchestrator reads this to decide when to delegate to this agent.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"system_prompt": {
+			"type": "string",
+			"title": "System prompt",
+			"default": "",
+			"optional": true,
+			"description": "Instructions that define this sub-agent's role and behaviour. Leave blank to use the default.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"instructions": {
+			"type": "array",
+			"title": "Instructions",
+			"description": "Additional instructions to guide this sub-agent.",
+			"items": {
+				"type": "string",
+				"format": "textarea"
+			}
+		},
+		"agent_deepagent_subagent.default": {
+			"object": "default",
+			"properties": ["description", "system_prompt", "instructions"]
+		},
+		"agent_deepagent_subagent.profile": {
+			"title": "Profile",
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["agent_deepagent_subagent.default"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "DeepAgent - Subagent",
+			"properties": ["description", "system_prompt", "instructions"]
+		}
+	],
+	"icon": "deepagent.svg",
+	"documentation": "https://docs.rocketride.org"
+}

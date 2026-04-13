@@ -16,6 +16,10 @@
 		"tool": {
 			"description": "Tools available to the agent (via control-plane invoke)",
 			"min": 0
+		},
+		"deepagent": {
+			"description": "DeepAgent sub-agent nodes for hierarchical orchestration",
+			"min": 0
 		}
 	},
 	"lanes": {
@@ -36,7 +40,8 @@
 		"profiles": {
 			"default": {
 				"agent_description": "",
-				"instructions": []
+				"instructions": [],
+				"system_prompt": ""
 			}
 		}
 	},
@@ -47,6 +52,16 @@
 			"default": "",
 			"optional": true,
 			"description": "What does this agent do? Describe its purpose and capabilities \u2014 this helps parent agents select and invoke it correctly.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"system_prompt": {
+			"type": "string",
+			"title": "System prompt",
+			"default": "",
+			"optional": true,
+			"description": "Instructions that define this agent's role and behaviour. Leave blank to use the default.",
 			"ui": {
 				"ui:widget": "textarea"
 			}
@@ -62,7 +77,7 @@
 		},
 		"agent_deepagent.default": {
 			"object": "default",
-			"properties": ["agent_description", "instructions"]
+			"properties": ["agent_description", "system_prompt", "instructions"]
 		},
 		"agent_deepagent.profile": {
 			"title": "Profile",
@@ -81,7 +96,7 @@
 		{
 			"section": "Pipe",
 			"title": "Deep Agent",
-			"properties": ["agent_description", "instructions"]
+			"properties": ["agent_description", "system_prompt", "instructions"]
 		}
 	],
 	"icon": "deepagent.svg",

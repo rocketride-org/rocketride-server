@@ -64,7 +64,9 @@ class IInstance(IInstanceBase):
         Handle a control-plane invocation on this node instance.
 
         Intercepts ``tool.*`` operations so the node can be composed as a tool inside
-        a parent agent.  All other operations are forwarded to the base-class handler.
+        a parent agent.  Intercepts ``deepagent.describe`` so this node can register
+        itself as a sub-agent with a DeepAgent orchestrator.  All other operations are
+        forwarded to the base-class handler.
 
         Args:
             param: Invocation parameter dict (with an ``op`` key) or an object with
@@ -77,4 +79,46 @@ class IInstance(IInstanceBase):
         op = param.get('op') if isinstance(param, dict) else getattr(param, 'op', None)
         if isinstance(op, str) and op.startswith('tool.'):
             return self.IGlobal.agent.handle_invoke(self, param)
+        if isinstance(op, str) and op == 'deepagent.describe':
+            self._handle_deepagent_describe(param)
+            return
         return super().invoke(param)
+
+    def _handle_deepagent_describe(self, param: Any) -> None:
+        """
+        Respond to a ``deepagent.describe`` fan-out from an orchestrator.
+
+        Reads resolved config from the driver (set at init time) and appends a
+        ``DescribeResponse`` to ``param.agents`` so the orchestrator can build a
+        ``SubAgent`` entry.
+
+        Args:
+            param: An ``IInvokeDeepagent.Describe`` instance whose ``agents`` list
+                is populated in-place.
+
+        Returns:
+            None
+        """
+        from rocketlib.types import IInvokeDeepagent
+
+        driver = self.IGlobal.agent
+
+        pipe_type = self.instance.pipeType
+        node_id = str(pipe_type.get('id') if isinstance(pipe_type, dict) else getattr(pipe_type, 'id', '')) or ''
+
+        # Use driver attributes resolved at init time
+        name = node_id or str(self.IGlobal.glb.logicalType)
+        description = getattr(driver, '_description', '') or ''
+        system_prompt = getattr(driver, '_system_prompt', '') or ''
+        instructions = list(getattr(driver, '_instructions', []) or [])
+
+        param.agents.append(
+            IInvokeDeepagent.DescribeResponse(
+                name=name,
+                description=description,
+                system_prompt=system_prompt,
+                instructions=instructions,
+                node_id=node_id,
+                invoke=self,
+            )
+        )

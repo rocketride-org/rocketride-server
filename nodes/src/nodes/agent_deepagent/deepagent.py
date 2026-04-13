@@ -60,6 +60,13 @@ class DeepAgentDriver(AgentBase):
             None
         """
         super().__init__(iGlobal)
+        # Read system_prompt at init time alongside agent_description/_instructions
+        # (resolved by AgentBase.__init__ via Config.getNodeConfig)
+        from ai.common.config import Config
+
+        _config = Config.getNodeConfig(self._iGlobal.glb.logicalType, self._iGlobal.glb.connConfig)
+        self._system_prompt: str = (_config.get('system_prompt', '') or '').strip()
+        self._description: str = (_config.get('description', '') or '').strip()
 
     # ------------------------------------------------------------------
     # Bindings — identical to the LangChain driver since deepagents is
@@ -160,19 +167,33 @@ class DeepAgentDriver(AgentBase):
                     A ``ChatResult`` wrapping either a tool-call ``AIMessage`` or a plain
                     ``AIMessage`` with the raw LLM text as its content.
                 """
+                from rocketlib import debug as _debug
+
                 transcript = _langchain_messages_to_transcript(messages)
                 tool_hint = _tool_call_protocol_prompt(self._bound_tools)
                 prompt = (tool_hint + '\n\n' + transcript).strip()
 
+                _debug(f'deepagent _generate bound_tools={[t.get("name") for t in self._bound_tools]} prompt_len={len(prompt)}')
+
+                # Stop generation at the first newline-then-brace, which is the
+                # LLM's common failure mode of emitting a second JSON object after
+                # the intended one (either a duplicate call or a hallucinated final).
+                stop_list = list(stop) if isinstance(stop, list) else ([stop] if isinstance(stop, str) else [])
+                if '\n{' not in stop_list:
+                    stop_list = stop_list + ['\n{']
+
                 raw = ''
                 for attempt in range(3):
-                    raw = _safe_str(call_llm(prompt, stop_words=stop)).strip()
+                    raw = _safe_str(call_llm(prompt, stop_words=stop_list)).strip()
+                    _debug(f'deepagent _generate attempt={attempt} raw_len={len(raw)} raw_head={raw[:400]!r}')
                     msg = _parse_tool_call_envelope(raw)
                     if msg is not None:
+                        _debug(f'deepagent _generate parsed envelope tool_calls={getattr(msg, "tool_calls", None)}')
                         return ChatResult(generations=[ChatGeneration(message=msg)])
                     if attempt < 2:
                         prompt = prompt + '\n\nsystem: Your last output was invalid. Output ONLY a single JSON object per the schema.'
 
+                _debug('deepagent _generate parse FAILED after 3 attempts; falling back to plain AIMessage')
                 return ChatResult(generations=[ChatGeneration(message=AIMessage(content=raw))])
 
         return RocketRideToolCallingChatModel()
@@ -508,6 +529,9 @@ class DeepAgentDriver(AgentBase):
 
         tool_descriptors = self.discover_tools(host=host)
         self.sendSSE('thinking', message=f'Discovered {len(tool_descriptors)} host tool(s)')
+        from rocketlib import debug as _debug
+
+        _debug(f'deepagent _run discovered {len(tool_descriptors)} tools: {[td.get("name") if hasattr(td, "get") else str(td) for td in tool_descriptors]}')
 
         def _call_llm(messages: Any, stop_words: Any = None) -> str:
             """
@@ -565,12 +589,38 @@ class DeepAgentDriver(AgentBase):
             ctx=ctx,
         )
 
-        system_prompt = 'You are an agent node in a tool-invocation hierarchy.\nUse the provided tools when needed.'
+        from ai.common.config import Config
+
+        _config = Config.getNodeConfig(self._iGlobal.glb.logicalType, self._iGlobal.glb.connConfig)
+        system_prompt = (_config.get('system_prompt', '') or '').strip()
+        if not system_prompt:
+            system_prompt = 'You are an agent node in a tool-invocation hierarchy.\nUse the provided tools when needed.'
+
+        # Fan out deepagent.describe to any connected sub-agent nodes
+        subagents_list = self._collect_subagents(host=host, ctx=ctx, log_tool_call=_log_tool_call)
+        if subagents_list:
+            self.sendSSE('thinking', message=f'Collected {len(subagents_list)} sub-agent(s)')
+
+        from rocketlib import debug as _debug
+
+        _debug(f'deep agent create system_prompt_len={len(system_prompt)} tools={len(tools_for_agent)} subagents={len(subagents_list)}')
+        for _sa in subagents_list:
+            _sa_name = _sa.get('name', '') if isinstance(_sa, dict) else getattr(_sa, 'name', '')
+            _sa_desc = _sa.get('description', '') if isinstance(_sa, dict) else getattr(_sa, 'description', '')
+            _sa_sp = _sa.get('system_prompt', '') if isinstance(_sa, dict) else getattr(_sa, 'system_prompt', '')
+            _sa_tools = _sa.get('tools', []) if isinstance(_sa, dict) else getattr(_sa, 'tools', [])
+            _sa_tool_names = [getattr(t, 'name', '') for t in (_sa_tools or [])]
+            _debug(f'  subagent name={_sa_name!r} description={_sa_desc!r} system_prompt={_sa_sp!r} tools={_sa_tool_names}')
 
         self.sendSSE('thinking', message='Starting Deep Agent...')
         stage = 'create_deep_agent'
         try:
-            agent = create_deep_agent(model=llm, tools=tools_for_agent, system_prompt=system_prompt)
+            agent = create_deep_agent(
+                model=llm,
+                tools=tools_for_agent,
+                system_prompt=system_prompt,
+                subagents=subagents_list if subagents_list else None,
+            )
             stage = 'invoke'
             state = agent.invoke(
                 {'messages': [HumanMessage(content=_safe_str(agent_input.question.getPrompt() or ''))]},
@@ -594,6 +644,120 @@ class DeepAgentDriver(AgentBase):
             final_text = _safe_str(state)
 
         return _safe_str(final_text), state
+
+    def _collect_subagents(
+        self,
+        *,
+        host: AgentHost,
+        ctx: dict[str, Any],
+        log_tool_call: Any,
+    ) -> list[Any]:
+        """
+        Fan out ``deepagent.describe`` to all nodes on the ``deepagent`` invoke channel
+        and return a list of ``SubAgent`` TypedDicts ready for ``create_deep_agent``.
+
+        For each responding sub-agent, an ``AgentHostServices`` is created from the
+        sub-agent's own ``pSelf`` so its LLM and tools are routed through its own
+        engine channels independently of the orchestrator's.
+
+        Args:
+            host: The orchestrator's host services (unused here but kept for consistency).
+            ctx: Run-context dict forwarded from ``_run``.
+            log_tool_call: Debug logging callable forwarded to ``_bind_framework_tools``.
+
+        Returns:
+            A (possibly empty) list of ``deepagents.middleware.subagents.SubAgent`` dicts.
+        """
+        from rocketlib.types import IInvokeDeepagent
+        from ai.common.agent._internal.host import AgentHostServices
+
+        if not self._invoker:
+            return []
+
+        try:
+            deepagent_node_ids = self._invoker.instance.getControllerNodeIds('deepagent')
+        except Exception:
+            return []
+
+        if not deepagent_node_ids:
+            return []
+
+        from deepagents.middleware.subagents import SubAgent as _SubAgent  # noqa: PLC0415
+
+        subagents: list[Any] = []
+        for node_id in deepagent_node_ids:
+            req = IInvokeDeepagent.Describe()
+            try:
+                self._invoker.instance.invoke('deepagent', req, nodeId=node_id)
+            except Exception:
+                pass
+
+            for d in req.agents:
+                if d is None:
+                    continue
+                try:
+                    sa_host = AgentHostServices(d.invoke)
+
+                    def _sa_call_llm(messages: Any, stop_words: Any = None, _h: Any = sa_host) -> str:
+                        return self.call_host_llm(
+                            host=_h,
+                            messages=messages,
+                            question_role='You are a helpful assistant.',
+                            stop_words=stop_words,
+                        )
+
+                    sa_llm = self._bind_framework_llm(host=sa_host, call_llm=_sa_call_llm, ctx=ctx)
+                    sa_tool_descriptors = sa_host.tools.query()
+
+                    def _sa_invoke_tool(tool_name: str, input: Any = None, kwargs: Any = None, _h: Any = sa_host) -> Any:  # noqa: A002
+                        return self.invoke_host_tool(host=_h, tool_name=tool_name, input=input, kwargs=kwargs)
+
+                    sa_tools = self._bind_framework_tools(
+                        host=sa_host,
+                        tool_descriptors=sa_tool_descriptors,
+                        invoke_tool=_sa_invoke_tool,
+                        log_tool_call=log_tool_call,
+                        ctx=ctx,
+                    )
+
+                    # Merge system_prompt + instructions
+                    sp = (d.system_prompt or '').strip()
+                    for inst in d.instructions or []:
+                        if inst.strip():
+                            sp += f'\n{inst.strip()}'
+                    if not sp:
+                        sp = 'You are a helpful sub-agent. Use your tools to complete the assigned task.'
+
+                    subagents.append(
+                        _SubAgent(
+                            name=d.name,
+                            description=d.description or d.name,
+                            system_prompt=sp,
+                            tools=sa_tools,
+                            model=sa_llm,
+                        )
+                    )
+                except Exception as e:
+                    from rocketlib import error as _error
+
+                    _error(f'deep agent collect_subagents failed for node={node_id}: {type(e).__name__}: {_safe_str(e)}')
+
+        return subagents
+
+
+class DeepAgentSubagentDriver(DeepAgentDriver):
+    """
+    Sub-agent node driver for ``agent_deepagent_subagent``.
+
+    Behaviorally identical to ``DeepAgentDriver`` — runs a single ``create_deep_agent``
+    invocation with its own LLM and tools.  Registered under the
+    ``agent_deepagent_subagent`` logical type so it can be wired on an orchestrator's
+    ``deepagent`` invoke channel.
+
+    Does not fan out on a ``deepagent`` channel (no such channel on this node type).
+    """
+
+    FRAMEWORK = 'deepagent_subagent'
 
 
 # ------------------------------------------------------------------
@@ -664,7 +828,22 @@ def _normalize_bound_tools(tools: Any) -> list[dict[str, Any]]:
         except Exception:
             input_schema = None
 
-        entry: dict[str, Any] = {'name': name, 'description': desc, 'args_schema': _safe_str(schema)}
+        # Prefer a structured JSON-Schema over the opaque str(schema). Pydantic v2
+        # models expose `.model_json_schema()`; fall back gracefully otherwise.
+        args_schema_json: Any = None
+        try:
+            if schema is not None and hasattr(schema, 'model_json_schema'):
+                args_schema_json = schema.model_json_schema()
+            elif schema is not None and hasattr(schema, 'schema'):
+                args_schema_json = schema.schema()
+        except Exception:
+            args_schema_json = None
+
+        entry: dict[str, Any] = {
+            'name': name,
+            'description': desc,
+            'args_schema': args_schema_json if isinstance(args_schema_json, dict) else _safe_str(schema),
+        }
         if isinstance(input_schema, dict):
             entry['input_schema'] = input_schema
         out.append(entry)
@@ -768,10 +947,7 @@ def _parse_tool_call_envelope(raw: str) -> Any:
         A LangChain ``AIMessage`` on success, or ``None`` when *raw* is not valid JSON,
         has an unrecognised ``type`` value, or the required fields are absent.
     """
-    try:
-        obj = json.loads(raw)
-    except Exception:
-        return None
+    obj = _extract_first_json_object(raw)
     if not isinstance(obj, dict):
         return None
 
@@ -807,6 +983,76 @@ def _parse_tool_call_envelope(raw: str) -> Any:
         except Exception:
             return None
 
+    return None
+
+
+def _extract_first_json_object(raw: str) -> Any:
+    """
+    Best-effort extraction of the first balanced JSON object from a raw LLM response.
+
+    Complements the stop-word defence in the protocol adapter: if the model still
+    manages to emit trailing text or a second object after the first one closes
+    (e.g. ``{...}\\n{...}`` or ``{...}`` + commentary), this parser returns only
+    the first object rather than failing the whole envelope.
+
+    Tolerates:
+      * Leading/trailing whitespace or prose
+      * Markdown code fences (```json ... ```)
+      * Trailing content after the first closing brace
+      * Multiple concatenated JSON objects (returns only the first)
+
+    Args:
+        raw: The raw string returned by the LLM.
+
+    Returns:
+        The decoded first JSON object, or ``None`` if none can be parsed.
+    """
+    if not isinstance(raw, str) or not raw:
+        return None
+
+    s = raw.strip()
+    if s.startswith('```'):
+        s = s.split('\n', 1)[1] if '\n' in s else s[3:]
+        if '```' in s:
+            s = s.rsplit('```', 1)[0]
+        s = s.strip()
+
+    # Fast path: valid JSON as-is
+    try:
+        return json.loads(s)
+    except Exception:
+        pass
+
+    # Walk from the first '{' to its matching '}', honouring string escapes
+    start = s.find('{')
+    if start < 0:
+        return None
+
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(s)):
+        ch = s[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == '\\':
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                candidate = s[start : i + 1]
+                try:
+                    return json.loads(candidate)
+                except Exception:
+                    return None
     return None
 
 
