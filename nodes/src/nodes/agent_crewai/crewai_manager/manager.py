@@ -48,6 +48,40 @@ from ai.common.schema import Question
 from ..crewai_base import CrewBase
 
 
+def _strip_react_preamble(text: str) -> str:
+    """Strip the ReAct Thought/Action/Action Input preamble from a task output.
+
+    In hierarchical mode CrewAI often returns the full agent trajectory rather
+    than just the final answer.  This function extracts the clean payload by
+    trying (in order):
+
+    1. Everything after the last ``Final Answer:`` marker.
+    2. The last top-level JSON block (``\\n{`` … end), which is typically the
+       tool's return value when the agent ends on a tool call observation.
+    3. The original text unchanged.
+    """
+    if not text:
+        return text
+    # 1. Strip to last "Final Answer:" if present.
+    fa_marker = 'Final Answer:'
+    if fa_marker in text:
+        return text[text.rfind(fa_marker) + len(fa_marker) :].strip()
+    # 2. Extract last JSON block — covers the case where the agent ends with a
+    #    tool observation (no Final Answer written).  Only apply when the text
+    #    looks like a ReAct trace; otherwise clean output (e.g. ```chartjs
+    #    fences) would have their prefix incorrectly stripped.
+    react_markers = ('Thought:', 'Action:', 'Observation:')
+    if any(m in text for m in react_markers):
+        last_json = text.rfind('\n{')
+        if last_json >= 0:
+            return text[last_json:].strip()
+        # 3. Inline ReAct trace (no newlines between Thought/Action/Action Input).
+        #    Nothing useful can be extracted — return empty so the caller can
+        #    fall back to other task outputs or surface a clean error.
+        return ''
+    return text
+
+
 _MGR_ROLE = 'Manager'
 _MGR_GOAL = 'Coordinate the team to complete the user request. Delegate to the appropriate agents and synthesize their outputs into a final answer.'
 _MGR_BACKSTORY = 'You are a senior manager coordinating a team of specialized agents. Delegate tasks to the right agent and synthesize their outputs into a final answer.'
@@ -193,6 +227,7 @@ class CrewManager(CrewBase):
                 description=task_desc,
                 expected_output=d.expected_output or self._DEFAULT_EXPECTED_OUTPUT,
                 agent=agent_obj,
+                context=list(sub_tasks) if sub_tasks else [],
             )
 
             sub_agents.append(agent_obj)
@@ -240,7 +275,20 @@ class CrewManager(CrewBase):
         # serializing access to them must be process-wide too).
         result = self._iGlobal._kickoff_runner.submit(context, crew.akickoff(inputs={'user_request': prompt} if prompt else {}))
 
-        # Result extraction handles both CrewOutput (has .raw) and
-        # CrewStreamingOutput (final answer at .result.raw).
-        final_text = self._safe_str(getattr(result, 'raw', None)) or self._safe_str(getattr(getattr(result, 'result', None), 'raw', None)) or self._safe_str(result)
+        # Result extraction: prefer the last completed task's output (clean result)
+        # over result.raw, which in hierarchical mode contains the full manager
+        # ReAct trace (all delegations + observations concatenated).
+        tasks_out = getattr(result, 'tasks_output', None) or []
+        final_text = ''
+        for task_out in reversed(tasks_out):
+            candidate = self._safe_str(getattr(task_out, 'raw', None))
+            if candidate:
+                final_text = _strip_react_preamble(candidate)
+                break
+
+        if not final_text:
+            # Fall back to result.raw with the same ReAct stripping.
+            raw = self._safe_str(getattr(result, 'raw', None)) or self._safe_str(getattr(getattr(result, 'result', None), 'raw', None)) or self._safe_str(result)
+            final_text = _strip_react_preamble(raw)
+
         return final_text, result
