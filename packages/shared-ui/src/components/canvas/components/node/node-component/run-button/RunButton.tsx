@@ -140,7 +140,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 				}}
 			>
 				<span style={styles.button}>
-					<Square size={12} style={{ ...styles.icon, color: 'var(--rr-error)', fill: 'transparent', strokeWidth: 2.5 }} />
+					<Square size={12} style={{ ...styles.icon, color: 'var(--rr-color-error)', strokeWidth: 2.5 }} />
 				</span>
 			</div>
 		);
