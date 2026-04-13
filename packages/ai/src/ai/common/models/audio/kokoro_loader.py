@@ -238,7 +238,7 @@ class KokoroLoader(BaseLoader):
         """Filter each inference item to only the requested output_fields."""
         items = raw_output.get('items') if isinstance(raw_output, dict) else None
         if not items:
-            return [{} for _ in range(batch_size or 1)]
+            return [{} for _ in range(batch_size)]
 
         results: List[Dict[str, Any]] = []
         for item in items:

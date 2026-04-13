@@ -24,12 +24,28 @@ _WAV_MIME = 'audio/wav'
 
 
 class IGlobal(IGlobalBase):
+    """Kokoro-only TTS node global state.
+
+    Holds either a local ``KPipeline`` (when no model server is configured) or a
+    ``ModelClient`` bound to a remote Kokoro loader. The local path needs the
+    ``kokoro``/``soundfile`` wheels and the ``en_core_web_sm`` spaCy model; the
+    remote path only needs the base client libraries.
+    """
+
     _voice: str
     _lang: str
     _pipeline: Optional[Any] = None
     _remote_client: Optional[Any] = None
 
     def beginGlobal(self):
+        """Initialise local pipeline or remote client from the node configuration.
+
+        No-op when the endpoint is opened in ``CONFIG`` mode (the UI only needs
+        the schema). Otherwise validates that a voice is configured, then either
+        connects to the model server — skipping the heavy local dependency
+        install — or installs the local requirements and constructs a
+        ``KPipeline``.
+        """
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
@@ -39,10 +55,6 @@ class IGlobal(IGlobalBase):
             raise Exception('Kokoro: choose a voice from the list')
         self._voice = voice
         self._lang = voice[0]
-
-        from depends import depends  # type: ignore
-
-        depends(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt'))
 
         addr = get_model_server_address()
         if addr:
@@ -54,6 +66,10 @@ class IGlobal(IGlobalBase):
                 {'lang_code': self._lang, 'repo_id': _KOKORO_REPO_ID},
             )
         else:
+            from depends import depends  # type: ignore
+
+            depends(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt'))
+
             self._ensure_spacy_en_model()
             from kokoro import KPipeline
 
@@ -85,6 +101,14 @@ class IGlobal(IGlobalBase):
         )
 
     def synthesize(self, text: str) -> Dict[str, Any]:
+        """Synthesise ``text`` to a temporary WAV file and return its path.
+
+        Writes a freshly-allocated file under the system temp dir and returns
+        ``{'path': <abs path>, 'mime_type': 'audio/wav'}``. The caller owns the
+        file and is responsible for deleting it once the bytes have been
+        streamed. On any synthesis error the temp file is removed before the
+        exception propagates so there are no orphans on disk.
+        """
         fd, out_path = tempfile.mkstemp(prefix='tts_', suffix='.wav')
         os.close(fd)
         try:
@@ -105,7 +129,12 @@ class IGlobal(IGlobalBase):
             else:
                 chunks: list[np.ndarray] = []
                 for _gs, _ps, audio in self._pipeline(text, voice=self._voice, speed=1):
-                    arr = np.asarray(audio, dtype=np.float32)
+                    if audio is None:
+                        continue
+                    if hasattr(audio, 'detach'):
+                        arr = audio.detach().cpu().numpy().astype(np.float32)
+                    else:
+                        arr = np.asarray(audio, dtype=np.float32)
                     if arr.size == 0:
                         continue
                     if arr.ndim > 1:
@@ -129,6 +158,7 @@ class IGlobal(IGlobalBase):
             raise
 
     def endGlobal(self):
+        """Release the local pipeline and disconnect the remote client, if any."""
         self._pipeline = None
         client = self._remote_client
         if client is not None:
