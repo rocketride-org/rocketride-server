@@ -270,6 +270,18 @@
 	height: 18px !important;
 }
 
+@keyframes rr-spin {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(360deg);
+	}
+}
+.rotate {
+	animation: rr-spin 1s linear infinite;
+}
+
 @keyframes rr-indeterminate {
 	0% {
 		transform: translateX(-100%);
