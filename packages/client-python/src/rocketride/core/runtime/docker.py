@@ -6,6 +6,7 @@ and removing Docker containers. Python equivalent of the VS Code
 extension's docker-manager.ts using the ``docker`` PyPI package.
 """
 
+import importlib
 import platform as _platform
 import subprocess
 import sys
@@ -39,6 +40,7 @@ class DockerRuntime:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
+                importlib.invalidate_caches()
                 import docker
 
             self._client = docker.from_env()

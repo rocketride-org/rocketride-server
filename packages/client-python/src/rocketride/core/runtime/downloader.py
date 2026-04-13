@@ -53,6 +53,15 @@ async def download_runtime(
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
+                if resp.status == 404:
+                    raise RuntimeNotFoundError(
+                        f'Runtime v{version} not found.\n'
+                        f'  No release asset matching "{asset}" exists under GitHub release "{tag}".\n'
+                        f'  This usually means the version does not exist or has no binary for your platform.\n'
+                        f'  Run "rocketride runtime install latest" to install the latest stable release,\n'
+                        f'  or check available versions at:\n'
+                        f'  https://github.com/rocketride-org/rocketride-server/releases'
+                    )
                 if resp.status != 200:
                     raise RuntimeNotFoundError(f'Failed to download runtime v{version}: HTTP {resp.status} from {url}')
                 total_bytes = resp.content_length or 0

@@ -512,7 +512,7 @@ class TestDownloader:
             patch('rocketride.core.runtime.downloader.release_tag', return_value='server-v3.1.0'),
             patch('rocketride.core.runtime.downloader.aiohttp.ClientSession', return_value=mock_session),
         ):
-            with pytest.raises(RuntimeNotFoundError, match='HTTP 404'):
+            with pytest.raises(RuntimeNotFoundError, match='not found'):
                 await download_runtime('3.1.0')
 
 

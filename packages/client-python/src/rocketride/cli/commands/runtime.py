@@ -16,6 +16,7 @@ import asyncio
 import shutil
 import sys
 
+from ...core.exceptions import RuntimeNotFoundError
 from ...core.runtime.downloader import download_runtime
 from ...core.runtime.paths import runtimes_dir, runtime_binary, logs_dir, rocketride_home
 from ...core.runtime.ports import find_available_port
@@ -181,7 +182,7 @@ async def _cmd_list(args) -> int:
                 status_text = 'unknown'
         else:
             alive = _is_pid_alive(pid)
-            status_text = 'online' if alive else 'stopped'
+            status_text = 'running' if alive else 'stopped'
 
         status_color = GREEN if alive else RED
 
@@ -558,6 +559,13 @@ async def _cmd_install(args) -> int:
         return 0
 
     # ── Local / Service install ───────────────────────────────────
+
+    # Resolve keyword specs (e.g. 'prerelease', 'latest') to real versions
+    if version in ('latest', 'prerelease'):
+        print(f'Resolving {version} version...')
+        resolved = await resolve_docker_tag(version)
+        version = resolved
+
     if version:
         # Check if already installed (scoped by type)
         binary = runtime_binary(version)
@@ -605,7 +613,12 @@ async def _cmd_install(args) -> int:
             else:
                 _print_progress(f'Downloading runtime v{version}... {dl_str}')
 
-        await download_runtime(version, on_progress=_on_download_progress, on_phase=_on_phase)
+        try:
+            await download_runtime(version, on_progress=_on_download_progress, on_phase=_on_phase)
+        except RuntimeNotFoundError as e:
+            _end_progress('')
+            print(f'\n{e}')
+            return 1
 
     # Register in state DB so it shows up in `list`
     async with StateDB() as db:
