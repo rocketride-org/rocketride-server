@@ -36,6 +36,7 @@ tool path), not via the `crewai` channel.
 
 from __future__ import annotations
 
+import json
 from typing import Any, List
 
 from rocketlib import debug
@@ -79,9 +80,19 @@ def _strip_react_preamble(text: str) -> str:
     if any(m in text for m in react_markers):
         tail = text.rstrip()
         if tail.endswith('}') or tail.endswith(']'):
-            last_json = max(text.rfind('\n{'), text.rfind('\n['))
-            if last_json >= 0:
-                return text[last_json:].strip()
+            # Collect all positions where { or [ opens at the start of a line,
+            # then walk right-to-left: the rightmost slice that round-trips
+            # through json.loads is the last complete tool-output block.
+            # rfind('\n{') alone would cut into the middle of a pretty-printed
+            # nested object whose inner braces also start on their own lines.
+            candidates = [i for i, ch in enumerate(text) if ch in ('{', '[') and (i == 0 or text[i - 1] == '\n')]
+            for start in reversed(candidates):
+                slice_ = text[start:].strip()
+                try:
+                    json.loads(slice_)
+                    return slice_
+                except (json.JSONDecodeError, ValueError):
+                    continue
         # 3. Inline ReAct trace (no newlines between Thought/Action/Action Input),
         #    or trailing non-JSON free text we can't safely slice.  Return empty
         #    so the caller can fall back to other task outputs or surface a
