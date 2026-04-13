@@ -39,8 +39,9 @@
 		"default": "default",
 		"profiles": {
 			"default": {
-				"agent_description": "",
+				"advanced_mode": false,
 				"instructions": [],
+				"agent_description": "",
 				"system_prompt": ""
 			}
 		}
@@ -69,34 +70,42 @@
 		"instructions": {
 			"type": "array",
 			"title": "Instructions",
-			"description": "Additional instructions to guide the agent.",
+			"description": "Additional instructions to guide the agent. Each line is appended to the system prompt.",
 			"items": {
 				"type": "string",
 				"format": "textarea"
 			}
 		},
-		"agent_deepagent.default": {
-			"object": "default",
-			"properties": ["agent_description", "system_prompt", "instructions"]
-		},
-		"agent_deepagent.profile": {
-			"title": "Profile",
-			"type": "string",
-			"default": "default",
-			"enum": [["default", "Default"]],
+		"advanced_mode": {
+			"type": "boolean",
+			"title": "Advanced Mode",
+			"description": "When enabled, replace the Instructions list with direct Agent Description and System Prompt fields for full control.",
+			"default": false,
+			"enum": [
+				[false, "Off"],
+				[true, "On"]
+			],
 			"conditional": [
 				{
-					"value": "default",
-					"properties": ["agent_deepagent.default"]
+					"value": false,
+					"properties": ["instructions"]
+				},
+				{
+					"value": true,
+					"properties": ["agent_description", "system_prompt"]
 				}
 			]
+		},
+		"agent_deepagent.default": {
+			"object": "default",
+			"properties": ["advanced_mode"]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "Deep Agent",
-			"properties": ["agent_description", "system_prompt", "instructions"]
+			"properties": ["agent_deepagent.default"]
 		}
 	],
 	"icon": "deepagent.svg",

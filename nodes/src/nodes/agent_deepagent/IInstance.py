@@ -102,22 +102,15 @@ class IInstance(IInstanceBase):
         from rocketlib.types import IInvokeDeepagent
 
         driver = self.IGlobal.agent
-
         pipe_type = self.instance.pipeType
         node_id = str(pipe_type.get('id') if isinstance(pipe_type, dict) else getattr(pipe_type, 'id', '')) or ''
 
-        # Use driver attributes resolved at init time
-        name = node_id or str(self.IGlobal.glb.logicalType)
-        description = getattr(driver, '_description', '') or ''
-        system_prompt = getattr(driver, '_system_prompt', '') or ''
-        instructions = list(getattr(driver, '_instructions', []) or [])
-
         param.agents.append(
             IInvokeDeepagent.DescribeResponse(
-                name=name,
-                description=description,
-                system_prompt=system_prompt,
-                instructions=instructions,
+                name=node_id or str(self.IGlobal.glb.logicalType),
+                description=driver._description,
+                system_prompt=driver._system_prompt,
+                instructions=list(driver._instructions or []),
                 node_id=node_id,
                 invoke=self,
             )

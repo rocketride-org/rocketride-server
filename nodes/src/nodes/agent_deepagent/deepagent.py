@@ -31,7 +31,7 @@ from typing import Any, Callable
 
 from ai.common.agent import AgentBase
 from ai.common.agent.types import AgentHost, AgentInput, AgentRunResult
-from rocketlib import ToolDescriptor
+from rocketlib import ToolDescriptor, debug, error
 
 
 class DeepAgentDriver(AgentBase):
@@ -167,33 +167,25 @@ class DeepAgentDriver(AgentBase):
                     A ``ChatResult`` wrapping either a tool-call ``AIMessage`` or a plain
                     ``AIMessage`` with the raw LLM text as its content.
                 """
-                from rocketlib import debug as _debug
-
                 transcript = _langchain_messages_to_transcript(messages)
                 tool_hint = _tool_call_protocol_prompt(self._bound_tools)
                 prompt = (tool_hint + '\n\n' + transcript).strip()
 
-                _debug(f'deepagent _generate bound_tools={[t.get("name") for t in self._bound_tools]} prompt_len={len(prompt)}')
-
                 # Stop generation at the first newline-then-brace, which is the
                 # LLM's common failure mode of emitting a second JSON object after
                 # the intended one (either a duplicate call or a hallucinated final).
-                stop_list = list(stop) if isinstance(stop, list) else ([stop] if isinstance(stop, str) else [])
-                if '\n{' not in stop_list:
-                    stop_list = stop_list + ['\n{']
+                stop_list = _merge_stop_words(stop, '\n{')
 
                 raw = ''
                 for attempt in range(3):
                     raw = _safe_str(call_llm(prompt, stop_words=stop_list)).strip()
-                    _debug(f'deepagent _generate attempt={attempt} raw_len={len(raw)} raw_head={raw[:400]!r}')
                     msg = _parse_tool_call_envelope(raw)
                     if msg is not None:
-                        _debug(f'deepagent _generate parsed envelope tool_calls={getattr(msg, "tool_calls", None)}')
                         return ChatResult(generations=[ChatGeneration(message=msg)])
                     if attempt < 2:
                         prompt = prompt + '\n\nsystem: Your last output was invalid. Output ONLY a single JSON object per the schema.'
 
-                _debug('deepagent _generate parse FAILED after 3 attempts; falling back to plain AIMessage')
+                debug('deepagent _generate parse failed after 3 attempts; falling back to plain text')
                 return ChatResult(generations=[ChatGeneration(message=AIMessage(content=raw))])
 
         return RocketRideToolCallingChatModel()
@@ -576,8 +568,6 @@ class DeepAgentDriver(AgentBase):
             Returns:
                 None
             """
-            from rocketlib import debug
-
             debug(f'deep agent tool call tool={tool_name} input_len={len(_safe_str(input))} output_len={len(_safe_str(output))}')
 
         llm = self._bind_framework_llm(host=host, call_llm=_call_llm, ctx=ctx)
@@ -589,28 +579,18 @@ class DeepAgentDriver(AgentBase):
             ctx=ctx,
         )
 
-        from ai.common.config import Config
-
-        _config = Config.getNodeConfig(self._iGlobal.glb.logicalType, self._iGlobal.glb.connConfig)
-        system_prompt = (_config.get('system_prompt', '') or '').strip()
-        if not system_prompt:
-            system_prompt = 'You are an agent node in a tool-invocation hierarchy.\nUse the provided tools when needed.'
+        system_prompt = _compose_system_prompt(
+            base=self._system_prompt,
+            instructions=self._instructions,
+            fallback='You are an agent node in a tool-invocation hierarchy.\nUse the provided tools when needed.',
+        )
 
         # Fan out deepagent.describe to any connected sub-agent nodes
         subagents_list = self._collect_subagents(host=host, ctx=ctx, log_tool_call=_log_tool_call)
         if subagents_list:
             self.sendSSE('thinking', message=f'Collected {len(subagents_list)} sub-agent(s)')
 
-        from rocketlib import debug as _debug
-
-        _debug(f'deep agent create system_prompt_len={len(system_prompt)} tools={len(tools_for_agent)} subagents={len(subagents_list)}')
-        for _sa in subagents_list:
-            _sa_name = _sa.get('name', '') if isinstance(_sa, dict) else getattr(_sa, 'name', '')
-            _sa_desc = _sa.get('description', '') if isinstance(_sa, dict) else getattr(_sa, 'description', '')
-            _sa_sp = _sa.get('system_prompt', '') if isinstance(_sa, dict) else getattr(_sa, 'system_prompt', '')
-            _sa_tools = _sa.get('tools', []) if isinstance(_sa, dict) else getattr(_sa, 'tools', [])
-            _sa_tool_names = [getattr(t, 'name', '') for t in (_sa_tools or [])]
-            _debug(f'  subagent name={_sa_name!r} description={_sa_desc!r} system_prompt={_sa_sp!r} tools={_sa_tool_names}')
+        debug(f'deep agent create system_prompt_len={len(system_prompt)} tools={len(tools_for_agent)} subagents={len(subagents_list)}')
 
         self.sendSSE('thinking', message='Starting Deep Agent...')
         stage = 'create_deep_agent'
@@ -720,27 +700,21 @@ class DeepAgentDriver(AgentBase):
                         ctx=ctx,
                     )
 
-                    # Merge system_prompt + instructions
-                    sp = (d.system_prompt or '').strip()
-                    for inst in d.instructions or []:
-                        if inst.strip():
-                            sp += f'\n{inst.strip()}'
-                    if not sp:
-                        sp = 'You are a helpful sub-agent. Use your tools to complete the assigned task.'
-
                     subagents.append(
                         _SubAgent(
                             name=d.name,
                             description=d.description or d.name,
-                            system_prompt=sp,
+                            system_prompt=_compose_system_prompt(
+                                base=d.system_prompt,
+                                instructions=d.instructions,
+                                fallback='You are a helpful sub-agent. Use your tools to complete the assigned task.',
+                            ),
                             tools=sa_tools,
                             model=sa_llm,
                         )
                     )
                 except Exception as e:
-                    from rocketlib import error as _error
-
-                    _error(f'deep agent collect_subagents failed for node={node_id}: {type(e).__name__}: {_safe_str(e)}')
+                    error(f'deep agent collect_subagents failed for node={node_id}: {type(e).__name__}: {_safe_str(e)}')
 
         return subagents
 
@@ -809,45 +783,54 @@ def _normalize_bound_tools(tools: Any) -> list[dict[str, Any]]:
     Returns:
         A list of ``dict`` objects suitable for use with ``_tool_call_protocol_prompt``.
     """
-    out: list[dict[str, Any]] = []
     if not tools:
-        return out
+        return []
     if not isinstance(tools, list):
         tools = [tools]
-    for t in tools:
-        name = _safe_str(getattr(t, 'name', ''))
-        desc = _safe_str(getattr(t, 'description', ''))
-        schema: Any = None
-        input_schema: Any = None
-        try:
-            schema = getattr(t, 'args_schema', None)
-        except Exception:
-            schema = None
-        try:
-            input_schema = getattr(t, '_rr_input_schema', None)
-        except Exception:
-            input_schema = None
 
-        # Prefer a structured JSON-Schema over the opaque str(schema). Pydantic v2
-        # models expose `.model_json_schema()`; fall back gracefully otherwise.
-        args_schema_json: Any = None
-        try:
-            if schema is not None and hasattr(schema, 'model_json_schema'):
-                args_schema_json = schema.model_json_schema()
-            elif schema is not None and hasattr(schema, 'schema'):
-                args_schema_json = schema.schema()
-        except Exception:
-            args_schema_json = None
+    out: list[dict[str, Any]] = []
+    for t in tools:
+        schema = getattr(t, 'args_schema', None)
+        input_schema = getattr(t, '_rr_input_schema', None)
 
         entry: dict[str, Any] = {
-            'name': name,
-            'description': desc,
-            'args_schema': args_schema_json if isinstance(args_schema_json, dict) else _safe_str(schema),
+            'name': _safe_str(getattr(t, 'name', '')),
+            'description': _safe_str(getattr(t, 'description', '')),
+            'args_schema': _tool_args_schema(schema),
         }
         if isinstance(input_schema, dict):
             entry['input_schema'] = input_schema
         out.append(entry)
     return out
+
+
+def _tool_args_schema(schema: Any) -> Any:
+    """
+    Return a JSON-Schema dict for a tool's ``args_schema``, or a string fallback.
+
+    Pydantic v2 models expose ``model_json_schema()``; older models expose ``schema()``.
+    When neither works, falls back to ``str(schema)`` so the LLM still sees *something*
+    identifying the expected shape.
+
+    Args:
+        schema: The ``args_schema`` attribute from a LangChain tool — typically a
+            pydantic model class, or ``None``.
+
+    Returns:
+        A JSON-Schema ``dict`` when extractable, otherwise the string representation.
+    """
+    if schema is None:
+        return ''
+    for attr in ('model_json_schema', 'schema'):
+        fn = getattr(schema, attr, None)
+        if callable(fn):
+            try:
+                result = fn()
+                if isinstance(result, dict):
+                    return result
+            except Exception:
+                continue
+    return _safe_str(schema)
 
 
 def _langchain_messages_to_transcript(messages: Any) -> str:
@@ -951,39 +934,80 @@ def _parse_tool_call_envelope(raw: str) -> Any:
     if not isinstance(obj, dict):
         return None
 
+    try:
+        from langchain_core.messages import AIMessage
+    except Exception:
+        return None
+
     msg_type = obj.get('type')
     if msg_type == 'final':
-        content = _safe_str(obj.get('content', ''))
-        try:
-            from langchain_core.messages import AIMessage
-
-            return AIMessage(content=content)
-        except Exception:
-            return None
+        return AIMessage(content=_safe_str(obj.get('content', '')))
 
     if msg_type == 'tool_call':
         name = _safe_str(obj.get('name', '')).strip()
         if not name:
             return None
-        args = obj.get('args')
-        if args is None:
-            args = {}
+        args = obj.get('args') or {}
         if not isinstance(args, dict):
             args = {'input': args}
 
         tool_call = {'id': f'call_{uuid.uuid4().hex[:12]}', 'type': 'tool_call', 'name': name, 'args': args}
-
-        try:
-            from langchain_core.messages import AIMessage
-
-            try:
-                return AIMessage(content='', tool_calls=[tool_call])
-            except Exception:
-                return AIMessage(content='', additional_kwargs={'tool_calls': [tool_call]})
-        except Exception:
-            return None
+        return AIMessage(content='', tool_calls=[tool_call])
 
     return None
+
+
+def _compose_system_prompt(*, base: str | None, instructions: list[str] | None, fallback: str) -> str:
+    """
+    Combine a base system prompt with trailing instruction lines.
+
+    Used by both the manager (``DeepAgentDriver._run``) and the sub-agent collector
+    (``_collect_subagents``) so the two paths produce prompts in an identical shape:
+
+    * Start with *base* (stripped); fall back to *fallback* when *base* is empty.
+    * Append each non-empty instruction on its own line.
+
+    Args:
+        base: The primary system prompt string, or ``None``/empty for the fallback.
+        instructions: Optional list of instruction lines to append.
+        fallback: Default prompt text used when *base* is empty after stripping.
+
+    Returns:
+        A single system-prompt string ready to hand to ``create_deep_agent``.
+    """
+    prompt = (base or '').strip() or fallback
+    for inst in instructions or []:
+        inst = inst.strip()
+        if inst:
+            prompt = f'{prompt}\n{inst}'
+    return prompt
+
+
+def _merge_stop_words(existing: Any, extra: str) -> list[str]:
+    """
+    Merge *extra* into an existing stop-word value (list, string, or ``None``).
+
+    Used by the tool-call protocol adapter to append a guard sequence (e.g. ``'\\n{'``)
+    that halts generation at the first sign of a second JSON object, without
+    clobbering any stop words the caller (LangChain/LangGraph) already supplied.
+
+    Args:
+        existing: The ``stop`` value passed in by LangChain — a list, a single
+            string, or ``None``.
+        extra: A stop string to append if not already present.
+
+    Returns:
+        A list of stop strings with *extra* appended exactly once.
+    """
+    if isinstance(existing, str):
+        stops = [existing]
+    elif existing:
+        stops = list(existing)
+    else:
+        stops = []
+    if extra not in stops:
+        stops.append(extra)
+    return stops
 
 
 def _extract_first_json_object(raw: str) -> Any:

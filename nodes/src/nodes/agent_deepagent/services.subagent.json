@@ -1,13 +1,13 @@
 {
 	"title": "DeepAgent - Subagent",
 	"protocol": "agent_deepagent_subagent://",
-	"classType": ["agent", "tool", "deepagent"],
+	"classType": ["deepagent"],
 	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.agent_deepagent",
 	"prefix": "agent",
-	"description": ["Sub-agent node for use within a DeepAgent orchestrator.", "Connect to a Deep Agent node via the 'deepagent' invoke channel.", "Can also be invoked as a standalone agent or as a tool (`<nodeId>.run_agent`)."],
+	"description": ["Sub-agent node for use within a DeepAgent orchestrator.", "Connect to a Deep Agent node via the 'deepagent' invoke channel. This node is invoke-only and cannot be used as a top-level pipeline agent."],
 	"invoke": {
 		"llm": {
 			"description": "LLM used by this sub-agent",
@@ -18,23 +18,11 @@
 			"min": 0
 		}
 	},
-	"lanes": {
-		"questions": ["answers"]
-	},
-	"input": [
-		{
-			"lane": "questions",
-			"output": [
-				{
-					"lane": "answers"
-				}
-			]
-		}
-	],
 	"preconfig": {
 		"default": "default",
 		"profiles": {
 			"default": {
+				"advanced_mode": false,
 				"description": "",
 				"instructions": [],
 				"system_prompt": ""
@@ -47,7 +35,7 @@
 			"title": "Description",
 			"default": "",
 			"optional": true,
-			"description": "A concise explanation of what this sub-agent does. The orchestrator reads this to decide when to delegate to this agent.",
+			"description": "The orchestrator reads this description to decide when to delegate to this sub-agent. Keep it specific and action-oriented \u2014 this is the only signal the orchestrator uses to pick a sub-agent.",
 			"ui": {
 				"ui:widget": "textarea"
 			}
@@ -65,34 +53,42 @@
 		"instructions": {
 			"type": "array",
 			"title": "Instructions",
-			"description": "Additional instructions to guide this sub-agent.",
+			"description": "Additional instructions to guide this sub-agent. Each line is appended to the system prompt.",
 			"items": {
 				"type": "string",
 				"format": "textarea"
 			}
 		},
-		"agent_deepagent_subagent.default": {
-			"object": "default",
-			"properties": ["description", "system_prompt", "instructions"]
-		},
-		"agent_deepagent_subagent.profile": {
-			"title": "Profile",
-			"type": "string",
-			"default": "default",
-			"enum": [["default", "Default"]],
+		"advanced_mode": {
+			"type": "boolean",
+			"title": "Advanced Mode",
+			"description": "When enabled, replace the Instructions list with a direct System Prompt field for full control.",
+			"default": false,
+			"enum": [
+				[false, "Off"],
+				[true, "On"]
+			],
 			"conditional": [
 				{
-					"value": "default",
-					"properties": ["agent_deepagent_subagent.default"]
+					"value": false,
+					"properties": ["instructions"]
+				},
+				{
+					"value": true,
+					"properties": ["system_prompt"]
 				}
 			]
+		},
+		"agent_deepagent_subagent.default": {
+			"object": "default",
+			"properties": ["description", "advanced_mode"]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "DeepAgent - Subagent",
-			"properties": ["description", "system_prompt", "instructions"]
+			"properties": ["agent_deepagent_subagent.default"]
 		}
 	],
 	"icon": "deepagent.svg",
