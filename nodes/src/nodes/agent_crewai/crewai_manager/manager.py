@@ -70,14 +70,22 @@ def _strip_react_preamble(text: str) -> str:
     #    tool observation (no Final Answer written).  Only apply when the text
     #    looks like a ReAct trace; otherwise clean output (e.g. ```chartjs
     #    fences) would have their prefix incorrectly stripped.
+    #
+    #    Require the trailing JSON to extend to end-of-text (last non-whitespace
+    #    char is `}` or `]`).  Without this guard, an intermediate Observation
+    #    containing JSON followed by more Thought/Action lines would match via
+    #    rfind('\n{') even though the true final answer is later free text.
     react_markers = ('Thought:', 'Action:', 'Observation:')
     if any(m in text for m in react_markers):
-        last_json = text.rfind('\n{')
-        if last_json >= 0:
-            return text[last_json:].strip()
-        # 3. Inline ReAct trace (no newlines between Thought/Action/Action Input).
-        #    Nothing useful can be extracted — return empty so the caller can
-        #    fall back to other task outputs or surface a clean error.
+        tail = text.rstrip()
+        if tail.endswith('}') or tail.endswith(']'):
+            last_json = max(text.rfind('\n{'), text.rfind('\n['))
+            if last_json >= 0:
+                return text[last_json:].strip()
+        # 3. Inline ReAct trace (no newlines between Thought/Action/Action Input),
+        #    or trailing non-JSON free text we can't safely slice.  Return empty
+        #    so the caller can fall back to other task outputs or surface a
+        #    clean error.
         return ''
     return text
 
@@ -223,11 +231,14 @@ class CrewManager(CrewBase):
                 task_text = f'{task_text}\n\nUser request: {prompt}'
             task_desc = self._escape_braces(task_text)
 
+            # No implicit inter-task context wiring.  In hierarchical mode the
+            # manager agent decides what to pass to each delegate via its
+            # delegation message
             task_obj = Task(
                 description=task_desc,
                 expected_output=d.expected_output or self._DEFAULT_EXPECTED_OUTPUT,
                 agent=agent_obj,
-                context=list(sub_tasks) if sub_tasks else [],
+                context=[],
             )
 
             sub_agents.append(agent_obj)
@@ -282,8 +293,11 @@ class CrewManager(CrewBase):
         final_text = ''
         for task_out in reversed(tasks_out):
             candidate = self._safe_str(getattr(task_out, 'raw', None))
-            if candidate:
-                final_text = _strip_react_preamble(candidate)
+            if not candidate:
+                continue
+            stripped = _strip_react_preamble(candidate)
+            if stripped:
+                final_text = stripped
                 break
 
         if not final_text:
