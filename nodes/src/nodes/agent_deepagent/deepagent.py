@@ -171,14 +171,9 @@ class DeepAgentDriver(AgentBase):
                 tool_hint = _tool_call_protocol_prompt(self._bound_tools)
                 prompt = (tool_hint + '\n\n' + transcript).strip()
 
-                # Stop generation at the first newline-then-brace, which is the
-                # LLM's common failure mode of emitting a second JSON object after
-                # the intended one (either a duplicate call or a hallucinated final).
-                stop_list = _merge_stop_words(stop, '\n{')
-
                 raw = ''
                 for attempt in range(3):
-                    raw = _safe_str(call_llm(prompt, stop_words=stop_list)).strip()
+                    raw = _safe_str(call_llm(prompt, stop_words=stop)).strip()
                     msg = _parse_tool_call_envelope(raw)
                     if msg is not None:
                         return ChatResult(generations=[ChatGeneration(message=msg)])
@@ -983,41 +978,15 @@ def _compose_system_prompt(*, base: str | None, instructions: list[str] | None, 
     return prompt
 
 
-def _merge_stop_words(existing: Any, extra: str) -> list[str]:
-    """
-    Merge *extra* into an existing stop-word value (list, string, or ``None``).
-
-    Used by the tool-call protocol adapter to append a guard sequence (e.g. ``'\\n{'``)
-    that halts generation at the first sign of a second JSON object, without
-    clobbering any stop words the caller (LangChain/LangGraph) already supplied.
-
-    Args:
-        existing: The ``stop`` value passed in by LangChain — a list, a single
-            string, or ``None``.
-        extra: A stop string to append if not already present.
-
-    Returns:
-        A list of stop strings with *extra* appended exactly once.
-    """
-    if isinstance(existing, str):
-        stops = [existing]
-    elif existing:
-        stops = list(existing)
-    else:
-        stops = []
-    if extra not in stops:
-        stops.append(extra)
-    return stops
-
-
 def _extract_first_json_object(raw: str) -> Any:
     """
-    Best-effort extraction of the first balanced JSON object from a raw LLM response.
+    Extract the first balanced JSON object from a raw LLM response.
 
-    Complements the stop-word defence in the protocol adapter: if the model still
-    manages to emit trailing text or a second object after the first one closes
-    (e.g. ``{...}\\n{...}`` or ``{...}`` + commentary), this parser returns only
-    the first object rather than failing the whole envelope.
+    Handles the common failure modes we've seen from host LLMs producing the
+    tool-call envelope — extra prose, markdown fences, or a second JSON object
+    appended after the first one closes (e.g. a duplicate tool call or a
+    hallucinated final answer). Returns just the first object so the parser
+    can build a valid ``AIMessage`` instead of failing the whole envelope.
 
     Tolerates:
       * Leading/trailing whitespace or prose
