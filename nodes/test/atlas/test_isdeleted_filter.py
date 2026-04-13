@@ -100,11 +100,14 @@ mock_ai_config.Config = MagicMock()
 for mod_name, mod_obj in [
     ('ai', types.ModuleType('ai')),
     ('ai.common', types.ModuleType('ai.common')),
-    ('ai.common.schema', mock_ai_schema),
-    ('ai.common.store', mock_ai_store),
-    ('ai.common.config', mock_ai_config),
 ]:
     sys.modules.setdefault(mod_name, mod_obj)
+
+# Force-set these stubs so they override any MagicMocks injected by other test
+# modules (e.g. milvus tests) that run before this file is collected.
+sys.modules['ai.common.schema'] = mock_ai_schema
+sys.modules['ai.common.store'] = mock_ai_store
+sys.modules['ai.common.config'] = mock_ai_config
 
 # Mock pydantic at module level (atlas.py imports ValidationError)
 mock_pydantic = types.ModuleType('pydantic')

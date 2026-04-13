@@ -9,11 +9,14 @@ filter expressions, preventing filter injection attacks.
 import sys
 import os
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-# Mock heavy dependencies before importing milvus so the real pymilvus/pandas/numpy
-# are never loaded during test collection.
-for _name, _mock in {
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'nodes', 'milvus'))
+
+# Mock heavy dependencies only for the duration of the milvus import so that
+# real modules (numpy, ai.*) remain available to other test files collected in
+# the same pytest session.
+with patch.dict(sys.modules, {
     'depends': MagicMock(),
     'numpy': MagicMock(),
     'engLib': MagicMock(),
@@ -23,12 +26,8 @@ for _name, _mock in {
     'ai.common.schema': MagicMock(),
     'ai.common.store': MagicMock(),
     'ai.common.config': MagicMock(),
-}.items():
-    sys.modules.setdefault(_name, _mock)
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'nodes', 'milvus'))
-
-from milvus import _escape_milvus_str
+}):
+    from milvus import _escape_milvus_str
 
 
 class TestEscapeMilvusStr(unittest.TestCase):
@@ -72,15 +71,15 @@ class TestFilterInjectionPrevention(unittest.TestCase):
     def test_inject_always_true_condition(self):
         payload = "' || true || '"
         result = _escape_milvus_str(payload)
-        self.assertNotIn("' ||", result)
         self.assertEqual(result, "\\' || true || \\'")
 
     def test_inject_bypass_isdeleted_filter(self):
         payload = "x' || meta['isDeleted'] == true || 'x"
         result = _escape_milvus_str(payload)
-        self.assertNotIn("'] ==", result)
+        self.assertEqual(result, "x\\' || meta[\\'isDeleted\\'] == true || \\'x")
         filter_expr = f"meta['nodeId'] == '{result}'"
-        self.assertNotIn("|| meta[", filter_expr)
+        self.assertTrue(filter_expr.startswith("meta['nodeId'] == '"))
+        self.assertTrue(filter_expr.endswith("'"))
 
     def test_inject_cross_tenant_access(self):
         payload = "' || meta['tenantId'] != '' || '"
