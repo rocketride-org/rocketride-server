@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A pipeline routing component that evaluates a Python condition and ", "directs data to one of two exclusive branches (then/else). ", "Supports text and questions lanes."],
+	"description": ["A pipeline routing component that evaluates a Python condition and ", "directs data to one of two exclusive branches (then/else). ", "Supports text, questions and answers lanes."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -63,22 +63,32 @@
 	//
 	"lanes": {
 		"text": ["then", "else"],
-		"questions": ["then", "else"]
+		"questions": ["then", "else"],
+		"answers": ["then", "else"]
 	},
 	"input": [
 		{
 			"lane": "text",
 			"description": "Text input",
-			"min": 0,
 			"output": [
-				{
-					"lane": "then",
-					"description": "Routed when condition is true"
-				},
-				{
-					"lane": "else",
-					"description": "Routed when condition is false"
-				}
+				{ "lane": "then", "description": "Routed when condition is true" },
+				{ "lane": "else", "description": "Routed when condition is false" }
+			]
+		},
+		{
+			"lane": "questions",
+			"description": "Questions input",
+			"output": [
+				{ "lane": "then", "description": "Routed when condition is true" },
+				{ "lane": "else", "description": "Routed when condition is false" }
+			]
+		},
+		{
+			"lane": "answers",
+			"description": "Answers input",
+			"output": [
+				{ "lane": "then", "description": "Routed when condition is true" },
+				{ "lane": "else", "description": "Routed when condition is false" }
 			]
 		}
 	],
@@ -106,7 +116,7 @@
 		"condition": {
 			"type": "string",
 			"title": "Python condition",
-			"description": "A Python expression evaluated in a sandbox against the incoming content. Variables in scope: ``text`` (str) when a text chunk arrives, ``questions`` (object) when a question arrives. Any expression works — comparisons, string methods, comprehensions, boolean logic, etc. Truthy routes to ``then``; falsy routes to ``else``. Examples: ``'confidential' in text`` | ``len(text) > 100`` | ``text.lower().startswith('error')`` | ``any(kw in text for kw in ['secret','draft'])``"
+			"description": "A Python expression evaluated in a sandbox against the incoming content. Variables in scope: ``text`` (str) on the text lane, ``questions`` (object) on the questions lane, ``answers`` (object) on the answers lane. Any expression works — comparisons, string methods, comprehensions, boolean logic, etc. Truthy routes to ``then``; falsy routes to ``else``. Examples: ``'confidential' in text`` | ``len(text) > 100`` | ``'urgent' in str(questions).lower()`` | ``any(kw in text for kw in ['secret','draft'])``"
 		}
 	},
 	//

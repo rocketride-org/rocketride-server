@@ -10,6 +10,7 @@ to one of two exclusive output lanes: `then` (condition true) or `else`
 | ----------- | --------------- |
 | `text`      | `then` / `else` |
 | `questions` | `then` / `else` |
+| `answers`   | `then` / `else` |
 
 Only text-like lanes are supported in this iteration. Additional lane types
 (audio, video, image, documents, classifications, etc.) will land in follow-up
@@ -28,6 +29,7 @@ routes to `else`.
 | ----------- | -------- | --------------------------------- |
 | `text`      | `str`    | `writeText` (text lane)           |
 | `questions` | `object` | `writeQuestions` (questions lane) |
+| `answers`   | `object` | `writeAnswers` (answers lane)     |
 
 ### Examples
 

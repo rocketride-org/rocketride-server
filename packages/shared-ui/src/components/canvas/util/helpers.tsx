@@ -100,6 +100,10 @@ export const renameLanes = (originalLaneName = ''): string => {
 	switch (originalLaneName) {
 		case 'tags':
 			return 'Data';
+		case 'then':
+			return 'Then';
+		case 'else':
+			return 'Else';
 		default:
 			return originalLaneName;
 	}
@@ -119,6 +123,9 @@ const INVOKE_TYPE_LABELS: Record<string, string> = {
  * @returns The display label for the invoke type.
  */
 export const renameInvokeType = (invokeType = ''): string => INVOKE_TYPE_LABELS[invokeType] ?? invokeType.charAt(0).toUpperCase() + invokeType.slice(1);
+
+/** Data lane types that can carry pipeline payloads, in display-preference order. */
+export const DATA_LANES = ['questions', 'text', 'answers', 'documents', 'table', 'image', 'audio', 'video'] as const;
 
 // =============================================================================
 // HTML Sanitisation

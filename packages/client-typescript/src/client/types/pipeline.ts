@@ -31,6 +31,9 @@ export interface PipelineInputConnection {
 
 	/** Source component ID providing the data */
 	from: string;
+
+	/** From a conditional node: 0 = then, 1 = else. */
+	branch?: number;
 }
 
 /**

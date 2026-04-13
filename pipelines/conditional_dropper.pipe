@@ -1,0 +1,168 @@
+{
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "name": "Conditional — Dropper text",
+  "description": "Drop a text file; routes content through a Python condition into then/else branches.",
+  "components": [
+    {
+      "id": "dropper_1",
+      "provider": "dropper",
+      "name": "Dropper",
+      "description": "Drop a file to start the pipeline",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "dropper"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "measured": {
+          "width": 176,
+          "height": 61
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "parser_1",
+      "provider": "parse",
+      "name": "Parse",
+      "config": {},
+      "ui": {
+        "position": {
+          "x": 260,
+          "y": 0
+        },
+        "measured": {
+          "width": 176,
+          "height": 76
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "tags",
+          "from": "dropper_1"
+        }
+      ]
+    },
+    {
+      "id": "conditional_1",
+      "provider": "conditional",
+      "name": "Confidential?",
+      "description": "Routes text containing 'confidential' to the then branch",
+      "config": {
+        "condition": "'confidential' in text"
+      },
+      "ui": {
+        "position": {
+          "x": 520,
+          "y": 0
+        },
+        "measured": {
+          "width": 176,
+          "height": 76
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "parser_1"
+        }
+      ]
+    },
+    {
+      "id": "anonymize_1",
+      "provider": "anonymize_text",
+      "name": "Anonymize",
+      "config": {},
+      "ui": {
+        "position": {
+          "x": 780,
+          "y": -80
+        },
+        "measured": {
+          "width": 176,
+          "height": 61
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "then",
+          "from": "conditional_1"
+        }
+      ]
+    },
+    {
+      "id": "response_confidential",
+      "provider": "response",
+      "name": "Confidential response",
+      "config": {
+        "keys": {
+          "documents": "confidential_docs"
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 1040,
+          "y": -80
+        },
+        "measured": {
+          "width": 176,
+          "height": 61
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "anonymize_1"
+        }
+      ]
+    },
+    {
+      "id": "response_public",
+      "provider": "response",
+      "name": "Public response",
+      "config": {
+        "keys": {
+          "documents": "public_docs"
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 780,
+          "y": 80
+        },
+        "measured": {
+          "width": 176,
+          "height": 61
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "else",
+          "from": "conditional_1"
+        }
+      ]
+    }
+  ],
+  "source": "dropper_1",
+  "project_id": "33daa32c-8b9f-4273-bb46-fdc7c6beb986"
+}

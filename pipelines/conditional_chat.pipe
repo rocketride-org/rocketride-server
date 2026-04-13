@@ -1,0 +1,89 @@
+{
+  "viewport": {
+    "x": 40.81818181818187,
+    "y": 455.9258763561457,
+    "zoom": 1.3246741513232303
+  },
+  "name": "Conditional — Chat questions",
+  "description": "Accepts user questions via chat and routes them based on a Python condition.",
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "name": "Chat",
+      "description": "Accepts user chat input",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "llm_anthropic_1",
+      "provider": "llm_anthropic",
+      "config": {
+        "profile": "claude-sonnet-4-6",
+        "claude-sonnet-4-6": {}
+      },
+      "ui": {
+        "position": {
+          "x": 466.2750556792872,
+          "y": -124.01559020044544
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": false
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "conditional_1",
+          "branch": 1
+        }
+      ]
+    },
+    {
+      "id": "conditional_1",
+      "provider": "conditional",
+      "config": {},
+      "ui": {
+        "position": {
+          "x": 207.04892398847227,
+          "y": -103.22555505677055
+        },
+        "measured": {
+          "width": 150,
+          "height": 101
+        },
+        "nodeType": "default",
+        "formDataValid": false
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ]
+    }
+  ],
+  "source": "chat_1",
+  "project_id": "9d033b15-2749-4ec4-9fb0-2b88a1c14ae6",
+  "version": 1,
+  "docRevision": 18
+}

@@ -24,8 +24,9 @@
 """
 Conditional routing node.
 
-Evaluates a sandboxed Python expression against the incoming text (or questions)
-and routes to one of two exclusive branches: ``then`` (true) or ``else`` (false).
+Evaluates a sandboxed Python expression against the incoming content
+(``text``, ``questions`` or ``answers``) and routes it to one of two exclusive
+branches: ``then`` (true) or ``else`` (false).
 """
 
 from __future__ import annotations
@@ -45,6 +46,10 @@ class IInstance(IInstanceBase):
     def writeQuestions(self, questions):
         self.instance.selectBranch(self._evaluate({'questions': questions}))
         self.instance.writeQuestions(questions)
+
+    def writeAnswers(self, answers):
+        self.instance.selectBranch(self._evaluate({'answers': answers}))
+        self.instance.writeAnswers(answers)
 
     def closing(self):
         pass

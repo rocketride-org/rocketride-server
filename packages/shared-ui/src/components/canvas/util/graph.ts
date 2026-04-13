@@ -268,12 +268,14 @@ export const getEdgesFromNodes = (nodes: INodeLike[]): Edge[] => {
 		// -----------------------------------------------------------------
 		if (data.input?.length) {
 			data.input.forEach((input: IInputConnection) => {
+				const b = input.branch;
+				const sourceHandle = b === 0 ? 'source-then' : b === 1 ? 'source-else' : `source-${input.lane}`;
 				edges.push({
 					...DEFAULT_EDGE,
 					id: uuid(),
 					source: input.from,
 					target: node.id,
-					sourceHandle: `source-${input.lane}`,
+					sourceHandle,
 					targetHandle: `target-${input.lane}`,
 				});
 			});

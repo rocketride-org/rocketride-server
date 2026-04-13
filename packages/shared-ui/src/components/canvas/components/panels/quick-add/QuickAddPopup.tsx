@@ -18,7 +18,7 @@ import { Search } from 'lucide-react';
 import { useFlowGraph } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
 import { IService, IServiceCapabilities, IServiceLane } from '../../../types';
-import { getOutputLaneDisplayValues } from '../../../util/helpers';
+import { getOutputLaneDisplayValues, DATA_LANES } from '../../../util/helpers';
 import { generateNodeId } from '../../../util';
 import { getIconPath } from '../../../util/get-icon-path';
 import { commonStyles } from '../../../../../themes/styles';
@@ -225,8 +225,8 @@ export default function QuickAddPopup(): ReactElement | null {
 				if (!lanes) continue;
 
 				if (isSource) {
-					// Clicked a source handle — find services that accept this lane type as input
-					if (laneType in lanes) {
+					const fromBranch = laneType === 'then' || laneType === 'else';
+					if (fromBranch ? DATA_LANES.some((l) => l in lanes) : laneType in lanes) {
 						results.push({ key: providerKey, service });
 					}
 				} else {
@@ -332,11 +332,13 @@ export default function QuickAddPopup(): ReactElement | null {
 		} else {
 			// Connect lane handles
 			if (isSource) {
+				const keys = Object.keys(catalog[providerKey]?.lanes ?? {}).filter((k) => !k.startsWith('_'));
+				const targetLane = laneType === 'then' || laneType === 'else' ? (DATA_LANES.find((l) => keys.includes(l)) ?? keys[0]) : laneType;
 				onEdgeConnect({
 					source: nodeId,
 					target: newNodeId,
 					sourceHandle: handleId,
-					targetHandle: `target-${laneType}`,
+					targetHandle: `target-${targetLane}`,
 				});
 			} else {
 				onEdgeConnect({

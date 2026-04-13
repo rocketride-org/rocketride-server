@@ -173,6 +173,28 @@ Error IServiceEndpoint::buildConnections() noexcept {
                 auto from = comp["from"].asString();
                 auto lane = comp["lane"].asString();
 
+                // Pipelines store conditional branch targets as the real data lane
+                // (text / questions / answers) plus ``branch``: 0 or 1. The binder
+                // only applies branch filtering when instances are bound via the
+                // meta-lanes ``then`` (0) or ``else`` (1), which expand to all data
+                // lanes and set ``m_branchMap`` (see Binder::bind).
+                if (comp.isMember("branch") && comp["branch"].isIntegral()) {
+                    const int branch = comp["branch"].asInt();
+                    Text fromProvider;
+                    for (const auto &c : components) {
+                        if (c["id"].asString() == from) {
+                            fromProvider = c["provider"].asString();
+                            break;
+                        }
+                    }
+                    if (fromProvider == "conditional") {
+                        if (branch == 0)
+                            lane = "then";
+                        else if (branch == 1)
+                            lane = "else";
+                    }
+                }
+
                 // Get the component id. If it is not found, it is not
                 // included or it is not the source, so skip it
                 auto fromId = getComponentId(from);

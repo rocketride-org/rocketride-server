@@ -34,7 +34,7 @@ import type { PipelineComponent, PipelineConfig } from 'rocketride';
 
 // Re-export SDK types under local aliases
 export { TASK_STATE as ITaskState } from 'rocketride';
-export type { PipelineInputConnection as IInputConnection } from 'rocketride';
+export type IInputConnection = import('rocketride').PipelineInputConnection & { branch?: number };
 export type { PipelineControlConnection as IControlConnection } from 'rocketride';
 export type { TASK_STATUS as ITaskStatus } from 'rocketride';
 export type { TASK_STATUS_FLOW as IFlowData } from 'rocketride';

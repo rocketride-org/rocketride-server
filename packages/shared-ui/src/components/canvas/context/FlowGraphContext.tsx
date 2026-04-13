@@ -517,13 +517,13 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				return valid;
 			}
 
-			// Lane validation — source lane type must match target lane type
-			// Handle IDs are "source-{type}" and "target-{type}"
-			const sourceLaneType = sourceHandle?.split('-')?.[1];
-			const targetLaneType = targetHandle?.split('-')?.[1];
-			const valid = sourceLaneType === targetLaneType;
-
-			return valid;
+			// Data lanes: handle IDs are ``source-{lane}`` / ``target-{lane}``.
+			// Meta-lanes ``then``/``else`` on the source side are polymorphic and
+			// connect to any data lane on the target side; otherwise lane names match.
+			const sl = sourceHandle?.split('-')?.[1];
+			const tl = targetHandle?.split('-')?.[1];
+			if (sl === 'then' || sl === 'else') return true;
+			return sl === tl;
 		},
 		[nodeMap, servicesJson]
 	);
@@ -558,15 +558,13 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 									},
 								};
 							} else {
-								// Remove matching lane input by source + lane
-								const lane = edgeToRemove.sourceHandle?.split('-')?.at(1) ?? '';
+								const srcLane = edgeToRemove.sourceHandle?.split('-')?.at(1) ?? '';
+								const tgtLane = edgeToRemove.targetHandle?.split('-')?.at(1) ?? '';
 								const input: IInputConnection[] = nd.input || [];
+								const next = srcLane === 'then' || srcLane === 'else' ? input.filter((i: IInputConnection) => !(i.from === edgeToRemove.source && i.lane === tgtLane && i.branch === (srcLane === 'then' ? 0 : 1))) : input.filter((i: IInputConnection) => !(i.from === edgeToRemove.source && i.lane === srcLane));
 								updated = {
 									...updated,
-									data: {
-										...updated.data,
-										input: input.filter((i: IInputConnection) => !(i.from === edgeToRemove.source && i.lane === lane)),
-									},
+									data: { ...updated.data, input: next },
 								};
 							}
 						});
@@ -614,15 +612,16 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 							},
 						};
 					} else {
-						// Lane (data-flow) connection
-						const lane = params.sourceHandle?.split('-')?.at(1) ?? '';
+						const srcLane = params.sourceHandle?.split('-')?.at(1) ?? '';
+						const tgtLane = params.targetHandle?.split('-')?.at(1) ?? '';
+						const fromCond = srcLane === 'then' || srcLane === 'else';
+						const lane = fromCond ? tgtLane : srcLane;
+						const branch = fromCond ? (srcLane === 'then' ? 0 : 1) : undefined;
 						const input: IInputConnection[] = nd.input || [];
+						const row: IInputConnection = branch !== undefined ? { lane, from: params.source, branch } : { lane, from: params.source };
 						return {
 							...node,
-							data: {
-								...node.data,
-								input: [...input, { lane, from: params.source }],
-							},
+							data: { ...node.data, input: [...input, row] },
 						};
 					}
 				});
