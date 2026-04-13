@@ -1,0 +1,3 @@
+# tool_filesystem has no external runtime dependencies.
+# It reuses ai.account.store.FileStore (already installed as part of the
+# engine's built-in `ai` package) plus the standard library.
