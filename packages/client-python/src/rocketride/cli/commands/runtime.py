@@ -359,16 +359,27 @@ async def _cmd_start(args) -> int:
             if inst_type == 'Docker':
                 print(f'Starting Docker runtime {instance_id}...')
                 docker = DockerRuntime()
+                docker_port = existing['port']
                 try:
                     docker.start(instance_id)
                 except Exception as e:
-                    print(f'Failed to start Docker container: {e}')
-                    return 1
+                    # Container deleted externally (e.g. Docker Desktop) — re-create it
+                    if '404' in str(e) or 'No such container' in str(e):
+                        print('Container was removed outside the CLI. Re-installing...')
+                        docker_port = existing['port'] or find_available_port()
+                        try:
+                            docker.install(existing['version'], instance_id, docker_port)
+                        except Exception as e2:
+                            print(f'Failed to re-install Docker container: {e2}')
+                            return 1
+                    else:
+                        print(f'Failed to start Docker container: {e}')
+                        return 1
                 async with StateDB() as db2:
                     await db2.register(
                         instance_id,
                         0,
-                        existing['port'],
+                        docker_port,
                         existing['version'],
                         existing['owner'],
                         restart_count=existing.get('restart_count', 0),

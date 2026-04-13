@@ -130,8 +130,9 @@ class DockerRuntime:
             container = client.containers.get(name)
             container.stop()
         except Exception as e:
-            # Ignore "container already stopped" errors
-            if '304' not in str(e) and 'not running' not in str(e).lower():
+            # Ignore "container already stopped" or "container not found" errors
+            err = str(e).lower()
+            if '304' not in str(e) and 'not running' not in err and '404' not in str(e) and 'no such container' not in err:
                 raise
 
     def remove(self, instance_id: str, remove_image: bool = False) -> None:
