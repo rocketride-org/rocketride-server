@@ -59,7 +59,11 @@ def _strip_react_preamble(text: str) -> str:
     1. Everything after the last ``Final Answer:`` marker.
     2. The last top-level JSON block (``\\n{`` … end), which is typically the
        tool's return value when the agent ends on a tool call observation.
-    3. The original text unchanged.
+    3. ``''`` — if the text looks like a ReAct trace but neither marker is
+       found, returns empty so the caller can try the next task output or
+       surface a clean error rather than leaking raw trace text.
+
+    Non-ReAct text (no Thought/Action/Observation markers) is returned as-is.
     """
     if not text:
         return text
