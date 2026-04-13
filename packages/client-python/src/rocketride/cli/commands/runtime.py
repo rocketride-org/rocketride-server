@@ -70,7 +70,7 @@ def _add_runtime_subcommands(subparsers) -> None:
     install_p.add_argument('version', nargs='?', default=None, help='Version to install (default: latest compatible)')
     install_p.add_argument('--force', action='store_true', help='Skip compatibility check and install any available version')
     install_type = install_p.add_mutually_exclusive_group()
-    install_type.add_argument('--service', action='store_true', help='Mark as Service type (managed by RocketRide products)')
+    install_type.add_argument('--local', action='store_true', help='Install as Local type (manual start/stop)')
     install_type.add_argument('--docker', action='store_true', help='Pull and run as a Docker container')
     install_p.add_argument('--port', type=int, default=None, help='Explicit host port for Docker installs (default: auto)')
 
@@ -503,15 +503,15 @@ async def _cmd_install(args) -> int:
     version = getattr(args, 'version', None)
     force = getattr(args, 'force', False)
     use_docker = getattr(args, 'docker', False)
-    use_service = getattr(args, 'service', False)
+    use_local = getattr(args, 'local', False)
 
     # Determine instance type
     if use_docker:
         inst_type = 'Docker'
-    elif use_service:
-        inst_type = 'Service'
-    else:
+    elif use_local:
         inst_type = 'Local'
+    else:
+        inst_type = 'Service'
 
     if version:
         version = normalize_version(version)
@@ -537,6 +537,10 @@ async def _cmd_install(args) -> int:
             sys.stdout.flush()
 
         async with StateDB() as db:
+            existing_docker = await db.find_by_version_and_type(image_tag, 'Docker')
+            if existing_docker:
+                print(f'Docker runtime v{image_tag} is already installed (id: {existing_docker["id"]})')
+                return 0
             instance_id = await db.next_id()
 
         print(f'Installing Docker runtime (tag: {image_tag}, port: {port}, id: {instance_id})')
@@ -555,12 +559,12 @@ async def _cmd_install(args) -> int:
 
     # ── Local / Service install ───────────────────────────────────
     if version:
-        # Check if already installed
+        # Check if already installed (scoped by type)
         binary = runtime_binary(version)
         async with StateDB() as db:
-            existing = await db.find_by_version(version)
+            existing = await db.find_by_version_and_type(version, inst_type)
         if binary.exists() and existing:
-            print(f'Runtime v{version} is already installed (id: {existing["id"]})')
+            print(f'Runtime v{version} ({inst_type}) is already installed (id: {existing["id"]})')
             return 0
 
         # Validate against the compatibility range (unless --force)
@@ -605,11 +609,30 @@ async def _cmd_install(args) -> int:
 
     # Register in state DB so it shows up in `list`
     async with StateDB() as db:
-        existing = await db.find_by_version(version)
+        existing = await db.find_by_version_and_type(version, inst_type)
         instance_id = existing['id'] if existing else await db.next_id()
         await db.register(instance_id, 0, 0, version, 'cli', desired_state='stopped', instance_type=inst_type)
 
     print(f'Installed runtime v{version} (id: {instance_id})')
+
+    if inst_type == 'Service':
+        port = find_available_port()
+        print(f'Starting service on port {port}...')
+        pid = await spawn_runtime(binary, port, instance_id)
+        try:
+            log_file = logs_dir(instance_id) / 'stderr.log'
+            await wait_ready(pid, log_file=log_file, on_output=lambda line: _print_progress(f'  {line}'))
+            _end_progress(f'Runtime v{version} is online (port {port}, PID {pid})')
+            async with StateDB() as db:
+                await db.register(instance_id, pid, port, version, 'cli', desired_state='running', instance_type='Service')
+        except Exception as e:
+            print(f'\nAuto-start failed: {e}')
+            print(f'Start manually: rocketride runtime start {instance_id}')
+            await stop_runtime(pid)
+            async with StateDB() as db:
+                await db.register(instance_id, 0, 0, version, 'cli', desired_state='stopped', instance_type='Service')
+            return 1
+
     return 0
 
 

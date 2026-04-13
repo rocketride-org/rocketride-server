@@ -230,6 +230,21 @@ class StateDB:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
+    async def find_by_version_and_type(
+        self,
+        version: str,
+        instance_type: str,
+        *,
+        include_deleted: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """Find an instance by version and type."""
+        sql = 'SELECT * FROM instances WHERE version = ? AND type = ?'
+        if not include_deleted:
+            sql += ' AND deleted = 0'
+        cursor = await self._db.execute(sql, (version, instance_type))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
     async def find_by_type(self, instance_type: str) -> List[Dict[str, Any]]:
         """Find all non-deleted instances of a given type."""
         cursor = await self._db.execute('SELECT * FROM instances WHERE type = ? AND deleted = 0 ORDER BY CAST(id AS INTEGER) ASC', (instance_type,))

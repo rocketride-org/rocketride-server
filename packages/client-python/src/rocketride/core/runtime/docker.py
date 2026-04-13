@@ -7,10 +7,9 @@ extension's docker-manager.ts using the ``docker`` PyPI package.
 """
 
 import platform as _platform
+import subprocess
 import sys
 from typing import Callable, Dict, Optional
-
-from ..exceptions import RuntimeManagementError
 
 CONTAINER_NAME_PREFIX = 'rocketride-runtime'
 IMAGE_BASE = 'ghcr.io/rocketride-org/rocketride-engine'
@@ -22,16 +21,6 @@ def _container_name(instance_id: str) -> str:
     return f'{CONTAINER_NAME_PREFIX}-{instance_id}'
 
 
-def _get_docker():
-    """Import and return the docker module, raising a clear error if missing."""
-    try:
-        import docker
-
-        return docker
-    except ImportError:
-        raise RuntimeManagementError('The "docker" Python package is required for Docker runtime support.\nInstall it with: pip install rocketride[docker]')
-
-
 class DockerRuntime:
     """Manages Docker container lifecycle for RocketRide runtime instances."""
 
@@ -39,9 +28,19 @@ class DockerRuntime:
         self._client = None
 
     def _ensure_client(self):
-        """Lazily create the Docker client."""
+        """Lazily create the Docker client, auto-installing the package if needed."""
         if self._client is None:
-            docker = _get_docker()
+            try:
+                import docker
+            except ImportError:
+                print('Installing docker package...')
+                subprocess.check_call(
+                    [sys.executable, '-m', 'pip', 'install', 'docker>=7.0.0'],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                import docker
+
             self._client = docker.from_env()
         return self._client
 
@@ -61,10 +60,6 @@ class DockerRuntime:
 
     def check_docker_status(self) -> str | None:
         """Return None if Docker is ready, or an error message explaining why not."""
-        try:
-            _get_docker()
-        except RuntimeManagementError:
-            return 'The "docker" Python package is not installed.\nInstall it with: pip install rocketride[docker]'
         try:
             client = self._ensure_client()
             client.ping()

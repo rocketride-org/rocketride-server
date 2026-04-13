@@ -309,6 +309,40 @@ class TestSoftDelete:
             assert result == []
 
 
+class TestFindByVersionAndType:
+    @pytest.fixture
+    def tmp_home(self, tmp_path):
+        """Redirect ~/.rocketride to a temp directory."""
+        home = tmp_path / '.rocketride'
+        with patch('rocketride.core.runtime.state.state_db_path', return_value=home / 'instances' / 'state.db'), patch('rocketride.core.runtime.state.ensure_dirs', side_effect=lambda: (home / 'instances').mkdir(parents=True, exist_ok=True)):
+            yield home
+
+    @pytest.mark.asyncio
+    async def test_find_by_version_and_type_found(self, tmp_home):
+        async with StateDB() as db:
+            await db.register('0', 100, 5565, '3.1.0', 'cli', instance_type='Service')
+            result = await db.find_by_version_and_type('3.1.0', 'Service')
+            assert result is not None
+            assert result['id'] == '0'
+
+    @pytest.mark.asyncio
+    async def test_find_by_version_and_type_wrong_type_returns_none(self, tmp_home):
+        async with StateDB() as db:
+            await db.register('0', 100, 5565, '3.1.0', 'cli', instance_type='Local')
+            result = await db.find_by_version_and_type('3.1.0', 'Service')
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_find_by_version_and_type_excludes_deleted(self, tmp_home):
+        async with StateDB() as db:
+            await db.register('0', 100, 5565, '3.1.0', 'cli', instance_type='Service')
+            await db.soft_delete('0')
+            result = await db.find_by_version_and_type('3.1.0', 'Service')
+            assert result is None
+            result_incl = await db.find_by_version_and_type('3.1.0', 'Service', include_deleted=True)
+            assert result_incl is not None
+
+
 class TestDesiredState:
     @pytest.fixture
     def tmp_home(self, tmp_path):
@@ -1372,17 +1406,17 @@ class TestCLIInstall:
             yield home
 
     @pytest.mark.asyncio
-    async def test_install_specific_version(self, tmp_home, tmp_path):
+    async def test_install_specific_version_local(self, tmp_home, tmp_path):
+        """--local flag: installs as Local, no auto-start."""
         from rocketride.cli.commands.runtime import _cmd_install
 
         binary = tmp_path / 'engine'
-        # Binary doesn't exist yet — download will create it
 
         args = MagicMock()
         args.version = '3.1.0'
         args.force = False
         args.docker = False
-        args.service = False
+        args.local = True
 
         with (
             patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
@@ -1392,9 +1426,79 @@ class TestCLIInstall:
             result = await _cmd_install(args)
 
         assert result == 0
+        async with StateDB() as db:
+            inst = await db.find_by_version_and_type('3.1.0', 'Local')
+            assert inst is not None
+            assert inst['desired_state'] == 'stopped'
+            assert inst['pid'] == 0
 
     @pytest.mark.asyncio
-    async def test_install_already_installed(self, tmp_home, tmp_path):
+    async def test_install_service_default(self, tmp_home, tmp_path):
+        """No flag = Service type + auto-start."""
+        from rocketride.cli.commands.runtime import _cmd_install
+
+        binary = tmp_path / 'engine'
+
+        args = MagicMock()
+        args.version = '3.1.0'
+        args.force = False
+        args.docker = False
+        args.local = False
+
+        with (
+            patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
+            patch('rocketride.cli.commands.runtime.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.cli.commands.runtime.download_runtime', new_callable=AsyncMock, side_effect=lambda *a, **kw: binary.write_text('fake') or binary),
+            patch('rocketride.cli.commands.runtime.find_available_port', return_value=5570),
+            patch('rocketride.cli.commands.runtime.spawn_runtime', new_callable=AsyncMock, return_value=12345),
+            patch('rocketride.cli.commands.runtime.wait_ready', new_callable=AsyncMock),
+            patch('rocketride.cli.commands.runtime.logs_dir', return_value=tmp_path / 'logs' / '0'),
+        ):
+            result = await _cmd_install(args)
+
+        assert result == 0
+        async with StateDB() as db:
+            inst = await db.find_by_version_and_type('3.1.0', 'Service')
+            assert inst is not None
+            assert inst['desired_state'] == 'running'
+            assert inst['pid'] == 12345
+            assert inst['port'] == 5570
+
+    @pytest.mark.asyncio
+    async def test_install_service_autostart_failure(self, tmp_home, tmp_path):
+        """Auto-start fails: install preserved as stopped, returns 1."""
+        from rocketride.cli.commands.runtime import _cmd_install
+
+        binary = tmp_path / 'engine'
+
+        args = MagicMock()
+        args.version = '3.1.0'
+        args.force = False
+        args.docker = False
+        args.local = False
+
+        with (
+            patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
+            patch('rocketride.cli.commands.runtime.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.cli.commands.runtime.download_runtime', new_callable=AsyncMock, side_effect=lambda *a, **kw: binary.write_text('fake') or binary),
+            patch('rocketride.cli.commands.runtime.find_available_port', return_value=5570),
+            patch('rocketride.cli.commands.runtime.spawn_runtime', new_callable=AsyncMock, return_value=12345),
+            patch('rocketride.cli.commands.runtime.wait_ready', new_callable=AsyncMock, side_effect=RuntimeManagementError('not ready')),
+            patch('rocketride.cli.commands.runtime.stop_runtime', new_callable=AsyncMock) as mock_stop,
+            patch('rocketride.cli.commands.runtime.logs_dir', return_value=tmp_path / 'logs' / '0'),
+        ):
+            result = await _cmd_install(args)
+
+        assert result == 1
+        mock_stop.assert_called_once_with(12345)
+        async with StateDB() as db:
+            inst = await db.find_by_version_and_type('3.1.0', 'Service')
+            assert inst is not None
+            assert inst['desired_state'] == 'stopped'
+            assert inst['pid'] == 0
+
+    @pytest.mark.asyncio
+    async def test_install_already_installed_same_type(self, tmp_home, tmp_path):
         from rocketride.cli.commands.runtime import _cmd_install
 
         binary = tmp_path / 'engine'
@@ -1404,16 +1508,52 @@ class TestCLIInstall:
         args.version = '3.1.0'
         args.force = False
         args.docker = False
-        args.service = False
+        args.local = True
 
-        # Pre-register an instance so it's "already installed"
+        # Pre-register a Local instance
         async with StateDB() as db:
-            await db.register('0', 0, 0, '3.1.0', 'cli', desired_state='stopped')
+            await db.register('0', 0, 0, '3.1.0', 'cli', desired_state='stopped', instance_type='Local')
 
         with patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary):
             result = await _cmd_install(args)
 
         assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_install_different_types_same_version_allowed(self, tmp_home, tmp_path):
+        """Local v3.1.0 exists, Service v3.1.0 should be allowed."""
+        from rocketride.cli.commands.runtime import _cmd_install
+
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        # Pre-register a Local instance (use next_id to advance sequence)
+        async with StateDB() as db:
+            local_id = await db.next_id()
+            await db.register(local_id, 0, 0, '3.1.0', 'cli', desired_state='stopped', instance_type='Local')
+
+        args = MagicMock()
+        args.version = '3.1.0'
+        args.force = False
+        args.docker = False
+        args.local = False  # default = Service
+
+        with (
+            patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
+            patch('rocketride.cli.commands.runtime.find_available_port', return_value=5570),
+            patch('rocketride.cli.commands.runtime.spawn_runtime', new_callable=AsyncMock, return_value=12345),
+            patch('rocketride.cli.commands.runtime.wait_ready', new_callable=AsyncMock),
+            patch('rocketride.cli.commands.runtime.logs_dir', return_value=tmp_path / 'logs' / '1'),
+        ):
+            result = await _cmd_install(args)
+
+        assert result == 0
+        async with StateDB() as db:
+            local = await db.find_by_version_and_type('3.1.0', 'Local')
+            service = await db.find_by_version_and_type('3.1.0', 'Service')
+            assert local is not None
+            assert service is not None
+            assert local['id'] != service['id']
 
     @pytest.mark.asyncio
     async def test_install_incompatible_version_rejected(self, tmp_home, tmp_path):
@@ -1425,7 +1565,7 @@ class TestCLIInstall:
         args.version = '5.0.0'
         args.force = False
         args.docker = False
-        args.service = False
+        args.local = True
 
         with (
             patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
@@ -1445,7 +1585,7 @@ class TestCLIInstall:
         args.version = '5.0.0'
         args.force = True
         args.docker = False
-        args.service = False
+        args.local = True
 
         with (
             patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
@@ -1465,7 +1605,7 @@ class TestCLIInstall:
         args.version = None
         args.force = False
         args.docker = False
-        args.service = False
+        args.local = True
 
         with (
             patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
@@ -1476,6 +1616,35 @@ class TestCLIInstall:
             result = await _cmd_install(args)
 
         assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_install_docker_duplicate_rejected(self, tmp_home, tmp_path):
+        """Docker same tag twice = rejected."""
+        from rocketride.cli.commands.runtime import _cmd_install
+
+        # Pre-register a Docker instance
+        async with StateDB() as db:
+            await db.register('0', 0, 8080, '3.1.0', 'cli', desired_state='running', instance_type='Docker')
+
+        args = MagicMock()
+        args.version = '3.1.0'
+        args.force = False
+        args.docker = True
+        args.local = False
+        args.port = None
+
+        with (
+            patch('rocketride.cli.commands.runtime.DockerRuntime') as mock_docker_cls,
+            patch('rocketride.cli.commands.runtime.resolve_docker_tag', new_callable=AsyncMock, return_value='3.1.0'),
+            patch('rocketride.cli.commands.runtime.find_available_port', return_value=8081),
+        ):
+            mock_docker = MagicMock()
+            mock_docker.check_docker_status.return_value = None
+            mock_docker_cls.return_value = mock_docker
+
+            result = await _cmd_install(args)
+
+        assert result == 0  # early return, not error
 
 
 # ── CLI start ─────────────────────────────────────────────────
