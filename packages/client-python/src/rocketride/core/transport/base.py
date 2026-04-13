@@ -189,9 +189,7 @@ class TransportBase(ABC):
             self._on_caller_disconnected = on_disconnected
 
     def get_connection_info(self) -> Optional[str]:
-        """
-        Connection info for the "connected" callback (e.g. URI). Default none.
-        """
+        """Return connection info for the "connected" callback (e.g. URI)."""
         return None
 
     def set_auth(self, auth: str) -> None:

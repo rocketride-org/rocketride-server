@@ -187,7 +187,7 @@ class TestServicesOperations:
             result = await client.get_services()
 
             assert isinstance(result, dict)
-            # Engine returns { "services": {...}, "version": ... }
+            # Runtime returns { "services": {...}, "version": ... }
             assert 'services' in result
             assert isinstance(result['services'], dict)
             # May have version from engine

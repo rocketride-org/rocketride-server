@@ -242,3 +242,21 @@ class ValidationException(RocketRideException):
     """
 
     pass
+
+
+class UnsupportedPlatformError(Exception):
+    """Raised when the current platform is not supported for runtime downloads."""
+
+    pass
+
+
+class RuntimeManagementError(Exception):
+    """Base exception for runtime management failures (spawn, download, state)."""
+
+    pass
+
+
+class RuntimeNotFoundError(RuntimeManagementError):
+    """Raised when no compatible runtime binary is available and download failed."""
+
+    pass

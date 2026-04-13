@@ -68,6 +68,8 @@ from .commands.events import EventsCommand
 from .commands.list import ListCommand
 from .commands.store import StoreCommand
 
+from .commands.runtime import register_runtime_commands, handle_runtime_command
+
 try:
     # Try importing from installed package first
     from rocketride import RocketRideClient
@@ -506,6 +508,9 @@ class RocketRideCLI:
         stat_parser = store_subparsers.add_parser('stat', help='Get file/directory metadata', parents=[store_common_parser])
         stat_parser.add_argument('path', help='File or directory path')
 
+        # Runtime management commands (rocketride runtime ... / rocketride r ...)
+        register_runtime_commands(subparsers)
+
         return parser
 
     async def run(self) -> int:
@@ -534,6 +539,10 @@ class RocketRideCLI:
         if not self.args.command:
             parser.print_help()
             return 1
+
+        # Runtime commands are self-contained — dispatch before client validation
+        if self.args.command in ('runtime', 'r'):
+            return await handle_runtime_command(self.args)
 
         # Validate required authentication
         if not self.args.apikey:

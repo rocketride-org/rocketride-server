@@ -108,7 +108,12 @@ from .types import (
 )
 
 from .client import RocketRideClient, RocketRideException
-from .core.exceptions import AuthenticationException
+from .core.exceptions import (
+    AuthenticationException,
+    UnsupportedPlatformError,
+    RuntimeManagementError,
+    RuntimeNotFoundError,
+)
 
 from .core.constants import (
     CONST_DEFAULT_SERVICE,
@@ -128,6 +133,9 @@ __all__ = [
     'RocketRideClientConfig',
     'RocketRideException',
     'AuthenticationException',
+    'UnsupportedPlatformError',
+    'RuntimeManagementError',
+    'RuntimeNotFoundError',
     'CONST_DEFAULT_SERVICE',
     'CONST_DEFAULT_WEB_CLOUD',
     'CONST_DEFAULT_WEB_HOST',

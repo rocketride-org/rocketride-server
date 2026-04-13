@@ -42,8 +42,8 @@ Key Features:
 import asyncio
 import time
 from typing import Dict, Any, Optional
-from .dap_base import DAPBase
-from .exceptions import AuthenticationException
+from .base import DAPBase
+from ..exceptions import AuthenticationException
 
 
 class DAPClient(DAPBase):

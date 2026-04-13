@@ -56,7 +56,7 @@ Usage (Internal):
 import json
 import asyncio
 from typing import Dict, Any, Union, Optional
-from .constants import CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT, CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
+from ..constants import CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT, CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 
 # Optional dependency handling for websockets library
 try:
@@ -74,7 +74,7 @@ except ImportError:
     WebSocket = None
     WebSocketDisconnect = None
 
-from .transport import TransportBase
+from .base import TransportBase
 
 
 class TransportWebSocket(TransportBase):

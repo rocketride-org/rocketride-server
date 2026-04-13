@@ -88,6 +88,7 @@ chat -> orchestrator agent -> response
 3. Open the `.pipe` file in VS Code with the RocketRide extension, or run it with the SDK:
 
 **Python:**
+
 ```python
 from rocketride import RocketRideClient
 
@@ -97,6 +98,7 @@ result = await client.use(filepath='rag-pipeline.pipe')
 ```
 
 **TypeScript:**
+
 ```typescript
 import { RocketRideClient } from 'rocketride';
 

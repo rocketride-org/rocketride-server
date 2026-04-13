@@ -24,7 +24,8 @@ import asyncio
 from rocketride import RocketRideClient
 
 async def main():
-    async with RocketRideClient(uri="https://cloud.rocketride.ai", auth="my-key") as client:
+    # Zero-config: no URI needed — the SDK auto-downloads and manages a local engine
+    async with RocketRideClient(auth="my-key") as client:
         result = await client.use(filepath="pipeline.pipe")
         token = result["token"]
         out = await client.send(token, "Hello, pipeline!", objinfo={"name": "input.txt"}, mimetype="text/plain")
@@ -62,9 +63,162 @@ You build your `.pipe` - and you run it against the fastest AI runtime available
 - **Event streaming** - Real-time events via `on_event` and `set_events()`
 - **File upload** - `send_files()` with progress; streaming with `pipe()`
 - **Connection lifecycle** - Optional persist mode, reconnection, and callbacks (`on_connected`, `on_disconnected`, `on_connect_error`)
-- **Project storage** - Save, retrieve, and version-control pipelines on the server
-- **Async-first** - Built on `asyncio` and `websockets`; supports `async with` context manager
-- **CLI included** - Manage pipelines from the command line
+- **Async context manager** - `async with RocketRideClient(...) as client:` for automatic cleanup
+- **Bundled engine** - Zero-config local execution: the SDK auto-downloads, spawns, and manages the engine binary
+- **Engine CLI** - `rocketride engine` (or `rocketride e`) commands for engine lifecycle management
+
+---
+
+## CLI Reference
+
+The `rocketride` command-line interface provides two categories of commands: **pipeline/task management** (for running and monitoring pipelines) and **engine management** (for controlling local engine instances).
+
+### Pipeline & Task Commands
+
+#### `rocketride start <pipeline>`
+
+Start a new pipeline execution.
+
+```bash
+rocketride start ./pipeline.pipe
+rocketride start ./pipeline.pipe --uri http://localhost:5566 --apikey YOUR_KEY
+rocketride start ./pipeline.pipe --threads 4 --args key1=value1 key2=value2
+```
+
+| Flag        | Description                                           |
+| ----------- | ----------------------------------------------------- |
+| `--uri`     | Engine URI (default: `$ROCKETRIDE_URI` or auto-spawn) |
+| `--apikey`  | API key (default: `$ROCKETRIDE_APIKEY`)               |
+| `--token`   | Reuse an existing task token                          |
+| `--threads` | Number of threads for the pipeline                    |
+| `--args`    | Key-value arguments passed to the pipeline            |
+
+#### `rocketride upload <files> [--pipeline_path <path>]`
+
+Upload files to an existing or new pipeline.
+
+```bash
+rocketride upload ./data/*.csv --pipeline_path ./pipeline.pipe
+rocketride upload report.pdf --token TASK_TOKEN --uri http://localhost:5566
+```
+
+| Flag              | Description                                |
+| ----------------- | ------------------------------------------ |
+| `--pipeline_path` | Pipeline to start if no `--token` is given |
+| `--token`         | Upload to an existing task                 |
+| `--uri`           | Engine URI                                 |
+| `--apikey`        | API key                                    |
+| `--threads`       | Number of threads                          |
+| `--args`          | Key-value arguments                        |
+
+#### `rocketride status`
+
+Monitor task execution status continuously.
+
+```bash
+rocketride status --token TASK_TOKEN --uri http://localhost:5566
+```
+
+#### `rocketride stop`
+
+Terminate a running task.
+
+```bash
+rocketride stop --token TASK_TOKEN --uri http://localhost:5566
+```
+
+#### `rocketride events [event_types...]`
+
+Monitor task events with optional filtering.
+
+```bash
+rocketride events --token TASK_TOKEN
+rocketride events apaevt_status_upload apaevt_status_processing --token TASK_TOKEN
+rocketride events --log --token TASK_TOKEN
+```
+
+#### `rocketride list`
+
+List all active tasks on the engine.
+
+```bash
+rocketride list --uri http://localhost:5566
+rocketride list --json
+```
+
+### Engine Management
+
+The engine commands manage local RocketRide engine instances. The SDK can automatically download, install, and run the engine binary &mdash; no separate install needed.
+
+Use `rocketride engine <command>` (or the shorthand `rocketride e <command>`).
+
+#### `rocketride engine install [version]`
+
+Download and register an engine binary.
+
+```bash
+rocketride engine install              # latest compatible version
+rocketride engine install 3.0.5        # specific version
+rocketride engine install 3.0.5 --force  # skip compatibility check
+```
+
+#### `rocketride engine list`
+
+List all tracked engine instances with status, port, PID, memory, and uptime.
+
+```bash
+rocketride engine list
+```
+
+```
+VERSION  ID  PID    PORT  OWNER  STATUS  RESTARTED  UPTIME  MEMORY
+3.0.5    0   12340  5566  cli    online  2          4m      86.9 MB
+3.0.3    1   -      -     cli    stopped 0          0s      -
+```
+
+#### `rocketride engine start [id]`
+
+Start an engine instance.
+
+```bash
+rocketride engine start 0                         # by instance ID
+rocketride engine start --version 3.0.5            # by version
+rocketride engine start --version 3.0.5 --port 7777  # explicit port
+```
+
+| Flag        | Description                                                               |
+| ----------- | ------------------------------------------------------------------------- |
+| `--version` | Engine version to use (looks up the registered instance for that version) |
+| `--port`    | Explicit port (default: auto-assigned)                                    |
+
+#### `rocketride engine stop <id>`
+
+Stop a running engine instance.
+
+```bash
+rocketride engine stop 0
+```
+
+#### `rocketride engine delete <id>`
+
+Deregister an engine instance. The engine binary is kept on disk so `install` can re-register it without re-downloading.
+
+```bash
+rocketride engine delete 0            # deregister only
+rocketride engine delete 0 --purge    # also remove the binary from disk
+```
+
+| Flag      | Description                             |
+| --------- | --------------------------------------- |
+| `--purge` | Also remove the engine binary from disk |
+
+#### `rocketride engine logs <id>`
+
+Tail the log output of an engine instance.
+
+```bash
+rocketride engine logs 0
+```
 
 ---
 
@@ -93,23 +247,23 @@ RocketRideClient(
 
 **Why the options matter:** `uri` and `auth` tell the client _where_ and _how_ to authenticate. `persist` and `max_retry_time` control what happens when the connection fails or the server is not ready yet: with `persist=True` the client retries with exponential backoff and calls `on_connect_error` on each failure, so you can show "Still connecting..." or "Connection failed" without implementing retry logic yourself. Use `on_disconnected` only for "we were connected and then dropped"; use `on_connect_error` for "failed to connect" or "gave up after max retry time."
 
-| Argument              | Type                      | Required | Description                                                                                                                                          |
-| --------------------- | ------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `uri`                 | `str`                     | Yes\*    | Server URI. \*Can be empty if `ROCKETRIDE_URI` is set in env/`.env`.                                                                                 |
-| `auth`                | `str`                     | Yes\*    | API key. \*Can be empty if `ROCKETRIDE_APIKEY` is set.                                                                                               |
-| `env`                 | `dict`                    | No       | Override env; if omitted, `.env` is loaded. Use when passing config in code instead of env files.                                                    |
-| `module`              | `str`                     | No       | Client name for logging.                                                                                                                             |
-| `request_timeout`     | `float`                   | No       | Default timeout in ms for requests. Prevents a single DAP call from hanging.                                                                         |
-| `max_retry_time`      | `float`                   | No       | Max time in ms to keep retrying connection. Use (e.g. 300000) so the app can show "gave up" after a bounded time.                                    |
-| `persist`             | `bool`                    | No       | Enable automatic reconnection. Default: `False`. Set `True` for long-lived scripts or UIs.                                                           |
-| `on_event`            | async callable            | No       | Called with each server event dict. Use for progress or status updates.                                                                              |
-| `on_connected`        | async callable            | No       | Called when connection is established.                                                                                                               |
-| `on_disconnected`     | async callable            | No       | Called when connection is lost **only if** connected first; args: `reason`, `has_error`. Do not call `disconnect()` here if you want auto-reconnect. |
-| `on_connect_error`    | callable `(message: str)` | No       | Called on each failed connection attempt. On auth failure the client stops retrying.                                                                 |
-| `on_protocol_message` | callable `(message: str)` | No       | Optional; for logging raw DAP messages. Helpful when debugging protocol issues.                                                                      |
-| `on_debug_message`    | callable `(message: str)` | No       | Optional; for debug output.                                                                                                                          |
+| Argument              | Type                      | Required | Description                                                                                                                                                        |
+| --------------------- | ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `uri`                 | `str`                     | No       | Server URI. If empty, falls back to `ROCKETRIDE_URI` env var. If neither is set, the SDK auto-spawns a local engine (see [Engine Auto-Spawn](#engine-auto-spawn)). |
+| `auth`                | `str`                     | Yes\*    | API key. \*Can be empty if `ROCKETRIDE_APIKEY` is set.                                                                                                             |
+| `env`                 | `dict`                    | No       | Override env; if omitted, `.env` is loaded. Use when passing config in code instead of env files.                                                                  |
+| `module`              | `str`                     | No       | Client name for logging.                                                                                                                                           |
+| `request_timeout`     | `float`                   | No       | Default timeout in ms for requests. Prevents a single DAP call from hanging.                                                                                       |
+| `max_retry_time`      | `float`                   | No       | Max time in ms to keep retrying connection. Use (e.g. 300000) so the app can show "gave up" after a bounded time.                                                  |
+| `persist`             | `bool`                    | No       | Enable automatic reconnection. Default: `False`. Set `True` for long-lived scripts or UIs.                                                                         |
+| `on_event`            | async callable            | No       | Called with each server event dict. Use for progress or status updates.                                                                                            |
+| `on_connected`        | async callable            | No       | Called when connection is established.                                                                                                                             |
+| `on_disconnected`     | async callable            | No       | Called when connection is lost **only if** connected first; args: `reason`, `has_error`. Do not call `disconnect()` here if you want auto-reconnect.               |
+| `on_connect_error`    | callable `(message: str)` | No       | Called on each failed connection attempt. On auth failure the client stops retrying.                                                                               |
+| `on_protocol_message` | callable `(message: str)` | No       | Optional; for logging raw DAP messages. Helpful when debugging protocol issues.                                                                                    |
+| `on_debug_message`    | callable `(message: str)` | No       | Optional; for debug output.                                                                                                                                        |
 
-Raises `ValueError` if both `uri` and `ROCKETRIDE_URI` are empty or if `auth` is missing and not in env.
+If `uri` and `ROCKETRIDE_URI` are both empty, the client activates **engine auto-spawn** mode — it will download (if needed) and start a local engine instance automatically on `connect()`. See [Engine Auto-Spawn](#engine-auto-spawn) for details.
 
 **Example - client with persist and callbacks:**
 
@@ -131,7 +285,7 @@ client = RocketRideClient(
 | `__aenter__` | `async def __aenter__(self)`                           | `self`  | Enters context; calls `connect()`.   |
 | `__aexit__`  | `async def __aexit__(self, exc_type, exc_val, exc_tb)` | -       | Exits context; calls `disconnect()`. |
 
-**How to use:** Prefer `async with RocketRideClient(...) as client:` so the connection is always closed when you leave the block, even on exception. No need to call `disconnect()` manually.
+**How to use:** Prefer `async with RocketRideClient(...) as client:` so the connection is always closed when you leave the block, even on exception. No need to call `disconnect()` manually. When using engine auto-spawn, the context manager also handles engine startup and teardown automatically.
 
 **Example:**
 
@@ -314,6 +468,72 @@ From `rocketride.schema`. Used to parse chat response content. The client does n
 
 ---
 
+## Engine Auto-Spawn
+
+When no `uri` is provided and `ROCKETRIDE_URI` is not set, the SDK automatically manages a local engine instance. This enables **zero-config** usage — just provide an API key and the SDK handles everything else.
+
+### How it works
+
+1. **Check for a running instance** — The SDK checks `~/.rocketride/instances/state.db` for an already-running engine. If found, it reuses it.
+2. **Find an installed binary** — If no running instance exists, the SDK looks for a compatible engine binary under `~/.rocketride/engines/{version}/`.
+3. **Download if needed** — If no compatible binary is installed, the SDK downloads the latest compatible version from GitHub releases.
+4. **Spawn and connect** — The engine is started on an available port (scanning from 5565), and the client connects to it automatically.
+5. **Teardown on exit** — When the client disconnects (via `__aexit__` or `disconnect()`), the engine is stopped — but only if this client started it.
+
+### Compatibility
+
+The SDK declares which engine versions it supports in `pyproject.toml`:
+
+```toml
+[tool.rocketride]
+engine-compatible = ">=3.0.0,<4.0.0"
+```
+
+Only engine versions matching this range will be used or downloaded.
+
+### Supported platforms
+
+| Platform | Architecture          | Asset format |
+| -------- | --------------------- | ------------ |
+| macOS    | ARM64 (Apple Silicon) | `.tar.gz`    |
+| Linux    | x86_64                | `.tar.gz`    |
+| Windows  | x64                   | `.zip`       |
+
+### Directory structure
+
+```
+~/.rocketride/
+├── engines/
+│   └── 3.1.0/              # One directory per installed version
+│       └── rocketride-server(.exe)
+├── instances/
+│   └── state.db             # SQLite — tracks running instances
+└── logs/
+    └── {instance-id}/       # Per-instance log files
+        ├── stdout.log
+        └── stderr.log
+```
+
+### Example — zero-config usage
+
+```python
+import asyncio
+from rocketride import RocketRideClient
+
+async def main():
+    # No URI — the SDK auto-spawns a local engine
+    async with RocketRideClient(auth="my-key") as client:
+        result = await client.use(filepath="pipeline.pipe")
+        token = result["token"]
+        out = await client.send(token, "Hello!")
+        print(out)
+        await client.terminate(token)
+
+asyncio.run(main())
+```
+
+---
+
 ## Exceptions
 
 The exception hierarchy provides fine-grained error handling:
@@ -326,16 +546,20 @@ DAPException                    # Base DAP protocol error (has dap_result dict)
     ├── PipeException           # Data pipe errors (open/write/close)
     ├── ExecutionException      # Pipeline start/run failures
     └── ValidationException     # Invalid input/config
+
+UnsupportedPlatformError        # OS/architecture not supported for engine download
+EngineError                     # Base for engine lifecycle errors
+└── EngineNotFoundError         # Compatible engine binary could not be found or downloaded
 ```
 
-All exceptions expose a `dap_result` dict with detailed server error context.
+DAP exceptions expose a `dap_result` dict with detailed server error context. Engine exceptions are plain `Exception` subclasses (not DAP-related).
 
 `AuthenticationException` is thrown on DAP auth failure. In persist mode the client catches it, calls `on_connect_error`, and does not retry so the app can fix credentials and call `connect()` again.
 
 **Example:**
 
 ```python
-from rocketride import RocketRideClient, AuthenticationException
+from rocketride import RocketRideClient, AuthenticationException, EngineError, UnsupportedPlatformError
 from rocketride.core.exceptions import PipeException, ExecutionException
 
 try:
@@ -348,6 +572,10 @@ except ExecutionException as e:
     print(f"Pipeline failed: {e}")
 except PipeException as e:
     print(f"Data transfer error: {e}")
+except EngineError as e:
+    print(f"Engine error: {e}")  # Covers EngineNotFoundError too
+except UnsupportedPlatformError:
+    print("This platform is not supported for local engine execution")
 ```
 
 ---

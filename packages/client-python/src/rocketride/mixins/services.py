@@ -30,7 +30,7 @@ configuration metadata used for pipeline configuration and validation.
 Usage:
     # Get all available service definitions
     services = await client.get_services()
-    # services is a dict with 'services' and 'version' keys from the engine
+    # services is a dict with 'services' and 'version' keys from the runtime
 
     # Get a specific service by name
     ocr_schema = await client.get_service('ocr')
@@ -63,7 +63,7 @@ class ServicesMixin(DAPClient):
         """
         Retrieve all available service definitions from the server.
 
-        Returns the full services structure from the engine, including a
+        Returns the full services structure from the runtime, including a
         'services' dict (logical type -> definition) and 'version'.
 
         Returns:
@@ -106,12 +106,8 @@ class ServicesMixin(DAPClient):
         response = await self.request(request)
 
         if self.did_fail(response):
-            error_msg = response.get(
-                'message', f"Service '{service}' not found"
-            )
-            raise RuntimeError(
-                f"Failed to retrieve service '{service}': {error_msg}"
-            )
+            error_msg = response.get('message', f"Service '{service}' not found")
+            raise RuntimeError(f"Failed to retrieve service '{service}': {error_msg}")
 
         return response.get('body')
 

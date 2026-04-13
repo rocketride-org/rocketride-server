@@ -546,7 +546,6 @@ class DataConn(DAPConn):
             raise ValueError(f'Write pipe with id {pipe_id} has failed')
 
         def write_sync():
-
             # Get the data to write
             data: bytes = args.get('data', None)
             if data is None:
