@@ -1,0 +1,212 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Text To Speech",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "audio_tts://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["audio"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most nodes
+	//
+	"path": "nodes.audio_tts",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "audio_tts",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["Converts incoming text into speech using Kokoro-82M (local KPipeline or --modelserver KokoroLoader).", "Output is sent on the audio lane as WAV bytes.", "See README for spaCy en_core_web_sm (misaki) and troubleshooting."],
+	//
+	// Optional:
+	//	  The icon to display in the UI for this node
+	//
+	"icon": "audio-player.svg",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"text": ["audio"]
+	},
+	"input": [
+		{
+			"lane": "text",
+			"description": "Text input for speech synthesis",
+			"output": [
+				{
+					"lane": "audio"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "kokoro",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"kokoro": {
+				"engine": "kokoro",
+				"kokoro_voice": "af_heart"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		// ── Kokoro ────────────────────────────────────────────────────────────
+		"audio_tts.kokoro_voice": {
+			"type": "string",
+			"title": "Voice",
+			"description": "Kokoro voice. The language is derived automatically from the voice prefix (af_/am_ → American, bf_/bm_ → British, ef_/em_ → Spanish, etc.).",
+			"default": "af_heart",
+			"enum": [
+				["af_heart", "American — af_heart"],
+				["af_bella", "American — af_bella"],
+				["af_nicole", "American — af_nicole"],
+				["af_sarah", "American — af_sarah"],
+				["af_sky", "American — af_sky"],
+				["af_alloy", "American — af_alloy"],
+				["af_aoede", "American — af_aoede"],
+				["af_jessica", "American — af_jessica"],
+				["af_kore", "American — af_kore"],
+				["af_nova", "American — af_nova"],
+				["af_river", "American — af_river"],
+				["am_adam", "American — am_adam"],
+				["am_echo", "American — am_echo"],
+				["am_eric", "American — am_eric"],
+				["am_fenrir", "American — am_fenrir"],
+				["am_liam", "American — am_liam"],
+				["am_michael", "American — am_michael"],
+				["am_onyx", "American — am_onyx"],
+				["am_puck", "American — am_puck"],
+				["am_santa", "American — am_santa"],
+				["bf_emma", "British — bf_emma"],
+				["bf_isabella", "British — bf_isabella"],
+				["bf_alice", "British — bf_alice"],
+				["bf_lily", "British — bf_lily"],
+				["bm_george", "British — bm_george"],
+				["bm_lewis", "British — bm_lewis"],
+				["bm_daniel", "British — bm_daniel"],
+				["bm_fable", "British — bm_fable"],
+				["jf_alpha", "Japanese — jf_alpha"],
+				["jf_gongitsune", "Japanese — jf_gongitsune"],
+				["jf_nezumi", "Japanese — jf_nezumi"],
+				["jf_tebukuro", "Japanese — jf_tebukuro"],
+				["jm_kumo", "Japanese — jm_kumo"],
+				["zf_xiaobei", "Mandarin — zf_xiaobei"],
+				["zf_xiaoni", "Mandarin — zf_xiaoni"],
+				["zf_xiaoxiao", "Mandarin — zf_xiaoxiao"],
+				["zf_xiaoyi", "Mandarin — zf_xiaoyi"],
+				["zm_yunjian", "Mandarin — zm_yunjian"],
+				["zm_yunxi", "Mandarin — zm_yunxi"],
+				["zm_yunxia", "Mandarin — zm_yunxia"],
+				["zm_yunyang", "Mandarin — zm_yunyang"],
+				["ef_dora", "Spanish — ef_dora"],
+				["em_alex", "Spanish — em_alex"],
+				["em_santa", "Spanish — em_santa"],
+				["ff_siwis", "French — ff_siwis"],
+				["hf_alpha", "Hindi — hf_alpha"],
+				["hf_beta", "Hindi — hf_beta"],
+				["hm_omega", "Hindi — hm_omega"],
+				["hm_psi", "Hindi — hm_psi"],
+				["if_sara", "Italian — if_sara"],
+				["im_nicola", "Italian — im_nicola"],
+				["pf_dora", "Portuguese — pf_dora"],
+				["pm_alex", "Portuguese — pm_alex"],
+				["pm_santa", "Portuguese — pm_santa"]
+			]
+		},
+		// ── Form objects (one per profile) ────────────────────────────────────
+		"audio_tts.form.kokoro": {
+			"object": "kokoro",
+			"properties": ["audio_tts.kokoro_voice"]
+		},
+		// ── Profile selector (drives conditional form rendering) ───────────────
+		"audio_tts.profile": {
+			"title": "TTS profile",
+			"type": "string",
+			"default": "kokoro",
+			"enum": [["kokoro", "Kokoro"]],
+			"conditional": [
+				{
+					"value": "kokoro",
+					"properties": ["audio_tts.form.kokoro"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Text To Speech",
+			"properties": ["audio_tts.profile"]
+		}
+	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing
+	//
+	"test": {
+		"profiles": ["kokoro"],
+		"outputs": ["audio"],
+		"cases": [
+			{
+				"name": "Kokoro returns audio",
+				"text": "Hello from RocketRide",
+				"expect": {
+					"audio": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	}
+}
