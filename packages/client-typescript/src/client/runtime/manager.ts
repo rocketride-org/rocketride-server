@@ -22,6 +22,7 @@ import { StateDB } from './state.js';
 
 export class RuntimeManager {
 	private instanceId: string | null = null;
+	private _pid: number | null = null;
 	private _port: number | null = null;
 	private _weStarted: boolean = false;
 	private _version: string = '';
@@ -57,8 +58,8 @@ export class RuntimeManager {
 					this._weStarted = false;
 					return [this.uri!, false];
 				}
-				// Stale — stop and mark
-				await stopRuntime(existing.pid);
+				// Stale — mark stopped without killing (PID may have been
+				// recycled to an unrelated process since the runtime crashed)
 				db.markStopped(existing.id);
 			}
 
@@ -83,6 +84,7 @@ export class RuntimeManager {
 
 			db.register(instanceId, pid, port, this._version, 'sdk');
 
+			this._pid = pid;
 			this._port = port;
 			this.instanceId = instanceId;
 			this._weStarted = true;
@@ -101,14 +103,14 @@ export class RuntimeManager {
 	async teardown(): Promise<void> {
 		if (!this._weStarted || !this.instanceId) return;
 
+		if (this._pid) {
+			await stopRuntime(this._pid);
+		}
+
 		const db = new StateDB();
 		db.open();
 		try {
-			const inst = db.get(this.instanceId);
-			if (inst) {
-				await stopRuntime(inst.pid);
-				db.markStopped(this.instanceId);
-			}
+			db.markStopped(this.instanceId);
 		} finally {
 			db.close();
 		}
@@ -116,6 +118,7 @@ export class RuntimeManager {
 		this.restoreSignalHandlers();
 		this._weStarted = false;
 		this.instanceId = null;
+		this._pid = null;
 		this._port = null;
 	}
 
@@ -205,17 +208,20 @@ export class RuntimeManager {
 		if (!this._weStarted || !this.instanceId) return;
 
 		try {
+			// Kill using in-memory PID — don't re-read from DB
+			// (avoids race where teardown already zeroed the row)
+			if (this._pid) {
+				try {
+					process.kill(this._pid, 'SIGTERM');
+				} catch {
+					// Already gone
+				}
+			}
+
+			// Update DB state
 			const dbPath = stateDbPath();
 			if (existsSync(dbPath)) {
 				const conn = new Database(dbPath);
-				const row = conn.prepare('SELECT pid FROM instances WHERE id = ?').get(this.instanceId) as { pid: number } | undefined;
-				if (row && row.pid) {
-					try {
-						process.kill(row.pid, 'SIGTERM');
-					} catch {
-						// Already gone
-					}
-				}
 				conn.prepare('UPDATE instances SET pid = 0, port = 0 WHERE id = ?').run(this.instanceId);
 				conn.close();
 			}
