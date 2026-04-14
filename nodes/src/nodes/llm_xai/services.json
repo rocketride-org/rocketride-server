@@ -107,14 +107,14 @@
 				"model": "grok-4-1-fast-non-reasoning",
 				"modelSource": "manual",
 				"modelTotalTokens": 2000000,
-				"modelOutputTokens": 4096 // default
+				"modelOutputTokens": 4096
 			},
 			"grok-code-fast-1": {
 				"title": "Grok Code Fast 1",
 				"model": "grok-code-fast-1",
 				"modelSource": "manual",
 				"modelTotalTokens": 256000,
-				"modelOutputTokens": 10000 // openrouter
+				"modelOutputTokens": 10000
 			},
 			"grok-4-fast-reasoning": {
 				"title": "Grok 4 Fast",
@@ -135,68 +135,68 @@
 				"model": "grok-4-0709",
 				"modelSource": "manual",
 				"modelTotalTokens": 256000,
-				"modelOutputTokens": 256000 // litellm
+				"modelOutputTokens": 256000
 			},
 			"grok-3-mini": {
 				"title": "Grok 3 Mini",
 				"model": "grok-3-mini",
 				"modelSource": "manual",
 				"modelTotalTokens": 131072,
-				"modelOutputTokens": 131072 // litellm
+				"modelOutputTokens": 131072
 			},
 			"grok-3": {
 				"title": "Grok 3",
 				"model": "grok-3",
 				"modelSource": "manual",
 				"modelTotalTokens": 131072,
-				"modelOutputTokens": 131072 // litellm
+				"modelOutputTokens": 131072
 			},
 			"grok-4-20-multi-agent": {
-				"title": "Grok 4.20 Multi Agent",
+				"title": "xAI: Grok 4.20 Multi-Agent",
 				"model": "grok-4.20-multi-agent",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 2000000, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 2000000,
+				"modelOutputTokens": 4096,
 				"apikey": ""
 			},
 			"grok-4-20": {
-				"title": "Grok 4.20",
+				"title": "xAI: Grok 4.20",
 				"model": "grok-4.20",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 2000000, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 2000000,
+				"modelOutputTokens": 4096,
 				"apikey": ""
 			},
 			"grok-4-1-fast": {
-				"title": "Grok 4.1 Fast",
+				"title": "xAI: Grok 4.1 Fast",
 				"model": "grok-4.1-fast",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 2000000, // openrouter
-				"modelOutputTokens": 30000, // openrouter
+				"modelTotalTokens": 2000000,
+				"modelOutputTokens": 30000,
 				"apikey": ""
 			},
 			"grok-4-fast": {
-				"title": "Grok 4 Fast",
+				"title": "xAI: Grok 4 Fast",
 				"model": "grok-4-fast",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 2000000, // openrouter
-				"modelOutputTokens": 30000, // openrouter
+				"modelTotalTokens": 2000000,
+				"modelOutputTokens": 30000,
 				"apikey": ""
 			},
 			"grok-3-mini-beta": {
-				"title": "Grok 3 Mini Beta",
+				"title": "xAI: Grok 3 Mini Beta",
 				"model": "grok-3-mini-beta",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 131072, // litellm
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 131072,
 				"apikey": ""
 			},
 			"grok-3-beta": {
-				"title": "Grok 3 Beta",
+				"title": "xAI: Grok 3 Beta",
 				"model": "grok-3-beta",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 131072, // litellm
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 131072,
 				"apikey": ""
 			}
 		}
@@ -220,39 +220,39 @@
 		},
 		"xai.custom": {
 			"object": "custom",
-			"properties": ["model", "modelTotalTokens", "llm.cloud.apikey"]
+			"properties": ["model", "modelTotalTokens", "llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"xai.grok-4-1-fast-reasoning": {
 			"object": "grok-4-1-fast-reasoning",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"xai.grok-4-1-fast-non-reasoning": {
 			"object": "grok-4-1-fast-non-reasoning",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"xai.grok-code-fast-1": {
 			"object": "grok-code-fast-1",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"xai.grok-4-fast-reasoning": {
 			"object": "grok-4-fast-reasoning",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"xai.grok-4-fast-non-reasoning": {
 			"object": "grok-4-fast-non-reasoning",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"xai.grok-4": {
 			"object": "grok-4",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"xai.grok-3-mini": {
 			"object": "grok-3-mini",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"xai.grok-3": {
 			"object": "grok-3",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"xai.profile": {
 			"title": "Model",
@@ -298,20 +298,16 @@
 					"properties": ["xai.grok-3"]
 				},
 				{
-					"value": "grok-4-20",
-					"properties": ["xai.grok-4-20"]
-				},
-				{
-					"value": "grok-4-20-multi-agent",
-					"properties": ["xai.grok-4-20-multi-agent"]
+					"value": "grok-4-fast",
+					"properties": ["xai.grok-4-fast"]
 				},
 				{
 					"value": "grok-3-mini-beta",
 					"properties": ["xai.grok-3-mini-beta"]
 				},
 				{
-					"value": "grok-4-fast",
-					"properties": ["xai.grok-4-fast"]
+					"value": "grok-4-20-multi-agent",
+					"properties": ["xai.grok-4-20-multi-agent"]
 				},
 				{
 					"value": "grok-3-beta",
@@ -320,32 +316,36 @@
 				{
 					"value": "grok-4-1-fast",
 					"properties": ["xai.grok-4-1-fast"]
+				},
+				{
+					"value": "grok-4-20",
+					"properties": ["xai.grok-4-20"]
 				}
 			]
 		},
-		"xai.grok-4-20": {
-			"object": "grok-4-20",
-			"properties": ["llm.cloud.apikey"]
-		},
-		"xai.grok-4-20-multi-agent": {
-			"object": "grok-4-20-multi-agent",
-			"properties": ["llm.cloud.apikey"]
+		"xai.grok-4-fast": {
+			"object": "grok-4-fast",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"xai.grok-3-mini-beta": {
 			"object": "grok-3-mini-beta",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
-		"xai.grok-4-fast": {
-			"object": "grok-4-fast",
-			"properties": ["llm.cloud.apikey"]
+		"xai.grok-4-20-multi-agent": {
+			"object": "grok-4-20-multi-agent",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"xai.grok-3-beta": {
 			"object": "grok-3-beta",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"xai.grok-4-1-fast": {
 			"object": "grok-4-1-fast",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"xai.grok-4-20": {
+			"object": "grok-4-20",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		}
 	},
 	//

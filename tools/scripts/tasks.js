@@ -12,7 +12,20 @@ const {
 } = require('../../scripts/lib');
 
 const TOOLS_SRC = path.join(__dirname, '..', 'src', 'sync_models.py');
-const NODES_GLOB = path.join(PROJECT_ROOT, 'nodes', 'src', 'nodes', '**', '*.json');
+
+// Maps provider key → relative path to its services.json from the repo root.
+// Mirrors _SERVICES_JSON_PATHS in tools/src/sync_models.py.
+const SERVICES_JSON_PATHS = {
+    llm_openai: 'nodes/src/nodes/llm_openai/services.json',
+    embedding_openai: 'nodes/src/nodes/embedding_openai/services.json',
+    llm_anthropic: 'nodes/src/nodes/llm_anthropic/services.json',
+    llm_gemini: 'nodes/src/nodes/llm_gemini/services.json',
+    llm_mistral: 'nodes/src/nodes/llm_mistral/services.json',
+    llm_deepseek: 'nodes/src/nodes/llm_deepseek/services.json',
+    llm_xai: 'nodes/src/nodes/llm_xai/services.json',
+    llm_perplexity: 'nodes/src/nodes/llm_perplexity/services.json',
+    llm_qwen: 'nodes/src/nodes/llm_qwen/services.json',
+};
 
 // Engine (built by server:build; execCommand resolves extension on Windows)
 const ENGINE = path.join(DIST_ROOT, 'server', 'engine');
@@ -43,16 +56,35 @@ function makeRunSyncModelsAction(options = {}) {
     };
 }
 
-function makePrettierAction() {
+function makePrettierAction(options = {}) {
     return {
         run: async (_ctx, task) => {
-            task.output = 'Formatting services.json files...';
+            const modelsOpts = options.models || [];
+            const extraArgs = modelsOpts.flatMap((o) => String(o).split(/\s+/).filter(Boolean));
 
-            await execCommand('npx', [
-                'prettier',
-                '--write',
-                NODES_GLOB,
-            ], {
+            let targetFiles;
+            if (extraArgs.includes('--all')) {
+                targetFiles = Object.values(SERVICES_JSON_PATHS).map((p) => path.join(PROJECT_ROOT, p));
+            } else {
+                const providers = [];
+                for (let i = 0; i < extraArgs.length; i++) {
+                    if (extraArgs[i] === '--provider' && i + 1 < extraArgs.length) {
+                        providers.push(extraArgs[i + 1]);
+                    }
+                }
+                targetFiles = providers
+                    .filter((p) => SERVICES_JSON_PATHS[p])
+                    .map((p) => path.join(PROJECT_ROOT, SERVICES_JSON_PATHS[p]));
+            }
+
+            if (targetFiles.length === 0) {
+                task.output = 'No files to format';
+                return;
+            }
+
+            task.output = `Formatting ${targetFiles.length} services.json file(s)...`;
+
+            await execCommand('npx', ['prettier', '--write', ...targetFiles], {
                 task,
                 cwd: PROJECT_ROOT,
             });

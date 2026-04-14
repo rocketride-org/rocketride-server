@@ -32,15 +32,15 @@
 				"model": "sonar-pro",
 				"modelSource": "manual",
 				"modelTotalTokens": 200000,
-				"modelOutputTokens": 8000, // openrouter
+				"modelOutputTokens": 8000,
 				"apikey": ""
 			},
 			"sonar": {
 				"title": "Sonar",
 				"model": "sonar",
 				"modelSource": "manual",
-				"modelTotalTokens": 127072, // openrouter
-				"modelOutputTokens": 4096, // default
+				"modelTotalTokens": 127072,
+				"modelOutputTokens": 4096,
 				"apikey": ""
 			},
 			"sonar-reasoning-pro": {
@@ -48,7 +48,7 @@
 				"model": "sonar-reasoning-pro",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000,
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 4096,
 				"apikey": ""
 			},
 			"sonar-reasoning": {
@@ -64,15 +64,15 @@
 				"model": "sonar-deep-research",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000,
-				"modelOutputTokens": 4096, // default
+				"modelOutputTokens": 4096,
 				"apikey": ""
 			},
 			"sonar-pro-search": {
-				"title": "SonarPro Search",
+				"title": "Perplexity: Sonar Pro Search",
 				"model": "sonar-pro-search",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 200000, // openrouter
-				"modelOutputTokens": 8000, // openrouter
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 8000,
 				"apikey": ""
 			}
 		}
@@ -90,23 +90,23 @@
 		},
 		"perplexity.sonar-pro": {
 			"object": "sonar-pro",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"perplexity.sonar": {
 			"object": "sonar",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"perplexity.sonar-reasoning-pro": {
 			"object": "sonar-reasoning-pro",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"perplexity.sonar-reasoning": {
 			"object": "sonar-reasoning",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"perplexity.sonar-deep-research": {
 			"object": "sonar-deep-research",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"perplexity.profile": {
 			"title": "Model",
@@ -143,7 +143,7 @@
 		},
 		"perplexity.sonar-pro-search": {
 			"object": "sonar-pro-search",
-			"properties": ["llm.cloud.apikey"]
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		}
 	},
 	"shape": [

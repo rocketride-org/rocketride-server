@@ -8,6 +8,8 @@ update the classification logic here, keep the two in sync manually.
 
 from __future__ import annotations
 
+import re
+
 
 def is_retryable_error(error: Exception) -> bool:
     """
@@ -52,13 +54,11 @@ def is_retryable_error(error: Exception) -> bool:
     non_retryable_codes = ['400', '401', '403', '404', '405', '422']
     retryable_codes = ['429', '500', '502', '503', '504']
 
-    import re as _re
-
     for code in non_retryable_codes:
-        if _re.search(rf'(?<!\d){code}(?!\d)', error_str):
+        if re.search(rf'(?<!\d){code}(?!\d)', error_str):
             return False
     for code in retryable_codes:
-        if _re.search(rf'(?<!\d){code}(?!\d)', error_str):
+        if re.search(rf'(?<!\d){code}(?!\d)', error_str):
             return True
 
     retryable_patterns = [

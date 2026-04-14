@@ -268,6 +268,35 @@ def _detect_namespace(fields: Dict[str, Any]) -> str:
     return ''
 
 
+def _repair_field_objects(fields: Dict[str, Any]) -> bool:
+    """
+    Ensure every profile field object that exposes ``llm.cloud.apikey`` also
+    exposes ``llm.cloud.modelSource``.
+
+    This is a forward-compatibility repair: field objects created before
+    ``llm.cloud.modelSource`` was introduced omit it from their properties list.
+    Running this repair on every patch pass ensures those objects are healed
+    even when no new profiles are being added in the current sync run.
+
+    Args:
+        fields: The ``"fields"`` dict to mutate in-place
+
+    Returns:
+        True if at least one field object was repaired, False otherwise
+    """
+    repaired = False
+    for value in fields.values():
+        if not isinstance(value, dict):
+            continue
+        props = value.get('properties')
+        if not isinstance(props, list):
+            continue
+        if 'llm.cloud.apikey' in props and 'llm.cloud.modelSource' not in props:
+            props.append('llm.cloud.modelSource')
+            repaired = True
+    return repaired
+
+
 def _update_fields_for_added(
     fields: Dict[str, Any],
     namespace: str,
@@ -299,7 +328,7 @@ def _update_fields_for_added(
     if field_key not in fields:
         fields[field_key] = {
             'object': profile_key,
-            'properties': ['llm.cloud.apikey'],
+            'properties': ['llm.cloud.apikey', 'llm.cloud.modelSource'],
         }
 
     # 2 & 3. enum + conditional live inside the profile selector field
@@ -429,39 +458,39 @@ def patch(
     new_profiles_str = _serialize_profiles(updated_profiles, indent_level=p_indent)
     raw = raw[:p_start] + new_profiles_str + raw[p_end:]
 
-    # --- Patch fields (enum + conditional + field objects) ---
+    # --- Patch fields (enum + conditional + field objects + repair) ---
     _added = added_profile_keys or set()
     _deprecated = deprecated_profile_keys or set()
     _protected = protected_profile_keys or set()
 
-    if _added or _deprecated:
+    try:
+        f_start, f_end, f_indent = _find_fields_block(raw)
+    except ValueError:
+        # No fields block in this file — skip silently
+        f_start = None
+
+    if f_start is not None:
+        # Parse the current fields block from the already-updated raw text
+        fields_text = raw[f_start:f_end]
         try:
-            f_start, f_end, f_indent = _find_fields_block(raw)
-        except ValueError:
-            # No fields block in this file — skip silently
-            f_start = None
+            fields: Dict[str, Any] = json5.loads(fields_text)
+        except Exception:
+            fields = json.loads(fields_text)
 
-        if f_start is not None:
-            # Parse the current fields block from the already-updated raw text
-            fields_text = raw[f_start:f_end]
-            try:
-                import json5 as _json5
+        ns = _detect_namespace(fields)
 
-                fields: Dict[str, Any] = _json5.loads(fields_text)
-            except Exception:
-                fields = json.loads(fields_text)
+        # Repair existing field objects that are missing llm.cloud.modelSource
+        _repair_field_objects(fields)
 
-            ns = _detect_namespace(fields)
+        for key in _added:
+            profile = updated_profiles.get(key, {})
+            _update_fields_for_added(fields, ns, key, profile, _protected)
 
-            for key in _added:
-                profile = updated_profiles.get(key, {})
-                _update_fields_for_added(fields, ns, key, profile, _protected)
+        for key in _deprecated:
+            _update_fields_for_deprecated(fields, ns, key, _protected)
 
-            for key in _deprecated:
-                _update_fields_for_deprecated(fields, ns, key, _protected)
-
-            new_fields_str = _serialize_fields(fields, indent_level=f_indent)
-            raw = raw[:f_start] + new_fields_str + raw[f_end:]
+        new_fields_str = _serialize_fields(fields, indent_level=f_indent)
+        raw = raw[:f_start] + new_fields_str + raw[f_end:]
 
     if not dry_run:
         with open(file_path, 'w', encoding='utf-8') as fh:

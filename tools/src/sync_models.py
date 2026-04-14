@@ -19,6 +19,7 @@ Exit codes
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import sys
@@ -37,9 +38,15 @@ _TOOLS_SRC = Path(__file__).parent
 if str(_TOOLS_SRC) not in sys.path:
     sys.path.insert(0, str(_TOOLS_SRC))
 
-from core.merger import _LITELLM_AVAILABLE
+from core.merger import _LITELLM_AVAILABLE, _OPENROUTER_AVAILABLE, _load_openrouter_cache
 from core.patcher import get_profiles
 from core.reporter import SyncReport, format_console, format_pr_body
+from providers.base import _active_protected_profiles
+
+try:
+    import json5 as _json5
+except ImportError:
+    _json5 = None  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # Provider registry
@@ -87,15 +94,12 @@ def _load_config() -> Dict[str, Any]:
         FileNotFoundError: If the config file is missing
     """
     config_path = _TOOLS_SRC / 'sync_models.config.json'
-    try:
-        import json5 as _json5
-
+    if _json5 is not None:
         with open(config_path, 'r', encoding='utf-8') as fh:
             return _json5.load(fh)
-    except ImportError:
-        # json5 not installed — fall back to stdlib json (comments will fail)
-        with open(config_path, 'r', encoding='utf-8') as fh:
-            return json.load(fh)
+    # json5 not installed — fall back to stdlib json (comments will fail)
+    with open(config_path, 'r', encoding='utf-8') as fh:
+        return json.load(fh)
 
 
 def _import_provider_class(dotted: str) -> type:
@@ -109,8 +113,6 @@ def _import_provider_class(dotted: str) -> type:
         The class object
     """
     module_path, class_name = dotted.split(':')
-    import importlib
-
     module = importlib.import_module(module_path)
     return getattr(module, class_name)
 
@@ -205,8 +207,6 @@ def sync_provider(
     title_mappings = config.get('title_mappings', {})
     output_token_overrides = config.get('model_output_tokens', {}).get('overrides', {})
     default_output_tokens = config.get('model_output_tokens', {}).get('defaults', {}).get('chat', 4096)
-    from providers.base import _active_protected_profiles
-
     global_protected = list(_active_protected_profiles(config.get('default_protected_profiles', [])))
 
     return provider.sync(
@@ -343,11 +343,7 @@ def main() -> int:
     # Pre-load OpenRouter cache once before the provider loop so the header
     # status is accurate and all per-model lookups hit the in-memory dict.
     if use_openrouter or args.openrouter_only:
-        from core.merger import _load_openrouter_cache
-
         _load_openrouter_cache()
-
-    from core.merger import _OPENROUTER_AVAILABLE
 
     report = SyncReport(
         dry_run=not args.apply,

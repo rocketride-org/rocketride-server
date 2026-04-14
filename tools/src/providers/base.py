@@ -8,17 +8,28 @@ calls ``sync()`` which drives the full fetch → smoke-test → merge pipeline.
 
 from __future__ import annotations
 
+import copy
+import json
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
+from datetime import date as _date
+from typing import Any, Dict, List, Optional
+
+from core.merger import _derive_title, _load_openrouter_cache, _OPENROUTER_CACHE, merge
+from core.patcher import patch, _find_fields_block, _repair_field_objects
+from core.reporter import ProviderReport
+from core.smoke import run as smoke_run, SmokeResult
+
+try:
+    import json5 as _json5
+except ImportError:
+    _json5 = None  # type: ignore[assignment]
 
 # Matches dated snapshot suffixes at the end of a model ID:
 #   -2024-05-13  (YYYY-MM-DD, e.g. gpt-4-turbo-2024-04-09)
 #   -0613        (MMDD, e.g. gpt-4-0613, gpt-3.5-turbo-1106)
 _DATED_SNAPSHOT_RE = re.compile(r'(-20\d{2}-\d{2}-\d{2}|-\d{4})$')
-
-from core.merger import merge
 
 
 def _active_protected_profiles(entries: List, today=None) -> set:
@@ -40,8 +51,6 @@ def _active_protected_profiles(entries: List, today=None) -> set:
     Returns:
         Set of active profile key strings
     """
-    from datetime import date as _date
-
     if today is None:
         today = _date.today()
     active: set = set()
@@ -57,10 +66,6 @@ def _active_protected_profiles(entries: List, today=None) -> set:
             except (ValueError, TypeError):
                 active.add(key)  # malformed date → treat as always active
     return active
-
-
-from core.smoke import run as smoke_run, SmokeResult
-from core.reporter import ProviderReport
 
 
 class CloudProvider(ABC):
@@ -170,8 +175,6 @@ class CloudProvider(ABC):
         Returns:
             Human-readable title string (e.g. ``"Gemini 2.5 Pro"``)
         """
-        from core.merger import _derive_title
-
         return _derive_title(model_id, title_mappings)
 
     def normalize_profile_model_id(self, model_id: str) -> str:
@@ -505,13 +508,11 @@ class CloudProvider(ABC):
             List of model dicts ``{"id": str, "context_window": int (optional)}``.
             Each ``id`` is in this provider's native format.
         """
-        from core.merger import _load_openrouter_cache, _OPENROUTER_CACHE
-
         _load_openrouter_cache()
 
         seen: Dict[str, Dict[str, Any]] = {}  # native_id → entry
 
-        for bare_id, (ctx, _out) in (_OPENROUTER_CACHE or {}).items():
+        for bare_id, (ctx, _out, _name) in (_OPENROUTER_CACHE or {}).items():
             # Apply the same two-step conversion as _fetch_litellm_models():
             # 1. normalize_model_id() — handles raw ID quirks (e.g. dots→hyphens for Anthropic)
             # 2. litellm_to_native_model_id() — converts to the native format stored in
@@ -532,6 +533,8 @@ class CloudProvider(ABC):
                 entry['context_window'] = ctx
             if _out:
                 entry['max_output_tokens'] = _out
+            if _name:
+                entry['name'] = _name
             seen[native_id] = entry
 
         return list(seen.values())
@@ -606,16 +609,32 @@ class CloudProvider(ABC):
         report.unchanged_count = len(merge_result.unchanged)
         report.estimated_tokens = merge_result.estimated_tokens
 
-        if apply and (merge_result.added or merge_result.updated or merge_result.deprecated):
-            from core.patcher import patch
+        if apply:
+            # Check if field repairs are needed even when no profiles changed
+            _needs_repair = False
+            if not (merge_result.added or merge_result.updated or merge_result.deprecated):
+                try:
+                    with open(services_json_path, 'r', encoding='utf-8') as _fh:
+                        _raw = _fh.read()
+                    _f_start, _f_end, _ = _find_fields_block(_raw)
+                    try:
+                        _fields = _json5.loads(_raw[_f_start:_f_end])
+                    except Exception:
+                        _fields = json.loads(_raw[_f_start:_f_end])
 
-            patch(
-                services_json_path,
-                updated_profiles,
-                added_profile_keys={key for key, _ in merge_result.added},
-                deprecated_profile_keys=set(merge_result.deprecated),
-                protected_profile_keys=protected,
-                dry_run=False,
-            )
+                    _fields_copy = copy.deepcopy(_fields)
+                    _needs_repair = _repair_field_objects(_fields_copy)
+                except Exception:
+                    pass
+
+            if merge_result.added or merge_result.updated or merge_result.deprecated or _needs_repair:
+                patch(
+                    services_json_path,
+                    updated_profiles,
+                    added_profile_keys={key for key, _ in merge_result.added},
+                    deprecated_profile_keys=set(merge_result.deprecated),
+                    protected_profile_keys=protected,
+                    dry_run=False,
+                )
 
         return report

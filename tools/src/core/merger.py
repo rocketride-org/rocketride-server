@@ -31,7 +31,7 @@ except ImportError:
 
 # Module-level cache — populated on first use, once per process.
 # None = not yet fetched; {} = fetch attempted but failed (no retry).
-_OPENROUTER_CACHE: Optional[Dict[str, Tuple[Optional[int], Optional[int]]]] = None
+_OPENROUTER_CACHE: Optional[Dict[str, Tuple[Optional[int], Optional[int], Optional[str]]]] = None
 _OPENROUTER_AVAILABLE: bool = False
 
 
@@ -62,17 +62,18 @@ def _load_openrouter_cache() -> None:
         with _urllib.urlopen(req, timeout=10) as resp:
             data = _json.loads(resp.read())
 
-        cache: Dict[str, Tuple[Optional[int], Optional[int]]] = {}
+        cache: Dict[str, Tuple[Optional[int], Optional[int], Optional[str]]] = {}
         for model in data.get('data', []):
             raw_id = model.get('id', '')
             bare = raw_id.split('/', 1)[1] if '/' in raw_id else raw_id
             ctx = model.get('context_length')
             top = model.get('top_provider', {})
             out = top.get('max_completion_tokens') if isinstance(top, dict) else None
+            name = model.get('name') or None
             ctx = int(ctx) if ctx is not None else None
             out = int(out) if out is not None else None
             if bare not in cache:  # keep first occurrence per bare ID
-                cache[bare] = (ctx, out)
+                cache[bare] = (ctx, out, name)
 
         _OPENROUTER_CACHE = cache
         _OPENROUTER_AVAILABLE = True
@@ -80,20 +81,20 @@ def _load_openrouter_cache() -> None:
         _OPENROUTER_CACHE = {}  # empty sentinel — no retry on subsequent calls
 
 
-def _openrouter_info(model_id: str) -> Tuple[Optional[int], Optional[int]]:
+def _openrouter_info(model_id: str) -> Tuple[Optional[int], Optional[int], Optional[str]]:
     """
-    Return (context_window, max_output_tokens) from the OpenRouter model list.
+    Return (context_window, max_output_tokens, name) from the OpenRouter model list.
 
-    Returns (None, None) if OpenRouter is unavailable or the model is not listed.
+    Returns (None, None, None) if OpenRouter is unavailable or the model is not listed.
 
     Args:
         model_id: Provider model ID (e.g. "gpt-4o", "claude-sonnet-4-6")
 
     Returns:
-        (context_window, max_output_tokens) — either value may be None
+        (context_window, max_output_tokens, name) — any value may be None
     """
     _load_openrouter_cache()
-    return (_OPENROUTER_CACHE or {}).get(model_id, (None, None))
+    return (_OPENROUTER_CACHE or {}).get(model_id, (None, None, None))
 
 
 def _litellm_info(model_id: str) -> Tuple[Optional[int], Optional[int]]:
@@ -239,6 +240,7 @@ def build_new_profile(
     output_tokens_source: str | None = None,
     derive_title_fn=None,
     model_source: str = 'provider',
+    display_name: str | None = None,
 ) -> Dict[str, Any]:
     """
     Build a new profile dict for a model discovered via the provider API.
@@ -256,6 +258,9 @@ def build_new_profile(
             to strip provider-specific prefixes (e.g. Gemini strips ``"models/"``).
         model_source: Where this model ID was discovered — ``"provider"``,
             ``"openrouter"``, ``"litellm"``, or ``"manual"``.
+        display_name: Human-readable name from OpenRouter (``model.name``).  When
+            provided it is used directly as the profile title, bypassing
+            ``derive_title_fn`` and ``title_mappings``.
 
     Returns:
         Profile dict ready to be written into services.json "preconfig.profiles".
@@ -264,7 +269,7 @@ def build_new_profile(
     """
     _title_fn = derive_title_fn if derive_title_fn is not None else _derive_title
     profile: Dict[str, Any] = {
-        'title': _title_fn(model_id, title_mappings),
+        'title': display_name if display_name else _title_fn(model_id, title_mappings),
         'model': model_id,
         'modelSource': model_source,
         'modelTotalTokens': total_tokens,
@@ -427,7 +432,9 @@ def merge(
         }
         _model_source: str = _source_to_model_source.get(_api_entry_source, 'provider')
         _api_entry_out = api_entry.get('max_output_tokens')
-        _or_ctx, _or_out = _openrouter_info(_token_lookup_id) if use_openrouter else (None, None)
+        _api_entry_name: Optional[str] = api_entry.get('name')
+        _or_ctx, _or_out, _or_name = _openrouter_info(_token_lookup_id) if use_openrouter else (None, None, None)
+        _display_name: Optional[str] = _api_entry_name or _or_name
         _litellm_ctx, _litellm_out = _litellm_info(_token_lookup_id) if use_litellm else (None, None)
         # Cast to int — config/litellm/openrouter values may arrive as float or str
         _override = int(_override) if _override is not None else None
@@ -499,6 +506,7 @@ def merge(
                 output_tokens_source=output_tokens_src,
                 derive_title_fn=derive_title_fn,
                 model_source=_model_source,
+                display_name=_display_name,
             )
             updated_profiles[profile_key] = new_profile
             added.append((profile_key, new_profile))

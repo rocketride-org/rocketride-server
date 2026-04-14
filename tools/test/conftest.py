@@ -166,6 +166,7 @@ def current_profiles() -> Dict[str, Any]:
         'test-model-a': {
             'title': 'Test Model A',
             'model': 'test-model-a',
+            'modelSource': 'provider',
             'modelTotalTokens': 16384,
             'modelOutputTokens': 4096,
             'apikey': '',
@@ -173,6 +174,7 @@ def current_profiles() -> Dict[str, Any]:
         'test-model-b': {
             'title': 'Test Model B',
             'model': 'test-model-b',
+            'modelSource': 'provider',
             'modelTotalTokens': 32768,
             'modelOutputTokens': 4096,
             'apikey': '',
