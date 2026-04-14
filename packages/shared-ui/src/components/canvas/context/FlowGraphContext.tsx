@@ -58,7 +58,7 @@ type FlowNode = Node<INodeData>;
 import { getNodesFromProject, getEdgesFromNodes, getProjectComponents, generateNodeId } from '../util/graph';
 import { useFlowPreferences } from './FlowPreferencesContext';
 import { useFlowProject } from './FlowProjectContext';
-import { resolveDefaultFormData } from '../util/helpers';
+import { getConditionalPayloadLane, resolveDefaultFormData } from '../util/helpers';
 import { validateFormData } from '../util/rjsf';
 
 // =============================================================================
@@ -518,11 +518,17 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			}
 
 			// Data lanes: handle IDs are ``source-{lane}`` / ``target-{lane}``.
-			// Meta-lanes ``then``/``else`` on the source side are polymorphic and
-			// connect to any data lane on the target side; otherwise lane names match.
+			// ``then`` / ``else`` are aliases for the single payload lane of the
+			// source ``conditional_*`` service (must match target lane name).
 			const sl = sourceHandle?.split('-')?.[1];
 			const tl = targetHandle?.split('-')?.[1];
-			if (sl === 'then' || sl === 'else') return true;
+			if (sl === 'then' || sl === 'else') {
+				const sourceNode = nodeMap[edge.source];
+				const srcData = sourceNode?.data as INodeData | undefined;
+				const srcSvc = servicesJson[srcData?.provider ?? ''];
+				const payloadLane = getConditionalPayloadLane(srcData?.provider, srcSvc);
+				return !!payloadLane && tl === payloadLane;
+			}
 			return sl === tl;
 		},
 		[nodeMap, servicesJson]

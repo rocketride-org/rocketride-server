@@ -18,7 +18,7 @@ import { Search } from 'lucide-react';
 import { useFlowGraph } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
 import { IService, IServiceCapabilities, IServiceLane } from '../../../types';
-import { getOutputLaneDisplayValues, DATA_LANES } from '../../../util/helpers';
+import { getConditionalPayloadLane, getOutputLaneDisplayValues } from '../../../util/helpers';
 import { generateNodeId } from '../../../util';
 import { getIconPath } from '../../../util/get-icon-path';
 import { commonStyles } from '../../../../../themes/styles';
@@ -226,7 +226,14 @@ export default function QuickAddPopup(): ReactElement | null {
 
 				if (isSource) {
 					const fromBranch = laneType === 'then' || laneType === 'else';
-					if (fromBranch ? DATA_LANES.some((l) => l in lanes) : laneType in lanes) {
+					if (fromBranch) {
+						const srcNode = nodes.find((n) => n.id === quickAddState.nodeId);
+						const srcProv = srcNode?.data?.provider as string | undefined;
+						const payloadLane = getConditionalPayloadLane(srcProv, srcProv ? catalog[srcProv] : undefined);
+						if (payloadLane && payloadLane in lanes) {
+							results.push({ key: providerKey, service });
+						}
+					} else if (laneType in lanes) {
 						results.push({ key: providerKey, service });
 					}
 				} else {
@@ -333,7 +340,9 @@ export default function QuickAddPopup(): ReactElement | null {
 			// Connect lane handles
 			if (isSource) {
 				const keys = Object.keys(catalog[providerKey]?.lanes ?? {}).filter((k) => !k.startsWith('_'));
-				const targetLane = laneType === 'then' || laneType === 'else' ? (DATA_LANES.find((l) => keys.includes(l)) ?? keys[0]) : laneType;
+				const srcProv = clickedNode?.data?.provider as string | undefined;
+				const payloadLane = getConditionalPayloadLane(srcProv, srcProv ? catalog[srcProv] : undefined);
+				const targetLane = laneType === 'then' || laneType === 'else' ? (payloadLane && keys.includes(payloadLane) ? payloadLane : keys[0]) : laneType;
 				onEdgeConnect({
 					source: nodeId,
 					target: newNodeId,

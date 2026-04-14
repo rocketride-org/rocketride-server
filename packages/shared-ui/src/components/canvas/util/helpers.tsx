@@ -124,8 +124,17 @@ const INVOKE_TYPE_LABELS: Record<string, string> = {
  */
 export const renameInvokeType = (invokeType = ''): string => INVOKE_TYPE_LABELS[invokeType] ?? invokeType.charAt(0).toUpperCase() + invokeType.slice(1);
 
-/** Data lane types that can carry pipeline payloads, in display-preference order. */
-export const DATA_LANES = ['questions', 'text', 'answers', 'documents', 'table', 'image', 'audio', 'video'] as const;
+/**
+ * For `conditional_text` / `conditional_questions` / `conditional_answers`, the
+ * catalog exposes exactly one input lane; that lane is the payload type for
+ * `then` / `else` (handles remain meta-lanes on the source side only).
+ */
+export function getConditionalPayloadLane(provider: string | undefined, service: Pick<IService, 'lanes'> | undefined): string | undefined {
+	if (!provider?.startsWith('conditional_')) return undefined;
+	if (!service?.lanes || typeof service.lanes !== 'object') return undefined;
+	const keys = Object.keys(service.lanes).filter((k) => !k.startsWith('_'));
+	return keys.length === 1 ? keys[0] : undefined;
+}
 
 // =============================================================================
 // HTML Sanitisation
