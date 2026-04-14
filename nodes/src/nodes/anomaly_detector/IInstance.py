@@ -68,7 +68,7 @@ class IInstance(IInstanceBase):
         enriched_docs = []
 
         for doc in documents:
-            enriched_doc = doc.model_copy()
+            enriched_doc = doc.model_copy(deep=True)
             if enriched_doc.metadata is None:
                 enriched_docs.append(enriched_doc)
                 continue
