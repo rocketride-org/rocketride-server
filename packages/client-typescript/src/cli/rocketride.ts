@@ -75,6 +75,7 @@ import { Command } from 'commander';
 import { RocketRideClient } from '../client/client';
 import { DAPMessage, PipelineConfig, UPLOAD_RESULT } from '../client/types';
 import { CONST_DEFAULT_WEB_LOCAL } from '../client/constants';
+import { registerRuntimeCommand } from './commands/runtime';
 
 // ANSI Color and Control Codes for terminal formatting
 const ANSI_RESET = '\x1b[0m';
@@ -1148,6 +1149,9 @@ export class RocketRideCLI {
 				}
 			});
 		addCommonOptions(storeStatCmd);
+
+		// Runtime management commands
+		registerRuntimeCommand(program);
 
 		return program;
 	}

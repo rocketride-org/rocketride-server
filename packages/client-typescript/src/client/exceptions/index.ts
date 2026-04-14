@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,7 +24,7 @@
 
 /**
  * Base exception class for Debug Adapter Protocol (DAP) errors.
- * 
+ *
  * This exception wraps DAP error responses to provide structured access to
  * error information including file locations, line numbers, and other
  * contextual data returned by RocketRide servers.
@@ -42,7 +42,7 @@ export class DAPException extends Error {
 
 /**
  * Base exception for all RocketRide operations.
- * 
+ *
  * This is the root exception class for all RocketRide-specific errors.
  * Catch this exception type to handle any error that originates from
  * RocketRide operations while still having access to detailed error context.
@@ -56,7 +56,7 @@ export class RocketRideException extends DAPException {
 
 /**
  * Exception raised for connection-related issues.
- * 
+ *
  * Raised when there are problems connecting to RocketRide servers,
  * maintaining connections, or when connections are lost unexpectedly.
  */
@@ -79,7 +79,7 @@ export class AuthenticationException extends ConnectionException {
 
 /**
  * Exception raised for data pipe operations.
- * 
+ *
  * Raised when there are problems with data pipes used for sending
  * data to pipelines, uploading files, or streaming operations.
  */
@@ -92,7 +92,7 @@ export class PipeException extends RocketRideException {
 
 /**
  * Exception raised for pipeline execution issues.
- * 
+ *
  * Raised when there are problems starting, running, or managing
  * RocketRide pipelines and processing tasks.
  */
@@ -105,7 +105,7 @@ export class ExecutionException extends RocketRideException {
 
 /**
  * Exception raised for input validation failures.
- * 
+ *
  * Raised when input data, configurations, or parameters don't meet
  * the requirements for RocketRide operations.
  */
@@ -113,5 +113,37 @@ export class ValidationException extends RocketRideException {
 	constructor(dapResult: Record<string, unknown>) {
 		super(dapResult);
 		this.name = 'ValidationException';
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Runtime management exceptions (not DAP-related — plain Error subclasses)
+// ---------------------------------------------------------------------------
+
+export class UnsupportedPlatformError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'UnsupportedPlatformError';
+	}
+}
+
+export class RuntimeManagementError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'RuntimeManagementError';
+	}
+}
+
+export class RuntimeNotFoundError extends RuntimeManagementError {
+	constructor(message: string) {
+		super(message);
+		this.name = 'RuntimeNotFoundError';
+	}
+}
+
+export class DockerNotAvailableError extends RuntimeManagementError {
+	constructor(message: string) {
+		super(message);
+		this.name = 'DockerNotAvailableError';
 	}
 }
