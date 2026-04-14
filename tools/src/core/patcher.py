@@ -42,7 +42,7 @@ def load(file_path: str) -> Dict[str, Any]:
         return json5.load(fh)
 
 
-def _find_profiles_block(raw: str) -> tuple[int, int]:
+def _find_profiles_block(raw: str) -> tuple[int, int, int]:
     """
     Find the character range of the value of "profiles": { ... } in raw text.
 

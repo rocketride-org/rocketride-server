@@ -38,7 +38,7 @@ _TOOLS_SRC = Path(__file__).parent
 if str(_TOOLS_SRC) not in sys.path:
     sys.path.insert(0, str(_TOOLS_SRC))
 
-from core.merger import _LITELLM_AVAILABLE, _OPENROUTER_AVAILABLE, _load_openrouter_cache
+from core.merger import _LITELLM_AVAILABLE, get_openrouter_cache, is_openrouter_available
 from core.patcher import get_profiles
 from core.reporter import SyncReport, format_console, format_pr_body
 from providers.base import _active_protected_profiles
@@ -344,12 +344,12 @@ def main() -> int:
     # Pre-load OpenRouter cache once before the provider loop so the header
     # status is accurate and all per-model lookups hit the in-memory dict.
     if use_openrouter or args.openrouter_only:
-        _load_openrouter_cache()
+        get_openrouter_cache()
 
     report = SyncReport(
         dry_run=not args.apply,
         litellm_available=_LITELLM_AVAILABLE,
-        openrouter_available=_OPENROUTER_AVAILABLE,
+        openrouter_available=is_openrouter_available(),
     )
 
     for provider_name in providers_to_sync:

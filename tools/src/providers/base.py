@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from datetime import date as _date
 from typing import Any, Dict, List, Optional
 
-from core.merger import _derive_title, _load_openrouter_cache, _OPENROUTER_CACHE, merge
+from core.merger import _derive_title, get_openrouter_cache, merge
 from core.patcher import patch, _find_fields_block, _repair_field_objects
 from core.reporter import ProviderReport
 from core.smoke import run as smoke_run, SmokeResult
@@ -508,11 +508,9 @@ class CloudProvider(ABC):
             List of model dicts ``{"id": str, "context_window": int (optional)}``.
             Each ``id`` is in this provider's native format.
         """
-        _load_openrouter_cache()
-
         seen: Dict[str, Dict[str, Any]] = {}  # native_id → entry
 
-        for bare_id, (ctx, _out, _name, _exp) in (_OPENROUTER_CACHE or {}).items():
+        for bare_id, (ctx, _out, _name, _exp) in get_openrouter_cache().items():
             # Apply the same two-step conversion as _fetch_litellm_models():
             # 1. normalize_model_id() — handles raw ID quirks (e.g. dots→hyphens for Anthropic)
             # 2. litellm_to_native_model_id() — converts to the native format stored in

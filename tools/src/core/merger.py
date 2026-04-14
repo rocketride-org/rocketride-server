@@ -82,6 +82,54 @@ def _load_openrouter_cache() -> None:
         _OPENROUTER_CACHE = {}  # empty sentinel — no retry on subsequent calls
 
 
+def _source_is_authoritative(source: str, model_source: str) -> bool:
+    """
+    Return True if the given sync source has authority to deprecate or
+    un-deprecate a profile with the given modelSource.
+
+    Each profile is owned by the source that originally discovered it:
+      provider API → manages 'provider' and 'manual' profiles
+      OpenRouter   → manages 'openrouter' profiles
+      LiteLLM      → manages 'litellm' profiles
+
+    Absence from a different source is meaningless — e.g. an OpenRouter alias
+    not appearing in the native provider API is expected, not a deprecation signal.
+    """
+    if source == 'provider API':
+        return model_source in ('provider', 'manual')
+    if source == 'OpenRouter':
+        return model_source == 'openrouter'
+    if source == 'LiteLLM':
+        return model_source == 'litellm'
+    return False
+
+
+def get_openrouter_cache() -> Dict[str, Tuple[Optional[int], Optional[int], Optional[str], Optional[str]]]:
+    """
+    Return the OpenRouter model cache, loading it on first call.
+
+    Safe to import directly (``from core.merger import get_openrouter_cache``)
+    because the function reads the module-level variable at call time rather
+    than at import time.
+
+    Returns:
+        Dict mapping bare model ID to (context_window, max_output_tokens, name, expiration_date).
+        Returns an empty dict if OpenRouter is unavailable or the request failed.
+    """
+    _load_openrouter_cache()
+    return _OPENROUTER_CACHE or {}
+
+
+def is_openrouter_available() -> bool:
+    """
+    Return True if the OpenRouter model list was fetched successfully.
+
+    Triggers a load on first call.  Safe to import directly.
+    """
+    _load_openrouter_cache()
+    return _OPENROUTER_AVAILABLE
+
+
 def _openrouter_info(model_id: str) -> Tuple[Optional[int], Optional[int], Optional[str], Optional[str]]:
     """
     Return (context_window, max_output_tokens, name, expiration_date) from the OpenRouter model list.
@@ -524,24 +572,32 @@ def merge(
             existing = updated_profiles[profile_key]
             changed = False
 
-            if authoritative_total_tokens is not None and existing.get('modelTotalTokens') != authoritative_total_tokens:
-                old_val = existing.get('modelTotalTokens')
-                updated_profiles[profile_key]['modelTotalTokens'] = authoritative_total_tokens
+            if authoritative_total_tokens is not None:
+                if existing.get('modelTotalTokens') != authoritative_total_tokens:
+                    old_val = existing.get('modelTotalTokens')
+                    updated_profiles[profile_key]['modelTotalTokens'] = authoritative_total_tokens
+                    updated_fields.append((profile_key, 'modelTotalTokens', old_val, authoritative_total_tokens))
+                    changed = True
+                # Always carry the source annotation so the // comment survives
+                # any patcher rewrite, even when the value itself hasn't changed.
                 updated_profiles[profile_key]['_src_modelTotalTokens'] = total_tokens_src
-                updated_fields.append((profile_key, 'modelTotalTokens', old_val, authoritative_total_tokens))
-                changed = True
 
-            if api_output_tokens > 0 and existing.get('modelOutputTokens') != api_output_tokens:
-                old_val = existing.get('modelOutputTokens')
-                updated_profiles[profile_key]['modelOutputTokens'] = api_output_tokens
+            if api_output_tokens > 0:
+                if existing.get('modelOutputTokens') != api_output_tokens:
+                    old_val = existing.get('modelOutputTokens')
+                    updated_profiles[profile_key]['modelOutputTokens'] = api_output_tokens
+                    updated_fields.append((profile_key, 'modelOutputTokens', old_val, api_output_tokens))
+                    changed = True
+                # Always carry the source annotation so the // comment survives
+                # any patcher rewrite, even when the value itself hasn't changed.
                 updated_profiles[profile_key]['_src_modelOutputTokens'] = output_tokens_src
-                updated_fields.append((profile_key, 'modelOutputTokens', old_val, api_output_tokens))
-                changed = True
 
-            # Deprecate if OpenRouter signals expiration — takes priority over un-deprecation.
-            # Combine the expiration signal from the api_entry (OpenRouter-as-source mode)
-            # and the supplementary _openrouter_info lookup (token-fallback mode).
-            _exp = api_entry.get('expiration_date') or _or_exp
+            # Deprecate if OpenRouter signals expiration — only when the api_entry
+            # itself came from OpenRouter (openrouter-as-source mode).  When the
+            # live provider API is the source, _or_exp is a supplemental token
+            # lookup and must NOT drive deprecation: the model just passed the
+            # provider's own API check, so it is clearly still available.
+            _exp = api_entry.get('expiration_date') if _api_entry_source == 'openrouter' else None
             if _exp and not existing.get('deprecated'):
                 updated_profiles[profile_key]['deprecated'] = True
                 if not existing.get('migration'):
@@ -549,10 +605,12 @@ def merge(
                 deprecated.append(profile_key)
                 changed = True
             elif not _exp:
-                # Un-deprecate if it came back (only when there is no expiration signal)
-                if existing.get('deprecated'):
+                # Un-deprecate if the current source is authoritative for this profile
+                # and the model just appeared in the source's response.
+                if existing.get('deprecated') and _source_is_authoritative(_api_entry_source, existing.get('modelSource', 'manual')):
                     updated_profiles[profile_key].pop('deprecated', None)
                     updated_profiles[profile_key].pop('deprecatedSince', None)
+                    updated_profiles[profile_key].pop('migration', None)
                     updated_fields.append((profile_key, 'deprecated', True, None))
                     changed = True
 
@@ -591,19 +649,9 @@ def merge(
             profile = updated_profiles.get(profile_key, {})
             model_source = profile.get('modelSource', 'manual')
 
-            # Only the native provider API is authoritative enough to deprecate
-            # provider-confirmed or hand-curated profiles.  OpenRouter and LiteLLM
-            # are routing/database indexes — a model absent from them may still be
-            # perfectly available via its native API.
-            #
-            # Deprecation authority by source:
-            #   provider API  → may deprecate any modelSource
-            #   OpenRouter    → may deprecate 'openrouter' and 'litellm' only
-            #   LiteLLM       → may deprecate 'litellm' only
-            if deprecation_source == 'OpenRouter' and model_source not in ('openrouter', 'litellm'):
-                unchanged.append(profile_key)
-                continue
-            if deprecation_source == 'LiteLLM' and model_source != 'litellm':
+            # Each profile is owned by the source that discovered it.
+            # Only deprecate when the current source has authority over this profile.
+            if not _source_is_authoritative(deprecation_source, model_source):
                 unchanged.append(profile_key)
                 continue
 
