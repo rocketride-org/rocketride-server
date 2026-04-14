@@ -31,7 +31,7 @@ except ImportError:
 
 # Module-level cache — populated on first use, once per process.
 # None = not yet fetched; {} = fetch attempted but failed (no retry).
-_OPENROUTER_CACHE: Optional[Dict[str, Tuple[Optional[int], Optional[int], Optional[str]]]] = None
+_OPENROUTER_CACHE: Optional[Dict[str, Tuple[Optional[int], Optional[int], Optional[str], Optional[str]]]] = None
 _OPENROUTER_AVAILABLE: bool = False
 
 
@@ -62,7 +62,7 @@ def _load_openrouter_cache() -> None:
         with _urllib.urlopen(req, timeout=10) as resp:
             data = _json.loads(resp.read())
 
-        cache: Dict[str, Tuple[Optional[int], Optional[int], Optional[str]]] = {}
+        cache: Dict[str, Tuple[Optional[int], Optional[int], Optional[str], Optional[str]]] = {}
         for model in data.get('data', []):
             raw_id = model.get('id', '')
             bare = raw_id.split('/', 1)[1] if '/' in raw_id else raw_id
@@ -70,10 +70,11 @@ def _load_openrouter_cache() -> None:
             top = model.get('top_provider', {})
             out = top.get('max_completion_tokens') if isinstance(top, dict) else None
             name = model.get('name') or None
+            exp = model.get('expiration_date') or None
             ctx = int(ctx) if ctx is not None else None
             out = int(out) if out is not None else None
             if bare not in cache:  # keep first occurrence per bare ID
-                cache[bare] = (ctx, out, name)
+                cache[bare] = (ctx, out, name, exp)
 
         _OPENROUTER_CACHE = cache
         _OPENROUTER_AVAILABLE = True
@@ -81,20 +82,21 @@ def _load_openrouter_cache() -> None:
         _OPENROUTER_CACHE = {}  # empty sentinel — no retry on subsequent calls
 
 
-def _openrouter_info(model_id: str) -> Tuple[Optional[int], Optional[int], Optional[str]]:
+def _openrouter_info(model_id: str) -> Tuple[Optional[int], Optional[int], Optional[str], Optional[str]]:
     """
-    Return (context_window, max_output_tokens, name) from the OpenRouter model list.
+    Return (context_window, max_output_tokens, name, expiration_date) from the OpenRouter model list.
 
-    Returns (None, None, None) if OpenRouter is unavailable or the model is not listed.
+    Returns (None, None, None, None) if OpenRouter is unavailable or the model is not listed.
 
     Args:
         model_id: Provider model ID (e.g. "gpt-4o", "claude-sonnet-4-6")
 
     Returns:
-        (context_window, max_output_tokens, name) — any value may be None
+        (context_window, max_output_tokens, name, expiration_date) — any value may be None.
+        expiration_date is non-None when OpenRouter has marked the model as deprecated.
     """
     _load_openrouter_cache()
-    return (_OPENROUTER_CACHE or {}).get(model_id, (None, None, None))
+    return (_OPENROUTER_CACHE or {}).get(model_id, (None, None, None, None))
 
 
 def _litellm_info(model_id: str) -> Tuple[Optional[int], Optional[int]]:
@@ -433,7 +435,7 @@ def merge(
         _model_source: str = _source_to_model_source.get(_api_entry_source, 'provider')
         _api_entry_out = api_entry.get('max_output_tokens')
         _api_entry_name: Optional[str] = api_entry.get('name')
-        _or_ctx, _or_out, _or_name = _openrouter_info(_token_lookup_id) if use_openrouter else (None, None, None)
+        _or_ctx, _or_out, _or_name, _or_exp = _openrouter_info(_token_lookup_id) if use_openrouter else (None, None, None, None)
         _display_name: Optional[str] = _api_entry_name or _or_name
         _litellm_ctx, _litellm_out = _litellm_info(_token_lookup_id) if use_litellm else (None, None)
         # Cast to int — config/litellm/openrouter values may arrive as float or str
@@ -531,12 +533,23 @@ def merge(
                 updated_fields.append((profile_key, 'modelOutputTokens', old_val, api_output_tokens))
                 changed = True
 
-            # Un-deprecate if it came back
-            if existing.get('deprecated'):
-                updated_profiles[profile_key].pop('deprecated', None)
-                updated_profiles[profile_key].pop('deprecatedSince', None)
-                updated_fields.append((profile_key, 'deprecated', True, None))
+            # Deprecate if OpenRouter signals expiration — takes priority over un-deprecation.
+            # Combine the expiration signal from the api_entry (OpenRouter-as-source mode)
+            # and the supplementary _openrouter_info lookup (token-fallback mode).
+            _exp = api_entry.get('expiration_date') or _or_exp
+            if _exp and not existing.get('deprecated'):
+                updated_profiles[profile_key]['deprecated'] = True
+                if not existing.get('migration'):
+                    updated_profiles[profile_key]['migration'] = f'Model deprecated by OpenRouter (expiration date: {_exp}). Please select a current model.'
+                deprecated.append(profile_key)
                 changed = True
+            elif not _exp:
+                # Un-deprecate if it came back (only when there is no expiration signal)
+                if existing.get('deprecated'):
+                    updated_profiles[profile_key].pop('deprecated', None)
+                    updated_profiles[profile_key].pop('deprecatedSince', None)
+                    updated_fields.append((profile_key, 'deprecated', True, None))
+                    changed = True
 
             # Upgrade modelSource to "provider" when confirmed by the live provider API.
             # Only upgrade — never downgrade a "provider" profile to "openrouter"/"litellm".
@@ -571,6 +584,24 @@ def merge(
         lookup_id = _norm(model_id) if _norm is not None else model_id
         if lookup_id not in api_lookup and model_id not in api_lookup:
             profile = updated_profiles.get(profile_key, {})
+            model_source = profile.get('modelSource', 'manual')
+
+            # Only the native provider API is authoritative enough to deprecate
+            # provider-confirmed or hand-curated profiles.  OpenRouter and LiteLLM
+            # are routing/database indexes — a model absent from them may still be
+            # perfectly available via its native API.
+            #
+            # Deprecation authority by source:
+            #   provider API  → may deprecate any modelSource
+            #   OpenRouter    → may deprecate 'openrouter' and 'litellm' only
+            #   LiteLLM       → may deprecate 'litellm' only
+            if deprecation_source == 'OpenRouter' and model_source not in ('openrouter', 'litellm'):
+                unchanged.append(profile_key)
+                continue
+            if deprecation_source == 'LiteLLM' and model_source != 'litellm':
+                unchanged.append(profile_key)
+                continue
+
             if not profile.get('deprecated'):
                 updated_profiles[profile_key]['deprecated'] = True
                 # Only set migration if not already present (don't overwrite manual msgs).

@@ -512,7 +512,7 @@ class CloudProvider(ABC):
 
         seen: Dict[str, Dict[str, Any]] = {}  # native_id → entry
 
-        for bare_id, (ctx, _out, _name) in (_OPENROUTER_CACHE or {}).items():
+        for bare_id, (ctx, _out, _name, _exp) in (_OPENROUTER_CACHE or {}).items():
             # Apply the same two-step conversion as _fetch_litellm_models():
             # 1. normalize_model_id() — handles raw ID quirks (e.g. dots→hyphens for Anthropic)
             # 2. litellm_to_native_model_id() — converts to the native format stored in
@@ -535,6 +535,8 @@ class CloudProvider(ABC):
                 entry['max_output_tokens'] = _out
             if _name:
                 entry['name'] = _name
+            if _exp:
+                entry['expiration_date'] = _exp
             seen[native_id] = entry
 
         return list(seen.values())

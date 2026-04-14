@@ -101,9 +101,9 @@
 			"cloud-reasoner": {
 				"title": "Cloud Reasoner",
 				"model": "deepseek-reasoner",
+				"modelSource": "manual",
 				"modelTotalTokens": 128000,
-				"deprecated": true,
-				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"modelOutputTokens": 4096, // default
 				"serverbase": "https://api.deepseek.com/v1",
 				"apikey": ""
 			},
@@ -111,8 +111,8 @@
 				"title": "Cloud Chat",
 				"model": "deepseek-chat",
 				"modelSource": "manual",
-				"modelTotalTokens": 163840,
-				"modelOutputTokens": 163840,
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096, // default
 				"serverbase": "https://api.deepseek.com/v1",
 				"apikey": ""
 			},
@@ -120,153 +120,57 @@
 				"model": "deepseek-r1:1.5b",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000,
-				"modelOutputTokens": 4096,
+				"modelOutputTokens": 4096, // default
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-r1-7b": {
 				"model": "deepseek-r1:7b",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000,
-				"modelOutputTokens": 4096,
+				"modelOutputTokens": 4096, // default
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-r1-8b": {
 				"model": "deepseek-r1:8b",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000,
-				"modelOutputTokens": 4096,
+				"modelOutputTokens": 4096, // default
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-r1-14b": {
 				"model": "deepseek-r1:14b",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000,
-				"modelOutputTokens": 4096,
+				"modelOutputTokens": 4096, // default
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-r1-32b": {
 				"model": "deepseek-r1:32b",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000,
-				"modelOutputTokens": 4096,
+				"modelOutputTokens": 4096, // default
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-r1-70b": {
 				"model": "deepseek-r1:70b",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000,
-				"modelOutputTokens": 4096,
+				"modelOutputTokens": 4096, // default
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-r1-671b": {
 				"model": "deepseek-r1:671b",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000,
-				"modelOutputTokens": 4096,
+				"modelOutputTokens": 4096, // default
 				"serverbase": "http://localhost:11434/v1"
 			},
 			"deepseek-v3": {
 				"model": "deepseek-v3",
 				"modelSource": "manual",
 				"modelTotalTokens": 128000,
-				"modelOutputTokens": 4096,
+				"modelOutputTokens": 4096, // default
 				"serverbase": "http://localhost:11434/v1"
-			},
-			"deepseek-v3-1-nex-n1": {
-				"title": "Nex AGI: DeepSeek V3.1 Nex N1",
-				"model": "deepseek-v3.1-nex-n1",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 131072,
-				"modelOutputTokens": 163840,
-				"apikey": ""
-			},
-			"deepseek-v3-2-speciale": {
-				"title": "DeepSeek: DeepSeek V3.2 Speciale",
-				"model": "deepseek-v3.2-speciale",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 163840,
-				"modelOutputTokens": 163840,
-				"apikey": ""
-			},
-			"deepseek-v3-2": {
-				"title": "DeepSeek: DeepSeek V3.2",
-				"model": "deepseek-v3.2",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 163840,
-				"modelOutputTokens": 163840,
-				"apikey": ""
-			},
-			"deepseek-v3-2-exp": {
-				"title": "DeepSeek: DeepSeek V3.2 Exp",
-				"model": "deepseek-v3.2-exp",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 163840,
-				"modelOutputTokens": 65536,
-				"apikey": ""
-			},
-			"deepseek-v3-1-terminus": {
-				"title": "DeepSeek: DeepSeek V3.1 Terminus",
-				"model": "deepseek-v3.1-terminus",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 163840,
-				"modelOutputTokens": 4096,
-				"apikey": ""
-			},
-			"deepseek-chat-v3-1": {
-				"title": "DeepSeek: DeepSeek V3.1",
-				"model": "deepseek-chat-v3.1",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 32768,
-				"modelOutputTokens": 7168,
-				"apikey": ""
-			},
-			"deepseek-r1t2-chimera": {
-				"title": "TNG: DeepSeek R1T2 Chimera",
-				"model": "deepseek-r1t2-chimera",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 163840,
-				"modelOutputTokens": 163840,
-				"apikey": ""
-			},
-			"deepseek-r1-0528": {
-				"title": "DeepSeek: R1 0528",
-				"model": "deepseek-r1-0528",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 163840,
-				"modelOutputTokens": 131072,
-				"apikey": ""
-			},
-			"deepseek-chat-v3-0324": {
-				"title": "DeepSeek: DeepSeek V3 0324",
-				"model": "deepseek-chat-v3-0324",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 163840,
-				"modelOutputTokens": 4096,
-				"apikey": ""
-			},
-			"deepseek-r1-distill-qwen-32b": {
-				"title": "DeepSeek: R1 Distill Qwen 32B",
-				"model": "deepseek-r1-distill-qwen-32b",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 32768,
-				"modelOutputTokens": 32768,
-				"apikey": ""
-			},
-			"deepseek-r1-distill-llama-70b": {
-				"title": "DeepSeek: R1 Distill Llama 70B",
-				"model": "deepseek-r1-distill-llama-70b",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 131072,
-				"modelOutputTokens": 16384,
-				"apikey": ""
-			},
-			"deepseek-r1": {
-				"title": "DeepSeek: R1",
-				"model": "deepseek-r1",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 64000,
-				"modelOutputTokens": 16000,
-				"apikey": ""
 			}
 		}
 	},
@@ -368,104 +272,8 @@
 				{
 					"value": "deepseek-v3",
 					"properties": ["deepseek.deepseek-v3"]
-				},
-				{
-					"value": "deepseek-v3-1-terminus",
-					"properties": ["deepseek.deepseek-v3-1-terminus"]
-				},
-				{
-					"value": "deepseek-v3-2",
-					"properties": ["deepseek.deepseek-v3-2"]
-				},
-				{
-					"value": "deepseek-v3-2-speciale",
-					"properties": ["deepseek.deepseek-v3-2-speciale"]
-				},
-				{
-					"value": "deepseek-r1t2-chimera",
-					"properties": ["deepseek.deepseek-r1t2-chimera"]
-				},
-				{
-					"value": "deepseek-r1-distill-qwen-32b",
-					"properties": ["deepseek.deepseek-r1-distill-qwen-32b"]
-				},
-				{
-					"value": "deepseek-v3-1-nex-n1",
-					"properties": ["deepseek.deepseek-v3-1-nex-n1"]
-				},
-				{
-					"value": "deepseek-r1",
-					"properties": ["deepseek.deepseek-r1"]
-				},
-				{
-					"value": "deepseek-chat-v3-1",
-					"properties": ["deepseek.deepseek-chat-v3-1"]
-				},
-				{
-					"value": "deepseek-r1-distill-llama-70b",
-					"properties": ["deepseek.deepseek-r1-distill-llama-70b"]
-				},
-				{
-					"value": "deepseek-v3-2-exp",
-					"properties": ["deepseek.deepseek-v3-2-exp"]
-				},
-				{
-					"value": "deepseek-r1-0528",
-					"properties": ["deepseek.deepseek-r1-0528"]
-				},
-				{
-					"value": "deepseek-chat-v3-0324",
-					"properties": ["deepseek.deepseek-chat-v3-0324"]
 				}
 			]
-		},
-		"deepseek.deepseek-v3-1-terminus": {
-			"object": "deepseek-v3-1-terminus",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"deepseek.deepseek-v3-2": {
-			"object": "deepseek-v3-2",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"deepseek.deepseek-v3-2-speciale": {
-			"object": "deepseek-v3-2-speciale",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"deepseek.deepseek-r1t2-chimera": {
-			"object": "deepseek-r1t2-chimera",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"deepseek.deepseek-r1-distill-qwen-32b": {
-			"object": "deepseek-r1-distill-qwen-32b",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"deepseek.deepseek-v3-1-nex-n1": {
-			"object": "deepseek-v3-1-nex-n1",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"deepseek.deepseek-r1": {
-			"object": "deepseek-r1",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"deepseek.deepseek-chat-v3-1": {
-			"object": "deepseek-chat-v3-1",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"deepseek.deepseek-r1-distill-llama-70b": {
-			"object": "deepseek-r1-distill-llama-70b",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"deepseek.deepseek-v3-2-exp": {
-			"object": "deepseek-v3-2-exp",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"deepseek.deepseek-r1-0528": {
-			"object": "deepseek-r1-0528",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"deepseek.deepseek-chat-v3-0324": {
-			"object": "deepseek-chat-v3-0324",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		}
 	},
 	//
