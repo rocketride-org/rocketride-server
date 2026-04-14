@@ -1,0 +1,136 @@
+{
+	"title": "Anthropic Vision",
+	"protocol": "image_vision_anthropic://",
+	"classType": ["image"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.llm_vision_anthropic",
+	"prefix": "image_vision_anthropic",
+	"description": ["A component that connects to Anthropic's Claude vision-capable models for image analysis, ", "OCR, visual understanding, and scene description. Supports Claude Opus, Sonnet, and Haiku models ", "with multimodal capabilities. Features robust error handling, automatic image processing, ", "and flexible prompt configuration for a wide range of vision use cases."],
+	"icon": "anthropic.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Model: ${parameters.image_vision_anthropic.profile}"],
+	"lanes": {
+		"image": ["text"],
+		"documents": ["documents"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "Image to analyze with Claude Vision models",
+			"output": [
+				{
+					"lane": "text",
+					"description": "Text analysis of the image content"
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Image documents to analyze with Claude Vision models",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Text analysis of each image document with original metadata (frame number, timestamp) preserved"
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "claude-opus-4-6",
+		"profiles": {
+			"claude-opus-4-6": {
+				"title": "Claude Opus 4.6 - Most Capable (200K tokens)",
+				"model": "claude-opus-4-6",
+				"modelTotalTokens": 200000,
+				"apikey": ""
+			},
+			"claude-sonnet-4-6": {
+				"title": "Claude Sonnet 4.6 - Balanced Speed & Quality (200K tokens)",
+				"model": "claude-sonnet-4-6",
+				"modelTotalTokens": 200000,
+				"apikey": ""
+			},
+			"claude-haiku-4-5": {
+				"title": "Claude Haiku 4.5 - Fastest & Most Affordable (200K tokens)",
+				"model": "claude-haiku-4-5",
+				"modelTotalTokens": 200000,
+				"apikey": ""
+			}
+		}
+	},
+	"fields": {
+		"image_vision_anthropic.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Anthropic API key. Get one at https://console.anthropic.com",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Claude Vision model"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Maximum context length in tokens"
+		},
+		"vision.systemPrompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "System Instructions",
+			"description": "Define the model's role and behavior for image analysis"
+		},
+		"vision.prompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Analysis Prompt",
+			"description": "Describe what you want to analyze or extract from the image"
+		},
+		"image_vision_anthropic.claude-opus-4-6": {
+			"object": "claude-opus-4-6",
+			"properties": ["image_vision_anthropic.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_anthropic.claude-sonnet-4-6": {
+			"object": "claude-sonnet-4-6",
+			"properties": ["image_vision_anthropic.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_anthropic.claude-haiku-4-5": {
+			"object": "claude-haiku-4-5",
+			"properties": ["image_vision_anthropic.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_anthropic.profile": {
+			"title": "Vision Model",
+			"description": "Select the Claude vision model to use",
+			"type": "string",
+			"default": "claude-opus-4-6",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "claude-opus-4-6",
+					"properties": ["image_vision_anthropic.claude-opus-4-6"]
+				},
+				{
+					"value": "claude-sonnet-4-6",
+					"properties": ["image_vision_anthropic.claude-sonnet-4-6"]
+				},
+				{
+					"value": "claude-haiku-4-5",
+					"properties": ["image_vision_anthropic.claude-haiku-4-5"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Anthropic Vision",
+			"properties": ["image_vision_anthropic.profile"]
+		}
+	]
+}
