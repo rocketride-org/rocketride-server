@@ -1,0 +1,164 @@
+{
+	"title": "Gemini Vision",
+	"protocol": "image_vision_gemini://",
+	"classType": ["image"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.llm_vision_gemini",
+	"prefix": "image_vision_gemini",
+	"description": ["A component that connects to Google Gemini's vision-capable models for image analysis, ", "OCR, visual understanding, and scene description. Supports Gemini 2.5 and 3.x models ", "with multimodal capabilities. Features robust error handling, automatic image processing, ", "and flexible prompt configuration for a wide range of vision use cases."],
+	"icon": "gemini.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Model: ${parameters.image_vision_gemini.profile}"],
+	"lanes": {
+		"image": ["text"],
+		"documents": ["documents"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "Image to analyze with Gemini Vision models",
+			"output": [
+				{
+					"lane": "text",
+					"description": "Text analysis of the image content"
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Image documents to analyze with Gemini Vision models",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Text analysis of each image document with original metadata (frame number, timestamp) preserved"
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "gemini-2_5-flash",
+		"profiles": {
+			"gemini-2_5-flash": {
+				"title": "Gemini 2.5 Flash - Fast Vision (1M tokens)",
+				"model": "models/gemini-2.5-flash",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			},
+			"gemini-2_5-pro": {
+				"title": "Gemini 2.5 Pro - High Quality Vision (1M tokens)",
+				"model": "models/gemini-2.5-pro",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			},
+			"gemini-2_5-flash-lite": {
+				"title": "Gemini 2.5 Flash Lite - Fastest & Cheapest (1M tokens)",
+				"model": "models/gemini-2.5-flash-lite",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			},
+			"gemini-3_1-pro-preview": {
+				"title": "Gemini 3.1 Pro - Latest Vision (1M tokens)",
+				"model": "models/gemini-3.1-pro-preview",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			},
+			"gemini-3_1-flash-image-preview": {
+				"title": "Gemini 3.1 Flash Image Preview (131k tokens)",
+				"model": "models/gemini-3.1-flash-image-preview",
+				"modelTotalTokens": 131072,
+				"apikey": ""
+			}
+		}
+	},
+	"fields": {
+		"image_vision_gemini.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Google AI API key. Get one at https://aistudio.google.com/apikey",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Gemini Vision model"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Maximum context length in tokens"
+		},
+		"vision.systemPrompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "System Instructions",
+			"description": "Define the model's role and behavior for image analysis"
+		},
+		"vision.prompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Analysis Prompt",
+			"description": "Describe what you want to analyze or extract from the image"
+		},
+		"image_vision_gemini.gemini-2_5-flash": {
+			"object": "gemini-2_5-flash",
+			"properties": ["image_vision_gemini.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_gemini.gemini-2_5-pro": {
+			"object": "gemini-2_5-pro",
+			"properties": ["image_vision_gemini.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_gemini.gemini-2_5-flash-lite": {
+			"object": "gemini-2_5-flash-lite",
+			"properties": ["image_vision_gemini.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_gemini.gemini-3_1-pro-preview": {
+			"object": "gemini-3_1-pro-preview",
+			"properties": ["image_vision_gemini.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_gemini.gemini-3_1-flash-image-preview": {
+			"object": "gemini-3_1-flash-image-preview",
+			"properties": ["image_vision_gemini.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_gemini.profile": {
+			"title": "Vision Model",
+			"description": "Select the Gemini vision model to use",
+			"type": "string",
+			"default": "gemini-2_5-flash",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "gemini-2_5-flash",
+					"properties": ["image_vision_gemini.gemini-2_5-flash"]
+				},
+				{
+					"value": "gemini-2_5-pro",
+					"properties": ["image_vision_gemini.gemini-2_5-pro"]
+				},
+				{
+					"value": "gemini-2_5-flash-lite",
+					"properties": ["image_vision_gemini.gemini-2_5-flash-lite"]
+				},
+				{
+					"value": "gemini-3_1-pro-preview",
+					"properties": ["image_vision_gemini.gemini-3_1-pro-preview"]
+				},
+				{
+					"value": "gemini-3_1-flash-image-preview",
+					"properties": ["image_vision_gemini.gemini-3_1-flash-image-preview"]
+				}
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Gemini Vision",
+			"properties": ["image_vision_gemini.profile"]
+		}
+	]
+}
