@@ -36,6 +36,7 @@ tool path), not via the `crewai` channel.
 
 from __future__ import annotations
 
+import json
 from typing import Any, List
 
 from rocketlib import debug
@@ -46,6 +47,62 @@ from ai.common.agent.types import AgentRunResult
 from ai.common.schema import Question
 
 from ..crewai_base import CrewBase
+
+
+def _strip_react_preamble(text: str) -> str:
+    """Strip the ReAct Thought/Action/Action Input preamble from a task output.
+
+    In hierarchical mode CrewAI often returns the full agent trajectory rather
+    than just the final answer.  This function extracts the clean payload by
+    trying (in order):
+
+    1. Everything after the last ``Final Answer:`` marker.
+    2. The last top-level JSON block (``\\n{`` … end), which is typically the
+       tool's return value when the agent ends on a tool call observation.
+    3. ``''`` — if the text looks like a ReAct trace but neither marker is
+       found, returns empty so the caller can try the next task output or
+       surface a clean error rather than leaking raw trace text.
+
+    Non-ReAct text (no Thought/Action/Observation markers) is returned as-is.
+    """
+    if not text:
+        return text
+    # 1. Strip to last "Final Answer:" if present.
+    fa_marker = 'Final Answer:'
+    if fa_marker in text:
+        return text[text.rfind(fa_marker) + len(fa_marker) :].strip()
+    # 2. Extract last JSON block — covers the case where the agent ends with a
+    #    tool observation (no Final Answer written).  Only apply when the text
+    #    looks like a ReAct trace; otherwise clean output (e.g. ```chartjs
+    #    fences) would have their prefix incorrectly stripped.
+    #
+    #    Require the trailing JSON to extend to end-of-text (last non-whitespace
+    #    char is `}` or `]`).  Without this guard, an intermediate Observation
+    #    containing JSON followed by more Thought/Action lines would match via
+    #    rfind('\n{') even though the true final answer is later free text.
+    react_markers = ('Thought:', 'Action:', 'Observation:')
+    if any(m in text for m in react_markers):
+        tail = text.rstrip()
+        if tail.endswith('}') or tail.endswith(']'):
+            # Collect all positions where { or [ opens at the start of a line,
+            # then walk right-to-left: the rightmost slice that round-trips
+            # through json.loads is the last complete tool-output block.
+            # rfind('\n{') alone would cut into the middle of a pretty-printed
+            # nested object whose inner braces also start on their own lines.
+            candidates = [i for i, ch in enumerate(text) if ch in ('{', '[') and (i == 0 or text[i - 1] == '\n')]
+            for start in reversed(candidates):
+                slice_ = text[start:].strip()
+                try:
+                    json.loads(slice_)
+                    return slice_
+                except (json.JSONDecodeError, ValueError):
+                    continue
+        # 3. Inline ReAct trace (no newlines between Thought/Action/Action Input),
+        #    or trailing non-JSON free text we can't safely slice.  Return empty
+        #    so the caller can fall back to other task outputs or surface a
+        #    clean error.
+        return ''
+    return text
 
 
 _MGR_ROLE = 'Manager'
@@ -189,10 +246,14 @@ class CrewManager(CrewBase):
                 task_text = f'{task_text}\n\nUser request: {prompt}'
             task_desc = self._escape_braces(task_text)
 
+            # No implicit inter-task context wiring.  In hierarchical mode the
+            # manager agent decides what to pass to each delegate via its
+            # delegation message
             task_obj = Task(
                 description=task_desc,
                 expected_output=d.expected_output or self._DEFAULT_EXPECTED_OUTPUT,
                 agent=agent_obj,
+                context=[],
             )
 
             sub_agents.append(agent_obj)
@@ -240,7 +301,23 @@ class CrewManager(CrewBase):
         # serializing access to them must be process-wide too).
         result = self._iGlobal._kickoff_runner.submit(context, crew.akickoff(inputs={'user_request': prompt} if prompt else {}))
 
-        # Result extraction handles both CrewOutput (has .raw) and
-        # CrewStreamingOutput (final answer at .result.raw).
-        final_text = self._safe_str(getattr(result, 'raw', None)) or self._safe_str(getattr(getattr(result, 'result', None), 'raw', None)) or self._safe_str(result)
+        # Result extraction: prefer the last completed task's output (clean result)
+        # over result.raw, which in hierarchical mode contains the full manager
+        # ReAct trace (all delegations + observations concatenated).
+        tasks_out = getattr(result, 'tasks_output', None) or []
+        final_text = ''
+        for task_out in reversed(tasks_out):
+            candidate = self._safe_str(getattr(task_out, 'raw', None))
+            if not candidate:
+                continue
+            stripped = _strip_react_preamble(candidate)
+            if stripped:
+                final_text = stripped
+                break
+
+        if not final_text:
+            # Fall back to result.raw with the same ReAct stripping.
+            raw = self._safe_str(getattr(result, 'raw', None)) or self._safe_str(getattr(getattr(result, 'result', None), 'raw', None)) or self._safe_str(result)
+            final_text = _strip_react_preamble(raw)
+
         return final_text, result
