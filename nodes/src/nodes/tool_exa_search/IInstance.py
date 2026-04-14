@@ -51,6 +51,8 @@ VALID_SEARCH_TYPES = {'auto', 'neural', 'keyword'}
 
 
 class IInstance(IInstanceBase):
+    """Node instance exposing Exa semantic web search as an agent tool."""
+
     IGlobal: IGlobal
 
     @tool_function(
@@ -122,6 +124,10 @@ class IInstance(IInstanceBase):
 
         cfg = self.IGlobal
         num_results = args.get('num_results', cfg.num_results)
+        # bool is a subclass of int in Python — reject it explicitly so that
+        # {'num_results': true} doesn't silently become 1.
+        if isinstance(num_results, bool) or not isinstance(num_results, int):
+            num_results = cfg.num_results
         search_type = args.get('type', cfg.search_type)
         use_autoprompt = args.get('use_autoprompt', cfg.use_autoprompt)
         include_text = args.get('include_text', cfg.include_text)
