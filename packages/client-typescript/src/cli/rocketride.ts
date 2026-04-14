@@ -801,6 +801,7 @@ export class RocketRideCLI {
 	private connected: boolean = false;
 	private attempt: number = 0;
 	private cancelled: boolean = false;
+	private signalShutdownPromise?: Promise<never>;
 
 	constructor() {
 		this.setupSignalHandlers();
@@ -814,30 +815,49 @@ export class RocketRideCLI {
 		return this.cancelled;
 	}
 
+	isShuttingDown(): boolean {
+		return this.signalShutdownPromise !== undefined;
+	}
+
+	// Resolves only when the signal handler calls process.exit, so any
+	// command/run/main flow that awaits this will stand down and let the
+	// signal handler own the exit code.
+	awaitShutdown(): Promise<never> {
+		return this.signalShutdownPromise ?? new Promise<never>(() => {});
+	}
+
 	private setupSignalHandlers(): void {
 		const FORCE_EXIT_TIMEOUT_MS = 5000;
 
 		const signalHandler = async (signal: string) => {
-			if (this.cancelled) {
+			const exitCode = 128 + (signal === 'SIGINT' ? 2 : 15);
+
+			if (this.signalShutdownPromise) {
 				// Second signal: force exit immediately
-				process.exit(128 + (signal === 'SIGINT' ? 2 : 15));
+				process.exit(exitCode);
 			}
+
+			// Park a promise that never resolves; other flows await it to
+			// stand down while the signal handler drives the exit.
+			this.signalShutdownPromise = new Promise<never>(() => {});
 
 			this.cancel();
 
 			// Force exit if cleanup hangs
 			const forceExitTimer = setTimeout(() => {
 				console.error(`\nCleanup timed out after ${FORCE_EXIT_TIMEOUT_MS}ms, forcing exit`);
-				process.exit(128 + (signal === 'SIGINT' ? 2 : 15));
+				process.exit(exitCode);
 			}, FORCE_EXIT_TIMEOUT_MS);
 
 			try {
 				await this.cleanupClient();
 			} catch {
 				// Ignore cleanup errors during signal handling
+			} finally {
+				clearTimeout(forceExitTimer);
 			}
 
-			process.exit(128 + (signal === 'SIGINT' ? 2 : 15));
+			process.exit(exitCode);
 		};
 
 		process.on('SIGINT', () => signalHandler('SIGINT'));
@@ -1548,8 +1568,15 @@ export class RocketRideCLI {
 		// Parse command line arguments - commander will handle command routing
 		try {
 			await program.parseAsync(process.argv);
+			if (this.isShuttingDown()) {
+				// Signal handler owns the exit; park until it calls process.exit.
+				await this.awaitShutdown();
+			}
 			return 0; // If we get here, a command was executed successfully
 		} catch (error) {
+			if (this.isShuttingDown()) {
+				await this.awaitShutdown();
+			}
 			if (error instanceof Error && error.message.includes('interrupted')) {
 				console.log('\nOperation interrupted by user');
 				return 1;
@@ -1576,11 +1603,18 @@ function formatError(e: Error): string {
 }
 
 export async function main(): Promise<void> {
+	const cli = new RocketRideCLI();
 	try {
-		const cli = new RocketRideCLI();
 		const exitCode = await cli.run();
+		if (cli.isShuttingDown()) {
+			// Signal handler owns the exit code; never race it to process.exit.
+			await cli.awaitShutdown();
+		}
 		process.exit(exitCode);
 	} catch (error) {
+		if (cli.isShuttingDown()) {
+			await cli.awaitShutdown();
+		}
 		if (error instanceof Error && error.message.includes('interrupted')) {
 			console.log('\n\nOperation interrupted by user');
 		} else {
