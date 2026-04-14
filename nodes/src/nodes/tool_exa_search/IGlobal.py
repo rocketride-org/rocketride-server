@@ -60,7 +60,10 @@ class IGlobal(IGlobalBase):
             raise ValueError('tool_exa_search: apikey is required')
 
         self.apikey = apikey
-        self.num_results = max(1, min(50, int(cfg.get('numResults') or 10)))
+        raw_num_results = cfg.get('numResults', 10)
+        if raw_num_results is None:
+            raw_num_results = 10
+        self.num_results = max(1, min(50, int(raw_num_results)))
         self.use_autoprompt = bool(cfg.get('useAutoprompt', True))
         self.search_type = str(cfg.get('searchType') or 'auto').strip()
         self.include_text = bool(cfg.get('includeText', True))
