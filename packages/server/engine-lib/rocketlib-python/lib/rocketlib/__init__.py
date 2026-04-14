@@ -74,6 +74,7 @@ from .types import IInvokeOp
 from .types import IInvokeLLM
 from .types import IInvokeTool
 from .types import IInvokeCrew
+from .types import IInvokeDeepagent
 from .types import IInvokeMemory
 from .types import IJson
 from .types import OPEN_MODE
@@ -115,6 +116,7 @@ __all__ = [
     'IInvokeLLM',
     'IInvokeTool',
     'IInvokeCrew',
+    'IInvokeDeepagent',
     'IInvokeMemory',
     'IJson',
     'ILoader',

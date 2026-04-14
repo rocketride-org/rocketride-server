@@ -367,6 +367,44 @@ class IInvokeCrew(IInvoke):
         model_config = ConfigDict(extra='allow')
 
 
+class IInvokeDeepagent(IInvoke):
+    """
+    DeepAgent invoke operations.  Pure namespace — construct via inner classes.
+
+    Usage::
+
+        param = IInvokeDeepagent.Describe()
+        instance.invoke(param, component_id=subagent_node_id)
+
+    Each sub-agent connected on the 'deepagent' lane appends a DescribeResponse
+    to ``Describe.agents`` when the orchestrator fans out a Describe request.
+    The op name is the bare 'describe' so it routes to an @invoke_function
+    decorated method named ``describe`` on the receiving IInstance.
+    """
+
+    class Describe(IInvokeOp):
+        """Fan-out request: each connected sub-agent appends its descriptor."""
+
+        lane: str = 'deepagent'
+        op: str = Field(default='describe', frozen=True)
+        agents: List[Any] = Field(default_factory=list)
+
+    class DescribeResponse(BaseModel):
+        """Sub-agent descriptor value object — appended to ``Describe.agents``.
+
+        Not an `IInvokeOp` because this is a value object that travels inside
+        a Describe response, not an invoke operation that gets dispatched.
+        """
+
+        name: str  # unique identifier — typically the node_id
+        description: str = ''  # how the orchestrator recognises this sub-agent's purpose
+        system_prompt: str = ''
+        instructions: List[str] = Field(default_factory=list)
+        node_id: str = ''  # pSelf.instance.pipeType['id']
+        invoke: Any = Field(default=None)  # full pSelf IInstance — passed to AgentHostServices(d.invoke)
+        model_config = ConfigDict(extra='allow')
+
+
 class IJson(Impl_IJson):
     """
     A wrapper class for IJson that provides utility methods for handling JSON-like structures.

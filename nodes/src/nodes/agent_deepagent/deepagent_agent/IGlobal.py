@@ -62,10 +62,15 @@ class IGlobal(IGlobalBase):
 
         from depends import depends
 
-        requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
+        # Shared requirements.txt lives at the parent agent_deepagent/ level.
+        requirements = os.path.join(
+            os.path.dirname(os.path.realpath(__file__)),
+            '..',
+            'requirements.txt',
+        )
         depends(requirements)
 
-        from .deepagent import DeepAgentDriver
+        from ..deepagent import DeepAgentDriver
 
         self.agent = DeepAgentDriver(self)
 
