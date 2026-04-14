@@ -142,7 +142,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 
 				try {
 					// Open with a specific custom editor
-					await vscode.commands.executeCommand('vscode.openWith', resourceUri, 'rocketride.PageEditor');
+					await vscode.commands.executeCommand('vscode.openWith', resourceUri, 'rocketride.PageProject');
 				} catch (error) {
 					vscode.window.showErrorMessage(`Failed to open status page: ${error}`);
 				}
@@ -751,7 +751,7 @@ export class SidebarFilesProvider implements vscode.TreeDataProvider<PipelineFil
 			const content = JSON.stringify(template, null, 2);
 			await vscode.workspace.fs.writeFile(fileUri, Buffer.from(content, 'utf8'));
 
-			await vscode.commands.executeCommand('vscode.openWith', fileUri, 'rocketride.PageEditor');
+			await vscode.commands.executeCommand('vscode.openWith', fileUri, 'rocketride.PageProject');
 		} catch (error) {
 			vscode.window.showErrorMessage(`Failed to create pipeline: ${error}`);
 		}
