@@ -22,6 +22,8 @@
  * SOFTWARE.
  */
 
+import type { PIPELINE_RESULT } from './data.js';
+
 /**
  * Event type enumeration for sophisticated client subscription and event routing.
  *
@@ -244,6 +246,12 @@ export interface TaskEventFlow {
 		result?: string;
 		error?: string;
 	};
+
+	/**
+	 * Final pipeline result — populated on op === 'end' when trace level >= summary.
+	 * Contains result_types mapping plus dynamic fields (text, answers, documents, etc.).
+	 */
+	result?: PIPELINE_RESULT;
 
 	/** Project identifier. */
 	project_id: string;

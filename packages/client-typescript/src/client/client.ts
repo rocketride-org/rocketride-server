@@ -1441,6 +1441,9 @@ export class RocketRideClient extends DAPClient {
 	 * (so "disconnect without ever connecting" does not fire the user callback).
 	 */
 	async onDisconnected(reason: string, hasError: boolean): Promise<void> {
+		// Transport is gone — clear it so the next _internalConnect always creates a fresh one
+		this._transport = undefined;
+
 		if (this._didNotifyConnected) {
 			this._didNotifyConnected = false;
 

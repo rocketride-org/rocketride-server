@@ -4,3 +4,4 @@
 // =============================================================================
 
 export { default as FloatingToolbar } from './FloatingToolbar';
+export { useToolbarOrientation } from './FloatingToolbar';

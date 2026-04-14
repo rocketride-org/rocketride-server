@@ -36,6 +36,8 @@ export interface TraceEvent {
 		result?: string;
 		error?: string;
 	};
+	/** Final pipeline result — present when op === 'end' and trace level >= summary. */
+	pipelineResult?: Record<string, unknown>;
 	/** Source node ID (e.g. "chat_1") — identifies which pipeline source generated this event. */
 	source?: string;
 }
@@ -57,6 +59,8 @@ export interface TraceRow {
 	objectName: string;
 	/** Source node ID that generated this trace. */
 	source?: string;
+	/** Final pipeline result — present on the sentinel row emitted for op === 'end'. */
+	pipelineResult?: Record<string, unknown>;
 }
 
 // =============================================================================

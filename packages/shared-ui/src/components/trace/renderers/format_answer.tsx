@@ -4,6 +4,7 @@
 
 import React, { ReactElement } from 'react';
 import { RS } from './styles';
+import { JsonTree } from '../JsonTree';
 
 export interface AnswerFields {
 	answer?: string | Record<string, unknown> | unknown[];
@@ -25,17 +26,34 @@ export function renderAnswerFields(a: AnswerFields | null | undefined): ReactEle
 	const answer = a.answer;
 	const isStringAnswer = typeof answer === 'string';
 
+	// If flagged as JSON string, try to parse for the tree view
+	let parsedJson: unknown = null;
+	if (isStringAnswer && a.expectJson) {
+		try {
+			parsedJson = JSON.parse(answer as string);
+		} catch {
+			/* render as plain text */
+		}
+	} else if (!isStringAnswer && answer != null) {
+		parsedJson = answer;
+	}
+	const isJson = parsedJson !== null;
+
 	return (
 		<div>
 			{answer != null && (
 				<div style={RS.section}>
-					<div style={RS.label}>Answer{!isStringAnswer && a.expectJson ? ' (JSON)' : ''}</div>
+					<div style={RS.label}>Answer{isJson ? ' (JSON)' : ''}</div>
 					<div style={RS.sectionContent}>
-						<div style={{ ...RS.textBlock, borderLeft: '3px solid var(--rr-chart-green)' }}>{isStringAnswer ? (answer as string) : JSON.stringify(answer, null, 2)}</div>
-						{isStringAnswer && (
-							<div style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginTop: 2 }}>
-								{(answer as string).length.toLocaleString()} chars {'\u00B7'} ~{(answer as string).split(/\s+/).length} words
-							</div>
+						{isJson ? (
+							<JsonTree data={parsedJson} defaultExpanded={1} />
+						) : (
+							<>
+								<div style={{ ...RS.textBlock, borderLeft: '3px solid var(--rr-chart-green)' }}>{answer as string}</div>
+								<div style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginTop: 2 }}>
+									{(answer as string).length.toLocaleString()} chars {'\u00B7'} ~{(answer as string).split(/\s+/).length} words
+								</div>
+							</>
 						)}
 					</div>
 				</div>
@@ -54,13 +72,6 @@ export function renderAnswerFields(a: AnswerFields | null | undefined): ReactEle
 							))}
 						</div>
 					</div>
-				</div>
-			)}
-
-			{a.expectJson && isStringAnswer && (
-				<div style={RS.kvRow}>
-					<span style={RS.kvKey}>Format</span>
-					<span style={RS.kvVal}>JSON expected</span>
 				</div>
 			)}
 		</div>

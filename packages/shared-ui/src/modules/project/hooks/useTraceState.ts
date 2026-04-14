@@ -287,7 +287,26 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 					const docId = slotBindingsRef.current.get(pipelineId);
 					if (docId != null) {
 						const doc = documentsRef.current.get(docId);
-						if (doc) doc.completed = true;
+						if (doc) {
+							doc.completed = true;
+							const result = (event as any).pipelineResult as Record<string, unknown> | undefined;
+							if (result && Object.keys(result).length > 0) {
+								const resultRow: TraceRow = {
+									id: rowCounterRef.current++,
+									docId,
+									completed: true,
+									lane: '__result__',
+									filterName: '',
+									depth: 0,
+									timestamp: Date.now(),
+									endTimestamp: Date.now(),
+									objectName: doc.objectName,
+									source: eventSource,
+									pipelineResult: result,
+								};
+								doc.rows.push(resultRow);
+							}
+						}
 					}
 					slotBindingsRef.current.delete(pipelineId);
 					pendingStacksRef.current.delete(pipelineId);

@@ -71,6 +71,9 @@ export class ConnectionManager extends EventEmitter {
 	// Engine install cancellation
 	private engineCts?: vscode.CancellationTokenSource;
 
+	// In-flight connect guard — prevents concurrent connect() calls
+	private connectPromise?: Promise<void>;
+
 	// Resource cleanup tracking
 	private disposables: vscode.Disposable[] = [];
 	private isDisposing: boolean = false;
@@ -257,7 +260,18 @@ export class ConnectionManager extends EventEmitter {
 	// CONNECT / DISCONNECT
 	// =========================================================================
 
-	public async connect(): Promise<void> {
+	public connect(): Promise<void> {
+		// Deduplicate: if a connect is already in flight, return the same promise
+		if (this.connectPromise) {
+			return this.connectPromise;
+		}
+		this.connectPromise = this._connect().finally(() => {
+			this.connectPromise = undefined;
+		});
+		return this.connectPromise;
+	}
+
+	private async _connect(): Promise<void> {
 		if (this.isDisposing) {
 			return;
 		}

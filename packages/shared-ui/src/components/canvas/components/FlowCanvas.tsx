@@ -36,7 +36,7 @@
 
 import { ReactElement, useCallback, useEffect, useState } from 'react';
 import { ReactFlow, Background, SelectionMode, useReactFlow } from '@xyflow/react';
-import { Settings, Undo2, Redo2, Move, BoxSelect, PlusSquare } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 
 // Design tokens — light defaults
@@ -57,6 +57,7 @@ import QuickAddPopup from './panels/quick-add/QuickAddPopup';
 import { useFlowGraph } from '../context/FlowGraphContext';
 import { useFlowPreferences, NavigationMode } from '../context/FlowPreferencesContext';
 import FloatingToolbar, { type IToolbarPosition } from './toolbar/FloatingToolbar';
+import { useToolbarOrientation } from './toolbar';
 import CreateNodePanel from './panels/create-node/CreateNodePanel';
 import EmptyCanvasPrompt from './EmptyCanvasPrompt';
 import NodeConfigPanel from './panels/node-config';
@@ -97,6 +98,80 @@ const edgeTypes = {
 // =============================================================================
 
 const DEFAULT_ZOOM = 0.75;
+
+// =============================================================================
+// INLINE ICON HELPERS
+// =============================================================================
+
+const BxIcon = ({ d, size = 16, color = 'currentColor' }: { d: string; size?: number; color?: string }) => (
+	<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill={color}>
+		<path d={d} />
+	</svg>
+);
+
+const BX_PLUS_SQUARE = 'M5 21h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2zm2-10h4V7h2v4h4v2h-4v4h-2v-4H7v-2z';
+const BX_UNDO = 'M9 10h6c1.654 0 3 1.346 3 3s-1.346 3-3 3h-3v2h3c2.757 0 5-2.243 5-5s-2.243-5-5-5H9V5L4 9l5 4v-3z';
+const BX_REDO = 'M9 18h3v-2H9c-1.654 0-3-1.346-3-3s1.346-3 3-3h6v3l5-4-5-4v3H9c-2.757 0-5 2.243-5 5s2.243 5 5 5z';
+const BX_POINTER = 'M20.978 13.21a1 1 0 0 0-.396-1.024l-14-10a.999.999 0 0 0-1.575.931l2 17a1 1 0 0 0 1.767.516l3.612-4.416 3.377 5.46 1.701-1.052-3.357-5.428 6.089-1.218a.995.995 0 0 0 .782-.769zm-8.674.31a1 1 0 0 0-.578.347l-3.008 3.677L7.257 5.127l10.283 7.345-5.236 1.048z';
+
+const HandIcon = ({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) => (
+	<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+		<path d="M18 11V6.5a1.5 1.5 0 0 0-3 0V11" />
+		<path d="M15 11V4.5a1.5 1.5 0 0 0-3 0V11" />
+		<path d="M12 11V5.5a1.5 1.5 0 0 0-3 0v10.81l-2.22-3.6a1.5 1.5 0 0 0-2.56 1.58l3.31 5.34A5 5 0 0 0 9.78 22H17a5 5 0 0 0 5-5V11.5a1.5 1.5 0 0 0-3 0V11" />
+	</svg>
+);
+
+// =============================================================================
+// TOOLBAR COMPONENTS
+// =============================================================================
+
+const ToolbarButton = ({ title, onClick, isActive = false, disabled = false, forceColor, children }: { title: string; onClick: () => void; isActive?: boolean; disabled?: boolean; forceColor?: string; children: React.ReactNode }) => {
+	const [hovered, setHovered] = useState(false);
+	const active = isActive && !disabled;
+	return (
+		<button
+			title={title}
+			onClick={onClick}
+			disabled={disabled}
+			onMouseEnter={() => setHovered(true)}
+			onMouseLeave={() => setHovered(false)}
+			style={{
+				padding: '4px',
+				background: active ? 'color-mix(in srgb, var(--rr-text-secondary) 20%, transparent)' : hovered && !disabled ? 'color-mix(in srgb, var(--rr-text-secondary) 12%, transparent)' : 'none',
+				border: 'none',
+				cursor: disabled ? 'default' : 'pointer',
+				display: 'inline-flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				width: 28,
+				height: 28,
+				borderRadius: 6,
+				color: forceColor ?? 'var(--rr-text-secondary)',
+				opacity: disabled ? 0.4 : 1,
+				transition: 'background 100ms ease',
+			}}
+		>
+			{children}
+		</button>
+	);
+};
+
+const ToolbarDivider = () => {
+	const dir = useToolbarOrientation();
+	const isVert = dir === 'vertical';
+	return (
+		<div
+			style={{
+				width: isVert ? 16 : 1,
+				height: isVert ? 1 : 16,
+				background: 'var(--rr-border)',
+				margin: isVert ? '2px 0' : '0 2px',
+				flexShrink: 0,
+			}}
+		/>
+	);
+};
 
 // =============================================================================
 // Component
@@ -208,23 +283,10 @@ export default function Canvas(): ReactElement {
 		return () => document.removeEventListener('keydown', handler, true);
 	}, [setNodes]);
 
-	// --- Canvas toolbar component (registered in context for external use) ---
-	const iconButtonStyle: React.CSSProperties = {
-		padding: '4px',
-		color: 'var(--rr-text-secondary)',
-		background: 'none',
-		border: 'none',
-		cursor: 'pointer',
-		display: 'inline-flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		width: 28,
-		height: 28,
-	};
-
+	// --- Canvas toolbar --------------------------------------------------------
 	const canvasToolbar = (
 		<>
-			<button
+			<ToolbarButton
 				title="Add node"
 				onClick={() => {
 					setShowCreatePanel((v) => {
@@ -232,45 +294,51 @@ export default function Canvas(): ReactElement {
 						return !v;
 					});
 				}}
-				style={{ ...iconButtonStyle, color: showCreatePanel ? 'var(--rr-accent)' : iconButtonStyle.color }}
+				isActive={showCreatePanel}
+				forceColor="var(--rr-brand)"
 			>
-				<PlusSquare size={16} />
-			</button>
+				<BxIcon d={BX_PLUS_SQUARE} size={16} />
+			</ToolbarButton>
 			{features.addAnnotation && (
-				<button title="Add annotation" onClick={addAnnotation} style={iconButtonStyle}>
+				<ToolbarButton title="Add annotation" onClick={addAnnotation}>
 					<NoteIcon color="currentColor" size={18} />
-				</button>
+				</ToolbarButton>
 			)}
-			<button title={isLocked ? 'Unlock canvas' : 'Lock canvas'} onClick={toggleLock} style={iconButtonStyle}>
+			<ToolbarDivider />
+			<ToolbarButton title={isLocked ? 'Unlock canvas' : 'Lock canvas'} onClick={toggleLock} isActive={isLocked}>
 				{isLocked ? <LockIcon color="currentColor" size={18} /> : <UnlockIcon color="currentColor" size={18} />}
-			</button>
-			<button title="Fit to screen" onClick={() => fitView()} style={iconButtonStyle}>
+			</ToolbarButton>
+			<ToolbarButton title="Fit to screen" onClick={() => fitView()}>
 				<FitIcon color="currentColor" size={18} />
-			</button>
+			</ToolbarButton>
 			{features.autoLayout !== false && (
-				<button title="Tidy layout" onClick={autoLayout} disabled={isLayouting || nodes.length === 0} style={iconButtonStyle}>
+				<ToolbarButton title="Tidy layout" onClick={autoLayout} disabled={isLayouting || nodes.length === 0}>
 					<TidyIcon color="currentColor" size={18} />
-				</button>
+				</ToolbarButton>
 			)}
-			<button title="Zoom in" onClick={() => zoomIn()} style={iconButtonStyle}>
+			<ToolbarButton title="Zoom in" onClick={() => zoomIn()}>
 				<ZoomInIcon color="currentColor" size={18} />
-			</button>
-			<button title="Zoom out" onClick={() => zoomOut()} style={iconButtonStyle}>
+			</ToolbarButton>
+			<ToolbarButton title="Zoom out" onClick={() => zoomOut()}>
 				<ZoomOutIcon color="currentColor" size={18} />
-			</button>
+			</ToolbarButton>
+			<ToolbarDivider />
 			{onUndo && (
-				<button title="Undo" onClick={onUndo} style={iconButtonStyle}>
-					<Undo2 size={16} />
-				</button>
+				<ToolbarButton title="Undo" onClick={onUndo}>
+					<BxIcon d={BX_UNDO} size={16} />
+				</ToolbarButton>
 			)}
 			{onRedo && (
-				<button title="Redo" onClick={onRedo} style={iconButtonStyle}>
-					<Redo2 size={16} />
-				</button>
+				<ToolbarButton title="Redo" onClick={onRedo}>
+					<BxIcon d={BX_REDO} size={16} />
+				</ToolbarButton>
 			)}
-			<button title={isPanMode ? 'Switch to lasso select' : 'Switch to pan'} onClick={() => setNavigationMode(isPanMode ? NavigationMode.SELECT : NavigationMode.DRAG)} style={iconButtonStyle}>
-				{isPanMode ? <BoxSelect size={16} /> : <Move size={16} />}
-			</button>
+			<ToolbarButton title="Select mode" onClick={() => setNavigationMode(NavigationMode.SELECT)} isActive={!isPanMode}>
+				<BxIcon d={BX_POINTER} size={16} />
+			</ToolbarButton>
+			<ToolbarButton title="Pan mode" onClick={() => setNavigationMode(NavigationMode.DRAG)} isActive={isPanMode}>
+				<HandIcon size={16} />
+			</ToolbarButton>
 		</>
 	);
 

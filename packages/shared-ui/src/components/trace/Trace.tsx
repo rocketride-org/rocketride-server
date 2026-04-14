@@ -10,6 +10,7 @@ import React, { useState, useMemo, useCallback, CSSProperties } from 'react';
 import { JsonTree } from './JsonTree';
 import { renderTraceInput, renderTraceOutput, summaryTraceInput, renderTraceData } from './renderers';
 import { traceDataEqual } from './renderers/utils';
+import { renderFinalSections, resultFieldCount } from './renderers/render_final';
 import type { TraceRow } from '../../modules/project/types';
 import { commonStyles } from '../../themes/styles';
 
@@ -36,6 +37,7 @@ interface TraceObjectGroup {
 	hasError: boolean;
 	inFlight: boolean;
 	totalElapsed: number | null;
+	resultData?: Record<string, unknown>;
 }
 
 // =============================================================================
@@ -301,9 +303,16 @@ function buildObjectGroups(rows: TraceRow[]): TraceObjectGroup[] {
 		const rootNodes: TraceTreeNode[] = [];
 		const stack: TraceTreeNode[] = [];
 		let hasError = false;
+		let resultData: Record<string, unknown> | undefined;
 
 		for (const row of docRows) {
 			if (row.error) hasError = true;
+
+			// Extract result sentinel row — render separately, not in tree
+			if (row.lane === '__result__') {
+				resultData = row.pipelineResult;
+				continue;
+			}
 
 			const node: TraceTreeNode = { row, children: [], parent: null };
 
@@ -347,6 +356,7 @@ function buildObjectGroups(rows: TraceRow[]): TraceObjectGroup[] {
 			hasError,
 			inFlight,
 			totalElapsed,
+			resultData,
 		});
 	}
 
@@ -923,6 +933,36 @@ const TraceCallChildren: React.FC<Omit<TraceCallNodeProps, 'node'> & { nodes: Tr
 };
 
 // =============================================================================
+// SUB-COMPONENT: Collapsible result row (shown after the call tree)
+// =============================================================================
+
+const ResultRow: React.FC<{ resultData: Record<string, unknown> }> = ({ resultData }) => {
+	const [expanded, setExpanded] = useState(false);
+	const [hovered, setHovered] = useState(false);
+	const count = resultFieldCount(resultData);
+
+	const headerStyle: CSSProperties = {
+		...(expanded ? SN.expandedHeader : SN.collapsedRow),
+		...(hovered && !expanded ? S.rowHover : {}),
+	};
+
+	return (
+		<div>
+			<div style={headerStyle} onClick={() => setExpanded((v) => !v)} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+				<span style={S.chev}>{expanded ? '\u25BE' : '\u25B8'}</span>
+				<span style={{ ...S.name, flex: 'none', color: 'var(--rr-color-success)', fontWeight: 600 }}>Result</span>
+				{!expanded && count > 0 && (
+					<span style={{ fontSize: 10, color: 'var(--rr-text-disabled)', marginLeft: 6 }}>
+						({count} field{count !== 1 ? 's' : ''})
+					</span>
+				)}
+			</div>
+			{expanded && <div style={SN.nest}>{renderFinalSections(resultData)}</div>}
+		</div>
+	);
+};
+
+// =============================================================================
 // MAIN COMPONENT
 // =============================================================================
 
@@ -1023,6 +1063,7 @@ const Trace: React.FC<TraceProps> = ({ rows, componentNames }) => {
 									{isExpanded && (
 										<div style={{ paddingLeft: 20 }}>
 											<TraceCallChildren nodes={group.nodes} componentNames={componentNames} expandedNodes={expandedNodes} moreRevealed={moreRevealed} onToggleExpand={(id) => toggleNode(id)} onExpandAll={expandAllForNode} onCollapseAll={collapseAllForNode} onRevealMore={revealMore} />
+											{group.resultData && <ResultRow resultData={group.resultData} />}
 										</div>
 									)}
 								</React.Fragment>

@@ -50,7 +50,7 @@ interface EditorState {
 
 export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 	private disposables: vscode.Disposable[] = [];
-	private editorStates: Map<string, EditorState> = new Map();
+	private editorStates: Map<vscode.WebviewPanel, EditorState> = new Map();
 	private connectionManager = ConnectionManager.getInstance();
 	private logger = getLogger();
 	private savesForRun: Set<string> = new Set();
@@ -119,18 +119,17 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 				const source = event.body?.source;
 				if (!projectId || !source) return;
 
-				const editorState = Array.from(this.editorStates.values()).find((state) => !state.isDisposed && state.projectId === projectId);
-				if (!editorState) return;
-
 				const taskStatus = event.body as TaskStatus;
-				editorState.cachedStatuses[source] = taskStatus;
-
-				if (editorState.isReady) {
-					editorState.webviewPanel.webview.postMessage({
-						type: 'status:update',
-						taskStatus,
-					});
+				let dispatched = false;
+				for (const editorState of this.editorStates.values()) {
+					if (editorState.isDisposed || editorState.projectId !== projectId) continue;
+					editorState.cachedStatuses[source] = taskStatus;
+					if (editorState.isReady) {
+						editorState.webviewPanel.webview.postMessage({ type: 'status:update', taskStatus });
+					}
+					dispatched = true;
 				}
+				if (!dispatched) return;
 				break;
 			}
 
@@ -138,19 +137,24 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 				const body = event.body;
 				if (!body?.trace) break;
 
+				const flowProjectId = body.project_id;
+				if (!flowProjectId) break;
+
+				const traceEvent: Record<string, unknown> = {
+					pipelineId: body.id ?? 0,
+					op: body.op || 'enter',
+					pipes: body.pipes || [],
+					trace: body.op === 'end' ? {} : body.trace || {},
+					source: body.source,
+				};
+				if (body.op === 'end' && body.trace && Object.keys(body.trace).length > 0) {
+					traceEvent.pipelineResult = body.trace;
+				}
+
 				for (const editorState of this.editorStates.values()) {
-					if (!editorState.isDisposed && editorState.isReady) {
-						editorState.webviewPanel.webview.postMessage({
-							type: 'trace:event',
-							event: {
-								pipelineId: body.id ?? 0,
-								op: body.op || 'enter',
-								pipes: body.pipes || [],
-								trace: body.trace || {},
-								source: body.source,
-							},
-						});
-					}
+					if (editorState.isDisposed || !editorState.isReady) continue;
+					if (editorState.projectId !== flowProjectId) continue;
+					editorState.webviewPanel.webview.postMessage({ type: 'trace:event', event: traceEvent });
 				}
 				break;
 			}
@@ -190,8 +194,8 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 	// MONITORING
 	// =========================================================================
 
-	private async startMonitoring(documentUri: string): Promise<void> {
-		const editorState = this.editorStates.get(documentUri);
+	private async startMonitoring(panel: vscode.WebviewPanel): Promise<void> {
+		const editorState = this.editorStates.get(panel);
 		if (!editorState || editorState.isDisposed || !editorState.projectId || !this.connectionManager.isConnected()) {
 			return;
 		}
@@ -205,8 +209,8 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 		}
 	}
 
-	private async stopMonitoring(documentUri: string): Promise<void> {
-		const editorState = this.editorStates.get(documentUri);
+	private async stopMonitoring(panel: vscode.WebviewPanel): Promise<void> {
+		const editorState = this.editorStates.get(panel);
 		if (!editorState || !editorState.projectId) return;
 
 		try {
@@ -276,7 +280,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 			cachedStatuses: {},
 		};
 
-		this.editorStates.set(document.uri.toString(), editorState);
+		this.editorStates.set(webviewPanel, editorState);
 
 		webview.options = {
 			enableScripts: true,
@@ -329,7 +333,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 
 					// Start monitoring
 					try {
-						await this.startMonitoring(document.uri.toString());
+						await this.startMonitoring(webviewPanel);
 					} catch (error) {
 						this.logger.error(`Starting monitoring after webview ready: ${error}`);
 					}
@@ -441,16 +445,16 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 
 		// Clean up when panel is disposed
 		webviewPanel.onDidDispose(async () => {
-			await this.stopMonitoring(document.uri.toString());
+			await this.stopMonitoring(webviewPanel);
 			editorState.cachedStatuses = {};
 			editorState.isDisposed = true;
-			this.editorStates.delete(document.uri.toString());
+			this.editorStates.delete(webviewPanel);
 			changeDocumentSubscription.dispose();
 		});
 
 		// Start monitoring immediately if connected
 		if (this.connectionManager.isConnected()) {
-			this.startMonitoring(document.uri.toString()).catch((error) => {
+			this.startMonitoring(webviewPanel).catch((error) => {
 				this.logger.error(`Starting initial monitoring: ${error}`);
 			});
 		}

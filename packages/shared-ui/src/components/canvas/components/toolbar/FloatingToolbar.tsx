@@ -22,7 +22,7 @@
  * vertical orientation automatically.
  */
 
-import { ReactElement, ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { ReactElement, ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 import { GripVertical, GripHorizontal } from 'lucide-react';
 
@@ -31,6 +31,13 @@ import { GripVertical, GripHorizontal } from 'lucide-react';
 // =============================================================================
 
 const EDGE_THRESHOLD = 30;
+
+// =============================================================================
+// TOOLBAR ORIENTATION CONTEXT
+// =============================================================================
+
+const ToolbarOrientationContext = createContext<'horizontal' | 'vertical'>('horizontal');
+export const useToolbarOrientation = () => useContext(ToolbarOrientationContext);
 
 // =============================================================================
 // POSITION TYPE
@@ -204,6 +211,7 @@ export default function FloatingToolbar({ children, position = DEFAULT_POSITION,
 
 			// Get current rendered position as the drag starting point
 			const rendered = getRenderedPosition();
+			if (!rendered) return;
 
 			dragStart.current = {
 				mouseX: e.clientX,
@@ -309,17 +317,19 @@ export default function FloatingToolbar({ children, position = DEFAULT_POSITION,
 				</div>
 
 				{/* Toolbar content */}
-				<div
-					style={{
-						display: 'flex',
-						flexDirection: isVertical ? 'column' : 'row',
-						alignItems: 'center',
-						gap: '4px',
-						padding: isVertical ? '4px 4px 8px' : '4px 8px 4px 4px',
-					}}
-				>
-					{children}
-				</div>
+				<ToolbarOrientationContext.Provider value={orientation}>
+					<div
+						style={{
+							display: 'flex',
+							flexDirection: isVertical ? 'column' : 'row',
+							alignItems: 'center',
+							gap: '4px',
+							padding: isVertical ? '4px 4px 8px' : '4px 8px 4px 4px',
+						}}
+					>
+						{children}
+					</div>
+				</ToolbarOrientationContext.Provider>
 			</div>
 		</div>
 	);

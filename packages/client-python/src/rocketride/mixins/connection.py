@@ -134,6 +134,10 @@ class ConnectionMixin(DAPClient):
         Only invokes the user's on_disconnected if on_connected had previously been called.
         Schedules reconnection if persist is enabled and not a manual disconnect.
         """
+        # Clear transport so _internal_connect always creates a fresh one with the current uri/auth.
+        # Without this, calling connect() with a new URI would reuse the old transport (old URI baked in).
+        self._transport = None
+
         # Only tell the user we disconnected if we had previously told them we connected
         if self._did_notify_connected:
             self._did_notify_connected = False
