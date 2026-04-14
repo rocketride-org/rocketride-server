@@ -29,6 +29,7 @@ import asyncio
 import secrets
 import uuid
 from typing import Any, Callable, Dict
+from urllib.parse import urlparse
 from rocketlib import IEndpointBase, monitorOther, monitorStatus, monitorCompleted, monitorFailed, debug, getObject, AVI_ACTION
 from ai.web import WebServer
 
@@ -71,6 +72,8 @@ class IEndpoint(IEndpointBase):
             return {}
 
     async def _startup(self):
+        self._inflight = set()
+
         # Config was already loaded in _run() (sync context) — use stored values
         if not self._bot_token:
             monitorStatus('Telegram Bot: missing bot token')
@@ -78,7 +81,6 @@ class IEndpoint(IEndpointBase):
 
         import aiohttp
 
-        self._inflight = set()
         self._http_session = aiohttp.ClientSession()
 
         if self._mode == 'webhook':
@@ -172,11 +174,15 @@ class IEndpoint(IEndpointBase):
                 ok = data.get('ok')
                 updates = data.get('result', []) if ok else []
 
-                if ok:
-                    for update in updates:
-                        uid = update.get('update_id')
-                        await self._handle_update(update)
-                        offset = uid + 1
+                if not ok:
+                    debug(f'Telegram: getUpdates error response: {data}')
+                    await asyncio.sleep(5)
+                    continue
+
+                for update in updates:
+                    uid = update.get('update_id')
+                    await self._handle_update(update)
+                    offset = uid + 1
 
             except asyncio.CancelledError:
                 break
@@ -414,8 +420,10 @@ class IEndpoint(IEndpointBase):
         )
         self._server.app.state.target = self.target
 
-        # Register webhook route (used only when mode == 'webhook')
-        self._server.add_route('/telegram/webhook', self._webhook_handler, ['POST'], public=True)
+        # Register webhook route using the path from the configured webhook URL
+        # so that the local handler matches what Telegram will POST to.
+        webhook_path = urlparse(self._webhook_url).path or '/telegram/webhook'
+        self._server.add_route(webhook_path, self._webhook_handler, ['POST'], public=True)
 
         self._server.use('profiler')
         self._server.run()
