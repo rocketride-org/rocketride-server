@@ -7,10 +7,23 @@ the results into `nodes/src/nodes/*/services.json` profile lists.
 
 ## Usage
 
-```
+**Direct (Python):**
+```bash
 python tools/src/sync_models.py --provider <PROVIDER> [--provider <PROVIDER> ...]
 python tools/src/sync_models.py --all
 ```
+
+**Via the engine:**
+```bash
+engine run tools/src/sync_models.py --provider <PROVIDER> [--provider <PROVIDER> ...]
+engine run tools/src/sync_models.py --all
+```
+
+**Via the builder** (runs sync + Prettier in one step):
+```bash
+builder models:update --models="--all --apply"
+```
+The `--models` flag forwards arguments directly to `sync_models.py`.
 
 ### Flags
 
