@@ -4,15 +4,27 @@
 
 import type { ThemeTokens } from './tokens';
 
+/** Last-applied tokens — used by readTheme() instead of fragile DOM iteration. */
+let _cachedTokens: ThemeTokens = {};
+
 /**
  * Apply a theme by setting all --rr-* CSS custom properties on :root.
  * Works in any document context (main app, iframe, webview).
  */
 export function applyTheme(tokens: ThemeTokens): void {
+	_cachedTokens = { ...tokens };
 	const root = document.documentElement;
 	for (const [key, value] of Object.entries(tokens)) {
 		root.style.setProperty(key, value);
 	}
+}
+
+/**
+ * Read current theme tokens. Returns the cached copy from the last
+ * applyTheme() call — avoids brittle DOM style iteration.
+ */
+export function readTheme(): ThemeTokens {
+	return { ..._cachedTokens };
 }
 
 /**

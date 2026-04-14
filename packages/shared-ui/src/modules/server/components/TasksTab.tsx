@@ -3,14 +3,65 @@
 // Copyright (c) 2026 Aparavi Software AG Inc.
 // =============================================================================
 
-import React from 'react';
+import React, { CSSProperties } from 'react';
 import type { DashboardTask } from '../types';
 import { StatusPill } from './StatusPill';
 import { formatUptime, formatNumber } from '../util';
+import { commonStyles } from '../../../themes/styles';
 
-interface TasksTabProps {
-	tasks: DashboardTask[];
-}
+// =============================================================================
+// STYLES
+// =============================================================================
+
+const styles = {
+	table: {
+		width: '100%',
+		borderCollapse: 'collapse',
+		fontSize: 13,
+	} as CSSProperties,
+	taskName: {
+		fontWeight: 500,
+		color: 'var(--rr-text-primary)',
+		fontVariantNumeric: 'tabular-nums',
+	} as CSSProperties,
+	taskSecondary: {
+		fontSize: 11,
+		color: 'var(--rr-text-disabled)',
+		marginTop: 2,
+	} as CSSProperties,
+	mono: {
+		...commonStyles.fontMono,
+		fontVariantNumeric: 'tabular-nums',
+	} as CSSProperties,
+	miniBar: { width: 80 } as CSSProperties,
+	miniBarLabel: {
+		fontSize: 10,
+		color: 'var(--rr-text-disabled)',
+		marginBottom: 2,
+		display: 'flex',
+		justifyContent: 'space-between',
+	} as CSSProperties,
+	miniBarTrack: {
+		height: 4,
+		background: 'color-mix(in srgb, var(--rr-border) 30%, transparent)',
+		borderRadius: 2,
+		overflow: 'hidden',
+	} as CSSProperties,
+	miniBarFillCpu: {
+		height: '100%',
+		borderRadius: 2,
+		background: 'var(--rr-border-focus)',
+	} as CSSProperties,
+	miniBarFillMem: {
+		height: '100%',
+		borderRadius: 2,
+		background: 'var(--rr-accent)',
+	} as CSSProperties,
+};
+
+// =============================================================================
+// HELPERS
+// =============================================================================
 
 function getStatePill(task: DashboardTask) {
 	if (task.completed) {
@@ -19,40 +70,43 @@ function getStatePill(task: DashboardTask) {
 	if (task.idleTime > 0 && task.ttl > 0 && task.idleTime > task.ttl * 0.8) {
 		return <StatusPill label="idle (ttl)" variant="warning" />;
 	}
-	return <StatusPill label={task.status ?? 'running'} variant="success" pulse />;
+	return <StatusPill label={task.status ?? 'running'} variant="success" />;
 }
 
 function getTtlDisplay(task: DashboardTask) {
-	if (task.completed) return <span className="sm-text-muted">-</span>;
-	if (task.ttl === 0) return <span className="sm-text-muted">none</span>;
+	if (task.completed) return <span style={commonStyles.textMuted}>-</span>;
+	if (task.ttl === 0) return <span style={commonStyles.textMuted}>none</span>;
 	const pct = task.idleTime / task.ttl;
-	const variant = pct > 0.8 ? 'sm-color-warning' : '';
 	return (
-		<span className={`sm-mono ${variant}`}>
+		<span style={{ ...styles.mono, ...(pct > 0.8 ? { color: 'var(--rr-color-warning)' } : {}) }}>
 			{formatUptime(task.idleTime)} / {formatUptime(task.ttl)}
 		</span>
 	);
 }
 
-export const TasksTab: React.FC<TasksTabProps> = ({ tasks }) => (
-	<div className="sm-card">
-		<div className="sm-card-header">
+// =============================================================================
+// COMPONENT
+// =============================================================================
+
+export const TasksTab: React.FC<{ tasks: DashboardTask[] }> = ({ tasks }) => (
+	<div style={commonStyles.card}>
+		<div style={commonStyles.cardHeader}>
 			<span>All Tasks ({tasks.length})</span>
-			<span className="sm-text-muted">
+			<span style={commonStyles.textMuted}>
 				{tasks.filter((t) => !t.completed).length} running &middot; {tasks.filter((t) => t.completed).length} completed
 			</span>
 		</div>
-		<table className="sm-table">
+		<table style={styles.table}>
 			<thead>
 				<tr>
-					<th>Task</th>
-					<th>Source</th>
-					<th>Elapsed</th>
-					<th>CPU</th>
-					<th>MEM</th>
-					<th>Completions</th>
-					<th>TTL / Idle</th>
-					<th>Status</th>
+					<th style={commonStyles.tableHeader}>Task</th>
+					<th style={commonStyles.tableHeader}>Source</th>
+					<th style={commonStyles.tableHeader}>Elapsed</th>
+					<th style={commonStyles.tableHeader}>CPU</th>
+					<th style={commonStyles.tableHeader}>MEM</th>
+					<th style={commonStyles.tableHeader}>Completions</th>
+					<th style={commonStyles.tableHeader}>TTL / Idle</th>
+					<th style={commonStyles.tableHeader}>Status</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -62,53 +116,53 @@ export const TasksTab: React.FC<TasksTabProps> = ({ tasks }) => (
 					const mem = m?.cpu_memory_mb ?? 0;
 					return (
 						<tr key={task.id}>
-							<td>
-								<div className="sm-task-name">{task.name || task.id}</div>
-								<div className="sm-task-secondary">
+							<td style={commonStyles.tableCell}>
+								<div style={styles.taskName}>{task.name || task.id}</div>
+								<div style={styles.taskSecondary}>
 									{task.provider} &middot; {task.launchType} &middot; {task.projectId?.slice(0, 8)}
 								</div>
 							</td>
-							<td>{task.source}</td>
-							<td className="sm-mono">{formatUptime(task.elapsedTime)}</td>
-							<td>
+							<td style={commonStyles.tableCell}>{task.source}</td>
+							<td style={{ ...commonStyles.tableCell, ...styles.mono }}>{formatUptime(task.elapsedTime)}</td>
+							<td style={commonStyles.tableCell}>
 								{!task.completed ? (
-									<div className="sm-mini-bar">
-										<div className="sm-mini-bar-label">
+									<div style={styles.miniBar}>
+										<div style={styles.miniBarLabel}>
 											<span></span>
 											<span>{cpu.toFixed(0)}%</span>
 										</div>
-										<div className="sm-mini-bar-track">
-											<div className="sm-mini-bar-fill sm-mini-bar-cpu" style={{ width: `${Math.min(cpu, 100)}%` }} />
+										<div style={styles.miniBarTrack}>
+											<div style={{ ...styles.miniBarFillCpu, width: `${Math.min(cpu, 100)}%` }} />
 										</div>
 									</div>
 								) : (
-									<span className="sm-text-muted">-</span>
+									<span style={commonStyles.textMuted}>-</span>
 								)}
 							</td>
-							<td>
+							<td style={commonStyles.tableCell}>
 								{!task.completed ? (
-									<div className="sm-mini-bar">
-										<div className="sm-mini-bar-label">
+									<div style={styles.miniBar}>
+										<div style={styles.miniBarLabel}>
 											<span></span>
 											<span>{mem.toFixed(0)}M</span>
 										</div>
-										<div className="sm-mini-bar-track">
-											<div className="sm-mini-bar-fill sm-mini-bar-mem" style={{ width: `${Math.min((mem / 2048) * 100, 100)}%` }} />
+										<div style={styles.miniBarTrack}>
+											<div style={{ ...styles.miniBarFillMem, width: `${Math.min((mem / 2048) * 100, 100)}%` }} />
 										</div>
 									</div>
 								) : (
-									<span className="sm-text-muted">-</span>
+									<span style={commonStyles.textMuted}>-</span>
 								)}
 							</td>
-							<td className="sm-mono">{task.completedCount > 0 ? formatNumber(task.completedCount) : <span className="sm-text-muted">-</span>}</td>
-							<td>{getTtlDisplay(task)}</td>
-							<td>{getStatePill(task)}</td>
+							<td style={{ ...commonStyles.tableCell, ...styles.mono }}>{task.completedCount > 0 ? formatNumber(task.completedCount) : <span style={commonStyles.textMuted}>-</span>}</td>
+							<td style={commonStyles.tableCell}>{getTtlDisplay(task)}</td>
+							<td style={commonStyles.tableCell}>{getStatePill(task)}</td>
 						</tr>
 					);
 				})}
 				{tasks.length === 0 && (
 					<tr>
-						<td colSpan={8} className="sm-text-muted sm-text-center">
+						<td colSpan={8} style={{ ...commonStyles.tableCell, ...commonStyles.empty }}>
 							No tasks
 						</td>
 					</tr>

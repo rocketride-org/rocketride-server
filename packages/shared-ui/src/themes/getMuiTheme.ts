@@ -123,19 +123,9 @@ export function getMuiTheme(): Theme {
 	// --- Derived values -----------------------------------------------------
 
 	// Determine palette mode.
-	//
-	// Priority order:
-	//   1. VS Code's body attribute (data-vscode-theme-kind) — most reliable
-	//      signal when running inside a webview.
-	//   2. Explicit --rr-palette-mode CSS token (set by the web defaults).
-	//   3. Luminance-based detection from the effective background colour.
-	//
-	// The web CSS (rocketride-web.css) declares --rr-palette-mode: light, which
-	// is never overridden by the VS Code CSS because the theme kind is dynamic.
-	// Reading the body attribute bypasses that static declaration.
+	// Priority: VS Code body attribute > explicit CSS token > luminance detection.
 	const vscodeThemeKind = typeof document !== 'undefined' ? document.body.getAttribute('data-vscode-theme-kind') || '' : '';
 	const isVsCodeDark = vscodeThemeKind === 'vscode-dark' || vscodeThemeKind === 'vscode-high-contrast';
-
 	const declaredMode = rr('--rr-palette-mode', '');
 	const vscodeEditorBg = typeof document !== 'undefined' ? getComputedStyle(document.body).getPropertyValue('--vscode-editor-background').trim() : '';
 	const effectiveBg = vscodeEditorBg || bgDefault;

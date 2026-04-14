@@ -22,40 +22,38 @@
 // =============================================================================
 
 import React from 'react';
-import { SettingsData } from './PageSettings';
+import { SettingsData, settingsStyles as S } from './PageSettings';
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 interface PipelineSettingsProps {
 	settings: SettingsData;
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
 }
 
-export const PipelineSettings: React.FC<PipelineSettingsProps> = ({
-	settings,
-	onSettingsChange
-}) => {
+// ============================================================================
+// COMPONENT
+// ============================================================================
+
+export const PipelineSettings: React.FC<PipelineSettingsProps> = ({ settings, onSettingsChange }) => {
 	const handleDefaultPipelinePathChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		onSettingsChange({ defaultPipelinePath: e.target.value });
 	};
 
 	return (
-		<div className="section">
-			<div className="section-title">Pipeline Settings</div>
-			<div className="section-description">Configure default settings for pipeline creation and management</div>
+		<div style={S.section}>
+			<div style={S.sectionTitle}>Pipeline Settings</div>
+			<div style={S.sectionDescription}>Configure default settings for pipeline creation and management</div>
 
-			<div className="form-grid">
-				<div className="form-group">
-					<label htmlFor="defaultPipelinePath">Default Pipeline Path</label>
-					<input
-						type="text"
-						id="defaultPipelinePath"
-						placeholder="${workspaceFolder}/pipelines"
-						value={settings.defaultPipelinePath}
-						onChange={handleDefaultPipelinePathChange}
-					/>
-					<div className="help-text">
-						Default directory path for creating new pipeline files (relative to workspace root).
-						Examples: "pipelines", "src/pipelines", "workflows"
-					</div>
+			<div style={S.formGrid}>
+				<div style={S.formGroup}>
+					<label htmlFor="defaultPipelinePath" style={S.label}>
+						Default Pipeline Path
+					</label>
+					<input type="text" id="defaultPipelinePath" placeholder="${workspaceFolder}/pipelines" value={settings.defaultPipelinePath} onChange={handleDefaultPipelinePathChange} />
+					<div style={S.helpText}>Default directory path for creating new pipeline files (relative to workspace root). Examples: "pipelines", "src/pipelines", "workflows"</div>
 				</div>
 			</div>
 		</div>

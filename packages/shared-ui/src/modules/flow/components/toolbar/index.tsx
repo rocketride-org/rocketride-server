@@ -1,6 +1,0 @@
-// =============================================================================
-// MIT License
-// Copyright (c) 2026 Aparavi Software AG Inc.
-// =============================================================================
-
-export { default as FloatingToolbar } from './FloatingToolbar';

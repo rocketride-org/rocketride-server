@@ -1,0 +1,109 @@
+{
+	"title": "Deep Agent",
+	"protocol": "agent_deepagent://",
+	"classType": ["agent", "tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.agent_deepagent.deepagent_agent",
+	"prefix": "agent",
+	"description": ["Single-agent execution using LangChain DeepAgents.", "Adds strategic planning, persistent state, and long-context management on top of LangChain.", "Connect DeepAgent Subagent nodes via the deepagent invoke channel for hierarchical delegation.", "Can be invoked as a tool (`<nodeId>.run_agent`) by other agents."],
+	"icon": "deepagent.svg",
+	"documentation": "https://docs.rocketride.org",
+	"invoke": {
+		"llm": {
+			"description": "LLM used by the agent",
+			"min": 1
+		},
+		"tool": {
+			"description": "Tools available to the agent (via control-plane invoke)",
+			"min": 0
+		},
+		"deepagent": {
+			"description": "Optional DeepAgent Subagent nodes for hierarchical delegation",
+			"min": 0
+		}
+	},
+	"lanes": {
+		"questions": ["answers"]
+	},
+	"input": [
+		{
+			"lane": "questions",
+			"output": [{ "lane": "answers" }]
+		}
+	],
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"advanced_mode": false,
+				"instructions": [],
+				"agent_description": "",
+				"system_prompt": ""
+			}
+		}
+	},
+	"fields": {
+		"agent_description": {
+			"type": "string",
+			"title": "Agent description",
+			"default": "",
+			"optional": true,
+			"description": "What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"system_prompt": {
+			"type": "string",
+			"title": "System prompt",
+			"default": "",
+			"optional": true,
+			"description": "Instructions that define this agent's role and behaviour. Leave blank to use the default.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"instructions": {
+			"type": "array",
+			"title": "Instructions",
+			"description": "Additional instructions to guide the agent. Each line is appended to the system prompt.",
+			"items": {
+				"type": "string",
+				"format": "textarea"
+			}
+		},
+		"advanced_mode": {
+			"type": "boolean",
+			"title": "Advanced Mode",
+			"description": "When enabled, replace the Instructions list with direct Agent Description and System Prompt fields for full control.",
+			"default": false,
+			"enum": [
+				[false, "Off"],
+				[true, "On"]
+			],
+			"conditional": [
+				{
+					"value": false,
+					"properties": ["instructions"]
+				},
+				{
+					"value": true,
+					"properties": ["agent_description", "system_prompt"]
+				}
+			]
+		},
+		"agent_deepagent.default": {
+			"object": "default",
+			"properties": ["advanced_mode"]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Deep Agent",
+			"properties": ["agent_deepagent.default"]
+		}
+	]
+}

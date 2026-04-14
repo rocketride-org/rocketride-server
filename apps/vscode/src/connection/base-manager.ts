@@ -24,9 +24,16 @@
 /**
  * base-manager.ts - Abstract Base for Connection Backend Managers
  *
- * Defines the polymorphic interface that EngineManager (local) and
- * CloudManager (cloud/onprem) both implement. ConnectionManager holds
- * a single BaseManager reference and never branches on connection mode.
+ * Defines the polymorphic interface that LocalManager, RemoteManager,
+ * and future backends (Docker, Service, etc.) implement.
+ *
+ * ConnectionManager owns a single RocketRideClient and passes it to the
+ * active manager. Each manager owns its full lifecycle:
+ *
+ *   connect    → do whatever is needed to get connected
+ *               (install engine, start engine, validate creds, connect client)
+ *   disconnect → do whatever is needed to tear down
+ *               (disconnect client, stop engine if running)
  *
  * Events:
  *   'status'     (message: string)  — progress text for UI display
@@ -35,6 +42,7 @@
 
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
+import { RocketRideClient } from 'rocketride';
 import { ConfigManagerInfo } from '../config';
 
 export interface ManagerInfo {
@@ -44,25 +52,21 @@ export interface ManagerInfo {
 
 export abstract class BaseManager extends EventEmitter {
 	/**
-	 * Prepare the backend for connections.
-	 * - EngineManager: install engine + spawn process
-	 * - CloudManager: validate credentials
-	 *
-	 * Emits 'status' events with progress messages during execution.
+	 * Do everything needed to get the client connected to a server.
+	 * - LocalManager: install engine if needed, start if not running, connect client with retries
+	 * - RemoteManager: validate credentials, connect client
 	 */
-	abstract start(config: ConfigManagerInfo, token?: vscode.CancellationToken): Promise<void>;
+	abstract connect(client: RocketRideClient, config: ConfigManagerInfo, token?: vscode.CancellationToken): Promise<void>;
 
 	/**
-	 * Tear down the backend.
-	 * - EngineManager: stop the engine process
-	 * - CloudManager: no-op
+	 * Do everything needed to tear down.
+	 * - LocalManager: disconnect client, stop engine if running
+	 * - RemoteManager: disconnect client
 	 */
-	abstract stop(): Promise<void>;
+	abstract disconnect(client: RocketRideClient): Promise<void>;
 
 	/**
 	 * Returns version info for the backend, or null if not applicable.
-	 * - EngineManager: { version, publishedAt } from installed engine
-	 * - CloudManager: null
 	 */
 	abstract getInfo(): ManagerInfo | null;
 }

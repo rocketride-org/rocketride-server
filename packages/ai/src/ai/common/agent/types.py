@@ -3,16 +3,12 @@ Agent boundary contracts (framework-agnostic).
 
 Defines the type contracts shared by all agent framework drivers:
 - Host service protocols (`AgentHost*`) used by `AgentBase`
-- The input object passed into drivers (`AgentInput`)
 - The JSON answer payload shape written to the answers lane (`AgentAnswer`)
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol, TypedDict
-
-from ai.common.schema import Question
 
 
 AGENT_TOOL_CALLS_TYPE = 'RocketRide.agent.tool_calls.v1'
@@ -98,23 +94,49 @@ class AgentAnswer(TypedDict, total=False):
     stack: List[AgentStackEntry]
 
 
-@dataclass(frozen=True)
-class AgentInput:
-    """
-    Run input passed from `AgentBase` into framework drivers.
-
-    Attributes:
-        prompt: Fully composed prompt text for the driver to run.
-        question: Original `Question` object received from the engine.
-        run_id: Unique run identifier.
-        task_id: Optional task identifier propagated from the engine.
-        started_at: UTC timestamp in ISO-8601 format.
-    """
-
-    question: Question
-    run_id: str
-    task_id: Optional[str]
-    started_at: str
-
-
 AgentRunResult = tuple[str, Any]
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# AGENT-AS-TOOL SCHEMAS
+# ────────────────────────────────────────────────────────────────────────────────
+#
+# Every agent IInstance that exposes itself as a tool to parent agents declares
+# a `@tool_function def run_agent(self, input_obj)` method.  These two schemas
+# describe the input and output contract for that method and are imported
+# directly by each IInstance file.  They are intentionally identical across
+# all agent frameworks so a parent agent calling `<agent_node>.run_agent`
+# always sees the same surface.
+
+AGENT_TOOL_INPUT_SCHEMA: Dict[str, Any] = {
+    'type': 'object',
+    'properties': {
+        'query': {'type': 'string', 'description': 'Query string for the agent (required)'},
+        'context': {'type': 'object', 'description': 'Optional caller-provided context'},
+    },
+    'required': ['query'],
+}
+
+
+AGENT_TOOL_OUTPUT_SCHEMA: Dict[str, Any] = {
+    'type': 'object',
+    'description': 'Agent answer JSON payload',
+    'properties': {
+        'content': {'type': 'string', 'description': 'Final user-facing answer text'},
+        'meta': {
+            'type': 'object',
+            'description': 'Run metadata',
+            'properties': {
+                'framework': {'type': 'string'},
+                'agent_id': {'type': 'string'},
+                'run_id': {'type': 'string'},
+                'task_id': {'type': 'string'},
+                'started_at': {'type': 'string'},
+                'ended_at': {'type': 'string'},
+            },
+            'required': ['framework', 'agent_id', 'run_id', 'started_at', 'ended_at'],
+        },
+        'stack': {'type': 'array', 'items': {'type': 'object'}, 'description': 'Run trace stack'},
+    },
+    'required': ['content', 'meta', 'stack'],
+}
