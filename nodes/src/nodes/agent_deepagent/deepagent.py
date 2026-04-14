@@ -29,7 +29,7 @@ import json
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
-from rocketlib import ToolDescriptor
+from rocketlib import ToolDescriptor, error
 
 from ai.common.agent import AgentBase, AgentContext
 from ai.common.agent.types import AgentRunResult
@@ -224,8 +224,55 @@ class DeepAgentDriver(AgentBase):
     FRAMEWORK = 'deepagent'
 
     def __init__(self, iGlobal: Any) -> None:
-        """Initialise the DeepAgents driver."""
+        """Initialise the DeepAgents driver.
+
+        Reads ``description`` and ``system_prompt`` from node config on top
+        of the ``agent_description`` / ``instructions`` already loaded by
+        ``AgentBase.__init__``. These four fields together drive the describe
+        fan-out when this driver is used as a sub-agent.
+        """
         super().__init__(iGlobal)
+
+        # Read user-configured values directly from connConfig so we work with
+        # both pipe shapes:
+        #   * flat:   {"description": "...", "instructions": [...]}
+        #   * nested: {"default": {"description": "...", "instructions": [...]}}
+        # The UI currently writes the nested shape; ``Config.getNodeConfig``
+        # in the no-profile branch does not descend into that wrapper, so we
+        # overlay the resolved values here. We also re-assign the base-class
+        # ``_instructions`` / ``_agent_description`` for the same reason.
+        values = self._read_connconfig_values()
+        self._instructions = values.get('instructions', []) or []
+        self._agent_description = (values.get('agent_description', '') or '').strip()
+        self._description: str = (values.get('description', '') or '').strip()
+        self._system_prompt: str = (values.get('system_prompt', '') or '').strip()
+
+    def _read_connconfig_values(self) -> Dict[str, Any]:
+        """Return the user-configured field values for this node.
+
+        Handles both pipe shapes the engine may deliver:
+
+        * Flat: ``connConfig`` is the value dict itself.
+        * Nested: ``connConfig`` wraps the values under the default-profile key
+          (the shape the UI writes, e.g. ``{"default": {...}}``).
+        """
+        from rocketlib import IJson as _IJson, getServiceDefinition
+
+        raw = self._iGlobal.glb.connConfig
+        conn = _IJson.toDict(raw) if raw else {}
+        if not isinstance(conn, dict):
+            return {}
+
+        # If the UI nested values under the default-profile key, use those.
+        try:
+            service = getServiceDefinition(self._iGlobal.glb.logicalType) or {}
+            default_profile = (service.get('preconfig') or {}).get('default')
+        except Exception:
+            default_profile = None
+
+        if default_profile and isinstance(conn.get(default_profile), dict):
+            return conn[default_profile]
+        return conn
 
     def _run(self, *, context: AgentContext, question: Question) -> AgentRunResult:
         """Execute the agent using ``deepagents.create_deep_agent``."""
@@ -282,12 +329,27 @@ class DeepAgentDriver(AgentBase):
         llm = _build_deepagent_llm(self, context)
         tools_for_agent = _build_deepagent_tools(self, context, tool_descriptors)
 
-        system_prompt = 'You are an agent node in a tool-invocation hierarchy.\nUse the provided tools when needed.'
+        system_prompt = _compose_system_prompt(
+            base=self._system_prompt,
+            instructions=self._instructions,
+            fallback='You are an agent node in a tool-invocation hierarchy.\nUse the provided tools when needed.',
+        )
+
+        # Fan out deepagent.describe to any connected DeepAgent Subagent nodes.
+        # Empty list → behaves as a standalone single-agent run.
+        subagents_list = self._collect_subagents(context)
+        if subagents_list:
+            _send_sse('thinking', message=f'Collected {len(subagents_list)} sub-agent(s)')
 
         _send_sse('thinking', message='Starting Deep Agent...')
         stage = 'create_deep_agent'
         try:
-            agent = create_deep_agent(model=llm, tools=tools_for_agent, system_prompt=system_prompt)
+            agent = create_deep_agent(
+                model=llm,
+                tools=tools_for_agent,
+                system_prompt=system_prompt,
+                subagents=subagents_list if subagents_list else None,
+            )
             stage = 'invoke'
             state = agent.invoke(
                 {'messages': [HumanMessage(content=_safe_str(question.getPrompt() or ''))]},
@@ -311,6 +373,85 @@ class DeepAgentDriver(AgentBase):
             final_text = _safe_str(state)
 
         return _safe_str(final_text), state
+
+    def _collect_subagents(self, context: AgentContext) -> List[Any]:
+        """Fan out ``describe`` to all connected DeepAgent Subagent nodes.
+
+        Discovers sub-agents via ``getControllerNodeIds('deepagent')``, invokes
+        each one individually with a fresh ``IInvokeDeepagent.Describe`` so
+        every responder appends its descriptor, and builds a ``SubAgent`` dict
+        for each descriptor — wiring per-subagent LLM/tools to the sub-agent's
+        own engine channels via ``AgentHostServices(d.invoke)``.
+
+        Mirrors the discovery pattern in ``agent_crewai/crewai_manager/manager.py``.
+
+        Args:
+            context: The orchestrator's ``AgentContext``; run metadata is
+                inherited by each sub-context so SSE events route back to the
+                same logical run.
+
+        Returns:
+            A (possibly empty) list of ``deepagents.middleware.subagents.SubAgent`` dicts.
+        """
+        from rocketlib.types import IInvokeDeepagent
+        from ai.common.agent._internal.host import AgentHostServices
+
+        pSelf = context.invoker
+        try:
+            deepagent_node_ids = pSelf.instance.getControllerNodeIds('deepagent')
+        except Exception:
+            return []
+
+        if not deepagent_node_ids:
+            return []
+
+        from deepagents.middleware.subagents import SubAgent as _SubAgent
+
+        subagents: List[Any] = []
+        for node_id in deepagent_node_ids:
+            req = IInvokeDeepagent.Describe()
+            try:
+                pSelf.instance.invoke(req, component_id=node_id)
+            except Exception as e:
+                error(f'deepagent _collect_subagents invoke failed for node={node_id}: {type(e).__name__}: {_safe_str(e)}')
+                continue
+
+            for d in req.agents:
+                if d is None:
+                    continue
+                try:
+                    sub_host = AgentHostServices(d.invoke)
+                    sub_context = AgentContext(
+                        invoker=d.invoke,
+                        llm=sub_host.llm,
+                        tools=sub_host.tools,
+                        memory=sub_host.memory,
+                        run_id=context.run_id,
+                        pipe_id=context.pipe_id,
+                        framework=context.framework,
+                        started_at=context.started_at,
+                    )
+
+                    sub_llm = _build_deepagent_llm(self, sub_context)
+                    sub_tools = _build_deepagent_tools(self, sub_context, sub_context.tools.list)
+
+                    subagents.append(
+                        _SubAgent(
+                            name=d.name,
+                            description=d.description or d.name,
+                            system_prompt=_compose_system_prompt(
+                                base=d.system_prompt,
+                                instructions=d.instructions,
+                                fallback='You are a helpful sub-agent. Use your tools to complete the assigned task.',
+                            ),
+                            tools=sub_tools,
+                            model=sub_llm,
+                        )
+                    )
+                except Exception as e:
+                    error(f'deepagent _collect_subagents build failed for node={node_id}: {type(e).__name__}: {_safe_str(e)}')
+
+        return subagents
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -342,27 +483,28 @@ def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
 
 
 def _normalize_bound_tools(tools: Any) -> List[Dict[str, Any]]:
-    """Normalise a LangChain tool or list of tools into plain descriptor dicts."""
-    out: List[Dict[str, Any]] = []
+    """Normalise a LangChain tool or list of tools into plain descriptor dicts.
+
+    Each entry carries the tool's real JSON Schema (not ``str(<class 'X'>)``)
+    so the LLM sees the actual argument names when it renders the tool-call
+    envelope — without this, models routinely guess wrong arg names on tools
+    like ``task`` (e.g. emit ``prompt`` instead of ``description``).
+    """
     if not tools:
-        return out
+        return []
     if not isinstance(tools, list):
         tools = [tools]
-    for t in tools:
-        name = _safe_str(getattr(t, 'name', ''))
-        desc = _safe_str(getattr(t, 'description', ''))
-        schema: Any = None
-        input_schema: Any = None
-        try:
-            schema = getattr(t, 'args_schema', None)
-        except Exception:
-            schema = None
-        try:
-            input_schema = getattr(t, '_rr_input_schema', None)
-        except Exception:
-            input_schema = None
 
-        entry: Dict[str, Any] = {'name': name, 'description': desc, 'args_schema': _safe_str(schema)}
+    out: List[Dict[str, Any]] = []
+    for t in tools:
+        schema = getattr(t, 'args_schema', None)
+        input_schema = getattr(t, '_rr_input_schema', None)
+
+        entry: Dict[str, Any] = {
+            'name': _safe_str(getattr(t, 'name', '')),
+            'description': _safe_str(getattr(t, 'description', '')),
+            'args_schema': _tool_args_schema(schema),
+        }
         if isinstance(input_schema, dict):
             entry['input_schema'] = input_schema
         out.append(entry)
@@ -437,45 +579,36 @@ def _langchain_messages_to_transcript(messages: Any) -> str:
 
 
 def _parse_tool_call_envelope(raw: str) -> Any:
-    """Parse a raw LLM response string as a JSON tool-call or final-answer envelope."""
-    try:
-        obj = json.loads(raw)
-    except Exception:
-        return None
+    """Parse a raw LLM response string as a JSON tool-call or final-answer envelope.
+
+    Uses ``_extract_first_json_object`` so the envelope still parses when the
+    LLM emits trailing prose, markdown fences, or a second JSON object right
+    after the first one closes (a common failure mode — duplicate call or
+    hallucinated ``final`` stacked onto a ``tool_call``).
+    """
+    obj = _extract_first_json_object(raw)
     if not isinstance(obj, dict):
+        return None
+
+    try:
+        from langchain_core.messages import AIMessage
+    except Exception:
         return None
 
     msg_type = obj.get('type')
     if msg_type == 'final':
-        content = _safe_str(obj.get('content', ''))
-        try:
-            from langchain_core.messages import AIMessage
-
-            return AIMessage(content=content)
-        except Exception:
-            return None
+        return AIMessage(content=_safe_str(obj.get('content', '')))
 
     if msg_type == 'tool_call':
         name = _safe_str(obj.get('name', '')).strip()
         if not name:
             return None
-        args = obj.get('args')
-        if args is None:
-            args = {}
+        args = obj.get('args') or {}
         if not isinstance(args, dict):
             args = {'input': args}
 
         tool_call = {'id': f'call_{uuid.uuid4().hex[:12]}', 'type': 'tool_call', 'name': name, 'args': args}
-
-        try:
-            from langchain_core.messages import AIMessage
-
-            try:
-                return AIMessage(content='', tool_calls=[tool_call])
-            except Exception:
-                return AIMessage(content='', additional_kwargs={'tool_calls': [tool_call]})
-        except Exception:
-            return None
+        return AIMessage(content='', tool_calls=[tool_call])
 
     return None
 
@@ -486,3 +619,96 @@ def _safe_str(v: Any) -> str:
         return '' if v is None else str(v)
     except Exception:
         return ''
+
+
+def _tool_args_schema(schema: Any) -> Any:
+    """Return a JSON-Schema dict for a tool's ``args_schema``, or a string fallback.
+
+    Pydantic v2 models expose ``model_json_schema()``; older models expose
+    ``schema()``. When neither works, falls back to ``str(schema)`` so the LLM
+    still sees *something* identifying the expected shape.
+    """
+    if schema is None:
+        return ''
+    for attr in ('model_json_schema', 'schema'):
+        fn = getattr(schema, attr, None)
+        if callable(fn):
+            try:
+                result = fn()
+                if isinstance(result, dict):
+                    return result
+            except Exception:
+                continue
+    return _safe_str(schema)
+
+
+def _extract_first_json_object(raw: str) -> Any:
+    """Extract the first balanced JSON object from a raw LLM response.
+
+    Handles the common failure modes we've seen from host LLMs producing the
+    tool-call envelope — extra prose, markdown fences, or a second JSON object
+    appended after the first one closes (e.g. a duplicate tool call or a
+    hallucinated final answer). Returns just the first object so the parser
+    can build a valid ``AIMessage`` instead of failing the whole envelope.
+    """
+    if not isinstance(raw, str) or not raw:
+        return None
+
+    s = raw.strip()
+    if s.startswith('```'):
+        s = s.split('\n', 1)[1] if '\n' in s else s[3:]
+        if '```' in s:
+            s = s.rsplit('```', 1)[0]
+        s = s.strip()
+
+    # Fast path: valid JSON as-is
+    try:
+        return json.loads(s)
+    except Exception:
+        pass
+
+    # Walk from the first '{' to its matching '}', honouring string escapes
+    start = s.find('{')
+    if start < 0:
+        return None
+
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(s)):
+        ch = s[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == '\\':
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                candidate = s[start : i + 1]
+                try:
+                    return json.loads(candidate)
+                except Exception:
+                    return None
+    return None
+
+
+def _compose_system_prompt(*, base: Optional[str], instructions: Optional[List[str]], fallback: str) -> str:
+    """Combine a base system prompt with trailing instruction lines.
+
+    * Start with *base* (stripped); fall back to *fallback* when *base* is empty.
+    * Append each non-empty instruction on its own line.
+    """
+    prompt = (base or '').strip() or fallback
+    for inst in instructions or []:
+        inst = inst.strip()
+        if inst:
+            prompt = f'{prompt}\n{inst}'
+    return prompt
