@@ -93,6 +93,7 @@
 		"profiles": {
 			"custom": {
 				"model": "",
+				"modelSource": "manual",
 				"modelTotalTokens": 200000,
 				"apikey": ""
 			},

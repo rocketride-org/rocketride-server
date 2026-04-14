@@ -1,9 +1,11 @@
 """
 util.py — shared utilities for the sync script.
 
-NOTE: An equivalent is_retryable_error() implementation also lives inline in
-ChatBase.is_retryable_error() (packages/ai/src/ai/common/chat.py). If you
-update the classification logic here, keep the two in sync manually.
+NOTE: This is the sync-tool-specific retry classifier.  A related but distinct
+implementation lives in ChatBase.is_retryable_error()
+(packages/ai/src/ai/common/chat.py).  The two are intentionally separate —
+the sync tool has different retry semantics (network fetches, smoke tests)
+from the engine's runtime chat path.  Do not assume they must stay identical.
 """
 
 from __future__ import annotations
