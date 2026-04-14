@@ -206,7 +206,8 @@ def sync_provider(
 
     title_mappings = config.get('title_mappings', {})
     output_token_overrides = config.get('model_output_tokens', {}).get('overrides', {})
-    default_output_tokens = config.get('model_output_tokens', {}).get('defaults', {}).get('chat', 4096)
+    output_defaults = config.get('model_output_tokens', {}).get('defaults', {})
+    default_output_tokens = output_defaults.get('embedding', 0) if provider_name.startswith('embedding_') else output_defaults.get('chat', 4096)
     global_protected = list(_active_protected_profiles(config.get('default_protected_profiles', [])))
 
     return provider.sync(

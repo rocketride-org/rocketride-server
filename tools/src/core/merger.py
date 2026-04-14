@@ -465,7 +465,12 @@ def merge(
             total_tokens_src = None
 
         # Determine winning source for output tokens (for provenance annotation)
-        _out_override = output_token_overrides.get(_token_lookup_id) or output_token_overrides.get(model_id)
+        if _token_lookup_id in output_token_overrides:
+            _out_override = output_token_overrides[_token_lookup_id]
+        elif model_id in output_token_overrides:
+            _out_override = output_token_overrides[model_id]
+        else:
+            _out_override = None
         if _out_override is not None:
             api_output_tokens: int = int(_out_override)
             output_tokens_src = 'sync_models.config.json'
@@ -613,23 +618,25 @@ def merge(
 
     # --- Pass 3: backfill missing fields ---
     # Profiles that were not processed in Pass 1 (e.g. model not listed by the
-    # current source) are left untouched.  Fill in any fields that every non-deprecated,
+    # current source) are left untouched.  Fill in any fields that every
     # non-placeholder profile should consistently carry.
     for key, profile in updated_profiles.items():
         if not isinstance(profile, dict):
             continue
-        if profile.get('deprecated'):
-            continue
         if not profile.get('model'):  # skip custom / placeholder profiles
+            continue
+        # Profiles without a modelSource were added before this field existed — treat as manual.
+        # This applies to deprecated profiles too (they still need provenance).
+        if 'modelSource' not in profile:
+            updated_profiles[key]['modelSource'] = 'manual'
+            updated_fields.append((key, 'modelSource', None, 'manual'))
+        # modelOutputTokens backfill only for active profiles.
+        if profile.get('deprecated'):
             continue
         if 'modelOutputTokens' not in profile:
             updated_profiles[key]['modelOutputTokens'] = int(default_output_tokens)
             updated_profiles[key]['_src_modelOutputTokens'] = 'default'
             updated_fields.append((key, 'modelOutputTokens', None, int(default_output_tokens)))
-        # Profiles without a modelSource were added before this field existed — treat as manual.
-        if 'modelSource' not in profile:
-            updated_profiles[key]['modelSource'] = 'manual'
-            updated_fields.append((key, 'modelSource', None, 'manual'))
 
     return updated_profiles, MergeResult(
         added=added,

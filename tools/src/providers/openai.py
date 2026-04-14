@@ -41,8 +41,6 @@ class OpenAIProvider(CloudProvider):
         Fetch all models from OpenAI.
 
         The /v1/models endpoint may or may not return context_window per model.
-        DEBUG lines below log the raw model object so we can see what fields
-        are actually available — remove once confirmed.
 
         Args:
             client: openai.OpenAI instance

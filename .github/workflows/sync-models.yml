@@ -21,6 +21,14 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-sync-models-${{ hashFiles('tools/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-sync-models-
+
       - name: Install sync script dependencies
         run: pip install -r tools/requirements.txt
 
@@ -52,6 +60,7 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
           title: 'chore(models): sync LLM model lists'
+          base: develop
           branch: chore/sync-models
           commit-message: 'chore(models): sync LLM model lists'
           delete-branch: true

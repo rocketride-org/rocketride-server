@@ -309,7 +309,7 @@
 			// so the OpenRouter fallback never re-deprecates them without an API key.
 			"protected_profiles": [
 				["custom", "2126-04-09"],
-				["grok-4-1-fast-reasoning", "2025-10-09"],
+				["grok-4-1-fast-reasoning", "2026-10-09"],
 				["grok-4-1-fast-non-reasoning", "2026-10-09"]
 			],
 			"token_limit_overrides": {

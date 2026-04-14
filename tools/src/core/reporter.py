@@ -160,12 +160,12 @@ def format_pr_body(report: SyncReport) -> str:
     lines.append('Automated sync of provider model lists against `services.json` profiles.')
     lines.append('')
 
-    if not report.has_any_changes() and not any(p.skipped for p in report.providers):
+    if not report.has_any_changes() and not any(p.skipped for p in report.providers) and not any(p.warning for p in report.providers) and not any(p.error for p in report.providers):
         lines.append('_No changes detected._')
         return '\n'.join(lines)
 
     for pr in report.providers:
-        if pr.warning:
+        if pr.warning and not pr.has_changes() and not pr.skipped:
             lines.append(f'### `{pr.provider}` — skipped')
             lines.append('')
             lines.append(f'_{pr.warning}_')
@@ -183,6 +183,10 @@ def format_pr_body(report: SyncReport) -> str:
 
         lines.append(f'### `{pr.provider}`')
         lines.append('')
+
+        if pr.warning:
+            lines.append(f'_{pr.warning}_')
+            lines.append('')
 
         if pr.added:
             lines.append('**Added** (smoke test passed):')

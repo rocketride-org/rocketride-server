@@ -587,7 +587,7 @@ class CloudProvider(ABC):
         # Merge per-provider and global protected lists, respecting expiry dates
         protected = _active_protected_profiles(self._config.get('protected_profiles', []))
         if global_protected_profiles:
-            protected.update(global_protected_profiles)
+            protected.update(_active_protected_profiles(global_protected_profiles))
         updated_profiles, merge_result = merge(
             current_profiles=current_profiles,
             api_models=api_models,

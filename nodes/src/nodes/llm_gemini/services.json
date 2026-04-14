@@ -167,6 +167,7 @@
 			"gemini-3-pro-preview": {
 				"title": "Gemini 3 Pro Preview",
 				"model": "models/gemini-3-pro-preview",
+				"modelSource": "manual",
 				"modelTotalTokens": 1048576,
 				"modelOutputTokens": 65536,
 				"deprecated": true,
@@ -176,6 +177,7 @@
 			"gemini-3-pro-image": {
 				"title": "Gemini 3 Pro Image",
 				"model": "models/gemini-3-pro-image",
+				"modelSource": "manual",
 				"modelTotalTokens": 98304,
 				"modelOutputTokens": 32768,
 				"deprecated": true,
@@ -184,7 +186,8 @@
 			},
 			"gemini-2_0-flash": {
 				"title": "Gemini 2.0 Flash",
-				"model": "models/gemini-2.5-flash",
+				"model": "models/gemini-2.0-flash",
+				"modelSource": "manual",
 				"modelTotalTokens": 1048576,
 				"modelOutputTokens": 65535,
 				"deprecated": true,
@@ -194,6 +197,7 @@
 			"gemini-2_0-flash-lite": {
 				"title": "Gemini 2.0 Flash Lite",
 				"model": "models/gemini-2.0-flash-lite",
+				"modelSource": "manual",
 				"modelOutputTokens": 65536,
 				"deprecated": true,
 				"migration": "Please use 'gemini-2.5-flash-lite' instead",

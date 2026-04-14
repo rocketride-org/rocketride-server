@@ -37,10 +37,16 @@ for _p in [str(_TOOLS_SRC), str(_TOOLS_TEST)]:
 # evaluated at import time).
 try:
     from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None  # type: ignore[assignment]
 
-    load_dotenv(_TOOLS_TEST.parent.parent / '.env')
-except Exception:
-    pass
+if load_dotenv is not None:
+    try:
+        load_dotenv(_TOOLS_TEST.parent.parent / '.env')
+    except OSError as exc:
+        import warnings
+
+        warnings.warn(f'Could not load .env: {exc}', stacklevel=1)
 
 # ---------------------------------------------------------------------------
 # Mock provider API helper

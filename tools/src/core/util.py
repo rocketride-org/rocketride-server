@@ -108,4 +108,4 @@ def is_retryable_error(error: Exception) -> bool:
     if error_type in retryable_types:
         return True
 
-    return True
+    return False

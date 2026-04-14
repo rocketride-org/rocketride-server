@@ -22,7 +22,7 @@ class MistralProvider(CloudProvider):
     Handler for the llm_mistral node.
 
     Uses openai.OpenAI with Mistral's base URL (OpenAI-compatible endpoint).
-    Filters out embedding and moderation models.
+    Embedding and moderation models are filtered via model_filter in sync_models.config.json.
     Token limits are sourced from sync_models.config.json overrides since
     the Mistral API does not return context_window in the model list.
     """

@@ -103,10 +103,10 @@ def _fetch_anthropic_model_ids(api_key: str) -> Set[str]:
 
 
 def _fetch_gemini_model_ids(api_key: str) -> Set[str]:
-    import google.generativeai as genai  # type: ignore[import]
+    from google import genai  # type: ignore[import]
 
-    genai.configure(api_key=api_key)
-    return {m.name for m in genai.list_models()}
+    client = genai.Client(api_key=api_key)
+    return {m.name for m in client.models.list()}
 
 
 def _fetch_mistral_model_ids(api_key: str) -> Set[str]:
