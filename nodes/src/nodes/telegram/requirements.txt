@@ -1,2 +1,3 @@
 aiohttp>=3.13.4
 requests
+fastapi
