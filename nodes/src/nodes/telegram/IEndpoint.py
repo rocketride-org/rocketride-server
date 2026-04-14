@@ -26,6 +26,7 @@ import os
 import argparse
 import sys
 import asyncio
+import secrets
 import uuid
 from typing import Any, Callable, Dict
 from rocketlib import IEndpointBase, monitorOther, monitorStatus, monitorCompleted, monitorFailed, debug, getObject, AVI_ACTION
@@ -53,6 +54,8 @@ class IEndpoint(IEndpointBase):
     _bot_token: str = ''
     _mode: str = 'polling'
     _webhook_url: str = ''
+    _webhook_secret: str = ''
+    _inflight: set
 
     def _get_telegram_config(self) -> Dict[str, Any]:
         """Read the telegram config block from serviceConfig parameters.
@@ -75,9 +78,11 @@ class IEndpoint(IEndpointBase):
 
         import aiohttp
 
+        self._inflight = set()
         self._http_session = aiohttp.ClientSession()
 
         if self._mode == 'webhook':
+            self._webhook_secret = secrets.token_hex(32)
             await self._setup_webhook()
         else:
             await self._clear_webhook()
@@ -101,6 +106,9 @@ class IEndpoint(IEndpointBase):
                 pass
             self._poll_task = None
 
+        if self._inflight:
+            await asyncio.gather(*self._inflight, return_exceptions=True)
+
         if self._mode == 'webhook' and self._bot_token:
             await self._delete_webhook()
 
@@ -121,7 +129,7 @@ class IEndpoint(IEndpointBase):
             return
         await self._delete_webhook()
         url = f'https://api.telegram.org/bot{self._bot_token}/setWebhook'
-        async with self._http_session.post(url, json={'url': self._webhook_url}) as resp:
+        async with self._http_session.post(url, json={'url': self._webhook_url, 'secret_token': self._webhook_secret}) as resp:
             data = await resp.json()
             if not data.get('ok'):
                 debug(f'Telegram: setWebhook failed: {data}')
@@ -167,7 +175,7 @@ class IEndpoint(IEndpointBase):
                 if ok:
                     for update in updates:
                         uid = update.get('update_id')
-                        asyncio.create_task(self._handle_update(update))
+                        await self._handle_update(update)
                         offset = uid + 1
 
             except asyncio.CancelledError:
@@ -184,9 +192,15 @@ class IEndpoint(IEndpointBase):
         """FastAPI POST handler for incoming Telegram webhook calls."""
         from fastapi.responses import JSONResponse
 
+        secret = request.headers.get('X-Telegram-Bot-Api-Secret-Token', '')
+        if secret != self._webhook_secret:
+            return JSONResponse({'ok': False}, status_code=403)
+
         try:
             update = await request.json()
-            asyncio.create_task(self._handle_update(update))
+            task = asyncio.create_task(self._handle_update(update))
+            self._inflight.add(task)
+            task.add_done_callback(self._inflight.discard)
         except Exception as e:
             debug(f'Telegram webhook handler error: {e}')
         return JSONResponse({'ok': True})
@@ -368,7 +382,8 @@ class IEndpoint(IEndpointBase):
             if len(text) > 4096:
                 text = text[:4093] + '...'
             url = f'https://api.telegram.org/bot{self._bot_token}/sendMessage'
-            await self._http_session.post(url, json={'chat_id': chat_id, 'text': text})
+            async with self._http_session.post(url, json={'chat_id': chat_id, 'text': text}) as resp:
+                await resp.read()
         except Exception as e:
             debug(f'Telegram: sendMessage error: {e}')
 
