@@ -30,6 +30,7 @@ import secrets
 import uuid
 from typing import Any, Callable, Dict
 from urllib.parse import urlparse
+from requests.status_codes import codes as status_codes
 from rocketlib import IEndpointBase, monitorOther, monitorStatus, monitorCompleted, monitorFailed, debug, getObject, AVI_ACTION
 from ai.web import WebServer
 
@@ -47,6 +48,8 @@ class IEndpoint(IEndpointBase):
     routes each message type to the appropriate pipeline lane, and
     sends the pipeline response back to the Telegram chat.
     """
+
+    _MAX_FILE_BYTES: int = 20 * 1024 * 1024  # 20 MB — Telegram's own bot file limit
 
     target: IEndpointBase | None = None
     _server: WebServer | None = None
@@ -85,7 +88,9 @@ class IEndpoint(IEndpointBase):
 
         if self._mode == 'webhook':
             self._webhook_secret = secrets.token_hex(32)
-            await self._setup_webhook()
+            if not await self._setup_webhook():
+                monitorStatus('Telegram Bot: webhook setup failed')
+                return
         else:
             await self._clear_webhook()
             self._poll_task = asyncio.create_task(self._poll_loop())
@@ -124,17 +129,19 @@ class IEndpoint(IEndpointBase):
     # Webhook management
     # -------------------------------------------------------------------------
 
-    async def _setup_webhook(self):
-        """Register the webhook URL with Telegram."""
+    async def _setup_webhook(self) -> bool:
+        """Register the webhook URL with Telegram. Returns True on success."""
         if not self._webhook_url:
             debug('Telegram: webhook mode selected but no webhook URL configured')
-            return
+            return False
         await self._delete_webhook()
         url = f'https://api.telegram.org/bot{self._bot_token}/setWebhook'
         async with self._http_session.post(url, json={'url': self._webhook_url, 'secret_token': self._webhook_secret}) as resp:
             data = await resp.json()
             if not data.get('ok'):
                 debug(f'Telegram: setWebhook failed: {data}')
+                return False
+        return True
 
     async def _delete_webhook(self):
         """Tell Telegram to stop sending webhook calls."""
@@ -198,9 +205,13 @@ class IEndpoint(IEndpointBase):
         """FastAPI POST handler for incoming Telegram webhook calls."""
         from fastapi.responses import JSONResponse
 
+        if self._mode != 'webhook' or not self._webhook_secret:
+            debug('Telegram: webhook mode not enabled')
+            return JSONResponse({'ok': False}, status_code=status_codes.not_found)
+
         secret = request.headers.get('X-Telegram-Bot-Api-Secret-Token', '')
         if secret != self._webhook_secret:
-            return JSONResponse({'ok': False}, status_code=403)
+            return JSONResponse({'ok': False}, status_code=status_codes.forbidden)
 
         try:
             update = await request.json()
@@ -209,6 +220,8 @@ class IEndpoint(IEndpointBase):
             task.add_done_callback(self._inflight.discard)
         except Exception as e:
             debug(f'Telegram webhook handler error: {e}')
+            return JSONResponse({'ok': False}, status_code=status_codes.internal_server_error)
+
         return JSONResponse({'ok': True})
 
     # -------------------------------------------------------------------------
@@ -369,8 +382,11 @@ class IEndpoint(IEndpointBase):
                 debug(f'Telegram: getFile failed for {file_id}: {data}')
                 return None
             file_path = data['result']['file_path']
-            file_size = data['result'].get('file_size', 'unknown')
+            file_size = data['result'].get('file_size')
             debug(f'Telegram: file_path={file_path}, file_size={file_size}')
+            if file_size is not None and file_size > self._MAX_FILE_BYTES:
+                debug(f'Telegram: file {file_id} too large ({file_size} bytes), skipping')
+                return None
             download_url = f'https://api.telegram.org/file/bot{self._bot_token}/{file_path}'
             async with self._http_session.get(download_url) as resp:
                 content = await resp.read()
@@ -389,7 +405,9 @@ class IEndpoint(IEndpointBase):
                 text = text[:4093] + '...'
             url = f'https://api.telegram.org/bot{self._bot_token}/sendMessage'
             async with self._http_session.post(url, json={'chat_id': chat_id, 'text': text}) as resp:
-                await resp.read()
+                data = await resp.json()
+                if not data.get('ok'):
+                    debug(f'Telegram: sendMessage failed: {data}')
         except Exception as e:
             debug(f'Telegram: sendMessage error: {e}')
 
@@ -422,8 +440,9 @@ class IEndpoint(IEndpointBase):
 
         # Register webhook route using the path from the configured webhook URL
         # so that the local handler matches what Telegram will POST to.
-        webhook_path = urlparse(self._webhook_url).path or '/telegram/webhook'
-        self._server.add_route(webhook_path, self._webhook_handler, ['POST'], public=True)
+        if self._mode == 'webhook':
+            webhook_path = urlparse(self._webhook_url).path or '/telegram/webhook'
+            self._server.add_route(webhook_path, self._webhook_handler, ['POST'], public=True)
 
         self._server.use('profiler')
         self._server.run()
