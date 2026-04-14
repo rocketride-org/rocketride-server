@@ -141,16 +141,14 @@ class IInstance(IInstanceBase):
                 interval = self.IGlobal.frame_interval
                 max_frames = self.IGlobal.max_frames
 
-                # Seek to start position if needed.
-                if start_time > 0:
-                    start_frame = int(start_time * fps)
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-
                 frames_extracted = 0
                 frame_interval_frames = max(1, int(interval * fps))
                 documents = []
 
                 current_frame_pos = int(start_time * fps) if start_time > 0 else 0
+                # Track where VideoCapture's read cursor sits so we can skip
+                # redundant seeks when the next frame is already next in line.
+                last_read_pos = -2
 
                 while True:
                     # Check max frames limit.
@@ -162,16 +160,22 @@ class IInstance(IInstanceBase):
                     if current_time >= end_time:
                         break
 
-                    # Set position and read the frame.
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame_pos)
+                    # Only seek when the next frame to read isn't already the
+                    # one VideoCapture would return next. Seeking on every
+                    # iteration is wasteful for sequential reads.
+                    if current_frame_pos != last_read_pos + 1:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame_pos)
                     ret, frame = cap.read()
                     if not ret:
                         break
+                    last_read_pos = current_frame_pos
 
                     # Calculate the timestamp for this frame.
                     time_stamp = current_frame_pos / fps
 
-                    # Convert BGR frame to PNG bytes, then load as PIL Image via ImageProcessor.
+                    # cv2.imencode expects OpenCV's native BGR layout and
+                    # produces a standard PNG, which ImageProcessor then loads
+                    # as a correct RGB PIL image for the embedding model.
                     _, png_buffer = cv2.imencode('.png', frame)
                     frame_bytes = png_buffer.tobytes()
                     pil_image = ImageProcessor.load_image_from_bytes(frame_bytes)
