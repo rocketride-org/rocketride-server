@@ -86,7 +86,7 @@ class IInstance(IInstanceBase):
 
         prompt = args.get('prompt')
         if not prompt:
-            raise ValueError('generate_ui requires a `prompt` parameter')
+            return {'success': False, 'error': 'generate_ui requires a `prompt` parameter'}
 
         model = args.get('model') or 'v0-1.0-md'
 
@@ -94,8 +94,11 @@ class IInstance(IInstanceBase):
             {'role': 'user', 'content': prompt},
         ]
 
-        response = self._call_v0_api(messages, model)
-        code, message_id = _extract_code(response)
+        try:
+            response = self._call_v0_api(messages, model)
+            code, message_id = _extract_code(response)
+        except Exception as e:
+            return {'success': False, 'error': f'v0 API call failed: {e}'}
 
         if not code:
             return {
@@ -157,11 +160,11 @@ class IInstance(IInstanceBase):
 
         prompt = args.get('prompt')
         if not prompt:
-            raise ValueError('refine_ui requires a `prompt` parameter')
+            return {'success': False, 'error': 'refine_ui requires a `prompt` parameter'}
 
         message_id = args.get('message_id')
         if not message_id:
-            raise ValueError('refine_ui requires a `message_id` from a prior generation')
+            return {'success': False, 'error': 'refine_ui requires a `message_id` from a prior generation'}
 
         model = args.get('model') or 'v0-1.0-md'
 
@@ -174,8 +177,11 @@ class IInstance(IInstanceBase):
         prior_messages: List[Dict[str, str]] = args.get('prior_messages') or []
         messages = [*prior_messages, {'role': 'user', 'content': prompt}]
 
-        response = self._call_v0_api(messages, model, parent_message_id=message_id)
-        code, new_message_id = _extract_code(response)
+        try:
+            response = self._call_v0_api(messages, model, parent_message_id=message_id)
+            code, new_message_id = _extract_code(response)
+        except Exception as e:
+            return {'success': False, 'error': f'v0 API call failed: {e}'}
 
         if not code:
             return {
@@ -257,7 +263,7 @@ def _normalize_tool_input(input_obj: Any) -> Dict[str, Any]:
             pass
 
     if not isinstance(input_obj, dict):
-        warning(f'v0: unexpected input type {type(input_obj).__name__}: {input_obj!r}')
+        warning(f'v0: unexpected input type {type(input_obj).__name__} (content redacted)')
         return {}
 
     if 'input' in input_obj and isinstance(input_obj['input'], dict):
