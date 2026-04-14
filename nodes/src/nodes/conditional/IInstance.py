@@ -24,9 +24,9 @@
 """
 Conditional routing node.
 
-Evaluates a sandboxed Python expression against the incoming content
-(``text``, ``questions`` or ``answers``) and routes it to one of two exclusive
-branches: ``then`` (true) or ``else`` (false).
+Catalog: ``conditional_text``, ``conditional_questions``, and ``conditional_answers``
+(one input lane each). Evaluates a sandboxed Python expression and routes to
+``then`` (true) or ``else`` (false).
 """
 
 from __future__ import annotations

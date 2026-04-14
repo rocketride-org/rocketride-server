@@ -57,7 +57,7 @@
     },
     {
       "id": "conditional_1",
-      "provider": "conditional",
+      "provider": "conditional_text",
       "name": "Confidential?",
       "description": "Routes text containing 'confidential' to the then branch",
       "config": {

@@ -297,7 +297,9 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
                             comp.def->serviceDefinition["lanes"][input->name],
                             output->name))
                         input->outputs.push_back(output);
-                    else if (comp.def->logicalType == "conditional" &&
+                    else if ((comp.def->logicalType == "conditional_text" ||
+                              comp.def->logicalType == "conditional_questions" ||
+                              comp.def->logicalType == "conditional_answers") &&
                              input->name == output->name)
                         input->outputs.push_back(output);
                 }

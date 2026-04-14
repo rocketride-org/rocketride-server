@@ -1,0 +1,49 @@
+{
+	"title": "Conditional (answers)",
+	"protocol": "conditional_answers://",
+	"classType": ["conditional"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.conditional",
+	"prefix": "conditional",
+	"description": ["Evaluates a Python condition on incoming answers and routes each item to one of two branches: ", "``then`` (true) or ``else`` (false). Use with downstream nodes that consume the ``answers`` lane."],
+	"icon": "util-conditional.svg",
+	"documentation": "https://docs.rocketride.org",
+	"lanes": {
+		"answers": ["then", "else"]
+	},
+	"input": [
+		{
+			"lane": "answers",
+			"description": "Answers input",
+			"output": [
+				{ "lane": "then", "description": "Routed when condition is true" },
+				{ "lane": "else", "description": "Routed when condition is false" }
+			]
+		}
+	],
+	"preconfig": {
+		"default": "python",
+		"profiles": {
+			"python": {
+				"title": "Python expression",
+				"condition": ""
+			}
+		}
+	},
+	"fields": {
+		"condition": {
+			"type": "string",
+			"title": "Python condition",
+			"description": "Evaluated in a sandbox with ``answers`` (object) in scope. Truthy → ``then``; falsy → ``else``."
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Conditional (answers)",
+			"properties": ["condition"]
+		}
+	]
+}

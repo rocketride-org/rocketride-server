@@ -55,27 +55,29 @@ Binder::Binder(IServiceFilterInstance *pThis) {
 /**
  * @brief Binds a method name to a service filter instance.
  *
- * When methodName is ``"then"`` or ``"else"`` (meta-lanes), the bind expands
- * to every data lane and tags the instance with branch 0 or 1 respectively,
- * so later dispatches filtered by ``selectBranch`` reach only the matching
- * branch.
+ * When methodName is ``"then"`` or ``"else"`` (meta-lanes), the bind tags the
+ * instance with branch 0 or 1 and binds only the lane supported by the
+ * current ``conditional_*`` service.
  *
  * @param methodName The name of the method to bind.
  * @param pInstance A pointer to the IServiceFilterInstance to bind.
  */
 Error Binder::bind(const std::string &methodName,
                    IServiceFilterInstance *pInstance) noexcept {
-    // Meta-lanes: expand to every data lane and tag the instance with its
-    // branch index for later dispatch filtering.
+    // Meta-lanes: bind only the lane supported by the current conditional
+    // service and tag the instance with its branch index for dispatch
+    // filtering.
     if (methodName == "then" || methodName == "else") {
         int branch = (methodName == "then") ? 0 : 1;
-        for (const char *name : MethodNames) {
-            std::string n(name);
-            // Skip lifecycle, meta-lanes, and tags
-            if (n == "open" || n == "closing" || n == "close" ||
-                n == "tags" || n == "then" || n == "else")
-                continue;
-            if (auto ccode = bind(n, pInstance)) return ccode;
+        const Text &lt = m_pInstance->pipeType.logicalType;
+        if (lt == "conditional_text") {
+            if (auto ccode = bind("text", pInstance)) return ccode;
+        } else if (lt == "conditional_questions") {
+            if (auto ccode = bind("questions", pInstance)) return ccode;
+        } else if (lt == "conditional_answers") {
+            if (auto ccode = bind("answers", pInstance)) return ccode;
+        } else {
+            return APERR(Ec::InvalidParam, "Unsupported conditional service", lt);
         }
         m_branchMap[pInstance] = branch;
         return {};

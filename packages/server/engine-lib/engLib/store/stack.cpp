@@ -175,9 +175,9 @@ Error IServiceEndpoint::buildConnections() noexcept {
 
                 // Pipelines store conditional branch targets as the real data lane
                 // (text / questions / answers) plus ``branch``: 0 or 1. The binder
-                // only applies branch filtering when instances are bound via the
-                // meta-lanes ``then`` (0) or ``else`` (1), which expand to all data
-                // lanes and set ``m_branchMap`` (see Binder::bind).
+                // applies branch filtering when instances are bound via the
+                // meta-lanes ``then`` (0) or ``else`` (1) and tags them in
+                // ``m_branchMap`` (see Binder::bind).
                 if (comp.isMember("branch") && comp["branch"].isIntegral()) {
                     const int branch = comp["branch"].asInt();
                     Text fromProvider;
@@ -187,7 +187,9 @@ Error IServiceEndpoint::buildConnections() noexcept {
                             break;
                         }
                     }
-                    if (fromProvider == "conditional") {
+                    if (fromProvider == "conditional_text" ||
+                        fromProvider == "conditional_questions" ||
+                        fromProvider == "conditional_answers") {
                         if (branch == 0)
                             lane = "then";
                         else if (branch == 1)

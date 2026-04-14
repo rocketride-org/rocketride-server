@@ -60,7 +60,7 @@
     },
     {
       "id": "conditional_1",
-      "provider": "conditional",
+      "provider": "conditional_questions",
       "config": {},
       "ui": {
         "position": {
