@@ -43,6 +43,7 @@ class IInstance(IInstanceGenericLLM):
         """Handle AVI image protocol for streaming image frames."""
         if action == AVI_ACTION.BEGIN:
             self.image_data = bytearray()
+            self._cached_answer = None
             return self.preventDefault()
         elif action == AVI_ACTION.WRITE:
             self.image_data += buffer
