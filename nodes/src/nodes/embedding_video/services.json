@@ -19,7 +19,7 @@
 	//		Capabilities are flags that change the behavior of the underlying
 	//		engine
 	//
-	"capabilities": ["gpu"],
+	"capabilities": ["gpu", "experimental"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -164,13 +164,7 @@
 		"embedding.extraction": {
 			"object": "extraction",
 			"title": "Frame Extraction",
-			"properties": [
-				"embedding.interval",
-				"embedding.max_frames",
-				"embedding.start_time",
-				"embedding.duration",
-				"embedding.maxVideoSizeMB"
-			]
+			"properties": ["embedding.interval", "embedding.max_frames", "embedding.start_time", "embedding.duration", "embedding.maxVideoSizeMB"]
 		}
 	},
 	//
