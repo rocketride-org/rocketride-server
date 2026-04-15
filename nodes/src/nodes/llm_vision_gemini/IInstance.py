@@ -35,17 +35,24 @@ class IInstance(IInstanceGenericLLM):
     # Raw image data accumulated across AVI_WRITE chunks
     image_data: bytearray = None
 
-    # Cached answer text from writeDocuments so writeImage can reuse it without
-    # a second Gemini call for the same frame.
+    # Cached answer text shared between the two lanes to avoid a second Gemini
+    # call when both lanes are active for the same frame.
+    # _cache_from_image distinguishes who set it: True = writeImage, False = writeDocuments.
+    # writeDocuments must only consume the cache when writeImage set it, otherwise a
+    # cached answer from doc[N] would bleed into doc[N+1] in a multi-doc batch.
     _cached_answer: str = None
+    _cache_from_image: bool = False
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         """Handle AVI image protocol for streaming image frames."""
         if action == AVI_ACTION.BEGIN:
             self.image_data = bytearray()
             self._cached_answer = None
+            self._cache_from_image = False
             return self.preventDefault()
         elif action == AVI_ACTION.WRITE:
+            if self.image_data is None:
+                raise RuntimeError('AVI protocol error: WRITE received before BEGIN')
             self.image_data += buffer
             return self.preventDefault()
         elif action == AVI_ACTION.END:
@@ -53,6 +60,7 @@ class IInstance(IInstanceGenericLLM):
                 # writeDocuments already called Gemini for this frame — reuse the result.
                 self.instance.writeText(self._cached_answer)
                 self._cached_answer = None
+                self._cache_from_image = False
             elif not self.image_data:
                 warning('Gemini Vision: skipping empty image frame')
             else:
@@ -70,12 +78,15 @@ class IInstance(IInstanceGenericLLM):
                     answer = self.IGlobal._chat.chat(question)
                     answer_text = answer.getText()
                     self._cached_answer = answer_text
+                    self._cache_from_image = True
                     self.instance.writeText(answer_text)
                 except Exception as e:
                     warning(f'Gemini Vision: inference failed for image frame: {e}')
 
             self.image_data = None
             return self.preventDefault()
+        else:
+            raise RuntimeError(f'AVI protocol error: unknown action {action}')
 
     def writeDocuments(self, documents: list[Doc]):
         """Process incoming image documents inline and emit vision model responses as text documents."""
@@ -93,21 +104,25 @@ class IInstance(IInstanceGenericLLM):
             question.addContext(f'data:image/png;base64,{doc.page_content}')
             question.addQuestion(self.IGlobal._chat._prompt)
 
-            if self._cached_answer is not None:
+            if self._cached_answer is not None and self._cache_from_image:
                 # writeImage already called Gemini for this frame — reuse the result.
                 answer_text = self._cached_answer
                 self._cached_answer = None
+                self._cache_from_image = False
             else:
+                # Discard any stale doc-sourced cache (multi-doc batch safety).
+                self._cached_answer = None
+                self._cache_from_image = False
                 try:
                     answer = self.IGlobal._chat.chat(question)
+                    answer_text = answer.getText()
                 except Exception as e:
                     chunk_id = doc.metadata.chunkId if doc.metadata else 'unknown'
                     warning(f'Gemini Vision: inference failed for chunk {chunk_id}: {e}')
                     continue
-
-                answer_text = answer.getText()
                 # Cache so writeImage can reuse it if it fires after us.
                 self._cached_answer = answer_text
+                # _cache_from_image stays False — writeImage checks for this.
 
             self.instance.writeDocuments([Doc(type='Text', page_content=answer_text, metadata=doc.metadata)])
 
