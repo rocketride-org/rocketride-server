@@ -12,7 +12,7 @@ sidebar_position: 1
 
 Sends images to Google Gemini vision-capable models and returns text analysis. Accepts either a single image or a stream of image documents (e.g. from the frame grabber). Metadata such as frame number and timestamp is preserved on the `documents` output.
 
-All profiles support a 1M token context window, making Gemini Vision well-suited for high-volume frame analysis pipelines where many images are processed in sequence.
+Most profiles support a 1M token context window, making Gemini Vision well-suited for high-volume frame analysis pipelines where many images are processed in sequence. The exception is Gemini 3.1 Flash Image Preview, which has a 131,072 token limit.
 
 **Lanes:**
 

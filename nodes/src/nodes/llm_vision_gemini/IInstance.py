@@ -53,6 +53,8 @@ class IInstance(IInstanceGenericLLM):
                 # writeDocuments already called Gemini for this frame — reuse the result.
                 self.instance.writeText(self._cached_answer)
                 self._cached_answer = None
+            elif not self.image_data:
+                warning('Gemini Vision: skipping empty image frame')
             else:
                 # Only the image lane is connected; call Gemini directly.
                 from ai.common.schema import Question
@@ -66,7 +68,9 @@ class IInstance(IInstanceGenericLLM):
 
                 try:
                     answer = self.IGlobal._chat.chat(question)
-                    self.instance.writeText(answer.getText())
+                    answer_text = answer.getText()
+                    self._cached_answer = answer_text
+                    self.instance.writeText(answer_text)
                 except Exception as e:
                     warning(f'Gemini Vision: inference failed for image frame: {e}')
 
@@ -89,17 +93,21 @@ class IInstance(IInstanceGenericLLM):
             question.addContext(f'data:image/png;base64,{doc.page_content}')
             question.addQuestion(self.IGlobal._chat._prompt)
 
-            try:
-                answer = self.IGlobal._chat.chat(question)
-            except Exception as e:
-                chunk_id = doc.metadata.chunkId if doc.metadata else 'unknown'
-                warning(f'Gemini Vision: inference failed for chunk {chunk_id}: {e}')
-                continue
+            if self._cached_answer is not None:
+                # writeImage already called Gemini for this frame — reuse the result.
+                answer_text = self._cached_answer
+                self._cached_answer = None
+            else:
+                try:
+                    answer = self.IGlobal._chat.chat(question)
+                except Exception as e:
+                    chunk_id = doc.metadata.chunkId if doc.metadata else 'unknown'
+                    warning(f'Gemini Vision: inference failed for chunk {chunk_id}: {e}')
+                    continue
 
-            answer_text = answer.getText()
-
-            # Cache so writeImage can emit the same text without a second API call.
-            self._cached_answer = answer_text
+                answer_text = answer.getText()
+                # Cache so writeImage can reuse it if it fires after us.
+                self._cached_answer = answer_text
 
             self.instance.writeDocuments([Doc(type='Text', page_content=answer_text, metadata=doc.metadata)])
 
