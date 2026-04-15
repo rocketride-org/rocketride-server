@@ -97,8 +97,7 @@
 		// Defines profiles used with the "profile": key
 		"profiles": {
 			"interval": {
-				"title": "Extract video frames at intervals",
-				"fps": 1
+				"title": "Extract video frames at intervals"
 			},
 			"transition": {
 				"title": "Extract video frames at scene transitions ",

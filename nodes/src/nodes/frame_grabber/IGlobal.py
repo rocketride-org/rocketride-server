@@ -22,7 +22,7 @@
 # =============================================================================
 
 import threading
-from rocketlib import IGlobalBase
+from rocketlib import IGlobalBase, IJson
 from ai.common.config import Config
 
 
@@ -31,8 +31,9 @@ class IGlobal(IGlobalBase):
         # Mutex if this driver requires physical devices
         self.device_lock = threading.Lock()
 
-        # Get and save the config info
-        self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        # Get and save the config info — convert to plain dict so user-supplied values
+        # (interval, duration, start_time) survive the IJson merge and are mutable.
+        self.config = IJson.toDict(Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig))
 
         # Put the profile (type) in there as well
         self.config['type'] = self.glb.connConfig.get('profile', 'interval')
