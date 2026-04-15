@@ -371,7 +371,7 @@ export default function QuickAddPopup(): ReactElement | null {
 						inputRef={searchRef}
 						size="small"
 						fullWidth
-						placeholder={mode === 'invoke' ? (isSource ? `Add ${renameInvokeType(invokeKey)} provider...` : 'Add invoker...') : `Add ${laneType} node...`}
+						placeholder={mode === 'invoke' ? (isSource ? `Add ${renameInvokeType(invokeKey ?? 'invoke')} provider...` : 'Add invoker...') : `Add ${laneType} node...`}
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}
 						InputProps={{
