@@ -32,7 +32,8 @@ export async function downloadRuntime(version: string, callbacks?: DownloadCallb
 	const tag = releaseTag(version);
 	const url = `${GITHUB_DOWNLOAD}/${tag}/${asset}`;
 
-	const tmpPath = join(tmpdir(), `rr-${randomBytes(8).toString('hex')}.download`);
+	const ext = asset.endsWith('.zip') ? '.zip' : '.tar.gz';
+	const tmpPath = join(tmpdir(), `rr-${randomBytes(8).toString('hex')}${ext}`);
 
 	try {
 		// Download
@@ -54,15 +55,21 @@ export async function downloadRuntime(version: string, callbacks?: DownloadCallb
 		if (!body) throw new RuntimeNotFoundError('Empty response body');
 
 		const reader = body.getReader();
+		let lastProgressTime = 0;
 		const nodeStream = new Readable({
 			async read() {
 				const { done, value } = await reader.read();
 				if (done) {
+					callbacks?.onProgress?.(downloaded, total);
 					this.push(null);
 					return;
 				}
 				downloaded += value.byteLength;
-				callbacks?.onProgress?.(downloaded, total);
+				const now = Date.now();
+				if (now - lastProgressTime >= 100) {
+					lastProgressTime = now;
+					callbacks?.onProgress?.(downloaded, total);
+				}
 				this.push(Buffer.from(value));
 			},
 		});
