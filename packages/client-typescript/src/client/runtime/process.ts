@@ -27,35 +27,37 @@ export function spawnRuntime(binaryPath: string, port: number, instanceId: strin
 	const script = join(dirname(binaryPath), 'ai', 'eaas.py');
 	const cwd = dirname(binaryPath);
 
+	const env = { ...process.env, PYTHONUNBUFFERED: '1' };
+	const stdoutFd = openSync(stdoutLog, 'w');
+	const stderrFd = openSync(stderrLog, 'w');
+
 	if (process.platform === 'win32') {
-		// Node.js spawn with detached:true creates a visible console window
-		// on Windows even with windowsHide:true. Use PowerShell Start-Process
-		// to get CREATE_NO_WINDOW + CREATE_NEW_PROCESS_GROUP behavior,
-		// matching the Python client.
+		// Use spawn with detached + windowsHide — no PowerShell overhead,
+		// no event-loop blocking, and proper stdio redirection.
 		try {
-			const psCmd = ["$env:PYTHONUNBUFFERED='1';", `$p = Start-Process -FilePath '${binaryPath}'`, `-ArgumentList '${script}','--port','${port}'`, `-RedirectStandardOutput '${stdoutLog}'`, `-RedirectStandardError '${stderrLog}'`, '-WindowStyle Hidden -PassThru;', 'Write-Output $p.Id'].join(' ');
-
-			const output = execSync(`powershell -NoProfile -Command "${psCmd}"`, {
-				encoding: 'utf-8',
-				windowsHide: true,
+			const child = spawn(binaryPath, [script, '--port', String(port)], {
+				stdio: ['ignore', stdoutFd, stderrFd],
+				env,
 				cwd,
-			}).trim();
+				detached: true,
+				windowsHide: true,
+			});
 
-			const pid = parseInt(output, 10);
-			if (isNaN(pid)) {
-				throw new RuntimeManagementError(`Failed to get PID from Start-Process: ${output}`);
+			child.unref();
+
+			const pid = child.pid;
+			if (pid === undefined) {
+				throw new RuntimeManagementError('Failed to start runtime: no PID returned');
 			}
 			return pid;
 		} catch (e) {
 			if (e instanceof RuntimeManagementError) throw e;
 			throw new RuntimeManagementError(`Failed to start runtime: ${e}`);
+		} finally {
+			closeSync(stdoutFd);
+			closeSync(stderrFd);
 		}
 	}
-
-	// Unix: use spawn with detached + new session
-	const env = { ...process.env, PYTHONUNBUFFERED: '1' };
-	const stdoutFd = openSync(stdoutLog, 'w');
-	const stderrFd = openSync(stderrLog, 'w');
 
 	try {
 		const child = spawn(binaryPath, [script, '--port', String(port)], {

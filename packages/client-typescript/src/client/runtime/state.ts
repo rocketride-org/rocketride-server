@@ -54,9 +54,14 @@ export function isPidAlive(pid: number): boolean {
 	if (pid === 0) return false;
 
 	if (process.platform === 'win32') {
+		// process.kill(pid, 0) is unreliable on Windows — use tasklist instead
 		try {
-			process.kill(pid, 0);
-			return true;
+			const output = execSync(`tasklist /FI "PID eq ${pid}" /NH`, {
+				encoding: 'utf-8',
+				timeout: 5000,
+				windowsHide: true,
+			}).trim();
+			return !output.includes('No tasks') && output.includes(String(pid));
 		} catch {
 			return false;
 		}

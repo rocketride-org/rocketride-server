@@ -522,9 +522,10 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Check if the client is currently connected to the RocketRide server.
+	 * Delegates to DAPClient which checks both transport and authentication state.
 	 */
 	isConnected(): boolean {
-		return this._transport?.isConnected() || false;
+		return super.isConnected();
 	}
 
 	/**

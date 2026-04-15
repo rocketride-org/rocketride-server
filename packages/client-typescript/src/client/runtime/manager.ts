@@ -14,9 +14,9 @@ import { join } from 'path';
 import { satisfies, valid as semverValid, rcompare } from 'semver';
 import Database from 'better-sqlite3';
 import { downloadRuntime } from './downloader.js';
-import { rocketrideHome, runtimeBinary, stateDbPath } from './paths.js';
+import { rocketrideHome, runtimeBinary, stateDbPath, logsDir } from './paths.js';
 import { findAvailablePort } from './ports.js';
-import { spawnRuntime, stopRuntime, waitHealthy } from './process.js';
+import { spawnRuntime, stopRuntime, waitReady } from './process.js';
 import { getCompatRange, resolveCompatibleVersion } from './resolver.js';
 import { StateDB } from './state.js';
 
@@ -73,9 +73,10 @@ export class RuntimeManager {
 
 			const pid = spawnRuntime(binary, port, instanceId);
 
-			// 4. Wait for healthy
+			// 4. Wait for ready (tail stderr log for Uvicorn startup line — faster than HTTP poll)
+			const stderrLog = join(logsDir(instanceId), 'stderr.log');
 			try {
-				await waitHealthy(port, pid);
+				await waitReady(pid, stderrLog);
 			} catch (e) {
 				await stopRuntime(pid);
 				db.register(instanceId, 0, 0, this._version, 'sdk', 0, 'stopped');

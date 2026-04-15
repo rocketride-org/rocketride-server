@@ -26,7 +26,7 @@ import { DAPBase } from './DAPBase.js';
 import { DAPMessage, RocketRideClientConfig } from '../types/index.js';
 import { TransportBase } from './TransportBase.js';
 import { AuthenticationException } from '../exceptions/index.js';
-import { SDK_VERSION } from '../constants.js';
+import { SDK_VERSION, CONST_SOCKET_TIMEOUT } from '../constants.js';
 
 /**
  * DAP (Debug Adapter Protocol) client for communicating with RocketRide servers.
@@ -53,13 +53,14 @@ export class DAPClient extends DAPBase {
 		}
 	>();
 	private _sequenceNumber = 0;
+	private _authenticated = false;
 	protected _requestTimeout?: number;
 	protected _clientDisplayName?: string;
 	protected _clientDisplayVersion?: string;
 
 	constructor(module: string, transport: TransportBase | undefined, config: RocketRideClientConfig = {}) {
 		super(module, transport, config);
-		this._requestTimeout = config.requestTimeout;
+		this._requestTimeout = config.requestTimeout ?? CONST_SOCKET_TIMEOUT * 1000;
 		this._clientDisplayName = config.clientName || 'TypeScript SDK';
 		this._clientDisplayVersion = config.clientVersion || SDK_VERSION;
 	}
@@ -99,6 +100,8 @@ export class DAPClient extends DAPBase {
 	 * Handle disconnection event and clean up pending requests.
 	 */
 	async onDisconnected(reason?: string, hasError = false): Promise<void> {
+		this._authenticated = false;
+
 		// Fail all pending requests since connection is lost
 		const connectionError = new Error(reason || 'Connection lost');
 
@@ -166,37 +169,46 @@ export class DAPClient extends DAPBase {
 		const seq = this.getNextSeq();
 		message.seq = seq;
 
-		// Create promise for response correlation
-		return new Promise((resolve, reject) => {
-			const entry: { resolve: typeof resolve; reject: typeof reject; timer?: ReturnType<typeof setTimeout> } = { resolve, reject };
-
-			// Set up request timeout if configured
-			const effectiveTimeout = timeout ?? this._requestTimeout;
-			if (effectiveTimeout) {
-				entry.timer = setTimeout(() => {
-					if (this._pendingRequests.has(seq)) {
-						this._pendingRequests.delete(seq);
-						reject(new Error(`Request timed out after ${effectiveTimeout}ms`));
-					}
-				}, effectiveTimeout);
-			}
-
-			// Store the resolve/reject functions for later use
-			this._pendingRequests.set(seq, entry);
-
-			// Send request through transport
-			this._send(message).catch((_error) => {
-				this.debugMessage(`Clearing request due to error: ${seq}`);
-
-				// Clean up on send failure
-				if (this._pendingRequests.has(seq)) {
-					const pending = this._pendingRequests.get(seq)!;
-					if (pending.timer) clearTimeout(pending.timer);
-					this._pendingRequests.delete(seq);
-				}
-				reject(new Error('Could not send request'));
-			});
+		// Deferred pattern: register pending request first, then await send.
+		// This avoids the fire-and-forget race where a response could arrive
+		// before the pending entry is registered.
+		let resolve!: (value: DAPMessage) => void;
+		let reject!: (reason: unknown) => void;
+		const responsePromise = new Promise<DAPMessage>((res, rej) => {
+			resolve = res;
+			reject = rej;
 		});
+
+		const entry: { resolve: typeof resolve; reject: typeof reject; timer?: ReturnType<typeof setTimeout> } = { resolve, reject };
+
+		// Set up request timeout if configured
+		const effectiveTimeout = timeout ?? this._requestTimeout;
+		if (effectiveTimeout) {
+			entry.timer = setTimeout(() => {
+				if (this._pendingRequests.has(seq)) {
+					this._pendingRequests.delete(seq);
+					reject(new Error(`Request timed out after ${effectiveTimeout}ms`));
+				}
+			}, effectiveTimeout);
+		}
+
+		// Store the resolve/reject functions for later use
+		this._pendingRequests.set(seq, entry);
+
+		// Await send — failures clean up and reject the response promise
+		try {
+			await this._send(message);
+		} catch {
+			this.debugMessage(`Clearing request due to error: ${seq}`);
+			if (this._pendingRequests.has(seq)) {
+				const pending = this._pendingRequests.get(seq)!;
+				if (pending.timer) clearTimeout(pending.timer);
+				this._pendingRequests.delete(seq);
+			}
+			reject(new Error('Could not send request'));
+		}
+
+		return responsePromise;
 	}
 
 	/**
@@ -243,6 +255,8 @@ export class DAPClient extends DAPBase {
 			throw new AuthenticationException(resp as unknown as Record<string, unknown>);
 		}
 
+		this._authenticated = true;
+
 		// Only now notify connected (transport resolved on socket open; callback runs after auth)
 		const connectionInfo = this._transport.getConnectionInfo();
 		await this.onConnected(connectionInfo);
@@ -262,6 +276,6 @@ export class DAPClient extends DAPBase {
 	 * Check if connected to server.
 	 */
 	isConnected(): boolean {
-		return this._transport?.isConnected() || false;
+		return (this._transport?.isConnected() || false) && this._authenticated;
 	}
 }

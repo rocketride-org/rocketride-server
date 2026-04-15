@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -68,19 +68,19 @@ type UniversalWebSocket = WebSocket | NodeWsInstance;
 
 /**
  * WebSocket transport implementation for DAP protocol communication.
- * 
+ *
  * Provides WebSocket-based communication between RocketRide clients and servers
  * with support for both text (JSON) and binary (CBOR) message formats. Handles
  * connection lifecycle management, message serialization/deserialization, automatic
  * heartbeat/ping messages, and connection timeout detection.
- * 
+ *
  * Features:
  * - Cross-platform: Works in both browser (native WebSocket) and Node.js (ws library)
  * - Automatic message encoding/decoding (JSON and CBOR)
  * - Connection timeout handling
  * - Authentication via headers
  * - Message queuing during connection
- * 
+ *
  * @extends TransportBase
  */
 export class TransportWebSocket extends TransportBase {
@@ -109,10 +109,14 @@ export class TransportWebSocket extends TransportBase {
 	}
 
 	/** Update auth credential. Takes effect on the next connect(). */
-	setAuth(auth: string): void { this._auth = auth; }
+	setAuth(auth: string): void {
+		this._auth = auth;
+	}
 
 	/** Update connection URI. Takes effect on the next connect(). */
-	setUri(uri: string): void { this._uri = uri; }
+	setUri(uri: string): void {
+		this._uri = uri;
+	}
 
 	/**
 	 * Start ping interval for Node.js WebSocket connections.
@@ -147,7 +151,8 @@ export class TransportWebSocket extends TransportBase {
 
 			// Send ping
 			try {
-				if (nodeWs.readyState === 1) { // OPEN state
+				if (nodeWs.readyState === 1) {
+					// OPEN state
 					nodeWs.ping();
 					this._debugMessage('Sent ping to server');
 				}
@@ -169,7 +174,7 @@ export class TransportWebSocket extends TransportBase {
 
 	/**
 	 * Process raw WebSocket data into structured messages.
-	 * 
+	 *
 	 * Handles both JSON text messages and DAP binary format messages.
 	 * Binary messages use format: JSON header + newline + binary payload.
 	 */
@@ -288,23 +293,23 @@ export class TransportWebSocket extends TransportBase {
 						task.finally(() => this._messageTasks.delete(task));
 					};
 
-				this._websocket.onclose = async (event: CloseEvent) => {
-					if (this._connectionTimeout) {
-						clearTimeout(this._connectionTimeout);
-						this._connectionTimeout = undefined;
-					}
+					this._websocket.onclose = async (event: CloseEvent) => {
+						if (this._connectionTimeout) {
+							clearTimeout(this._connectionTimeout);
+							this._connectionTimeout = undefined;
+						}
 
-					this._connected = false;
-					const wasClean = event.code === 1000;
-					const reasonText = event.reason || (wasClean ? 'Connection closed normally' : 'Connection closed unexpectedly');
+						this._connected = false;
+						const wasClean = event.code === 1000;
+						const reasonText = event.reason || (wasClean ? 'Connection closed normally' : 'Connection closed unexpectedly');
 
-					// Always notify disconnection to enable reconnection
-					await this._transportDisconnected(reasonText, !wasClean);
+						// Always notify disconnection to enable reconnection
+						await this._transportDisconnected(reasonText, !wasClean);
 
-					if (!promiseResolved) {
-						rejectOnce(new Error(`Connection failed: ${reasonText} (code: ${event.code})`));
-					}
-				};
+						if (!promiseResolved) {
+							rejectOnce(new Error(`Connection failed: ${reasonText} (code: ${event.code})`));
+						}
+					};
 
 					this._websocket.onerror = async () => {
 						if (this._connectionTimeout) {
@@ -331,14 +336,15 @@ export class TransportWebSocket extends TransportBase {
 							await this._transportDisconnected('WebSocket error', true);
 						}
 					};
-
 				} else {
 					// ============================================================
 					// NODE.JS WebSocket (ws library)
 					// ============================================================
 					// nodeWs is the WebSocket constructor from 'ws' (loaded above via ensureNodeWebSocket)
-					// ws exports the constructor directly: new WebSocket(url)
-					this._websocket = new (nodeWs as new (url: string) => NodeWsInstance)(this._uri);
+					// ws exports the constructor directly: new WebSocket(url, options)
+					// Disable permessage-deflate (matches Python compression=None) and raise
+					// max payload to 250 MB (Python max_size=2**28 ≈ 250 MB).
+					this._websocket = new (nodeWs as new (url: string, options: { perMessageDeflate: boolean; maxPayload: number }) => NodeWsInstance)(this._uri, { perMessageDeflate: false, maxPayload: 250 * 1024 * 1024 });
 
 					this._websocket.on('open', async () => {
 						if (this._connectionTimeout) {
@@ -366,11 +372,8 @@ export class TransportWebSocket extends TransportBase {
 						if (!isBinary && typeof data === 'string') {
 							messageData = data;
 						} else if (Buffer.isBuffer(data)) {
-							// Convert Buffer to ArrayBuffer
-							const arrayBuffer = new ArrayBuffer(data.length);
-							const view = new Uint8Array(arrayBuffer);
-							view.set(data);
-							messageData = arrayBuffer;
+							// Zero-copy slice from Buffer's underlying ArrayBuffer
+							messageData = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
 						} else if (data instanceof ArrayBuffer) {
 							messageData = data;
 						} else if (Array.isArray(data)) {
@@ -393,23 +396,23 @@ export class TransportWebSocket extends TransportBase {
 						task.finally(() => this._messageTasks.delete(task));
 					});
 
-				this._websocket.on('close', async (code: number, reason: Buffer) => {
-					if (this._connectionTimeout) {
-						clearTimeout(this._connectionTimeout);
-						this._connectionTimeout = undefined;
-					}
+					this._websocket.on('close', async (code: number, reason: Buffer) => {
+						if (this._connectionTimeout) {
+							clearTimeout(this._connectionTimeout);
+							this._connectionTimeout = undefined;
+						}
 
-					this._connected = false;
-					const wasClean = code === 1000;
-					const reasonText = (reason ? reason.toString() : '') || (wasClean ? 'Connection closed normally' : 'Connection closed unexpectedly');
+						this._connected = false;
+						const wasClean = code === 1000;
+						const reasonText = (reason ? reason.toString() : '') || (wasClean ? 'Connection closed normally' : 'Connection closed unexpectedly');
 
-					// Always notify disconnection to enable reconnection
-					await this._transportDisconnected(reasonText, !wasClean);
+						// Always notify disconnection to enable reconnection
+						await this._transportDisconnected(reasonText, !wasClean);
 
-					if (!promiseResolved) {
-						rejectOnce(new Error(`Connection failed: ${reasonText} (code: ${code})`));
-					}
-				});
+						if (!promiseResolved) {
+							rejectOnce(new Error(`Connection failed: ${reasonText} (code: ${code})`));
+						}
+					});
 
 					this._websocket.on('error', async (error: Error) => {
 						if (this._connectionTimeout) {
@@ -458,7 +461,6 @@ export class TransportWebSocket extends TransportBase {
 
 					rejectOnce(new Error(`Connection timeout after ${effectiveTimeout}ms`));
 				}, effectiveTimeout);
-
 			} catch (error) {
 				if (this._connectionTimeout) {
 					clearTimeout(this._connectionTimeout);
@@ -542,13 +544,13 @@ export class TransportWebSocket extends TransportBase {
 					});
 
 					await closePromise;
-
 				} else {
 					// Node.js WebSocket
 					(ws as NodeWsInstance).removeAllListeners();
 
 					const closePromise = new Promise<void>((resolve) => {
-						if (ws.readyState === 3) { // CLOSED state
+						if (ws.readyState === 3) {
+							// CLOSED state
 							resolve();
 							return;
 						}
@@ -588,7 +590,6 @@ export class TransportWebSocket extends TransportBase {
 			// Notify about disconnection (use caller-provided reason/hasError when given)
 			await this._transportDisconnected(reason ?? 'Disconnected by request', hasError ?? false);
 			callbackCalled = true;
-
 		} catch (error) {
 			this._debugMessage(`Error during disconnect: ${error}`);
 			if (!callbackCalled) {
@@ -606,11 +607,11 @@ export class TransportWebSocket extends TransportBase {
 
 	/**
 	 * Send a DAP message with automatic format selection.
-	 * 
+	 *
 	 * Handles both standard JSON messages and DAP binary messages with
 	 * data payloads. Automatically chooses appropriate WebSocket message
 	 * format based on message content.
-	 * 
+	 *
 	 * Works in both browser and Node.js environments.
 	 */
 	async send(message: DAPMessage): Promise<void> {
@@ -661,13 +662,11 @@ export class TransportWebSocket extends TransportBase {
 
 				// Send binary message
 				this._websocket.send(combinedMessage);
-
 			} else {
 				// Standard JSON message
 				this._debugProtocol(`SEND: ${JSON.stringify(message)}`);
 				this._websocket.send(JSON.stringify(message));
 			}
-
 		} catch (error) {
 			if (error instanceof Error && error.name === 'NetworkError') {
 				// Connection errors should update state
