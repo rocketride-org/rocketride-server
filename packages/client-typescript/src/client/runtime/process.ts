@@ -4,7 +4,7 @@
  * Manages the runtime subprocess lifecycle: start, health-check, stop.
  */
 
-import { spawn, execSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, closeSync } from 'fs';
 import { dirname, join } from 'path';
 import { RuntimeManagementError } from '../exceptions/index.js';
@@ -96,7 +96,7 @@ function sleep(ms: number): Promise<void> {
 export async function stopRuntime(pid: number, timeout: number = 10000): Promise<void> {
 	if (process.platform === 'win32') {
 		try {
-			execSync(`taskkill /F /T /PID ${pid}`, {
+			spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)], {
 				windowsHide: true,
 				stdio: 'ignore',
 				timeout,

@@ -11,7 +11,7 @@
 
 import Database from 'better-sqlite3';
 import { readFileSync } from 'fs';
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { stateDbPath, ensureDirs } from './paths.js';
 
 const SCHEMA = `
@@ -54,13 +54,17 @@ export function isPidAlive(pid: number): boolean {
 	if (pid === 0) return false;
 
 	if (process.platform === 'win32') {
-		// process.kill(pid, 0) is unreliable on Windows — use tasklist instead
+		// spawnSync with windowsHide + stdio:'pipe' avoids console window flashes
+		// that execSync causes on Windows (even with windowsHide: true).
 		try {
-			const output = execSync(`tasklist /FI "PID eq ${pid}" /NH`, {
+			const result = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH'], {
 				encoding: 'utf-8',
 				timeout: 5000,
 				windowsHide: true,
-			}).trim();
+				stdio: 'pipe',
+			});
+			if (result.error || result.status !== 0) return false;
+			const output = (result.stdout ?? '').trim();
 			return !output.includes('No tasks') && output.includes(String(pid));
 		} catch {
 			return false;
@@ -97,11 +101,14 @@ export function isRuntimeProcess(pid: number): boolean {
 	if (process.platform !== 'win32') return isPidAlive(pid);
 
 	try {
-		const output = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, {
+		const result = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
 			encoding: 'utf-8',
 			timeout: 5000,
 			windowsHide: true,
-		}).trim();
+			stdio: 'pipe',
+		});
+		if (result.error || result.status !== 0) return false;
+		const output = (result.stdout ?? '').trim();
 		if (output.includes('No tasks')) return false;
 		return output.toLowerCase().includes('engine.exe');
 	} catch {
@@ -113,10 +120,24 @@ export function getProcessMemory(pid: number): number | null {
 	if (pid === 0 || !isPidAlive(pid)) return null;
 
 	if (process.platform === 'win32') {
+		// Use tasklist /FI to get memory — avoids spawning PowerShell which is
+		// heavyweight and flashes a console window even with windowsHide.
 		try {
-			const output = execSync(`powershell -NoProfile -Command "(Get-Process -Id ${pid}).WorkingSet64"`, { encoding: 'utf-8', timeout: 5000, windowsHide: true }).trim();
-			const bytes = parseInt(output, 10);
-			return isNaN(bytes) ? null : bytes;
+			const result = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
+				encoding: 'utf-8',
+				timeout: 5000,
+				windowsHide: true,
+				stdio: 'pipe',
+			});
+			if (result.error || result.status !== 0) return null;
+			const output = (result.stdout ?? '').trim();
+			if (output.includes('No tasks')) return null;
+			// CSV format: "name","pid","session","session#","mem usage"
+			// mem usage looks like "123,456 K"
+			const match = output.match(/"([0-9,]+)\s*K"/);
+			if (!match) return null;
+			const kb = parseInt(match[1].replace(/,/g, ''), 10);
+			return isNaN(kb) ? null : kb * 1024;
 		} catch {
 			return null;
 		}

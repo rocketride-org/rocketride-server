@@ -85,9 +85,11 @@ export async function downloadRuntime(version: string, callbacks?: DownloadCallb
 			const tar = await import('tar');
 			await tar.extract({ file: tmpPath, cwd: dest });
 		} else if (asset.endsWith('.zip')) {
-			// Use PowerShell on Windows for zip extraction
-			const { execSync } = await import('child_process');
-			execSync(`powershell -NoProfile -Command "Expand-Archive -Path '${tmpPath}' -DestinationPath '${dest}' -Force"`, { windowsHide: true });
+			const { spawnSync } = await import('child_process');
+			spawnSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -Path '${tmpPath}' -DestinationPath '${dest}' -Force`], {
+				windowsHide: true,
+				stdio: 'ignore',
+			});
 		}
 
 		// Set executable on Unix
