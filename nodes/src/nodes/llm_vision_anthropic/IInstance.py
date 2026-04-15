@@ -75,6 +75,8 @@ class IInstance(IInstanceGenericLLM):
 
             self.image_data = None
             return self.preventDefault()
+        else:
+            raise RuntimeError(f'AVI protocol error: Unknown action {action}')
 
     def writeDocuments(self, documents: list[Doc]):
         """Process incoming image documents inline and emit vision model responses as text documents."""
