@@ -70,8 +70,11 @@ class IInstance(IInstanceGenericLLM):
                 question.addContext(image_data_url)
                 question.addQuestion(self.IGlobal._chat._prompt)
 
-                answer = self.IGlobal._chat.chat(question)
-                self.instance.writeText(answer.getText())
+                try:
+                    answer = self.IGlobal._chat.chat(question)
+                    self.instance.writeText(answer.getText())
+                except Exception as e:
+                    warning(f'Anthropic Vision: inference failed on image lane: {e}')
 
             self.image_data = None
             return self.preventDefault()
