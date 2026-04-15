@@ -23,7 +23,7 @@ import { normalizeVersion } from '../../client/runtime/platform.js';
 import { findAvailablePort } from '../../client/runtime/ports.js';
 import { spawnRuntime, stopRuntime, waitReady } from '../../client/runtime/process.js';
 import { getCompatRange, resolveCompatibleVersion, resolveDockerTag } from '../../client/runtime/resolver.js';
-import { StateDB, InstanceRecord, isPidAlive, getProcessMemory } from '../../client/runtime/state.js';
+import { StateDB, InstanceRecord, isPidAlive, isRuntimeProcess, getProcessMemory } from '../../client/runtime/state.js';
 import { DockerRuntime } from '../../client/runtime/docker.js';
 
 // ── UI helpers ──────────────────────────────────────────────────────
@@ -187,7 +187,7 @@ async function cmdList(): Promise<number> {
 				statusText = 'unknown';
 			}
 		} else {
-			alive = isPidAlive(pid);
+			alive = isRuntimeProcess(pid);
 			statusText = alive ? 'running' : 'stopped';
 		}
 

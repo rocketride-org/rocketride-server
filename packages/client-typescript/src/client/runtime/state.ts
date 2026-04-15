@@ -55,7 +55,6 @@ export function isPidAlive(pid: number): boolean {
 
 	if (process.platform === 'win32') {
 		try {
-			// process.kill(pid, 0) works on Windows in Node.js too
 			process.kill(pid, 0);
 			return true;
 		} catch {
@@ -82,6 +81,27 @@ export function isPidAlive(pid: number): boolean {
 		// /proc not available (macOS) — fall through
 	}
 	return true;
+}
+
+/**
+ * Verify a PID belongs to the runtime binary (engine.exe), not a recycled PID.
+ * Slower than isPidAlive — use only for display (e.g. runtime list), never in tight loops.
+ */
+export function isRuntimeProcess(pid: number): boolean {
+	if (pid === 0) return false;
+	if (process.platform !== 'win32') return isPidAlive(pid);
+
+	try {
+		const output = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, {
+			encoding: 'utf-8',
+			timeout: 5000,
+			windowsHide: true,
+		}).trim();
+		if (output.includes('No tasks')) return false;
+		return output.toLowerCase().includes('engine.exe');
+	} catch {
+		return false;
+	}
 }
 
 export function getProcessMemory(pid: number): number | null {
