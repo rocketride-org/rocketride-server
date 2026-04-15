@@ -137,7 +137,7 @@ class TransportWebSocket(TransportBase):
         self._uri = uri
 
     def _on_message_task_done(self, task: asyncio.Task) -> None:
-        """Callback for when a message processing task completes."""
+        """Handle completion of a message processing task."""
         self._message_tasks.discard(task)
 
     def _is_fastapi_websocket(self) -> bool:
@@ -162,6 +162,9 @@ class TransportWebSocket(TransportBase):
             reason: Reason for disconnection
             has_error: Whether this was an error disconnection
         """
+        if not self._connected:  # Already disconnected, skip
+            return
+
         # Stop accepting new messages immediately
         self._connected = False
 
