@@ -35,16 +35,20 @@ class IInstance(IInstanceGenericLLM):
     # Raw image data accumulated across AVI_WRITE chunks
     image_data: bytearray | None = None
 
-    # Cached answer text from writeDocuments so writeImage can reuse it without
-    # a second API call for the same frame. Cleared at AVI_ACTION.BEGIN so a
-    # late-arriving writeDocuments from frame N cannot bleed into frame N+1.
+    # Cached answer text shared between the two lanes to avoid a second Claude
+    # call when both lanes are active for the same frame.
+    # _cache_from_image distinguishes who set it: True = writeImage, False = writeDocuments.
+    # writeDocuments must only consume the cache when writeImage set it, otherwise a
+    # cached answer from doc[N] would bleed into doc[N+1] in a multi-doc batch.
     _cached_answer: str | None = None
+    _cache_from_image: bool = False
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         """Handle AVI image protocol for streaming image frames."""
         if action == AVI_ACTION.BEGIN:
             self.image_data = bytearray()
             self._cached_answer = None
+            self._cache_from_image = False
             return self.preventDefault()
         elif action == AVI_ACTION.WRITE:
             if self.image_data is None:
@@ -59,6 +63,9 @@ class IInstance(IInstanceGenericLLM):
                 # writeDocuments already called Claude for this frame — reuse the result.
                 self.instance.writeText(self._cached_answer)
                 self._cached_answer = None
+                self._cache_from_image = False
+            elif not self.image_data:
+                warning('Anthropic Vision: skipping empty image frame')
             else:
                 # Only the image lane is connected; call Claude directly.
                 from ai.common.schema import Question
@@ -72,7 +79,10 @@ class IInstance(IInstanceGenericLLM):
 
                 try:
                     answer = self.IGlobal._chat.chat(question)
-                    self.instance.writeText(answer.getText())
+                    answer_text = answer.getText()
+                    self._cached_answer = answer_text
+                    self._cache_from_image = True
+                    self.instance.writeText(answer_text)
                 except Exception as e:
                     warning(f'Anthropic Vision: inference failed on image lane: {e}')
 
@@ -98,17 +108,26 @@ class IInstance(IInstanceGenericLLM):
             question.addContext(f'data:image/png;base64,{doc.page_content}')
             question.addQuestion(self.IGlobal._chat._prompt)
 
-            try:
-                answer = self.IGlobal._chat.chat(question)
-            except Exception as e:
-                chunk_id = doc.metadata.chunkId if doc.metadata else 'unknown'
-                warning(f'Anthropic Vision: inference failed for chunk {chunk_id}: {e}')
-                continue
+            if self._cached_answer is not None and self._cache_from_image:
+                # writeImage already called Claude for this frame — reuse the result.
+                answer_text = self._cached_answer
+                self._cached_answer = None
+                self._cache_from_image = False
+            else:
+                # Discard any stale doc-sourced cache (multi-doc batch safety).
+                self._cached_answer = None
+                self._cache_from_image = False
+                try:
+                    answer = self.IGlobal._chat.chat(question)
+                    answer_text = answer.getText()
+                except Exception as e:
+                    chunk_id = doc.metadata.chunkId if doc.metadata else 'unknown'
+                    warning(f'Anthropic Vision: inference failed for chunk {chunk_id}: {e}')
+                    continue
 
-            answer_text = answer.getText()
-
-            # Cache so writeImage can emit the same text without a second API call.
-            self._cached_answer = answer_text
+                # Cache so writeImage can reuse it if it fires after us.
+                self._cached_answer = answer_text
+                # _cache_from_image stays False — writeImage checks for this.
 
             self.instance.writeDocuments([Doc(type='Text', page_content=answer_text, metadata=doc.metadata)])
 
