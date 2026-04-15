@@ -142,6 +142,8 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	const [viewState, setViewState] = useState<ViewState | null>(null);
 	const [prefs, setPrefs] = useState<Record<string, unknown> | null>(null);
 	const [serverHost, setServerHost] = useState<string>('');
+	const [isDirty, setIsDirty] = useState(false);
+	const [isNew, setIsNew] = useState(false);
 
 	// Pending validate requests
 	const pendingValidates = useRef<Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>>(new Map());
@@ -207,6 +209,10 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 					setPrefs(msg.prefs ?? {});
 					break;
 				case 'project:themeChange':
+					break;
+				case 'project:dirtyState':
+					setIsDirty(msg.isDirty);
+					setIsNew(msg.isNew);
 					break;
 			}
 		},
@@ -322,6 +328,12 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 		[send]
 	);
 
+	// --- Save ----------------------------------------------------------------
+
+	const handleSave = useCallback(() => {
+		send({ type: 'canvas:requestSave' });
+	}, [send]);
+
 	// --- Open link -----------------------------------------------------------
 
 	const handleOpenLink = useCallback(
@@ -377,7 +389,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} />}</div>,
+			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isDirty} isNew={isNew} onSave={handleSave} />}</div>,
 		},
 		status: {
 			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} onPipelineAction={handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={styles.empty}>No source components found</div>}</div>,

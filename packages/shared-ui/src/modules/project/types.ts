@@ -107,7 +107,7 @@ export interface ProjectLoadMessage {
 }
 
 /** All messages the host can send to ProjectView. */
-export type ProjectViewIncoming = CanvasIncoming | StatusIncoming | TraceIncoming | ProjectLoadMessage | { type: 'project:connectionState'; isConnected: boolean } | { type: 'project:initialState'; state: ViewState } | { type: 'project:initialPrefs'; prefs: Record<string, unknown> } | { type: 'project:themeChange'; tokens: Record<string, string> };
+export type ProjectViewIncoming = CanvasIncoming | StatusIncoming | TraceIncoming | ProjectLoadMessage | { type: 'project:connectionState'; isConnected: boolean } | { type: 'project:initialState'; state: ViewState } | { type: 'project:initialPrefs'; prefs: Record<string, unknown> } | { type: 'project:themeChange'; tokens: Record<string, string> } | { type: 'project:dirtyState'; isDirty: boolean; isNew: boolean };
 
 /** All messages ProjectView can send to the host. */
 export type ProjectViewOutgoing = CanvasOutgoing | StatusOutgoing | TraceOutgoing | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:requestSave' } | { type: 'project:openLink'; url: string; displayName?: string };
