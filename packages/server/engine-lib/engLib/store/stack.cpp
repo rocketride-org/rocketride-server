@@ -173,11 +173,13 @@ Error IServiceEndpoint::buildConnections() noexcept {
                 auto from = comp["from"].asString();
                 auto lane = comp["lane"].asString();
 
-                // Pipelines store conditional branch targets as the real data lane
-                // (text / questions / answers) plus ``branch``: 0 or 1. The binder
-                // applies branch filtering when instances are bound via the
-                // meta-lanes ``then`` (0) or ``else`` (1) and tags them in
-                // ``m_branchMap`` (see Binder::bind).
+                // Pipelines store conditional branch targets as the real data
+                // lane (declared by the source service) plus ``branch``: 0 or
+                // 1. The binder applies branch filtering when instances are
+                // bound via the meta-lanes ``then`` (0) or ``else`` (1) and
+                // tags them in ``m_branchMap`` (see Binder::bind). The source
+                // is recognised as conditional via its classType so new
+                // ``conditional_<lane>`` services require no C++ changes.
                 if (comp.isMember("branch") && comp["branch"].isIntegral()) {
                     const int branch = comp["branch"].asInt();
                     Text fromProvider;
@@ -187,13 +189,16 @@ Error IServiceEndpoint::buildConnections() noexcept {
                             break;
                         }
                     }
-                    if (fromProvider == "conditional_text" ||
-                        fromProvider == "conditional_questions" ||
-                        fromProvider == "conditional_answers") {
-                        if (branch == 0)
-                            lane = "then";
-                        else if (branch == 1)
-                            lane = "else";
+                    if (fromProvider) {
+                        auto service =
+                            IServices::getServiceDefinition(fromProvider);
+                        if (service && (*service)->classType.isArray() &&
+                            _anyOf((*service)->classType, "conditional")) {
+                            if (branch == 0)
+                                lane = "then";
+                            else if (branch == 1)
+                                lane = "else";
+                        }
                     }
                 }
 

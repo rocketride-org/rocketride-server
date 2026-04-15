@@ -56,30 +56,43 @@ Binder::Binder(IServiceFilterInstance *pThis) {
  * @brief Binds a method name to a service filter instance.
  *
  * When methodName is ``"then"`` or ``"else"`` (meta-lanes), the bind tags the
- * instance with branch 0 or 1 and binds only the lane supported by the
- * current ``conditional_*`` service.
+ * instance with branch 0 or 1 and binds the single data lane declared by the
+ * current service (resolved at runtime from ``serviceDefinition["lanes"]``).
+ * The service must have ``"conditional"`` in its classType and declare
+ * exactly one input lane — this keeps new ``conditional_<lane>`` variants
+ * purely data-driven (drop a new ``services.<lane>.json``, no C++ changes).
  *
  * @param methodName The name of the method to bind.
  * @param pInstance A pointer to the IServiceFilterInstance to bind.
  */
 Error Binder::bind(const std::string &methodName,
                    IServiceFilterInstance *pInstance) noexcept {
-    // Meta-lanes: bind only the lane supported by the current conditional
-    // service and tag the instance with its branch index for dispatch
-    // filtering.
+    // Meta-lanes: resolve the data lane from the service definition rather
+    // than enumerating known conditional_<lane> types here.
     if (methodName == "then" || methodName == "else") {
-        int branch = (methodName == "then") ? 0 : 1;
         const Text &lt = m_pInstance->pipeType.logicalType;
-        if (lt == "conditional_text") {
-            if (auto ccode = bind("text", pInstance)) return ccode;
-        } else if (lt == "conditional_questions") {
-            if (auto ccode = bind("questions", pInstance)) return ccode;
-        } else if (lt == "conditional_answers") {
-            if (auto ccode = bind("answers", pInstance)) return ccode;
-        } else {
-            return APERR(Ec::InvalidParam, "Unsupported conditional service", lt);
-        }
-        m_branchMap[pInstance] = branch;
+
+        auto service = IServices::getServiceDefinition(lt);
+        if (!service) return service.ccode();
+        const auto &def = **service;
+
+        if (!def.classType.isArray() || !_anyOf(def.classType, "conditional"))
+            return APERR(Ec::InvalidParam,
+                         "then/else bind on non-conditional service", lt);
+
+        const auto &lanes = def.serviceDefinition["lanes"];
+        if (!lanes.isObject())
+            return APERR(Ec::InvalidParam,
+                         "conditional service has no lanes object", lt);
+
+        const auto laneNames = lanes.getMemberNames();
+        if (laneNames.size() != 1)
+            return APERR(Ec::InvalidParam,
+                         "conditional service must declare exactly one lane",
+                         lt);
+
+        if (auto ccode = bind(laneNames[0], pInstance)) return ccode;
+        m_branchMap[pInstance] = (methodName == "then") ? 0 : 1;
         return {};
     }
 

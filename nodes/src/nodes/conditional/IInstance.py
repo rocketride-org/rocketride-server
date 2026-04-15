@@ -27,11 +27,18 @@ Conditional routing node.
 Catalog: ``conditional_text``, ``conditional_questions``, and ``conditional_answers``
 (one input lane each). Evaluates a sandboxed Python expression and routes to
 ``then`` (true) or ``else`` (false).
+
+Chunks for a single object are buffered until ``close`` and the condition
+is evaluated once over the full accumulated payload, so an object is never
+split across both branches (e.g. text arriving as two chunks still matches
+a phrase that spans the chunk boundary).
 """
 
 from __future__ import annotations
 
-from rocketlib import IInstanceBase, debug
+from typing import Any, List
+
+from rocketlib import Entry, IInstanceBase, debug
 
 from .IGlobal import IGlobal
 
@@ -39,23 +46,53 @@ from .IGlobal import IGlobal
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
+    def open(self, object: Entry):
+        """Reset per-object buffers. Called once at the start of each object."""
+        self._text_chunks: List[str] = []
+        self._questions: List[Any] = []
+        self._answers: List[Any] = []
+
     def writeText(self, text: str):
-        self.instance.selectBranch(self._evaluate({'text': text}))
-        self.instance.writeText(text)
+        # Do not forward yet — the branch decision must be made over the full
+        # object payload, not per chunk.
+        self._text_chunks.append(text)
 
     def writeQuestions(self, questions):
-        self.instance.selectBranch(self._evaluate({'questions': questions}))
-        self.instance.writeQuestions(questions)
+        self._questions.append(questions)
 
     def writeAnswers(self, answers):
-        self.instance.selectBranch(self._evaluate({'answers': answers}))
-        self.instance.writeAnswers(answers)
-
-    def closing(self):
-        pass
+        self._answers.append(answers)
 
     def close(self):
-        self.instance.clearBranchSelection()
+        """
+        Evaluate the condition once over the full accumulated payload, then
+        flush buffered chunks to the selected branch. Only one of the three
+        lane buffers is populated in practice (each ``conditional_*`` service
+        declares a single input lane), but all three are handled defensively.
+        """
+        try:
+            if self._text_chunks:
+                full_text = ''.join(self._text_chunks)
+                self.instance.selectBranch(self._evaluate({'text': full_text}))
+                for chunk in self._text_chunks:
+                    self.instance.writeText(chunk)
+                self.instance.clearBranchSelection()
+
+            if self._questions:
+                self.instance.selectBranch(self._evaluate({'questions': self._questions}))
+                for q in self._questions:
+                    self.instance.writeQuestions(q)
+                self.instance.clearBranchSelection()
+
+            if self._answers:
+                self.instance.selectBranch(self._evaluate({'answers': self._answers}))
+                for a in self._answers:
+                    self.instance.writeAnswers(a)
+                self.instance.clearBranchSelection()
+        finally:
+            # Always release the branch selection, even if a write raised, so
+            # subsequent dispatches (e.g. close fan-out) are not misrouted.
+            self.instance.clearBranchSelection()
 
     def _evaluate(self, scope: dict) -> int:
         """Return branch index: 0 (then) if the condition is true, else 1."""

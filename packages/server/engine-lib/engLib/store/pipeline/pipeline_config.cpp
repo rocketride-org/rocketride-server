@@ -297,9 +297,12 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
                             comp.def->serviceDefinition["lanes"][input->name],
                             output->name))
                         input->outputs.push_back(output);
-                    else if ((comp.def->logicalType == "conditional_text" ||
-                              comp.def->logicalType == "conditional_questions" ||
-                              comp.def->logicalType == "conditional_answers") &&
+                    // Conditional services re-expose their single input lane
+                    // as ``then`` and ``else`` meta-lanes via the binder; at
+                    // config-validation time the input and output lane names
+                    // match (see Binder::bind).
+                    else if (comp.def->classType.isArray() &&
+                             _anyOf(comp.def->classType, "conditional") &&
                              input->name == output->name)
                         input->outputs.push_back(output);
                 }
