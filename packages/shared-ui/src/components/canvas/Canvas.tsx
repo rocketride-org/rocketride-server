@@ -114,13 +114,22 @@ export interface IFlowProps {
 
 	/** Saved viewport to restore on load — passed separately, not in the project. */
 	initialViewport?: { x: number; y: number; zoom: number };
+
+	/** Whether the document has unsaved changes — shows Save/Save As button in toolbar. */
+	isDirty?: boolean;
+
+	/** Whether the document is new (not yet saved) — shows Save As instead of Save. */
+	isNew?: boolean;
+
+	/** Called when the user triggers save from the canvas toolbar. */
+	onSave?: () => void;
 }
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, initialViewport }: IFlowProps) {
+export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, initialViewport, isDirty, isNew, onSave }: IFlowProps) {
 	// --- Build inventory from service catalog --------------------------------
 	const inventory = buildInventory(servicesJson);
 
@@ -187,6 +196,9 @@ export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuse
 					serverHost={serverHost}
 					isConnected={isConnected}
 					initialViewport={initialViewport}
+					isDirty={isDirty}
+					isNew={isNew}
+					onSave={onSave}
 					features={{
 						addNode: true,
 						addAnnotation: true,
