@@ -527,9 +527,9 @@ class CloudProvider(ABC):
                 continue  # keep first encounter
 
             entry: Dict[str, Any] = {'id': native_id, '_source': 'openrouter'}
-            if ctx:
+            if ctx is not None:
                 entry['context_window'] = ctx
-            if _out:
+            if _out is not None:
                 entry['max_output_tokens'] = _out
             if _name:
                 entry['name'] = _name
