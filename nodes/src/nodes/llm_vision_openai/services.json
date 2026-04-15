@@ -7,7 +7,7 @@
 	"node": "python",
 	"path": "nodes.llm_vision_openai",
 	"prefix": "image_vision_openai",
-	"description": ["A component that connects to OpenAI's vision-capable models for image analysis, ", "OCR, visual understanding, and scene description. Supports GPT-4o and GPT-4 Turbo models ", "with multimodal capabilities. Features robust error handling, automatic image processing, ", "and flexible prompt configuration for a wide range of vision use cases."],
+	"description": ["A component that connects to OpenAI's vision-capable models for image analysis, ", "OCR, visual understanding, and scene description. Supports GPT-4.1 and GPT-4o model families ", "with multimodal capabilities. Features robust error handling, automatic image processing, ", "and flexible prompt configuration for a wide range of vision use cases."],
 	"icon": "openai.svg",
 	"documentation": "https://docs.rocketride.org",
 	"tile": ["Model: ${parameters.image_vision_openai.profile}"],
@@ -38,23 +38,35 @@
 		}
 	],
 	"preconfig": {
-		"default": "gpt-4o",
+		"default": "openai-4-1",
 		"profiles": {
-			"gpt-4o": {
-				"title": "GPT-4o - Best Vision Quality (128K tokens)",
+			"openai-4-1": {
+				"title": "GPT-4.1",
+				"model": "gpt-4.1",
+				"modelTotalTokens": 1047576,
+				"apikey": ""
+			},
+			"openai-4-1-mini": {
+				"title": "GPT-4.1-mini",
+				"model": "gpt-4.1-mini",
+				"modelTotalTokens": 1047576,
+				"apikey": ""
+			},
+			"openai-4-1-nano": {
+				"title": "GPT-4.1-nano",
+				"model": "gpt-4.1-nano",
+				"modelTotalTokens": 1047576,
+				"apikey": ""
+			},
+			"openai-4o": {
+				"title": "GPT-4o",
 				"model": "gpt-4o",
 				"modelTotalTokens": 128000,
 				"apikey": ""
 			},
-			"gpt-4o-mini": {
-				"title": "GPT-4o Mini - Fast & Affordable (128K tokens)",
+			"openai-4o-mini": {
+				"title": "GPT-4o-mini",
 				"model": "gpt-4o-mini",
-				"modelTotalTokens": 128000,
-				"apikey": ""
-			},
-			"gpt-4-turbo": {
-				"title": "GPT-4 Turbo - High Quality Vision (128K tokens)",
-				"model": "gpt-4-turbo",
 				"modelTotalTokens": 128000,
 				"apikey": ""
 			}
@@ -92,36 +104,52 @@
 			"title": "Analysis Prompt",
 			"description": "Describe what you want to analyze or extract from the image"
 		},
-		"image_vision_openai.gpt-4o": {
-			"object": "gpt-4o",
+		"image_vision_openai.openai-4-1": {
+			"object": "openai-4-1",
 			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
 		},
-		"image_vision_openai.gpt-4o-mini": {
-			"object": "gpt-4o-mini",
+		"image_vision_openai.openai-4-1-mini": {
+			"object": "openai-4-1-mini",
 			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
 		},
-		"image_vision_openai.gpt-4-turbo": {
-			"object": "gpt-4-turbo",
+		"image_vision_openai.openai-4-1-nano": {
+			"object": "openai-4-1-nano",
+			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_openai.openai-4o": {
+			"object": "openai-4o",
+			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
+		},
+		"image_vision_openai.openai-4o-mini": {
+			"object": "openai-4o-mini",
 			"properties": ["image_vision_openai.apikey", "vision.systemPrompt", "vision.prompt"]
 		},
 		"image_vision_openai.profile": {
 			"title": "Vision Model",
 			"description": "Select the OpenAI vision model to use",
 			"type": "string",
-			"default": "gpt-4o",
+			"default": "openai-4-1",
 			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
-					"value": "gpt-4o",
-					"properties": ["image_vision_openai.gpt-4o"]
+					"value": "openai-4-1",
+					"properties": ["image_vision_openai.openai-4-1"]
 				},
 				{
-					"value": "gpt-4o-mini",
-					"properties": ["image_vision_openai.gpt-4o-mini"]
+					"value": "openai-4-1-mini",
+					"properties": ["image_vision_openai.openai-4-1-mini"]
 				},
 				{
-					"value": "gpt-4-turbo",
-					"properties": ["image_vision_openai.gpt-4-turbo"]
+					"value": "openai-4-1-nano",
+					"properties": ["image_vision_openai.openai-4-1-nano"]
+				},
+				{
+					"value": "openai-4o",
+					"properties": ["image_vision_openai.openai-4o"]
+				},
+				{
+					"value": "openai-4o-mini",
+					"properties": ["image_vision_openai.openai-4o-mini"]
 				}
 			]
 		}
