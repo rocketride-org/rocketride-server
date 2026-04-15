@@ -96,7 +96,8 @@ class IInstance(IInstanceGenericLLM):
             try:
                 answer = self.IGlobal._chat.chat(question)
             except Exception as e:
-                warning(f'Anthropic Vision: inference failed for chunk {doc.metadata.chunkId}: {e}')
+                chunk_id = doc.metadata.chunkId if doc.metadata else 'unknown'
+                warning(f'Anthropic Vision: inference failed for chunk {chunk_id}: {e}')
                 continue
 
             answer_text = answer.getText()
