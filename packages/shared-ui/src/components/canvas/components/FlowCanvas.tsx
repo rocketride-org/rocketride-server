@@ -190,6 +190,19 @@ export default function Canvas(): ReactElement {
 	// --- Graph state from context ------------------------------------------
 	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onContentUpdated, isFlowReady } = useFlowGraph();
 
+	// --- Guard ReactFlow render until container has real dimensions ----------
+	const [hasSize, setHasSize] = useState(false);
+	useEffect(() => {
+		const el = canvasRef.current;
+		if (!el) return;
+		const ro = new ResizeObserver((entries) => {
+			const { width, height } = entries[0].contentRect;
+			setHasSize(width > 0 && height > 0);
+		});
+		ro.observe(el);
+		return () => ro.disconnect();
+	}, [canvasRef]);
+
 	// --- Preferences from context ------------------------------------------
 	const { navigationMode, setNavigationMode, isLocked, toggleLock, projectLayout, getPreference, setPreference } = useFlowPreferences();
 
@@ -356,40 +369,42 @@ export default function Canvas(): ReactElement {
 			<FloatingToolbar position={toolbarPosition} onPositionChange={handleToolbarPositionChange}>
 				{canvasToolbar}
 			</FloatingToolbar>
-			<ReactFlow
-				nodes={nodes}
-				edges={edges}
-				nodeTypes={nodeTypes}
-				edgeTypes={edgeTypes}
-				onNodesChange={onNodesChange}
-				onEdgesChange={onEdgesChange}
-				onConnect={onEdgeConnect}
-				isValidConnection={isValidConnection}
-				onNodesDelete={onNodesDelete}
-				deleteKeyCode={['Backspace', 'Delete']}
-				onDragOver={onDragOver}
-				onDrop={onDrop}
-				onNodeDragStop={onNodeDragStop}
-				onMoveEnd={(_event, viewport) => onViewportChange?.(viewport)}
-				/* Navigation mode: pan on drag vs lasso-select on drag */
-				selectionMode={SelectionMode.Partial}
-				panOnScroll={!isPanMode}
-				panOnDrag={isPanMode}
-				selectionOnDrag={!isPanMode}
-				/* Lock state: disable editing when locked */
-				nodesDraggable={editable}
-				nodesConnectable={editable}
-				nodesFocusable={editable}
-				edgesFocusable={editable}
-				elementsSelectable={editable}
-				/* Viewport defaults — fitView is handled programmatically in loadData */
-				defaultViewport={{ x: 0, y: 0, zoom: DEFAULT_ZOOM }}
-				proOptions={{ hideAttribution: true }}
-				snapToGrid={projectLayout.snapToGrid ?? true}
-				snapGrid={projectLayout.snapGridSize ?? [10, 10]}
-			>
-				<Background color="var(--rr-text-disabled)" gap={20} style={{ backgroundColor: 'var(--rr-bg-paper)' }} />
-			</ReactFlow>
+			{hasSize && (
+				<ReactFlow
+					nodes={nodes}
+					edges={edges}
+					nodeTypes={nodeTypes}
+					edgeTypes={edgeTypes}
+					onNodesChange={onNodesChange}
+					onEdgesChange={onEdgesChange}
+					onConnect={onEdgeConnect}
+					isValidConnection={isValidConnection}
+					onNodesDelete={onNodesDelete}
+					deleteKeyCode={['Backspace', 'Delete']}
+					onDragOver={onDragOver}
+					onDrop={onDrop}
+					onNodeDragStop={onNodeDragStop}
+					onMoveEnd={(_event, viewport) => onViewportChange?.(viewport)}
+					/* Navigation mode: pan on drag vs lasso-select on drag */
+					selectionMode={SelectionMode.Partial}
+					panOnScroll={!isPanMode}
+					panOnDrag={isPanMode}
+					selectionOnDrag={!isPanMode}
+					/* Lock state: disable editing when locked */
+					nodesDraggable={editable}
+					nodesConnectable={editable}
+					nodesFocusable={editable}
+					edgesFocusable={editable}
+					elementsSelectable={editable}
+					/* Viewport defaults — fitView is handled programmatically in loadData */
+					defaultViewport={{ x: 0, y: 0, zoom: DEFAULT_ZOOM }}
+					proOptions={{ hideAttribution: true }}
+					snapToGrid={projectLayout.snapToGrid ?? true}
+					snapGrid={projectLayout.snapGridSize ?? [10, 10]}
+				>
+					<Background color="var(--rr-text-disabled)" gap={20} style={{ backgroundColor: 'var(--rr-bg-paper)' }} />
+				</ReactFlow>
+			)}
 
 			{/* Empty canvas prompt — shown when no nodes and create panel is closed */}
 			{nodes.length === 0 && !showCreatePanel && isFlowReady && <EmptyCanvasPrompt instantiateTemplate={instantiateTemplate} onNodeAdded={onNodeAdded} />}

@@ -325,6 +325,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 						statuses: editorState.cachedStatuses,
 						serverHost: this.connectionManager.getHttpUrl(),
 					});
+					webview.postMessage({ type: 'project:dirtyState', isDirty: document.isDirty, isNew: document.isUntitled });
 
 					// Kick off background services refresh
 					this.connectionManager.refreshServices().catch((err) => {
@@ -367,7 +368,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 
 				case 'canvas:requestSave':
 				case 'project:requestSave': {
-					await this.saveDocument(document, document.getText());
+					await document.save();
 					break;
 				}
 
@@ -440,6 +441,16 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 				const { projectId: newProjectId } = this.extractPipelineIds(e.document);
 				editorState.projectId = newProjectId;
 				this.sendCanvasUpdate(webview, e.document);
+				if (editorState.isReady) {
+					webview.postMessage({ type: 'project:dirtyState', isDirty: e.document.isDirty, isNew: e.document.isUntitled });
+				}
+			}
+		});
+
+		// Listen for saves to clear dirty state in canvas
+		const saveDocumentSubscription = vscode.workspace.onDidSaveTextDocument((savedDoc) => {
+			if (savedDoc.uri.toString() === document.uri.toString() && editorState.isReady) {
+				webview.postMessage({ type: 'project:dirtyState', isDirty: false, isNew: savedDoc.isUntitled });
 			}
 		});
 
@@ -450,6 +461,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 			editorState.isDisposed = true;
 			this.editorStates.delete(webviewPanel);
 			changeDocumentSubscription.dispose();
+			saveDocumentSubscription.dispose();
 		});
 
 		// Start monitoring immediately if connected
