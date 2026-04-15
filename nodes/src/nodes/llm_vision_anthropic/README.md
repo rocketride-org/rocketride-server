@@ -36,7 +36,7 @@ Sends images to Anthropic Claude vision-capable models and returns text analysis
 
 Anthropic enforces a **5 MB limit on the base64-encoded image string**. If a frame exceeds this, the node automatically re-encodes it as JPEG at progressively lower quality (85 → 70 → 55 → 40). A warning is logged when compression occurs:
 
-```
+```text
 Anthropic Vision: image is 5.4MB, exceeds 5MB limit — compressing to JPEG
 Anthropic Vision: compressed to 0.5MB at JPEG quality=85
 ```

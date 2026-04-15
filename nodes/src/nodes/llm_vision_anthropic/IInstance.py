@@ -38,7 +38,7 @@ class IInstance(IInstanceGenericLLM):
     # Cached answer text from writeDocuments so writeImage can reuse it without
     # a second API call for the same frame. Cleared at AVI_ACTION.BEGIN so a
     # late-arriving writeDocuments from frame N cannot bleed into frame N+1.
-    _cached_answer: str = None
+    _cached_answer: str | None = None
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         """Handle AVI image protocol for streaming image frames."""
@@ -89,6 +89,7 @@ class IInstance(IInstanceGenericLLM):
                 continue
 
             question = Question()
+            # All Image doc producers (frame_grabber, thumbnail, embedding_image) normalize to PNG
             question.addContext(f'data:image/png;base64,{doc.page_content}')
             question.addQuestion(self.IGlobal._chat._prompt)
 
