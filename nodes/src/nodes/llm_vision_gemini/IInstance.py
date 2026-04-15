@@ -64,8 +64,11 @@ class IInstance(IInstanceGenericLLM):
                 question.addContext(image_data_url)
                 question.addQuestion(self.IGlobal._chat._prompt)
 
-                answer = self.IGlobal._chat.chat(question)
-                self.instance.writeText(answer.getText())
+                try:
+                    answer = self.IGlobal._chat.chat(question)
+                    self.instance.writeText(answer.getText())
+                except Exception as e:
+                    warning(f'Gemini Vision: inference failed for image frame: {e}')
 
             self.image_data = None
             return self.preventDefault()
@@ -89,7 +92,8 @@ class IInstance(IInstanceGenericLLM):
             try:
                 answer = self.IGlobal._chat.chat(question)
             except Exception as e:
-                warning(f'Gemini Vision: inference failed for chunk {doc.metadata.chunkId}: {e}')
+                chunk_id = doc.metadata.chunkId if doc.metadata else 'unknown'
+                warning(f'Gemini Vision: inference failed for chunk {chunk_id}: {e}')
                 continue
 
             answer_text = answer.getText()
