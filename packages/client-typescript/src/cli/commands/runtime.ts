@@ -111,10 +111,8 @@ export function registerRuntimeCommand(program: Command): void {
 		.option('--purge', 'Also remove the runtime binary (or Docker image) from disk')
 		.action(async (id, opts) => {
 			const code = await cmdDelete(id, opts.purge ?? false);
-			if (code === 0) {
-				console.log();
-				await cmdList();
-			}
+			console.log();
+			await cmdList();
 			process.exit(code);
 		});
 
