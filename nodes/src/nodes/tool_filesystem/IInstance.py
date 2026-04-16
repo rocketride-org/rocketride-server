@@ -251,6 +251,35 @@ class IInstance(IInstanceBase):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    # Map each @tool_function name to the IGlobal allow-flag that gates it.
+    # Used by ``_collect_tool_methods`` to hide disabled tools from the agent
+    # at ``tool.query`` discovery time (not just at invocation).
+    _ALLOW_FLAG_BY_TOOL = {
+        'read_file': 'allow_read',
+        'write_file': 'allow_write',
+        'delete_file': 'allow_delete',
+        'list_directory': 'allow_list',
+        'create_directory': 'allow_mkdir',
+        'stat_file': 'allow_stat',
+    }
+
+    def _collect_tool_methods(self):
+        """Filter out tool methods whose allow-flag is disabled.
+
+        The base implementation returns every ``@tool_function`` method on the
+        class. We override here so the engine's ``tool.query`` only advertises
+        ops the operator has enabled — the LLM never sees a tool it isn't
+        allowed to call.
+        """
+        methods = super()._collect_tool_methods()
+        return {name: m for name, m in methods.items() if self._is_method_allowed(name)}
+
+    def _is_method_allowed(self, name: str) -> bool:
+        flag = self._ALLOW_FLAG_BY_TOOL.get(name)
+        if flag is None:
+            return True
+        return bool(getattr(self.IGlobal, flag, False))
+
     def _check_ready(self) -> None:
         """Verify the FileStore was successfully initialised in beginGlobal()."""
         if self.IGlobal.file_store is None:

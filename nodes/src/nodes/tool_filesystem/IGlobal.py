@@ -125,13 +125,7 @@ class IGlobal(IGlobalBase):
     def validateConfig(self) -> None:
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            server_name = str((cfg.get('serverName') or '')).strip()
-            if not server_name:
-                warning('serverName is required')
-
-            patterns = self._build_path_patterns(cfg)
-            if not patterns:
-                warning('Path whitelist is empty — all paths under users/<client_id>/files/ will be allowed')
+            self._build_path_patterns(cfg)
         except Exception as e:
             warning(str(e))
 
