@@ -88,7 +88,9 @@ class TaskCommands(DAPConn):
             'fs_delete': self._store_fs_delete,
             'fs_list_dir': self._store_fs_list_dir,
             'fs_mkdir': self._store_fs_mkdir,
+            'fs_rmdir': self._store_fs_rmdir,
             'fs_stat': self._store_fs_stat,
+            'fs_rename': self._store_fs_rename,
         }
 
     async def on_execute(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -451,7 +453,17 @@ class TaskCommands(DAPConn):
         await self._get_file_store().mkdir(args.get('path'))
         return self.build_response(request)
 
+    async def _store_fs_rmdir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Remove directory."""
+        await self._get_file_store().rmdir(args.get('path'), recursive=bool(args.get('recursive', False)))
+        return self.build_response(request)
+
     async def _store_fs_stat(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Get file/directory metadata."""
         result = await self._get_file_store().stat(args.get('path'))
         return self.build_response(request, body=result)
+
+    async def _store_fs_rename(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Rename a file or directory."""
+        await self._get_file_store().rename(args.get('old_path'), args.get('new_path'))
+        return self.build_response(request)

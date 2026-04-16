@@ -118,6 +118,7 @@ from .core.constants import (
     CONST_SOCKET_TIMEOUT,
     CONST_WS_PING_INTERVAL,
     CONST_WS_PING_TIMEOUT,
+    PROJECT_DIR,
 )
 
 __all__ = [
@@ -135,6 +136,7 @@ __all__ = [
     'CONST_SOCKET_TIMEOUT',
     'CONST_WS_PING_INTERVAL',
     'CONST_WS_PING_TIMEOUT',
+    'PROJECT_DIR',
     'ConnectCallback',
     'ConnectErrorCallback',
     'ConnectionInfo',
