@@ -31,7 +31,6 @@ open/close internally.
 import json
 from typing import Dict, Any, Optional
 from ..core import DAPClient
-from ..types.pipeline import PipelineConfig
 
 
 class StoreMixin(DAPClient):
@@ -163,6 +162,22 @@ class StoreMixin(DAPClient):
         response = await self.request(request)
         self._check_response(response)
 
+    async def fs_rmdir(self, path: str, recursive: bool = False) -> None:
+        """
+        Remove a directory.
+
+        Args:
+            path: Relative directory path.
+            recursive: If True, delete all contents recursively (default: False).
+
+        Raises:
+            RuntimeError: If directory is not empty and recursive is False.
+        """
+        self._validate_store_path(path)
+        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_rmdir', 'path': path, 'recursive': recursive})
+        response = await self.request(request)
+        self._check_response(response)
+
     async def fs_stat(self, path: str) -> Dict[str, Any]:
         """
         Get file or directory metadata.
@@ -179,6 +194,26 @@ class StoreMixin(DAPClient):
         response = await self.request(request)
         self._check_response(response)
         return response.get('body', {})
+
+    async def fs_rename(self, old_path: str, new_path: str) -> None:
+        """
+        Rename a file or directory.
+
+        On object stores this is implemented as copy + delete. For directories,
+        all contents are moved recursively.
+
+        Args:
+            old_path: Current relative path within the account store.
+            new_path: New relative path within the account store.
+
+        Raises:
+            RuntimeError: If old_path does not exist or rename fails.
+        """
+        self._validate_store_path(old_path)
+        self._validate_store_path(new_path)
+        request = self.build_request(command='rrext_store', arguments={'subcommand': 'fs_rename', 'old_path': old_path, 'new_path': new_path})
+        response = await self.request(request)
+        self._check_response(response)
 
     # =========================================================================
     # Convenience Wrappers (text/JSON over binary)
@@ -226,32 +261,6 @@ class StoreMixin(DAPClient):
 
     # =========================================================================
     # Domain Convenience - Projects
-    # =========================================================================
-
-    async def save_project(self, name: str, pipeline: PipelineConfig) -> None:
-        """Save a project pipeline to .projects/<name>.json."""
-        self._validate_id(name, 'name')
-        if not pipeline or not isinstance(pipeline, dict):
-            raise ValueError('pipeline must be a non-empty dictionary')
-
-        await self.fs_write_json(f'.projects/{name}.json', pipeline)
-
-    async def get_project(self, name: str) -> PipelineConfig:
-        """Get a project by file name from .projects/<name>.json."""
-        self._validate_id(name, 'name')
-
-        return await self.fs_read_json(f'.projects/{name}.json')
-
-    async def delete_project(self, name: str) -> None:
-        """Delete a project by file name."""
-        self._validate_id(name, 'name')
-
-        await self.fs_delete(f'.projects/{name}.json')
-
-    async def get_all_projects(self) -> Dict[str, Any]:
-        """List all projects with summaries."""
-        return await self._get_all_items('.projects', 'id', 'projects')
-
     # =========================================================================
     # Domain Convenience - Templates
     # =========================================================================

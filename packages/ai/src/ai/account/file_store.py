@@ -350,6 +350,72 @@ class FileStore:
         marker_path = self._full_path(path.rstrip('/') + '/' + DIR_MARKER)
         await self._store.write_bytes(marker_path, b'')
 
+    async def rmdir(self, path: str, recursive: bool = False) -> None:
+        """
+        Remove a directory.
+
+        Args:
+            path: Relative directory path.
+            recursive: If True, delete all contents recursively (default: False).
+
+        Raises:
+            StorageError: If directory is not empty and recursive is False.
+        """
+        full_prefix = self._full_path(path.rstrip('/') + '/')
+        all_files = await self._store.list_files(full_prefix)
+
+        # Ignore the dirmarker sentinel when checking emptiness
+        non_marker = [f for f in all_files if not f.endswith('/' + DIR_MARKER)]
+
+        if not recursive and non_marker:
+            raise StorageError(f'Directory not empty: {path}')
+
+        for f in all_files:
+            try:
+                await self._store.delete_file(f)
+            except StorageError:
+                pass
+
+    async def rename(self, old_path: str, new_path: str) -> None:
+        """
+        Rename a file or directory.
+
+        On object stores there is no native rename, so this is implemented as
+        copy + delete.  For directories every file under the old prefix is
+        copied to the new prefix and then deleted.
+
+        Args:
+            old_path: Current relative path within the account store.
+            new_path: New relative path within the account store.
+
+        Raises:
+            StorageError: If old_path does not exist, is open for writing, or
+                the operation fails.
+        """
+        old_full = self._full_path(old_path)
+        new_full = self._full_path(new_path)
+
+        # Check for directory (has children under old_path/)
+        dir_prefix = old_full.rstrip('/') + '/'
+        all_files = await self._store.list_files(dir_prefix)
+
+        if all_files:
+            # Directory rename: copy every file to the new prefix then delete
+            new_dir_prefix = new_full.rstrip('/') + '/'
+            for file_path in all_files:
+                relative_to_old = file_path[len(dir_prefix) :]
+                new_file_path = new_dir_prefix + relative_to_old
+                data = await self._store.read_bytes(file_path)
+                await self._store.write_bytes(new_file_path, data)
+                await self._store.delete_file(file_path)
+        else:
+            # File rename: read + write new + delete old
+            if old_full in self._write_locks:
+                raise StorageError(f'Cannot rename file while it is open for writing: {old_path}')
+            data = await self._store.read_bytes(old_full)
+            await self._store.write_bytes(new_full, data)
+            await self._store.delete_file(old_full)
+
     async def stat(self, path: str) -> dict:
         """
         Get file or directory metadata.

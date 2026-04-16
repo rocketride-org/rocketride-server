@@ -1642,52 +1642,6 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	// ============================================================================
-	// PROJECT STORAGE MANAGEMENT
-	// ============================================================================
-
-	/** Save or update a project pipeline configuration. */
-	async saveProject(name: string, pipeline: PipelineConfig): Promise<void> {
-		this.validateId(name, 'name');
-		if (!pipeline || typeof pipeline !== 'object') throw new Error('pipeline must be a non-empty object');
-
-		await this.fsWriteJson(`.projects/${name}.json`, pipeline);
-	}
-
-	/** Get a project by file name from .projects/<name>.json. */
-	async getProject(name: string): Promise<PipelineConfig> {
-		this.validateId(name, 'name');
-
-		return this.fsReadJson(`.projects/${name}.json`) as Promise<PipelineConfig>;
-	}
-
-	/** Delete a project by file name. */
-	async deleteProject(name: string): Promise<void> {
-		this.validateId(name, 'name');
-
-		await this.fsDelete(`.projects/${name}.json`);
-	}
-
-	async getAllProjects(): Promise<Array<{ id: string; name: string; sources: any[]; totalComponents: number }>> {
-		const dir = await this.fsListDir('.projects');
-		const projects: Array<{ id: string; name: string; sources: any[]; totalComponents: number }> = [];
-
-		for (const entry of dir.entries) {
-			if (entry.type !== 'file' || !entry.name.endsWith('.json')) continue;
-			try {
-				const id = entry.name.slice(0, -5);
-				const pipeline = await this.fsReadJson(`.projects/${entry.name}`);
-				const sources = (pipeline.components || []).filter((c: any) => c.config?.mode === 'Source').map((c: any) => ({ id: c.id, provider: c.provider, name: c.config?.name || c.id }));
-				projects.push({ id, name: pipeline.name || 'Untitled', sources, totalComponents: (pipeline.components || []).length });
-			} catch (err) {
-				console.debug(`[RocketRideClient] Failed to read .projects/${entry.name}:`, err);
-				continue;
-			}
-		}
-
-		return projects;
-	}
-
-	// ============================================================================
 	// TEMPLATE STORAGE MANAGEMENT (convenience wrappers using fsReadJson/fsWriteJson)
 	// ============================================================================
 
@@ -1878,6 +1832,20 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
+	 * Remove a directory.
+	 *
+	 * @param path - Relative directory path
+	 * @param recursive - If true, delete contents recursively (default: false)
+	 * @throws Error if directory is not empty (when recursive is false) or delete fails
+	 */
+	async fsRmdir(path: string, recursive: boolean = false): Promise<void> {
+		this.validateStorePath(path);
+		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_rmdir', path, recursive } });
+		const response = await this.request(request);
+		if (this.didFail(response)) throw new Error(response.message || 'Failed to remove directory');
+	}
+
+	/**
 	 * Get file or directory metadata.
 	 *
 	 * @param path - Relative path within the account store
@@ -1889,6 +1857,24 @@ export class RocketRideClient extends DAPClient {
 		const response = await this.request(request);
 		if (this.didFail(response)) throw new Error(response.message || 'Failed to stat path');
 		return response.body as any;
+	}
+
+	/**
+	 * Rename a file or directory.
+	 *
+	 * On object stores this is implemented as copy + delete. For directories,
+	 * all contents are moved recursively.
+	 *
+	 * @param oldPath - Current relative path within the account store
+	 * @param newPath - New relative path within the account store
+	 * @throws Error if oldPath does not exist or rename fails
+	 */
+	async fsRename(oldPath: string, newPath: string): Promise<void> {
+		this.validateStorePath(oldPath);
+		this.validateStorePath(newPath);
+		const request = this.buildRequest('rrext_store', { arguments: { subcommand: 'fs_rename', old_path: oldPath, new_path: newPath } });
+		const response = await this.request(request);
+		if (this.didFail(response)) throw new Error(response.message || 'Failed to rename path');
 	}
 
 	// ============================================================================
