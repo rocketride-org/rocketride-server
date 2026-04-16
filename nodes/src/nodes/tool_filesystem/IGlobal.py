@@ -30,16 +30,9 @@ Resolves the account's ``client_id`` from the ``ROCKETRIDE_CLIENT_ID`` env var
 per-operation allow-flags and a path whitelist that IInstance enforces before
 every tool call.
 
-Only the operations already implemented by ``FileStore`` are surfaced:
-``read_file``, ``write_file``, ``delete_file``, ``list_directory``,
-``create_directory``, ``stat_file``.
-
-Not yet implemented (follow-up — require new primitives on ``FileStore`` and
-all ``IStore`` providers first):
-  * ``edit_file``  — atomic in-place patch (add edit primitive or compose
-                     read+write with concurrency control).
-  * ``move_file``  — requires ``FileStore.rename(src, dst)`` plus DAP and
-                     client-SDK propagation.
+Surfaces ``read_file``, ``write_file``, ``delete_file``, ``list_directory``,
+``create_directory``, and ``stat_file`` as ``@tool_function`` methods on
+``IInstance``.
 """
 
 from __future__ import annotations

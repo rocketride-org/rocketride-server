@@ -38,10 +38,6 @@ Each method checks the corresponding allow-flag on ``self.IGlobal``, validates
 the path against the configured regex whitelist, and then invokes the
 ``FileStore`` coroutine via a per-call event loop. Exceptions from the store
 (``StorageError``, ``ValueError``) propagate to the agent as tool errors.
-
-TODO (follow-up — see IGlobal.py docstring):
-  * ``edit_file(path, old_string, new_string, replace_all?)``
-  * ``move_file(src, dst)``
 """
 
 from __future__ import annotations
