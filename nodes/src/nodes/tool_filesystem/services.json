@@ -7,29 +7,19 @@
 	"node": "python",
 	"path": "nodes.tool_filesystem",
 	"prefix": "fs",
-	"icon": "http.svg",
+	"icon": "file-system.svg",
 	"documentation": "https://docs.rocketride.org",
-	"description": ["File system tool for agents. Reads, writes, deletes, lists, and creates directories within the account-scoped RocketRide file store (the same store exposed via the client SDK's fs_* methods).", "All operations are scoped to users/<client_id>/files/ — resolved from the ROCKETRIDE_CLIENT_ID env var injected by the task engine.", "Per-operation toggles (allowRead, allowWrite, allowDelete, allowList, allowMkdir, allowStat) gate which methods the agent can call. Destructive operations (allowDelete) default to off."],
-	"tile": ["Tool: ${parameters.filesystem.serverName}.filesystem"],
+	"description": ["File system tool for agents. Reads, writes, deletes, lists, and creates directories within the account-scoped RocketRide file store (the same store exposed via the client SDK's fs_* methods).", "All operations are scoped to users/<client_id>/files/ — resolved from the ROCKETRIDE_CLIENT_ID env var injected by the task engine.", "Per-operation toggles (allowRead, allowWrite, allowDelete, allowList, allowMkdir, allowStat) gate which methods the agent can call."],
 	"lanes": {},
 	"preconfig": {
 		"default": "default",
 		"profiles": {
 			"default": {
-				"title": "Default",
-				"serverName": "fs"
+				"title": "Default"
 			}
 		}
 	},
 	"fields": {
-		"filesystem.serverName": {
-			"hidden": true,
-			"type": "string",
-			"title": "Server name",
-			"description": "Namespace prefix for tools: <serverName>.read_file, <serverName>.write_file, etc.",
-			"default": "fs"
-		},
-
 		"filesystem.allowRead": {
 			"type": "boolean",
 			"title": "Read files",
@@ -78,7 +68,7 @@
 		"filesystem.allowDelete": {
 			"type": "boolean",
 			"title": "Delete files",
-			"description": "Destructive — off by default. Enable only when the agent is trusted to delete account files.",
+			"description": "Destructive — enable only when the agent is trusted to delete account files.",
 			"default": false,
 			"enum": [
 				[true, "Yes"],
