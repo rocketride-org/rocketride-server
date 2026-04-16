@@ -186,8 +186,7 @@ class IInstance(IInstanceBase):
         path = args.get('path', '')
         if not isinstance(path, str):
             raise ValueError('path must be a string')
-        if path:
-            self._check_path(path)
+        self._check_path(path)
 
         result = _run_async(self.IGlobal.file_store.list_dir(path))
         return result
@@ -271,6 +270,13 @@ class IInstance(IInstanceBase):
         return {name: m for name, m in methods.items() if self._is_method_allowed(name)}
 
     def _is_method_allowed(self, name: str) -> bool:
+        # When FileStore couldn't be initialised (e.g. ROCKETRIDE_CLIENT_ID
+        # missing), hide every tool method so the LLM never sees something it
+        # can't successfully invoke. ``beginGlobal()`` already logged a warning
+        # with the reason.
+        if self.IGlobal.file_store is None:
+            return False
+
         flag = self._ALLOW_FLAG_BY_TOOL.get(name)
         if flag is None:
             return True
@@ -318,9 +324,21 @@ def _optional_str(args: dict, key: str, *, default: str | None = None) -> str | 
 def _run_async(coro):
     """Run an async coroutine from a synchronous ``@tool_function`` method.
 
-    Always uses an isolated event loop so we don't deadlock if (now or later)
-    this is invoked from a thread that already has a running loop.
+    Only safe to call from a thread with no running event loop — the engine's
+    tool dispatcher (``filters.py::_dispatch_tool``) calls ``@tool_function``
+    methods synchronously, which is the supported caller. If invoked from a
+    thread that already has a running loop, ``loop.run_until_complete`` on a
+    fresh loop would block the thread and deadlock any work the coroutine
+    tries to route back through the outer loop; raise a clear error instead
+    of failing opaquely.
     """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError('_run_async must not be called from a thread with a running event loop; the tool_filesystem @tool_function methods are designed to be dispatched synchronously by the engine.')
+
     loop = asyncio.new_event_loop()
     try:
         return loop.run_until_complete(coro)
