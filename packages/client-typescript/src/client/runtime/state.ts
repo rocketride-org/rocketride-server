@@ -11,7 +11,6 @@
 
 import Database from 'better-sqlite3';
 import { readFileSync } from 'fs';
-import { spawnSync } from 'child_process';
 import { stateDbPath, ensureDirs } from './paths.js';
 
 const SCHEMA = `
@@ -54,21 +53,8 @@ export function isPidAlive(pid: number): boolean {
 	if (pid === 0) return false;
 
 	if (process.platform === 'win32') {
-		// spawnSync with windowsHide + stdio:'pipe' avoids console window flashes
-		// that execSync causes on Windows (even with windowsHide: true).
-		try {
-			const result = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH'], {
-				encoding: 'utf-8',
-				timeout: 5000,
-				windowsHide: true,
-				stdio: 'pipe',
-			});
-			if (result.error || result.status !== 0) return false;
-			const output = (result.stdout ?? '').trim();
-			return !output.includes('No tasks') && output.includes(String(pid));
-		} catch {
-			return false;
-		}
+		const win32: typeof import('./win32.js') = require('./win32.js');
+		return win32.isPidAlive(pid);
 	}
 
 	// Unix
@@ -100,47 +86,16 @@ export function isRuntimeProcess(pid: number): boolean {
 	if (pid === 0) return false;
 	if (process.platform !== 'win32') return isPidAlive(pid);
 
-	try {
-		const result = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
-			encoding: 'utf-8',
-			timeout: 5000,
-			windowsHide: true,
-			stdio: 'pipe',
-		});
-		if (result.error || result.status !== 0) return false;
-		const output = (result.stdout ?? '').trim();
-		if (output.includes('No tasks')) return false;
-		return output.toLowerCase().includes('engine.exe');
-	} catch {
-		return false;
-	}
+	const win32: typeof import('./win32.js') = require('./win32.js');
+	return win32.isRuntimeProcess(pid);
 }
 
 export function getProcessMemory(pid: number): number | null {
 	if (pid === 0 || !isPidAlive(pid)) return null;
 
 	if (process.platform === 'win32') {
-		// Use tasklist /FI to get memory — avoids spawning PowerShell which is
-		// heavyweight and flashes a console window even with windowsHide.
-		try {
-			const result = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
-				encoding: 'utf-8',
-				timeout: 5000,
-				windowsHide: true,
-				stdio: 'pipe',
-			});
-			if (result.error || result.status !== 0) return null;
-			const output = (result.stdout ?? '').trim();
-			if (output.includes('No tasks')) return null;
-			// CSV format: "name","pid","session","session#","mem usage"
-			// mem usage looks like "123,456 K"
-			const match = output.match(/"([0-9,]+)\s*K"/);
-			if (!match) return null;
-			const kb = parseInt(match[1].replace(/,/g, ''), 10);
-			return isNaN(kb) ? null : kb * 1024;
-		} catch {
-			return null;
-		}
+		const win32: typeof import('./win32.js') = require('./win32.js');
+		return win32.getProcessMemoryBytes(pid);
 	}
 
 	// Linux: read /proc

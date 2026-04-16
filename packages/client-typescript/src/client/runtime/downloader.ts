@@ -85,11 +85,9 @@ export async function downloadRuntime(version: string, callbacks?: DownloadCallb
 			const tar = await import('tar');
 			await tar.extract({ file: tmpPath, cwd: dest });
 		} else if (asset.endsWith('.zip')) {
-			const { spawnSync } = await import('child_process');
-			spawnSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -Path '${tmpPath}' -DestinationPath '${dest}' -Force`], {
-				windowsHide: true,
-				stdio: 'ignore',
-			});
+			const AdmZip = require('adm-zip');
+			const zip = new AdmZip(tmpPath);
+			zip.extractAllTo(dest, true);
 		}
 
 		// Set executable on Unix

@@ -4,7 +4,7 @@
  * Manages the runtime subprocess lifecycle: start, health-check, stop.
  */
 
-import { spawn, spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, closeSync } from 'fs';
 import { dirname, join } from 'path';
 import { RuntimeManagementError } from '../exceptions/index.js';
@@ -27,37 +27,23 @@ export function spawnRuntime(binaryPath: string, port: number, instanceId: strin
 	const script = join(dirname(binaryPath), 'ai', 'eaas.py');
 	const cwd = dirname(binaryPath);
 
-	const env = { ...process.env, PYTHONUNBUFFERED: '1' };
-	const stdoutFd = openSync(stdoutLog, 'w');
-	const stderrFd = openSync(stderrLog, 'w');
-
 	if (process.platform === 'win32') {
-		// Use spawn with detached + windowsHide — no PowerShell overhead,
-		// no event-loop blocking, and proper stdio redirection.
+		// CreateProcessW with CREATE_NO_WINDOW prevents console allocation
+		// entirely. Node.js spawn() only uses SW_HIDE which still creates a
+		// hidden console — child processes (torch → nvidia-smi) flash.
 		try {
-			const child = spawn(binaryPath, [script, '--port', String(port)], {
-				stdio: ['ignore', stdoutFd, stderrFd],
-				env,
-				cwd,
-				detached: true,
-				windowsHide: true,
-			});
-
-			child.unref();
-
-			const pid = child.pid;
-			if (pid === undefined) {
-				throw new RuntimeManagementError('Failed to start runtime: no PID returned');
-			}
-			return pid;
+			const win32: typeof import('./win32.js') = require('./win32.js');
+			process.env.PYTHONUNBUFFERED = '1';
+			return win32.spawnProcessHidden(binaryPath, [script, '--port', String(port)], cwd, stdoutLog, stderrLog);
 		} catch (e) {
 			if (e instanceof RuntimeManagementError) throw e;
 			throw new RuntimeManagementError(`Failed to start runtime: ${e}`);
-		} finally {
-			closeSync(stdoutFd);
-			closeSync(stderrFd);
 		}
 	}
+
+	const env = { ...process.env, PYTHONUNBUFFERED: '1' };
+	const stdoutFd = openSync(stdoutLog, 'w');
+	const stderrFd = openSync(stderrLog, 'w');
 
 	try {
 		const child = spawn(binaryPath, [script, '--port', String(port)], {
@@ -95,20 +81,8 @@ function sleep(ms: number): Promise<void> {
  */
 export async function stopRuntime(pid: number, timeout: number = 10000): Promise<void> {
 	if (process.platform === 'win32') {
-		try {
-			spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)], {
-				windowsHide: true,
-				stdio: 'ignore',
-				timeout,
-			});
-		} catch {
-			try {
-				process.kill(pid);
-			} catch {
-				// Already gone
-			}
-		}
-		await sleep(500);
+		const win32: typeof import('./win32.js') = require('./win32.js');
+		win32.terminateProcessTree(pid, timeout);
 		return;
 	}
 

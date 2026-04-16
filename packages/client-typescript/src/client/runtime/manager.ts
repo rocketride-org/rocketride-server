@@ -213,7 +213,12 @@ export class RuntimeManager {
 			// (avoids race where teardown already zeroed the row)
 			if (this._pid) {
 				try {
-					process.kill(this._pid, 'SIGTERM');
+					if (process.platform === 'win32') {
+						const win32: typeof import('./win32.js') = require('./win32.js');
+						win32.terminateSingleProcess(this._pid);
+					} else {
+						process.kill(this._pid, 'SIGTERM');
+					}
 				} catch {
 					// Already gone
 				}

@@ -357,6 +357,9 @@ importers:
 
   packages/client-typescript:
     dependencies:
+      adm-zip:
+        specifier: ^0.5.16
+        version: 0.5.16
       better-sqlite3:
         specifier: ^12.9.0
         version: 12.9.0
@@ -376,6 +379,9 @@ importers:
       '@jest/globals':
         specifier: ^30.1.2
         version: 30.2.0
+      '@types/adm-zip':
+        specifier: ^0.5.7
+        version: 0.5.7
       '@types/better-sqlite3':
         specifier: ^7.6.13
         version: 7.6.13
@@ -407,6 +413,9 @@ importers:
         specifier: ^5.0.0
         version: 5.9.3
     optionalDependencies:
+      ffi-rs:
+        specifier: ^1.3.1
+        version: 1.3.1
       ws:
         specifier: ^8.18.3
         version: 8.19.0
@@ -3517,6 +3526,76 @@ packages:
   '@xyflow/system@0.0.47':
     resolution: {integrity: sha512-aUXJPIvsCFxGX70ccRG8LPsR+A8ExYXfh/noYNpqn8udKerrLdSHxMG2VsvUrQ1PGex10fOpbJwFU4A+I/Xv8w==}
 
+  '@yuuang/ffi-rs-android-arm64@1.3.1':
+    resolution: {integrity: sha512-V4nmlXdOYZEa7GOxSExVG95SLp8FE0iTq2yKeN54UlfNMr3Sik+1Ff57LcCv7qYcn4TBqnBAt5rT3FAM6T6caQ==}
+    engines: {node: '>= 12'}
+    cpu: [arm64]
+    os: [android]
+
+  '@yuuang/ffi-rs-darwin-arm64@1.3.1':
+    resolution: {integrity: sha512-YlnTMIyzfW3mAULC5ZA774nzQfFlYXM0rrfq/8ZzWt+IMbYk55a++jrI+6JeKV+1EqlDS3TFBEFtjdBNG94KzQ==}
+    engines: {node: '>= 12'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@yuuang/ffi-rs-darwin-x64@1.3.1':
+    resolution: {integrity: sha512-sI3LpQQ34SX4nyOHc5yxA7FSqs9qPEUMqW/y/wWo9cuyPpaHMFsi/BeOVYsnC0syp3FrY7gzn6RnD6PlXCktXg==}
+    engines: {node: '>= 12'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@yuuang/ffi-rs-linux-arm-gnueabihf@1.3.1':
+    resolution: {integrity: sha512-1WkcGkJTlwh4ZA59htKI+RXhiL3oKiYwLv7PO8LUf6FuADK73s5GcXp67iakKu243uYu+qGYr4RHco4ySddYhQ==}
+    engines: {node: '>= 12'}
+    cpu: [arm]
+    os: [linux]
+
+  '@yuuang/ffi-rs-linux-arm64-gnu@1.3.1':
+    resolution: {integrity: sha512-J2PwqviycZxaEVA0Bwv38LqGDGSB9A1DPN4iYginYJZSvTvKW8kh7Tis0HbZrX1YDKnY8hi3lt0N0tCTNPDH5Q==}
+    engines: {node: '>= 12'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@yuuang/ffi-rs-linux-arm64-musl@1.3.1':
+    resolution: {integrity: sha512-Hn1W1hBPssTaqikU1Bqp1XUdDdOgbnYVIOtR++LVx66hhrtjf/xrIUQOhTm+NmOFDG16JUKXe1skfM4gpaqYwg==}
+    engines: {node: '>= 12'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@yuuang/ffi-rs-linux-x64-gnu@1.3.1':
+    resolution: {integrity: sha512-kW6e+oCYZPvpH2ppPsffA18e1aLowtmWTRjVlyHtY04g/nQDepQvDUkkcvInh9fW5jLna7PjHvktW1tVgYIj2A==}
+    engines: {node: '>= 12'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@yuuang/ffi-rs-linux-x64-musl@1.3.1':
+    resolution: {integrity: sha512-HTwblAzruUS16nQPrez3ozvEHm1Xxh8J8w7rZYrpmAcNl1hzyOT8z/hY70M9Rt9fOqQ4Ovgor9qVy/U3ZJo0ZA==}
+    engines: {node: '>= 12'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@yuuang/ffi-rs-win32-arm64-msvc@1.3.1':
+    resolution: {integrity: sha512-WeZkGl2BP1U4tRhEQH+FXLQS52N8obp74smK5AAGOfzPAT1pHkq6+dVkC1QCSIt7dHJs7SPtlnQw+5DkdZYlWA==}
+    engines: {node: '>= 12'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@yuuang/ffi-rs-win32-ia32-msvc@1.3.1':
+    resolution: {integrity: sha512-rNGgMeCH5mdeHiMiJgt7wWXovZ+FHEfXhU9p4zZBH4n8M1/QnEsRUwlapISPLpILSGpoYS6iBuq9/fUlZY8Mhg==}
+    engines: {node: '>= 12'}
+    cpu: [x64, ia32]
+    os: [win32]
+
+  '@yuuang/ffi-rs-win32-x64-msvc@1.3.1':
+    resolution: {integrity: sha512-dr2LcLD2CXo2a7BktlOpV68QhayqiI112KxIJC9tBgQO/Dkdg4CPsdqmvzzLhFo64iC5RLl2BT7M5lJImrfUWw==}
+    engines: {node: '>= 12'}
+    cpu: [x64]
+    os: [win32]
+
   acorn-import-phases@1.0.4:
     resolution: {integrity: sha512-wKmbr/DDiIXzEOiWrTTUcDm24kQ2vGfZQvM2fwg2vXqR5uW6aapr7ObPtj1th32b9u90/Pf4AItvdTh42fBmVQ==}
     engines: {node: '>=10.13.0'}
@@ -4867,6 +4946,9 @@ packages:
     peerDependenciesMeta:
       picomatch:
         optional: true
+
+  ffi-rs@1.3.1:
+    resolution: {integrity: sha512-ZyNXL9fnclnZV+waQmWB9JrfbIEyxQa1OWtMrHOrAgcC04PgP5hBMG5TdhVN8N4uT/eul8zCFMVnJUukAFFlXA==}
 
   fflate@0.4.8:
     resolution: {integrity: sha512-FJqqoDBR00Mdj9ppamLa/Y7vxm+PRmNWA67N846RvsoYVMKB4q3y/de5PA7gUmRMYK/8CMz2GDZQmCRN1wBcWA==}
@@ -11961,6 +12043,39 @@ snapshots:
       d3-selection: 3.0.0
       d3-zoom: 3.0.0
 
+  '@yuuang/ffi-rs-android-arm64@1.3.1':
+    optional: true
+
+  '@yuuang/ffi-rs-darwin-arm64@1.3.1':
+    optional: true
+
+  '@yuuang/ffi-rs-darwin-x64@1.3.1':
+    optional: true
+
+  '@yuuang/ffi-rs-linux-arm-gnueabihf@1.3.1':
+    optional: true
+
+  '@yuuang/ffi-rs-linux-arm64-gnu@1.3.1':
+    optional: true
+
+  '@yuuang/ffi-rs-linux-arm64-musl@1.3.1':
+    optional: true
+
+  '@yuuang/ffi-rs-linux-x64-gnu@1.3.1':
+    optional: true
+
+  '@yuuang/ffi-rs-linux-x64-musl@1.3.1':
+    optional: true
+
+  '@yuuang/ffi-rs-win32-arm64-msvc@1.3.1':
+    optional: true
+
+  '@yuuang/ffi-rs-win32-ia32-msvc@1.3.1':
+    optional: true
+
+  '@yuuang/ffi-rs-win32-x64-msvc@1.3.1':
+    optional: true
+
   acorn-import-phases@1.0.4(acorn@8.15.0):
     dependencies:
       acorn: 8.15.0
@@ -13559,6 +13674,21 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.3):
     optionalDependencies:
       picomatch: 4.0.3
+
+  ffi-rs@1.3.1:
+    optionalDependencies:
+      '@yuuang/ffi-rs-android-arm64': 1.3.1
+      '@yuuang/ffi-rs-darwin-arm64': 1.3.1
+      '@yuuang/ffi-rs-darwin-x64': 1.3.1
+      '@yuuang/ffi-rs-linux-arm-gnueabihf': 1.3.1
+      '@yuuang/ffi-rs-linux-arm64-gnu': 1.3.1
+      '@yuuang/ffi-rs-linux-arm64-musl': 1.3.1
+      '@yuuang/ffi-rs-linux-x64-gnu': 1.3.1
+      '@yuuang/ffi-rs-linux-x64-musl': 1.3.1
+      '@yuuang/ffi-rs-win32-arm64-msvc': 1.3.1
+      '@yuuang/ffi-rs-win32-ia32-msvc': 1.3.1
+      '@yuuang/ffi-rs-win32-x64-msvc': 1.3.1
+    optional: true
 
   fflate@0.4.8: {}
 
