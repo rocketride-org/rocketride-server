@@ -34,14 +34,14 @@ Each tool is namespaced by the node id: e.g. an agent sees `tool_filesystem_1.re
 | List directories   | Enable `list_directory`                                                                                           |
 | Create directories | Enable `create_directory`                                                                                         |
 | Stat (metadata)    | Enable `stat_file`                                                                                                |
-| Delete files       |                                                                                                                   |
+| Delete files       | Enable `delete_file`                                                                                              |
 | Path Whitelist     | Optional regex patterns. If non-empty, every operation's path must match at least one pattern. Empty = allow all. |
 
 ## Storage location
 
 Files land under the configured storage backend (defaults to `~/.rocketlib/store/`). For the default filesystem backend the absolute path is:
 
-```
+```text
 <store>/users/<client_id>/files/<path>
 ```
 
