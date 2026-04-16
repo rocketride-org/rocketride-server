@@ -23,6 +23,15 @@
 # SOFTWARE.
 # =============================================================================
 
+# =============================================================================
+
+"""Tool filesystem package.
+
+This module exports the public interfaces for filesystem operations:
+- IGlobal: Global filesystem interface
+- IInstance: Instance-level filesystem interface
+"""
+
 from .IGlobal import IGlobal
 from .IInstance import IInstance
 

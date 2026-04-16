@@ -322,21 +322,9 @@ def _optional_str(args: dict, key: str, *, default: str | None = None) -> str | 
 def _run_async(coro):
     """Run an async coroutine from a synchronous ``@tool_function`` method.
 
-    The tool dispatcher invokes us synchronously. If no event loop is running
-    on this thread, create a dedicated one and tear it down after the call;
-    otherwise we'd deadlock reusing the already-running loop.
+    Always uses an isolated event loop so we don't deadlock if (now or later)
+    this is invoked from a thread that already has a running loop.
     """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        # No running loop — safe to spin up our own.
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
-    # We are already inside an event loop — still need our own isolated loop
-    # to drive the coroutine synchronously.
     loop = asyncio.new_event_loop()
     try:
         return loop.run_until_complete(coro)
