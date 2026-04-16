@@ -6,13 +6,14 @@
 useDefault = true
 
 # Custom rule: detect hardcoded API keys in .pipe pipeline files
+# Matches both `.pipe` and `.pipe.json` (the editor saves as the latter).
 [[rules]]
 id = "pipe-file-api-key"
 description = "Hardcoded API key in .pipe pipeline file"
 regex = '''(?i)"(apikey|api_key|secret|token|password|auth)"\s*:\s*"([^"]{8,})"'''
 secretGroup = 2
 keywords = ["apikey", "api_key", "secret", "token", "password", "auth"]
-paths = ['''\.pipe$''']
+paths = ['''\.pipe(\.json)?$''']
 
     [rules.allowlist]
     regexes = [
