@@ -15,7 +15,7 @@ class IInstance(IInstanceBase):
 
     def writeDocuments(self, documents):
         docs = documents if isinstance(documents, list) else [documents]
-        text = '\n'.join(doc.page_content for doc in docs if doc.page_content)
+        text = '\n'.join(doc.page_content for doc in docs if doc.page_content and doc.type not in ('Image', 'Audio', 'Video'))
         self.writeText(text)
 
     def writeQuestions(self, question):
