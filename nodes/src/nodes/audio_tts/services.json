@@ -59,12 +59,42 @@
 	//		and what it produces
 	//
 	"lanes": {
-		"text": ["audio"]
+		"text": ["audio"],
+		"documents": ["audio"],
+		"questions": ["audio"],
+		"answers": ["audio"]
 	},
 	"input": [
 		{
 			"lane": "text",
 			"description": "Text input for speech synthesis",
+			"output": [
+				{
+					"lane": "audio"
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Document input — extracts page_content text for speech synthesis",
+			"output": [
+				{
+					"lane": "audio"
+				}
+			]
+		},
+		{
+			"lane": "questions",
+			"description": "Question input — extracts question text for speech synthesis",
+			"output": [
+				{
+					"lane": "audio"
+				}
+			]
+		},
+		{
+			"lane": "answers",
+			"description": "Answer input — extracts answer text for speech synthesis",
 			"output": [
 				{
 					"lane": "audio"

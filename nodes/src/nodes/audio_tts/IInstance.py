@@ -13,6 +13,19 @@ from .IGlobal import IGlobal
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
+    def writeDocuments(self, documents):
+        docs = documents if isinstance(documents, list) else [documents]
+        text = '\n'.join(doc.page_content for doc in docs if doc.page_content)
+        self.writeText(text)
+
+    def writeQuestions(self, question):
+        text = ' '.join(q.text for q in question.questions) if question.questions else ''
+        self.writeText(text)
+
+    def writeAnswers(self, answer):
+        text = answer.getText() if hasattr(answer, 'getText') else str(answer)
+        self.writeText(text)
+
     def writeText(self, text: str):
         value = (text or '').strip()
         if not value:
