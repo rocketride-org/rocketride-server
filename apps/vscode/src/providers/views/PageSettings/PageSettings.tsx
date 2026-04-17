@@ -87,7 +87,7 @@ export type PageSettingsIncomingMessage =
 
 export type PageSettingsOutgoingMessage =
 	| {
-			type: 'ready';
+			type: 'view:ready';
 	  }
 	| {
 			type: 'saveSettings';

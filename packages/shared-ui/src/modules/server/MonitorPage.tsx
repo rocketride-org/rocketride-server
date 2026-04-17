@@ -6,7 +6,7 @@
 // Protocol: standard shell:* messages + monitor:* app-specific messages.
 // =============================================================================
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import ServerMonitor from './ServerMonitor';
 import type { ActivityEvent, DashboardResponse } from './types';
 import { applyTheme } from '../../themes';
@@ -16,7 +16,7 @@ import { useMessaging } from '../../hooks/useMessaging';
 // TYPES
 // =============================================================================
 
-type MonitorOutgoing = { type: 'view:ready' } | { type: 'monitor:refresh' };
+type MonitorOutgoing = { type: 'view:ready' } | { type: 'view:initialized' } | { type: 'monitor:refresh' };
 
 type MonitorIncoming = { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean } | { type: 'shell:themeChange'; tokens: Record<string, string> } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'server:event'; event: unknown } | { type: 'monitor:dashboard'; data: DashboardResponse };
 
@@ -43,12 +43,14 @@ export const MonitorPage: React.FC = () => {
 	const [data, setData] = useState<DashboardResponse | null>(null);
 	const [events, setEvents] = useState<ActivityEvent[]>([]);
 	const [isConnected, setIsConnected] = useState(false);
+	const sendMessageRef = useRef<(msg: MonitorOutgoing) => void>(() => {});
 
 	const handleMessage = useCallback((message: MonitorIncoming) => {
 		switch (message.type) {
 			case 'shell:init':
 				if (message.theme) applyTheme(message.theme);
 				setIsConnected(message.isConnected);
+				sendMessageRef.current({ type: 'view:initialized' });
 				break;
 			case 'shell:themeChange':
 				applyTheme(message.tokens);
@@ -70,6 +72,7 @@ export const MonitorPage: React.FC = () => {
 	const { sendMessage } = useMessaging<MonitorOutgoing, MonitorIncoming>({
 		onMessage: handleMessage,
 	});
+	sendMessageRef.current = sendMessage;
 
 	const handleRefresh = useCallback(() => {
 		sendMessage({ type: 'monitor:refresh' });

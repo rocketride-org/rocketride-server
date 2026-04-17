@@ -54,7 +54,7 @@ interface MessageData {
 
 type IncomingMessage = { type: 'settingsLoaded'; settings: WelcomeSettings; logoDarkUri?: string; logoLightUri?: string } | { type: 'showMessage'; level: 'success' | 'error' | 'info' | 'warning'; message: string } | { type: 'engineVersionsLoaded'; versions: EngineVersionItem[] };
 
-type OutgoingMessage = { type: 'ready' } | { type: 'saveAndConnect'; settings: WelcomeSettings } | { type: 'dismiss' } | { type: 'testConnection'; settings: WelcomeSettings } | { type: 'openSettings' } | { type: 'openExternal'; url: string } | { type: 'fetchEngineVersions' };
+type OutgoingMessage = { type: 'view:ready' } | { type: 'saveAndConnect'; settings: WelcomeSettings } | { type: 'dismiss' } | { type: 'testConnection'; settings: WelcomeSettings } | { type: 'openSettings' } | { type: 'openExternal'; url: string } | { type: 'fetchEngineVersions' };
 
 // =============================================================================
 // MODE DESCRIPTIONS

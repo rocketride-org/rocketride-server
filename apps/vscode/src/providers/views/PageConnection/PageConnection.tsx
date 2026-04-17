@@ -48,7 +48,7 @@ type PageConnectionIncomingMessage = {
 	data: ConnectionData;
 };
 
-type PageConnectionOutgoingMessage = { type: 'ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'reconnect' } | { type: 'openSettings' } | { type: 'openDocs' } | { type: 'openDeploy' } | { type: 'openDashboard' };
+type PageConnectionOutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'reconnect' } | { type: 'openSettings' } | { type: 'openDocs' } | { type: 'openDeploy' } | { type: 'openDashboard' };
 
 // =============================================================================
 // STYLES

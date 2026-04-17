@@ -174,6 +174,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 				case 'shell:init':
 					if (msg.theme) applyTheme(msg.theme as any);
 					setIsConnected(msg.isConnected);
+					send({ type: 'view:initialized' });
 					break;
 				case 'shell:themeChange':
 					applyTheme(msg.tokens as any);
