@@ -19,7 +19,7 @@ import { useMessaging } from '../../hooks/useMessaging';
 // TYPES
 // =============================================================================
 
-type OutgoingMessage = ProjectViewOutgoing | { type: 'ready' };
+type OutgoingMessage = ProjectViewOutgoing | { type: 'view:ready' } | { type: 'view:initialized' };
 type IncomingMessage = ProjectViewIncoming;
 
 // =============================================================================
@@ -36,6 +36,7 @@ type IncomingMessage = ProjectViewIncoming;
 export const ProjectPage: React.FC = () => {
 	const viewRef = useRef<ProjectViewRef>(null);
 	const getStateRef = useRef<() => ViewState | null>(() => null);
+	const sendMessageRef = useRef<(msg: OutgoingMessage) => void>(() => {});
 
 	const handleMessage = useCallback((message: IncomingMessage) => {
 		// In VS Code: override viewState with saved webview state if available
@@ -47,12 +48,17 @@ export const ProjectPage: React.FC = () => {
 			}
 		}
 		viewRef.current?.handleMessage(message);
+
+		if (message.type === 'shell:init') {
+			sendMessageRef.current({ type: 'view:initialized' });
+		}
 	}, []);
 
 	const { sendMessage, getState, setState } = useMessaging<OutgoingMessage, IncomingMessage, ViewState>({
 		onMessage: handleMessage,
 	});
 	getStateRef.current = getState;
+	sendMessageRef.current = sendMessage;
 
 	const handleOutgoing = useCallback(
 		(msg: ProjectViewOutgoing) => {

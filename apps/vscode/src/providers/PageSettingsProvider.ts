@@ -139,7 +139,7 @@ export class PageSettingsProvider {
 		const messageDisposable = panel.webview.onDidReceiveMessage(async (message) => {
 			try {
 				switch (message.type) {
-					case 'ready':
+					case 'view:ready':
 						await this.loadAllSettings(panel.webview);
 						break;
 

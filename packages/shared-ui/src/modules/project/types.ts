@@ -109,7 +109,7 @@ export interface ProjectLoadMessage {
 export type ProjectViewIncoming = CanvasIncoming | ServerEventIncoming | ProjectLoadMessage | { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean } | { type: 'shell:themeChange'; tokens: Record<string, string> } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'shell:viewActivated'; viewId: string } | { type: 'project:initialState'; state: ViewState } | { type: 'project:initialPrefs'; prefs: Record<string, unknown> } | { type: 'project:dirtyState'; isDirty: boolean; isNew: boolean };
 
 /** All messages ProjectView can send to the host. */
-export type ProjectViewOutgoing = CanvasOutgoing | StatusOutgoing | TraceOutgoing | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:openLink'; url: string; displayName?: string };
+export type ProjectViewOutgoing = CanvasOutgoing | StatusOutgoing | TraceOutgoing | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:openLink'; url: string; displayName?: string } | { type: 'view:initialized' };
 
 // =============================================================================
 // VIEW TYPES

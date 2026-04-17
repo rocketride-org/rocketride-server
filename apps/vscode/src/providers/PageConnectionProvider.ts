@@ -66,7 +66,7 @@ export class PageConnectionProvider implements vscode.WebviewViewProvider {
 		const messageDisposable = webviewView.webview.onDidReceiveMessage(async (message) => {
 			try {
 				switch (message.type) {
-					case 'ready':
+					case 'view:ready':
 						await this.sendConnectionUpdate();
 						break;
 
