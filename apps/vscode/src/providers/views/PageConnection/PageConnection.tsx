@@ -4,7 +4,7 @@
 // =============================================================================
 
 import React, { useState, useEffect, CSSProperties } from 'react';
-import { useMessaging } from '../../../shared/util/useMessaging';
+import { useMessaging } from 'shared';
 
 import 'shared/themes/rocketride-default.css';
 import 'shared/themes/rocketride-vscode.css';

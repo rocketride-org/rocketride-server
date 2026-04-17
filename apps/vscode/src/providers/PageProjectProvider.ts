@@ -113,50 +113,25 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 	// =========================================================================
 
 	private handleEvent(event: GenericEvent): void {
-		switch (event.event) {
-			case 'apaevt_status_update': {
-				const projectId = event.body?.project_id;
-				const source = event.body?.source;
-				if (!projectId || !source) return;
+		const projectId = event.body?.project_id;
+		if (!projectId) return;
 
-				const taskStatus = event.body as TaskStatus;
-				let dispatched = false;
+		if (event.event === 'apaevt_status_update') {
+			const source = event.body?.source;
+			if (source) {
 				for (const editorState of this.editorStates.values()) {
-					if (editorState.isDisposed || editorState.projectId !== projectId) continue;
-					editorState.cachedStatuses[source] = taskStatus;
-					if (editorState.isReady) {
-						editorState.webviewPanel.webview.postMessage({ type: 'status:update', taskStatus });
+					if (!editorState.isDisposed && editorState.projectId === projectId) {
+						editorState.cachedStatuses[source] = event.body as TaskStatus;
 					}
-					dispatched = true;
 				}
-				if (!dispatched) return;
-				break;
 			}
+		}
 
-			case 'apaevt_flow': {
-				const body = event.body;
-				if (!body?.trace) break;
-
-				const flowProjectId = body.project_id;
-				if (!flowProjectId) break;
-
-				const traceEvent: Record<string, unknown> = {
-					pipelineId: body.id ?? 0,
-					op: body.op || 'enter',
-					pipes: body.pipes || [],
-					trace: body.op === 'end' ? {} : body.trace || {},
-					source: body.source,
-				};
-				if (body.op === 'end' && body.trace && Object.keys(body.trace).length > 0) {
-					traceEvent.pipelineResult = body.trace;
-				}
-
-				for (const editorState of this.editorStates.values()) {
-					if (editorState.isDisposed || !editorState.isReady) continue;
-					if (editorState.projectId !== flowProjectId) continue;
-					editorState.webviewPanel.webview.postMessage({ type: 'trace:event', event: traceEvent });
-				}
-				break;
+		if (event.event === 'apaevt_status_update' || event.event === 'apaevt_flow') {
+			for (const editorState of this.editorStates.values()) {
+				if (editorState.isDisposed || !editorState.isReady) continue;
+				if (editorState.projectId !== projectId) continue;
+				editorState.webviewPanel.webview.postMessage({ type: 'server:event', event });
 			}
 		}
 	}
@@ -170,7 +145,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
 				editorState.webviewPanel.webview
 					.postMessage({
-						type: 'canvas:services',
+						type: 'project:services',
 						services: payload.services,
 					})
 					.then(undefined, (err: unknown) => {
@@ -183,7 +158,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 	private broadcastConnectionState(isConnected: boolean): void {
 		for (const editorState of this.editorStates.values()) {
 			if (editorState.isReady && !editorState.isDisposed && editorState.webviewPanel.webview) {
-				editorState.webviewPanel.webview.postMessage({ type: 'project:connectionState', isConnected }).then(undefined, (err: unknown) => {
+				editorState.webviewPanel.webview.postMessage({ type: 'shell:connectionChange', isConnected }).then(undefined, (err: unknown) => {
 					this.logger.error(`Failed to post connectionState to webview: ${err}`);
 				});
 			}
@@ -293,7 +268,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 
 		webview.onDidReceiveMessage(async (data) => {
 			switch (data.type) {
-				case 'ready': {
+				case 'view:ready': {
 					editorState.isReady = true;
 
 					// Build project from document
@@ -342,7 +317,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 				}
 
 				// Canvas messages
-				case 'canvas:contentChanged': {
+				case 'project:contentChanged': {
 					if (data.project) {
 						const content = typeof data.project === 'string' ? data.project : JSON.stringify(data.project);
 						this.applyDocumentEdit(document, content);
@@ -350,23 +325,22 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 					break;
 				}
 
-				case 'canvas:validate': {
+				case 'project:validate': {
 					this.logger.output(`${icons.pipeline} Validating pipeline...`);
 					try {
 						const client = this.connectionManager.getClient();
 						if (!client) throw new Error('Not connected to server');
 						const result = await client.validate({ pipeline: data.pipeline });
 						this.logger.output(`${icons.success} Pipeline validation passed`);
-						webview.postMessage({ type: 'canvas:validateResponse', requestId: data.requestId, result });
+						webview.postMessage({ type: 'project:validateResponse', requestId: data.requestId, result });
 					} catch (error) {
 						const msg = error instanceof Error ? error.message : String(error);
 						this.logger.output(`${icons.error} Pipeline validation failed: ${msg}`);
-						webview.postMessage({ type: 'canvas:validateResponse', requestId: data.requestId, result: { errors: [], warnings: [] }, error: msg });
+						webview.postMessage({ type: 'project:validateResponse', requestId: data.requestId, result: { errors: [], warnings: [] }, error: msg });
 					}
 					break;
 				}
 
-				case 'canvas:requestSave':
 				case 'project:requestSave': {
 					await document.save();
 					break;
@@ -486,7 +460,7 @@ export class PageProjectProvider implements vscode.CustomTextEditorProvider {
 		const enriched = this.enrichComponentNames(text);
 		try {
 			const project = JSON.parse(enriched);
-			webview.postMessage({ type: 'canvas:update', project });
+			webview.postMessage({ type: 'project:update', project });
 		} catch {
 			// Invalid JSON — skip
 		}

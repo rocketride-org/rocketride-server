@@ -16,9 +16,7 @@
 
 import React, { useState, useCallback, useRef, useMemo, useImperativeHandle, forwardRef, CSSProperties } from 'react';
 
-// Theme CSS — defines --rr-* tokens in the iframe/webview context
-import '../../themes/rocketride-default.css';
-
+import { applyTheme } from '../../themes';
 import { TabPanel } from '../../components/tab-panel/TabPanel';
 import { useTraceState } from './hooks/useTraceState';
 import { useElapsedTimer } from './hooks/useElapsedTimer';
@@ -135,6 +133,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	// --- Internal state (all populated via handleMessage) ---------------------
 
 	const [project, setProject] = useState<any>(null);
+	const [projectId, setProjectId] = useState<string>('');
 	const [servicesJson, setServicesJson] = useState<Record<string, any>>({});
 	const [isConnected, setIsConnected] = useState(false);
 	const [statusMap, setStatusMap] = useState<Record<string, TaskStatus>>({});
@@ -144,6 +143,9 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	const [serverHost, setServerHost] = useState<string>('');
 	const [isDirty, setIsDirty] = useState(false);
 	const [isNew, setIsNew] = useState(false);
+
+	const projectIdRef = useRef(projectId);
+	projectIdRef.current = projectId;
 
 	// Pending validate requests
 	const pendingValidates = useRef<Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>>(new Map());
@@ -156,6 +158,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 				case 'project:load':
 					// Atomic load — sets all state in one React batch
 					setProject(msg.project);
+					setProjectId(msg.project?.project_id ?? '');
 					setServicesJson(msg.services);
 					setIsConnected(msg.isConnected);
 					setStatusMap(msg.statuses ?? {});
@@ -168,13 +171,20 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 					setTraceEvents([]);
 					if (msg.serverHost) setServerHost(msg.serverHost);
 					break;
-				case 'canvas:update':
+				case 'shell:init':
+					if (msg.theme) applyTheme(msg.theme as any);
+					setIsConnected(msg.isConnected);
+					break;
+				case 'shell:themeChange':
+					applyTheme(msg.tokens as any);
+					break;
+				case 'project:update':
 					setProject(msg.project);
 					break;
-				case 'canvas:services':
+				case 'project:services':
 					setServicesJson(msg.services);
 					break;
-				case 'canvas:validateResponse': {
+				case 'project:validateResponse': {
 					const pending = pendingValidates.current.get(msg.requestId);
 					if (pending) {
 						pendingValidates.current.delete(msg.requestId);
@@ -183,13 +193,26 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 					}
 					break;
 				}
-				case 'status:update':
-					setStatusMap((prev) => ({ ...prev, [msg.taskStatus.source]: msg.taskStatus }));
+				case 'server:event': {
+					const event = msg.event as Record<string, any>;
+					const pid = projectIdRef.current;
+					if (event?.event === 'apaevt_status_update' && event?.body?.project_id === pid) {
+						setStatusMap((prev) => ({ ...prev, [event.body.source]: event.body }));
+					} else if (event?.event === 'apaevt_flow' && event?.body?.project_id === pid) {
+						const body = event.body;
+						const traceEvent: TraceEvent = {
+							pipelineId: body.id ?? 0,
+							op: body.op || 'enter',
+							pipes: body.pipes || [],
+							trace: body.op === 'end' ? {} : body.trace || {},
+							source: body.source,
+							...(body.op === 'end' && body.trace && Object.keys(body.trace).length > 0 ? { pipelineResult: body.trace } : {}),
+						};
+						setTraceEvents((prev) => [...prev, traceEvent]);
+					}
 					break;
-				case 'trace:event':
-					setTraceEvents((prev) => [...prev, msg.event]);
-					break;
-				case 'project:connectionState':
+				}
+				case 'shell:connectionChange':
 					// On reconnect, clear stale data so only fresh server
 					// events repopulate the panels.
 					if (msg.isConnected) {
@@ -197,6 +220,9 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 						setTraceEvents([]);
 					}
 					setIsConnected(msg.isConnected);
+					break;
+				case 'shell:viewActivated':
+					window.dispatchEvent(new CustomEvent('canvas:restoreViewport'));
 					break;
 				case 'project:initialState':
 					setViewState({
@@ -207,8 +233,6 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 					break;
 				case 'project:initialPrefs':
 					setPrefs(msg.prefs ?? {});
-					break;
-				case 'project:themeChange':
 					break;
 				case 'project:dirtyState':
 					setIsDirty(msg.isDirty);
@@ -283,7 +307,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 			return new Promise((resolve, reject) => {
 				const requestId = ++validateCounter.current;
 				pendingValidates.current.set(requestId, { resolve, reject });
-				send({ type: 'canvas:validate', requestId, pipeline });
+				send({ type: 'project:validate', requestId, pipeline });
 				setTimeout(() => {
 					if (pendingValidates.current.has(requestId)) {
 						pendingValidates.current.get(requestId)!.resolve({ errors: [], warnings: [] });
@@ -309,7 +333,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	const handleContentChanged = useCallback(
 		(updatedProject: any) => {
 			setProject(updatedProject);
-			send({ type: 'canvas:contentChanged', project: updatedProject });
+			send({ type: 'project:contentChanged', project: updatedProject });
 		},
 		[send]
 	);
@@ -331,7 +355,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 	// --- Save ----------------------------------------------------------------
 
 	const handleSave = useCallback(() => {
-		send({ type: 'canvas:requestSave' });
+		send({ type: 'project:requestSave' });
 	}, [send]);
 
 	// --- Open link -----------------------------------------------------------

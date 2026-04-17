@@ -67,20 +67,19 @@ export interface TraceRow {
 // MESSAGE PROTOCOL — PER COMPONENT
 // =============================================================================
 
-/** Canvas component messages. */
-export type CanvasIncoming = { type: 'canvas:update'; project: any } | { type: 'canvas:services'; services: Record<string, any> } | { type: 'canvas:validateResponse'; requestId: number; result: any; error?: string };
+/** Canvas component messages (project:* naming). */
+export type CanvasIncoming = { type: 'project:update'; project: any } | { type: 'project:services'; services: Record<string, any> } | { type: 'project:validateResponse'; requestId: number; result: any; error?: string };
 
-export type CanvasOutgoing = { type: 'canvas:contentChanged'; project: any } | { type: 'canvas:validate'; requestId: number; pipeline: any } | { type: 'canvas:requestSave' };
+export type CanvasOutgoing = { type: 'project:contentChanged'; project: any } | { type: 'project:validate'; requestId: number; pipeline: any } | { type: 'project:requestSave' };
 
 /** Status component messages. */
-export type StatusIncoming = { type: 'status:update'; taskStatus: TaskStatus };
-
 export type StatusOutgoing = { type: 'status:pipelineAction'; action: 'run' | 'stop' | 'restart'; source?: string };
 
 /** Trace component messages. */
-export type TraceIncoming = { type: 'trace:event'; event: TraceEvent };
-
 export type TraceOutgoing = { type: 'trace:clear' };
+
+/** Raw server event — ProjectView filters apaevt_status_update and apaevt_flow. */
+export type ServerEventIncoming = { type: 'server:event'; event: unknown };
 
 /** View state — per-view UI state (mode, flowViewMode, viewport). */
 export interface ViewState {
@@ -101,16 +100,16 @@ export interface ProjectLoadMessage {
 	prefs: Record<string, unknown>;
 	services: Record<string, any>;
 	isConnected: boolean;
-	statuses?: Record<string, TaskStatus>;
+	statuses?: Record<string, import('../../types/project').ITaskStatus>;
 	/** Server host URL for {host} placeholder replacement in endpoint URLs. */
 	serverHost?: string;
 }
 
 /** All messages the host can send to ProjectView. */
-export type ProjectViewIncoming = CanvasIncoming | StatusIncoming | TraceIncoming | ProjectLoadMessage | { type: 'project:connectionState'; isConnected: boolean } | { type: 'project:initialState'; state: ViewState } | { type: 'project:initialPrefs'; prefs: Record<string, unknown> } | { type: 'project:themeChange'; tokens: Record<string, string> } | { type: 'project:dirtyState'; isDirty: boolean; isNew: boolean };
+export type ProjectViewIncoming = CanvasIncoming | ServerEventIncoming | ProjectLoadMessage | { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean } | { type: 'shell:themeChange'; tokens: Record<string, string> } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'shell:viewActivated'; viewId: string } | { type: 'project:initialState'; state: ViewState } | { type: 'project:initialPrefs'; prefs: Record<string, unknown> } | { type: 'project:dirtyState'; isDirty: boolean; isNew: boolean };
 
 /** All messages ProjectView can send to the host. */
-export type ProjectViewOutgoing = CanvasOutgoing | StatusOutgoing | TraceOutgoing | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:requestSave' } | { type: 'project:openLink'; url: string; displayName?: string };
+export type ProjectViewOutgoing = CanvasOutgoing | StatusOutgoing | TraceOutgoing | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:openLink'; url: string; displayName?: string };
 
 // =============================================================================
 // VIEW TYPES

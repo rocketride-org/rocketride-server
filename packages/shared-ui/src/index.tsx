@@ -40,8 +40,15 @@ export type { IEndpointInfo as EndpointInfo } from './components/pipeline-action
 export { appendAuthQueryParam, buildIntegrationExamples } from './components/pipeline-actions/endpointIntegrationExamples';
 export type { IntegrationTabId } from './components/pipeline-actions/endpointIntegrationExamples';
 
+export * from './components/BoxIcon';
+
 export { TabPanel } from './components/tab-panel/TabPanel';
 export type { ITabPanelTab, ITabPanelProps } from './components/tab-panel/TabPanel';
 
-export { ProjectView } from './modules/project';
+export { useMessaging } from './hooks/useMessaging';
+export type { UseMessagingOptions, UseMessagingReturn, MessageHandler } from './hooks/useMessaging';
+
+export { ProjectView, ProjectPage } from './modules/project';
 export type { IProjectViewProps, ProjectViewRef, IViewProps, ProjectViewMode, ProjectViewIncoming, ProjectViewOutgoing, TaskStatus, TraceEvent } from './modules/project';
+
+export { MonitorPage } from './modules/server';
