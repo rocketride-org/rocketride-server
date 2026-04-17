@@ -10,16 +10,21 @@
 	"description": ["Filters video frames by visual similarity using CLIP embeddings. ", "The first frame received becomes the reference; every subsequent frame ", "is scored against it and forwarded only if its similarity meets the threshold. ", "Includes pre-roll/post-roll context around matching segments."],
 	"icon": "embedding-image.svg",
 	"lanes": {
+		"reference": [],
 		"image": ["image", "table"]
 	},
 	"input": [
+		{
+			"lane": "reference",
+			"description": "A single reference image to match video frames against. The first image received on this lane sets the reference embedding."
+		},
 		{
 			"lane": "image",
 			"description": "Image frames to filter by visual similarity.",
 			"output": [
 				{
 					"lane": "image",
-					"description": "Frames visually similar to the first frame received."
+					"description": "Frames visually similar to the reference image."
 				},
 				{
 					"lane": "table",
@@ -29,16 +34,34 @@
 		}
 	],
 	"preconfig": {
-		"default": "clip-base",
+		"default": "siglip-so400m",
 		"profiles": {
+			"siglip-so400m": {
+				"title": "SigLIP SO400M (best accuracy)",
+				"embedding_model": "google/siglip-so400m-patch14-384",
+				"similarity_threshold": 0.5,
+				"fps": 1.0
+			},
+			"siglip-base": {
+				"title": "SigLIP-base",
+				"embedding_model": "google/siglip-base-patch16-224",
+				"similarity_threshold": 0.62,
+				"fps": 1.0
+			},
+			"dinov2-base": {
+				"title": "DINOv2-base (multi-crop cosine)",
+				"embedding_model": "facebook/dinov2-base",
+				"similarity_threshold": 0.25,
+				"fps": 1.0
+			},
 			"clip-base": {
-				"title": "CLIP ViT-B/32",
+				"title": "CLIP ViT-B/32 (cosine)",
 				"embedding_model": "openai/clip-vit-base-patch32",
 				"similarity_threshold": 0.25,
 				"fps": 1.0
 			},
 			"clip-large": {
-				"title": "CLIP ViT-L/14",
+				"title": "CLIP ViT-L/14 (cosine)",
 				"embedding_model": "openai/clip-vit-large-patch14",
 				"similarity_threshold": 0.25,
 				"fps": 1.0
@@ -73,25 +96,63 @@
 			"description": "Frame rate of the upstream frame_grabber, used to compute timestamps in the output table.",
 			"default": 1.0
 		},
+		"vsf.reference_filename_pattern": {
+			"type": "string",
+			"title": "Reference image filename pattern",
+			"description": "Case-insensitive substring that identifies a reference image arriving on the image lane (e.g. 'reference'). Images whose filenames contain this string are used as the reference embedding; all others are scored as frames.",
+			"default": "reference"
+		},
+		"vsf.scene_change_threshold": {
+			"type": "number",
+			"title": "Scene cut threshold",
+			"description": "Grayscale frame difference (0.0–1.0) above which a scene cut is detected and the tracker is reset. Once a car is confirmed in a scene, the tracker uses a lower similarity bar to keep forwarding it even when small or partially out of frame. Set to 0 to disable.",
+			"default": 0.15,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"vsf.siglip-so400m": {
+			"object": "siglip-so400m",
+			"properties": ["vsf.similarity_threshold", "vsf.fps", "vsf.scene_change_threshold"]
+		},
+		"vsf.siglip-base": {
+			"object": "siglip-base",
+			"properties": ["vsf.similarity_threshold", "vsf.fps", "vsf.scene_change_threshold"]
+		},
+		"vsf.dinov2-base": {
+			"object": "dinov2-base",
+			"properties": ["vsf.similarity_threshold", "vsf.fps", "vsf.scene_change_threshold"]
+		},
 		"vsf.clip-base": {
 			"object": "clip-base",
-			"properties": ["vsf.similarity_threshold", "vsf.fps"]
+			"properties": ["vsf.similarity_threshold", "vsf.fps", "vsf.scene_change_threshold"]
 		},
 		"vsf.clip-large": {
 			"object": "clip-large",
-			"properties": ["vsf.similarity_threshold", "vsf.fps"]
+			"properties": ["vsf.similarity_threshold", "vsf.fps", "vsf.scene_change_threshold"]
 		},
 		"vsf.custom": {
 			"object": "custom",
-			"properties": ["vsf.embedding_model", "vsf.similarity_threshold", "vsf.fps"]
+			"properties": ["vsf.embedding_model", "vsf.similarity_threshold", "vsf.fps", "vsf.scene_change_threshold"]
 		},
 		"vsf.profile": {
 			"title": "Embedding model",
-			"description": "CLIP model and configuration",
+			"description": "Model and scoring profile",
 			"type": "string",
-			"default": "clip-base",
+			"default": "siglip-so400m",
 			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
+				{
+					"value": "siglip-so400m",
+					"properties": ["vsf.siglip-so400m"]
+				},
+				{
+					"value": "siglip-base",
+					"properties": ["vsf.siglip-base"]
+				},
+				{
+					"value": "dinov2-base",
+					"properties": ["vsf.dinov2-base"]
+				},
 				{
 					"value": "clip-base",
 					"properties": ["vsf.clip-base"]

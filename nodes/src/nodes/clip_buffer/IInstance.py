@@ -49,9 +49,10 @@ class IInstance(IInstanceBase):
         self._buffer_seconds = float(cfg.get('buffer_seconds', 5.0))
         self._scene_threshold = float(cfg.get('scene_threshold', 0.25))
 
-        vsf_ids = self.instance.getControllerNodeIds('visual_similarity')
-        self._vsf_node_id: Optional[str] = vsf_ids[0] if vsf_ids else None
-        _plog(f'beginInstance: scan_interval={self._scan_interval} buffer_seconds={self._buffer_seconds} scene_threshold={self._scene_threshold} vsf_node_id={self._vsf_node_id!r}')
+        # Lazy-initialised on first _invoke_vsf call — controllers may not be
+        # registered yet at beginInstance time.
+        self._vsf_node_id: Optional[str] = None
+        _plog(f'beginInstance: scan_interval={self._scan_interval} buffer_seconds={self._buffer_seconds} scene_threshold={self._scene_threshold} vsf_node_id=deferred')
 
     def endInstance(self):
         pass
@@ -135,8 +136,22 @@ class IInstance(IInstanceBase):
                     self._in_match = True
                     self._clip = list(self._buffer)  # snapshot pre-buffer (includes this frame)
         else:
-            # 3. Collecting — append frame, flush on scene change
+            # 3. Collecting — append frame, flush on scene change OR VSF miss
             self._clip.append((timestamp, frame_bytes, mime))
+
+            # Re-verify with VSF at scan_interval — stop clip if car has left
+            if (timestamp - self._last_scan) >= self._scan_interval:
+                self._last_scan = timestamp
+                still_matched = self._invoke_vsf(frame_bytes)
+                _plog(f'collect_scan: ts={timestamp:.3f} vsf_result={still_matched}')
+                if not still_matched:
+                    _plog(f'car_left: ts={timestamp:.3f} flushing clip with {len(self._clip)} frames')
+                    self._flush_clip()
+                    self._in_match = False
+                    self._clip = []
+                    self._buffer.clear()
+                    return
+
             if scene_change_score >= self._scene_threshold:
                 _plog(f'scene_change: ts={timestamp:.3f} score={scene_change_score:.3f} clip_frames={len(self._clip)}')
                 self._flush_clip()
@@ -145,7 +160,12 @@ class IInstance(IInstanceBase):
                 self._buffer.clear()
 
     def _invoke_vsf(self, frame_bytes: bytes) -> bool:
+        # Lazy lookup — try once per instance; if still empty, mark NOT_FOUND.
         if self._vsf_node_id is None:
+            vsf_ids = self.instance.getControllerNodeIds('visual_similarity')
+            self._vsf_node_id = vsf_ids[0] if vsf_ids else 'NOT_FOUND'
+            _plog(f'invoke_vsf: lazy_init vsf_node_id={self._vsf_node_id!r}')
+        if self._vsf_node_id == 'NOT_FOUND':
             _plog('invoke_vsf: no VSF wired — stub match=True')
             return True  # stub: always match when no VSF wired (dev/test)
         try:

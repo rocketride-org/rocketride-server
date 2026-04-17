@@ -1,2 +1,4 @@
 transformers
 accelerate
+scikit-learn
+ultralytics
