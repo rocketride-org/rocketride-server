@@ -16,5 +16,6 @@
  */
 
 export { default } from './ServerMonitor';
+export { MonitorPage } from './MonitorPage';
 export type { IServerMonitorProps } from './ServerMonitor';
 export * from './types';

@@ -34,13 +34,11 @@
  *   - Applies navigation mode (pan vs lasso-select) and lock state
  */
 
-import { ReactElement, useCallback, useEffect, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import { ReactFlow, Background, SelectionMode, useReactFlow } from '@xyflow/react';
 import { Settings } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 
-// Design tokens — light defaults
-import '../../../themes/rocketride-default.css';
 import './reactflow-overrides.css';
 
 // Flow node components
@@ -190,19 +188,6 @@ export default function Canvas(): ReactElement {
 	// --- Graph state from context ------------------------------------------
 	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onContentUpdated, isFlowReady } = useFlowGraph();
 
-	// --- Guard ReactFlow render until container has real dimensions ----------
-	const [hasSize, setHasSize] = useState(false);
-	useEffect(() => {
-		const el = canvasRef.current;
-		if (!el) return;
-		const ro = new ResizeObserver((entries) => {
-			const { width, height } = entries[0].contentRect;
-			setHasSize(width > 0 && height > 0);
-		});
-		ro.observe(el);
-		return () => ro.disconnect();
-	}, [canvasRef]);
-
 	// --- Preferences from context ------------------------------------------
 	const { navigationMode, setNavigationMode, isLocked, toggleLock, projectLayout, getPreference, setPreference } = useFlowPreferences();
 
@@ -215,8 +200,32 @@ export default function Canvas(): ReactElement {
 		[setPreference]
 	);
 
-	const { features, onUndo, onRedo, onViewportChange, isDirty, isNew, onSave } = useFlowProject();
-	const { fitView, zoomIn, zoomOut } = useReactFlow();
+	const { features, onUndo, onRedo, onViewportChange, isDirty, isNew, onSave, initialViewport } = useFlowProject();
+	const { fitView, zoomIn, zoomOut, setViewport } = useReactFlow();
+
+	// Keep a ref so the restore handler always sees the latest viewport value
+	// without needing to re-register the event listener.
+	const initialViewportRef = useRef(initialViewport);
+	initialViewportRef.current = initialViewport;
+
+	// Restore saved viewport on initial ReactFlow mount.
+	const handleInit = useCallback(() => {
+		if (initialViewportRef.current) {
+			setViewport(initialViewportRef.current, { duration: 0 });
+		}
+	}, [setViewport]);
+
+	// Restore viewport when the shell activates this tab (canvas:restoreViewport
+	// is dispatched by ProjectView when it receives shell:viewActivated).
+	useEffect(() => {
+		const handler = () => {
+			if (initialViewportRef.current) {
+				setViewport(initialViewportRef.current, { duration: 0 });
+			}
+		};
+		window.addEventListener('canvas:restoreViewport', handler);
+		return () => window.removeEventListener('canvas:restoreViewport', handler);
+	}, [setViewport]);
 
 	// --- Auto-layout -------------------------------------------------------
 	const { autoLayout, isLayouting } = useAutoLayout(nodes, edges, setNodes, onContentUpdated);
@@ -369,42 +378,41 @@ export default function Canvas(): ReactElement {
 			<FloatingToolbar position={toolbarPosition} onPositionChange={handleToolbarPositionChange}>
 				{canvasToolbar}
 			</FloatingToolbar>
-			{hasSize && (
-				<ReactFlow
-					nodes={nodes}
-					edges={edges}
-					nodeTypes={nodeTypes}
-					edgeTypes={edgeTypes}
-					onNodesChange={onNodesChange}
-					onEdgesChange={onEdgesChange}
-					onConnect={onEdgeConnect}
-					isValidConnection={isValidConnection}
-					onNodesDelete={onNodesDelete}
-					deleteKeyCode={['Backspace', 'Delete']}
-					onDragOver={onDragOver}
-					onDrop={onDrop}
-					onNodeDragStop={onNodeDragStop}
-					onMoveEnd={(_event, viewport) => onViewportChange?.(viewport)}
-					/* Navigation mode: pan on drag vs lasso-select on drag */
-					selectionMode={SelectionMode.Partial}
-					panOnScroll={!isPanMode}
-					panOnDrag={isPanMode}
-					selectionOnDrag={!isPanMode}
-					/* Lock state: disable editing when locked */
-					nodesDraggable={editable}
-					nodesConnectable={editable}
-					nodesFocusable={editable}
-					edgesFocusable={editable}
-					elementsSelectable={editable}
-					/* Viewport defaults — fitView is handled programmatically in loadData */
-					defaultViewport={{ x: 0, y: 0, zoom: DEFAULT_ZOOM }}
-					proOptions={{ hideAttribution: true }}
-					snapToGrid={projectLayout.snapToGrid ?? true}
-					snapGrid={projectLayout.snapGridSize ?? [10, 10]}
-				>
-					<Background color="var(--rr-text-disabled)" gap={20} style={{ backgroundColor: 'var(--rr-bg-paper)' }} />
-				</ReactFlow>
-			)}
+			<ReactFlow
+				nodes={nodes}
+				edges={edges}
+				nodeTypes={nodeTypes}
+				edgeTypes={edgeTypes}
+				onNodesChange={onNodesChange}
+				onEdgesChange={onEdgesChange}
+				onConnect={onEdgeConnect}
+				isValidConnection={isValidConnection}
+				onNodesDelete={onNodesDelete}
+				deleteKeyCode={['Backspace', 'Delete']}
+				onDragOver={onDragOver}
+				onDrop={onDrop}
+				onNodeDragStop={onNodeDragStop}
+				onInit={handleInit}
+				onMoveEnd={(_event, viewport) => onViewportChange?.(viewport)}
+				/* Navigation mode: pan on drag vs lasso-select on drag */
+				selectionMode={SelectionMode.Partial}
+				panOnScroll={!isPanMode}
+				panOnDrag={isPanMode}
+				selectionOnDrag={!isPanMode}
+				/* Lock state: disable editing when locked */
+				nodesDraggable={editable}
+				nodesConnectable={editable}
+				nodesFocusable={editable}
+				edgesFocusable={editable}
+				elementsSelectable={editable}
+				/* Viewport defaults — fitView is handled programmatically in loadData */
+				defaultViewport={{ x: 0, y: 0, zoom: DEFAULT_ZOOM }}
+				proOptions={{ hideAttribution: true }}
+				snapToGrid={projectLayout.snapToGrid ?? true}
+				snapGrid={projectLayout.snapGridSize ?? [10, 10]}
+			>
+				<Background color="var(--rr-text-disabled)" gap={20} style={{ backgroundColor: 'var(--rr-bg-paper)' }} />
+			</ReactFlow>
 
 			{/* Empty canvas prompt — shown when no nodes and create panel is closed */}
 			{nodes.length === 0 && !showCreatePanel && isFlowReady && <EmptyCanvasPrompt instantiateTemplate={instantiateTemplate} onNodeAdded={onNodeAdded} />}

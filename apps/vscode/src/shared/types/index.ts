@@ -23,6 +23,5 @@
 
 export * from './connection';
 export * from './events';
-export * from './pageMonitor';
 export * from './protocol';
 export * from './taskStatus';
