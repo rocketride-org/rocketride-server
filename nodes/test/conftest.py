@@ -243,7 +243,6 @@ def pytest_generate_tests(metafunc):
             'image_cleanup',
             'frame_grabber',
             # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
-            'accessibility_describe',
             'index_search',
             'llm_bedrock',
             'llm_deepseek',
