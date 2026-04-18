@@ -52,8 +52,15 @@ class IGlobal(IGlobalBase):
         )
 
     def endGlobal(self) -> None:
-        """Release resources and close backend connections."""
-        if self.store is not None:
-            self.store.backend.close()
-        self.store = None
-        self.config = None
+        """Release resources and close backend connections.
+
+        Uses ``try/finally`` to guarantee the backend is released even if
+        ``close()`` raises (e.g. transient Redis error during disconnect),
+        preventing connection leaks in long-running pipelines.
+        """
+        try:
+            if self.store is not None:
+                self.store.backend.close()
+        finally:
+            self.store = None
+            self.config = None

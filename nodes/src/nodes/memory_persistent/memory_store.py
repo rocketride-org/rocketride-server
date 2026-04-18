@@ -382,14 +382,11 @@ class RedisBackend(MemoryBackend):
     def list_sessions(self) -> List[str]:
         with self._lock:
             members = self._client.smembers(_REDIS_SESSIONS_KEY)
-            # Prune sessions whose metadata has expired
-            active = []
-            stale = []
-            for sid in members:
-                if self._client.exists(self._meta_key(sid)):
-                    active.append(sid)
-                else:
-                    stale.append(sid)
+            # Prune sessions whose metadata has expired. Use list
+            # comprehensions (bulk growth) instead of per-iteration appends.
+            liveness = [(sid, bool(self._client.exists(self._meta_key(sid)))) for sid in members]
+            active = [sid for sid, alive in liveness if alive]
+            stale = [sid for sid, alive in liveness if not alive]
             if stale:
                 self._client.srem(_REDIS_SESSIONS_KEY, *stale)
             return sorted(active)
