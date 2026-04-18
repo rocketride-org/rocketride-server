@@ -132,6 +132,7 @@ class _MockQuestion:
     def __init__(self, **kwargs):
         self.questions = []
         self.context = []
+        self.history = []
 
     def addQuestion(self, text):
         self.questions.append({'text': text})
@@ -139,12 +140,15 @@ class _MockQuestion:
     def addContext(self, ctx):
         self.context.append(ctx)
 
+    def addHistory(self, item):
+        self.history.append(item)
+
     def getPrompt(self):
         parts = [q['text'] for q in self.questions]
         return ' '.join(parts) if parts else ''
 
     def model_dump(self):
-        return {'questions': self.questions, 'context': self.context}
+        return {'questions': self.questions, 'context': self.context, 'history': self.history}
 
 
 class _MockAnswer:
@@ -159,6 +163,12 @@ class _MockAnswer:
 
     def model_dump(self):
         return {'text': self._text}
+
+
+class _MockQuestionHistory:
+    def __init__(self, role, content):
+        self.role = role
+        self.content = content
 
 
 def _install_mocks():
@@ -186,6 +196,7 @@ def _install_mocks():
     mock_ai_schema = types.ModuleType('ai.common.schema')
     mock_ai_schema.Question = _MockQuestion
     mock_ai_schema.Answer = _MockAnswer
+    mock_ai_schema.QuestionHistory = _MockQuestionHistory
     mock_ai_schema.Doc = MagicMock
 
     mock_ai_config = types.ModuleType('ai.common.config')
@@ -326,6 +337,15 @@ class TestRegexCondition:
     def test_empty_pattern(self):
         result = BranchEngine.regex('some text', '')
         assert result['matched'] is False
+
+    def test_regex_does_not_use_stdlib_timeout_kwarg(self):
+        """Regression: re.search has no timeout kwarg. Must not raise TypeError on Py 3.11+."""
+        # The implementation previously attempted re.search(..., timeout=...) which
+        # raises TypeError on Python >= 3.11. This test exercises the path on any
+        # Python 3.x and asserts we get a normal result dict, not an exception.
+        result = BranchEngine.regex('hello 42', r'\d+')
+        assert isinstance(result, dict)
+        assert result['matched'] is True
 
 
 # =============================================================================
@@ -576,6 +596,26 @@ class TestEvaluate:
         )
         assert result['matched'] is False
 
+    def test_evaluate_sentiment_uses_services_json_expected_key(self):
+        """Regression: evaluate() must look up the 'expected' key (matching the
+        services.json schema), not an out-of-band 'expected_sentiment' alias.
+        """
+        engine = _engine()
+        # 'expected' is the canonical key emitted by services.json sentiment profile
+        ok = engine.evaluate(
+            {'text': 'thanks, this is great and helpful'},
+            {'type': 'sentiment', 'expected': 'positive'},
+        )
+        assert ok['matched'] is True
+        # An 'expected_sentiment' key should NOT be silently honored -- if no
+        # 'expected' is passed, sentiment matches unconditionally (details carries label).
+        legacy = engine.evaluate(
+            {'text': 'thanks, this is great and helpful'},
+            {'type': 'sentiment', 'expected_sentiment': 'negative'},
+        )
+        assert legacy['matched'] is True  # default behavior: match unconditionally
+        assert legacy['details'] == 'positive'
+
     def test_evaluate_always_true(self):
         engine = _engine()
         result = engine.evaluate({'text': ''}, {'type': 'always_true'})
@@ -784,6 +824,53 @@ class TestIInstanceRouting:
         with pytest.raises(RuntimeError, match='BranchEngine is not initialised'):
             inst.writeAnswers(answer)
 
+    def test_answer_to_question_lane_preserves_text_as_context_and_history(self):
+        """Cross-lane enrichment: answer->question conversion must carry the
+        answer text into both Question.context and Question.history to avoid
+        silent data loss.
+        """
+        inst = self._make_instance(
+            rules=[{'condition': {'type': 'always_true'}, 'lane': 'questions'}],
+        )
+        answer = _MockAnswer(text='Paris is the capital of France.')
+        inst.writeAnswers(answer)
+        inst.instance.writeQuestions.assert_called_once()
+        routed_question = inst.instance.writeQuestions.call_args[0][0]
+        # Question text still matches the answer text
+        assert routed_question.getPrompt() == 'Paris is the capital of France.'
+        # Context preserves the answer text
+        assert 'Paris is the capital of France.' in routed_question.context
+        # History includes an assistant turn with the answer text
+        assert len(routed_question.history) == 1
+        assert routed_question.history[0].role == 'assistant'
+        assert routed_question.history[0].content == 'Paris is the capital of France.'
+
+    def test_answer_to_question_skips_enrichment_on_empty_text(self):
+        """Empty-text answers should still route but not inject empty context/history entries."""
+        inst = self._make_instance(
+            rules=[{'condition': {'type': 'always_true'}, 'lane': 'questions'}],
+        )
+        answer = _MockAnswer(text='')
+        inst.writeAnswers(answer)
+        routed_question = inst.instance.writeQuestions.call_args[0][0]
+        assert routed_question.context == []
+        assert routed_question.history == []
+
+    def test_question_to_answer_lane_carries_prompt_text(self):
+        """Question->answer conversion preserves the rendered prompt text as the
+        answer payload. History/context enrichment is intentionally not
+        possible (Answer schema has no such fields).
+        """
+        inst = self._make_instance(
+            rules=[{'condition': {'type': 'always_true'}, 'lane': 'answers'}],
+        )
+        question = _MockQuestion()
+        question.addQuestion('What is Python?')
+        inst.writeQuestions(question)
+        inst.instance.writeAnswers.assert_called_once()
+        routed_answer = inst.instance.writeAnswers.call_args[0][0]
+        assert routed_answer.getText() == 'What is Python?'
+
 
 # =============================================================================
 # Deep copy standalone tests
@@ -928,3 +1015,14 @@ class TestServicesJson:
             ['neutral', 'Neutral'],
         ]
         assert fields['branch.sentiment']['properties'] == ['expected', 'default_lane']
+
+    def test_description_documents_cross_lane_conversion(self, services):
+        """The services.json description must document the answer->question
+        enrichment so users know what to expect when lanes are crossed.
+        """
+        description = ' '.join(services['description']).lower()
+        # Mentions both enrichment vectors for the answer->question direction
+        assert 'history' in description
+        assert 'context' in description
+        # And acknowledges the irreducible question->answer schema mismatch
+        assert 'answer schema' in description or 'cannot be preserved' in description

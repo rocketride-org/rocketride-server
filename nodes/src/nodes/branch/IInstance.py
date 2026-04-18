@@ -27,6 +27,14 @@ from rocketlib import IInstanceBase
 from ai.common.schema import Question, Answer
 from .IGlobal import IGlobal
 
+try:
+    # QuestionHistory lives alongside Question in ai.common.schema.  It may not be
+    # available in older schema versions, in which case the history enrichment
+    # degrades gracefully (only addContext is used).
+    from ai.common.schema import QuestionHistory
+except ImportError:  # pragma: no cover - exercised only in legacy schema envs
+    QuestionHistory = None
+
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
@@ -43,10 +51,10 @@ class IInstance(IInstanceBase):
         """Evaluate branch conditions against a question and route to the matched output lane.
 
         When routed to the answers lane the question is converted to an Answer.
-        Note: the converted Answer carries only the prompt text -- enrichment
-        fields such as history, documents, and context from the original
-        Question are not copied.  This is intentional: downstream answer
-        consumers do not expect Question-specific fields.
+        The Answer schema only carries a response payload, so Question
+        enrichment fields (history, documents, context) cannot be preserved on
+        lane conversion -- this is an irreducible schema mismatch and is
+        documented on the answers output lane in services.json.
         """
         engine = self.IGlobal.engine
         if engine is None:
@@ -73,10 +81,12 @@ class IInstance(IInstanceBase):
         """Evaluate branch conditions against an answer and route to the matched output lane.
 
         When routed to the questions lane the answer is converted to a Question.
-        Note: the converted Question carries only the answer text -- enrichment
-        added via addContext(), addHistory(), etc. on the original Answer is not
-        copied.  This is intentional: downstream question consumers do not
-        expect Answer-specific fields.
+        The answer text is preserved both as conversation history (so
+        downstream LLM nodes can see the prior assistant turn) and as
+        context (so downstream retrieval/analysis nodes that inspect
+        question.context still have visibility into the answer text).  This
+        avoids silent data loss when the pipeline crosses the answer->question
+        lane boundary.
         """
         engine = self.IGlobal.engine
         if engine is None:
@@ -91,8 +101,15 @@ class IInstance(IInstanceBase):
 
         if lane == 'questions':
             # Convert answer to a question and route to the questions lane.
+            # Preserve the answer text as context and as an assistant turn in
+            # the conversation history so downstream consumers retain visibility.
             question = Question()
             question.addQuestion(text)
+            if text:
+                if hasattr(question, 'addContext'):
+                    question.addContext(text)
+                if QuestionHistory is not None and hasattr(question, 'addHistory'):
+                    question.addHistory(QuestionHistory(role='assistant', content=text))
             self.instance.writeQuestions(question)
         else:
             # Route to the answers lane (first-match-wins means only one

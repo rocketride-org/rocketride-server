@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A conditional routing component that evaluates data against configurable ", "rules and sends it to different output lanes based on the results. ", "Supports keyword matching, regex patterns, text length checks, numeric ", "score thresholds, metadata field comparison, and basic sentiment ", "classification. Rules are evaluated in order and the first match wins. ", "If no rule matches, data is routed to the configured default lane."],
+	"description": ["A conditional routing component that evaluates data against configurable ", "rules and sends it to different output lanes based on the results. ", "Supports keyword matching, regex patterns, text length checks, numeric ", "score thresholds, metadata field comparison, and basic sentiment ", "classification. Rules are evaluated in order and the first match wins. ", "If no rule matches, data is routed to the configured default lane. ", "Cross-lane conversions: answers routed to the questions lane are wrapped ", "as a Question whose conversation history includes an 'assistant' turn with ", "the answer text and whose context list carries the same text. Questions ", "routed to the answers lane are wrapped as an Answer containing only the ", "rendered prompt text -- Question enrichment fields (history, documents, ", "context) cannot be preserved because the Answer schema has no equivalents."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -88,7 +88,7 @@
 			"output": [
 				{
 					"lane": "questions",
-					"description": "Answers converted to Question (text only -- enrichment from addContext/addHistory is not carried over)"
+					"description": "Answers converted to Question with the answer text preserved as context and as an 'assistant' entry in the conversation history"
 				},
 				{
 					"lane": "answers",
