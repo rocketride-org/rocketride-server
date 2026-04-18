@@ -58,6 +58,17 @@ docker compose down -v
 docker compose ps
 ```
 
+## Vector Store Startup Behavior
+
+`docker compose up` starts all three vector stores (pgvector, Milvus, ChromaDB)
+together. The engine blocks on `postgres` being healthy (pgvector is required),
+but only waits for Milvus and ChromaDB to be _started_, not healthy. The engine
+is expected to handle transient connection retries against optional vector
+stores. If a node depends on Milvus or Chroma and the corresponding service is
+unhealthy, the engine surfaces the error at request time rather than at boot.
+To run with a single vector store, start only the services you need (for
+example: `docker compose up engine postgres`).
+
 ## Development Overrides
 
 The `docker-compose.override.yml` file is automatically applied during
