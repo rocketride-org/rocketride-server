@@ -27,7 +27,7 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll, jest } from '@j
 import { getEchoPipeline } from './echo.pipeline';
 import { getChatPipeline } from './chat.pipeline';
 // Skip chat tests when no LLM API key is available (must match env vars used by chat.pipeline.ts)
-const hasLLMKey = !!(process.env.ROCKETRIDE_APIKEY_OPENAI || process.env.ROCKETRIDE_APIKEY_ANTHROPIC || process.env.ROCKETRIDE_APIKEY_GEMINI || process.env.ROCKETRIDE_HOST_OLLAMA);
+const hasLLMKey = !!(process.env.ROCKETRIDE_OPENAI_KEY || process.env.ROCKETRIDE_ANTHROPIC_KEY || process.env.ROCKETRIDE_GEMINI_KEY || process.env.ROCKETRIDE_OLLAMA_HOST);
 const describeIfLLM = hasLLMKey ? describe : describe.skip;
 const itIfLLM = hasLLMKey ? it : it.skip;
 
@@ -35,10 +35,10 @@ const itIfLLM = hasLLMKey ? it : it.skip;
  * Environment Variables:
  *
  * 	ROCKETRIDE_APIKEY - General API key for RocketRide server
- * 	ROCKETRIDE_APIKEY_OPENAI - API key for OpenAI (GPT-4)
- * 	ROCKETRIDE_APIKEY_ANTHROPIC - API key for Anthropic (Claude-3 Sonnet)
- * 	ROCKETRIDE_APIKEY_GEMINI - API key for Gemini (Gemini Pro model)
- * 	ROCKETRIDE_HOST_OLLAMA - Host URL for local Ollama server
+ * 	ROCKETRIDE_OPENAI_KEY - API key for OpenAI (GPT-4)
+ * 	ROCKETRIDE_ANTHROPIC_KEY - API key for Anthropic (Claude-3 Sonnet)
+ * 	ROCKETRIDE_GEMINI_KEY - API key for Gemini (Gemini Pro model)
+ * 	ROCKETRIDE_OLLAMA_HOST - Host URL for local Ollama server
  *
  *  Note: Only one of the LLM settings needs to be set for chat pipeline tests.
  */

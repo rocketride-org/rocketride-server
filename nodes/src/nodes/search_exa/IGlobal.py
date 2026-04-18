@@ -43,7 +43,7 @@ class IGlobal(IGlobalBase):
         apikey = str((conn_config.get('apikey') or '')).strip()
         if apikey:
             return apikey
-        return str((os.environ.get('ROCKETRIDE_APIKEY_EXA') or '')).strip()
+        return str((os.environ.get('ROCKETRIDE_EXA_KEY') or '')).strip()
 
     def beginGlobal(self) -> None:
         """Initialize the shared Exa backend for runtime execution.

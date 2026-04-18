@@ -58,14 +58,17 @@ class ExaSearch(ChatBase):
     """Search backend that sends a single user query to Exa and returns raw JSON."""
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+        """
+        Initialize the ExaSearch node.
+
+        Args:
+            provider: The provider name.
+            connConfig: The connection configuration.
+            bag: The bag to store the node instance.
+        """
         super().__init__(provider, connConfig, bag)
         config = Config.getNodeConfig(provider, connConfig)
-        self._apikey = str(
-            config.get('apikey')
-            or connConfig.get('apikey')
-            or os.environ.get('ROCKETRIDE_APIKEY_EXA')
-            or ''
-        ).strip()
+        self._apikey = str(config.get('apikey') or connConfig.get('apikey') or os.environ.get('ROCKETRIDE_EXA_KEY') or '').strip()
         self._search_type = str(config.get('type') or 'auto').strip() or 'auto'
         self._num_results = int(config.get('numResults') or 5)
         self._include_highlights = _get_bool(config.get('includeHighlights'), True)
@@ -163,14 +166,7 @@ class ExaSearch(ChatBase):
 
         for _, _, _, _, sockaddr in addrinfo:
             ip = ipaddress.ip_address(sockaddr[0])
-            if (
-                ip.is_private
-                or ip.is_loopback
-                or ip.is_link_local
-                or ip.is_reserved
-                or ip.is_multicast
-                or ip.is_unspecified
-            ):
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
                 raise ValueError(f'Exa returned a blocked URL host: {parsed.hostname}')
 
         return raw_url

@@ -12,7 +12,7 @@ structured extraction, and chat-based interactions.
   "label": "Text Analysis",
   "config": {
     "model": "gpt-4o",
-    "apikey_env": "ROCKETRIDE_APIKEY_OPENAI",
+    "apikey_env": "ROCKETRIDE_OPENAI_KEY",
     "system": "You are a helpful assistant. Return concise, structured answers."
   }
 }
@@ -56,7 +56,7 @@ prompt that instructs the model to return JSON:
   "type": "llm_openai",
   "config": {
     "model": "gpt-4o",
-    "apikey_env": "ROCKETRIDE_APIKEY_OPENAI",
+    "apikey_env": "ROCKETRIDE_OPENAI_KEY",
     "system": "Extract the following fields as valid JSON: {company_name, revenue, industry, risk_level}. Return only the JSON object, no prose.",
     "expectJson": true
   }
@@ -104,7 +104,7 @@ Set `modelTotalTokens` to cap total token usage per invocation:
 
 ```
 # OpenAI
-ROCKETRIDE_APIKEY_OPENAI=sk-...
+ROCKETRIDE_OPENAI_KEY=sk-...
 
 # GMI Cloud
 GMI_API_KEY=your_key

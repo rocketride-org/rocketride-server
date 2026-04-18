@@ -77,6 +77,8 @@ function parseArgs(args) {
         } else if (arg.startsWith('--pytest=')) {
             options.pytest = options.pytest || [];
             options.pytest.push(arg.substring('--pytest='.length));
+        } else if (arg.startsWith('--pytest-pattern=')) {
+            options.pytestPattern = arg.substring('--pytest-pattern='.length);
         } else if (arg.startsWith('--jest=')) {
             options.jest = options.jest || [];
             options.jest.push(arg.substring('--jest='.length));
@@ -197,8 +199,9 @@ Options:
   --sequential, -s    Run modules sequentially (default: parallel)
   --nodownload        Force compile from source (skip prebuilt download)
   --arch=arm|intel    Target architecture (macOS cross-compile)
-  --pytest="args"     Pass arguments to pytest (can be repeated)
-  --jest="args"       Pass arguments to Jest (can be repeated)
+  --pytest="args"           Pass arguments to pytest (can be repeated)
+  --pytest-pattern="EXPR"  Filter pytest tests by name expression (pytest -k)
+  --jest="args"             Pass arguments to Jest (can be repeated)
   --catch="args"      Pass arguments to Catch2 tests (aptest/engtest)
   --trace="a,b,c"     Enable trace output (passed to engine/tests)
   --testport=N        Use existing server on port N for tests (skip build/start)
