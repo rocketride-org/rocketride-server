@@ -185,6 +185,9 @@ class AnomalyDetector:
 
         Returns a dict with keys: score, severity, is_anomalous, details.
         """
+        if not math.isfinite(value):
+            return {'score': 0.0, 'severity': 'normal', 'is_anomalous': False, 'details': 'non-finite input'}
+
         window = self._get_window_snapshot()
 
         if self.method == 'iqr':
