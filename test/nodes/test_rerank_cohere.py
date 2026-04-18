@@ -636,6 +636,64 @@ class TestIInstance:
         assert docs[0].metadata == metadata
         assert docs[0].metadata['objectId'] == 'obj-123'
 
+    def test_write_questions_metadata_alignment_after_filter(self):
+        """Regression test for metadata misalignment bug.
+
+        When some of the question.documents entries are skipped while
+        building doc_texts (because their page_content is empty), the
+        rerank result's ``index`` refers to the FILTERED doc_texts list,
+        not to the original question.documents list. The IInstance code
+        must use a parallel tracking list (``original_indices``) to map
+        each rerank index back to the correct original document so that
+        metadata is preserved.
+
+        Concrete scenario:
+            question.documents = [A, B, C, D]  (B has empty page_content)
+            doc_texts          = [A, C, D]     (B dropped)
+            Cohere returns index=1 -> C in the filtered list
+
+        BUG: using question.documents[1] would return B's metadata.
+        FIX: using original_indices[1] -> 2, question.documents[2] -> C.
+        """
+        # Cohere returns the FILTERED-list index 1 which must map to C
+        rerank_results = [
+            {'index': 1, 'relevance_score': 0.95, 'document': 'doc C content'},
+        ]
+        inst = self._make_instance(rerank_results=rerank_results)
+
+        meta_a = {'objectId': 'A', 'source': 'a.txt'}
+        meta_b = {'objectId': 'B', 'source': 'b.txt'}
+        meta_c = {'objectId': 'C', 'source': 'c.txt'}
+        meta_d = {'objectId': 'D', 'source': 'd.txt'}
+
+        question = _MockQuestion()
+        question.addQuestion('find C')
+        question.addDocuments(_MockDoc(page_content='doc A content', metadata=meta_a))
+        # B is dropped from doc_texts because page_content is empty
+        question.addDocuments(_MockDoc(page_content='', metadata=meta_b))
+        question.addDocuments(_MockDoc(page_content='doc C content', metadata=meta_c))
+        question.addDocuments(_MockDoc(page_content='doc D content', metadata=meta_d))
+
+        inst.writeQuestions(question)
+
+        # Verify that only non-empty docs were forwarded to the reranker
+        call_kwargs = inst.IGlobal._reranker.rerank_with_threshold.call_args
+        assert call_kwargs.kwargs['documents'] == [
+            'doc A content',
+            'doc C content',
+            'doc D content',
+        ]
+
+        # Verify the output doc has C's metadata (NOT B's, which would be
+        # the bug — B sits at question.documents[1] in the unfiltered list).
+        docs = inst.instance.writeDocuments.call_args[0][0]
+        assert len(docs) == 1
+        assert docs[0].page_content == 'doc C content'
+        assert docs[0].metadata == meta_c
+        assert docs[0].metadata['objectId'] == 'C'
+        # Explicit guard against the original bug: metadata must not be B's.
+        assert docs[0].metadata['objectId'] != 'B'
+
     def test_write_questions_empty_rerank_results(self):
         """WriteQuestions with no rerank results still writes an answer."""
         inst = self._make_instance(rerank_results=[])
