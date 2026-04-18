@@ -1,4 +1,4 @@
-/* =============================================================================
+* =============================================================================
  * MIT License
  * Copyright (c) 2026 Aparavi Software AG
  *
@@ -40,7 +40,6 @@
 
 .status-container {
 	padding: 15px;
-	background-color: var(--vscode-editor-background);
 }
 
 /* ============================================================================ */
@@ -305,12 +304,6 @@
 
 .action-btn.stop-btn:hover {
 	background: var(--vscode-errorForeground);
-}
-
-.action-btn.stopping-btn {
-	background: var(--vscode-charts-orange);
-	color: white;
-	cursor: not-allowed;
 }
 
 .action-btn.run-btn {
