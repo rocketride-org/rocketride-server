@@ -804,19 +804,31 @@ function makeCompileTestsAction(options = {}) {
 function makeInstallPipAction() {
     return {
         run: async (ctx, task) => {
-            // Bootstrap pip and install setuptools, wheel, build, pytest, pytest-asyncio (once; tracked in state)
+            const enginePath = path.join(DIST_DIR, 'engine');
+
+            // Bootstrap pip, install build tools, and test requirements (once; tracked in state)
             const pipInstalled = await getState('server.pipInstalled');
             if (!pipInstalled) {
-                const enginePath = path.join(DIST_DIR, 'engine');
                 task.output = 'Bootstrapping pip...';
                 await execCommand(enginePath, ['-m', 'ensurepip', '--default-pip'], { task, cwd: DIST_DIR });
                 task.output = 'Upgrading pip...';
                 await execCommand(enginePath, ['-m', 'pip', 'install', '--upgrade', 'pip'], { task, cwd: DIST_DIR });
-                task.output = 'Installing setuptools, wheel, build, pytest, pytest-asyncio...';
-                await execCommand(enginePath, ['-m', 'pip', 'install', 'setuptools>=75', 'wheel', 'build', 'pytest', 'pytest-asyncio'], { task, cwd: DIST_DIR });
+                task.output = 'Installing setuptools, wheel, build...';
+                await execCommand(enginePath, ['-m', 'pip', 'install', 'setuptools>=75', 'wheel', 'build'], { task, cwd: DIST_DIR });
+                task.output = 'Installing test requirements...';
+                const testReqs = path.join(PROJECT_ROOT, 'nodes', 'test', 'requirements.txt');
+                await execCommand(enginePath, ['-m', 'pip', 'install', '-r', testReqs], { task, cwd: DIST_DIR });
                 await setState('server.pipInstalled', true);
             } else {
                 task.output = 'Pip and build deps already installed (skipped)';
+            }
+
+            // Pre-install additional dependencies when --pytest-preinstall is provided
+            const preinstall = ctx.options && ctx.options.pytestPreinstall;
+            if (preinstall) {
+                const deps = preinstall.split(',').filter(Boolean);
+                task.output = `Pre-installing: ${deps.join(', ')}...`;
+                await execCommand(enginePath, ['-m', 'pip', 'install', ...deps], { task, cwd: DIST_DIR });
             }
         }
     };
