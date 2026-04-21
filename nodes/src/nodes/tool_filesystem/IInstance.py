@@ -77,10 +77,7 @@ class IInstance(IInstanceBase):
         description=('Read a file from the account file store and return its contents as a decoded string. Required: "path" (relative path). Optional: "encoding" (default "utf-8"). Returns: {path, content, size} where size is the byte length before decoding.'),
     )
     def read_file(self, args):
-        args = self._prepare(args, 'read_file')
-        path = _require_str(args, 'path')
-        encoding = _optional_str(args, 'encoding', default='utf-8') or 'utf-8'
-        self._check_path(path)
+        path, encoding, _ = self._prepare(args, 'read_file', needs_encoding=True)
 
         data = _run_async(self.IGlobal.file_store.read(path))
         try:
@@ -113,13 +110,7 @@ class IInstance(IInstanceBase):
         description=('Write (or overwrite) a file in the account file store. Required: "path", "content". Optional: "encoding" (default "utf-8"). Returns: {path, bytesWritten}.'),
     )
     def write_file(self, args):
-        args = self._prepare(args, 'write_file')
-        path = _require_str(args, 'path')
-        content = args.get('content')
-        if not isinstance(content, str):
-            raise ValueError('content is required and must be a string')
-        encoding = _optional_str(args, 'encoding', default='utf-8') or 'utf-8'
-        self._check_path(path)
+        path, encoding, content = self._prepare(args, 'write_file', needs_encoding=True, needs_content=True)
 
         try:
             data = content.encode(encoding)
@@ -144,9 +135,7 @@ class IInstance(IInstanceBase):
         description=('Delete a file from the account file store. Only available when the operator has enabled "allowDelete" on this node. Required: "path". Returns: {path, deleted: true}.'),
     )
     def delete_file(self, args):
-        args = self._prepare(args, 'delete_file')
-        path = _require_str(args, 'path')
-        self._check_path(path)
+        path, _, _ = self._prepare(args, 'delete_file')
 
         _run_async(self.IGlobal.file_store.delete(path))
         return {'path': path, 'deleted': True}
@@ -166,11 +155,7 @@ class IInstance(IInstanceBase):
         description=('List the immediate children of a directory in the account file store. Optional: "path" (defaults to the account root). Returns: {entries: [{name, type, size?, modified?}], count}.'),
     )
     def list_directory(self, args):
-        args = self._prepare(args, 'list_directory')
-        path = args.get('path', '')
-        if not isinstance(path, str):
-            raise ValueError('path must be a string')
-        self._check_path(path)
+        path, _, _ = self._prepare(args, 'list_directory', path_required=False)
 
         result = _run_async(self.IGlobal.file_store.list_dir(path))
         return result
@@ -190,9 +175,7 @@ class IInstance(IInstanceBase):
         description=('Create a directory in the account file store. Intermediate segments are created as needed. Required: "path". Returns: {path, created: true}.'),
     )
     def create_directory(self, args):
-        args = self._prepare(args, 'create_directory')
-        path = _require_str(args, 'path')
-        self._check_path(path)
+        path, _, _ = self._prepare(args, 'create_directory')
 
         _run_async(self.IGlobal.file_store.mkdir(path))
         return {'path': path, 'created': True}
@@ -212,9 +195,7 @@ class IInstance(IInstanceBase):
         description=('Get metadata for a file or directory in the account file store. Required: "path". Returns: {exists, type?, size?, modified?}.'),
     )
     def stat_file(self, args):
-        args = self._prepare(args, 'stat_file')
-        path = _require_str(args, 'path')
-        self._check_path(path)
+        path, _, _ = self._prepare(args, 'stat_file')
 
         return _run_async(self.IGlobal.file_store.stat(path))
 
@@ -258,13 +239,24 @@ class IInstance(IInstanceBase):
             return True
         return bool(getattr(self.IGlobal, flag, False))
 
-    def _prepare(self, args: Any, tool_name: str) -> dict:
-        """Shared prologue for every ``@tool_function`` method:
-        validate ``args`` is a dict (``None`` becomes ``{}``), verify the
-        FileStore initialised, and enforce the allow-flag for this op.
+    def _prepare(
+        self,
+        args: Any,
+        tool_name: str,
+        *,
+        path_required: bool = True,
+        needs_encoding: bool = False,
+        needs_content: bool = False,
+    ) -> tuple[str, str | None, str | None]:
+        """Shared prologue for every ``@tool_function`` method: validates
+        ``args`` is a dict (``None`` becomes ``{}``), verifies the FileStore
+        initialised, enforces the allow-flag, extracts the per-op fields, and
+        checks ``path`` against the whitelist.
 
-        Returns the validated args dict so the caller can read per-op fields
-        without re-validating. Raises ``ValueError`` on any failure.
+        ``path_required=False`` makes ``path`` optional (defaults to ``''``,
+        meaning the account root) — use this for directory-listing-style ops.
+        ``needs_encoding`` / ``needs_content`` pull those fields for ops that
+        take them. Fields not requested are returned as ``None``.
 
         This duplicates the filtering done by ``_collect_tool_methods``
         intentionally — defence-in-depth against direct method calls that
@@ -276,7 +268,26 @@ class IInstance(IInstanceBase):
         if not getattr(self.IGlobal, flag_attr, False):
             label = flag_attr.removeprefix('allow_')
             raise ValueError(f'{label} access is not enabled for this filesystem tool')
-        return args
+
+        if path_required:
+            path = _require_str(args, 'path')
+        else:
+            path = args.get('path', '')
+            if not isinstance(path, str):
+                raise ValueError('path must be a string')
+        self._check_path(path)
+
+        encoding: str | None = None
+        if needs_encoding:
+            encoding = _optional_str(args, 'encoding', default='utf-8') or 'utf-8'
+
+        content: str | None = None
+        if needs_content:
+            content = args.get('content')
+            if not isinstance(content, str):
+                raise ValueError('content is required and must be a string')
+
+        return path, encoding, content
 
     def _check_ready(self) -> None:
         """Verify the FileStore was successfully initialised in beginGlobal()."""
