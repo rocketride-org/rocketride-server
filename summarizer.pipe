@@ -1,0 +1,33 @@
+{
+  "project_id": "235fed05-10c0-44e8-a59a-0040cf399e6d",
+  "components": [],
+  "id": "summarizer",
+  "name": "Weather Data Summarizer",
+  "description": "Summarizes weather data using an LLM node",
+  "nodes": [
+    {
+      "id": "input",
+      "type": "webhook",
+      "label": "Raw Weather Data Input"
+    },
+    {
+      "id": "llm",
+      "type": "llm",
+      "label": "Summarize with LLM",
+      "config": {
+        "provider": "openai",
+        "model": "gpt-3.5-turbo",
+        "prompt": "You are a weather analyst. Summarize the following weather data clearly and highlight any anomalies:\n\n{{input}}"
+      }
+    },
+    {
+      "id": "output",
+      "type": "output",
+      "label": "Summary Output"
+    }
+  ],
+  "edges": [
+    { "from": "input", "to": "llm" },
+    { "from": "llm", "to": "output" }
+  ]
+}
