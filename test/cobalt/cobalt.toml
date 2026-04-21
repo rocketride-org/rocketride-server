@@ -1,0 +1,23 @@
+# =============================================================================
+# Cobalt configuration for RocketRide pipeline testing
+#
+# Cobalt (basalt-ai-cobalt) runs AI experiments: load a dataset, run each item
+# through an AI pipeline, evaluate outputs, and report scores.
+#
+# See docs/README-cobalt-testing.md for usage details.
+# =============================================================================
+
+[judge]
+model = "gpt-4o-mini"
+provider = "openai"
+
+[experiment]
+concurrency = 3
+timeout = 60000
+test_dir = "./experiments"
+
+[thresholds]
+# Average quality score across all test items must meet this bar
+avg = 0.7
+# 95th-percentile worst-case score must meet this bar
+p95 = 0.5
