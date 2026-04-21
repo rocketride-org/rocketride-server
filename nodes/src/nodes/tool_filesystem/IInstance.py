@@ -77,11 +77,7 @@ class IInstance(IInstanceBase):
         description=('Read a file from the account file store and return its contents as a decoded string. Required: "path" (relative path). Optional: "encoding" (default "utf-8"). Returns: {path, content, size} where size is the byte length before decoding.'),
     )
     def read_file(self, args):
-        args = _require_dict(args)
-        self._check_ready()
-        if not self.IGlobal.allow_read:
-            raise ValueError('read access is not enabled for this filesystem tool')
-
+        args = self._prepare(args, 'read_file')
         path = _require_str(args, 'path')
         encoding = _optional_str(args, 'encoding', default='utf-8') or 'utf-8'
         self._check_path(path)
@@ -117,11 +113,7 @@ class IInstance(IInstanceBase):
         description=('Write (or overwrite) a file in the account file store. Required: "path", "content". Optional: "encoding" (default "utf-8"). Returns: {path, bytesWritten}.'),
     )
     def write_file(self, args):
-        args = _require_dict(args)
-        self._check_ready()
-        if not self.IGlobal.allow_write:
-            raise ValueError('write access is not enabled for this filesystem tool')
-
+        args = self._prepare(args, 'write_file')
         path = _require_str(args, 'path')
         content = args.get('content')
         if not isinstance(content, str):
@@ -152,11 +144,7 @@ class IInstance(IInstanceBase):
         description=('Delete a file from the account file store. Only available when the operator has enabled "allowDelete" on this node. Required: "path". Returns: {path, deleted: true}.'),
     )
     def delete_file(self, args):
-        args = _require_dict(args)
-        self._check_ready()
-        if not self.IGlobal.allow_delete:
-            raise ValueError('delete access is not enabled for this filesystem tool')
-
+        args = self._prepare(args, 'delete_file')
         path = _require_str(args, 'path')
         self._check_path(path)
 
@@ -178,11 +166,7 @@ class IInstance(IInstanceBase):
         description=('List the immediate children of a directory in the account file store. Optional: "path" (defaults to the account root). Returns: {entries: [{name, type, size?, modified?}], count}.'),
     )
     def list_directory(self, args):
-        args = _require_dict(args) if args is not None else {}
-        self._check_ready()
-        if not self.IGlobal.allow_list:
-            raise ValueError('list access is not enabled for this filesystem tool')
-
+        args = self._prepare(args, 'list_directory')
         path = args.get('path', '')
         if not isinstance(path, str):
             raise ValueError('path must be a string')
@@ -206,11 +190,7 @@ class IInstance(IInstanceBase):
         description=('Create a directory in the account file store. Intermediate segments are created as needed. Required: "path". Returns: {path, created: true}.'),
     )
     def create_directory(self, args):
-        args = _require_dict(args)
-        self._check_ready()
-        if not self.IGlobal.allow_mkdir:
-            raise ValueError('mkdir access is not enabled for this filesystem tool')
-
+        args = self._prepare(args, 'create_directory')
         path = _require_str(args, 'path')
         self._check_path(path)
 
@@ -232,11 +212,7 @@ class IInstance(IInstanceBase):
         description=('Get metadata for a file or directory in the account file store. Required: "path". Returns: {exists, type?, size?, modified?}.'),
     )
     def stat_file(self, args):
-        args = _require_dict(args)
-        self._check_ready()
-        if not self.IGlobal.allow_stat:
-            raise ValueError('stat access is not enabled for this filesystem tool')
-
+        args = self._prepare(args, 'stat_file')
         path = _require_str(args, 'path')
         self._check_path(path)
 
@@ -281,6 +257,26 @@ class IInstance(IInstanceBase):
         if flag is None:
             return True
         return bool(getattr(self.IGlobal, flag, False))
+
+    def _prepare(self, args: Any, tool_name: str) -> dict:
+        """Shared prologue for every ``@tool_function`` method:
+        validate ``args`` is a dict (``None`` becomes ``{}``), verify the
+        FileStore initialised, and enforce the allow-flag for this op.
+
+        Returns the validated args dict so the caller can read per-op fields
+        without re-validating. Raises ``ValueError`` on any failure.
+
+        This duplicates the filtering done by ``_collect_tool_methods``
+        intentionally — defence-in-depth against direct method calls that
+        bypass the tool dispatcher.
+        """
+        args = _require_dict(args) if args is not None else {}
+        self._check_ready()
+        flag_attr = self._ALLOW_FLAG_BY_TOOL[tool_name]
+        if not getattr(self.IGlobal, flag_attr, False):
+            label = flag_attr.removeprefix('allow_')
+            raise ValueError(f'{label} access is not enabled for this filesystem tool')
+        return args
 
     def _check_ready(self) -> None:
         """Verify the FileStore was successfully initialised in beginGlobal()."""
