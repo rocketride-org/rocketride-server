@@ -43,7 +43,7 @@ def _validate_path(path: str) -> str:
     try:
         common = os.path.commonpath([real_path, real_cwd])
     except ValueError:
-        raise ValueError(f'Path traversal detected: {path}')
+        raise ValueError(f'Path traversal detected: {path}') from None
 
     if common != real_cwd:
         raise ValueError(f'Path {path} is outside the working directory')

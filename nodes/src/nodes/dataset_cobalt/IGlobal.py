@@ -78,8 +78,8 @@ class IGlobal(IGlobalBase):
                 warning(f'Cobalt Dataset Global: sample_size must be >= 0, got {sample_size}')
                 return
 
-        except Exception as e:
-            warning(f'Cobalt Dataset Global: Configuration validation error: {str(e)}')
+        except Exception as e:  # noqa: BLE001 - validation warns instead of aborting config save
+            warning(f'Cobalt Dataset Global: Configuration validation error: {e!s}')
             return
 
     def beginGlobal(self):

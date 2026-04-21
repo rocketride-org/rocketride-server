@@ -59,21 +59,33 @@ class IInstance(IInstanceBase):
             # Deep copy prevents mutation between emitted questions
             q = copy.deepcopy(question)
 
-            # Set the question text from the dataset item
+            # Set the question text from the dataset item, replacing any
+            # prompt carried by the incoming template so emitted items
+            # contain only the dataset's prompt.
             text = item.get('text', '')
             if text:
+                if hasattr(q, 'questions'):
+                    try:
+                        q.questions = []
+                    except (ValueError, AttributeError):
+                        pass
                 q.addQuestion(text)
 
             # Attach metadata to the question without injecting expected
             # answers into the prompt context (which the LLM would see).
-            # Store expected output and dataset ID in question metadata only.
+            # The shared Question schema does not declare a metadata field
+            # and does not allow extras, so assignment may raise ValueError
+            # on Pydantic v2; degrade gracefully so the pipeline still runs.
             metadata = item.get('metadata', {})
-            if hasattr(q, 'metadata') and isinstance(q.metadata, dict):
-                q.metadata.update(metadata)
-            elif hasattr(q, 'metadata'):
-                q.metadata = dict(metadata)
-            else:
-                q.metadata = dict(metadata)
+            if metadata:
+                try:
+                    existing = getattr(q, 'metadata', None)
+                    if isinstance(existing, dict):
+                        existing.update(metadata)
+                    else:
+                        q.metadata = dict(metadata)
+                except (ValueError, AttributeError) as exc:
+                    debug(f'Cobalt Dataset Instance: Question schema does not accept metadata; expected/context will not reach eval_cobalt ({exc})')
 
             self.instance.writeQuestions(q)
 

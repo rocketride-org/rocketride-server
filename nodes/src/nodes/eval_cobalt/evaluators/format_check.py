@@ -148,7 +148,7 @@ def _check_json_format(output: str) -> dict:
     """
     stripped = output.strip()
 
-    code_block_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', stripped, re.DOTALL)
+    code_block_match = re.search(r'```(?:json)?\s*(.*?)\s*```', stripped, re.DOTALL)
     if code_block_match:
         stripped = code_block_match.group(1).strip()
 

@@ -178,7 +178,7 @@ Measures whether output claims are supported by the provided context:
 Parameters:
 
 - `output` (str): The LLM-generated answer
-- `context` (str): Source documents (concatenated)
+- `context` (str | list[str]): Source documents. A list of strings is concatenated before word extraction; pass the raw list when documents are already split.
 - `threshold` (float): Minimum score to pass (default 0.5)
 
 ### format_check.evaluate_format(output, expected_format, ...)

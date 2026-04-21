@@ -68,7 +68,7 @@ class IGlobal(IGlobalBase):
                 warning('Threshold must be a valid number between 0.0 and 1.0')
                 return
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - validation surfaces dependency/config failures as warnings
             warning(str(e))
 
     def beginGlobal(self):

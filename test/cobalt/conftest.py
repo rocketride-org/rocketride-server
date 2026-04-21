@@ -29,8 +29,12 @@ import sys
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-# Make the evaluators package importable from experiment test files
-sys.path.insert(0, os.path.dirname(__file__))
+# Make the evaluators package importable from experiment test files.
+# Append (with duplicate guard) rather than insert at position 0 so this
+# directory can never shadow packages of the same name if the codebase grows.
+_cobalt_test_dir = os.path.dirname(__file__)
+if _cobalt_test_dir not in sys.path:
+    sys.path.append(_cobalt_test_dir)
 
 
 @pytest.fixture

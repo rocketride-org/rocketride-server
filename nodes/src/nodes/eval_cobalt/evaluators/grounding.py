@@ -62,22 +62,26 @@ def _extract_content_words(text: str) -> set[str]:
     return words - STOP_WORDS
 
 
-def _sentence_grounded_in_context(sentence: str, context_words: set[str]) -> float:
+def _sentence_grounded_in_context(sentence: str, context_words: set[str]) -> float | None:
     """Compute how well a single sentence is grounded in the context.
 
     Measures the fraction of content words in the sentence that also
-    appear in the context.
+    appear in the context. Sentences with no content words (e.g.
+    "It is.", "These are.") return ``None`` so the aggregator can skip
+    them rather than counting them as perfectly grounded — which would
+    inflate the overall mean and mask hallucinations.
 
     Args:
         sentence: A single sentence from the output.
         context_words: Content words from all context documents combined.
 
     Returns:
-        A float between 0.0 and 1.0 representing grounding strength.
+        A float in [0.0, 1.0] representing grounding strength, or
+        ``None`` if the sentence carries no content words.
     """
     sentence_words = _extract_content_words(sentence)
     if not sentence_words:
-        return 1.0
+        return None
 
     grounded_words = sentence_words & context_words
     return len(grounded_words) / len(sentence_words)
@@ -115,16 +119,29 @@ def evaluate_grounding(output: str, context: str, threshold: float = 0.5) -> dic
         return {'score': 0.0, 'passed': False, 'reasoning': 'No parseable sentences in output.', 'details': []}
 
     sentence_scores = []
+    scored_only: list[float] = []
     for sentence in sentences:
         score = _sentence_grounded_in_context(sentence, context_words)
+        if score is None:
+            sentence_scores.append({'sentence': sentence, 'score': None, 'skipped': True})
+            continue
         sentence_scores.append({'sentence': sentence, 'score': round(score, 4)})
+        scored_only.append(score)
 
-    avg_score = sum(s['score'] for s in sentence_scores) / len(sentence_scores)
+    if not scored_only:
+        return {
+            'score': 0.0,
+            'passed': False,
+            'reasoning': 'No sentences with content words to evaluate.',
+            'details': sentence_scores,
+        }
+
+    avg_score = sum(scored_only) / len(scored_only)
     passed = avg_score >= threshold
 
-    ungrounded = [s for s in sentence_scores if s['score'] < threshold]
+    ungrounded = [s for s in sentence_scores if s.get('score') is not None and s['score'] < threshold]
     if ungrounded:
-        ungrounded_summary = f'{len(ungrounded)}/{len(sentence_scores)} sentences below threshold'
+        ungrounded_summary = f'{len(ungrounded)}/{len(scored_only)} sentences below threshold'
     else:
         ungrounded_summary = 'All sentences adequately grounded'
 

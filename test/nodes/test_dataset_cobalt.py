@@ -177,7 +177,14 @@ def _snapshot_modules():
 
 
 def _restore_modules_impl():
-    """Restore sys.modules to pre-mock state."""
+    """Restore sys.modules to pre-mock state.
+
+    Note: mocks must stay installed for the full pytest session because
+    ``dataset_loader.py`` performs lazy ``from cobalt import Dataset`` inside
+    its methods (re-reads ``sys.modules`` at call time). Restoring earlier
+    would break tests. The session fixture is the narrowest scope that's
+    compatible with those runtime imports.
+    """
     sys.path[:] = _original_path
     for name, orig in _original_modules.items():
         if orig is None:
@@ -186,8 +193,10 @@ def _restore_modules_impl():
             sys.modules[name] = orig
     # Drop any cached imports that were resolved through _NODES_DIR so they
     # don't leak into other test modules that may want the real packages.
+    # Covers both `dataset_cobalt.*` (via _NODES_DIR) and `nodes.dataset_cobalt.*`
+    # (via the top-level `nodes` package) just in case.
     for key in list(sys.modules):
-        if key.startswith('dataset_cobalt'):
+        if key.startswith('dataset_cobalt') or key.startswith('nodes.dataset_cobalt'):
             del sys.modules[key]
 
 
@@ -775,8 +784,9 @@ class TestGoldAnswerNotInContext:
         inst.writeQuestions(template)
 
         assert len(emitted) == 1
-        # The context list must NOT contain the expected answer
-        assert 'secret_answer' not in emitted[0].context
+        # The context list must NOT contain the expected answer in any form
+        # (including nested structures like ['expected: secret_answer']).
+        assert 'secret_answer' not in repr(emitted[0].context)
         # But metadata should have it
         assert emitted[0].metadata.get('expected') == 'secret_answer'
 

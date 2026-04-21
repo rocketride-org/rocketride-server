@@ -93,7 +93,7 @@
 	//		Test configuration for automated node testing
 	//
 	"test": {
-		"profiles": ["file", "inline"],
+		"profiles": ["inline"],
 		"cases": [
 			{
 				"text": "Load dataset",

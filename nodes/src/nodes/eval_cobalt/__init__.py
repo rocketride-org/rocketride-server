@@ -22,8 +22,8 @@
 # =============================================================================
 
 __all__ = [
-    'IInstance',
     'IGlobal',
+    'IInstance',
 ]
 
 # The IGlobal/IInstance modules depend on rocketlib (the RocketRide runtime),

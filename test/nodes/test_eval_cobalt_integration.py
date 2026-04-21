@@ -35,6 +35,7 @@ Run with:
     pytest -m integration test/nodes/test_eval_cobalt_integration.py
 """
 
+import importlib.util
 import os
 import pathlib
 import sys
@@ -43,9 +44,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# Skip the whole module when the real cobalt library is not installed.
 # The basalt-ai-cobalt package exposes its API under the `cobalt` module name.
-cobalt = pytest.importorskip('cobalt', reason='requires basalt-ai-cobalt to be installed')
+# Tests that require the real library are guarded individually so that
+# `--collect-only` still reports the full set of tests even when the library
+# is not installed in the current environment.
+_cobalt_installed = importlib.util.find_spec('cobalt') is not None
+_requires_cobalt = pytest.mark.skipif(
+    not _cobalt_installed,
+    reason='requires basalt-ai-cobalt to be installed',
+)
 
 pytestmark = pytest.mark.integration
 
@@ -122,6 +129,7 @@ from eval_cobalt.cobalt_evaluator import CobaltEvaluator  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
+@_requires_cobalt
 def test_similarity_real_library_path():
     """Drive similarity evaluation through the real `cobalt.Evaluator`.
 
@@ -143,6 +151,7 @@ def test_similarity_real_library_path():
     assert 'reasoning' in result
 
 
+@_requires_cobalt
 @pytest.mark.skipif(not os.getenv('OPENAI_API_KEY'), reason='requires OPENAI_API_KEY for llm_judge integration')
 def test_llm_judge_real_library_path():
     """Drive llm_judge evaluation through the real library + real API.
