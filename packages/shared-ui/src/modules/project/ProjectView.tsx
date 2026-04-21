@@ -78,11 +78,6 @@ const styles = {
 		flexDirection: 'column',
 		position: 'relative',
 	} as CSSProperties,
-	empty: {
-		color: 'var(--rr-text-disabled)',
-		textAlign: 'center',
-		padding: 32,
-	} as CSSProperties,
 	sourcePane: {
 		...commonStyles.card,
 		borderRadius: 6,
@@ -95,20 +90,14 @@ const styles = {
 	} as CSSProperties,
 	sourceBody: commonStyles.cardBody,
 	errorBadge: {
-		fontSize: 11,
-		fontWeight: 600,
-		padding: '2px 8px',
-		borderRadius: 10,
+		...commonStyles.badge,
 		backgroundColor: 'var(--rr-color-error)',
-		color: '#fff',
+		color: 'var(--rr-fg-button)',
 	} as CSSProperties,
 	warningBadge: {
-		fontSize: 11,
-		fontWeight: 600,
-		padding: '2px 8px',
-		borderRadius: 10,
+		...commonStyles.badge,
 		backgroundColor: 'var(--rr-color-warning)',
-		color: '#fff',
+		color: 'var(--rr-fg-button)',
 	} as CSSProperties,
 };
 
@@ -417,16 +406,16 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={handleRunPipeline} onStopPipeline={handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isDirty} isNew={isNew} onSave={handleSave} />}</div>,
 		},
 		status: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} onPipelineAction={handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={styles.empty}>No source components found</div>}</div>,
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} onPipelineAction={handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
 		},
 		tokens: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTokensPane key={src.id} source={src} taskStatus={statusMap[src.id]} />) : <div style={styles.empty}>No source components found</div>}</div>,
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTokensPane key={src.id} source={src} taskStatus={statusMap[src.id]} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
 		},
 		flow: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceFlowPane key={src.id} source={src} taskStatus={statusMap[src.id]} viewMode={viewState.flowViewMode ?? 'pipeline'} onViewModeChange={(vm) => updateViewState({ flowViewMode: vm })} />) : <div style={styles.empty}>No source components found</div>}</div>,
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceFlowPane key={src.id} source={src} taskStatus={statusMap[src.id]} viewMode={viewState.flowViewMode ?? 'pipeline'} onViewModeChange={(vm) => updateViewState({ flowViewMode: vm })} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
 		},
 		trace: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTracePane key={src.id} source={src} rows={traceRows.filter((r) => r.source === src.id)} componentNames={componentNames} onClear={handleTraceClear} />) : <div style={styles.empty}>No source components found</div>}</div>,
+			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTracePane key={src.id} source={src} rows={traceRows.filter((r) => r.source === src.id)} componentNames={componentNames} onClear={handleTraceClear} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
 		},
 		errors: {
 			content: (
@@ -460,7 +449,7 @@ const ProjectView = forwardRef<ProjectViewRef, IProjectViewProps>(({ onMessage }
 							</div>
 						);
 					})}
-					{totalErrors === 0 && totalWarnings === 0 && <div style={styles.empty}>No errors or warnings</div>}
+					{totalErrors === 0 && totalWarnings === 0 && <div style={commonStyles.empty}>No errors or warnings</div>}
 				</div>
 			),
 		},
