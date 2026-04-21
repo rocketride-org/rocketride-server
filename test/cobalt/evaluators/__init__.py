@@ -21,70 +21,24 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Shared constants for Cobalt evaluators."""
+"""Shim package that re-exports the canonical evaluators from the eval_cobalt node.
 
-STOP_WORDS: set[str] = {
-    'a',
-    'an',
-    'the',
-    'is',
-    'are',
-    'was',
-    'were',
-    'be',
-    'been',
-    'being',
-    'have',
-    'has',
-    'had',
-    'do',
-    'does',
-    'did',
-    'will',
-    'would',
-    'could',
-    'should',
-    'may',
-    'might',
-    'shall',
-    'can',
-    'to',
-    'of',
-    'in',
-    'for',
-    'on',
-    'with',
-    'at',
-    'by',
-    'from',
-    'as',
-    'into',
-    'through',
-    'during',
-    'before',
-    'after',
-    'and',
-    'but',
-    'or',
-    'nor',
-    'not',
-    'so',
-    'yet',
-    'both',
-    'either',
-    'neither',
-    'it',
-    'its',
-    'that',
-    'this',
-    'these',
-    'those',
-    'their',
-    'them',
-    'they',
-    'what',
-    'which',
-    'who',
-    'whom',
-    'whose',
-}
+The evaluator logic now lives in `nodes/src/nodes/eval_cobalt/evaluators/`
+as a first-class component of the Cobalt evaluator node. This shim keeps
+the experiment test files in `test/cobalt/experiments/` working without
+rewriting their imports: they can continue to do
+`from evaluators.relevance import evaluate_relevance`.
+"""
+
+import os
+import sys
+
+# Ensure the node-package evaluators are importable by adding the nodes/src/nodes
+# directory to sys.path. This mirrors the pattern used by test/nodes/test_eval_cobalt.py.
+_NODES_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'nodes', 'src', 'nodes'))
+if _NODES_DIR not in sys.path:
+    sys.path.insert(0, _NODES_DIR)
+
+from eval_cobalt.evaluators import STOP_WORDS  # noqa: E402, F401 — re-export for experiments
+
+__all__ = ['STOP_WORDS']

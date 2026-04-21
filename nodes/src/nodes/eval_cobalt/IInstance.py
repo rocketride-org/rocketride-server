@@ -97,8 +97,10 @@ class IInstance(IInstanceBase):
         elif isinstance(json_data, dict):
             expected = json_data.get('expected', '') or json_data.get('context', '')
 
-        if not expected and evaluator.eval_type == 'similarity':
-            debug('Cobalt evaluator: no expected text found for similarity mode; score will be 0')
+        if not expected and evaluator.eval_type in ('similarity', 'relevance'):
+            debug(f'Cobalt evaluator: no expected text found for {evaluator.eval_type} mode; score will be 0')
+        if not expected and evaluator.eval_type == 'grounding':
+            debug('Cobalt evaluator: no context text found for grounding mode; score will be 0')
 
         result = evaluator.evaluate(output_text, expected)
 

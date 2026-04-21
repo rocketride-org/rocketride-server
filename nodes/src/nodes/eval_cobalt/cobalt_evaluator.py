@@ -41,7 +41,7 @@ except ImportError:
     Evaluator = None  # type: ignore
 
 
-_VALID_EVAL_TYPES = ('similarity', 'llm_judge', 'custom')
+_VALID_EVAL_TYPES = ('similarity', 'llm_judge', 'custom', 'relevance', 'grounding', 'format')
 
 
 class CobaltEvaluator:
@@ -84,6 +84,7 @@ class CobaltEvaluator:
         self._model = config.get('model', 'gpt-4')
         self._criteria = config.get('criteria', 'Is the output correct, complete, and well-structured?')
         self._apikey = config.get('apikey', '')
+        self._expected_format = config.get('expected_format', 'prose')
 
         # Resolve custom evaluation function: explicit arg > config > bag
         resolved_fn = custom_fn
@@ -211,12 +212,79 @@ class CobaltEvaluator:
             debug(f'Custom evaluation failed: {e}')
             return self._make_result(0.0, self._threshold, f'Custom evaluation failed: {type(e).__name__}', 'custom')
 
+    def evaluate_relevance(self, output: str, expected: str, threshold: Optional[float] = None) -> Dict[str, Any]:
+        """Evaluate response relevance using deterministic keyword + length heuristics.
+
+        Args:
+            output: The LLM-generated output text.
+            expected: The expected/reference text to compare against.
+            threshold: Override the default threshold for this call.
+
+        Returns:
+            Evaluation result dict with score, passed, reasoning, and evaluator keys.
+        """
+        threshold = threshold if threshold is not None else self._threshold
+        try:
+            from .evaluators.relevance import evaluate_relevance as _relevance_fn
+
+            result = _relevance_fn(output, expected, threshold=threshold)
+            return self._make_result(float(result.get('score', 0.0)), threshold, result.get('reasoning', ''), 'relevance')
+        except Exception as e:
+            debug(f'Relevance evaluation failed: {e}')
+            return self._make_result(0.0, threshold, f'Relevance evaluation failed: {type(e).__name__}', 'relevance')
+
+    def evaluate_grounding(self, output: str, context: str, threshold: Optional[float] = None) -> Dict[str, Any]:
+        """Evaluate whether output is grounded in the provided context.
+
+        Args:
+            output: The LLM-generated output text.
+            context: The source context (reference passages) the output should be grounded in.
+            threshold: Override the default threshold for this call.
+
+        Returns:
+            Evaluation result dict with score, passed, reasoning, and evaluator keys.
+        """
+        threshold = threshold if threshold is not None else self._threshold
+        try:
+            from .evaluators.grounding import evaluate_grounding as _grounding_fn
+
+            result = _grounding_fn(output, context, threshold=threshold)
+            return self._make_result(float(result.get('score', 0.0)), threshold, result.get('reasoning', ''), 'grounding')
+        except Exception as e:
+            debug(f'Grounding evaluation failed: {e}')
+            return self._make_result(0.0, threshold, f'Grounding evaluation failed: {type(e).__name__}', 'grounding')
+
+    def evaluate_format(self, output: str, expected_format: Optional[str] = None, threshold: Optional[float] = None) -> Dict[str, Any]:
+        """Evaluate output formatting against an expected structural format.
+
+        Args:
+            output: The LLM-generated output text.
+            expected_format: The expected format type (prose, list, code, json).
+                If None, uses the configured expected_format.
+            threshold: Override the default threshold for this call.
+
+        Returns:
+            Evaluation result dict with score, passed, reasoning, and evaluator keys.
+        """
+        threshold = threshold if threshold is not None else self._threshold
+        expected_format = expected_format or self._expected_format
+        try:
+            from .evaluators.format_check import evaluate_format as _format_fn
+
+            result = _format_fn(output, expected_format=expected_format, threshold=threshold)
+            return self._make_result(float(result.get('score', 0.0)), threshold, result.get('reasoning', ''), 'format')
+        except Exception as e:
+            debug(f'Format evaluation failed: {e}')
+            return self._make_result(0.0, threshold, f'Format evaluation failed: {type(e).__name__}', 'format')
+
     def evaluate(self, output: str, expected: str, eval_type: Optional[str] = None) -> Dict[str, Any]:
         """Dispatch to the appropriate evaluator based on eval_type.
 
         Args:
             output: The LLM-generated output text.
-            expected: The expected/reference text for comparison.
+            expected: The expected/reference text for comparison. For grounding,
+                this is treated as the source context to check grounding against.
+                For format, this argument is ignored (expected_format comes from config).
             eval_type: Override the configured eval_type for this call.
 
         Returns:
@@ -228,6 +296,12 @@ class CobaltEvaluator:
             return self.evaluate_llm_judge(output, expected)
         elif eval_type == 'custom':
             return self.evaluate_custom(output, expected, eval_fn=self._custom_fn)
+        elif eval_type == 'relevance':
+            return self.evaluate_relevance(output, expected)
+        elif eval_type == 'grounding':
+            return self.evaluate_grounding(output, expected)
+        elif eval_type == 'format':
+            return self.evaluate_format(output)
         else:
             return self.evaluate_semantic(output, expected)
 

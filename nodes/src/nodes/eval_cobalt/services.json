@@ -94,6 +94,22 @@
 				"title": "Custom Function      - User-defined evaluation logic",
 				"eval_type": "custom",
 				"threshold": 0.7
+			},
+			"relevance": {
+				"title": "Relevance            - Keyword overlap + length heuristics (deterministic)",
+				"eval_type": "relevance",
+				"threshold": 0.5
+			},
+			"grounding": {
+				"title": "Grounding            - Verify output is grounded in provided context",
+				"eval_type": "grounding",
+				"threshold": 0.5
+			},
+			"format": {
+				"title": "Format               - Check output structure (prose/list/code/json)",
+				"eval_type": "format",
+				"threshold": 0.5,
+				"expected_format": "prose"
 			}
 		}
 	},
@@ -139,6 +155,25 @@
 			"object": "custom",
 			"properties": ["cobalt_eval.threshold"]
 		},
+		"cobalt_eval.expected_format": {
+			"type": "string",
+			"title": "Expected format",
+			"description": "Structural format to validate the output against",
+			"default": "prose",
+			"enum": ["prose", "list", "code", "json"]
+		},
+		"cobalt_eval.relevance": {
+			"object": "relevance",
+			"properties": ["cobalt_eval.threshold"]
+		},
+		"cobalt_eval.grounding": {
+			"object": "grounding",
+			"properties": ["cobalt_eval.threshold"]
+		},
+		"cobalt_eval.format": {
+			"object": "format",
+			"properties": ["cobalt_eval.threshold", "cobalt_eval.expected_format"]
+		},
 		"cobalt_eval.profile": {
 			"title": "Evaluator",
 			"description": "Cobalt evaluator profile",
@@ -157,6 +192,18 @@
 				{
 					"value": "custom",
 					"properties": ["cobalt_eval.custom"]
+				},
+				{
+					"value": "relevance",
+					"properties": ["cobalt_eval.relevance"]
+				},
+				{
+					"value": "grounding",
+					"properties": ["cobalt_eval.grounding"]
+				},
+				{
+					"value": "format",
+					"properties": ["cobalt_eval.format"]
 				}
 			]
 		}
