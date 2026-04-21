@@ -4,7 +4,7 @@
 # =============================================================================
 """Timeout and iteration-count enforcement for flow drivers.
 
-`Bounds` is shared by every `flow_*` node: `flow_if` uses only the
+`Bounds` is shared by every `flow_*` node: `flow_if_else` uses only the
 overall timeout; `flow_for` / `flow_while` / `flow_map` additionally
 enforce `max_iterations` so a runaway loop cannot stall the pipeline.
 """

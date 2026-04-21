@@ -47,7 +47,7 @@ import { IServiceCatalog, IServiceLane, INodeData, INodeLayout } from '../../../
 
 import { LaneHandle } from '../../../handles';
 import { useFlow } from '../../../../hooks';
-import { sortOutputLanes, getOutputLaneDisplayValues, renameLanes } from '../../../../util/helpers';
+import { sortOutputLanes, getOutputLaneDisplayValues, renameLanes, getKnownContentLanes, expandWildcardLanes } from '../../../../util/helpers';
 import ConditionalRender from '../../../ConditionalRender';
 import InsideLines from './InsideLines';
 
@@ -108,9 +108,13 @@ const RedAsterisk = (
 // Component
 // =============================================================================
 
-export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGroup }: IProps): ReactElement | null {
+export default function NodeLanes({ nodeId, lanes: rawLanes, layout, data, isGroup: _isGroup }: IProps): ReactElement | null {
 	const { edges, servicesJson: _servicesJson, setQuickAddState } = useFlow();
 	const servicesJson = useMemo(() => (_servicesJson ?? {}) as IServiceCatalog, [_servicesJson]);
+
+	// Expand `"*"` wildcard lanes into the full set of content lanes known
+	// to the catalog. Non-wildcard maps pass through unchanged.
+	const lanes = useMemo(() => expandWildcardLanes(rawLanes, getKnownContentLanes(servicesJson)), [rawLanes, servicesJson]);
 
 	// Service-level display fields looked up from catalog at render time
 	const service = servicesJson[data.provider];
@@ -133,23 +137,40 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 	}, [lanes]);
 
 	const outputLanes = useMemo(() => {
-		const uniqueOutputTypes = new Set<string>();
-		const outputLanesByType = new Map<string, { type: string; required: boolean; sourceId: string; label: string }>();
+		const uniqueKeys = new Set<string>();
+		const outputLanesByKey = new Map<string, { type: string; required: boolean; sourceId: string; label: string; branch?: string }>();
+		const branches = service?.branches ?? [];
 
 		inputLanes.forEach((inputLane: { type: string; targetId: string; label: string }) => {
 			const sortedOutputLaneList = sortOutputLanes(lanes[inputLane?.type]);
 			sortedOutputLaneList.forEach((outputLane) => {
 				const { type, required, sourceId, label } = getOutputLaneDisplayValues(outputLane);
-				if (!uniqueOutputTypes.has(type)) {
-					uniqueOutputTypes.add(type);
-					outputLanesByType.set(type, { type, required, sourceId, label });
+				if (branches.length > 0) {
+					// Conditional router: render one port per (type, branch) pair.
+					// Each branch gets its own handle ID so edges preserve the branch identity.
+					for (const branch of branches) {
+						const key = `${type}-${branch}`;
+						if (!uniqueKeys.has(key)) {
+							uniqueKeys.add(key);
+							outputLanesByKey.set(key, {
+								type,
+								required,
+								sourceId: `source-${type}-${branch}`,
+								label: `${label} · ${branch}`,
+								branch,
+							});
+						}
+					}
+				} else if (!uniqueKeys.has(type)) {
+					uniqueKeys.add(type);
+					outputLanesByKey.set(type, { type, required, sourceId, label });
 				}
 			});
 		});
 
-		const deduplicatedLanes = Array.from(outputLanesByType.values()).sort((a, b) => a.label.localeCompare(b.label));
+		const deduplicatedLanes = Array.from(outputLanesByKey.values()).sort((a, b) => a.label.localeCompare(b.label));
 		return inputLanes.map(() => deduplicatedLanes);
-	}, [lanes, inputLanes]);
+	}, [lanes, inputLanes, service]);
 
 	const isInputConnected = useCallback((targetId: string) => edges.some((edge) => edge.targetHandle === targetId && edge.target === nodeId), [edges, nodeId]);
 
@@ -261,12 +282,12 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 				>
 					<ConditionalRender condition={uniqueOutputLanes.length > 0}>
 						<>
-							{uniqueOutputLanes.map((outputLane: { type: string; required: string | boolean; sourceId: string; label: string }) => {
-								const { type, required, sourceId, label } = outputLane;
+							{uniqueOutputLanes.map((outputLane: { type: string; required: string | boolean; sourceId: string; label: string; branch?: string }) => {
+								const { type, required, sourceId, label, branch } = outputLane;
 
 								return (
 									<div
-										key={`output-${title}-${type}`}
+										key={`output-${title}-${sourceId}`}
 										style={{
 											...styles.connectionType,
 											justifyContent: 'end',
@@ -294,6 +315,7 @@ export default function NodeLanes({ nodeId, lanes, layout, data, isGroup: _isGro
 														isSource: true,
 														position: { x: e.clientX, y: e.clientY },
 														mode: 'lane',
+														branch,
 													})
 												}
 											/>

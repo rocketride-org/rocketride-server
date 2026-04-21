@@ -285,17 +285,22 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
     //     }
     _block() {
         for (auto &[id, comp] : comps) {
+            const auto &lanesDef = comp.def->serviceDefinition["lanes"];
+            // `"*"` is a wildcard meaning "accept any engine-known input lane
+            // and emit on the same lane" (used by flow_if_else / flow_switch).
+            const bool wildcard = lanesDef.isMember("*");
             for (auto &input : comp.inputs) {
                 for (auto &output : comp.outputs) {
-                    if (!comp.def->serviceDefinition["lanes"].isMember(
-                            input->name))
+                    if (!wildcard && !lanesDef.isMember(input->name))
                         return APERR(Ec::InvalidParam, "Component", id,
                                      "input lane", input->name,
                                      "not found in service definition");
 
-                    if (_anyOf(
-                            comp.def->serviceDefinition["lanes"][input->name],
-                            output->name))
+                    const auto &outDef = wildcard ? lanesDef["*"] : lanesDef[input->name];
+                    const bool matches = wildcard && _anyOf(outDef, "*")
+                        ? (input->name == output->name)
+                        : _anyOf(outDef, output->name);
+                    if (matches)
                         input->outputs.push_back(output);
                 }
             }

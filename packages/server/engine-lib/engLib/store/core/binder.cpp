@@ -113,6 +113,10 @@ Error Binder::callMethods(
 
     // Iterate over bound instances and invoke the callback
     for (auto *pInstance : *(it->second)) {
+        // Optional per-call target filter: skip instances that don't match.
+        // Empty filter preserves the original broadcast behaviour.
+        if (!pThis->m_targetFilter.empty() && pInstance->pipeType.id != pThis->m_targetFilter) continue;
+
         // Build enter trace
         json::Value enterTrace;
         if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {

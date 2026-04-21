@@ -913,6 +913,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(control, &IServiceFilterInstance::cb_control,
                 py::arg("classType"), py::arg("control"),
                 py::arg("nodeId") = "")
+        .PYBIND(setTargetFilter, &IServiceFilterInstance::cb_setTargetFilter)
         .PYBIND(open, &IServiceFilterInstance::cb_open)
         .PYBIND(writeTagBeginObject,
                 &IServiceFilterInstance::cb_writeTagBeginObject)

@@ -4,7 +4,7 @@
 # =============================================================================
 """Shared async-first infrastructure for `flow_*` nodes.
 
-Exposes the public API consumed by concrete flow drivers (`flow_if`,
+Exposes the public API consumed by concrete flow drivers (`flow_if_else`,
 `flow_for`, `flow_while`, ...) and by user code running inside the
 sandbox (`rocketride.flow.cond`, `state`, `invoke`, `emit`).
 
@@ -19,6 +19,7 @@ from .trace import FlowTrace
 from .invoker import AsyncInvoker
 from .sandbox import SandboxError, evaluate_expression
 from .driver import FlowDriverBase
+from .gating import AutoGatingMixin
 from . import cond
 
 __all__ = [
@@ -34,5 +35,6 @@ __all__ = [
     'SandboxError',
     'evaluate_expression',
     'FlowDriverBase',
+    'AutoGatingMixin',
     'cond',
 ]

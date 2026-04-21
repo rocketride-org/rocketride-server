@@ -320,6 +320,7 @@ public:
         std::string &classType) noexcept(false);
     virtual void cb_control(std::string &filter, py::object &control,
                             std::string nodeId = "") noexcept(false);
+    virtual void cb_setTargetFilter(std::string nodeId) noexcept(false);
     virtual void cb_open(py::object entry) noexcept(false);
     virtual void cb_writeTagBeginObject() noexcept(false);
     virtual void cb_writeTagBeginStream() noexcept(false);

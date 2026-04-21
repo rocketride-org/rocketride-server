@@ -81,6 +81,11 @@ export interface IQuickAddState {
 	mode: 'lane' | 'invoke';
 	/** For invoke-source clicks: the channel key (e.g. "llm"). Undefined for invoke-target or lane mode. */
 	invokeKey?: string;
+	/**
+	 * For lane-source clicks on a branched node (e.g. flow_if_else): the branch
+	 * this handle belongs to (e.g. "then", "else"). Undefined on single-output nodes.
+	 */
+	branch?: string;
 }
 
 // =============================================================================
@@ -342,7 +347,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		if (!onContentChanged || isLoadingRef.current) return;
 
 		setTimeout(() => {
-			const components = getProjectComponents(nodesRef.current as INode[]);
+			const components = getProjectComponents(nodesRef.current as INode[], servicesJson);
 			const nextVersion = (lastSentVersion.current ?? 0) + 1;
 			const layout = projectLayoutRef.current;
 			const project: IProject = {
@@ -560,14 +565,16 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 									},
 								};
 							} else {
-								// Remove matching lane input by source + lane
-								const lane = edgeToRemove.sourceHandle?.split('-')?.at(1) ?? '';
+								// Remove matching lane input by source + lane (+ branch if present)
+								const parts = edgeToRemove.sourceHandle?.split('-') ?? [];
+								const lane = parts[1] ?? '';
+								const branch = parts.length > 2 ? parts.slice(2).join('-') : undefined;
 								const input: IInputConnection[] = nd.input || [];
 								updated = {
 									...updated,
 									data: {
 										...updated.data,
-										input: input.filter((i: IInputConnection) => !(i.from === edgeToRemove.source && i.lane === lane)),
+										input: input.filter((i: IInputConnection) => !(i.from === edgeToRemove.source && i.lane === lane && (i.branch ?? undefined) === branch)),
 									},
 								};
 							}
@@ -616,14 +623,19 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 							},
 						};
 					} else {
-						// Lane (data-flow) connection
-						const lane = params.sourceHandle?.split('-')?.at(1) ?? '';
+						// Lane (data-flow) connection. Branched source nodes use
+						// handles shaped `source-<lane>-<branch>` (e.g. source-text-then);
+						// un-branched nodes use `source-<lane>`. Extract both parts.
+						const parts = params.sourceHandle?.split('-') ?? [];
+						const lane = parts[1] ?? '';
+						const branch = parts.length > 2 ? parts.slice(2).join('-') : undefined;
 						const input: IInputConnection[] = nd.input || [];
+						const newEntry: IInputConnection = branch ? { lane, from: params.source, branch } : { lane, from: params.source };
 						return {
 							...node,
 							data: {
 								...node.data,
-								input: [...input, { lane, from: params.source }],
+								input: [...input, newEntry],
 							},
 						};
 					}
@@ -802,7 +814,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			// loadCanvas sets isLoading=true which blocks onContentUpdated,
 			// so we build the project directly from allNodes instead.
 			if (onContentChanged) {
-				const components = getProjectComponents(allNodes as unknown as INode[]);
+				const components = getProjectComponents(allNodes as unknown as INode[], servicesJson);
 				const layout = projectLayoutRef.current;
 				const project: IProject = {
 					...currentProjectRef.current,
