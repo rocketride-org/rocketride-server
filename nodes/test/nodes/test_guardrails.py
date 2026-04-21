@@ -818,7 +818,7 @@ class TestConfigWiring:
         import re
 
         services_path = os.path.join(_GUARDRAILS_DIR, 'services.json')
-        with open(services_path) as f:
+        with open(services_path, encoding='utf-8') as f:
             text = f.read()
         # Strip single-line // comments (but not inside strings)
         text = re.sub(r'(?m)^\s*//.*$', '', text)
