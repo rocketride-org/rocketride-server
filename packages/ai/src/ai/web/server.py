@@ -1,3 +1,53 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+"""
+WebServer — FastAPI/Uvicorn wrapper for AI service HTTP endpoints.
+
+This module provides the WebServer class which wires together:
+    - A FastAPI application instance with CORS, auth middleware, and lifespan hooks
+    - A Uvicorn server instance configured from an optional dict of settings
+    - Route registration helpers for both HTTP routes and WebSocket endpoints
+    - A chain-of-responsibility authenticator system that validates incoming requests
+    - Dynamic module loading via the /use endpoint and the use() method
+    - Standard built-in routes: /ping, /use, /shutdown, /status, /version,
+      /auth/callback
+
+Usage::
+
+    from ai.web.server import WebServer
+
+
+    async def startup():
+        print('Server ready')
+
+
+    server = WebServer(
+        config={'port': 8080, 'host': '0.0.0.0'},
+        on_startup=startup,
+    )
+    server.run()  # blocking — use server.serve() inside an async context
+"""
+
 import os
 import sys
 import urllib.parse
@@ -16,10 +66,10 @@ from rocketlib import debug
 from rocketride import CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 from ai.constants import CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_HOST, CONST_WEB_WS_MAX_SIZE
 from ai.web import exception, error, Result
-from ai.account import Account, AccountInfo, Reporter
+from ai.account import account, AccountInfo, Reporter
 from ai.modules import ALL as ALLOWED_MODULES
 from .middleware import AuthMiddleware
-from .endpoints import use, ping, version, shutdown, status
+from .endpoints import use, ping, version, shutdown, status, auth_callback
 from .denied import (
     CONST_ACCESS_DENIED_HTML,
     CONST_ACCESS_DENIED_TEXT,
@@ -35,15 +85,16 @@ __all__ = ['WebServer', 'AccountInfo']
 #     # Windows needs SelectorEventLoop for stability when spawning processes
 #     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+# ASCII art banner printed to stdout when the server starts (serve() only).
 logo = r"""
-        _____            _        _   _____  _     _      
-       |  __ \          | |      | | |  __ \(_)   | |     
-       | |__) |___   ___| | _____| |_| |__) |_  __| | ___ 
+        _____            _        _   _____  _     _
+       |  __ \          | |      | | |  __ \(_)   | |
+       | |__) |___   ___| | _____| |_| |__) |_  __| | ___
        |  _  // _ \ / __| |/ / _ \ __|  _  /| |/ _` |/ _ \
        | | \ \ (_) | (__|   <  __/ |_| | \ \| | (_| |  __/
        |_|  \_\___/ \___|_|\_\___|\__|_|  \_\_|\__,_|\___|
-                                                    
-                                                    
+
+
             Copyright (c) 2026 Aparavi Software AG
                     All rights reserved
     """
@@ -51,6 +102,19 @@ logo = r"""
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    """
+    FastAPI lifespan context manager that calls WebServer startup and shutdown hooks.
+
+    FastAPI executes the code before the ``yield`` when the application starts and the
+    code after the ``yield`` when the application is shutting down.  The WebServer
+    instance is retrieved from ``app.state.server`` which is set in WebServer.__init__.
+
+    Args:
+        app (FastAPI): The FastAPI application instance whose lifespan is being managed.
+
+    Yields:
+        None: Control is yielded to the running application between startup and shutdown.
+    """
     # Call the startup method
     await app.state.server._on_startup()
     yield
@@ -135,7 +199,7 @@ class WebServer:
         self._port = None
 
         # Configure CORS origins and credentials
-        cors_origins_env = os.environ.get('ROCKETRIDE_CORS_ORIGINS', '')
+        cors_origins_env = os.environ.get('RR_CORS_ORIGINS', '')
         if cors_origins_env:
             cors_origins = [o.strip() for o in cors_origins_env.split(',') if o.strip()]
         else:
@@ -179,12 +243,13 @@ class WebServer:
         # These are always there - no way to turn them off
         self.add_route('/status', status, ['GET'])
         self.add_route('/version', version, ['GET'], public=True)
+        self.add_route('/auth/callback', auth_callback, ['GET'], public=True)
 
         # Configure the Uvicorn server immediately upon initialization
         self.server = self._configure_server()
 
         # Setup our accounting info
-        self.account = Account()
+        self.account = account
         self.report = Reporter()
 
         # Don't pass on to super as this is the final class
@@ -242,6 +307,8 @@ class WebServer:
         Returns:
             exception
         """
+        # Delegate to the module-level exception() helper which formats the error
+        # into a structured JSON response with the appropriate HTTP status code.
         return exception(exc)
 
     def _format_request_error(self, request, message: str = 'Access denied', status_code: int = 401):
@@ -249,9 +316,20 @@ class WebServer:
         Format an HTTP error response according to the client's 'Accept' header.
 
         Reuses existing templates (CONST_ACCESS_DENIED_*, CONST_OTHER_*) when available.
+
+        Args:
+            request: The incoming HTTP request whose Accept header is inspected.
+            message (str): The human-readable error detail to embed in the response body.
+            status_code (int): The HTTP status code for the response (default 401).
+
+        Returns:
+            Response: An HTMLResponse, PlainTextResponse, or JSON error response
+                      depending on the client's Accept header.
         """
+        # Read the Accept header to determine the client's preferred response format
         accept_type = (request.headers.get('accept') or '').lower()
 
+        # Return an HTML error page when the client prefers HTML (e.g. a browser)
         if 'text/html' in accept_type:
             html_template = CONST_ACCESS_DENIED_HTML if status_code == 401 else CONST_OTHER_HTML
             return HTMLResponse(
@@ -259,12 +337,14 @@ class WebServer:
                 status_code=status_code,
             )
         elif 'text/plain' in accept_type:
+            # Return a plain-text error body for clients that explicitly requested text/plain
             text_template = CONST_ACCESS_DENIED_TEXT if status_code == 401 else CONST_OTHER_TEXT
             return PlainTextResponse(
                 content=text_template.format(message),
                 status_code=status_code,
             )
         else:
+            # Default to a JSON error response for API clients and any unspecified Accept types
             text_template = CONST_ACCESS_DENIED_TEXT if status_code == 401 else CONST_OTHER_TEXT
             return error(
                 message=text_template.format(message),
@@ -329,6 +409,7 @@ class WebServer:
 
         This method is called when the FastAPI application shuts down.
         """
+        # Invoke the user-supplied shutdown callback if one was provided at construction time
         if self._user_shutdown is not None:
             await self._user_shutdown()
 
@@ -336,24 +417,39 @@ class WebServer:
         """
         Authenticate a normalized credential string (chain + account fallback).
         Returns AccountInfo on success, (error_code, error_message) on failure.
+
+        Args:
+            authorization (str): The stripped credential string (Bearer prefix removed).
+
+        Returns:
+            Union[AccountInfo, Tuple[int, str]]:
+                AccountInfo on success; a (http_status_code, message) tuple on failure.
         """
+        # Walk each registered authenticator in registration order.
+        # The first one that returns a non-None AccountInfo wins; the rest are skipped.
         for authenticator in self._authenticators:
             try:
                 account_info = await authenticator(authorization)
                 if not account_info:
+                    # This authenticator did not recognise the credential; try the next one
                     continue
                 return account_info
             except PermissionError as e:
+                # Authenticator explicitly denied access (known-bad credential)
                 return (401, str(e))
             except Exception as e:
+                # Authenticator raised an unexpected error — treat as a bad-request failure
                 return (400, str(e))
 
+        # No registered authenticator matched; fall back to the built-in account authenticator
         try:
             account_info = await self.account.authenticate(authorization)
             if not account_info:
+                # Built-in authenticator also rejected the credential
                 return (401, 'Invalid authorization provided')
             return account_info
         except Exception as e:
+            # Built-in authenticator raised an unexpected error
             return (400, str(e))
 
     async def authenticate_request(
@@ -507,6 +603,8 @@ class WebServer:
         if not authorization:
             return _format_auth_error(message='No authorization provided')
 
+        # Run the credential through the authenticator chain; result is either
+        # AccountInfo (success) or a (code, message) tuple (failure).
         result = await self._authenticate_credential_inner(authorization)
         if isinstance(result, tuple):
             error_code, message = result
@@ -515,6 +613,9 @@ class WebServer:
             if error_code == 401:
                 return _format_auth_error(message=message)
             return _format_other_error(message, error_code=error_code)
+
+        # Authentication succeeded — attach the AccountInfo to the request state
+        # so downstream handlers can read it without re-authenticating.
         request.state.account = result
         return None
 
@@ -532,11 +633,18 @@ class WebServer:
         Returns:
             AccountInfo on success; (error_code, error_message) on failure.
         """
+        # Reject completely empty credentials before touching the authenticator chain
         if not authorization:
             return (401, 'No authorization provided')
+
+        # Normalise by stripping the optional "Bearer " prefix
         authorization = authorization.removeprefix('Bearer ').strip()
+
+        # Reject credentials that are empty after stripping
         if not authorization:
             return (401, 'No authorization provided')
+
+        # Delegate to the shared inner authentication method
         return await self._authenticate_credential_inner(authorization)
 
     def get_port(self) -> int:
@@ -555,7 +663,13 @@ class WebServer:
     def registerStatusCallback(self, callback: Callable[[Dict[str, any]], None]) -> None:
         """
         Register a callback function to be called to gather the server status.
+
+        Args:
+            callback (Callable[[Dict[str, any]], None]): A function that accepts a
+                dictionary and populates it with status information. Called by the
+                /status endpoint handler to collect metrics from all registered providers.
         """
+        # Append the callback to the list; /status iterates all registered callbacks
         self._statusCallbacks.append(callback)
 
     async def report(self, apikey: str, token: str, metrics: Dict[str, Any]) -> None:
@@ -573,6 +687,7 @@ class WebServer:
         Example:
             >>> report('abc123', {'key': 'value'})
         """
+        # Log the report data at debug level; no remote call is made in this base implementation
         debug(f'REPORT: apikey={apikey}, metrics={metrics}')
         return
 
@@ -592,6 +707,7 @@ class WebServer:
 
             # Add all of our patterns
             for pattern in self._public_paths:
+                # compile_path converts FastAPI path syntax into a compiled regex
                 regex, _, _ = compile_path(pattern)
                 self._compiled_public_paths.append(regex)
 
@@ -606,10 +722,11 @@ class WebServer:
 
             # Add all of our patterns
             for pattern in self._private_paths:
+                # compile_path converts FastAPI path syntax into a compiled regex
                 regex, _, _ = compile_path(pattern)
                 self._compiled_private_paths.append(regex)
 
-        # See if it specifically matches a private route
+        # See if it specifically matches a private route; private overrides public
         for regex in self._compiled_private_paths:
             if regex.match(path):
                 return False
@@ -618,12 +735,28 @@ class WebServer:
         for regex in self._compiled_public_paths:
             if regex.match(path):
                 return True
+
+        # Path did not match any public pattern — treat as private by default
         return False
 
     def add_authenticator(
         self,
         authenticator: Callable[[str], Awaitable[Dict[str, Any]]],
     ):
+        """
+        Register an additional authenticator in the authentication chain.
+
+        Registered authenticators are tried in registration order before the
+        built-in account authenticator.  The first authenticator that returns
+        a non-None AccountInfo wins; all others are skipped.
+
+        Args:
+            authenticator (Callable[[str], Awaitable[Dict[str, Any]]]):
+                An async callable that accepts a credential string and returns
+                either an AccountInfo dict (success) or None (not recognised).
+                It may raise PermissionError to signal an explicit denial (401)
+                or any other exception to signal a bad-request error (400).
+        """
         # Save it
         self._authenticators.append(authenticator)
 
@@ -663,11 +796,13 @@ class WebServer:
         if public:
             # If this is a public endpoint, add it to the public endpoints set
             self._public_paths.append(path)
+            # Invalidate the compiled cache so it is rebuilt on the next is_public_route() call
             self._compiled_public_paths = None
 
         if private:
             # If this is a private endpoint, specifically add it to the private endpoints set
             self._private_paths.append(path)
+            # Invalidate the compiled cache so it is rebuilt on the next is_public_route() call
             self._compiled_private_paths = None
 
     def add_socket(
@@ -694,6 +829,7 @@ class WebServer:
         Example:
             >>> server.addRoute('/hello', hello_handler, ['GET', 'POST'])
         """
+        # Register the WebSocket handler with FastAPI's router
         self.app.router.add_api_websocket_route(path, listener)
 
         # Reset the OpenAPI schema to reflect the new route in documentation
@@ -702,11 +838,13 @@ class WebServer:
         if public:
             # If this is a public endpoint, add it to the public endpoints set
             self._public_paths.append(path)
+            # Invalidate the compiled cache so it is rebuilt on the next is_public_route() call
             self._compiled_public_paths = None
 
         if private:
             # If this is a private endpoint, specifically add it to the private endpoints set
             self._private_paths.append(path)
+            # Invalidate the compiled cache so it is rebuilt on the next is_public_route() call
             self._compiled_private_paths = None
 
     def use(self, moduleName: str, config: Optional[Dict[str, Any]] = None):
@@ -741,16 +879,22 @@ class WebServer:
         if moduleName in self.app.state.modules:
             return
 
-        # Dynamically import the module
+        # Dynamically import the module using its fully-qualified package path
         moduleHandle = importlib.import_module(f'ai.modules.{moduleName}')
 
         # Init the module and register the module's endpoints with the server
         moduleHandle.initModule(self, config if config is not None else {})
 
-        # Add it to the module handle
+        # Track the loaded module so duplicate load attempts are short-circuited above
         self.app.state.modules[moduleName] = moduleHandle
 
     def stop(self):
+        """
+        Signal the Uvicorn server to exit cleanly on the next event loop iteration.
+
+        Sets Uvicorn's ``should_exit`` flag to True, which causes the server's
+        main loop to break after completing any in-flight requests.
+        """
         # Set the shutdown flag to True
         self.server.should_exit = True
 
@@ -796,10 +940,12 @@ class WebServer:
         if self.server is None:
             raise RuntimeError('Server is not configured. Something went wrong during initialization.')
 
-        # Get the server start time
+        # Record the wall-clock time at which the server began serving; used by
+        # the /status endpoint to calculate uptime.
         self._startTime = time.time()
 
+        # Print the ASCII art banner so operators can confirm the process started
         print(logo)
 
-        # Start the Uvicorn server
+        # Start the Uvicorn server; this coroutine blocks until the server exits
         await self.server.serve()

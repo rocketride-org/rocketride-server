@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparati Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 TaskCommands: DAP Command Handler for Task Management.
 
@@ -188,13 +210,26 @@ class DebugCommands(DAPConn):
             if self._debug_token:
                 raise RuntimeError('Debugger already active on this session')
 
+            # Resolve org_id from the user's default team
+            org_id = ''
+            for org in self._account_info.organizations or []:
+                for team in org.get('teams', []):
+                    if team.get('id') == self._account_info.defaultTeam:
+                        org_id = org.get('id', '')
+                        break
+                if org_id:
+                    break
+
             # Create and start the new task, obtaining a unique token
             response = await self._server.start_task(
-                self._account_info.apikey,
+                self._account_info.userToken,
                 request,
                 self,
                 attach_debugger=True,
-                client_id=self._account_info.clientid,
+                client_id=self._account_info.userId,
+                user_id=self._account_info.userId,
+                team_id=self._account_info.defaultTeam,
+                org_id=org_id,
             )
 
             # Save the debug token and the event id
@@ -441,6 +476,25 @@ class DebugCommands(DAPConn):
             raise
 
     async def on_configurationDone(self, request: Dict[str, Any]) -> None:
+        """
+        Handle DAP 'configurationDone' command signaling that the client has
+        finished sending all configuration (breakpoints, etc.) after launch.
+
+        VS Code sends this even when debugging is not available. In that case
+        we return a plain success response rather than forwarding to debugpy,
+        which would fail because no debug interface is attached.
+
+        Args:
+            request (Dict[str, Any]): configurationDone request from the DAP client.
+                The debug token is injected automatically from the session state
+                if not already present.
+
+        Returns:
+            None: Response is sent via send_response / build_response helpers.
+
+        Raises:
+            Exception: If token extraction or the debugpy forwarding fails.
+        """
         try:
             # We know this is now a vscode debugging command. Inject
             # the debug token if it was not specified
@@ -451,8 +505,11 @@ class DebugCommands(DAPConn):
 
             # vscode sends this after launch even if debugging is not available
             if not self._server.is_debug_available(token=token):
+                # Debugging is not attached — return a plain success response
+                # to unblock VS Code without forwarding to debugpy
                 return self.build_response(request)
             else:
+                # Debugging is available — forward the command to debugpy
                 return await self.request(request)
 
         except Exception as e:
@@ -461,6 +518,24 @@ class DebugCommands(DAPConn):
             raise
 
     async def on_threads(self, request: Dict[str, Any]) -> None:
+        """
+        Handle DAP 'threads' command requesting the list of active threads.
+
+        VS Code sends this after launch/attach. When debugging is not available
+        (e.g. noDebug mode or subProcess mode) we return an empty success response
+        rather than forwarding to debugpy, which has no connection in those cases.
+
+        Args:
+            request (Dict[str, Any]): threads request from the DAP client.
+                The debug token is injected automatically from the session state
+                if not already present.
+
+        Returns:
+            None: Response is sent via send_response / build_response helpers.
+
+        Raises:
+            Exception: If token extraction or the debugpy forwarding fails.
+        """
         try:
             # We know this is now a vscode debugging command. Inject
             # the debug token if it was not specified
@@ -471,8 +546,11 @@ class DebugCommands(DAPConn):
 
             # vscode sends this after launch even if debugging is not available
             if not self._server.is_debug_available(token=token):
+                # No debug interface — return an empty success response so VS Code
+                # does not hang waiting for a threads reply
                 return self.build_response(request)
             else:
+                # Debug interface is active — forward to debugpy for live thread info
                 return await self.request(request)
 
         except Exception as e:

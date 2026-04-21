@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparati Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 MiscCommands: DAP Command Handler for Miscellaneous Operations.
 
@@ -196,11 +218,11 @@ class MiscCommands(DAPConn):
 
             server = self._server
             current_time = time.time()
-            caller_apikey = self._account_info.apikey
+            caller_user_id = self._account_info.userId
 
-            # Snapshot and filter to caller's own data
-            task_controls = [c for c in server._task_control.values() if c.apikey == caller_apikey]
-            conn_items = [(cid, conn) for cid, conn in server._connections.items() if hasattr(conn, '_account_info') and conn._account_info and conn._account_info.apikey == caller_apikey]
+            # Snapshot and filter to caller's own data (cross-team: match on userId)
+            task_controls = [c for c in server._task_control.values() if c.userId == caller_user_id]
+            conn_items = [(cid, conn) for cid, conn in server._connections.items() if hasattr(conn, '_account_info') and conn._account_info and conn._account_info.userId == caller_user_id]
 
             # Task-scoped tokens (tk_) can only see their own task
             caller_auth = self._account_info.auth if hasattr(self._account_info, 'auth') else ''
@@ -254,8 +276,8 @@ class MiscCommands(DAPConn):
                     'attachedTasks': conn_tasks.get(conn_id, []),
                 }
                 if hasattr(conn, '_account_info') and conn._account_info:
-                    conn_info['clientId'] = conn._account_info.clientid
-                    conn_info['apikey'] = self._mask_apikey(conn._account_info.apikey)
+                    conn_info['clientId'] = conn._account_info.userId
+                    conn_info['apikey'] = self._mask_apikey(conn._account_info.userToken)
                 connections.append(conn_info)
 
             # Build tasks list

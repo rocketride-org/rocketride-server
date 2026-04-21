@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparati Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 TaskConn: Unified DAP Connection Handler for Task Management System.
 
@@ -46,8 +68,8 @@ from .commands.cmd_data import DataCommands
 from .commands.cmd_monitor import MonitorCommands
 from .commands.cmd_debug import DebugCommands
 from .commands.cmd_misc import MiscCommands
-from .commands.cmd_billing import BillingCommands
-from ai.web import AccountInfo
+from .commands.cmd_account import AccountCommands
+from ai.account.models import AccountInfo, resolve_team_permissions
 from ai.common.account import AccountPipelineValidation
 
 # Only import for type checking to avoid circular import errors
@@ -71,7 +93,7 @@ class TaskConn(
     MonitorCommands,
     DebugCommands,
     MiscCommands,
-    BillingCommands,
+    AccountCommands,
     DAPConn,
 ):
     """
@@ -103,8 +125,7 @@ class TaskConn(
     - MonitorCommands: Event subscription and monitoring
     - DebugCommands: Debugging session management
     - MiscCommands: Miscellaneous utility commands (services, etc.)
-    - BillingCommands: Account billing (stub in OSS; SaaS overlays the
-                       real wallet + subscription implementation)
+    - AccountCommands: Account management (profile, keys, organizations, teams, billing)
     - DAPConn: Base DAP protocol implementation and transport handling
 
     Attributes:
@@ -156,7 +177,7 @@ class TaskConn(
         TaskCommands.__init__(self, connection_id, server, transport, **kwargs)
         DebugCommands.__init__(self, connection_id, server, transport, **kwargs)
         MiscCommands.__init__(self, connection_id, server, transport, **kwargs)
-        BillingCommands.__init__(self, connection_id, server, transport, **kwargs)
+        AccountCommands.__init__(self, connection_id, server, transport, **kwargs)
 
         # Store connection identifier for tracking and logging
         self._connection_id = connection_id
@@ -167,9 +188,13 @@ class TaskConn(
         # Store reference to task server for task lookup and management operations
         self._server = server
 
-        # Account info set when client sends successful auth command as first message
+        # Account info set when client sends successful auth { auth: apikey } command.
         self._account_info: Optional[AccountInfo] = None
         self._authenticated = False
+
+        # Client IP — set by task_server.listen() immediately after construction,
+        # used for per-IP unauthenticated connection tracking.
+        self._client_ip: str = ''
 
         # Connection tracking for server dashboard
         self._connected_at: float = time.time()
@@ -179,36 +204,62 @@ class TaskConn(
         self._client_info: Dict[str, str] = {}
 
     async def send(self, message: Dict[str, Any]) -> None:
+        """
+        Send a DAP message over the transport layer, updating outbound message metrics.
+
+        Increments the outbound message counter and refreshes the last-activity
+        timestamp before delegating to the parent DAPConn send implementation.
+        This ensures dashboard metrics remain accurate for every message sent.
+
+        Args:
+            message (Dict[str, Any]): The fully-formed DAP message dict to transmit.
+                Must be JSON-serialisable; encoding is handled by the transport layer.
+        """
+        # Increment outbound message counter for dashboard metrics
         self._messages_out += 1
+        # Update last activity timestamp so idle-time tracking stays accurate
         self._last_activity = time.time()
+        # Delegate to the parent transport send implementation
         await super().send(message)
 
     async def on_receive(self, message: Optional[Dict[str, Any]] = None) -> None:
         """
-        Intercept DAP dispatch: if not authenticated, only allow auth command; otherwise require auth first.
+        Intercept DAP dispatch: whitelist auth and login pre-authentication;
+        reject and disconnect all other commands until authenticated.
         """
         if message is None:
             message = {}
         self._messages_in += 1
         self._last_activity = time.time()
-        if message.get('type') == 'request' and message.get('command') == 'auth':
+        cmd = message.get('command', '')
+
+        # auth is always allowed before authentication:
+        #   auth  — authenticates the connection with a credential (access_token or user key)
+        if message.get('type') == 'request' and cmd in ('auth',):
             await super().on_receive(message)
-            if not self._authenticated:
-                await self._transport.disconnect()
             return
+
         if not self._authenticated:
             err = self.build_error(message, 'Not authenticated')
             await self.send(err)
             await self._transport.disconnect()
             return
+
         await super().on_receive(message)
 
     async def on_auth(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle DAP auth command: validate credential from arguments.auth and set account_info on success.
+        Handle DAP auth command: validate credential and return ConnectResult on success.
+        An empty credential deauthenticates the connection.
         """
         args = request.get('arguments') or {}
         credential = args.get('auth') or ''
+
+        if not credential:
+            self._authenticated = False
+            self._account_info = None
+            return self.build_response(request, body={})
+
         result = await self._server._server.authenticate_credential(credential)
         if isinstance(result, tuple):
             await self._server.broadcast_server_event(
@@ -223,9 +274,12 @@ class TaskConn(
                     },
                 },
             )
+            await self._transport.disconnect()
             return self.build_error(request, result[1])
+
         self._account_info = result
         self._authenticated = True
+        self._server.release_unauthed_slot(self._client_ip)
 
         # Capture optional client identification from auth arguments
         if args.get('clientName'):
@@ -233,7 +287,7 @@ class TaskConn(
         if args.get('clientVersion'):
             self._client_info['version'] = str(args['clientVersion'])
 
-        # Notify dashboard subscribers that an authenticated connection has arrived
+        # Notify dashboard subscribers
         await self._server.broadcast_server_event(
             EVENT_TYPE.DASHBOARD,
             {
@@ -244,54 +298,35 @@ class TaskConn(
                     'connectionId': self.get_connection_id(),
                     'clientName': self._client_info.get('name'),
                     'clientVersion': self._client_info.get('version'),
-                    'clientId': self._account_info.clientid if self._account_info else None,
+                    'clientId': self._account_info.userId if self._account_info else None,
                 },
             },
-            apikey=self._account_info.apikey,
+            apikey=self._account_info.userToken,
         )
 
-        return self.build_response(request, body={})
+        return self.build_response(request, body=result.to_connect_result())
 
-    def has_permission(self, perm: Union[list[str], str]) -> bool:
-        """
-        Check if the account has the specified permission.
-
-        Args:
-            perm (str): The permission to check.
-
-        Returns:
-            bool: True if the permission is granted, False otherwise.
-        """
+    def has_permission(self, perm: Union[list, str]) -> bool:
+        """Check if the authenticated user has the given permission for their default team."""
         if not self._account_info:
             return False
-        # Check for all permissions
-        if '*' in self._account_info.permissions:
-            return True
-
-        # If it is a single string, turn it into a list
+        try:
+            perms = resolve_team_permissions(self._account_info, self._account_info.defaultTeam)
+        except PermissionError:
+            return False
         if isinstance(perm, str):
             perm = [perm]
-
-        # Look for an of the permissions
-        for p in perm:
-            if p in self._account_info.permissions:
-                return True
-
-        # Nope, denied
-        return False
+        return any(p in perms for p in perm)
 
     def verify_permission(self, perm: str) -> None:
-        """
-        Check if the account has the specified permission.
-
-        Args:
-            perm (str): The permission to check.
-
-        Returns:
-            bool: True if the permission is granted, False otherwise.
-        """
+        """Raise PermissionError if the authenticated user lacks the given permission."""
         if not self.has_permission(perm):
-            raise PermissionError('Permission denied')
+            raise PermissionError(f'Permission {perm!r} denied')
+
+    def require_zitadel_auth(self) -> None:
+        """Verify the connection is authenticated (any credential type is accepted)."""
+        if not self._authenticated or not self._account_info:
+            raise PermissionError('Not authenticated')
 
     def verify_plans(self, account_info: AccountInfo, pipeline: Dict[str, Any]) -> bool:
         """
@@ -375,10 +410,10 @@ class TaskConn(
         # Get the task control and verify ownership for API key auth
         control = self._server.get_task_control(token)
 
-        # For API key auth, verify the task belongs to this account.
+        # For API key auth, verify the task belongs to this user (cross-team safe).
         # pk_ and tk_ auth are already scoped to their task by get_task_token.
         if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
-            if control.apikey != self._account_info.apikey:
+            if control.userId != self._account_info.userId:
                 raise PermissionError('Access denied: task belongs to a different account')
 
         return control.task
