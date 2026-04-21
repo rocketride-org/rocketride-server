@@ -400,7 +400,7 @@ export class PageSettingsProvider {
 			});
 
 			try {
-				await testClient.connect(8000);
+				await testClient.connect(undefined, { timeout: 8000 });
 			} catch (connectError) {
 				if (testClient) {
 					await testClient.disconnect();

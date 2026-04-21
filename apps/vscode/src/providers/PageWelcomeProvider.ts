@@ -274,7 +274,7 @@ export class PageWelcomeProvider {
 			});
 
 			try {
-				await testClient.connect(8000);
+				await testClient.connect(undefined, { timeout: 8000 });
 			} catch (connectError) {
 				if (testClient) await testClient.disconnect();
 				const errorMessage = connectError instanceof Error ? connectError.message : String(connectError);
