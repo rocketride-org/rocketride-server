@@ -60,15 +60,7 @@ _mock_config_mod = MagicMock()
 _mock_schema_mod = MagicMock()
 
 for name, mock in {
-    'depends': MagicMock(),
-    'engLib': MagicMock(),
-    'rocketlib': MagicMock(),
     'numpy': MagicMock(),
-    'ai': MagicMock(),
-    'ai.common': MagicMock(),
-    'ai.common.schema': _mock_schema_mod,
-    'ai.common.store': _mock_store_mod,
-    'ai.common.config': _mock_config_mod,
     'qdrant_client': MagicMock(),
     'qdrant_client.models': MagicMock(),
     'qdrant_client.http': MagicMock(),
@@ -105,6 +97,7 @@ def _make_store() -> Store:
     store.modelName = 'test-model'
     store.threshold_search = 0.5
     store.collectionLock = threading.Lock()
+    store._checkCollectionExists = lambda: True
     return store
 
 

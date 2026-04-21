@@ -17,15 +17,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 _STUB_MODULE_NAMES = (
-    'depends',
     'chromadb',
     'chromadb.config',
-    'ai',
-    'ai.common',
-    'ai.common.schema',
-    'ai.common.store',
-    'ai.common.config',
-    'rocketlib',
     'numpy',
     'chroma_store_under_test',
 )
@@ -33,10 +26,6 @@ _STUB_MODULE_NAMES = (
 
 def _install_min_stubs() -> None:
     """Minimal stubs so `chroma.py` can execute for `_convertFilter` tests."""
-    mod_depends = types.ModuleType('depends')
-    mod_depends.depends = lambda *_a, **_k: None
-    sys.modules['depends'] = mod_depends
-
     chromadb = types.ModuleType('chromadb')
 
     class _HttpClient:
@@ -55,52 +44,6 @@ def _install_min_stubs() -> None:
 
     chromadb_config.Settings = Settings
     sys.modules['chromadb.config'] = chromadb_config
-
-    ai_pkg = types.ModuleType('ai')
-    ai_pkg.__path__ = []
-    common_pkg = types.ModuleType('ai.common')
-    common_pkg.__path__ = []
-    schema_mod = types.ModuleType('ai.common.schema')
-    store_mod = types.ModuleType('ai.common.store')
-    config_mod = types.ModuleType('ai.common.config')
-
-    class Doc:
-        pass
-
-    class DocFilter:
-        pass
-
-    class DocMetadata:
-        pass
-
-    class QuestionText:
-        pass
-
-    class DocumentStoreBase:
-        def __init__(self, *_a: object, **_k: object) -> None:
-            pass
-
-    class Config:
-        @staticmethod
-        def getNodeConfig(_provider: object, _connConfig: object) -> dict:
-            return {}
-
-    schema_mod.Doc = Doc
-    schema_mod.DocFilter = DocFilter
-    schema_mod.DocMetadata = DocMetadata
-    schema_mod.QuestionText = QuestionText
-    store_mod.DocumentStoreBase = DocumentStoreBase
-    config_mod.Config = Config
-
-    sys.modules['ai'] = ai_pkg
-    sys.modules['ai.common'] = common_pkg
-    sys.modules['ai.common.schema'] = schema_mod
-    sys.modules['ai.common.store'] = store_mod
-    sys.modules['ai.common.config'] = config_mod
-
-    rocketlib = types.ModuleType('rocketlib')
-    rocketlib.debug = lambda *_a, **_k: None
-    sys.modules['rocketlib'] = rocketlib
 
     numpy_mod = types.ModuleType('numpy')
     numpy_mod.exp = math.exp

@@ -19,15 +19,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'n
 with patch.dict(
     sys.modules,
     {
-        'depends': MagicMock(),
         'numpy': MagicMock(),
-        'engLib': MagicMock(),
         'pymilvus': MagicMock(),
-        'ai': MagicMock(),
-        'ai.common': MagicMock(),
-        'ai.common.schema': MagicMock(),
-        'ai.common.store': MagicMock(),
-        'ai.common.config': MagicMock(),
     },
 ):
     from milvus import _escape_milvus_str
