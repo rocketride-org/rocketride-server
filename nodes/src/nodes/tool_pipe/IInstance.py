@@ -65,7 +65,7 @@ class IInstance(IInstanceBase):
                 },
             },
         },
-        description='Accepts a text input and returns the pipeline result.',
+        description=lambda self: (self.IGlobal.tool_description or 'Accepts a text input and returns the pipeline result.'),
         output_schema=lambda self: {
             'type': 'object',
             'properties': {
