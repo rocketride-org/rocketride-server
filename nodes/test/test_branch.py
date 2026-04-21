@@ -229,13 +229,15 @@ def _install_mocks():
 
 
 # Install mocks at import time so the branch module can be imported.
-# The session fixture below ensures teardown restores original state.
+# The module-scoped fixture below ensures teardown restores original state
+# once all tests in THIS module have finished, so the mocked rocketlib / ai
+# modules do not leak to other test modules in the same pytest session.
 _teardown_mocks = _install_mocks()
 
 
-@pytest.fixture(autouse=True, scope='session')
+@pytest.fixture(autouse=True, scope='module')
 def _engine_mocks():
-    """Session fixture that restores sys.path/sys.modules after all tests complete."""
+    """Restore sys.path/sys.modules after this module's tests complete."""
     yield
     _teardown_mocks()
 
