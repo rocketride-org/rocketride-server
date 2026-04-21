@@ -59,6 +59,7 @@ struct BlobConfig {
     Text endpointSuffix = DefaultEndpointSuffix;
     std::vector<Text> containers;
     bool deleted = false;
+    bool scanAllContainers = false;
 
     //---------------------------------------------------------------------
     /// @details
@@ -92,6 +93,15 @@ struct BlobConfig {
                     return ccode;
                 if (!path.empty()) {
                     Path includePath{path};
+                    auto firstSegment = includePath[0];
+                    // Wildcard in the container segment means "scan all
+                    // containers" — skip registering a specific container
+                    if (firstSegment.find('*') != string::npos ||
+                        firstSegment.find('?') != string::npos ||
+                        firstSegment.find('[') != string::npos) {
+                        blobConfig.scanAllContainers = true;
+                        continue;
+                    }
                     Path container{includePath[0]};
                     blobConfig.containers.push_back(container.gen());
                 }
@@ -109,7 +119,8 @@ struct BlobConfig {
         if (res.hasCcode()) return res.ccode();
         blobConfig.deleted = res.value();
 
-        if (!blobConfig.deleted && blobConfig.containers.empty())
+        if (!blobConfig.deleted && !blobConfig.scanAllContainers &&
+            blobConfig.containers.empty())
             return APERR(Ec::InvalidParam, "Missing required container name");
 
         // Done
