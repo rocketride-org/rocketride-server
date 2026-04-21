@@ -52,7 +52,7 @@ class IGlobal(IGlobalBase):
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
         self.tool_description = str(cfg.get('tool_description') or '').strip()
-        self.return_type = str(cfg.get('return_type') or 'text').strip()
+        self.return_type = str(cfg.get('return_type') or '').strip() or 'text'
 
         if self.return_type not in VALID_RETURN_TYPES:
             raise Exception(f'tool_pipe: return_type must be one of {sorted(VALID_RETURN_TYPES)}')
@@ -60,8 +60,8 @@ class IGlobal(IGlobalBase):
     def validateConfig(self) -> None:
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            return_type = str(cfg.get('return_type') or 'text').strip()
-            if return_type and return_type not in VALID_RETURN_TYPES:
+            return_type = str(cfg.get('return_type') or '').strip() or 'text'
+            if return_type not in VALID_RETURN_TYPES:
                 warning(f'tool_pipe: return_type must be one of {sorted(VALID_RETURN_TYPES)}')
         except Exception as e:
             warning(str(e))

@@ -48,7 +48,6 @@ _RETURN_TYPE_DESCRIPTIONS = {
     'answers': 'LLM-generated answer string from the pipeline.',
     'documents': 'JSON-serialised array of document objects from the pipeline.',
     'table': 'JSON-serialised table data from the pipeline.',
-    'image': 'Base64-encoded image data from the pipeline.',
 }
 
 
@@ -95,8 +94,9 @@ class IInstance(IInstanceBase):
             self.instance.open(entry)
             opened = True
             self._send_to_connected_lane(data)
-        except Exception:
-            return {'result': ''}
+        except Exception as exc:
+            debug(f'tool_pipe: sub-pipeline failed: {exc}')
+            raise
         finally:
             if opened:
                 self.instance.close()
