@@ -666,3 +666,175 @@ class TestIGlobalLifecycle:
         iglobal.endGlobal()
 
         assert iglobal._evaluator is None
+
+
+# ===========================================================================
+# Deterministic evaluators (relevance, grounding, format)
+#
+# These eval_types wrap pure-python evaluator functions shipped with the
+# eval_cobalt node package. No cobalt / network dependency is required.
+# ===========================================================================
+
+
+class TestRelevanceEvaluation:
+    """Test the relevance eval_type (keyword overlap + length heuristic)."""
+
+    def test_high_relevance_scores_pass(self):
+        evaluator = CobaltEvaluator({'eval_type': 'relevance', 'threshold': 0.3}, {})
+        result = evaluator.evaluate_relevance(
+            'Machine learning enables systems to learn from data without explicit programming',
+            'Machine learning is a subset of AI that allows systems to learn from data',
+        )
+        assert result['evaluator'] == 'relevance'
+        assert 0.0 <= result['score'] <= 1.0
+        assert result['passed'] is True
+
+    def test_low_relevance_scores_fail(self):
+        evaluator = CobaltEvaluator({'eval_type': 'relevance', 'threshold': 0.8}, {})
+        result = evaluator.evaluate_relevance(
+            'The weather today is sunny',
+            'Python is a programming language used for machine learning',
+        )
+        assert result['evaluator'] == 'relevance'
+        assert result['score'] < 0.8
+        assert result['passed'] is False
+
+    def test_empty_output(self):
+        evaluator = CobaltEvaluator({'eval_type': 'relevance', 'threshold': 0.5}, {})
+        result = evaluator.evaluate_relevance('', 'some expected content')
+        assert result['score'] == 0.0
+        assert result['passed'] is False
+        assert result['evaluator'] == 'relevance'
+
+    def test_both_empty(self):
+        evaluator = CobaltEvaluator({'eval_type': 'relevance', 'threshold': 0.5}, {})
+        result = evaluator.evaluate_relevance('', '')
+        assert result['score'] == 1.0
+        assert result['passed'] is True
+
+    def test_dispatch_routes_relevance(self):
+        evaluator = CobaltEvaluator({'eval_type': 'relevance', 'threshold': 0.3}, {})
+        result = evaluator.evaluate(
+            'Machine learning lets computers learn from experience',
+            'Machine learning lets computers learn from data',
+        )
+        assert result['evaluator'] == 'relevance'
+        assert result['passed'] is True
+
+    def test_threshold_override(self):
+        evaluator = CobaltEvaluator({'eval_type': 'relevance', 'threshold': 0.99}, {})
+        result = evaluator.evaluate_relevance('same text here', 'same text here', threshold=0.1)
+        assert result['passed'] is True
+
+
+class TestGroundingEvaluation:
+    """Test the grounding eval_type (sentence-level context overlap)."""
+
+    def test_well_grounded_output_passes(self):
+        evaluator = CobaltEvaluator({'eval_type': 'grounding', 'threshold': 0.4}, {})
+        context = 'Vector databases store high-dimensional vectors and enable fast similarity search across millions of embeddings.'
+        output = 'Vector databases enable fast similarity search across embeddings.'
+        result = evaluator.evaluate_grounding(output, context)
+        assert result['evaluator'] == 'grounding'
+        assert result['score'] > 0.4
+        assert result['passed'] is True
+
+    def test_ungrounded_output_fails(self):
+        evaluator = CobaltEvaluator({'eval_type': 'grounding', 'threshold': 0.5}, {})
+        context = 'Paris is the capital city of France.'
+        output = 'Quantum computers leverage superposition to accelerate certain algorithms.'
+        result = evaluator.evaluate_grounding(output, context)
+        assert result['evaluator'] == 'grounding'
+        assert result['score'] < 0.5
+        assert result['passed'] is False
+
+    def test_empty_output_fails(self):
+        evaluator = CobaltEvaluator({'eval_type': 'grounding', 'threshold': 0.5}, {})
+        result = evaluator.evaluate_grounding('', 'some context')
+        assert result['score'] == 0.0
+        assert result['passed'] is False
+
+    def test_empty_context_fails(self):
+        evaluator = CobaltEvaluator({'eval_type': 'grounding', 'threshold': 0.5}, {})
+        result = evaluator.evaluate_grounding('some output with claims', '')
+        assert result['score'] == 0.0
+        assert result['passed'] is False
+
+    def test_dispatch_routes_grounding(self):
+        evaluator = CobaltEvaluator({'eval_type': 'grounding', 'threshold': 0.4}, {})
+        context = 'Hybrid search combines dense vector search with sparse keyword search like BM25.'
+        output = 'Hybrid search combines dense vector and sparse keyword search.'
+        # IInstance passes context via the `expected` arg position for grounding
+        result = evaluator.evaluate(output, context)
+        assert result['evaluator'] == 'grounding'
+        assert result['passed'] is True
+
+
+class TestFormatEvaluation:
+    """Test the format eval_type (structural validation)."""
+
+    def test_prose_format_passes(self):
+        evaluator = CobaltEvaluator({'eval_type': 'format', 'expected_format': 'prose', 'threshold': 0.5}, {})
+        result = evaluator.evaluate_format('This is a simple sentence. It flows naturally.')
+        assert result['evaluator'] == 'format'
+        assert result['score'] >= 0.5
+        assert result['passed'] is True
+
+    def test_list_format_passes(self):
+        evaluator = CobaltEvaluator({'eval_type': 'format', 'expected_format': 'list', 'threshold': 0.5}, {})
+        result = evaluator.evaluate_format('- First item\n- Second item\n- Third item')
+        assert result['evaluator'] == 'format'
+        assert result['score'] >= 0.5
+        assert result['passed'] is True
+
+    def test_json_format_passes(self):
+        evaluator = CobaltEvaluator({'eval_type': 'format', 'expected_format': 'json', 'threshold': 0.5}, {})
+        result = evaluator.evaluate_format('{"key": "value", "count": 42}')
+        assert result['evaluator'] == 'format'
+        assert result['score'] == 1.0
+        assert result['passed'] is True
+
+    def test_json_format_invalid_fails(self):
+        evaluator = CobaltEvaluator({'eval_type': 'format', 'expected_format': 'json', 'threshold': 0.5}, {})
+        result = evaluator.evaluate_format('not json at all')
+        assert result['score'] == 0.0
+        assert result['passed'] is False
+
+    def test_format_empty_output(self):
+        evaluator = CobaltEvaluator({'eval_type': 'format', 'expected_format': 'prose', 'threshold': 0.5}, {})
+        result = evaluator.evaluate_format('')
+        assert result['score'] == 0.0
+        assert result['passed'] is False
+
+    def test_format_default_config(self):
+        """expected_format defaults to 'prose' when not configured."""
+        evaluator = CobaltEvaluator({'eval_type': 'format', 'threshold': 0.5}, {})
+        assert evaluator._expected_format == 'prose'
+
+    def test_format_config_override(self):
+        """expected_format is read from config."""
+        evaluator = CobaltEvaluator({'eval_type': 'format', 'expected_format': 'json'}, {})
+        assert evaluator._expected_format == 'json'
+
+    def test_dispatch_routes_format(self):
+        evaluator = CobaltEvaluator({'eval_type': 'format', 'expected_format': 'json', 'threshold': 0.5}, {})
+        # For format mode, the `expected` argument is ignored; config drives the check
+        result = evaluator.evaluate('{"valid": true}', 'ignored')
+        assert result['evaluator'] == 'format'
+        assert result['passed'] is True
+
+
+class TestExtendedEvalTypeWhitelist:
+    """Test that the extended _VALID_EVAL_TYPES accepts the 3 new types."""
+
+    def test_relevance_is_valid(self):
+        evaluator = CobaltEvaluator({'eval_type': 'relevance'}, {})
+        assert evaluator._eval_type == 'relevance'
+
+    def test_grounding_is_valid(self):
+        evaluator = CobaltEvaluator({'eval_type': 'grounding'}, {})
+        assert evaluator._eval_type == 'grounding'
+
+    def test_format_is_valid(self):
+        evaluator = CobaltEvaluator({'eval_type': 'format'}, {})
+        assert evaluator._eval_type == 'format'

@@ -21,19 +21,81 @@
 # SOFTWARE.
 # =============================================================================
 
-__all__ = [
-    'IInstance',
-    'IGlobal',
-]
+"""Shared constants and function exports for Cobalt evaluators."""
 
-# The IGlobal/IInstance modules depend on rocketlib (the RocketRide runtime),
-# which is only available when the node is loaded by the pipeline engine.
-# We import them lazily so that subpackages (e.g. `eval_cobalt.evaluators`,
-# which are pure-python) can be imported in lightweight test environments
-# without pulling in the runtime.
-try:
-    from .IGlobal import IGlobal
-    from .IInstance import IInstance
-except ImportError:
-    IGlobal = None  # type: ignore[assignment]
-    IInstance = None  # type: ignore[assignment]
+STOP_WORDS: set[str] = {
+    'a',
+    'an',
+    'the',
+    'is',
+    'are',
+    'was',
+    'were',
+    'be',
+    'been',
+    'being',
+    'have',
+    'has',
+    'had',
+    'do',
+    'does',
+    'did',
+    'will',
+    'would',
+    'could',
+    'should',
+    'may',
+    'might',
+    'shall',
+    'can',
+    'to',
+    'of',
+    'in',
+    'for',
+    'on',
+    'with',
+    'at',
+    'by',
+    'from',
+    'as',
+    'into',
+    'through',
+    'during',
+    'before',
+    'after',
+    'and',
+    'but',
+    'or',
+    'nor',
+    'not',
+    'so',
+    'yet',
+    'both',
+    'either',
+    'neither',
+    'it',
+    'its',
+    'that',
+    'this',
+    'these',
+    'those',
+    'their',
+    'them',
+    'they',
+    'what',
+    'which',
+    'who',
+    'whom',
+    'whose',
+}
+
+from .relevance import evaluate_relevance  # noqa: E402
+from .grounding import evaluate_grounding  # noqa: E402
+from .format_check import evaluate_format  # noqa: E402
+
+__all__ = [
+    'STOP_WORDS',
+    'evaluate_relevance',
+    'evaluate_grounding',
+    'evaluate_format',
+]
