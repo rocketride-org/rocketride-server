@@ -87,7 +87,7 @@ export function useTemplateInstantiator() {
 		// Notify host directly — onContentUpdated is blocked by isLoadingRef
 		// which hasn't been cleared yet (parent effect runs after child)
 		if (onContentChanged) {
-			const components = getProjectComponents(nodes as unknown as INode[]);
+			const components = getProjectComponents(nodes as unknown as INode[], servicesJson);
 			const project: IProject = { ...currentProject, components };
 			delete (project as any).viewport;
 			onContentChanged(project);

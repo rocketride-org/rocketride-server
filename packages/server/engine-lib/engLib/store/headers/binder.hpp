@@ -56,7 +56,18 @@ private:
                        std::unique_ptr<std::vector<IServiceFilterInstance *>>>
         methodMap;
 
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		When non-empty, `callMethods` skips every bound instance
+    ///		whose `pipeType.id` does not match this value. Used by
+    ///		`flow_if_else` to fan out to a single downstream branch.
+    ///		Default empty == current broadcast behaviour.
+    //-----------------------------------------------------------------
+    std::string m_targetFilter;
+
 public:
+    void setTargetFilter(const std::string &nodeId) noexcept { m_targetFilter = nodeId; }
+
     static constexpr std::array<const char *, 15> MethodNames = {
         "open",
         "tags",

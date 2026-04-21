@@ -445,6 +445,10 @@ void IServiceFilterInstance::cb_writeTag(py::bytes data) noexcept(false) {
     if (auto ccode = binder.writeTag(tag)) throw ccode;
 }
 
+void IServiceFilterInstance::cb_setTargetFilter(std::string nodeId) noexcept(false) {
+    this->binder.setTargetFilter(nodeId);
+}
+
 void IServiceFilterInstance::cb_writeText(const std::u16string &text) noexcept(
     false) {
     // Check to make sure target mode

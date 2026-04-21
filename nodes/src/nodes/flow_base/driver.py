@@ -29,7 +29,7 @@ class FlowDriverBase(ABC):
 
     The concrete `IInstance` that owns this driver is responsible for
     translating the returned `FlowResult` into engine write calls or
-    `preventDefault()` — see `flow_if.IInstance.writeText` for the
+    `preventDefault()` — see `flow_if_else.IInstance._gate` for the
     canonical consumer.
     """
 
@@ -74,7 +74,7 @@ class FlowDriverBase(ABC):
     async def evaluate(self, ctx: FlowContext) -> Any:
         """Return the driver-specific decision for this chunk.
 
-        For `flow_if` this is a `bool`. For `flow_switch` this is a
+        For `flow_if_else` this is a `bool`. For `flow_switch` this is a
         dispatch key. For `flow_for` this is an iterable. The return
         value is passed verbatim to `dispatch()`.
         """

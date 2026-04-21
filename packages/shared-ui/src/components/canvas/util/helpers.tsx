@@ -31,7 +31,7 @@
 import { ReactNode } from 'react';
 import DOMPurify from 'dompurify';
 import parse, { DOMNode, Element as DOMElement, domToReact, HTMLReactParserOptions } from 'html-react-parser';
-import { ILaneObject, IService, IServiceCapabilities, IServiceLane } from '../types';
+import { ILaneMap, ILaneObject, IService, IServiceCapabilities, IServiceCatalog, IServiceLane } from '../types';
 import { getDefaultFormState } from './rjsf';
 import { getIconPath } from './get-icon-path';
 
@@ -103,6 +103,60 @@ export const renameLanes = (originalLaneName = ''): string => {
 		default:
 			return originalLaneName;
 	}
+};
+
+// =============================================================================
+// Wildcard lane expansion
+// =============================================================================
+
+/**
+ * Discovers every content-lane name used across the service catalog.
+ *
+ * Walks every service's `lanes` map and collects each non-wildcard,
+ * non-internal (not prefixed with `_`) key and value. The union is the
+ * set of content lanes the UI knows about, used to expand `"*"` wildcard
+ * lane declarations at render time.
+ *
+ * New engine content types are picked up automatically as soon as a
+ * service — any service — declares them.
+ */
+export const getKnownContentLanes = (servicesJson: IServiceCatalog | undefined): string[] => {
+	const lanes = new Set<string>();
+	if (!servicesJson) return [];
+	for (const service of Object.values(servicesJson)) {
+		if (!service?.lanes) continue;
+		for (const [key, outputs] of Object.entries(service.lanes)) {
+			if (key !== '*' && !key.startsWith('_')) lanes.add(key);
+			for (const out of outputs ?? []) {
+				const name = typeof out === 'string' ? out : out.type;
+				if (name && name !== '*' && !name.startsWith('_')) lanes.add(name);
+			}
+		}
+	}
+	return Array.from(lanes).sort();
+};
+
+/**
+ * Expands a lane map that declares `"*"` as a key into its fully-enumerated
+ * form. Returns the input unchanged when no wildcard is present.
+ *
+ * Semantics:
+ *   `"*": ["*"]`          → one entry per known lane, each emitting its own name.
+ *   `"*": ["text"]`       → one entry per known lane, each emitting only "text".
+ *   `"*": ["*", "text"]`  → one entry per known lane, emitting {same, "text"}.
+ */
+export const expandWildcardLanes = (lanes: ILaneMap | undefined, knownLanes: string[]): ILaneMap => {
+	if (!lanes) return {};
+	if (!lanes['*']) return lanes;
+	const wildcardOutputs = lanes['*'];
+	const expanded: ILaneMap = {};
+	for (const lane of knownLanes) {
+		expanded[lane] = wildcardOutputs.map((o) => {
+			if (typeof o === 'string') return o === '*' ? lane : o;
+			return o.type === '*' ? { ...o, type: lane } : o;
+		});
+	}
+	return expanded;
 };
 
 /**

@@ -2,7 +2,7 @@
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
-"""IfDriver — evaluates a boolean expression and decides pass vs skip."""
+"""IfElseDriver — evaluates a boolean expression and picks a branch."""
 
 from __future__ import annotations
 
@@ -19,21 +19,21 @@ from ..flow_base import (
 )
 
 
-class IfDriver(FlowDriverBase):
-    """Single-gate driver: truthy → emit, falsy → skip.
+class IfElseDriver(FlowDriverBase):
+    """Two-branch driver: truthy → THEN, falsy → ELSE.
 
-    The expression runs in the AST-gated sandbox with two bindings:
+    Every chunk is routed to exactly one branch — the driver never
+    returns ``FlowAction.SKIP``. When the expression raises or times
+    out, it fails closed to the ELSE branch.
 
-    - ``text`` (or whatever `payload_name` is set to) — the incoming chunk.
-    - ``state`` — the `PerChunkState` for this invocation.
+    Expression bindings:
+
+    - ``<payload_name>`` (``text``, ``image``, ``audio``, ...) — incoming chunk.
+    - ``state`` — per-chunk state store.
     - ``cond`` — the `flow_base.cond` helper namespace.
-
-    Evaluation errors are fail-closed: treated as `False` (i.e. skip).
-    This keeps the pipeline resilient against malformed payloads
-    without requiring defensive try/except in every user expression.
     """
 
-    driver_name = 'flow_if'
+    driver_name = 'flow_if_else'
 
     def __init__(
         self,
@@ -45,7 +45,7 @@ class IfDriver(FlowDriverBase):
         """Configure the condition expression and payload binding name."""
         super().__init__(**kwargs)
         if not expression or not expression.strip():
-            raise ValueError('IfDriver requires a non-empty expression')
+            raise ValueError('IfElseDriver requires a non-empty expression')
         self.expression = expression
         self.payload_name = payload_name
 
@@ -58,8 +58,7 @@ class IfDriver(FlowDriverBase):
         try:
             value = evaluate_expression(self.expression, bindings)
         except SandboxError:
-            # Fail-closed: any evaluation error is treated as a rejection.
-            # The trace span records the exception via `FlowTrace.span`.
+            # Fail-closed: any evaluation error routes the chunk to ELSE.
             return False
         return bool(value)
 
@@ -67,6 +66,4 @@ class IfDriver(FlowDriverBase):
         branch = Decision.THEN if decision else Decision.ELSE
         run_id = ctx.state.get('_run_id', '')
         ctx.trace.decision(run_id, decision=branch.value, truthy=decision)
-        if decision:
-            return FlowResult.emit(payload=ctx.chunk, decision=branch)
-        return FlowResult.skip(decision=branch)
+        return FlowResult.emit(payload=ctx.chunk, decision=branch)
