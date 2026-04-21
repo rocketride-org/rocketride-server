@@ -453,19 +453,38 @@
 			"properties": ["ollama.profile"]
 		}
 	],
-	"test": {
-		"profiles": ["llama4-latest"],
-		"outputs": ["answers"],
-		"cases": [
-			{
-				"name": "LLM returns mock response",
-				"text": "What is 2+2?",
-				"expect": {
-					"answers": {
-						"contains": "Mock LLM response"
+	"test": [
+		{
+			"profiles": ["llama4-latest"],
+			"outputs": ["answers"],
+			"cases": [
+				{
+					"name": "LLM returns mock response",
+					"text": "What is 2+2?",
+					"expect": {
+						"answers": {
+							"contains": "Mock LLM response"
+						}
 					}
 				}
-			}
-		]
-	}
+			]
+		},
+		{
+			"requires": ["ROCKETRIDE_OLLAMA_HOST", "ROCKETRIDE_OLLAMA_MODEL_QWEN2_5_0_5B"],
+			"avoidMocks": true,
+			"profiles": ["qwen2_5-0_5b"],
+			"outputs": ["answers"],
+			"cases": [
+				{
+					"name": "LLM returns mock response",
+					"text": "What is 4*9?",
+					"expect": {
+						"answers": {
+							"contains": "36"
+						}
+					}
+				}
+			]
+		}
+	]
 }

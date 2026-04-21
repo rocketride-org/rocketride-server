@@ -1,6 +1,4 @@
 # Plugin Vertex AI core
-numpy
-versioneer
 langchain-google-vertexai
 google-auth
 google-auth-httplib2
@@ -16,5 +14,3 @@ google-api-core
 googleapis-common-protos
 proto-plus
 protobuf
-Cython
-bottleneck

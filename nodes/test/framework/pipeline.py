@@ -26,7 +26,7 @@ import uuid
 from typing import List, Dict, Any, Optional
 from .discovery import NodeTestConfig, get_node_test_config
 
-# Maps ROCKETRIDE_<PROVIDER>_<ATTR> suffixes to config field names.
+# Maps ROCKETRIDE_<PROVIDER>_<ATTR> attribute names to config field names.
 # Used by _parse_credential_env_var() to derive credentials from env var names.
 _ENV_ATTR_MAP = {
     'SECRET_KEY': 'secretKey',
@@ -37,32 +37,30 @@ _ENV_ATTR_MAP = {
     'HOST': 'host',
     'PORT': 'port',
 }
-# Sorted longest-first so SECRET_KEY matches before KEY
-_ENV_ATTR_SUFFIXES = sorted(_ENV_ATTR_MAP.keys(), key=len, reverse=True)
 
 
 def _parse_credential_env_var(env_var: str) -> Optional[str]:
     """Parse ROCKETRIDE_<PROVIDER>_<ATTR> and return the config field name.
 
+    Splits into exactly three sections: ROCKETRIDE, provider, attribute.
+    The attribute may contain underscores (e.g. SECRET_KEY).
+
     Examples:
         ROCKETRIDE_OPENAI_KEY        → 'apikey'
         ROCKETRIDE_BEDROCK_SECRET_KEY → 'secretKey'
         ROCKETRIDE_BEDROCK_REGION     → 'region'
+        ROCKETRIDE_MYSERVICE_TOKEN    → 'token'
 
     Returns:
         Config field name, or None if the env var doesn't match the pattern.
     """
-    prefix = 'ROCKETRIDE_'
-    if not env_var.startswith(prefix):
+    parts = env_var.split('_', 2)
+    if parts[0] != 'ROCKETRIDE' or len(parts) < 3:
         return None
-    rest = env_var[len(prefix) :]  # e.g. 'BEDROCK_SECRET_KEY'
-    for suffix in _ENV_ATTR_SUFFIXES:
-        if rest.endswith('_' + suffix):
-            return _ENV_ATTR_MAP[suffix]
-    # Unknown attribute — return the part after ROCKETRIDE_<PROVIDER>_ lowercased
-    # e.g. ROCKETRIDE_MYSERVICE_TOKEN → 'token'
-    parts = rest.split('_', 1)
-    return parts[1].lower() if len(parts) > 1 else None
+    attr = parts[2]  # e.g. 'SECRET_KEY', 'KEY', 'REGION', 'TOKEN'
+    if attr in _ENV_ATTR_MAP:
+        return _ENV_ATTR_MAP[attr]
+    return attr.lower()
 
 
 # Placeholder credentials for LLM nodes when ROCKETRIDE_MOCK is set (mocks handle requests)
@@ -80,6 +78,10 @@ _LLM_MOCK_CREDENTIALS = {
     'accessibility_describe': {'apikey': 'AIza-mock-placeholder-for-tests'},
     'llm_ibm_watson': {'apikey': 'mock-watson-placeholder-for-tests'},
     'llm_bedrock': {'accessKey': 'mock-access-key', 'secretKey': 'mock-secret-key', 'region': 'us-east-1'},
+    'llm_openai_api': {'apikey': 'sk-mock-placeholder-for-tests', 'model': 'mock-model'},
+    'llm_gmi_cloud': {'apikey': 'sk-mock-placeholder-for-tests'},
+    'llm_qwen': {'apikey': 'sk-mock-placeholder-for-tests'},
+    'llm_vision_ollama': {'apikey': 'sk-mock-placeholder-for-tests'},
 }
 
 

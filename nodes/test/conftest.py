@@ -235,8 +235,6 @@ def pytest_generate_tests(metafunc):
         # Groups: ML/heavy (anonymize, ocr, ner, embedding_image); image/video (image_cleanup, frame_grabber); LLM/local (llm_anthropic, llm_ollama).
         skip_nodes = {
             'anonymize',
-            'llm_anthropic',
-            'llm_ollama',
             'ocr',
             'ner',
             'embedding_image',
@@ -244,15 +242,6 @@ def pytest_generate_tests(metafunc):
             'frame_grabber',
             # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
             'index_search',
-            'llm_bedrock',
-            'llm_deepseek',
-            'llm_gmi_cloud',
-            'llm_openai_api',
-            'llm_qwen',
-            'llm_vision_ollama',
-            'llm_xai',
-            'vectordb_postgres',
-            'weaviate',
         }
         include_skip = {n.strip() for n in os.environ.get('ROCKETRIDE_INCLUDE_SKIP', '').split(',') if n.strip()}
 
