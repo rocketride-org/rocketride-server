@@ -57,6 +57,8 @@ Usage:
         print(f"Pipeline state: {status['state']}")
 """
 
+# Client-level types: configuration dict, identity types returned by connect(),
+# low-level DAP message structures, and all callback type aliases.
 from .client import (
     RocketRideClientConfig,
     ConnectCallback,
@@ -67,8 +69,13 @@ from .client import (
     TraceInfo,
     DAPMessage,
     TransportCallbacks,
+    TeamInfo,
+    OrgInfo,
+    ConnectResult,
 )
 
+# Pipeline types: the structures that describe a pipeline's topology — its
+# components and the connections wired between them.
 from .pipeline import (
     PipelineInputConnection,
     PipelineControlConnection,
@@ -76,6 +83,8 @@ from .pipeline import (
     PipelineConfig,
 )
 
+# Task types: runtime status, state machine values, execution flow flags,
+# token references, and per-component performance metrics.
 from .task import (
     TASK_STATUS,
     TASK_STATE,
@@ -84,6 +93,8 @@ from .task import (
     TASK_METRICS,
 )
 
+# Event types: constants and payload shapes for the real-time event stream
+# that reports pipeline lifecycle changes back to the client.
 from .events import (
     EVENT_TYPE,
     TASK_EVENT,
@@ -94,6 +105,8 @@ from .events import (
     TASK_EVENT_RESTART,
 )
 
+# Dashboard types: structures used by the monitoring/overview dashboard to
+# describe connections, running tasks, and aggregated server state.
 from .dashboard import (
     DASHBOARD_OVERVIEW,
     DASHBOARD_MONITOR,
@@ -111,11 +124,14 @@ from .dashboard import (
     DASHBOARD_EVENT_MONITOR_CHANGED,
 )
 
+# Data types: result shapes for pipeline data submissions and file uploads.
 from .data import (
     PIPELINE_RESULT,
     UPLOAD_RESULT,
 )
 
+# Service types: shapes for service discovery responses, slot/lane descriptors,
+# capability flags, and validation results.
 from .service import (
     SERVICE_SECTION,
     SERVICE_INVOKE_SLOT,
@@ -138,6 +154,9 @@ __all__ = [
     'TraceInfo',
     'DAPMessage',
     'TransportCallbacks',
+    'TeamInfo',
+    'OrgInfo',
+    'ConnectResult',
     # Pipeline types
     'PipelineInputConnection',
     'PipelineControlConnection',

@@ -56,7 +56,7 @@ CONST_READY_POLL_INTERVAL = 0.250  # seconds between readiness checks
 CONST_SUBPROCESS_BUFFER_LIMIT = 16 * 1024 * 1024  # bytes for subprocess stdin/stdout/stderr buffers (16MB)
 CONST_STATUS_UPDATE_CANCEL_TIMEOUT = 2.0  # seconds to wait for status update task cancellation
 CONST_DEFAULT_TTL = 15 * 60  # default time-to-live for idle tasks in seconds (15 minutes)
-CONST_TTL_CHECK = 60 # check for tasks to kill every 60 seconds
+CONST_TTL_CHECK = 60  # check for tasks to kill every 60 seconds
 
 # =============================================================================
 # Task Server Configuration
@@ -67,6 +67,10 @@ CONST_CLEANUP_SLEEP_TIME = 1 * 60  # seconds between cleanup scans (1 minute)
 # =============================================================================
 # Web Server Configuration
 # =============================================================================
+CONST_AUTH_PENDING_TIMEOUT = 600  # seconds before an OAuth-pending connection is dropped (10 minutes)
+CONST_MAX_PENDING_OAUTH_STATES = 500  # global cap on simultaneous OAuth state nonces
+CONST_MAX_UNAUTHED_CONNS_PER_IP = 10  # max unauthenticated WebSocket connections per client IP
+CONST_AUTH_MAX_ATTEMPTS_PER_CONN = 5  # max rrext_account_authenticate calls per connection
 CONST_DEFAULT_WEB_PORT = 5565  # default web server port
 CONST_DEFAULT_WEB_HOST = '0.0.0.0'  # default bind address (all interfaces)
 CONST_WEB_WS_MAX_SIZE = 250 * 1024 * 1024  # maximum WebSocket message size in bytes (250MB)
