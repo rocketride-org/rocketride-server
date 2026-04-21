@@ -1,0 +1,62 @@
+{
+	"components": [
+		{
+			"id": "dataset_cobalt_1",
+			"provider": "dataset_cobalt",
+			"config": {
+				"profile": "inline",
+				"inline": {
+					"source_type": "inline",
+					"items": "[{\"input\": \"What is the capital of France?\", \"expected\": \"The capital of France is Paris.\"}, {\"input\": \"What is 2 + 2?\", \"expected\": \"2 + 2 equals 4.\"}, {\"input\": \"Name the largest ocean on Earth.\", \"expected\": \"The Pacific Ocean is the largest ocean on Earth.\"}]",
+					"sample_size": 0
+				},
+				"parameters": {}
+			},
+			"ui": { "position": { "x": 20, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "prompt_1",
+			"provider": "prompt",
+			"config": {
+				"instructions": ["Answer the question concisely in one sentence. Stay factual and avoid speculation."],
+				"parameters": {}
+			},
+			"input": [{ "lane": "questions", "from": "dataset_cobalt_1" }],
+			"ui": { "position": { "x": 240, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "llm_openai_1",
+			"provider": "llm_openai",
+			"config": {
+				"profile": "openai-4o",
+				"openai-4o": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" },
+				"parameters": {}
+			},
+			"input": [{ "lane": "questions", "from": "prompt_1" }],
+			"ui": { "position": { "x": 460, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "eval_cobalt_1",
+			"provider": "eval_cobalt",
+			"config": {
+				"profile": "similarity",
+				"similarity": {
+					"eval_type": "similarity",
+					"threshold": 0.6
+				},
+				"parameters": {}
+			},
+			"input": [{ "lane": "answers", "from": "llm_openai_1" }],
+			"ui": { "position": { "x": 680, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_answers_1",
+			"provider": "response_answers",
+			"config": { "laneName": "answers" },
+			"input": [{ "lane": "answers", "from": "eval_cobalt_1" }],
+			"ui": { "position": { "x": 900, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		}
+	],
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
+}

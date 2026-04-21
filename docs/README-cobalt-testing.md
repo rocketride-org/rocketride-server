@@ -195,3 +195,27 @@ Parameters:
 - `output` (str): The text to check
 - `expected_format` (str): One of 'prose', 'list', 'code', 'json'
 - `threshold` (float): Minimum score to pass (default 0.5)
+
+## End-to-end pipeline example
+
+A working example pipeline is provided in `examples/cobalt-evaluation.pipe`.
+It wires the full evaluation flow:
+
+```
+dataset_cobalt → prompt → llm_openai → eval_cobalt → response_answers
+```
+
+- **dataset_cobalt** loads a small inline Q&A dataset (3 items).
+- **prompt** prepends an instruction to each question.
+- **llm_openai** generates an answer for each question.
+- **eval_cobalt** scores each answer against the expected output using
+  semantic similarity (`threshold: 0.6`).
+- **response_answers** returns the evaluated answers.
+
+Swap the `eval_cobalt_1` profile to `relevance`, `grounding`, `format`,
+`llm_judge`, or `custom` to try the other evaluators. The `relevance`,
+`grounding`, and `format` profiles are fully deterministic and require
+no external API keys, making them ideal for CI gating.
+
+Run the pipeline via the standard RocketRide loader (set
+`ROCKETRIDE_OPENAI_KEY` in your environment first).
