@@ -219,3 +219,18 @@ no external API keys, making them ideal for CI gating.
 
 Run the pipeline via the standard RocketRide loader (set
 `ROCKETRIDE_OPENAI_KEY` in your environment first).
+
+## Running real-library integration tests
+
+The fast unit tests in `test/nodes/test_eval_cobalt.py` mock the `cobalt`
+library to keep CI deterministic. A companion file exercises the real
+basalt-ai-cobalt library for each of the three primary evaluation modes
+(`similarity`, `llm_judge`, `custom`):
+
+```bash
+pytest -m integration test/nodes/test_eval_cobalt_integration.py
+```
+
+The whole module is skipped cleanly when `basalt-ai-cobalt` is not
+installed, and the `llm_judge` test additionally requires
+`OPENAI_API_KEY` to be set.
