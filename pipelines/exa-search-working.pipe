@@ -43,7 +43,7 @@
       "provider": "search_exa",
       "name": "Exa search",
       "config": {
-        "apikey": "${ROCKETRIDE_APIKEY_EXA}",
+        "apikey": "${ROCKETRIDE_EXA_KEY}",
         "profile": "default",
         "default": {
           "highlightChars": 600,
