@@ -240,6 +240,7 @@ def pytest_generate_tests(metafunc):
             'embedding_image',
             'image_cleanup',
             'frame_grabber',
+            'audio_transcribe',  # it downloads faster-whisper model (1.5GB)
             # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
             'index_search',
         }
