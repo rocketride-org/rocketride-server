@@ -26,11 +26,19 @@
 All tests use mocks to avoid real file I/O and external dependencies.
 """
 
+import pathlib
 import sys
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+# Directory that contains the individual node packages (dataset_cobalt,
+# eval_cobalt, ...). Adding it to sys.path lets us `import dataset_cobalt.*`
+# directly, bypassing the top-level `nodes/__init__.py` which would otherwise
+# try to `from depends import depends` and fail outside the engine runtime.
+_NODES_DIR = str(pathlib.Path(__file__).resolve().parents[2] / 'nodes' / 'src' / 'nodes')
 
 
 # ---------------------------------------------------------------------------
@@ -176,10 +184,17 @@ def _restore_modules_impl():
             sys.modules.pop(name, None)
         else:
             sys.modules[name] = orig
+    # Drop any cached imports that were resolved through _NODES_DIR so they
+    # don't leak into other test modules that may want the real packages.
+    for key in list(sys.modules):
+        if key.startswith('dataset_cobalt'):
+            del sys.modules[key]
 
 
 # Snapshot before mocks are installed, then install mocks so node imports succeed.
 _snapshot_modules()
+if _NODES_DIR not in sys.path:
+    sys.path.insert(0, _NODES_DIR)
 _install_mocks()
 
 
@@ -250,9 +265,9 @@ sys.modules['cobalt'] = mock_cobalt
 # ---------------------------------------------------------------------------
 # Now import the actual node code
 # ---------------------------------------------------------------------------
-from nodes.dataset_cobalt.dataset_loader import DatasetLoader
-from nodes.dataset_cobalt.IGlobal import IGlobal
-from nodes.dataset_cobalt.IInstance import IInstance
+from dataset_cobalt.dataset_loader import DatasetLoader
+from dataset_cobalt.IGlobal import IGlobal
+from dataset_cobalt.IInstance import IInstance
 
 
 # ---------------------------------------------------------------------------
@@ -664,7 +679,7 @@ class TestIGlobalLifecycle:
         # when another test module has replaced rocketlib in sys.modules.
         import importlib  # noqa: PLC0415
 
-        _ig_mod = importlib.import_module('nodes.dataset_cobalt.IGlobal')
+        _ig_mod = importlib.import_module('dataset_cobalt.IGlobal')
         g.IEndpoint.endpoint.openMode = _ig_mod.OPEN_MODE.CONFIG
 
         g.beginGlobal()
@@ -770,7 +785,7 @@ class TestValidatePathHelper:
     """Fix 1 + 8: Shared _validate_path helper used by loader and IGlobal."""
 
     def test_validate_path_rejects_sibling_prefix(self):
-        from nodes.dataset_cobalt.dataset_loader import _validate_path
+        from dataset_cobalt.dataset_loader import _validate_path
 
         with patch('os.path.realpath', side_effect=lambda p: p):
             with patch('os.getcwd', return_value='/safe/workdir'):
@@ -778,7 +793,7 @@ class TestValidatePathHelper:
                     _validate_path('/safe/workdir_evil/test.json')
 
     def test_validate_path_accepts_valid_child(self):
-        from nodes.dataset_cobalt.dataset_loader import _validate_path
+        from dataset_cobalt.dataset_loader import _validate_path
 
         with patch('os.path.realpath', side_effect=lambda p: p):
             with patch('os.getcwd', return_value='/safe/workdir'):
@@ -786,7 +801,7 @@ class TestValidatePathHelper:
                 assert result == '/safe/workdir/data/test.json'
 
     def test_validate_path_rejects_dotdot(self):
-        from nodes.dataset_cobalt.dataset_loader import _validate_path
+        from dataset_cobalt.dataset_loader import _validate_path
 
         with pytest.raises(ValueError, match='traversal'):
             _validate_path('/data/../../../etc/passwd')
