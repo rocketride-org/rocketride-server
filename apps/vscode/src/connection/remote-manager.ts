@@ -53,7 +53,7 @@ export class RemoteManager extends BaseManager {
 			throw new Error('API key is required for cloud connections. Configure it in Settings.');
 		}
 
-		await client.connect({ uri: config.hostUrl, auth: config.apiKey });
+		await client.connect(config.apiKey, { uri: config.hostUrl });
 	}
 
 	async disconnect(client: RocketRideClient): Promise<void> {
