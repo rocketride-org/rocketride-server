@@ -249,7 +249,7 @@
 				"model": "deepseek-v3.2",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 32768, // openrouter
+				"modelOutputTokens": 65536, // openrouter
 				"apikey": ""
 			},
 			"deepseek-v3-2-exp": {
