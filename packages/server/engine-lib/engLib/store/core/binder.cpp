@@ -113,23 +113,8 @@ Error Binder::callMethods(
 
     // Iterate over bound instances and invoke the callback
     for (auto *pInstance : *(it->second)) {
-        // -----------------------------------------------------------------
-        // Optional per-call target filter (used by conditional routers like
-        // `flow_if_else`). When `m_targetFilter` is non-empty, we skip every
-        // bound instance whose `pipeType.id` does not match, effectively
-        // dispatching the chunk to a single downstream node instead of
-        // broadcasting to all.
-        //
-        // The empty-string short-circuit is the hot path: when no filter is
-        // set (the default for every non-conditional pipeline) the guard
-        // collapses to a single empty-string check per instance and the
-        // dispatch is behaviorally identical to the pre-filter version.
-        //
-        // Thread-safety: this read is unsynchronised. The Binder assumes
-        // single-threaded dispatch per pipeline; if multi-threaded dispatch
-        // is introduced in the future, protect `m_targetFilter` with a
-        // mutex or promote it to `thread_local` (see binder.hpp).
-        // -----------------------------------------------------------------
+        // Single-target dispatch guard (see Binder::m_targetFilter).
+        // Empty filter = broadcast, zero behavioural drift.
         if (!pThis->m_targetFilter.empty() && pInstance->pipeType.id != pThis->m_targetFilter) continue;
 
         // Build enter trace

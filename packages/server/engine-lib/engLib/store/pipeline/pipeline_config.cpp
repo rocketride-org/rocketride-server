@@ -285,38 +285,8 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
     //     }
     _block() {
         for (auto &[id, comp] : comps) {
-            // -------------------------------------------------------------
-            // Lane-pair validation with wildcard support.
-            //
-            // A service's `lanes` map declares which (input_lane, output_lane)
-            // pairs the component supports. The original rule was strict:
-            //   lanes[input] must exist, and output must appear in that list.
-            //
-            // Conditional routers (`flow_if_else`) are pure routers —
-            // they don't transform types, they just forward chunks.
-            // Instead of enumerating every engine content type, they
-            // declare the single wildcard key:
-            //
-            //     "lanes": { "*": ["*"] }
-            //
-            // Read as: "accept any engine-known input lane and emit on the
-            // same lane". The validator honors this with two extra rules:
-            //
-            //   1. If `lanes` contains `"*"`, the input-lane existence check
-            //      is skipped (every input is implicitly accepted).
-            //   2. If the wildcard's output list is `["*"]` too, the pair
-            //      links iff input->name == output->name. Prevents
-            //      cross-type wiring (e.g. text-in → image-out) while
-            //      admitting every known content type.
-            //   3. If the wildcard's output list enumerates specific lanes
-            //      (e.g. `"*": ["text", "documents"]`), falls through to
-            //      the standard `_anyOf` check — same semantics as before.
-            //
-            // Services that do NOT declare `"*"` go through the exact same
-            // path as pre-change code: the `wildcard` flag is false and both
-            // the existence check and the `_anyOf` match behave identically.
-            // Zero behavioural drift for existing pipelines.
-            // -------------------------------------------------------------
+            // Wildcard `"*"` lanes accept any input; `{"*":["*"]}` enforces
+            // input==output (passthrough router). Non-wildcard path unchanged.
             const auto &lanesDef = comp.def->serviceDefinition["lanes"];
             const bool wildcard = lanesDef.isMember("*");
             for (auto &input : comp.inputs) {
@@ -326,11 +296,7 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
                                      "input lane", input->name,
                                      "not found in service definition");
 
-                    // Pick the output-lane allow-list: the wildcard list if
-                    // present, otherwise the concrete per-lane list.
                     const auto &outDef = wildcard ? lanesDef["*"] : lanesDef[input->name];
-                    // Strict wildcard (`"*":["*"]`) enforces same-type
-                    // passthrough; every other case defers to `_anyOf`.
                     const bool matches = wildcard && _anyOf(outDef, "*")
                         ? (input->name == output->name)
                         : _anyOf(outDef, output->name);
