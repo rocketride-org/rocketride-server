@@ -425,7 +425,11 @@ def merge(
     exact_matched_profiles: set = set()
 
     # --- Pass 1: add new models, update changed ones ---
-    for model_id, api_entry in api_lookup.items():
+    # Iterate in sorted model_id order so that when multiple API entries resolve
+    # to the same profile (via exact, normalised, or key-collision matching) the
+    # "last-seen wins" outcome is stable across runs, not driven by API response order.
+    for model_id in sorted(api_lookup):
+        api_entry = api_lookup[model_id]
         # Try exact match first; fall back to normalised lookup (e.g. for Gemini
         # where API returns "models/gemini-2.5-pro" but OpenRouter has "gemini-2.5-pro").
         profile_key = model_to_key.get(model_id) or norm_model_to_key.get(model_id)
@@ -536,6 +540,14 @@ def merge(
             output_tokens_src = 'default'
 
         if profile_key is None:
+            # Skip models that arrive already deprecated from their discovery source
+            # (e.g. OpenRouter entries carrying an `expiration_date`).  Creating a
+            # fresh profile just to mark it deprecated pollutes services.json and
+            # causes flip-flop between the "new profile" and "existing profile"
+            # branches on successive syncs.
+            if _api_entry_source == 'openrouter' and api_entry.get('expiration_date'):
+                continue
+
             # New model — use authoritative value if available, then provider default,
             # then global fallback. Track when we're guessing so the report can flag it.
             if authoritative_total_tokens:
