@@ -57,7 +57,7 @@ except ImportError:
 class TestConfig:
     """Test configuration loaded from environment variables."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize test configuration from ROCKETRIDE_* environment variables."""
         self.uri = os.getenv('ROCKETRIDE_URI', 'http://localhost:5565')
         self.auth = os.getenv('ROCKETRIDE_APIKEY', 'MYAPIKEY')
@@ -111,7 +111,7 @@ async def server_available():
 
 
 @pytest_asyncio.fixture
-async def client(server_available):
+async def client(server_available):  # noqa: ARG001 — pytest fixture dependency, not unused
     """
     Provide a connected RocketRideClient for tests.
 
@@ -178,7 +178,7 @@ async def node_test_runner(client):
     """
     runners = []
 
-    async def _create_runner(config: NodeTestConfig, profile: str = None) -> NodeTestRunner:
+    async def _create_runner(config: NodeTestConfig, profile: str | None = None) -> NodeTestRunner:
         runner = NodeTestRunner(client, config, profile)
         await runner.setup()
         runners.append(runner)
