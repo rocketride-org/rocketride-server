@@ -411,7 +411,7 @@ export default function Canvas(): ReactElement {
 				snapToGrid={projectLayout.snapToGrid ?? true}
 				snapGrid={projectLayout.snapGridSize ?? [10, 10]}
 			>
-				<Background color="var(--rr-text-disabled)" gap={20} style={{ backgroundColor: 'var(--rr-bg-paper)' }} />
+				<Background color="var(--rr-text-disabled)" gap={20} style={{ backgroundColor: 'var(--rr-bg-default)' }} />
 			</ReactFlow>
 
 			{/* Empty canvas prompt — shown when no nodes and create panel is closed */}
