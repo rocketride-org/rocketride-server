@@ -121,8 +121,19 @@ class BillingCommands(DAPConn):
               "arguments": { "subcommand": "credits_balance",
                              "orgId": "..." } }
         """
-        args       = (request.get('arguments') or {})
+        # Harden against malformed requests — a non-dict `arguments`
+        # (bug in a client, someone poking the wire by hand) or a
+        # non-hashable `subcommand` would otherwise crash the handler
+        # with AttributeError / TypeError before reaching the structured
+        # error response. Normalise both and fall through to the
+        # `unknown_subcommand` branch with a repr() for diagnosis.
+        args = request.get('arguments') or {}
+        if not isinstance(args, dict):
+            args = {}
+
         subcommand = args.get('subcommand', '')
+        if not isinstance(subcommand, str):
+            subcommand = repr(subcommand)
 
         if subcommand not in _KNOWN_SUBCOMMANDS:
             # Unknown subcommand — separate error code so SaaS clients can
