@@ -86,19 +86,23 @@ class BillingCommands(DAPConn):
         """
         Initialise a new BillingCommands mixin.
 
-        Args match every other DAP command mixin in the TaskConn chain so
-        TaskConn's co-operative multiple-inheritance pattern works. The
-        stub holds no state; SaaS overrides may populate clients here.
+        Args match every other DAP command mixin in the TaskConn chain.
+        Note that TaskConn initializes each mixin explicitly (see
+        task_conn.py) rather than relying on cooperative MRO; this
+        constructor deliberately does not call ``super().__init__`` to
+        avoid double-initialising DAPConn. Args are accepted for
+        signature parity but dropped on the OSS stub — the SaaS overlay
+        subclass is where real per-connection state lives.
 
         Args:
             connection_id: Unique identifier for this DAP connection.
             server: TaskServer instance for context + utilities.
             transport: Transport layer for DAP messaging.
-            **kwargs: Forwarded to DAPConn / parent mixins.
+            **kwargs: Accepted for signature parity with sibling mixins.
         """
         # All state sits on TaskConn via the other mixins; nothing specific
         # to billing needs to exist on the OSS stub.
-        pass
+        del connection_id, server, transport, kwargs  # unused on OSS stub
 
     async def on_rrext_account_billing(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
