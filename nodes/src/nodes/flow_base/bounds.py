@@ -4,9 +4,10 @@
 # =============================================================================
 """Timeout and iteration-count enforcement for flow drivers.
 
-`Bounds` is shared by every `flow_*` node: `flow_if_else` uses only the
-overall timeout; `flow_for` / `flow_while` / `flow_map` additionally
-enforce `max_iterations` so a runaway loop cannot stall the pipeline.
+`Bounds` is shared by every `flow_*` node. `flow_if_else` uses only the
+overall `timeout_s`. `max_iterations` is included in the contract so a
+future iterating driver can reuse the same primitive without changing
+this module.
 """
 
 from __future__ import annotations
@@ -26,8 +27,8 @@ class Bounds:
     """Execution limits for a single flow driver invocation.
 
     `timeout_s` caps the total time spent in `FlowDriverBase.run()`.
-    `max_iterations` caps loop bodies in `flow_for` / `flow_while` etc.
-    Drivers that do not iterate ignore it.
+    `max_iterations` caps loop bodies for iterating drivers; drivers
+    that do not iterate (e.g. `flow_if_else`) ignore it.
     """
 
     timeout_s: float = 30.0

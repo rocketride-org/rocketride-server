@@ -74,9 +74,9 @@ class FlowDriverBase(ABC):
     async def evaluate(self, ctx: FlowContext) -> Any:
         """Return the driver-specific decision for this chunk.
 
-        For `flow_if_else` this is a `bool`. For `flow_switch` this is a
-        dispatch key. For `flow_for` this is an iterable. The return
-        value is passed verbatim to `dispatch()`.
+        For `flow_if_else` this is a `bool`. Other driver types may
+        return different shapes (dispatch keys, iterables, etc.); the
+        return value is passed verbatim to `dispatch()`.
         """
 
     @abstractmethod
