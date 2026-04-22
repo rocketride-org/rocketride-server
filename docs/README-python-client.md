@@ -160,7 +160,26 @@ Download and register an engine binary.
 rocketride engine install              # latest compatible version
 rocketride engine install 3.0.5        # specific version
 rocketride engine install 3.0.5 --force  # skip compatibility check
+rocketride engine install 3.1.2 --new    # additional instance of the same version
 ```
+
+| Flag      | Description                                                       |
+| --------- | ----------------------------------------------------------------- |
+| `--force` | Skip compatibility check                                          |
+| `--new`   | Create a new instance even if one already exists for that version |
+
+#### `rocketride engine versions`
+
+List available engine versions.
+
+```bash
+rocketride engine versions              # stable versions only
+rocketride engine versions --prerelease # include prerelease versions
+```
+
+| Flag           | Description                 |
+| -------------- | --------------------------- |
+| `--prerelease` | Include prerelease versions |
 
 #### `rocketride engine list`
 
@@ -212,6 +231,8 @@ rocketride engine delete 0 --purge    # also remove the binary from disk
 | --------- | --------------------------------------- |
 | `--purge` | Also remove the engine binary from disk |
 
+**Purge safety:** When deleting with `--purge`, the engine binary is only removed from disk when the last instance of that version is deleted. If other instances still reference the same version, only the instance record is removed and the binary is kept.
+
 #### `rocketride engine logs <id>`
 
 Tail the log output of an engine instance.
@@ -219,6 +240,17 @@ Tail the log output of an engine instance.
 ```bash
 rocketride engine logs 0
 ```
+
+#### Multiple Instances
+
+Use the `--new` flag with `install` to create additional instances of the same version:
+
+```bash
+rocketride engine install 3.1.2          # first instance (ID 0)
+rocketride engine install 3.1.2 --new    # second instance (ID 1), same version
+```
+
+Each instance gets its own ID and can be started, stopped, and deleted independently.
 
 ---
 
@@ -465,6 +497,49 @@ From `rocketride.schema`. Used to parse chat response content. The client does n
 - **QuestionHistory**: `{ 'role': str, 'content': str }`.
 - **QuestionInstruction**: `{ 'subtitle': str, 'instructions': str }`.
 - **QuestionExample**: `{ 'given': str, 'result': str }`.
+
+---
+
+## RuntimeService
+
+The `RuntimeService` class provides a programmatic async API for managing local engine instances. This is the same functionality exposed by the `rocketride engine` CLI commands, available for use in your own scripts and applications.
+
+```python
+from rocketride import RuntimeService
+
+service = RuntimeService()
+
+# Install
+inst = await service.install(version='3.1.2', type='Service')
+
+# List instances
+instances = await service.list()
+
+# Start/stop/delete
+await service.start('0', port=5570)
+await service.stop('0')
+await service.delete('0', purge=True)
+
+# List versions
+versions = await service.list_versions(include_prerelease=False)
+
+# Get running
+running = await service.get_running()
+```
+
+### Instance Targeting
+
+Connect a client to a specific runtime instance by ID or port:
+
+```python
+client = RocketRideClient(
+    auth='key',
+    runtime_id='4',
+    runtime_port=5567,
+)
+```
+
+When `runtime_id` is set, the client connects to the instance with that ID. When `runtime_port` is set, the client connects to the instance listening on that port. These options let you run multiple engines side by side and direct each client to a specific one.
 
 ---
 

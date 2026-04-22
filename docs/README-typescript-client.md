@@ -465,6 +465,86 @@ await client.disconnect();
 
 ---
 
+## Runtime Management
+
+The SDK includes a full runtime management system for installing, running, and managing local RocketRide engine instances. You can control runtimes programmatically via `RuntimeService` or from the command line.
+
+### RuntimeService Class
+
+```typescript
+import { RuntimeService } from 'rocketride';
+
+const runtime = new RuntimeService();
+
+// Install a runtime
+const inst = await runtime.install({ version: '3.1.2', type: 'Service' });
+
+// List installed instances
+const instances = runtime.list();
+
+// Start/stop/delete
+await runtime.start('0', { port: 5570 });
+await runtime.stop('0');
+await runtime.delete('0', { purge: true });
+
+// List available versions
+const versions = await runtime.listVersions({ includePrerelease: false });
+
+// Get running instances
+const running = runtime.getRunning();
+```
+
+### Runtime CLI Commands
+
+```
+npx rocketride runtime list
+npx rocketride runtime versions [--prerelease]
+npx rocketride runtime install [version] [--local|--docker] [--new] [--force] [--port PORT]
+npx rocketride runtime start [id] [--port PORT] [--version VERSION]
+npx rocketride runtime stop <id>
+npx rocketride runtime delete <id> [--purge]
+npx rocketride runtime logs <id>
+```
+
+### Instance Targeting
+
+Connect a client to a specific runtime instance by ID or port:
+
+```typescript
+const client = new RocketRideClient({
+	auth: 'key',
+	runtimeId: '4', // connect to specific instance
+	runtimePort: 5567, // connect to instance on specific port
+});
+```
+
+### Multiple Instances
+
+Use the `--new` flag to install additional instances of the same version:
+
+```
+npx rocketride runtime install 3.1.2 --local          # first instance
+npx rocketride runtime install 3.1.2 --local --new    # second instance, same version
+```
+
+Each instance gets its own ID and can be started, stopped, and deleted independently.
+
+### Purge Safety
+
+When deleting an instance with `--purge`, the engine binary is only removed from disk when the last instance of that version is deleted. If other instances still reference the same version, only the instance record is removed and the binary is kept.
+
+### Type Definitions
+
+The runtime management API uses these types:
+
+- **InstallOptions** — `{ version?: string; type?: 'Service' | 'Docker'; force?: boolean; port?: number; new?: boolean }`
+- **StartOptions** — `{ port?: number; version?: string }`
+- **DeleteOptions** — `{ purge?: boolean }`
+- **VersionStatus** — Version metadata including version string, compatibility, and prerelease status
+- **InstanceRecord** — Instance state including ID, version, PID, port, status, owner, uptime, and memory usage
+
+---
+
 ## Links
 
 - [Documentation](https://docs.rocketride.org/)

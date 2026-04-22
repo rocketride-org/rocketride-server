@@ -947,6 +947,72 @@ Common error scenarios:
 - **Execution errors**: Pipeline execution failures
 - **Upload errors**: File upload failures
 
+## Runtime Management
+
+The SDK includes `RuntimeService` for programmatic control of local engine instances, plus CLI commands under `rocketride engine`.
+
+### RuntimeService
+
+```python
+from rocketride import RuntimeService
+
+service = RuntimeService()
+
+# Install
+inst = await service.install(version='3.1.2', type='Service')
+
+# List instances
+instances = await service.list()
+
+# Start/stop/delete
+await service.start('0', port=5570)
+await service.stop('0')
+await service.delete('0', purge=True)
+
+# List versions
+versions = await service.list_versions(include_prerelease=False)
+
+# Get running
+running = await service.get_running()
+```
+
+### Runtime CLI Commands
+
+```
+rocketride engine list
+rocketride engine versions [--prerelease]
+rocketride engine install [version] [--force] [--new]
+rocketride engine start [id] [--port PORT] [--version VERSION]
+rocketride engine stop <id>
+rocketride engine delete <id> [--purge]
+rocketride engine logs <id>
+```
+
+### Instance Targeting
+
+Connect a client to a specific runtime instance by ID or port:
+
+```python
+client = RocketRideClient(
+    auth='key',
+    runtime_id='4',
+    runtime_port=5567,
+)
+```
+
+### Multiple Instances
+
+Use the `--new` flag to install additional instances of the same version:
+
+```
+rocketride engine install 3.1.2            # first instance
+rocketride engine install 3.1.2 --new      # second instance, same version
+```
+
+### Purge Safety
+
+When deleting with `--purge`, the engine binary is only removed from disk when the last instance of that version is deleted. If other instances still reference the same version, only the instance record is removed.
+
 ## Performance Considerations
 
 - File uploads are parallelized (all files uploaded concurrently)

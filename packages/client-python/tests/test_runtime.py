@@ -1398,233 +1398,171 @@ class TestManagerAutoSpawn:
 
 
 class TestCLIInstall:
-    @pytest.fixture
-    def tmp_home(self, tmp_path):
-        """Redirect ~/.rocketride to a temp directory."""
-        home = tmp_path / '.rocketride'
-        with patch('rocketride.core.runtime.state.state_db_path', return_value=home / 'instances' / 'state.db'), patch('rocketride.core.runtime.state.ensure_dirs', side_effect=lambda: (home / 'instances').mkdir(parents=True, exist_ok=True)):
-            yield home
+    """CLI install tests — mock RuntimeService since CLI is now a thin wrapper."""
 
     @pytest.mark.asyncio
-    async def test_install_specific_version_local(self, tmp_home, tmp_path):
-        """--local flag: installs as Local, no auto-start."""
+    async def test_install_specific_version_local(self):
+        """--local flag: delegates to service with type=Local."""
         from rocketride.cli.commands.runtime import _cmd_install
 
-        binary = tmp_path / 'engine'
+        mock_service = MagicMock()
+        mock_service.install = AsyncMock(return_value={'id': '0', 'version': '3.1.0', 'pid': 0, 'port': 0})
 
         args = MagicMock()
         args.version = '3.1.0'
         args.force = False
         args.docker = False
         args.local = True
+        args.port = None
+        args.new = False
 
-        with (
-            patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
-            patch('rocketride.cli.commands.runtime.get_compat_range', return_value='>=3.0.0,<4.0.0'),
-            patch('rocketride.cli.commands.runtime.download_runtime', new_callable=AsyncMock, side_effect=lambda *a, **kw: binary.write_text('fake') or binary),
-        ):
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service), patch('rocketride.cli.commands.runtime._cmd_list', new_callable=AsyncMock, return_value=0):
             result = await _cmd_install(args)
 
         assert result == 0
-        async with StateDB() as db:
-            inst = await db.find_by_version_and_type('3.1.0', 'Local')
-            assert inst is not None
-            assert inst['desired_state'] == 'stopped'
-            assert inst['pid'] == 0
+        mock_service.install.assert_awaited_once()
+        _, kwargs = mock_service.install.call_args
+        assert kwargs['type'] == 'Local'
 
     @pytest.mark.asyncio
-    async def test_install_service_default(self, tmp_home, tmp_path):
-        """No flag = Service type + auto-start."""
+    async def test_install_service_default(self):
+        """No flag = Service type."""
         from rocketride.cli.commands.runtime import _cmd_install
 
-        binary = tmp_path / 'engine'
+        mock_service = MagicMock()
+        mock_service.install = AsyncMock(return_value={'id': '0', 'version': '3.1.0', 'pid': 12345, 'port': 5570})
 
         args = MagicMock()
         args.version = '3.1.0'
         args.force = False
         args.docker = False
         args.local = False
+        args.port = None
+        args.new = False
 
-        with (
-            patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
-            patch('rocketride.cli.commands.runtime.get_compat_range', return_value='>=3.0.0,<4.0.0'),
-            patch('rocketride.cli.commands.runtime.download_runtime', new_callable=AsyncMock, side_effect=lambda *a, **kw: binary.write_text('fake') or binary),
-            patch('rocketride.cli.commands.runtime.find_available_port', return_value=5570),
-            patch('rocketride.cli.commands.runtime.spawn_runtime', new_callable=AsyncMock, return_value=12345),
-            patch('rocketride.cli.commands.runtime.wait_ready', new_callable=AsyncMock),
-            patch('rocketride.cli.commands.runtime.logs_dir', return_value=tmp_path / 'logs' / '0'),
-        ):
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service), patch('rocketride.cli.commands.runtime._cmd_list', new_callable=AsyncMock, return_value=0):
             result = await _cmd_install(args)
 
         assert result == 0
-        async with StateDB() as db:
-            inst = await db.find_by_version_and_type('3.1.0', 'Service')
-            assert inst is not None
-            assert inst['desired_state'] == 'running'
-            assert inst['pid'] == 12345
-            assert inst['port'] == 5570
+        _, kwargs = mock_service.install.call_args
+        assert kwargs['type'] == 'Service'
 
     @pytest.mark.asyncio
-    async def test_install_service_autostart_failure(self, tmp_home, tmp_path):
-        """Auto-start fails: install preserved as stopped, returns 1."""
+    async def test_install_service_autostart_failure(self):
+        """Auto-start fails: returns 1."""
         from rocketride.cli.commands.runtime import _cmd_install
 
-        binary = tmp_path / 'engine'
+        mock_service = MagicMock()
+        mock_service.install = AsyncMock(side_effect=RuntimeManagementError('Auto-start failed: not ready'))
 
         args = MagicMock()
         args.version = '3.1.0'
         args.force = False
         args.docker = False
         args.local = False
+        args.port = None
+        args.new = False
 
-        with (
-            patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
-            patch('rocketride.cli.commands.runtime.get_compat_range', return_value='>=3.0.0,<4.0.0'),
-            patch('rocketride.cli.commands.runtime.download_runtime', new_callable=AsyncMock, side_effect=lambda *a, **kw: binary.write_text('fake') or binary),
-            patch('rocketride.cli.commands.runtime.find_available_port', return_value=5570),
-            patch('rocketride.cli.commands.runtime.spawn_runtime', new_callable=AsyncMock, return_value=12345),
-            patch('rocketride.cli.commands.runtime.wait_ready', new_callable=AsyncMock, side_effect=RuntimeManagementError('not ready')),
-            patch('rocketride.cli.commands.runtime.stop_runtime', new_callable=AsyncMock) as mock_stop,
-            patch('rocketride.cli.commands.runtime.logs_dir', return_value=tmp_path / 'logs' / '0'),
-        ):
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service):
             result = await _cmd_install(args)
 
         assert result == 1
-        mock_stop.assert_called_once_with(12345)
-        async with StateDB() as db:
-            inst = await db.find_by_version_and_type('3.1.0', 'Service')
-            assert inst is not None
-            assert inst['desired_state'] == 'stopped'
-            assert inst['pid'] == 0
 
     @pytest.mark.asyncio
-    async def test_install_already_installed_same_type(self, tmp_home, tmp_path):
+    async def test_install_already_installed_same_type(self):
+        """Service returns existing instance — no error."""
         from rocketride.cli.commands.runtime import _cmd_install
 
-        binary = tmp_path / 'engine'
-        binary.write_text('fake')
+        mock_service = MagicMock()
+        mock_service.install = AsyncMock(return_value={'id': '0', 'version': '3.1.0', 'pid': 0, 'port': 0})
 
         args = MagicMock()
         args.version = '3.1.0'
         args.force = False
         args.docker = False
         args.local = True
+        args.port = None
+        args.new = False
 
-        # Pre-register a Local instance
-        async with StateDB() as db:
-            await db.register('0', 0, 0, '3.1.0', 'cli', desired_state='stopped', instance_type='Local')
-
-        with patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary):
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service), patch('rocketride.cli.commands.runtime._cmd_list', new_callable=AsyncMock, return_value=0):
             result = await _cmd_install(args)
 
         assert result == 0
 
     @pytest.mark.asyncio
-    async def test_install_different_types_same_version_allowed(self, tmp_home, tmp_path):
-        """Local v3.1.0 exists, Service v3.1.0 should be allowed."""
+    async def test_install_incompatible_version_rejected(self):
+        """Service raises for incompatible version — CLI returns 1."""
         from rocketride.cli.commands.runtime import _cmd_install
 
-        binary = tmp_path / 'engine'
-        binary.write_text('fake')
-
-        # Pre-register a Local instance (use next_id to advance sequence)
-        async with StateDB() as db:
-            local_id = await db.next_id()
-            await db.register(local_id, 0, 0, '3.1.0', 'cli', desired_state='stopped', instance_type='Local')
-
-        args = MagicMock()
-        args.version = '3.1.0'
-        args.force = False
-        args.docker = False
-        args.local = False  # default = Service
-
-        with (
-            patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
-            patch('rocketride.cli.commands.runtime.find_available_port', return_value=5570),
-            patch('rocketride.cli.commands.runtime.spawn_runtime', new_callable=AsyncMock, return_value=12345),
-            patch('rocketride.cli.commands.runtime.wait_ready', new_callable=AsyncMock),
-            patch('rocketride.cli.commands.runtime.logs_dir', return_value=tmp_path / 'logs' / '1'),
-        ):
-            result = await _cmd_install(args)
-
-        assert result == 0
-        async with StateDB() as db:
-            local = await db.find_by_version_and_type('3.1.0', 'Local')
-            service = await db.find_by_version_and_type('3.1.0', 'Service')
-            assert local is not None
-            assert service is not None
-            assert local['id'] != service['id']
-
-    @pytest.mark.asyncio
-    async def test_install_incompatible_version_rejected(self, tmp_home, tmp_path):
-        from rocketride.cli.commands.runtime import _cmd_install
-
-        binary = tmp_path / 'engine'
+        mock_service = MagicMock()
+        mock_service.install = AsyncMock(side_effect=RuntimeManagementError('not compatible'))
 
         args = MagicMock()
         args.version = '5.0.0'
         args.force = False
         args.docker = False
         args.local = True
+        args.port = None
+        args.new = False
 
-        with (
-            patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
-            patch('rocketride.cli.commands.runtime.get_compat_range', return_value='>=3.0.0,<4.0.0'),
-        ):
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service):
             result = await _cmd_install(args)
 
         assert result == 1
 
     @pytest.mark.asyncio
-    async def test_install_incompatible_version_forced(self, tmp_home, tmp_path):
+    async def test_install_incompatible_version_forced(self):
+        """Force flag passes through to service."""
         from rocketride.cli.commands.runtime import _cmd_install
 
-        binary = tmp_path / 'engine'
+        mock_service = MagicMock()
+        mock_service.install = AsyncMock(return_value={'id': '0', 'version': '5.0.0', 'pid': 0, 'port': 0})
 
         args = MagicMock()
         args.version = '5.0.0'
         args.force = True
         args.docker = False
         args.local = True
+        args.port = None
+        args.new = False
 
-        with (
-            patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
-            patch('rocketride.cli.commands.runtime.download_runtime', new_callable=AsyncMock, side_effect=lambda *a, **kw: binary.write_text('fake') or binary),
-        ):
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service), patch('rocketride.cli.commands.runtime._cmd_list', new_callable=AsyncMock, return_value=0):
             result = await _cmd_install(args)
 
         assert result == 0
+        _, kwargs = mock_service.install.call_args
+        assert kwargs['force'] is True
 
     @pytest.mark.asyncio
-    async def test_install_resolves_latest_when_no_version(self, tmp_home, tmp_path):
+    async def test_install_resolves_latest_when_no_version(self):
+        """No version arg passes None to service."""
         from rocketride.cli.commands.runtime import _cmd_install
 
-        binary = tmp_path / 'engine'
+        mock_service = MagicMock()
+        mock_service.install = AsyncMock(return_value={'id': '0', 'version': '3.2.0', 'pid': 0, 'port': 0})
 
         args = MagicMock()
         args.version = None
         args.force = False
         args.docker = False
         args.local = True
+        args.port = None
+        args.new = False
 
-        with (
-            patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
-            patch('rocketride.cli.commands.runtime.get_compat_range', return_value='>=3.0.0,<4.0.0'),
-            patch('rocketride.cli.commands.runtime.resolve_compatible_version', new_callable=AsyncMock, return_value='3.2.0'),
-            patch('rocketride.cli.commands.runtime.download_runtime', new_callable=AsyncMock, side_effect=lambda *a, **kw: binary.write_text('fake') or binary),
-        ):
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service), patch('rocketride.cli.commands.runtime._cmd_list', new_callable=AsyncMock, return_value=0):
             result = await _cmd_install(args)
 
         assert result == 0
+        _, kwargs = mock_service.install.call_args
+        assert kwargs['version'] is None
 
     @pytest.mark.asyncio
-    async def test_install_docker_duplicate_rejected(self, tmp_home, tmp_path):
-        """Docker same tag twice = rejected."""
+    async def test_install_docker_type(self):
+        """Docker flag passes type=Docker to service."""
         from rocketride.cli.commands.runtime import _cmd_install
 
-        # Pre-register a Docker instance
-        async with StateDB() as db:
-            await db.register('0', 0, 8080, '3.1.0', 'cli', desired_state='running', instance_type='Docker')
+        mock_service = MagicMock()
+        mock_service.install = AsyncMock(return_value={'id': '0', 'version': '3.1.0', 'pid': 0, 'port': 8080})
 
         args = MagicMock()
         args.version = '3.1.0'
@@ -1632,121 +1570,90 @@ class TestCLIInstall:
         args.docker = True
         args.local = False
         args.port = None
+        args.new = False
 
-        with (
-            patch('rocketride.cli.commands.runtime.DockerRuntime') as mock_docker_cls,
-            patch('rocketride.cli.commands.runtime.resolve_docker_tag', new_callable=AsyncMock, return_value='3.1.0'),
-            patch('rocketride.cli.commands.runtime.find_available_port', return_value=8081),
-        ):
-            mock_docker = MagicMock()
-            mock_docker.check_docker_status.return_value = None
-            mock_docker_cls.return_value = mock_docker
-
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service), patch('rocketride.cli.commands.runtime._cmd_list', new_callable=AsyncMock, return_value=0):
             result = await _cmd_install(args)
 
-        assert result == 0  # early return, not error
+        assert result == 0
+        _, kwargs = mock_service.install.call_args
+        assert kwargs['type'] == 'Docker'
 
 
 # ── CLI start ─────────────────────────────────────────────────
 
 
 class TestCLIStart:
-    @pytest.fixture
-    def tmp_home(self, tmp_path):
-        """Redirect ~/.rocketride to a temp directory."""
-        home = tmp_path / '.rocketride'
-        with patch('rocketride.core.runtime.state.state_db_path', return_value=home / 'instances' / 'state.db'), patch('rocketride.core.runtime.state.ensure_dirs', side_effect=lambda: (home / 'instances').mkdir(parents=True, exist_ok=True)):
-            yield home
+    """CLI start tests — mock RuntimeService since CLI is now a thin wrapper."""
 
     @pytest.mark.asyncio
-    async def test_start_existing_instance(self, tmp_home, tmp_path):
+    async def test_start_existing_instance(self):
+        """Start by ID delegates to service.start()."""
         from rocketride.cli.commands.runtime import _cmd_start
 
-        binary = tmp_path / 'engine'
-        binary.write_text('fake')
-
-        # Pre-register an instance
-        async with StateDB() as db:
-            await db.register('0', 0, 0, '3.1.0', 'cli', desired_state='stopped')
+        mock_service = MagicMock()
+        mock_service.start = AsyncMock(return_value={'id': '0', 'version': '3.1.0', 'pid': 12345, 'port': 5570})
 
         args = MagicMock()
         args.id = '0'
         args.port = None
         args.version = None
 
-        with (
-            patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
-            patch('rocketride.cli.commands.runtime.find_available_port', return_value=5570),
-            patch('rocketride.cli.commands.runtime.spawn_runtime', new_callable=AsyncMock, return_value=12345),
-            patch('rocketride.cli.commands.runtime.wait_ready', new_callable=AsyncMock),
-            patch('rocketride.cli.commands.runtime.logs_dir', return_value=tmp_path / 'logs' / '0'),
-        ):
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service):
             result = await _cmd_start(args)
 
         assert result == 0
 
     @pytest.mark.asyncio
-    async def test_start_nonexistent_id_fails(self, tmp_home):
+    async def test_start_nonexistent_id_fails(self):
+        """Service raises — CLI returns 1."""
         from rocketride.cli.commands.runtime import _cmd_start
+
+        mock_service = MagicMock()
+        mock_service.start = AsyncMock(side_effect=RuntimeNotFoundError('No instance found'))
 
         args = MagicMock()
         args.id = 'nonexistent'
         args.port = None
         args.version = None
 
-        result = await _cmd_start(args)
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service):
+            result = await _cmd_start(args)
+
         assert result == 1
 
     @pytest.mark.asyncio
-    async def test_start_health_check_failure_kills_process(self, tmp_home, tmp_path):
+    async def test_start_health_check_failure(self):
+        """Health check fails — service raises, CLI returns 1."""
         from rocketride.cli.commands.runtime import _cmd_start
 
-        binary = tmp_path / 'engine'
-        binary.write_text('fake')
-
-        async with StateDB() as db:
-            await db.register('0', 0, 0, '3.1.0', 'cli', desired_state='stopped')
+        mock_service = MagicMock()
+        mock_service.start = AsyncMock(side_effect=RuntimeManagementError('health check failed'))
 
         args = MagicMock()
         args.id = '0'
         args.port = None
         args.version = None
 
-        with (
-            patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
-            patch('rocketride.cli.commands.runtime.find_available_port', return_value=5570),
-            patch('rocketride.cli.commands.runtime.spawn_runtime', new_callable=AsyncMock, return_value=12345),
-            patch('rocketride.cli.commands.runtime.wait_ready', new_callable=AsyncMock, side_effect=RuntimeManagementError('not ready')),
-            patch('rocketride.cli.commands.runtime.stop_runtime', new_callable=AsyncMock) as mock_stop,
-            patch('rocketride.cli.commands.runtime.logs_dir', return_value=tmp_path / 'logs' / '0'),
-        ):
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service):
             result = await _cmd_start(args)
 
         assert result == 1
-        mock_stop.assert_called_once_with(12345)
 
     @pytest.mark.asyncio
-    async def test_start_by_version(self, tmp_home, tmp_path):
+    async def test_start_by_version(self):
+        """Start by version delegates to service.start(version=...)."""
         from rocketride.cli.commands.runtime import _cmd_start
 
-        binary = tmp_path / 'engine'
-        binary.write_text('fake')
-
-        async with StateDB() as db:
-            await db.register('0', 0, 0, '3.1.0', 'cli', desired_state='stopped')
+        mock_service = MagicMock()
+        mock_service.start = AsyncMock(return_value={'id': '0', 'version': '3.1.0', 'pid': 12345, 'port': 5570})
 
         args = MagicMock()
         args.id = None
         args.port = None
         args.version = '3.1.0'
 
-        with (
-            patch('rocketride.cli.commands.runtime.runtime_binary', return_value=binary),
-            patch('rocketride.cli.commands.runtime.find_available_port', return_value=5570),
-            patch('rocketride.cli.commands.runtime.spawn_runtime', new_callable=AsyncMock, return_value=12345),
-            patch('rocketride.cli.commands.runtime.wait_ready', new_callable=AsyncMock),
-            patch('rocketride.cli.commands.runtime.logs_dir', return_value=tmp_path / 'logs' / '0'),
-        ):
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service):
             result = await _cmd_start(args)
 
         assert result == 0
@@ -1756,43 +1663,39 @@ class TestCLIStart:
 
 
 class TestCLIStop:
-    @pytest.fixture
-    def tmp_home(self, tmp_path):
-        """Redirect ~/.rocketride to a temp directory."""
-        home = tmp_path / '.rocketride'
-        with patch('rocketride.core.runtime.state.state_db_path', return_value=home / 'instances' / 'state.db'), patch('rocketride.core.runtime.state.ensure_dirs', side_effect=lambda: (home / 'instances').mkdir(parents=True, exist_ok=True)):
-            yield home
+    """CLI stop tests — mock RuntimeService."""
 
     @pytest.mark.asyncio
-    async def test_stop_existing_instance(self, tmp_home):
+    async def test_stop_existing_instance(self):
+        """Stop delegates to service.stop()."""
         from rocketride.cli.commands.runtime import _cmd_stop
 
-        async with StateDB() as db:
-            await db.register('0', 12345, 5565, '3.1.0', 'cli', desired_state='running')
+        mock_service = MagicMock()
+        mock_service.stop = AsyncMock()
 
         args = MagicMock()
         args.id = '0'
 
-        with patch('rocketride.cli.commands.runtime.stop_runtime', new_callable=AsyncMock) as mock_stop:
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service):
             result = await _cmd_stop(args)
 
         assert result == 0
-        mock_stop.assert_called_once_with(12345)
-
-        # Verify desired_state was set to stopped
-        async with StateDB() as db:
-            inst = await db.get('0')
-            assert inst['desired_state'] == 'stopped'
-            assert inst['pid'] == 0
+        mock_service.stop.assert_awaited_once_with('0')
 
     @pytest.mark.asyncio
-    async def test_stop_nonexistent_id_fails(self, tmp_home):
+    async def test_stop_nonexistent_id_fails(self):
+        """Service raises — CLI returns 1."""
         from rocketride.cli.commands.runtime import _cmd_stop
+
+        mock_service = MagicMock()
+        mock_service.stop = AsyncMock(side_effect=RuntimeNotFoundError('not found'))
 
         args = MagicMock()
         args.id = 'nonexistent'
 
-        result = await _cmd_stop(args)
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service):
+            result = await _cmd_stop(args)
+
         assert result == 1
 
 
@@ -1800,82 +1703,63 @@ class TestCLIStop:
 
 
 class TestCLIDelete:
-    @pytest.fixture
-    def tmp_home(self, tmp_path):
-        """Redirect ~/.rocketride to a temp directory."""
-        home = tmp_path / '.rocketride'
-        with patch('rocketride.core.runtime.state.state_db_path', return_value=home / 'instances' / 'state.db'), patch('rocketride.core.runtime.state.ensure_dirs', side_effect=lambda: (home / 'instances').mkdir(parents=True, exist_ok=True)):
-            yield home
+    """CLI delete tests — mock RuntimeService."""
 
     @pytest.mark.asyncio
-    async def test_delete_soft_deletes_instance(self, tmp_home):
+    async def test_delete_soft_deletes_instance(self):
+        """Delete delegates to service.delete()."""
         from rocketride.cli.commands.runtime import _cmd_delete
 
-        async with StateDB() as db:
-            await db.register('0', 0, 0, '3.1.0', 'cli', desired_state='stopped')
+        mock_service = MagicMock()
+        mock_service.delete = AsyncMock()
 
         args = MagicMock()
         args.id = '0'
         args.purge = False
 
-        with patch('rocketride.cli.commands.runtime.stop_runtime', new_callable=AsyncMock):
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service):
             result = await _cmd_delete(args)
 
         assert result == 0
-
-        # Should be soft-deleted (hidden from get_all but row preserved)
-        async with StateDB() as db:
-            all_inst = await db.get_all()
-            assert len(all_inst) == 0
-            inst = await db.get('0')
-            assert inst is not None
-            assert inst['deleted'] == 1
+        mock_service.delete.assert_awaited_once()
+        _, kwargs = mock_service.delete.call_args
+        assert kwargs['purge'] is False
 
     @pytest.mark.asyncio
-    async def test_delete_already_deleted_is_noop(self, tmp_home):
+    async def test_delete_purge_flag(self):
+        """Purge flag passed to service."""
         from rocketride.cli.commands.runtime import _cmd_delete
 
-        async with StateDB() as db:
-            await db.register('0', 0, 0, '3.1.0', 'cli', desired_state='stopped')
-            await db.soft_delete('0')
-
-        args = MagicMock()
-        args.id = '0'
-        args.purge = False
-
-        result = await _cmd_delete(args)
-        assert result == 0
-
-    @pytest.mark.asyncio
-    async def test_delete_purge_removes_binary(self, tmp_home, tmp_path):
-        from rocketride.cli.commands.runtime import _cmd_delete
-
-        async with StateDB() as db:
-            await db.register('0', 0, 0, '3.1.0', 'cli', desired_state='stopped')
-
-        # Create a fake binary directory
-        version_dir = tmp_path / 'runtimes' / '3.1.0'
-        version_dir.mkdir(parents=True)
-        (version_dir / 'engine').write_text('fake')
+        mock_service = MagicMock()
+        mock_service.delete = AsyncMock()
 
         args = MagicMock()
         args.id = '0'
         args.purge = True
 
-        with (
-            patch('rocketride.cli.commands.runtime.runtimes_dir', return_value=version_dir),
-            patch('rocketride.cli.commands.runtime.stop_runtime', new_callable=AsyncMock),
-            patch('rocketride.cli.commands.runtime.logs_dir', return_value=tmp_path / 'logs' / '0'),
-        ):
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service):
             result = await _cmd_delete(args)
 
         assert result == 0
-        # Version directory should be removed
-        assert not version_dir.exists()
-        # DB row should be hard-deleted
-        async with StateDB() as db:
-            inst = await db.get('0')
-            assert inst is None
+        _, kwargs = mock_service.delete.call_args
+        assert kwargs['purge'] is True
+
+    @pytest.mark.asyncio
+    async def test_delete_nonexistent_fails(self):
+        """Service raises — CLI returns 1."""
+        from rocketride.cli.commands.runtime import _cmd_delete
+
+        mock_service = MagicMock()
+        mock_service.delete = AsyncMock(side_effect=RuntimeNotFoundError('not found'))
+
+        args = MagicMock()
+        args.id = 'nonexistent'
+        args.purge = False
+
+        with patch('rocketride.cli.commands.runtime.RuntimeService', return_value=mock_service):
+            result = await _cmd_delete(args)
+
+        assert result == 1
 
 
 # ── command dispatch ──────────────────────────────────────────
@@ -1900,6 +1784,1597 @@ class TestCommandDispatch:
 
         result = await handle_runtime_command(args)
         assert result == 1
+
+
+# ── RuntimeService ────────────────────────────────────────────
+
+
+from rocketride.core.runtime.service import RuntimeService
+
+
+def _mock_statedb(instances=None):
+    """Create a mock StateDB async context manager.
+
+    *instances* is a dict keyed by instance_id → row dict.
+    The mock supports get, get_all, register, next_id, soft_delete,
+    unregister, find_by_version, and find_by_version_and_type.
+    """
+    if instances is None:
+        instances = {}
+
+    db = AsyncMock()
+    _id_seq = len(instances)
+
+    async def _get(instance_id):
+        return instances.get(instance_id)
+
+    async def _get_all():
+        return [inst for inst in instances.values() if not inst.get('deleted')]
+
+    async def _register(instance_id, pid, port, version, owner, **kwargs):
+        instances[instance_id] = {
+            'id': instance_id,
+            'pid': pid,
+            'port': port,
+            'version': version,
+            'owner': owner,
+            'type': kwargs.get('instance_type', 'Local'),
+            'desired_state': kwargs.get('desired_state', 'running'),
+            'restart_count': kwargs.get('restart_count', 0),
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+
+    async def _next_id():
+        nonlocal _id_seq
+        result = str(_id_seq)
+        _id_seq += 1
+        return result
+
+    async def _soft_delete(instance_id):
+        if instance_id in instances:
+            instances[instance_id]['deleted'] = 1
+            instances[instance_id]['pid'] = 0
+            instances[instance_id]['port'] = 0
+            instances[instance_id]['desired_state'] = 'stopped'
+
+    async def _unregister(instance_id):
+        instances.pop(instance_id, None)
+
+    async def _find_by_version(version, include_deleted=False):
+        for inst in instances.values():
+            if inst['version'] == version:
+                if not include_deleted and inst.get('deleted'):
+                    continue
+                return inst
+        return None
+
+    async def _find_by_version_and_type(version, inst_type, include_deleted=False):
+        for inst in instances.values():
+            if inst['version'] == version and inst.get('type') == inst_type:
+                if not include_deleted and inst.get('deleted'):
+                    continue
+                return inst
+        return None
+
+    db.get = AsyncMock(side_effect=_get)
+    db.get_all = AsyncMock(side_effect=_get_all)
+    db.register = AsyncMock(side_effect=_register)
+    db.next_id = AsyncMock(side_effect=_next_id)
+    db.soft_delete = AsyncMock(side_effect=_soft_delete)
+    db.unregister = AsyncMock(side_effect=_unregister)
+    db.find_by_version = AsyncMock(side_effect=_find_by_version)
+    db.find_by_version_and_type = AsyncMock(side_effect=_find_by_version_and_type)
+    db.__aenter__ = AsyncMock(return_value=db)
+    db.__aexit__ = AsyncMock(return_value=False)
+
+    mock_cls = MagicMock(return_value=db)
+    return mock_cls, db, instances
+
+
+class TestRuntimeServiceInstall:
+    @pytest.mark.asyncio
+    async def test_install_no_version_resolves_latest(self, tmp_path):
+        """install() with no version resolves latest compatible version."""
+        mock_cls, db, store = _mock_statedb()
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.resolve_compatible_version', new_callable=AsyncMock, return_value='3.2.0'),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.download_runtime', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.find_available_port', return_value=5570),
+            patch('rocketride.core.runtime.service.spawn_runtime', new_callable=AsyncMock, return_value=12345),
+            patch('rocketride.core.runtime.service.wait_ready', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=tmp_path / 'logs' / '0'),
+        ):
+            result = await svc.install(type='Local')
+
+        assert result is not None
+        assert result['version'] == '3.2.0'
+
+    @pytest.mark.asyncio
+    async def test_install_explicit_version_downloads_if_missing(self, tmp_path):
+        """install() with explicit version downloads binary when not present."""
+        mock_cls, db, store = _mock_statedb()
+        binary = tmp_path / 'engine'  # does not exist yet
+
+        svc = RuntimeService()
+
+        mock_dl = AsyncMock(side_effect=lambda *a, **kw: binary.write_text('fake'))
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.download_runtime', mock_dl),
+            patch('rocketride.core.runtime.service.find_available_port', return_value=5570),
+            patch('rocketride.core.runtime.service.spawn_runtime', new_callable=AsyncMock, return_value=12345),
+            patch('rocketride.core.runtime.service.wait_ready', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=tmp_path / 'logs' / '0'),
+        ):
+            result = await svc.install(version='3.1.0', type='Local')
+
+        mock_dl.assert_called_once()
+        assert result['version'] == '3.1.0'
+
+    @pytest.mark.asyncio
+    async def test_install_skips_download_if_binary_exists(self, tmp_path):
+        """install() skips download when the binary already exists."""
+        mock_cls, db, store = _mock_statedb()
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.download_runtime', new_callable=AsyncMock) as mock_dl,
+            patch('rocketride.core.runtime.service.find_available_port', return_value=5570),
+            patch('rocketride.core.runtime.service.spawn_runtime', new_callable=AsyncMock, return_value=12345),
+            patch('rocketride.core.runtime.service.wait_ready', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=tmp_path / 'logs' / '0'),
+        ):
+            result = await svc.install(version='3.1.0', type='Local')
+
+        mock_dl.assert_not_called()
+        assert result['version'] == '3.1.0'
+
+    @pytest.mark.asyncio
+    async def test_install_returns_existing_when_not_allow_duplicate(self, tmp_path):
+        """install() returns existing instance when allow_duplicate is False."""
+        existing = {
+            'id': '0',
+            'pid': 12345,
+            'port': 5565,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Service',
+            'desired_state': 'running',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+        ):
+            result = await svc.install(version='3.1.0', type='Service', allow_duplicate=False)
+
+        assert result['id'] == '0'
+
+    @pytest.mark.asyncio
+    async def test_install_allow_duplicate_creates_new_id(self, tmp_path):
+        """install() with allow_duplicate creates a new instance ID."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.download_runtime', new_callable=AsyncMock),
+        ):
+            result = await svc.install(version='3.1.0', type='Local', allow_duplicate=True)
+
+        # Should have a new ID different from existing
+        assert result['id'] == '1'
+
+    @pytest.mark.asyncio
+    async def test_install_service_type_auto_starts(self, tmp_path):
+        """install() with type=Service auto-starts and registers as running."""
+        mock_cls, db, store = _mock_statedb()
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.download_runtime', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.find_available_port', return_value=5570),
+            patch('rocketride.core.runtime.service.spawn_runtime', new_callable=AsyncMock, return_value=12345) as mock_spawn,
+            patch('rocketride.core.runtime.service.wait_ready', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=tmp_path / 'logs' / '0'),
+        ):
+            result = await svc.install(version='3.1.0', type='Service')
+
+        mock_spawn.assert_called_once()
+        assert result['desired_state'] == 'running'
+        assert result['pid'] == 12345
+        assert result['port'] == 5570
+
+    @pytest.mark.asyncio
+    async def test_install_local_type_does_not_auto_start(self, tmp_path):
+        """install() with type=Local does NOT auto-start."""
+        mock_cls, db, store = _mock_statedb()
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.download_runtime', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.spawn_runtime', new_callable=AsyncMock) as mock_spawn,
+        ):
+            result = await svc.install(version='3.1.0', type='Local')
+
+        mock_spawn.assert_not_called()
+        assert result['desired_state'] == 'stopped'
+        assert result['pid'] == 0
+
+    @pytest.mark.asyncio
+    async def test_install_auto_start_failure_rolls_back(self, tmp_path):
+        """Auto-start failure rolls back to stopped state."""
+        mock_cls, db, store = _mock_statedb()
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.download_runtime', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.find_available_port', return_value=5570),
+            patch('rocketride.core.runtime.service.spawn_runtime', new_callable=AsyncMock, return_value=12345),
+            patch('rocketride.core.runtime.service.wait_ready', new_callable=AsyncMock, side_effect=RuntimeManagementError('not ready')),
+            patch('rocketride.core.runtime.service.stop_runtime', new_callable=AsyncMock) as mock_stop,
+            patch('rocketride.core.runtime.service.logs_dir', return_value=tmp_path / 'logs' / '0'),
+        ):
+            with pytest.raises(RuntimeManagementError, match='Auto-start failed'):
+                await svc.install(version='3.1.0', type='Service')
+
+        mock_stop.assert_called_once_with(12345)
+        # Instance should be rolled back to stopped
+        inst = store.get('0')
+        assert inst is not None
+        assert inst['desired_state'] == 'stopped'
+        assert inst['pid'] == 0
+
+    @pytest.mark.asyncio
+    async def test_install_validates_compat_range(self, tmp_path):
+        """install() rejects incompatible version when force=False."""
+        mock_cls, db, store = _mock_statedb()
+        binary = tmp_path / 'engine'
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+        ):
+            with pytest.raises(RuntimeManagementError, match='not compatible'):
+                await svc.install(version='5.0.0', type='Local', force=False)
+
+    @pytest.mark.asyncio
+    async def test_install_force_skips_compat_check(self, tmp_path):
+        """install() with force=True skips compat check."""
+        mock_cls, db, store = _mock_statedb()
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.download_runtime', new_callable=AsyncMock),
+        ):
+            result = await svc.install(version='5.0.0', type='Local', force=True)
+
+        assert result['version'] == '5.0.0'
+
+    @pytest.mark.asyncio
+    async def test_install_on_progress_callback_fires(self, tmp_path):
+        """install() fires on_progress callbacks."""
+        mock_cls, db, store = _mock_statedb()
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        progress_msgs = []
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.download_runtime', new_callable=AsyncMock),
+        ):
+            await svc.install(
+                version='3.1.0',
+                type='Local',
+                on_progress=lambda msg, pct: progress_msgs.append(msg),
+            )
+
+        assert len(progress_msgs) >= 1
+        assert any('Installed' in msg for msg in progress_msgs)
+
+    @pytest.mark.asyncio
+    async def test_install_latest_keyword_resolves_via_docker_tag(self, tmp_path):
+        """install() with 'latest' keyword resolves via resolve_docker_tag."""
+        mock_cls, db, store = _mock_statedb()
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.resolve_docker_tag', new_callable=AsyncMock, return_value='3.2.0') as mock_tag,
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.download_runtime', new_callable=AsyncMock),
+        ):
+            result = await svc.install(version='latest', type='Local')
+
+        mock_tag.assert_called_once_with('latest')
+        assert result['version'] == '3.2.0'
+
+    @pytest.mark.asyncio
+    async def test_install_with_explicit_port(self, tmp_path):
+        """install() Service with explicit port passes it to spawn."""
+        mock_cls, db, store = _mock_statedb()
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.download_runtime', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.spawn_runtime', new_callable=AsyncMock, return_value=12345) as mock_spawn,
+            patch('rocketride.core.runtime.service.wait_ready', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=tmp_path / 'logs' / '0'),
+        ):
+            result = await svc.install(version='3.1.0', type='Service', port=9090)
+
+        mock_spawn.assert_called_once_with(binary, 9090, '0')
+        assert result['port'] == 9090
+
+    @pytest.mark.asyncio
+    async def test_install_prerelease_keyword_resolves_via_docker_tag(self, tmp_path):
+        """install() with 'prerelease' keyword resolves via resolve_docker_tag."""
+        mock_cls, db, store = _mock_statedb()
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.resolve_docker_tag', new_callable=AsyncMock, return_value='3.3.0-prerelease') as mock_tag,
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.download_runtime', new_callable=AsyncMock),
+        ):
+            result = await svc.install(version='prerelease', type='Local')
+
+        mock_tag.assert_called_once_with('prerelease')
+        assert result['version'] == '3.3.0-prerelease'
+
+    @pytest.mark.asyncio
+    async def test_install_normalizes_v_prefix(self, tmp_path):
+        """install() strips 'v' prefix via normalize_version."""
+        mock_cls, db, store = _mock_statedb()
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', return_value='3.1.0'),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.download_runtime', new_callable=AsyncMock),
+        ):
+            result = await svc.install(version='v3.1.0', type='Local')
+
+        assert result['version'] == '3.1.0'
+
+
+class TestRuntimeServiceStart:
+    @pytest.mark.asyncio
+    async def test_start_by_instance_id(self, tmp_path):
+        """start() by instance_id starts a stopped instance."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.find_available_port', return_value=5570),
+            patch('rocketride.core.runtime.service.spawn_runtime', new_callable=AsyncMock, return_value=12345),
+            patch('rocketride.core.runtime.service.wait_ready', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=tmp_path / 'logs' / '0'),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=False),
+        ):
+            result = await svc.start('0')
+
+        assert result['pid'] == 12345
+        assert result['desired_state'] == 'running'
+
+    @pytest.mark.asyncio
+    async def test_start_by_version(self, tmp_path):
+        """start() with version= finds the correct instance."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.find_available_port', return_value=5570),
+            patch('rocketride.core.runtime.service.spawn_runtime', new_callable=AsyncMock, return_value=12345),
+            patch('rocketride.core.runtime.service.wait_ready', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=tmp_path / 'logs' / '0'),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=False),
+        ):
+            result = await svc.start(version='3.1.0')
+
+        assert result['id'] == '0'
+        assert result['pid'] == 12345
+
+    @pytest.mark.asyncio
+    async def test_start_no_args_uses_first_instance(self, tmp_path):
+        """start() with no args uses the first instance."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.find_available_port', return_value=5570),
+            patch('rocketride.core.runtime.service.spawn_runtime', new_callable=AsyncMock, return_value=12345),
+            patch('rocketride.core.runtime.service.wait_ready', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=tmp_path / 'logs' / '0'),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=False),
+        ):
+            result = await svc.start()
+
+        assert result['id'] == '0'
+
+    @pytest.mark.asyncio
+    async def test_start_raises_when_no_instances(self):
+        """start() raises RuntimeNotFoundError if no instances exist."""
+        mock_cls, db, store = _mock_statedb()
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+        ):
+            with pytest.raises(RuntimeNotFoundError, match='No runtime instances found'):
+                await svc.start()
+
+    @pytest.mark.asyncio
+    async def test_start_raises_if_already_running(self, tmp_path):
+        """start() raises RuntimeManagementError if instance is already running."""
+        existing = {
+            'id': '0',
+            'pid': 12345,
+            'port': 5565,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'running',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=True),
+        ):
+            with pytest.raises(RuntimeManagementError, match='already running'):
+                await svc.start('0')
+
+    @pytest.mark.asyncio
+    async def test_start_tracks_restart_count(self, tmp_path):
+        """start() increments restart_count when instance has run before."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 2,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        # Create a log file so has_run_before is True
+        log_dir = tmp_path / 'logs' / '0'
+        log_dir.mkdir(parents=True)
+        (log_dir / 'stdout.log').write_text('previous run')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.find_available_port', return_value=5570),
+            patch('rocketride.core.runtime.service.spawn_runtime', new_callable=AsyncMock, return_value=12345),
+            patch('rocketride.core.runtime.service.wait_ready', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=log_dir),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=False),
+        ):
+            result = await svc.start('0')
+
+        assert result['restart_count'] == 3
+
+    @pytest.mark.asyncio
+    async def test_start_health_check_failure_kills_process(self, tmp_path):
+        """start() health check failure kills process and rolls back."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.find_available_port', return_value=5570),
+            patch('rocketride.core.runtime.service.spawn_runtime', new_callable=AsyncMock, return_value=12345),
+            patch('rocketride.core.runtime.service.wait_ready', new_callable=AsyncMock, side_effect=RuntimeManagementError('not ready')),
+            patch('rocketride.core.runtime.service.stop_runtime', new_callable=AsyncMock) as mock_stop,
+            patch('rocketride.core.runtime.service.logs_dir', return_value=tmp_path / 'logs' / '0'),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=False),
+        ):
+            with pytest.raises(RuntimeManagementError, match='health check failed'):
+                await svc.start('0')
+
+        mock_stop.assert_called_once_with(12345)
+        inst = store['0']
+        assert inst['pid'] == 0
+        assert inst['desired_state'] == 'stopped'
+
+    @pytest.mark.asyncio
+    async def test_start_binary_not_found_raises(self, tmp_path):
+        """start() raises RuntimeNotFoundError when binary does not exist."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+        binary = tmp_path / 'nonexistent' / 'engine'  # does not exist
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=False),
+        ):
+            with pytest.raises(RuntimeNotFoundError, match='binary not found'):
+                await svc.start('0')
+
+    @pytest.mark.asyncio
+    async def test_start_version_not_found_raises(self):
+        """start() with version= raises if no instance matches."""
+        mock_cls, db, store = _mock_statedb()
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+        ):
+            with pytest.raises(RuntimeNotFoundError, match='No instance found for version'):
+                await svc.start(version='9.9.9')
+
+    @pytest.mark.asyncio
+    async def test_start_on_progress_callback(self, tmp_path):
+        """start() fires on_progress callbacks."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        progress_msgs = []
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.normalize_version', side_effect=lambda v: v),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service.find_available_port', return_value=5570),
+            patch('rocketride.core.runtime.service.spawn_runtime', new_callable=AsyncMock, return_value=12345),
+            patch('rocketride.core.runtime.service.wait_ready', new_callable=AsyncMock),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=tmp_path / 'logs' / '0'),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=False),
+        ):
+            await svc.start('0', on_progress=progress_msgs.append)
+
+        assert len(progress_msgs) >= 1
+        assert any('Starting' in msg for msg in progress_msgs)
+
+
+class TestRuntimeServiceStop:
+    @pytest.mark.asyncio
+    async def test_stop_calls_stop_runtime_and_updates_db(self):
+        """stop() calls stop_runtime and registers as stopped."""
+        existing = {
+            'id': '0',
+            'pid': 12345,
+            'port': 5565,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'running',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.stop_runtime', new_callable=AsyncMock) as mock_stop,
+        ):
+            await svc.stop('0')
+
+        mock_stop.assert_called_once_with(12345)
+        inst = store['0']
+        assert inst['pid'] == 0
+        assert inst['port'] == 0
+        assert inst['desired_state'] == 'stopped'
+
+    @pytest.mark.asyncio
+    async def test_stop_raises_for_missing_id(self):
+        """stop() raises RuntimeNotFoundError for missing instance."""
+        mock_cls, db, store = _mock_statedb()
+
+        svc = RuntimeService()
+
+        with patch('rocketride.core.runtime.service.StateDB', mock_cls):
+            with pytest.raises(RuntimeNotFoundError, match='No instance found'):
+                await svc.stop('nonexistent')
+
+    @pytest.mark.asyncio
+    async def test_stop_docker_instance_delegates(self):
+        """stop() Docker instance delegates to DockerRuntime.stop()."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 8080,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Docker',
+            'desired_state': 'running',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+
+        mock_docker = MagicMock()
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.DockerRuntime', return_value=mock_docker),
+        ):
+            await svc.stop('0')
+
+        mock_docker.stop.assert_called_once_with('0')
+        inst = store['0']
+        assert inst['desired_state'] == 'stopped'
+
+    @pytest.mark.asyncio
+    async def test_stop_preserves_restart_count(self):
+        """stop() preserves the existing restart_count."""
+        existing = {
+            'id': '0',
+            'pid': 12345,
+            'port': 5565,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'running',
+            'restart_count': 5,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.stop_runtime', new_callable=AsyncMock),
+        ):
+            await svc.stop('0')
+
+        assert store['0']['restart_count'] == 5
+
+    @pytest.mark.asyncio
+    async def test_stop_preserves_instance_type(self):
+        """stop() preserves the instance type on re-register."""
+        existing = {
+            'id': '0',
+            'pid': 12345,
+            'port': 5565,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Service',
+            'desired_state': 'running',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.stop_runtime', new_callable=AsyncMock),
+        ):
+            await svc.stop('0')
+
+        assert store['0']['type'] == 'Service'
+
+
+class TestRuntimeServiceDelete:
+    @pytest.mark.asyncio
+    async def test_delete_soft_deletes(self):
+        """delete() without purge soft-deletes the instance."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=False),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=Path('/nonexistent/logs/0')),
+        ):
+            await svc.delete('0')
+
+        db.soft_delete.assert_called_once_with('0')
+        assert store['0']['deleted'] == 1
+
+    @pytest.mark.asyncio
+    async def test_delete_already_deleted_is_noop(self):
+        """delete() on already-deleted instance is a noop."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 1,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=False),
+        ):
+            await svc.delete('0')
+
+        # soft_delete should NOT be called again
+        db.soft_delete.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_purge_removes_binary_and_hard_deletes(self, tmp_path):
+        """delete() with purge removes binary directory and hard-deletes row."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+
+        version_dir = tmp_path / 'runtimes' / '3.1.0'
+        version_dir.mkdir(parents=True)
+        (version_dir / 'engine').write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=False),
+            patch('rocketride.core.runtime.service.runtimes_dir', return_value=version_dir),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=tmp_path / 'logs' / '0'),
+        ):
+            await svc.delete('0', purge=True)
+
+        assert not version_dir.exists()
+        db.unregister.assert_called_once_with('0')
+        assert '0' not in store
+
+    @pytest.mark.asyncio
+    async def test_delete_purge_keeps_binary_when_shared(self, tmp_path):
+        """CRITICAL: delete() purge keeps binary when another instance uses same version."""
+        inst_0 = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        inst_1 = {
+            'id': '1',
+            'pid': 12345,
+            'port': 5565,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Service',
+            'desired_state': 'running',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': inst_0, '1': inst_1})
+
+        version_dir = tmp_path / 'runtimes' / '3.1.0'
+        version_dir.mkdir(parents=True)
+        (version_dir / 'engine').write_text('fake')
+
+        progress_msgs = []
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=False),
+            patch('rocketride.core.runtime.service.runtimes_dir', return_value=version_dir),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=tmp_path / 'logs' / '0'),
+        ):
+            await svc.delete('0', purge=True, on_progress=progress_msgs.append)
+
+        # Binary directory must still exist
+        assert version_dir.exists()
+        assert (version_dir / 'engine').exists()
+        # But the DB row should be removed
+        assert '0' not in store
+        assert any('Keeping' in msg for msg in progress_msgs)
+
+    @pytest.mark.asyncio
+    async def test_delete_purge_stops_running_instance(self, tmp_path):
+        """delete() purge stops a running instance before removing."""
+        existing = {
+            'id': '0',
+            'pid': 12345,
+            'port': 5565,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'running',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+
+        version_dir = tmp_path / 'runtimes' / '3.1.0'
+        version_dir.mkdir(parents=True)
+        (version_dir / 'engine').write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=True),
+            patch('rocketride.core.runtime.service.stop_runtime', new_callable=AsyncMock) as mock_stop,
+            patch('rocketride.core.runtime.service.runtimes_dir', return_value=version_dir),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=tmp_path / 'logs' / '0'),
+        ):
+            await svc.delete('0', purge=True)
+
+        mock_stop.assert_called_once_with(12345)
+
+    @pytest.mark.asyncio
+    async def test_delete_by_version_string(self):
+        """delete() can look up instance by version string (not just ID)."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=False),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=Path('/nonexistent/logs/0')),
+        ):
+            # Pass version string '3.1.0' instead of ID '0'
+            await svc.delete('3.1.0')
+
+        db.soft_delete.assert_called_once_with('0')
+
+    @pytest.mark.asyncio
+    async def test_delete_raises_for_missing_id(self):
+        """delete() raises RuntimeNotFoundError for missing instance."""
+        mock_cls, db, store = _mock_statedb()
+
+        svc = RuntimeService()
+
+        with patch('rocketride.core.runtime.service.StateDB', mock_cls):
+            with pytest.raises(RuntimeNotFoundError, match='No instance found'):
+                await svc.delete('nonexistent')
+
+    @pytest.mark.asyncio
+    async def test_delete_soft_stops_running_before_soft_delete(self):
+        """delete() without purge stops running instance before soft-deleting."""
+        existing = {
+            'id': '0',
+            'pid': 12345,
+            'port': 5565,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'running',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=True),
+            patch('rocketride.core.runtime.service.stop_runtime', new_callable=AsyncMock) as mock_stop,
+            patch('rocketride.core.runtime.service.logs_dir', return_value=Path('/nonexistent/logs/0')),
+        ):
+            await svc.delete('0')
+
+        mock_stop.assert_called_once_with(12345)
+        db.soft_delete.assert_called_once_with('0')
+
+    @pytest.mark.asyncio
+    async def test_delete_on_progress_fires(self, tmp_path):
+        """delete() fires on_progress callbacks."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+
+        progress_msgs = []
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=False),
+            patch('rocketride.core.runtime.service.logs_dir', return_value=Path('/nonexistent/logs/0')),
+        ):
+            await svc.delete('0', on_progress=progress_msgs.append)
+
+        assert len(progress_msgs) >= 1
+        assert any('Deleted' in msg for msg in progress_msgs)
+
+
+class TestRuntimeServiceList:
+    @pytest.mark.asyncio
+    async def test_list_returns_all_non_deleted(self):
+        """list() returns all non-deleted instances."""
+        inst_0 = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        inst_1 = {
+            'id': '1',
+            'pid': 12345,
+            'port': 5565,
+            'version': '3.2.0',
+            'owner': 'cli',
+            'type': 'Service',
+            'desired_state': 'running',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        inst_deleted = {
+            'id': '2',
+            'pid': 0,
+            'port': 0,
+            'version': '3.0.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 1,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': inst_0, '1': inst_1, '2': inst_deleted})
+
+        svc = RuntimeService()
+
+        with patch('rocketride.core.runtime.service.StateDB', mock_cls):
+            result = await svc.list()
+
+        assert len(result) == 2
+        ids = {r['id'] for r in result}
+        assert ids == {'0', '1'}
+
+    @pytest.mark.asyncio
+    async def test_list_returns_empty_when_none(self):
+        """list() returns empty list when no instances."""
+        mock_cls, db, store = _mock_statedb()
+
+        svc = RuntimeService()
+
+        with patch('rocketride.core.runtime.service.StateDB', mock_cls):
+            result = await svc.list()
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_list_excludes_deleted(self):
+        """list() excludes soft-deleted instances."""
+        inst = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 1,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': inst})
+
+        svc = RuntimeService()
+
+        with patch('rocketride.core.runtime.service.StateDB', mock_cls):
+            result = await svc.list()
+
+        assert result == []
+
+
+class TestRuntimeServiceGet:
+    @pytest.mark.asyncio
+    async def test_get_returns_instance_by_id(self):
+        """get() returns instance by ID."""
+        existing = {
+            'id': '0',
+            'pid': 12345,
+            'port': 5565,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'running',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+
+        svc = RuntimeService()
+
+        with patch('rocketride.core.runtime.service.StateDB', mock_cls):
+            result = await svc.get('0')
+
+        assert result is not None
+        assert result['id'] == '0'
+        assert result['version'] == '3.1.0'
+
+    @pytest.mark.asyncio
+    async def test_get_returns_none_for_missing(self):
+        """get() returns None for missing ID."""
+        mock_cls, db, store = _mock_statedb()
+
+        svc = RuntimeService()
+
+        with patch('rocketride.core.runtime.service.StateDB', mock_cls):
+            result = await svc.get('nonexistent')
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_returns_deleted_instance(self):
+        """get() returns instance even if soft-deleted (DB.get does not filter)."""
+        existing = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 1,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': existing})
+
+        svc = RuntimeService()
+
+        with patch('rocketride.core.runtime.service.StateDB', mock_cls):
+            result = await svc.get('0')
+
+        assert result is not None
+        assert result['deleted'] == 1
+
+
+class TestRuntimeServiceGetRunning:
+    @pytest.mark.asyncio
+    async def test_get_running_returns_alive_pids(self):
+        """get_running() returns only instances with alive PIDs."""
+        inst_alive = {
+            'id': '0',
+            'pid': 12345,
+            'port': 5565,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'running',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        inst_dead = {
+            'id': '1',
+            'pid': 99999,
+            'port': 5566,
+            'version': '3.2.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'running',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': inst_alive, '1': inst_dead})
+
+        svc = RuntimeService()
+
+        def mock_pid_alive(pid):
+            return pid == 12345
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service._is_pid_alive', side_effect=mock_pid_alive),
+        ):
+            result = await svc.get_running()
+
+        assert len(result) == 1
+        assert result[0]['id'] == '0'
+
+    @pytest.mark.asyncio
+    async def test_get_running_skips_pid_zero(self):
+        """get_running() skips instances with pid=0."""
+        inst = {
+            'id': '0',
+            'pid': 0,
+            'port': 0,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'stopped',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': inst})
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=True),
+        ):
+            result = await svc.get_running()
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_running_returns_empty_when_none(self):
+        """get_running() returns empty list when nothing is running."""
+        mock_cls, db, store = _mock_statedb()
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=False),
+        ):
+            result = await svc.get_running()
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_running_includes_docker_running(self):
+        """get_running() checks Docker container status for Docker instances."""
+        inst_docker = {
+            'id': '0',
+            'pid': 1,
+            'port': 8080,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Docker',
+            'desired_state': 'running',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': inst_docker})
+
+        mock_docker = MagicMock()
+        mock_docker.get_status.return_value = {'state': 'running'}
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.DockerRuntime', return_value=mock_docker),
+        ):
+            result = await svc.get_running()
+
+        assert len(result) == 1
+        assert result[0]['id'] == '0'
+
+
+class TestRuntimeServiceListVersions:
+    @pytest.mark.asyncio
+    async def test_list_versions_returns_compatible(self, tmp_path):
+        """list_versions() returns compatible versions with install status."""
+        versions_data = [
+            {'version': '3.2.0', 'prerelease': False, 'published_at': '2026-01-15'},
+            {'version': '3.1.0', 'prerelease': False, 'published_at': '2026-01-01'},
+        ]
+        mock_cls, db, store = _mock_statedb()
+
+        binary_exists = tmp_path / 'engine'
+        binary_exists.write_text('fake')
+        binary_missing = tmp_path / 'nonexistent' / 'engine'
+
+        call_count = [0]
+
+        def mock_runtime_binary(version):
+            call_count[0] += 1
+            if version == '3.2.0':
+                return binary_exists
+            return binary_missing
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.list_compatible_versions', new_callable=AsyncMock, return_value=versions_data),
+            patch('rocketride.core.runtime.service.runtime_binary', side_effect=mock_runtime_binary),
+        ):
+            result = await svc.list_versions()
+
+        assert len(result) == 2
+        v320 = next(r for r in result if r['version'] == '3.2.0')
+        v310 = next(r for r in result if r['version'] == '3.1.0')
+        assert v320['installed'] is True
+        assert v310['installed'] is False
+
+    @pytest.mark.asyncio
+    async def test_list_versions_cross_references_db(self, tmp_path):
+        """list_versions() cross-references installed instances from DB."""
+        versions_data = [
+            {'version': '3.1.0', 'prerelease': False, 'published_at': '2026-01-01'},
+        ]
+        inst = {
+            'id': '0',
+            'pid': 12345,
+            'port': 5565,
+            'version': '3.1.0',
+            'owner': 'cli',
+            'type': 'Local',
+            'desired_state': 'running',
+            'restart_count': 0,
+            'deleted': 0,
+            'started_at': '2026-01-01T00:00:00',
+        }
+        mock_cls, db, store = _mock_statedb({'0': inst})
+
+        binary = tmp_path / 'engine'
+        binary.write_text('fake')
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.list_compatible_versions', new_callable=AsyncMock, return_value=versions_data),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=binary),
+            patch('rocketride.core.runtime.service._is_pid_alive', return_value=True),
+        ):
+            result = await svc.list_versions()
+
+        assert len(result) == 1
+        assert len(result[0]['instances']) == 1
+        assert result[0]['instances'][0]['id'] == '0'
+        assert result[0]['instances'][0]['running'] is True
+
+    @pytest.mark.asyncio
+    async def test_list_versions_excludes_prerelease_by_default(self):
+        """list_versions() passes include_prerelease=False by default."""
+        mock_cls, db, store = _mock_statedb()
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.list_compatible_versions', new_callable=AsyncMock, return_value=[]) as mock_list,
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=Path('/fake')),
+        ):
+            await svc.list_versions()
+
+        mock_list.assert_called_once_with('>=3.0.0,<4.0.0', False)
+
+    @pytest.mark.asyncio
+    async def test_list_versions_includes_prerelease_when_flag_set(self):
+        """list_versions() passes include_prerelease=True when requested."""
+        mock_cls, db, store = _mock_statedb()
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.list_compatible_versions', new_callable=AsyncMock, return_value=[]) as mock_list,
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=Path('/fake')),
+        ):
+            await svc.list_versions(include_prerelease=True)
+
+        mock_list.assert_called_once_with('>=3.0.0,<4.0.0', True)
+
+    @pytest.mark.asyncio
+    async def test_list_versions_includes_prerelease_data(self, tmp_path):
+        """list_versions() preserves the prerelease flag in results."""
+        versions_data = [
+            {'version': '3.2.0', 'prerelease': False, 'published_at': '2026-01-15'},
+            {'version': '3.3.0-rc1', 'prerelease': True, 'published_at': '2026-02-01'},
+        ]
+        mock_cls, db, store = _mock_statedb()
+
+        svc = RuntimeService()
+
+        with (
+            patch('rocketride.core.runtime.service.StateDB', mock_cls),
+            patch('rocketride.core.runtime.service.get_compat_range', return_value='>=3.0.0,<4.0.0'),
+            patch('rocketride.core.runtime.service.list_compatible_versions', new_callable=AsyncMock, return_value=versions_data),
+            patch('rocketride.core.runtime.service.runtime_binary', return_value=tmp_path / 'nonexistent'),
+        ):
+            result = await svc.list_versions(include_prerelease=True)
+
+        assert len(result) == 2
+        pre = next(r for r in result if r['version'] == '3.3.0-rc1')
+        assert pre['prerelease'] is True
+        stable = next(r for r in result if r['version'] == '3.2.0')
+        assert stable['prerelease'] is False
 
 
 pytest_plugins = ['pytest_asyncio']
