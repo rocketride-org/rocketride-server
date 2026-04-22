@@ -2059,13 +2059,7 @@ ErrorOr<json::Value> IServices::getServiceSchemas() noexcept {
         if (def.serviceDefinition.isMember("lanes"))
             schemas[logicalType]["lanes"] = def.serviceDefinition["lanes"];
 
-        // Copy over the branch metadata to the UI-facing schema.
-        // Conditional routers (e.g. `flow_if_else`) declare a `branches`
-        // array (e.g. ["then", "else"]) alongside their wildcard `lanes`.
-        // The canvas reads this to render one output port per branch and
-        // to persist branch names on edge handles. Services that do not
-        // declare `branches` are unaffected — the key is simply absent
-        // from the emitted schema, matching pre-change behaviour.
+        // Expose `branches` to the UI (e.g. flow_if_else ["then","else"]).
         if (def.serviceDefinition.isMember("branches"))
             schemas[logicalType]["branches"] = def.serviceDefinition["branches"];
 
