@@ -40,14 +40,14 @@ const App: React.FC = () => {
 			return {
 				theme: null,
 				isVSCode: false,
-				isReady: true
+				isReady: true,
 			};
 		} else {
 			// VSCode mode - not ready yet
 			return {
 				theme: null,
 				isVSCode: true,
-				isReady: false
+				isReady: false,
 			};
 		}
 	});
@@ -94,8 +94,6 @@ const App: React.FC = () => {
 		// Try to get the token from session storage (skip in VSCode webview - shared storage would mix auth across tabs)
 		if (!isVSCode) {
 			token = sessionStorage.getItem('auth') || '';
-			if (token) {
-			}
 		}
 
 		// If we don't have a token yet
@@ -114,7 +112,7 @@ const App: React.FC = () => {
 			// If we got it from the query string...
 			if (token) {
 				// Remove it so the user doesn't see it in the URL
-				window.history.replaceState({}, "", window.location.pathname);
+				window.history.replaceState({}, '', window.location.pathname);
 			}
 		}
 
@@ -129,11 +127,11 @@ const App: React.FC = () => {
 		// Set the config
 		setAPIConfig({
 			ROCKETRIDE_APIKEY: token,
-			ROCKETRIDE_URI: uri
+			ROCKETRIDE_URI: uri,
 		});
 
 		// Start the client with persistent connection
-		startClient(token).catch(error => {
+		startClient(token).catch((error) => {
 			console.error('Failed to start client:', error);
 		});
 
@@ -160,7 +158,7 @@ const App: React.FC = () => {
 					setVscodeState({
 						theme: message.theme,
 						isVSCode: true,
-						isReady: true
+						isReady: true,
 					});
 				}
 			};
@@ -168,7 +166,7 @@ const App: React.FC = () => {
 			window.addEventListener('message', handleVSCodeData);
 
 			// Send ready message to parent
-			window.parent.postMessage({ type: 'ready' }, '*');
+			window.parent.postMessage({ type: 'view:ready' }, '*');
 
 			return () => window.removeEventListener('message', handleVSCodeData);
 		} else {
