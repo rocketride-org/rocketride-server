@@ -126,12 +126,17 @@ class BillingCommands(DAPConn):
 
         if subcommand not in _KNOWN_SUBCOMMANDS:
             # Unknown subcommand — separate error code so SaaS clients can
-            # distinguish "typo" from "backend not wired up".
+            # distinguish "typo" from "backend not wired up". We encode the
+            # failure in the response body rather than using build_error /
+            # kwargs that build_response doesn't accept (per DAP base API).
             return self.build_response(
                 request,
-                success=False,
-                message=f'unknown rrext_account_billing subcommand: {subcommand!r}',
-                body={'code': 'unknown_subcommand'},
+                body={
+                    'success':    False,
+                    'code':       'unknown_subcommand',
+                    'subcommand': subcommand,
+                    'message':    f'unknown rrext_account_billing subcommand: {subcommand!r}',
+                },
             )
 
         # Known subcommand, no backend to dispatch it to — signal
@@ -139,7 +144,10 @@ class BillingCommands(DAPConn):
         # class entirely and never hits this path.
         return self.build_response(
             request,
-            success=False,
-            message='billing not configured on this deployment',
-            body={'code': 'not_configured', 'subcommand': subcommand},
+            body={
+                'success':    False,
+                'code':       'not_configured',
+                'subcommand': subcommand,
+                'message':    'billing not configured on this deployment',
+            },
         )
