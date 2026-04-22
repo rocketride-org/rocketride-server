@@ -57,6 +57,16 @@ class Transcribe(AudioReader):
     ):
         """
         Initialize the Transcribe instance.
+
+        Args:
+            segment_callback (Callable): Called with the list of
+                `(start, end, text)` tuples produced after each flush.
+            transcribe (Callable): Function that turns PCM bytes into a list
+                of Whisper-style segment objects (each with `.text`, `.start`,
+                `.end`).
+            **kwargs: Forwarded to :class:`AudioReader`. Recognized extras:
+                `chunk_duration` (int seconds, default 60) and
+                `max_chunk_duration` (int seconds, default 120).
         """
         # Get the optional parameters from kwargs
         chunk_duration: int = kwargs.get('chunk_duration', self.CHUNK_DURATION)
@@ -81,7 +91,7 @@ class Transcribe(AudioReader):
             **kwargs,
         )
 
-    def _build_text(self, segments: list, timestamp: float) -> list[tuple[int, str]]:
+    def _build_text(self, segments: list, timestamp: float) -> list[tuple[float, float, str]]:
         """
         Combine segments where they do not end with terminal punctuation.
 
@@ -90,13 +100,14 @@ class Transcribe(AudioReader):
             timestamp (float): Base timestamp for this audio chunk.
 
         Returns:
-            list: List of tuples (seek, text) representing complete merged sentences.
+            list: List of tuples (start, end, text) representing complete merged sentences.
         """
         output = []
 
         terminal_punct = {'.', '?', '!'}
         accum_text = ''
         accum_start = None  # Use None to detect unset state
+        accum_end = None
 
         for segment in segments:
             text = segment.text.strip()
@@ -107,14 +118,16 @@ class Transcribe(AudioReader):
                 accum_text += ' '
 
             accum_text += text
+            accum_end = segment.end  # Always track the latest end
 
             if text and text[-1] in terminal_punct:
-                output.append((timestamp + accum_start, accum_text))
+                output.append((timestamp + accum_start, timestamp + accum_end, accum_text))
                 accum_text = ''
                 accum_start = None
+                accum_end = None
 
         if accum_text:
-            output.append((timestamp + accum_start, accum_text))
+            output.append((timestamp + accum_start, timestamp + accum_end, accum_text))
 
         return output
 
@@ -184,10 +197,13 @@ class Transcribe(AudioReader):
 
     def start(self):
         """
-        Begins audio decoding stream.
+        Begin the audio decoding stream.
 
-        Args:
-            mime_type (str): MIME type of the incoming stream (e.g., 'audio/mp3').
+        Initializes the PCM chunk buffer and hands off to the underlying
+        AudioReader's `start()`.
+
+        Returns:
+            None.
         """
         # Initialize buffers
         self._audio_chunks = []  # List of byte chunks (efficient!)

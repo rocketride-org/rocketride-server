@@ -1,0 +1,106 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Video Player",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "video_player://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["video"],
+	//
+	// Required:
+	//		Capabilities - nosaas means the node is local-only (needs a display)
+	//
+	"capabilities": ["nosaas"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate.
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		Python module path for this node.
+	//
+	"path": "nodes.video_player",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths.
+	//
+	"prefix": "video_player",
+	//
+	// Optional:
+	//		Description of this driver.
+	//
+	"description": ["Plays a video in a local window with optional burned-in subtitles. Accepts a video ", "stream plus either timed document segments (preferred: preserves per-segment timestamps ", "for synchronized subtitles) or plain text (displayed as a single cue). Subtitles are ", "rendered through ffmpeg's subtitles filter for frame-accurate sync. Local-only (nosaas)."],
+	//
+	// Optional:
+	//	  The icon to display in the UI for this node.
+	//
+	"icon": "video-player.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces. Sink node - no outputs.
+	//
+	"lanes": {
+		"video": [],
+		"documents": [],
+		"text": []
+	},
+	"input": [
+		{
+			"lane": "video",
+			"description": "Video stream to play",
+			"output": []
+		},
+		{
+			"lane": "documents",
+			"description": "Timed subtitle segments (preferred - preserves timing)",
+			"output": []
+		},
+		{
+			"lane": "text",
+			"description": "Plain subtitle text (fallback - shown as a single cue)",
+			"output": []
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section - no configurable options for the MVP.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - none yet.
+	//
+	"fields": {},
+	//
+	// Required:
+	//		UI shape definition.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Video Player",
+			"properties": []
+		}
+	]
+}

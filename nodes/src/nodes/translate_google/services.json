@@ -1,0 +1,218 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Google Translate",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "translate_google://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["text"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate.
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		Python module path for this node.
+	//
+	"path": "nodes.translate_google",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths.
+	//
+	"prefix": "translate",
+	//
+	// Optional:
+	//		Description of this driver.
+	//
+	"description": ["Translates text between languages using the Google Cloud Translation API (v3). ", "Accepts plain text or document segments (preserving per-segment timestamps) and emits ", "the translated content on the matching lane. Use in subtitle pipelines to translate ", "transcripts produced by the Transcribe component while retaining timing for video playback."],
+	//
+	// Optional:
+	//	  The icon to display in the UI for this node.
+	//
+	"icon": "translate-google.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces.
+	//
+	"lanes": {
+		"text": ["text"],
+		"documents": ["documents"]
+	},
+	"input": [
+		{
+			"lane": "text",
+			"description": "Plain text to translate",
+			"output": [
+				{
+					"lane": "text",
+					"description": "Translated text"
+				}
+			]
+		},
+		{
+			"lane": "documents",
+			"description": "Timed document segments (e.g., transcript chunks) to translate",
+			"output": [
+				{
+					"lane": "documents",
+					"description": "Translated segments with timestamps preserved"
+				}
+			]
+		}
+	],
+	//
+	//	Optional:
+	//		Profile section - configuration values for the driver.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Google Translate",
+				"apikey": "",
+				"sourceLanguage": "",
+				"targetLanguage": "en"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Test configuration for automated node testing.
+	//
+	"test": {
+		"profiles": ["default"],
+		"cases": [
+			{
+				"text": "Hello world",
+				"config": {
+					"targetLanguage": "es"
+				},
+				"expect": {
+					"text": {
+						"contains": "Hola"
+					}
+				}
+			}
+		]
+	},
+	//
+	// Optional:
+	//		Local field definitions.
+	//
+	"fields": {
+		"translate.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Google Cloud API key with Cloud Translation API enabled. NOTE: this is NOT a Gemini / AI Studio key - create one in Google Cloud Console > APIs & Services > Credentials.",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"translate.sourceLanguage": {
+			"type": "string",
+			"title": "Source language",
+			"description": "BCP-47 code of the input language. Leave blank to auto-detect.",
+			"default": "",
+			"enum": [
+				["", "Auto-detect"],
+				["en", "English"],
+				["es", "Spanish"],
+				["fr", "French"],
+				["de", "German"],
+				["it", "Italian"],
+				["pt", "Portuguese"],
+				["ru", "Russian"],
+				["zh", "Chinese (Simplified)"],
+				["zh-TW", "Chinese (Traditional)"],
+				["ja", "Japanese"],
+				["ko", "Korean"],
+				["ar", "Arabic"],
+				["hi", "Hindi"],
+				["nl", "Dutch"],
+				["pl", "Polish"],
+				["tr", "Turkish"],
+				["uk", "Ukrainian"],
+				["vi", "Vietnamese"],
+				["ro", "Romanian"]
+			]
+		},
+		"translate.targetLanguage": {
+			"type": "string",
+			"title": "Target language",
+			"description": "BCP-47 code of the output language.",
+			"default": "en",
+			"minLength": 2,
+			"enum": [
+				["en", "English"],
+				["es", "Spanish"],
+				["fr", "French"],
+				["de", "German"],
+				["it", "Italian"],
+				["pt", "Portuguese"],
+				["ru", "Russian"],
+				["zh", "Chinese (Simplified)"],
+				["zh-TW", "Chinese (Traditional)"],
+				["ja", "Japanese"],
+				["ko", "Korean"],
+				["ar", "Arabic"],
+				["hi", "Hindi"],
+				["nl", "Dutch"],
+				["pl", "Polish"],
+				["tr", "Turkish"],
+				["uk", "Ukrainian"],
+				["vi", "Vietnamese"],
+				["ro", "Romanian"]
+			]
+		},
+		"translate.default": {
+			"object": "default",
+			"properties": ["translate.apikey", "translate.sourceLanguage", "translate.targetLanguage"]
+		},
+		"translate.profile": {
+			"hidden": true,
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["translate.default"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		UI shape definition.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Google Translate",
+			"properties": ["translate.profile"]
+		}
+	]
+}

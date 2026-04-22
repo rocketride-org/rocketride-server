@@ -1,0 +1,4 @@
+ffpyplayer
+opencv-python
+numpy
+imageio_ffmpeg

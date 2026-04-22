@@ -90,10 +90,12 @@ import smbIcon from '../../../assets/nodes/smb.svg';
 import summariesIcon from '../../../assets/nodes/summaries.svg';
 import textOutputIcon from '../../../assets/nodes/text-output.svg';
 import thumbnailIcon from '../../../assets/nodes/thumbnail.svg';
+import translateGoogleIcon from '../../../assets/nodes/translate-google.svg';
 import unknownIcon from '../../../assets/nodes/unknown.svg';
 import utilInfrastructureIcon from '../../../assets/nodes/util-infrastructure.svg';
 import utilTextIcon from '../../../assets/nodes/util-text.svg';
 import vertexIcon from '../../../assets/nodes/vertex.svg';
+import videoPlayerIcon from '../../../assets/nodes/video-player.svg';
 import weaviateIcon from '../../../assets/nodes/weaviate.svg';
 import webhookIcon from '../../../assets/nodes/webhook.svg';
 import slackIcon from '../../../assets/nodes/slack.svg';
@@ -190,10 +192,12 @@ const iconMap: Record<string, string> = {
 	summaries: summariesIcon,
 	'text-output': textOutputIcon,
 	thumbnail: thumbnailIcon,
+	'translate-google': translateGoogleIcon,
 	unknown: unknownIcon,
 	'util-infrastructure': utilInfrastructureIcon,
 	'util-text': utilTextIcon,
 	vertex: vertexIcon,
+	'video-player': videoPlayerIcon,
 	weaviate: weaviateIcon,
 	webhook: webhookIcon,
 	xai: xaiIcon,
@@ -258,6 +262,10 @@ const THEME_DYNAMIC_ICONS: ReadonlySet<string> = new Set([
 	// Audio
 	'audio-player',
 	'audio-transcribe',
+	// Video
+	'video-player',
+	// Translation
+	'translate-google',
 	// Data
 	'hash',
 	'parse',

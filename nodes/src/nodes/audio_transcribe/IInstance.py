@@ -37,12 +37,12 @@ class IInstance(IInstanceBase):
 
     IGlobal: IGlobal  # Reference to the global object with configuration and transcribe method
 
-    def _segment_callback(self, segments: List[Tuple[int, str]]):
+    def _segment_callback(self, segments: List[Tuple[float, float, str]]):
         """
         Output transcribed text output.
 
         Args:
-            segments (List[Tuple[float, str]]): A list of (timestamp, text) tuples
+            segments (List[Tuple[float, float, str]]): A list of (start, end, text) tuples
         """
         outputDocs = False
         if self.instance.hasListener('documents'):
@@ -57,16 +57,17 @@ class IInstance(IInstanceBase):
         docs = []
 
         for segment in segments:
-            # Get the time stamp and text
-            time_stamp, text = segment
+            # Get the start, end and text
+            time_stamp, time_stamp_end, text = segment
 
             if outputDocs:
                 # Create the default metadata for the document
                 metadata = DocMetadata.defaultMetadata(self)
 
-                # Save the frame and time stamp in the metadata
+                # Save the frame and time stamps in the metadata
                 metadata.chunkId = self.chunkId
                 metadata.time_stamp = time_stamp
+                metadata.time_stamp_end = time_stamp_end
 
                 # Create the document object and save the base64 encoded image
                 doc = Doc(page_content=text, metadata=metadata)
@@ -112,9 +113,32 @@ class IInstance(IInstanceBase):
         self.chunkId = 0
 
     def writeAudio(self, action: int, mimeType: str, buffer: bytes):
+        """
+        Forward an audio-lane chunk to the underlying Transcribe buffer.
+
+        Args:
+            action (int): AVI stream action marker (BEGIN / WRITE / END).
+            mimeType (str): MIME type of the incoming audio payload.
+            buffer (bytes): Encoded audio bytes for this chunk.
+
+        Returns:
+            None.
+        """
         # Use the standard AVI write method for audio
         self._transcribe.writeAVI(action, mimeType, buffer)
 
     def writeVideo(self, action: int, mimeType: str, buffer: bytes):
+        """
+        Forward a video-lane chunk to the underlying Transcribe buffer so
+        the audio track inside the container can be extracted and transcribed.
+
+        Args:
+            action (int): AVI stream action marker (BEGIN / WRITE / END).
+            mimeType (str): MIME type of the incoming video payload.
+            buffer (bytes): Encoded video bytes for this chunk.
+
+        Returns:
+            None.
+        """
         # Use the standard AVI write method for video
         self._transcribe.writeAVI(action, mimeType, buffer)
