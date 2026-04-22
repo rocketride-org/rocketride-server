@@ -285,9 +285,18 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
     //     }
     _block() {
         for (auto &[id, comp] : comps) {
+            // Preserve pre-wildcard behaviour: the original implementation only
+            // dereferenced `comp.def` inside the input/output double loop, so
+            // components without I/O (or without a bound definition) were
+            // skipped implicitly. Hoisting the lanes lookup would deref a null
+            // `comp.def` for those components and crash.
+            if (comp.inputs.empty() || comp.outputs.empty()) continue;
+            if (!comp.def) continue;
+
             // Wildcard `"*"` lanes accept any input; `{"*":["*"]}` enforces
             // input==output (passthrough router). Non-wildcard path unchanged.
-            const auto &lanesDef = comp.def->serviceDefinition["lanes"];
+            // Use `get` to avoid mutating serviceDefinition when "lanes" is absent.
+            const auto lanesDef = comp.def->serviceDefinition.get("lanes", json::Value());
             const bool wildcard = lanesDef.isMember("*");
             for (auto &input : comp.inputs) {
                 for (auto &output : comp.outputs) {
