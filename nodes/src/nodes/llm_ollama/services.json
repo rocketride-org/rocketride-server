@@ -476,7 +476,7 @@
 			"outputs": ["answers"],
 			"cases": [
 				{
-					"name": "LLM returns mock response",
+					"name": "LLM returns real response",
 					"text": "What is 4*9?",
 					"expect": {
 						"answers": {

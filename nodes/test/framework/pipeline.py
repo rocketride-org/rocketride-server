@@ -39,28 +39,73 @@ _ENV_ATTR_MAP = {
 }
 
 
-def _parse_credential_env_var(env_var: str) -> Optional[str]:
-    """Parse ROCKETRIDE_<PROVIDER>_<ATTR> and return the config field name.
+def _parse_credential_env_var(env_var: str, provider: str) -> Optional[str]:
+    """Resolve a `requires` env var name to a node config field name.
 
-    Splits into exactly three sections: ROCKETRIDE, provider, attribute.
-    The attribute may contain underscores (e.g. SECRET_KEY).
+    Algorithm
+    ---------
+    The env var must follow ``ROCKETRIDE_<PROVIDER>_<ATTR>``:
 
-    Examples:
-        ROCKETRIDE_OPENAI_KEY        → 'apikey'
-        ROCKETRIDE_BEDROCK_SECRET_KEY → 'secretKey'
-        ROCKETRIDE_BEDROCK_REGION     → 'region'
-        ROCKETRIDE_MYSERVICE_TOKEN    → 'token'
+    1. Verify the ``ROCKETRIDE_`` prefix.
+    2. Match the next segment against ``provider`` (case-insensitive),
+       accepting either the full directory name (``LLM_OPENAI``) or the
+       short form with ``llm_``/``tool_`` stripped (``OPENAI``). Strict
+       match — this catches typos and cross-provider pollution where a
+       services.json lists an env var for the wrong node.
+    3. Whatever remains is ``<ATTR>``. Look it up in ``_ENV_ATTR_MAP``
+       for known tokens (``KEY`` → ``apikey``, ``SECRET_KEY`` →
+       ``secretKey``); otherwise fall back to ``attr.lower()``
+       (e.g. ``SERVERBASE`` → ``serverbase``).
 
-    Returns:
-        Config field name, or None if the env var doesn't match the pattern.
+    Examples (provider='llm_openai'):
+        ROCKETRIDE_OPENAI_KEY         → 'apikey'
+        ROCKETRIDE_LLM_OPENAI_KEY     → 'apikey'   (full form also OK)
+        ROCKETRIDE_ANTHROPIC_KEY      → None       (wrong provider)
+
+    Examples (provider='llm_gmi_cloud'):
+        ROCKETRIDE_GMI_CLOUD_KEY           → 'apikey'
+        ROCKETRIDE_LLM_GMI_CLOUD_SECRET_KEY → 'secretKey'
+        ROCKETRIDE_GMICLOUD_KEY            → None       (missing underscore)
+
+    Possible issues
+    ---------------
+    * Hidden prefix-stripping rule: a hypothetical directory named
+      ``tool_xyz`` that isn't semantically a tool node would still have
+      ``tool_`` stripped. Today every ``llm_*``/``tool_*`` directory is
+      a real LLM/tool node, so this doesn't bite in practice.
+    * Provider whose short name collides with an ATTR token (e.g. a
+      pathological provider ``llm_key``): the strict provider check
+      still fires first, so ``ROCKETRIDE_KEY_REGION`` for that provider
+      parses to ``region``. No real provider triggers this.
+    * Returns ``None`` for structural mismatches (wrong prefix, wrong
+      provider, empty attr). Callers must treat ``None`` as a
+      services.json ``requires`` bug — NOT as "env var missing in the
+      environment", which is detected separately via
+      ``os.environ.get(env_var)``.
     """
-    parts = env_var.split('_', 2)
-    if parts[0] != 'ROCKETRIDE' or len(parts) < 3:
+    if not env_var.startswith('ROCKETRIDE_'):
         return None
-    attr = parts[2]  # e.g. 'SECRET_KEY', 'KEY', 'REGION', 'TOKEN'
-    if attr in _ENV_ATTR_MAP:
-        return _ENV_ATTR_MAP[attr]
-    return attr.lower()
+    suffix = env_var[len('ROCKETRIDE_'):]  # e.g. 'OPENAI_KEY'
+
+    # Accept both full provider name ('LLM_OPENAI') and short form
+    # ('OPENAI'). Full form is tried first so that an exact directory
+    # name always wins over the prefix-stripped form.
+    candidates = [provider.upper()]
+    for pfx in ('llm_', 'tool_'):
+        if provider.startswith(pfx):
+            candidates.append(provider[len(pfx):].upper())
+            break
+
+    suffix_upper = suffix.upper()
+    for candidate in candidates:
+        token = candidate + '_'
+        if suffix_upper.startswith(token):
+            attr = suffix[len(token):]
+            if not attr:
+                return None
+            return _ENV_ATTR_MAP.get(attr.upper(), attr.lower())
+
+    return None
 
 
 # Placeholder credentials for LLM nodes when ROCKETRIDE_MOCK is set (mocks handle requests)
@@ -128,20 +173,29 @@ class PipelineBuilder:
         if profile:
             config['profile'] = profile
         # Inject credentials into the pipeline config.
-        # Mock groups (no requires): use placeholder keys from _LLM_MOCK_CREDENTIALS.
-        # Real groups (has requires): parse env var names (ROCKETRIDE_<PROVIDER>_<ATTR>)
-        # to derive field names and read values from the environment.
-        if not self.config.requires and os.environ.get('ROCKETRIDE_MOCK') and provider in _LLM_MOCK_CREDENTIALS and profile:
-            creds = _LLM_MOCK_CREDENTIALS[provider]
-        elif self.config.requires and profile:
-            creds = {}
-            for env_var in self.config.requires:
-                val = os.environ.get(env_var)
-                field = _parse_credential_env_var(env_var)
-                if val and field:
-                    creds[field] = val
-        else:
-            creds = {}
+        #
+        # `ROCKETRIDE_MOCK` (set by the test runner) and per-group
+        # `avoidMocks` control the mock-SDK baseline. `requires` is
+        # independent — it always overlays real env var values on top.
+        #
+        #   MOCK + !avoidMocks + requires=[]   → mock placeholders only
+        #   MOCK + !avoidMocks + requires=[…]  → mock placeholders baseline,
+        #                                        env vars override (tester
+        #                                        with real creds still
+        #                                        exercises the real config
+        #                                        path even under mocked SDK)
+        #   avoidMocks=true + requires=[…]     → env vars only (real API)
+        #   MOCK unset + requires=[…]          → env vars only (real SDK)
+        creds: Dict[str, Any] = {}
+        if profile:
+            if os.environ.get('ROCKETRIDE_MOCK') and not self.config.avoid_mocks and provider in _LLM_MOCK_CREDENTIALS:
+                creds.update(_LLM_MOCK_CREDENTIALS[provider])
+            if self.config.requires:
+                for env_var in self.config.requires:
+                    val = os.environ.get(env_var)
+                    field = _parse_credential_env_var(env_var, provider)
+                    if val and field:
+                        creds[field] = val
         if creds:
             overrides = config.get(profile, {})
             if isinstance(overrides, dict):
