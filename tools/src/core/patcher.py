@@ -453,15 +453,21 @@ def patch(
     with open(file_path, 'r', encoding='utf-8') as fh:
         raw = fh.read()
 
-    # --- Patch preconfig.profiles ---
-    p_start, p_end, p_indent = _find_profiles_block(raw)
-    new_profiles_str = _serialize_profiles(updated_profiles, indent_level=p_indent)
-    raw = raw[:p_start] + new_profiles_str + raw[p_end:]
-
-    # --- Patch fields (enum + conditional + field objects + repair) ---
     _added = added_profile_keys or set()
     _deprecated = deprecated_profile_keys or set()
     _protected = protected_profile_keys or set()
+
+    # --- Patch preconfig.profiles ---
+    # Move newly added profiles to the end, sorted by key, so repeated runs produce
+    # identical file output regardless of the order the provider API returned models in.
+    if _added:
+        existing_portion = {k: v for k, v in updated_profiles.items() if k not in _added}
+        new_portion = {k: updated_profiles[k] for k in sorted(_added) if k in updated_profiles}
+        updated_profiles = {**existing_portion, **new_portion}
+
+    p_start, p_end, p_indent = _find_profiles_block(raw)
+    new_profiles_str = _serialize_profiles(updated_profiles, indent_level=p_indent)
+    raw = raw[:p_start] + new_profiles_str + raw[p_end:]
 
     try:
         f_start, f_end, f_indent = _find_fields_block(raw)

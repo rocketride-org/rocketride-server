@@ -10,7 +10,7 @@ Run with all keys:
   pytest tools/test/test_sync_live.py
 
 Run for a single provider:
-  ROCKETRIDE_APIKEY_OPENAI=sk-... pytest tools/test/test_sync_live.py -k openai
+  ROCKETRIDE_OPENAI_KEY=sk-... pytest tools/test/test_sync_live.py -k openai
 """
 
 from __future__ import annotations
@@ -124,7 +124,7 @@ def _fetch_mistral_model_ids(api_key: str) -> Set[str]:
 @requires_openai
 def test_openai_profiles_exist_in_api():
     """Every non-deprecated llm_openai profile model ID must be in the live API."""
-    api_key = os.environ['ROCKETRIDE_APIKEY_OPENAI']
+    api_key = os.environ['ROCKETRIDE_OPENAI_KEY']
     profiles = _load_profiles('llm_openai')
     live_ids = _fetch_openai_model_ids(api_key)
     _check_missing_models(profiles, live_ids, 'llm_openai')
@@ -133,7 +133,7 @@ def test_openai_profiles_exist_in_api():
 @requires_openai
 def test_embedding_openai_profiles_exist_in_api():
     """Every non-deprecated embedding_openai profile model ID must be in the live API."""
-    api_key = os.environ['ROCKETRIDE_APIKEY_OPENAI']
+    api_key = os.environ['ROCKETRIDE_OPENAI_KEY']
     profiles = _load_profiles('embedding_openai')
     live_ids = _fetch_openai_model_ids(api_key)
     _check_missing_models(profiles, live_ids, 'embedding_openai')
@@ -147,7 +147,7 @@ def test_embedding_openai_profiles_exist_in_api():
 @requires_anthropic
 def test_anthropic_profiles_exist_in_api():
     """Every non-deprecated llm_anthropic profile model ID must be in the live API."""
-    api_key = os.environ['ROCKETRIDE_APIKEY_ANTHROPIC']
+    api_key = os.environ['ROCKETRIDE_ANTHROPIC_KEY']
     profiles = _load_profiles('llm_anthropic')
     live_ids = _fetch_anthropic_model_ids(api_key)
     _check_missing_models(profiles, live_ids, 'llm_anthropic')
@@ -161,7 +161,7 @@ def test_anthropic_profiles_exist_in_api():
 @requires_gemini
 def test_gemini_profiles_exist_in_api():
     """Every non-deprecated llm_gemini profile model ID must be in the live API."""
-    api_key = os.environ['ROCKETRIDE_APIKEY_GEMINI']
+    api_key = os.environ['ROCKETRIDE_GEMINI_KEY']
     profiles = _load_profiles('llm_gemini')
     live_ids = _fetch_gemini_model_ids(api_key)
     _check_missing_models(profiles, live_ids, 'llm_gemini')
@@ -175,7 +175,7 @@ def test_gemini_profiles_exist_in_api():
 @requires_mistral
 def test_mistral_profiles_exist_in_api():
     """Every non-deprecated llm_mistral profile model ID must be in the live API."""
-    api_key = os.environ['ROCKETRIDE_APIKEY_MISTRAL']
+    api_key = os.environ['ROCKETRIDE_MISTRAL_KEY']
     profiles = _load_profiles('llm_mistral')
     live_ids = _fetch_mistral_model_ids(api_key)
     _check_missing_models(profiles, live_ids, 'llm_mistral')
@@ -192,7 +192,7 @@ def test_deepseek_cloud_profiles_exist_in_api():
     Non-deprecated, non-local (no colon in model ID) llm_deepseek profiles
     must be in the live DeepSeek API.
     """
-    api_key = os.environ['ROCKETRIDE_APIKEY_DEEPSEEK']
+    api_key = os.environ['ROCKETRIDE_DEEPSEEK_KEY']
     # Exclude Ollama-style "model:size" IDs — those are local, not cloud
     profiles = {k: p for k, p in _load_profiles('llm_deepseek').items() if ':' not in p.get('model', '')}
     live_ids = _fetch_openai_model_ids(api_key, base_url='https://api.deepseek.com')
@@ -207,7 +207,7 @@ def test_deepseek_cloud_profiles_exist_in_api():
 @requires_xai
 def test_xai_profiles_exist_in_api():
     """Every non-deprecated llm_xai profile model ID must be in the live API."""
-    api_key = os.environ['ROCKETRIDE_APIKEY_XAI']
+    api_key = os.environ['ROCKETRIDE_XAI_KEY']
     profiles = _load_profiles('llm_xai')
     live_ids = _fetch_openai_model_ids(api_key, base_url='https://api.x.ai/v1')
     _check_missing_models(profiles, live_ids, 'llm_xai')
@@ -221,7 +221,7 @@ def test_xai_profiles_exist_in_api():
 @requires_perplexity
 def test_perplexity_profiles_exist_in_api():
     """Every non-deprecated llm_perplexity profile model ID must be in the live API."""
-    api_key = os.environ['ROCKETRIDE_APIKEY_PERPLEXITY']
+    api_key = os.environ['ROCKETRIDE_PERPLEXITY_KEY']
     profiles = _load_profiles('llm_perplexity')
     live_ids = _fetch_openai_model_ids(api_key, base_url='https://api.perplexity.ai')
     _check_missing_models(profiles, live_ids, 'llm_perplexity')
@@ -235,7 +235,7 @@ def test_perplexity_profiles_exist_in_api():
 @requires_qwen
 def test_qwen_profiles_exist_in_api():
     """Every non-deprecated llm_qwen profile model ID must be in the live API."""
-    api_key = os.environ['ROCKETRIDE_APIKEY_QWEN']
+    api_key = os.environ['ROCKETRIDE_QWEN_KEY']
     profiles = _load_profiles('llm_qwen')
     live_ids = _fetch_openai_model_ids(
         api_key,

@@ -8,21 +8,25 @@ the results into `nodes/src/nodes/*/services.json` profile lists.
 ## Usage
 
 **Direct (Python):**
+
 ```bash
 python tools/src/sync_models.py --provider <PROVIDER> [--provider <PROVIDER> ...]
 python tools/src/sync_models.py --all
 ```
 
 **Via the engine:**
+
 ```bash
 engine run tools/src/sync_models.py --provider <PROVIDER> [--provider <PROVIDER> ...]
 engine run tools/src/sync_models.py --all
 ```
 
 **Via the builder** (runs sync + Prettier in one step):
+
 ```bash
 builder models:update --models="--all --apply"
 ```
+
 The `--models` flag forwards arguments directly to `sync_models.py`.
 
 ### Flags
@@ -64,17 +68,17 @@ python tools/src/sync_models.py --provider llm_openai --no-litellm
 
 ## Providers
 
-| Provider key       | Node               | API key env var                |
-| ------------------ | ------------------ | ------------------------------ |
-| `llm_openai`       | `llm_openai`       | `ROCKETRIDE_APIKEY_OPENAI`     |
-| `embedding_openai` | `embedding_openai` | `ROCKETRIDE_APIKEY_OPENAI`     |
-| `llm_anthropic`    | `llm_anthropic`    | `ROCKETRIDE_APIKEY_ANTHROPIC`  |
-| `llm_gemini`       | `llm_gemini`       | `ROCKETRIDE_APIKEY_GEMINI`     |
-| `llm_mistral`      | `llm_mistral`      | `ROCKETRIDE_APIKEY_MISTRAL`    |
-| `llm_deepseek`     | `llm_deepseek`     | `ROCKETRIDE_APIKEY_DEEPSEEK`   |
-| `llm_xai`          | `llm_xai`          | `ROCKETRIDE_APIKEY_XAI`        |
-| `llm_perplexity`   | `llm_perplexity`   | `ROCKETRIDE_APIKEY_PERPLEXITY` |
-| `llm_qwen`         | `llm_qwen`         | `ROCKETRIDE_APIKEY_QWEN`       |
+| Provider key       | Node               | API key env var             |
+| ------------------ | ------------------ | --------------------------- |
+| `llm_openai`       | `llm_openai`       | `ROCKETRIDE_OPENAI_KEY`     |
+| `embedding_openai` | `embedding_openai` | `ROCKETRIDE_OPENAI_KEY`     |
+| `llm_anthropic`    | `llm_anthropic`    | `ROCKETRIDE_ANTHROPIC_KEY`  |
+| `llm_gemini`       | `llm_gemini`       | `ROCKETRIDE_GEMINI_KEY`     |
+| `llm_mistral`      | `llm_mistral`      | `ROCKETRIDE_MISTRAL_KEY`    |
+| `llm_deepseek`     | `llm_deepseek`     | `ROCKETRIDE_DEEPSEEK_KEY`   |
+| `llm_xai`          | `llm_xai`          | `ROCKETRIDE_XAI_KEY`        |
+| `llm_perplexity`   | `llm_perplexity`   | `ROCKETRIDE_PERPLEXITY_KEY` |
+| `llm_qwen`         | `llm_qwen`         | `ROCKETRIDE_QWEN_KEY`       |
 
 If an API key env var is not set the provider is skipped with a warning (not an error).
 Set keys in a `.env` file in the repo root or export them in the shell.
@@ -159,7 +163,7 @@ Useful for an initial bulk population of token limits.
 
 ```jsonc
 "llm_openai": {
-    "env_var": "ROCKETRIDE_APIKEY_OPENAI",
+    "env_var": "ROCKETRIDE_OPENAI_KEY",
     "default_context_window": 128000,  // fallback for new models when API + litellm have no data
     "protected_profiles": ["custom"],  // these keys are never deprecated (merged with default_protected_profiles)
     "exclude_dated_snapshots": true,   // drop -2024-04-09 and -0613 date suffixes

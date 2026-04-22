@@ -151,19 +151,19 @@
 				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 4096 // default
 			},
-			"grok-4-20-multi-agent": {
-				"title": "xAI: Grok 4.20 Multi-Agent",
-				"model": "grok-4.20-multi-agent",
+			"grok-3-beta": {
+				"title": "xAI: Grok 3 Beta",
+				"model": "grok-3-beta",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 2000000, // openrouter
+				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
-			"grok-4-20": {
-				"title": "xAI: Grok 4.20",
-				"model": "grok-4.20",
+			"grok-3-mini-beta": {
+				"title": "xAI: Grok 3 Mini Beta",
+				"model": "grok-3-mini-beta",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 2000000, // openrouter
+				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			},
@@ -175,28 +175,28 @@
 				"modelOutputTokens": 30000, // openrouter
 				"apikey": ""
 			},
+			"grok-4-20": {
+				"title": "xAI: Grok 4.20",
+				"model": "grok-4.20",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 2000000, // openrouter
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"grok-4-20-multi-agent": {
+				"title": "xAI: Grok 4.20 Multi-Agent",
+				"model": "grok-4.20-multi-agent",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 2000000, // openrouter
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
 			"grok-4-fast": {
 				"title": "xAI: Grok 4 Fast",
 				"model": "grok-4-fast",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 2000000, // openrouter
 				"modelOutputTokens": 30000, // openrouter
-				"apikey": ""
-			},
-			"grok-3-mini-beta": {
-				"title": "xAI: Grok 3 Mini Beta",
-				"model": "grok-3-mini-beta",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 4096, // default
-				"apikey": ""
-			},
-			"grok-3-beta": {
-				"title": "xAI: Grok 3 Beta",
-				"model": "grok-3-beta",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			}
 		}
@@ -306,16 +306,16 @@
 					"properties": ["xai.grok-4-20-multi-agent"]
 				},
 				{
+					"value": "grok-3-mini-beta",
+					"properties": ["xai.grok-3-mini-beta"]
+				},
+				{
 					"value": "grok-4-fast",
 					"properties": ["xai.grok-4-fast"]
 				},
 				{
 					"value": "grok-3-beta",
 					"properties": ["xai.grok-3-beta"]
-				},
-				{
-					"value": "grok-3-mini-beta",
-					"properties": ["xai.grok-3-mini-beta"]
 				},
 				{
 					"value": "grok-4-1-fast",
@@ -331,16 +331,16 @@
 			"object": "grok-4-20-multi-agent",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
+		"xai.grok-3-mini-beta": {
+			"object": "grok-3-mini-beta",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
 		"xai.grok-4-fast": {
 			"object": "grok-4-fast",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"xai.grok-3-beta": {
 			"object": "grok-3-beta",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
-		},
-		"xai.grok-3-mini-beta": {
-			"object": "grok-3-mini-beta",
 			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
 		},
 		"xai.grok-4-1-fast": {

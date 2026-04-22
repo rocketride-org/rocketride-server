@@ -32,7 +32,7 @@ for _p in [str(_TOOLS_SRC), str(_TOOLS_TEST)]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-# Load .env from repo root so ROCKETRIDE_APIKEY_* vars are available.
+# Load .env from repo root so ROCKETRIDE_<PROVIDER>_KEY vars are available.
 # This must run before markers.py is imported (skipif conditions are
 # evaluated at import time).
 try:

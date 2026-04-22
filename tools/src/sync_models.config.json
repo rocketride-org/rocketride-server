@@ -19,7 +19,7 @@
 		// ----------------------------------------------------------------------
 		"llm_openai": {
 			"handler": "cloud",
-			"env_var": "ROCKETRIDE_APIKEY_OPENAI",
+			"env_var": "ROCKETRIDE_OPENAI_KEY",
 			"module": "openai",
 			"models_endpoint": "https://api.openai.com/v1/models",
 			"auth_header": "Authorization",
@@ -77,7 +77,7 @@
 		// ----------------------------------------------------------------------
 		"embedding_openai": {
 			"handler": "cloud",
-			"env_var": "ROCKETRIDE_APIKEY_OPENAI",
+			"env_var": "ROCKETRIDE_OPENAI_KEY",
 			"module": "openai",
 			"models_endpoint": "https://api.openai.com/v1/models",
 			"auth_header": "Authorization",
@@ -109,7 +109,7 @@
 		// ----------------------------------------------------------------------
 		"llm_anthropic": {
 			"handler": "cloud",
-			"env_var": "ROCKETRIDE_APIKEY_ANTHROPIC",
+			"env_var": "ROCKETRIDE_ANTHROPIC_KEY",
 			"module": "anthropic",
 			"models_endpoint": "https://api.anthropic.com/v1/models",
 			"auth_header": "x-api-key",
@@ -150,7 +150,7 @@
 		// ----------------------------------------------------------------------
 		"llm_gemini": {
 			"handler": "cloud",
-			"env_var": "ROCKETRIDE_APIKEY_GEMINI",
+			"env_var": "ROCKETRIDE_GEMINI_KEY",
 			"module": "gemini",
 			"models_endpoint": "https://generativelanguage.googleapis.com/v1beta/models",
 			"auth_in_url": true,
@@ -184,7 +184,7 @@
 		// ----------------------------------------------------------------------
 		"llm_mistral": {
 			"handler": "cloud",
-			"env_var": "ROCKETRIDE_APIKEY_MISTRAL",
+			"env_var": "ROCKETRIDE_MISTRAL_KEY",
 			"module": "mistral",
 			"models_endpoint": "https://api.mistral.ai/v1/models",
 			"auth_header": "Authorization",
@@ -257,7 +257,7 @@
 		// ----------------------------------------------------------------------
 		"llm_deepseek": {
 			"handler": "cloud",
-			"env_var": "ROCKETRIDE_APIKEY_DEEPSEEK",
+			"env_var": "ROCKETRIDE_DEEPSEEK_KEY",
 			"module": "deepseek",
 			"models_endpoint": "https://api.deepseek.com/models",
 			"auth_header": "Authorization",
@@ -292,7 +292,7 @@
 		// ----------------------------------------------------------------------
 		"llm_xai": {
 			"handler": "cloud",
-			"env_var": "ROCKETRIDE_APIKEY_XAI",
+			"env_var": "ROCKETRIDE_XAI_KEY",
 			"module": "xai",
 			"models_endpoint": "https://api.x.ai/v1/models",
 			"auth_header": "Authorization",
@@ -329,7 +329,7 @@
 		// ----------------------------------------------------------------------
 		"llm_perplexity": {
 			"handler": "cloud",
-			"env_var": "ROCKETRIDE_APIKEY_PERPLEXITY",
+			"env_var": "ROCKETRIDE_PERPLEXITY_KEY",
 			"module": "perplexity",
 			"models_endpoint": "https://api.perplexity.ai/models",
 			"auth_header": "Authorization",
@@ -354,7 +354,7 @@
 		// ----------------------------------------------------------------------
 		"llm_qwen": {
 			"handler": "cloud",
-			"env_var": "ROCKETRIDE_APIKEY_QWEN",
+			"env_var": "ROCKETRIDE_QWEN_KEY",
 			"module": "qwen",
 			"models_endpoint": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
 			"auth_header": "Authorization",

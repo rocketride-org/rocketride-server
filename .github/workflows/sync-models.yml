@@ -2,8 +2,8 @@ name: Sync LLM Models
 
 on:
   schedule:
-    - cron: '0 5 * * 1'   # Mondays 05:00 UTC
-  workflow_dispatch:       # Allow manual trigger from GitHub Actions UI
+    - cron: '0 5 * * 1' # Mondays 05:00 UTC
+  workflow_dispatch: # Allow manual trigger from GitHub Actions UI
 
 jobs:
   sync:
@@ -35,26 +35,26 @@ jobs:
       - name: Run model sync (dry run first — fail fast if script errors)
         run: python tools/src/sync_models.py --all
         env:
-          ROCKETRIDE_APIKEY_OPENAI: ${{ secrets.ROCKETRIDE_APIKEY_OPENAI }}
-          ROCKETRIDE_APIKEY_ANTHROPIC: ${{ secrets.ROCKETRIDE_APIKEY_ANTHROPIC }}
-          ROCKETRIDE_APIKEY_GEMINI: ${{ secrets.ROCKETRIDE_APIKEY_GEMINI }}
-          ROCKETRIDE_APIKEY_MISTRAL: ${{ secrets.ROCKETRIDE_APIKEY_MISTRAL }}
-          ROCKETRIDE_APIKEY_DEEPSEEK: ${{ secrets.ROCKETRIDE_APIKEY_DEEPSEEK }}
-          ROCKETRIDE_APIKEY_XAI: ${{ secrets.ROCKETRIDE_APIKEY_XAI }}
-          ROCKETRIDE_APIKEY_PERPLEXITY: ${{ secrets.ROCKETRIDE_APIKEY_PERPLEXITY }}
-          ROCKETRIDE_APIKEY_QWEN: ${{ secrets.ROCKETRIDE_APIKEY_QWEN }}
+          ROCKETRIDE_OPENAI_KEY: ${{ secrets.ROCKETRIDE_OPENAI_KEY }}
+          ROCKETRIDE_ANTHROPIC_KEY: ${{ secrets.ROCKETRIDE_ANTHROPIC_KEY }}
+          ROCKETRIDE_GEMINI_KEY: ${{ secrets.ROCKETRIDE_GEMINI_KEY }}
+          ROCKETRIDE_MISTRAL_KEY: ${{ secrets.ROCKETRIDE_MISTRAL_KEY }}
+          ROCKETRIDE_DEEPSEEK_KEY: ${{ secrets.ROCKETRIDE_DEEPSEEK_KEY }}
+          ROCKETRIDE_XAI_KEY: ${{ secrets.ROCKETRIDE_XAI_KEY }}
+          ROCKETRIDE_PERPLEXITY_KEY: ${{ secrets.ROCKETRIDE_PERPLEXITY_KEY }}
+          ROCKETRIDE_QWEN_KEY: ${{ secrets.ROCKETRIDE_QWEN_KEY }}
 
       - name: Apply model sync and capture PR body
         run: python tools/src/sync_models.py --all --apply --pr-body
         env:
-          ROCKETRIDE_APIKEY_OPENAI: ${{ secrets.ROCKETRIDE_APIKEY_OPENAI }}
-          ROCKETRIDE_APIKEY_ANTHROPIC: ${{ secrets.ROCKETRIDE_APIKEY_ANTHROPIC }}
-          ROCKETRIDE_APIKEY_GEMINI: ${{ secrets.ROCKETRIDE_APIKEY_GEMINI }}
-          ROCKETRIDE_APIKEY_MISTRAL: ${{ secrets.ROCKETRIDE_APIKEY_MISTRAL }}
-          ROCKETRIDE_APIKEY_DEEPSEEK: ${{ secrets.ROCKETRIDE_APIKEY_DEEPSEEK }}
-          ROCKETRIDE_APIKEY_XAI: ${{ secrets.ROCKETRIDE_APIKEY_XAI }}
-          ROCKETRIDE_APIKEY_PERPLEXITY: ${{ secrets.ROCKETRIDE_APIKEY_PERPLEXITY }}
-          ROCKETRIDE_APIKEY_QWEN: ${{ secrets.ROCKETRIDE_APIKEY_QWEN }}
+          ROCKETRIDE_OPENAI_KEY: ${{ secrets.ROCKETRIDE_OPENAI_KEY }}
+          ROCKETRIDE_ANTHROPIC_KEY: ${{ secrets.ROCKETRIDE_ANTHROPIC_KEY }}
+          ROCKETRIDE_GEMINI_KEY: ${{ secrets.ROCKETRIDE_GEMINI_KEY }}
+          ROCKETRIDE_MISTRAL_KEY: ${{ secrets.ROCKETRIDE_MISTRAL_KEY }}
+          ROCKETRIDE_DEEPSEEK_KEY: ${{ secrets.ROCKETRIDE_DEEPSEEK_KEY }}
+          ROCKETRIDE_XAI_KEY: ${{ secrets.ROCKETRIDE_XAI_KEY }}
+          ROCKETRIDE_PERPLEXITY_KEY: ${{ secrets.ROCKETRIDE_PERPLEXITY_KEY }}
+          ROCKETRIDE_QWEN_KEY: ${{ secrets.ROCKETRIDE_QWEN_KEY }}
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v7

@@ -108,17 +108,49 @@
 				"region": "us",
 				"apikey": ""
 			},
-			"qwen-plus-2025-07-28-thinking": {
-				"title": "Qwen: Qwen Plus 0728 (thinking)",
-				"model": "qwen-plus-2025-07-28:thinking",
+			"qwen-2-5-72b-instruct": {
+				"title": "Qwen2.5 72B Instruct",
+				"model": "qwen-2.5-72b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1000000, // openrouter
+				"modelTotalTokens": 32768, // openrouter
+				"modelOutputTokens": 16384, // openrouter
+				"apikey": ""
+			},
+			"qwen-2-5-7b-instruct": {
+				"title": "Qwen: Qwen2.5 7B Instruct",
+				"model": "qwen-2.5-7b-instruct",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 32768, // openrouter
 				"modelOutputTokens": 32768, // openrouter
+				"apikey": ""
+			},
+			"qwen-2-5-coder-32b-instruct": {
+				"title": "Qwen2.5 Coder 32B Instruct",
+				"model": "qwen-2.5-coder-32b-instruct",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 32768, // openrouter
+				"modelOutputTokens": 4096, // default
+				"apikey": ""
+			},
+			"qwen-max": {
+				"title": "Qwen: Qwen-Max ",
+				"model": "qwen-max",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 32768, // openrouter
+				"modelOutputTokens": 8192, // openrouter
 				"apikey": ""
 			},
 			"qwen-plus-2025-07-28": {
 				"title": "Qwen: Qwen Plus 0728",
 				"model": "qwen-plus-2025-07-28",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000, // openrouter
+				"modelOutputTokens": 32768, // openrouter
+				"apikey": ""
+			},
+			"qwen-plus-2025-07-28-thinking": {
+				"title": "Qwen: Qwen Plus 0728 (thinking)",
+				"model": "qwen-plus-2025-07-28:thinking",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 32768, // openrouter
@@ -130,38 +162,6 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 8192, // openrouter
-				"apikey": ""
-			},
-			"qwen-max": {
-				"title": "Qwen: Qwen-Max ",
-				"model": "qwen-max",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
-				"modelOutputTokens": 8192, // openrouter
-				"apikey": ""
-			},
-			"qwen-2-5-coder-32b-instruct": {
-				"title": "Qwen2.5 Coder 32B Instruct",
-				"model": "qwen-2.5-coder-32b-instruct",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
-				"modelOutputTokens": 4096, // default
-				"apikey": ""
-			},
-			"qwen-2-5-7b-instruct": {
-				"title": "Qwen: Qwen2.5 7B Instruct",
-				"model": "qwen-2.5-7b-instruct",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
-				"modelOutputTokens": 32768, // openrouter
-				"apikey": ""
-			},
-			"qwen-2-5-72b-instruct": {
-				"title": "Qwen2.5 72B Instruct",
-				"model": "qwen-2.5-72b-instruct",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 32768, // openrouter
-				"modelOutputTokens": 16384, // openrouter
 				"apikey": ""
 			}
 		}
