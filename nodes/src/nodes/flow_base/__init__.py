@@ -4,9 +4,9 @@
 # =============================================================================
 """Shared async-first infrastructure for `flow_*` nodes.
 
-Exposes the public API consumed by concrete flow drivers (`flow_if_else`,
-`flow_for`, `flow_while`, ...) and by user code running inside the
-sandbox (`rocketride.flow.cond`, `state`, `invoke`, `emit`).
+Exposes the public API consumed by concrete flow drivers (today
+`flow_if_else`) and by user code running inside the sandbox
+(`rocketride.flow.cond`, `state`, `invoke`, `emit`).
 
 See docs/nodes/conditional-node-action-plan.md for the architectural
 rationale: async-first + per-chunk state as foundational invariants.

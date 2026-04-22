@@ -68,12 +68,11 @@ private:
     ///		pipelines that never call `setTargetFilter` are
     ///		unaffected.
     ///
-    ///		Used by conditional routers (e.g. `flow_if_else`,
-    ///		`flow_switch`) to steer a chunk to a specific downstream
-    ///		branch. Python sets the filter via
-    ///		`IServiceFilterInstance::setTargetFilter(nodeId)` before
-    ///		emitting the payload, then clears it (empty string) after
-    ///		to restore broadcast mode.
+    ///		Used by conditional routers (e.g. `flow_if_else`) to steer
+    ///		a chunk to a specific downstream branch. Python sets the
+    ///		filter via `IServiceFilterInstance::setTargetFilter(nodeId)`
+    ///		before emitting the payload, then clears it (empty string)
+    ///		after to restore broadcast mode.
     ///
     ///	@note
     ///		Not thread-safe. The Binder assumes single-threaded

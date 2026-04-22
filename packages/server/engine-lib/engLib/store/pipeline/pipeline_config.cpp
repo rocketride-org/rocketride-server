@@ -292,10 +292,10 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
             // pairs the component supports. The original rule was strict:
             //   lanes[input] must exist, and output must appear in that list.
             //
-            // Conditional routers (`flow_if_else`, future `flow_switch`,
-            // `flow_for`, …) are pure routers — they don't transform types,
-            // they just forward chunks. Instead of enumerating every engine
-            // content type, they declare the single wildcard key:
+            // Conditional routers (`flow_if_else`) are pure routers —
+            // they don't transform types, they just forward chunks.
+            // Instead of enumerating every engine content type, they
+            // declare the single wildcard key:
             //
             //     "lanes": { "*": ["*"] }
             //

@@ -5,13 +5,13 @@
 """Zero-maintenance auto-gating for `flow_*` filter nodes.
 
 Any filter whose job is "evaluate a condition per chunk, then route the
-payload somewhere" — `flow_if_else`, `flow_switch`, `flow_for`, `flow_while`,
-`flow_filter`, … — needs to intercept *every* content-bearing `writeXxx`
-method the engine dispatches and run the same gating logic. Writing one
-override per method is boilerplate, and silently breaks the day the engine
-adds a new content lane (e.g. a future ``writeJson``) because the inherited
-``IInstanceBase.writeX`` default is ``pass`` → chunks are dropped with no
-warning.
+payload somewhere" — today `flow_if_else`, and any future flow_* router
+built on this same scaffolding — needs to intercept *every* content-bearing
+``writeXxx`` method the engine dispatches and run the same gating logic.
+Writing one override per method is boilerplate, and silently breaks the day
+the engine adds a new content lane (e.g. a future ``writeJson``) because
+the inherited ``IInstanceBase.writeX`` default is ``pass`` → chunks are
+dropped with no warning.
 
 ``AutoGatingMixin`` closes that gap. Subclasses inherit from both
 ``IInstanceBase`` and ``AutoGatingMixin``, define a single ``_gate`` method,
